@@ -1,0 +1,10 @@
+[build]
+target = "riscv64gc-unknown-none-elf"
+
+[target.riscv64gc-unknown-none-elf]
+# Kernel and user/program ELFs use different linker scripts, so `-T` stays in
+# each crate's build.rs. These three flags are identical to Source's facts.
+rustflags = ["-Crelocation-model=static", "-Cforce-frame-pointers=yes", "-Ccode-model=medium"]
+
+# No `runner` and no `image` alias: QEMU board arguments, firmware, and the
+# image builder are Integration-owned external tools for this provider gate.
