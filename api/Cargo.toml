@@ -1,5 +1,6 @@
 [workspace]
 resolver = "3"
+members = [".", "env", "wire", "macros", "compat/env", "compat/wire"]
 
 [package]
 name = "kernel-api"
@@ -14,5 +15,10 @@ bench = false
 doctest = false
 
 [dependencies]
-env = { git = "https://github.com/shuyra-arche/env.git", rev = "d3000253cd5d13d466e91fafd4dbb27a5ec5aaae" }
-wire = { git = "https://github.com/shuyra-arche/wire.git", rev = "0ff77dc4573fa2620d2fe995a18c01949d9c7e57" }
+kernel-api-env = { path = "env" }
+kernel-api-wire = { path = "wire" }
+
+[dev-dependencies]
+env = { path = "compat/env" }
+wire = { path = "compat/wire" }
+mold = { package = "kernel-api-macros", path = "macros" }

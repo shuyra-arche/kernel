@@ -1,0 +1,14 @@
+[package]
+name = "kernel-api-wire"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+test = false
+bench = false
+doctest = false
+
+[dev-dependencies]
+mold = { package = "kernel-api-macros", path = "../macros" }

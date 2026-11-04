@@ -11,12 +11,8 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 [[package]]
 name = "env"
 version = "0.1.0"
-source = "git+https://github.com/shuyra-arche/env.git?rev=d3000253cd5d13d466e91fafd4dbb27a5ec5aaae#d3000253cd5d13d466e91fafd4dbb27a5ec5aaae"
 dependencies = [
- "bitflags",
- "erra",
- "mold",
- "wire",
+ "kernel-api-env",
 ]
 
 [[package]]
@@ -30,17 +26,37 @@ name = "kernel-api"
 version = "0.1.0"
 dependencies = [
  "env",
+ "kernel-api-env",
+ "kernel-api-macros",
+ "kernel-api-wire",
  "wire",
 ]
 
 [[package]]
-name = "mold"
+name = "kernel-api-env"
 version = "0.1.0"
-source = "git+https://github.com/shuyra-arche/mold.git?rev=f52501f4c91b686eded8b4bcd743b4e96084b7f9#f52501f4c91b686eded8b4bcd743b4e96084b7f9"
+dependencies = [
+ "bitflags",
+ "erra",
+ "kernel-api-macros",
+ "kernel-api-wire",
+ "syn",
+]
+
+[[package]]
+name = "kernel-api-macros"
+version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "kernel-api-wire"
+version = "0.1.0"
+dependencies = [
+ "kernel-api-macros",
 ]
 
 [[package]]
@@ -81,4 +97,6 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "wire"
 version = "0.1.0"
-source = "git+https://github.com/shuyra-arche/wire.git?rev=0ff77dc4573fa2620d2fe995a18c01949d9c7e57#0ff77dc4573fa2620d2fe995a18c01949d9c7e57"
+dependencies = [
+ "kernel-api-wire",
+]
