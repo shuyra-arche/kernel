@@ -1,0 +1,27 @@
+[package]
+name = "kernel-std"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Independent experimental std workspace. It intentionally does not participate in
+# the root kernel workspace and never edits root manifests or production graph.
+[workspace]
+members = [".", "execution", "resource", "ipc", "rt", "fixtures/std-only", "fixtures/rt-opt-in"]
+resolver = "3"
+
+[lib]
+path = "src/lib.rs"
+test = false
+bench = false
+doctest = false
+
+[features]
+default = []
+
+[dependencies]
+env = { package = "kernel-api-env", path = "../api/env" }
+wire = { package = "kernel-api-wire", path = "../api/wire" }
+execution = { package = "kernel-std-execution", path = "execution" }
+resource = { package = "kernel-std-resource", path = "resource" }
+ipc = { package = "kernel-std-ipc", path = "ipc" }

@@ -1,0 +1,17 @@
+[package]
+name = "ipc-rpc-host-tests"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+abi = { package = "kernel-api-env", path = "../../../../api/env" }
+wire = { package = "kernel-api-wire", path = "../../../../api/wire" }
+
+[dev-dependencies]
+ipc_impl = { package = "kernel-std-ipc", path = "../.." }

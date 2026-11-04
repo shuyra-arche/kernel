@@ -1,0 +1,15 @@
+[package]
+name = "kernel-std-std-only-elf"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "std-only"
+path = "src/main.rs"
+test = false
+bench = false
+doctest = false
+
+[dependencies]
+kernel-std = { path = "../.." }

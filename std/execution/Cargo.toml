@@ -1,0 +1,16 @@
+[package]
+name = "kernel-std-execution"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+test = false
+bench = false
+doctest = false
+
+[dependencies]
+env = { package = "kernel-api-env", path = "../../api/env" }
+talc = { version = "=5.1.1", default-features = false }
+spinning_top = { version = "=0.3.0", default-features = false }

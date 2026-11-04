@@ -1,0 +1,16 @@
+[package]
+name = "kernel-std-ipc"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+test = false
+bench = false
+doctest = false
+
+[dependencies]
+env = { package = "kernel-api-env", path = "../../api/env" }
+wire = { package = "kernel-api-wire", path = "../../api/wire" }
+resource = { package = "kernel-std-resource", path = "../resource" }

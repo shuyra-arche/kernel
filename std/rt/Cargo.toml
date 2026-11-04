@@ -1,0 +1,22 @@
+[package]
+name = "kernel-std-rt"
+version = "0.1.0"
+edition = "2024"
+publish = false
+links = "kernel_std_rt"
+
+[lib]
+path = "src/lib.rs"
+test = false
+bench = false
+doctest = false
+
+[features]
+default = []
+entry = []
+panic-handler = []
+global-allocator = []
+
+[dependencies]
+env = { package = "kernel-api-env", path = "../../api/env" }
+kernel-std = { path = ".." }
