@@ -1,20 +1,22 @@
 #![no_std]
-//! Isolated `kernel-api` candidate.
+//! Isolated `kernel-api` umbrella.
 //!
-//! This package is deliberately only a transparent facade over the canonical
-//! `env` and `wire` crates at the pinned revisions. It defines no types,
-//! wrappers, trait implementations, ABI encodings, or codecs of its own.
+//! The canonical definitions now live in the owned packages under `env/` and
+//! `wire/`. This crate only re-exports those two packages; it defines no ABI,
+//! codec, wrapper, forwarding function, or trait of its own.
 //!
-//! Two distinct `wire` names remain distinct:
+//! The two `wire` module scopes remain distinct:
 //!
-//! - [`env::wire`] is the register/ABI wire vocabulary owned by `env`;
-//! - [`wire`] is the standalone byte/protocol codec crate.
+//! - [`env::wire`] is the register/ABI wire vocabulary owned by `kernel-api-env`;
+//! - [`wire`] is the standalone byte/protocol codec owned by `kernel-api-wire`.
 //!
-//! They are not interchangeable. Keeping them as explicit crate re-exports
-//! makes `kernel_api::env::wire` and `kernel_api::wire` unambiguously different
-//! paths.
+//! The module scopes differ, but [`env::wire::Field`]/[`env::wire::Span`] and
+//! [`wire::Field`]/[`wire::Span`] intentionally name the same canonical traits
+//! from `kernel-api-wire`, re-exported through the env vocabulary. Keeping the
+//! explicit crate re-exports makes the two paths unambiguous without creating
+//! duplicate trait identities.
 
 #![forbid(unsafe_code)]
 
-pub use env;
-pub use wire;
+pub use kernel_api_env as env;
+pub use kernel_api_wire as wire;
