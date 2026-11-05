@@ -87,12 +87,8 @@ dependencies = [
 [[package]]
 name = "env"
 version = "0.1.0"
-source = "git+https://github.com/shuyra-arche/env.git?rev=d3000253cd5d13d466e91fafd4dbb27a5ec5aaae#d3000253cd5d13d466e91fafd4dbb27a5ec5aaae"
 dependencies = [
- "bitflags",
- "erra",
- "mold",
- "wire",
+ "kernel-api-env",
 ]
 
 [[package]]
@@ -187,13 +183,13 @@ dependencies = [
  "bitflags",
  "embedded-test",
  "embedded-test-linker-script",
- "env",
  "erra",
  "fack",
  "fdt",
  "hashbrown",
  "iommu-hold",
  "kernel-allocator",
+ "kernel-api-env",
  "kernel-test-api",
  "log",
  "riscv",
@@ -207,9 +203,36 @@ dependencies = [
 name = "kernel-allocator"
 version = "0.1.0"
 dependencies = [
- "env",
  "erra",
  "fack",
+ "kernel-api-env",
+]
+
+[[package]]
+name = "kernel-api-env"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "erra",
+ "kernel-api-macros",
+ "kernel-api-wire",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "kernel-api-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "kernel-api-wire"
+version = "0.1.0"
+dependencies = [
+ "kernel-api-macros",
 ]
 
 [[package]]
@@ -227,16 +250,6 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
-
-[[package]]
-name = "mold"
-version = "0.1.0"
-source = "git+https://github.com/shuyra-arche/mold.git?rev=f52501f4c91b686eded8b4bcd743b4e96084b7f9#f52501f4c91b686eded8b4bcd743b4e96084b7f9"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
 
 [[package]]
 name = "pastey"
@@ -410,11 +423,6 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
-
-[[package]]
-name = "wire"
-version = "0.1.0"
-source = "git+https://github.com/shuyra-arche/wire.git?rev=0ff77dc4573fa2620d2fe995a18c01949d9c7e57#0ff77dc4573fa2620d2fe995a18c01949d9c7e57"
 
 [[package]]
 name = "zmij"

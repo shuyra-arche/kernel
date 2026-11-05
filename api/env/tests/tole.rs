@@ -130,7 +130,7 @@ fn sources_fit_three_words_and_attach_fits_four() {
 
 #[test]
 fn await_triples_preserve_source_identity_and_typed_event_failures() {
-    use env::{PieToken, ToleAwaitReply, ToleEventFail, ToleFail, ToleResult, Wait};
+    use env::{ToleAwaitReply, ToleEventFail, ToleFail};
 
     assert_eq!(ToleAwaitReply::Pending.words(), [0; 3]);
     assert_eq!(ToleAwaitReply::of([0; 3]), Some(ToleAwaitReply::Pending));
@@ -155,6 +155,5 @@ fn await_triples_preserve_source_identity_and_typed_event_failures() {
     }
     assert!(ToleAwaitReply::of([1 | (7 << 8), 7, 0]).is_none());
     assert!(ToleAwaitReply::of([0, 7, 0]).is_none());
-    let _: fn(PieToken, Wait) -> ToleResult<ToleAwaitReply> = env::tole::await_;
     assert_eq!(ToleFail::HandedOver.code(), -5);
 }

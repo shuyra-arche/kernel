@@ -1,0 +1,14 @@
+[package]
+name = "kernel-client-contract-tests"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dev-dependencies]
+renamed_api = { package = "kernel-api-env", path = "../../../api/env" }
+kernel-client = { path = "../.." }
+
+[lib]
+path = "lib.rs"

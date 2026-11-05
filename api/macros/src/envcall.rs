@@ -5,15 +5,15 @@
 //!   * `pack(&self) -> [usize; 6]`  —— 字段按声明顺序 wire 化（`Wire::pack`）
 //!   * `from_wire(slot, &[usize; 6])` —— 按 slot 取 variant，逐字段 `Wire::unpack`
 //!   * `Ret` 枚举                   —— 每个标 `#[ret(T)]` 的 variant 一个载荷变体
-//!   * 每格一个**精确签名的入口**（`pub fn seal(token) -> Result<(), erra::Error<PieFail>>`）
-//!   * `call(self) -> Result<Ret, erra::Error<XxxFail>>`—— 给 `#[manual]` 那一格（`Reap`）留的
+//!   * `decode_return(self, (a0,a1,a2))` —— 无副作用的返回解码
+//!   * 隐藏生成宏 —— Client 指定 transport 后才生成每格一个精确签名的入口
 //!
 //! **两种返回宽度**：`#[ret(T)]` 走 `wire::FromPair`（读 `a0`/`a1`），`#[ret3(T)]` 走
 //! `wire::FromTriple`（读 `a0..a2`）。宽度是**那一格载荷自己的事实**：一对寄存器说不完的
 //! 才标 `ret3`（今天只有 `PieCall::Collect`），其余四十八格一个字不改。
 //!
 //! 通用性：`slot/pack/unpack` 与 `Ret` 只依赖 `Wire`（不绑 env 错误/汇编），sbi 等
-//! S-mode 调用封装未来可复用同一 derive；那两个入口则绑定 env 的 `trap` 与域词表。
+//! Client 生成体经 `$crate` 指向 API owner，只有 transport 路径来自 Client。
 //!
 //! 本文件是该宏的全部：解析（[`ret_type`] / [`ret_wide_type`] / [`class`]）、变体那一格
 //! （[`Variant`]）与展开（[`expand`]）——**与另外两个宏一行都不共享**。
@@ -47,20 +47,12 @@ pub fn expand(input: TokenStream2) -> TokenStream2 {
     }
     let ret_name = Ident::new(&format!("{}Ret", name), proc_macro2::Span::call_site());
 
-    // 可用 #[slot(N)] 固定操作号；同一个枚举全部指定，避免混合编号。
-    // 这一枚枚举里有没有宽返回的那一格——决定 `call()` 绑几口寄存器。
-    let any_wide = vols.iter().any(|v| v.wide);
-    // 第三口绑不绑名字：只有宽那一格用得上它，其余枚举绑成 `_v2`（不绑名字就不会有
-    // "未使用的变量"那一 warn，而 `a2` 照样按 ABI 读回——线宽不因没人读而改变）。
-    let v2_bind: TokenStream2 = if any_wide {
-        quote! { v2 }
-    } else {
-        quote! { _v2 }
-    };
-
-    // 每格一个精确签名的入口（住本类自己的模块）：`#[derive(Envcall)]` 的另一半产出。
     let mod_name = Ident::new(
         &class_module(&name.to_string()),
+        proc_macro2::Span::call_site(),
+    );
+    let client_macro = Ident::new(
+        &format!("__kernel_client_{}", mod_name),
         proc_macro2::Span::call_site(),
     );
     let gen_fns: Vec<TokenStream2> = vols
@@ -69,13 +61,16 @@ pub fn expand(input: TokenStream2) -> TokenStream2 {
         .map(|v| gen_fn(name, v, fail_ty.as_ref()))
         .collect();
     let gen_mod = quote! {
-        /// **每格一个精确签名的入口**：载荷类型就是那一格的契约；标 `#[infallible]` 的格
-        /// **不返 `Result`**（那一格没有失败域）。错误类型是这一域的词汇（`fail = XxxFail`）；
-        /// 没有词表的类（今天只有 Chrono）的格一律 `#[infallible]`。
-        pub mod #mod_name {
-            use super::*;
-
-            #(#gen_fns)*
+        /// Instantiate the typed client from this same ABI declaration.
+        #[doc(hidden)]
+        #[macro_export]
+        macro_rules! #client_macro {
+            ($transport:path) => {
+                pub mod #mod_name {
+                    use $crate::*;
+                    #(#gen_fns)*
+                }
+            };
         }
     };
 
@@ -175,24 +170,7 @@ pub fn expand(input: TokenStream2) -> TokenStream2 {
         })
         .collect();
 
-    let call_arms: Vec<_> = vols
-        .iter()
-        .map(|v| {
-            let binds = v.binds();
-            // 匹配与造值**同形**：同一份 `shape`，一处都不重写。
-            let form = v.shape(Some(&binds));
-            quote! {
-                #form => {
-                    let this = #form;
-                    let slot = Self::slot(&this);
-                    let args = Self::pack(&this);
-                    (slot, args)
-                }
-            }
-        })
-        .collect();
-
-    // `call()` 的错类型：跟着这一类的词表走；没有词表的类（今天只有 Chrono）不返 `Result`。
+    // 返回解码的错类型跟着这一类的词表走；无词表的类不返 Result。
     let call_ret: TokenStream2 = match &fail_ty {
         Some(f) => quote! { Result<#ret_name, erra::Error<#f>> },
         None => quote! { #ret_name },
@@ -219,6 +197,16 @@ pub fn expand(input: TokenStream2) -> TokenStream2 {
             }
         },
         None => quote! { unreachable!("这一类没有词表，内核却答了负码：{}", v0) },
+    };
+    let fallible_slots: Vec<_> = vols
+        .iter()
+        .filter(|v| !v.infallible)
+        .map(|v| v.slot)
+        .collect();
+    let has_failure = if fail_ty.is_none() || fallible_slots.is_empty() {
+        quote! { false }
+    } else {
+        quote! { matches!(slot & 0xFFFF_FFFF, #(#fallible_slots)|*) }
     };
 
     let expanded = quote! {
@@ -255,17 +243,11 @@ pub fn expand(input: TokenStream2) -> TokenStream2 {
         }
 
         impl #name {
-            /// 触发并判译：a0 负 → 这一类的**域词汇**，非负 → 蒸馏成域 Ret。
-            ///
-            /// **今天只有 `#[manual]` 那一格（`RoomCall::Reap`）用它**——每格一个入口
-            /// 才是常规路（见本类下面那个模块）；`Ret` 联合也是为它留的。
+            /// Decode return registers without performing an environment call.
             #[inline]
-            pub fn call(self) -> #call_ret {
-                let (slot, args) = match self {
-                    #(#call_arms),*
-                };
-                let (v0, v1, #v2_bind) = unsafe { crate::ecall::trap(slot, args) };
-                if (v0 as isize) < 0 {
+            pub fn decode_return(self, (v0, v1, v2): (usize, usize, usize)) -> #call_ret {
+                let slot = self.slot();
+                if #has_failure && (v0 as isize) < 0 {
                     #call_on_err
                 } else {
                     #call_ok
@@ -473,6 +455,7 @@ fn variants(ast: &DeriveInput) -> syn::Result<Vec<Variant>> {
 fn gen_fn(owner: &Ident, v: &Variant, fail: Option<&Type>) -> TokenStream2 {
     let fname = Ident::new(&snake_case(&v.ident.to_string()), v.ident.span());
     let variant = &v.ident;
+    let ret_owner = Ident::new(&format!("{}Ret", owner), owner.span());
     let binds = v.binds();
     let types = v.types();
     let ctor = match &v.fields {
@@ -481,55 +464,57 @@ fn gen_fn(owner: &Ident, v: &Variant, fail: Option<&Type>) -> TokenStream2 {
         Fields::Named(_) => quote! { #owner::#variant { #(#binds),* } },
     };
     let ret = &v.ret;
-    // `()` 载荷不写 `-> ()`（那是噪音）。
     let is_unit = matches!(ret, Type::Tuple(t) if t.elems.is_empty());
-    let unpack = if v.wide {
-        quote! { <#ret as crate::wire::FromTriple>::from_triple(v0, v1, v2) }
-    } else {
-        quote! { <#ret as crate::wire::FromPair>::from_pair(v0, v1) }
-    };
-    let v2_bind = if v.wide { quote!(v2) } else { quote!(_v2) };
-
-    let (sig_ret, tail) = if v.infallible {
-        let sig = if is_unit {
-            quote! {}
-        } else {
-            quote! { -> #ret }
-        };
-        (
-            sig,
+    let (sig_ret, tail) = match (fail, v.infallible) {
+        (None, _) => {
+            let sig = if is_unit {
+                quote! {}
+            } else {
+                quote! { -> #ret }
+            };
+            (
+                sig,
+                quote! {
+                    match this.decode_return(raw) {
+                        #ret_owner::#variant(value) => value,
+                        _ => unreachable!("return decoder changed the request variant"),
+                    }
+                },
+            )
+        }
+        (Some(_), true) => {
+            let sig = if is_unit {
+                quote! {}
+            } else {
+                quote! { -> #ret }
+            };
+            (
+                sig,
+                quote! {
+                    match this.decode_return(raw) {
+                        Ok(#ret_owner::#variant(value)) => value,
+                        Err(_) => panic!("infallible environment call returned a failure"),
+                        _ => unreachable!("return decoder changed the request variant"),
+                    }
+                },
+            )
+        }
+        (Some(f), false) => (
+            quote! { -> Result<#ret, $crate::__CallError<#f>> },
             quote! {
-                debug_assert!((v0 as isize) >= 0, "这一格不失败，内核却答了负码");
-                #unpack
-            },
-        )
-    } else {
-        // 展开期已断：走到这里必有词表（见 `expand` 的不变式）。
-        let f = fail.expect("可失败的格必挂在词表上");
-        let sig = quote! { -> Result<#ret, erra::Error<#f>> };
-        let on_err = quote! {
-            match <#f>::of_code(v0 as isize) {
-                Some(f) => Err(crate::ecall::make_fail(f)),
-                None => unreachable!("内核答了本域表外的码：{}", v0),
-            }
-        };
-        (
-            sig,
-            quote! {
-                if (v0 as isize) < 0 {
-                    #on_err
-                } else {
-                    Ok(#unpack)
+                match this.decode_return(raw) {
+                    Ok(#ret_owner::#variant(value)) => Ok(value),
+                    Err(error) => Err(error),
+                    _ => unreachable!("return decoder changed the request variant"),
                 }
             },
-        )
+        ),
     };
-
     quote! {
         #[inline]
         pub fn #fname(#(#binds: #types),*) #sig_ret {
             let this = #ctor;
-            let (v0, v1, #v2_bind) = unsafe { crate::ecall::trap(this.slot(), this.pack()) };
+            let raw = unsafe { $transport(this.slot(), this.pack()) };
             #tail
         }
     }

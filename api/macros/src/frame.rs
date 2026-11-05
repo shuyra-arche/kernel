@@ -1,5 +1,5 @@
 //! `#[derive(Frame)]` —— **帧**那一族的一处定义：给一枚具名字段的结构体，生成 `pub const LEN`
-//! 与 `impl env::wire::Span`（**结构体归你写**——它本就是那张字段表，生成物使它自己就是过线的一格）。
+//! 与 `impl env::wire::Span`（**结构体归你写**——它本就是那张字段表）。
 //!
 //! ```ignore
 //! #[derive(env::Frame)]

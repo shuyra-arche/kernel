@@ -1,8 +1,8 @@
 //! 返回值蒸馏——内核回写的寄存器 → 域 Ret 载荷。
 //!
-//! 每个 `#[ret(T)]` 的 `T` 在此实现 [`FromPair`]；derive 生成的 `call()`
-//! 在非负路径调用 `<T as FromPair>::from_pair(v0, v1)`。错误路径由
-//! 各域的**词表读法**（生成的入口里那一格）接管，故此处只见成功值。
+//! 每个 `#[ret(T)]` 的 `T` 在此实现 [`FromPair`]；derive 生成的 `decode_return()`
+//! 按 variant 的失败契约判定后调用 `<T as FromPair>::from_pair(v0, v1)`。
+//! 可失败格由域词表解释负码；无失败格保留完整字的位模式，故此处只见成功值。
 //!
 //! **宽返回那一格**（`#[ret3(T)]`，`HoleCall::Pull` 与 `HoleCall::Peek`）走
 //! [`FromTriple`]：两格寄存器装不下它那几件事实，故读 `a0..a2`。两条路的分工是**线宽**，
@@ -20,7 +20,7 @@
 //!
 //! 内核侧那一条不写成 `Err`，理由是**错误域的形状**：各域词表（`abi/call` 那一份）的
 //! D1 契约）说的都是**内核→用户**的答案（`Denied`/`Dead`/`Busy`/…）。把"内核自己违约"
-//! 塞进同一个域，等于让用户程序去处理内核的 bug，且每条 `call()` 都要多一个分支。
+//! 塞进同一个域，等于让用户程序去处理内核的 bug，且每条 `decode_return()` 都要多一个分支。
 //!
 //! 故这里的纪律是：**只对"纯靠类型收窄、没有任何契约依据"的取值设防**——今天这样的
 //! 取值一处也没有（全树没有 `impl FromPair for u8` 一类），故下面每一处 `from_pair`
@@ -32,9 +32,9 @@ use crate::abi::permission::Permission;
 
 /// 由内核回写的 `(a0, a1)` 还原「域 Ret 载荷」的契约（R3 蒸馏）。
 ///
-/// derive(Envcall) 生成的 `call()` 在正（非负）路径按 variant 调用
-/// `<T as FromPair>::from_pair(v0, v1)` 组装 Ret 载荷；错误路径已在
-/// 词表读法那一分支，故此处只见成功值。
+/// derive(Envcall) 生成的 `decode_return()` 按 variant 的失败契约识别负码，
+/// 再调用 `<T as FromPair>::from_pair(v0, v1)` 组装 Ret 载荷。无失败格的
+/// 整字位模式都是载荷，高位不会被解释为错误。
 pub trait FromPair: Sized {
     fn from_pair(v0: usize, v1: usize) -> Self;
 }
@@ -42,7 +42,7 @@ pub trait FromPair: Sized {
 /// 由内核回写的 `(a0, a1, a2)` 还原**那一格宽载荷**的契约（R3 蒸馏）。
 ///
 /// 与 [`FromPair`] 只差**线宽**：一对寄存器说不完的返回走这一条。derive 生成的
-/// `call()` 对 `#[ret3(T)]` 那几个 variant 调 `<T as FromTriple>::from_triple(v0, v1, v2)`；
+/// `decode_return()` 对 `#[ret3(T)]` 那几个 variant 调 `<T as FromTriple>::from_triple(v0, v1, v2)`；
 /// **同一枚枚举里两条路可以并存**（Mail 的调用表同时使用两种宽度），按 variant 各走各的。
 ///
 /// **为什么不是"给 [`FromPair`] 多加两个参数"**：那会让三十格只读 `a0`/`a1` 的
