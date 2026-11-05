@@ -5,5 +5,4 @@ pub(crate) mod halt;
 pub(crate) mod render;
 pub(crate) mod report;
 pub(crate) mod scene;
-pub(crate) mod trace;
 pub(crate) mod shutdown;

@@ -14,7 +14,6 @@ use alloc::sync::Arc;
 #[cfg(debug_assertions)]
 use core::time::Duration;
 
-use crate::core::work::record::trace::{self, EventKind, RoomEvent};
 use crate::core::work::room::chain::Chain;
 use crate::core::work::room::deadline;
 use crate::core::work::unit::task::{Task, TaskState};
@@ -194,12 +193,10 @@ impl Conductor {
             i.running = Some(cur);
             return pa;
         }
-        let prev_tid = cur.ident.id.get();
         self.badge.shed(&cur.ident);
         let next = self.rotate(&mut i, cur);
         drop(i);
         let pa = next.and_then(|next| self.seat(next));
-        trace::note(EventKind::Room(RoomEvent::Starve { tid: prev_tid }));
         drop(_commit);
         pa.unwrap_or_else(fetch::fetch)
     }
@@ -226,13 +223,10 @@ impl Conductor {
             deadline::beat_until(ceiling);
             return Some(pa);
         }
-        let prev_tid = cur.ident.id.get();
         self.badge.shed(&cur.ident);
         let next = self.rotate(&mut i, cur);
-        let next_tid = next.as_ref().map_or(0, |t| t.ident.id.get());
         drop(i);
         let pa = next.and_then(|next| self.seat(next));
-        trace::note(EventKind::Room(RoomEvent::Switch { prev_tid, next_tid }));
         pa
     }
 }

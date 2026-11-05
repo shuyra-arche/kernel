@@ -5,21 +5,11 @@ use ::core::ptr::NonNull;
 
 use alloc::vec::Vec;
 
-use crate::machine::hart;
 use crate::core::memory::flat::allocator::spare;
 use crate::core::memory::flat::allocator::spare::DUMP_BUDGET;
 use crate::core::memory::flat::allocator::statistics;
-use crate::core::work::record::trace;
 
 pub fn accept() {
-    let h = hart::hart_count();
-    let ring = trace::ring_bytes(h);
-
-    crate::expect!(
-        statistics::spare_occupied() >= ring,
-        "spare: ring {ring} B not resident (occupied {})",
-        statistics::spare_occupied()
-    );
     crate::expect!(
         statistics::spare_available() >= DUMP_BUDGET,
         "spare: dump budget {DUMP_BUDGET} B not reserved (available {})",

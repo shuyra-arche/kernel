@@ -13,17 +13,16 @@ use alloc::sync::{Arc, Weak};
 use core::time::Duration;
 
 use crate::core::memory::nest::Asid;
-use crate::core::work::record::trace::{self, EventKind, RoomEvent};
-use crate::core::work::room::deadline;
 use crate::core::work::room::conductor::current;
 use crate::core::work::room::conductor::run::run;
+use crate::core::work::room::deadline;
 use crate::core::work::room::scheduler::launch;
 use crate::core::work::unit::life::{Life, TaskLife};
 use crate::core::work::unit::task::Task;
 use crate::machine::clock;
 
-use self::blocked::{Blocked, finish_block};
 use self::block::block_with_call;
+use self::blocked::{Blocked, finish_block};
 use self::call::WaitCall;
 use self::fail::WaitFail;
 use self::fwd::Fwd;
@@ -56,21 +55,14 @@ fn rise<I: IntoIterator<Item = Arc<Task>>>(tasks: I) -> usize {
         if !Task::rise(&t) {
             continue;
         }
-        trace::note(EventKind::Room(RoomEvent::Wake {
-            tid: t.ident.id.get(),
-        }));
         launch(t);
         woke += 1;
     }
     woke
 }
 
-fn alarm_block<E: WaitFail>(task: Arc<Task>, wake_at: usize, dur: Duration) -> Result<usize, E> {
+fn alarm_block<E: WaitFail>(task: Arc<Task>, dur: Duration) -> Result<usize, E> {
     let me = task.ident.id;
-    trace::note(EventKind::Room(RoomEvent::Park {
-        tid: me.get(),
-        wake_at,
-    }));
     let life = task.life();
     drop(task);
     match wait(WakeKey::Alarm { task: me }, life, dur)? {
@@ -83,8 +75,7 @@ pub fn park<E: WaitFail>(duration: Duration) -> Result<usize, E> {
     let Some(task) = current().running_task() else {
         return Ok(run());
     };
-    let wake_at = clock::now().add(duration).as_ticks() as usize;
-    alarm_block::<E>(task, wake_at, duration)
+    alarm_block::<E>(task, duration)
 }
 
 pub fn park_until<E: WaitFail>(at: u64) -> Result<Option<usize>, E> {
@@ -97,8 +88,7 @@ pub fn park_until<E: WaitFail>(at: u64) -> Result<Option<usize>, E> {
         return Ok(Some(run()));
     };
     let wait_ticks = at_ticks - now_ticks;
-    let wake_at = (clock::now().as_ticks() + wait_ticks) as usize;
-    alarm_block::<E>(task, wake_at, clock::ticks_to_duration(wait_ticks)).map(Some)
+    alarm_block::<E>(task, clock::ticks_to_duration(wait_ticks)).map(Some)
 }
 
 pub fn wait<E: WaitFail>(key: WakeKey, life: Weak<Life>, dur: Duration) -> Result<Handoff<()>, E> {

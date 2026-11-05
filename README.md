@@ -1,5 +1,11 @@
 # kernel
 
+Ordinary execution does not record a kernel event log. Syscall, scheduler,
+page-fault, task and boot paths contain no event ring or per-event host export.
+Exception diagnostics and crash backtraces remain available. The optional
+`semihosting` feature exports only explicit crash reports to `kernel-crash.json`;
+integration-test verdicts use native task exit and reclaim receipts in System.
+
 Standalone Kernel provider snapshot. This repository is the
 boot/runtime mechanism and its owned tests, not a ledger Runtime Unit: it has
 no UnitFile, server wrapper, image builder, Integration harness, firmware, or
@@ -19,8 +25,8 @@ the former `source/kernel/` tree: 490 tracked files, with only the root
 - `tests/api/` - `kernel-test-api` shared control-wire package.
 - `tests/embedded.rs` + `tests/health/` - native `embedded-test` health suite.
 - `tests/{console-line,custody,dma-confirmation,export,frame-runs,pend,
-  scheduler-dispatch,trace,wait-block,weak-copies}/` - ten independent owned
-  host workspaces; all ten lockfiles are included in the snapshot. Four are force-added
+  scheduler-dispatch,wait-block,weak-copies}/` - nine independent owned
+  host workspaces; their lockfiles are included in the snapshot. Four are force-added
   because the preserved nested Source `.gitignore` files still ignore
   `/Cargo.lock`; those `.gitignore` files are byte-identical to Source.
 - `tests/critical/` - independent verifier scripts.

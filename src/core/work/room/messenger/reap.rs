@@ -4,7 +4,6 @@ use env::{NOTE_MAX, TaskId};
 
 use crate::core::memory::address::VirtAddr;
 use crate::core::work::record::ledger;
-use crate::core::work::record::trace::{self, EventKind, RoomEvent};
 use crate::core::work::room::chain::Chain;
 use crate::core::work::room::conductor::current;
 use crate::core::work::unit::space::Space;
@@ -98,10 +97,6 @@ pub fn quit() -> usize {
         note_len,
         &mut buf,
     );
-    trace::note(EventKind::Room(RoomEvent::Exit {
-        tid: tid.get(),
-        reason,
-    }));
     let owner = {
         let _commit = crate::core::work::commit();
         exited
@@ -163,9 +158,6 @@ pub(crate) fn bury() {
             HUSKS.lock().push(z);
             break;
         }
-        trace::note(EventKind::Room(RoomEvent::Reap {
-            tid: z.ident.id.get(),
-        }));
         wipe(WakeKey::Task { id: z.ident.id });
         wipe(WakeKey::Pies { task: z.ident.id });
         z.ident.team.prune_tasks();

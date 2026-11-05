@@ -22,7 +22,6 @@ use crate::core::memory::nest::table::PteFlags;
 use crate::core::memory::nest::{
     Access, ActiveRange, Nest, NestError, Placement, RegionId, identity,
 };
-use crate::core::work::record::trace;
 use crate::core::work::room::{conductor, scheduler};
 use crate::core::work::unit::team::kernel;
 use crate::machine::board;
@@ -298,7 +297,6 @@ pub(crate) fn boot_harts() -> Result<(), BootError> {
             continue;
         }
         let stack_top = boot_stack(hart);
-        trace::note(trace::EventKind::Boot(trace::BootEvent::Launch { hart }));
         let r = sbi::HsmCall::new(sbi::fid::Hsm::Start)
             .args(sbi::ecall::SArgs {
                 a0: hart,
@@ -317,7 +315,6 @@ pub(crate) fn boot_harts() -> Result<(), BootError> {
 
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn boot_main() -> ! {
-    let me = hart::hart_id();
     let ktc = kernel()
         .expect("kernel team not initialized")
         .space
@@ -333,8 +330,5 @@ pub(crate) extern "C" fn boot_main() -> ! {
     }
     arm_hart();
     identity::occupy(crate::core::memory::nest::Asid::kernel());
-    trace::note(trace::EventKind::Boot(trace::BootEvent::Done {
-        hart: me.get(),
-    }));
     run()
 }

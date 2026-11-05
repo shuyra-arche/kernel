@@ -4,7 +4,6 @@ use core::mem::MaybeUninit;
 
 use crate::core::memory::nest::NestError;
 use crate::core::work::pend::Pend;
-use crate::core::work::record::trace::{self, EventKind, RoomEvent};
 use crate::core::work::room::scheduler;
 use crate::core::work::unit::copies::Origin;
 use crate::core::work::unit::life::Life;
@@ -122,9 +121,6 @@ impl PreparedTask {
         drop(held);
         drop(tasks);
 
-        trace::note(EventKind::Room(RoomEvent::Spawn {
-            tid: task.ident.id.get(),
-        }));
         Ok(task)
     }
 }

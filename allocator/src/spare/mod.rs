@@ -4,9 +4,9 @@ use core::ptr::NonNull;
 use crate::{InitError, Lock, LockRole, Locked};
 use env::PAGE_SIZE;
 
-mod effect;
 #[path = "blk.rs"]
 mod blk;
+mod effect;
 #[path = "inner.rs"]
 mod inner;
 
@@ -26,10 +26,7 @@ pub struct SpareAllocator<L: Lock, E: Effect> {
 
 impl<L: Lock, E: Effect> SpareAllocator<L, E> {
     pub fn new(effect: E) -> Result<Self, InitError> {
-        let cap = {
-            let payload = effect.trace_payload_bytes();
-            (payload.next_multiple_of(MAX_ALIGN) + HEADER + DUMP_BUDGET).next_multiple_of(PAGE_SIZE)
-        };
+        let cap = (HEADER + DUMP_BUDGET).next_multiple_of(PAGE_SIZE);
         let align = Layout::from_size_align(cap, PAGE_SIZE).map_err(|_| InitError::OutOfMemory)?;
         let chunk = effect
             .allocate_spare(align)
