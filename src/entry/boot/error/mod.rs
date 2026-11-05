@@ -1,14 +1,13 @@
 use ::core::fmt::{self, Write};
 
-use crate::machine::console::Sink;
-use crate::machine::hart::HartId;
 use crate::core::memory::flat::allocator::InitError;
 use crate::core::memory::nest::NestError;
-use crate::machine::mode::SatpError;
+use crate::entry::report::halt;
 use crate::machine::board::MachineError;
 use crate::machine::clock::ClockError;
-use crate::entry::report::halt;
-use crate::core::work::record::trace::TraceInitError;
+use crate::machine::console::Sink;
+use crate::machine::hart::HartId;
+use crate::machine::mode::SatpError;
 
 mod map_operation;
 mod resource_operation;
@@ -28,7 +27,6 @@ pub enum BootError {
     PagingMode(SatpError),
     KernelSpace(erra::Error<NestError>),
     Clock(ClockError),
-    Trace(TraceInitError),
     Scheduler(NestError),
     TrapStacks(NestError),
     #[cfg(debug_assertions)]
@@ -88,7 +86,6 @@ impl BootError {
                 field!("reason", "{}", source.source);
             }
             Self::Clock(source) => reason!("initialize clock", source),
-            Self::Trace(source) => reason!("initialize trace", source),
             Self::Scheduler(source) => reason!("initialize scheduler", source),
             Self::TrapStacks(source) => reason!("initialize trap stacks", source),
             #[cfg(debug_assertions)]

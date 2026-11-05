@@ -4,7 +4,6 @@ use alloc::sync::Arc;
 
 use env::{RoomCall, RoomFail};
 
-use crate::core::work::record::trace::{self, EventKind, RoomEvent};
 use crate::core::work::room::conductor::current;
 use crate::core::work::room::messenger::{self, Handoff, WakeKey, park, park_until, wait, wake};
 use crate::core::work::room::scheduler::roster::muster;
@@ -47,10 +46,6 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             if team.all_reaped() {
                 return Outcome::fail(frame, RoomFail::Dead);
             }
-            trace::note(EventKind::Room(RoomEvent::Doomed {
-                tid: target.ident.id.get(),
-                by: ident.id.get(),
-            }));
             drop(target);
             drop(ident);
             messenger::cull(&[team], messenger::EXIT_DOOM);

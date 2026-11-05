@@ -8,7 +8,6 @@ use riscv::register::{scause, sepc, sie, sip, stval};
 use crate::core::memory::address::VirtAddr as KVirt;
 use crate::core::memory::nest::identity::{self as asid, Asid};
 use crate::core::memory::nest::{FaultOutcome, Nest};
-use crate::core::work::record::trace::{self, EventKind, MemoryEvent, RoomEvent};
 use crate::core::work::room::conductor::run::run;
 use crate::core::work::room::deadline;
 use crate::core::work::room::identity::{Identity, ident};
@@ -218,27 +217,19 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                             fault.addr,
                             fault.pc
                         );
-                        page_fault_note(&fault, false);
                         drop(nest);
                         return page_fault_killed(ident, tid, fault);
                     }
                 }
             }
             match outcome {
-                FaultOutcome::Resolved => {
-                    page_fault_note(&fault, true);
-                    resume(frame as *mut TrapContext)
-                }
+                FaultOutcome::Resolved => resume(frame as *mut TrapContext),
                 // 一次完整解析之后仍要物化：并发只要求重探，与重试原指令同路，
                 // 绝不与真实资源失败混同。
-                FaultOutcome::Materialize => {
-                    page_fault_note(&fault, false);
-                    resume(frame as *mut TrapContext)
-                }
+                FaultOutcome::Materialize => resume(frame as *mut TrapContext),
                 // 承载不在（墓碑或在途）：按这段关系整段等一次，醒后重试原指令。
                 FaultOutcome::Wait(view) => page_fault_wait(ident, fault, nest, view, frame),
                 FaultOutcome::Invalid => {
-                    page_fault_note(&fault, false);
                     drop(nest);
                     page_fault_killed(ident, tid, fault)
                 }
@@ -251,13 +242,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                     .and_then(Identity::live)
                     .expect("user exception without running task");
                 let tid = running.id.get();
-                let cause_bits = scause::read().bits();
                 let stval_bits = stval::read();
-                trace::note(EventKind::Room(RoomEvent::FaultKilled {
-                    tid,
-                    cause: cause_bits,
-                    stval: stval_bits,
-                }));
                 putln!(
                     "user exception killed: tid={tid} cause={:?} stval={stval_bits:#x}",
                     other
@@ -287,16 +272,6 @@ fn resume(next: *mut TrapContext) -> *mut TrapContext {
     next
 }
 
-/// 一次页错误的记录：`resolved` 只表示“这一次访存已经能继续”；
-/// 未完的等待与重探都是 `false`，真杀另由 `FaultKilled` 说明。
-fn page_fault_note(fault: &fault::PageFault, resolved: bool) {
-    trace::note(EventKind::Memory(MemoryEvent::PageFault {
-        va: fault.addr.as_usize(),
-        fault: fault.kind,
-        resolved,
-    }));
-}
-
 /// 按这段关系整段等一次承载；登记与切换都不带着调用者的强引用。
 fn page_fault_wait(
     ident: Option<Identity>,
@@ -319,7 +294,6 @@ fn page_fault_wait(
         view,
     };
     let waiting = fault_wait::FaultWait::new(nest, fault.addr, fault.kind, view);
-    page_fault_note(&fault, false);
     // 先放掉空间与身份，再进提交边界的 wait_until；等待捕获自己在其内部释放。
     drop(space);
     drop(ident);
@@ -352,11 +326,6 @@ fn page_fault_killed(
         fault.addr,
         fault.pc
     );
-    trace::note(EventKind::Room(RoomEvent::FaultKilled {
-        tid,
-        cause: cause_bits,
-        stval: stval_bits,
-    }));
     putln!("user fault killed: tid={tid} cause={cause_bits} stval={stval_bits:#x}");
     kill_fault(ident)
 }

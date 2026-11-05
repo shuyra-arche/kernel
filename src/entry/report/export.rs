@@ -2,7 +2,6 @@ use ::core::sync::atomic::{AtomicUsize, Ordering};
 
 use semihosting::io::Write as _;
 
-use crate::core::work::record::trace::{EventKind, HaltEvent};
 use crate::entry::report::report::Report;
 use crate::machine::sync::SpinLock;
 
@@ -11,27 +10,7 @@ mod failure;
 
 use failure::Failure;
 
-#[derive(serde::Serialize)]
-struct HostEvent {
-    h: usize,
-    when: u64,
-    kind: EventKind,
-}
-
-pub(crate) fn note_sink(kind: EventKind, hart: usize, when: u64) {
-    let Ok(json) = serde_json::to_vec(&HostEvent {
-        h: hart,
-        when,
-        kind,
-    }) else {
-        fail(Failure::Encode);
-        return;
-    };
-    let wait_ticks = matches!(kind, EventKind::Halt(HaltEvent::Panic)).then_some(HOST_WAIT_TICKS);
-    push(&json, wait_ticks);
-}
-
-const EXPORT_NAME: &::core::ffi::CStr = c"sqware-diagnose.jsonl";
+const EXPORT_NAME: &::core::ffi::CStr = c"kernel-crash.json";
 
 static FAILURE: AtomicUsize = AtomicUsize::new(0);
 static HOST: SpinLock<Option<semihosting::fs::File>> = SpinLock::new(None);
@@ -87,7 +66,9 @@ fn with_host(wait_ticks: Option<u64>, f: impl FnOnce(&mut semihosting::fs::File)
 }
 
 fn push(json: &[u8], wait_ticks: Option<u64>) {
-    with_host(wait_ticks, |f| f.write_all(json).and_then(|()| f.write_all(b"\n")).is_ok());
+    with_host(wait_ticks, |f| {
+        f.write_all(json).and_then(|()| f.write_all(b"\n")).is_ok()
+    });
 }
 
 pub fn export(r: &Report) {

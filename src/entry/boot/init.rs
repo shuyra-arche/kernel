@@ -1,6 +1,6 @@
 use super::{BootError, ResourceOperation};
 use crate::core::memory::flat;
-use crate::core::work::{record::trace, room::interrupt};
+use crate::core::work::room::interrupt;
 use crate::entry::call;
 use crate::machine::{board, clock, console};
 
@@ -19,10 +19,6 @@ pub fn init(dtp: usize) -> Result<(), BootError> {
     crate::machine::mode::detect().map_err(BootError::PagingMode)?;
     super::unit::init().map_err(BootError::KernelSpace)?;
     clock::init().map_err(BootError::Clock)?;
-    #[cfg(not(feature = "semihosting"))]
-    trace::init().map_err(BootError::Trace)?;
-    #[cfg(feature = "semihosting")]
-    trace::init(crate::entry::report::export::note_sink).map_err(BootError::Trace)?;
     interrupt::init().map_err(|source| BootError::Resources {
         operation: ResourceOperation::InitializeTraps,
         source,

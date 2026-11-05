@@ -10,11 +10,11 @@ use riscv::register::{satp, scause, sepc, sscratch, sstatus, stval, stvec};
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::VirtAddr;
+use crate::core::memory::nest::SpaceKind;
+use crate::core::work::room::identity::ident;
 use crate::entry::report::backtrace::{self, Backtrace, StackReader, WalkConfig};
 use crate::entry::report::report::Report;
 use crate::machine::switcher::context::{Gprs, TrapContext};
-use crate::core::work::room::identity::ident;
-use crate::core::memory::nest::SpaceKind;
 
 use super::render::{address_label, backtrace_rows, hex};
 
@@ -339,8 +339,6 @@ pub fn dump(r: &mut Report) {
             .items
             .extend(backtrace_rows(&scene.backtrace, "nbt"));
     }
-
-    crate::entry::report::trace::panic_dump(r);
 }
 
 #[macro_export]

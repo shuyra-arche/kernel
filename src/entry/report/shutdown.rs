@@ -1,4 +1,4 @@
-use crate::core::work::record::{ledger, trace};
+use crate::core::work::record::ledger;
 use crate::core::work::room::{deadline, halt, interrupt, messenger, scheduler};
 use crate::core::work::unit::tally;
 use crate::machine::clock;
@@ -59,7 +59,6 @@ pub(crate) fn report() {
         "supervisor_external: ring={ring} busy={busy} idle_ring={idle_ring} idle_busy={idle_busy}"
     );
     crate::core::work::mail::hole::hold_line();
-    trace::note(trace::EventKind::Halt(trace::HaltEvent::Halt));
 }
 
 pub(crate) fn verdict() {

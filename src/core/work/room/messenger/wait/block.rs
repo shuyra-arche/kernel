@@ -32,10 +32,6 @@ pub(super) fn block_with_call<E: WaitFail>(
     }
     drop(me);
     let (task, next_pa) = current().swap();
-    trace::note(EventKind::Room(RoomEvent::Wait {
-        tid: task.ident.id.get(),
-        key: key.fold() as usize,
-    }));
     task.block(key, ticket, wait);
     let queued = {
         let mut sites = sites(key).lock();

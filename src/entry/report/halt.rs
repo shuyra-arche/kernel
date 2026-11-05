@@ -5,10 +5,10 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::entry::report::report::Report;
 use crate::machine::hart;
 use crate::machine::image::ROOT_STACK_SIZE;
-use crate::entry::report::report::Report;
-use crate::machine::stop::{alarm, claim, broadcast};
+use crate::machine::stop::{alarm, broadcast, claim};
 use sbi::fid;
 
 static mut SCENE: [usize; 2] = [0; 2];
@@ -63,10 +63,13 @@ extern "C" fn home(_info: &PanicInfo) -> ! {
 
 #[allow(improper_ctypes_definitions)]
 extern "C" fn info(info: &PanicInfo) -> ! {
-    let root_ok = unsafe { (crate::machine::image::root_stack_base() as *const usize).read_volatile() }
-        == crate::machine::image::ROOT_STACK_CANARY;
+    let root_ok =
+        unsafe { (crate::machine::image::root_stack_base() as *const usize).read_volatile() }
+            == crate::machine::image::ROOT_STACK_CANARY;
 
-    crate::core::memory::flat::allocator::portal::switch(crate::core::memory::flat::allocator::portal::Backend::Spare);
+    crate::core::memory::flat::allocator::portal::switch(
+        crate::core::memory::flat::allocator::portal::Backend::Spare,
+    );
 
     let mut report = Report::default();
     {
@@ -97,9 +100,6 @@ extern "C" fn info(info: &PanicInfo) -> ! {
         report.paragraph("panic", Some(head)).items.extend(rows);
     }
 
-    crate::core::work::record::trace::note(crate::core::work::record::trace::EventKind::Halt(
-        crate::core::work::record::trace::HaltEvent::Panic,
-    ));
     crate::entry::report::scene::dump(&mut report);
 
     let sealed = report.seal();
@@ -140,7 +140,13 @@ pub(crate) fn protected_stop(_reason: usize) -> ! {
 pub(crate) fn halt_loop() -> ! {
     unsafe { ::core::arch::asm!("csrci sstatus, 2") };
     loop {
-        let _ = sbi::SystemResetCall::new(fid::SystemReset::SystemReset).call();
+        let _ = sbi::SystemResetCall::new(fid::SystemReset::SystemReset)
+            .args(sbi::ecall::SArgs {
+                a0: 0,
+                a1: 1,
+                ..Default::default()
+            })
+            .call();
         unsafe { ::core::arch::asm!("wfi") };
     }
 }

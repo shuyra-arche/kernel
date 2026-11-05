@@ -2,7 +2,6 @@ use alloc::sync::Arc;
 
 use env::{DebugCall, EnvCall};
 
-use crate::core::work::record::trace::{self, EnvEvent, EventKind};
 use crate::core::work::unit::task::TaskIdent;
 use crate::machine::switcher::context::{Gprs, TrapContext};
 
@@ -38,10 +37,6 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
         frame.gpr.x(Gprs::A4),
         frame.gpr.x(Gprs::A5),
     ];
-    trace::note(EventKind::Env(EnvEvent::Call {
-        call: number,
-        arg: frame.gpr.x(Gprs::A0),
-    }));
     let envcall = match EnvCall::from_wire(number, &regs) {
         Ok(c) => c,
         Err(_) => {
