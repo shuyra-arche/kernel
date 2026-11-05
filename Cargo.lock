@@ -85,13 +85,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env"
-version = "0.1.0"
-dependencies = [
- "kernel-api-env",
-]
-
-[[package]]
 name = "erra"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -165,9 +158,9 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "iommu-hold"
 version = "0.1.0"
-source = "git+https://github.com/shuyra-arche/iommu.git?rev=5d2038033efcbd55de77534b35e611729d4bd9bd#5d2038033efcbd55de77534b35e611729d4bd9bd"
+source = "git+https://github.com/shuyra-arche/driver-iommu.git?rev=90f59ef91d3c4c157fb78bb691991ee7abe4f175#90f59ef91d3c4c157fb78bb691991ee7abe4f175"
 dependencies = [
- "env",
+ "kernel-api-env",
 ]
 
 [[package]]

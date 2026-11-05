@@ -25,11 +25,26 @@ and passed after correction. Only variants with an error domain interpret
 negative register values as errors; all typed entry points use API's single
 `decode_return` implementation.
 
-The resolved Server graph contains one owning `kernel-api-env`; its legacy
-`env` dependency through `iommu-hold` is a re-export-only adapter. No original
-Git `env`/wire definitions or Client transport enter the Server graph.
+The resolved Server graph contains one owning `kernel-api-env`. Its current
+`iommu-hold` pin is `90f59ef91d3c4c157fb78bb691991ee7abe4f175` from the canonical
+`driver-iommu` repository, with direct canonical API dependency. Root patches
+only that API package to `api/env`; no legacy `env` patch remains. No legacy
+`env`/wire definitions or Client transport enter this Server graph.
 The Client contract fixture verifies nominal handle identity with a renamed
 canonical API dependency. This is stronger than checking equal bytes alone.
+
+The consumer-alignment follow-up starts from published Kernel `a9a1d8d` and
+resolves `iommu-hold@90f59ef` from its public canonical Git URL. The actual Kernel
+Server RV64 library check and locked/offline release link are repeated with that
+lock. Its normal/build tree contains exactly one local canonical API owner and
+none of Client, execution, legacy `env`, `wire`, or `mold`. This evidence covers
+Kernel's hold dependency; the Driver IOMMU Server's standalone old-SDK type
+conflicts require its separate product overlay validation.
+
+TLS contract documentation now permits legacy terminal handoff without changing
+initialization or exit behavior. Kernel terminal ownership of Caller mapping
+cleanup does not promise eager local-table reclamation: a retained Live slot may
+remain until the address space ends when no owed or pending work triggers sweep.
 
 Negative probes separately require the expected compiler diagnostics: API has
 no trap or enum `.call()`, and TLS tokens implement none of Copy, Send or Sync.

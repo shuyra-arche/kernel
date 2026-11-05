@@ -313,7 +313,7 @@ fn allocate() -> MemoryResult<Tls> {
     Ok(Tls::new(index))
 }
 
-/// 归还本线程的 TLS 块（**任务退场前必调**）。
+/// 显式归还本线程的 TLS 块，可在正常退场前调用。
 ///
 /// 归还按**准确的关系身份**执行（登记时记下的那个 `ViewId`），不是按地址猜所有权；
 /// 同步未完成的失败保留身份，下一次再试，不当成功丢掉句柄。
@@ -341,8 +341,15 @@ pub unsafe fn retire(token: Tls) -> Cleanup {
 ///
 /// # Safety
 /// Call once in a fresh task before any code that requires TLS. The task must
-/// have no valid TLS installation; the returned token stays in this task until
-/// explicit retirement, after all TLS-dependent code has finished.
+/// have no valid TLS installation. Keep the token in this task if explicitly
+/// retiring TLS, and retire only after all TLS-dependent code has finished.
+/// An adapter may instead retain the Caller mapping through the existing Kernel
+/// terminal path; native task termination then owns mapping cleanup. Retiring
+/// local bookkeeping still requires a native terminal observation. The existing
+/// sweeper runs only while cleanup is owed or a reference release is pending;
+/// it does not guarantee reclaiming a retained Live slot, which may remain until
+/// the address space ends. Dropping the token alone neither clears tp nor
+/// discharges the table's responsibility.
 pub unsafe fn initialize() -> MemoryResult<Tls> {
     if base() != 0 {
         return Err(env::make_fail(env::MemoryFail::Busy));

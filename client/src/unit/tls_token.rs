@@ -1,7 +1,10 @@
 /// Unique identity of an installed TLS slot. State remains in the TLS table.
 ///
-/// This token must be retired by its current task before the terminal trap.
-/// Dropping it has no effects; runtimes must keep it until explicit retirement.
+/// Keep this task-local token for explicit retirement, or retain the Caller
+/// mapping through the existing Kernel terminal path. The table remains
+/// responsible until explicit cleanup or native terminal observation; dropping
+/// the token has no effect on tp, mappings, or that responsibility. A retained
+/// Live slot is not guaranteed to be swept before the address space ends.
 pub struct Tls {
     index: usize,
     task_local: core::marker::PhantomData<*mut ()>,

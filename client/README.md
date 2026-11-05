@@ -30,6 +30,15 @@ Main and closure tasks use the same mechanism. A runtime must finish all TLS
 users before retirement, then use a terminal path that needs no TLS. The room
 terminal trap faults if it unexpectedly returns, without invoking panic again.
 
+Legacy startup adapters may instead retain the Caller mapping through their
+existing Kernel terminal path. Native task termination owns that mapping's
+cleanup; a native terminal observation permits retiring local table bookkeeping.
+The existing TLS sweeper scans only while cleanup is owed or a reference release
+is pending, so it does not guarantee reclaiming an otherwise retained Live slot
+before the address space ends. Dropping the token does not clear `tp`, remove
+the mapping, or discharge the table's responsibility. This allowance preserves
+legacy startup and does not select a new Runtime exit policy.
+
 `unit::observe(target, wait)` always uses non-consuming native observation and
 does not clear TLS. Foreign Denied never establishes death. The private closure
 registry retains its original same-Team, self-created task prerequisite for

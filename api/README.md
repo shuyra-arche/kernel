@@ -38,10 +38,12 @@ entry macro; that entry remains excluded. Its frame comment update is retained.
 The effect/decoder split in this candidate is intentional.
 
 Root Server and `kernel-allocator` now use `kernel-api-env` directly.
-`iommu-hold@5d2038033efcbd55de77534b35e611729d4bd9bd` uses ABI values only;
-the root manifest patches its old `env` name to the re-export adapter. The
-resolved Server graph has one `kernel-api-env`, no original `env`/wire definitions,
-and no Client dependency. Server dispatch and scheduling source are unchanged.
+`iommu-hold@90f59ef91d3c4c157fb78bb691991ee7abe4f175` comes from the canonical
+`driver-iommu` repository and directly pins the public `kernel-api-env`. The root
+manifest patches that API package to `api/env`, unifying its Git identity with
+Server's checkout identity. It no longer patches legacy `env`. The resolved
+Server graph has one `kernel-api-env`, no legacy `env`/wire definitions, and no
+Client dependency. Server dispatch and scheduling source are unchanged.
 
 External product repositories and old effectful `env` consumers have not been
 migrated. They must move typed calls to Client in a separately validated

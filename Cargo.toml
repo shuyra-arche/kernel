@@ -76,7 +76,7 @@ kernel-test-api = { path = "tests/api", optional = true }
 embedded-test-linker-script = "0.1"
 
 env = { package = "kernel-api-env", path = "api/env" }
-iommu-hold = { git = "https://github.com/shuyra-arche/iommu.git", rev = "5d2038033efcbd55de77534b35e611729d4bd9bd" }
+iommu-hold = { git = "https://github.com/shuyra-arche/driver-iommu.git", rev = "90f59ef91d3c4c157fb78bb691991ee7abe4f175" }
 kernel-allocator = { path = "allocator" }
 sbi = { git = "https://github.com/shuyra-arche/sbi.git", rev = "2dc10bafb919eb2e8f6ca37c95cfd56f9a05831d" }
 
@@ -132,7 +132,7 @@ embedded-test = { version = "0.7", default-features = false, features = ["semiho
 # 故在此声明一次，而不是删一格承重的依赖。
 unused_dependencies = "allow"
 
-# iommu-hold consumes ABI values only. Its legacy name is a re-export of the
-# same owner used directly by Server; no second nominal env type enters here.
-[patch."https://github.com/shuyra-arche/env.git"]
-env = { path = "api/compat/env" }
+# iommu-hold pins the public canonical API. This provider builds that same
+# owner from its checkout rather than selecting a second nominal Git owner.
+[patch."https://github.com/shuyra-arche/kernel.git"]
+kernel-api-env = { path = "api/env" }
