@@ -5,4 +5,4 @@ mod macros;
 
 use crate::invoke::{invoke as invoke_call, invoke_terminal};
 
-include!("call/definitions.rs");
+include!("definitions.rs");

@@ -51,8 +51,9 @@ cargo test --locked -p kernel-api-macros --test declaration --target x86_64-unkn
 
 Tests, compile-fail fixtures, expected diagnostics and test support stay under
 each owning package's `tests/` tree, grouped by ABI, boot, call or declaration
-behavior. The production libraries remain unconditionally `no_std`; host
-integration tests use `std`. `trybuild` is a test-only dependency for public
+behavior. Suite entry points use `tests/<domain>/mod.rs` and explicit Cargo
+`[[test]]` declarations. The production libraries remain unconditionally
+`no_std`; host integration tests use `std`. `trybuild` is a test-only dependency for public
 macro and operation type contracts. Library doctests are disabled.
 
 Host call checks exercise the public `invoke_with` boundary with a recording

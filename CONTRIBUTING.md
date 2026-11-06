@@ -15,3 +15,7 @@ on Client. Keep shared semantic types in `model`, call representation in `abi`,
 and startup contracts in `boot`. Keep compile-time generation under `tools` and
 language runtime/std support outside Kernel. Update the root lockfile whenever
 the package graph changes. Preserve source attribution and third-party notices.
+
+Rust modules with child files use `name/mod.rs`; do not place `name.rs` beside
+a `name/` directory. Test suites follow the same layout and declare their
+`tests/<domain>/mod.rs` entry points explicitly in Cargo.

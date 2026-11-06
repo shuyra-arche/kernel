@@ -5,7 +5,6 @@ use semihosting::io::Write as _;
 use crate::entry::report::report::Report;
 use crate::machine::sync::SpinLock;
 
-#[path = "export/failure.rs"]
 mod failure;
 
 use failure::Failure;
