@@ -1,96 +1,68 @@
-# kernel
+# Kernel
 
-Ordinary execution does not record a kernel event log. Syscall, scheduler,
-page-fault, task and boot paths contain no event ring or per-event host export.
-Exception diagnostics and crash backtraces remain available. The optional
-`semihosting` feature exports only explicit crash reports to `kernel-crash.json`;
-integration-test verdicts use native task exit and reclaim receipts in System.
+Shuyra's RV64 kernel, canonical ABI and typed client mechanisms. The kernel owns
+scheduling, address spaces, tasks, permissions and resource lifetime. Product
+composition and user-space startup policy belong to their consumers.
 
-Standalone Kernel provider snapshot. This repository is the
-boot/runtime mechanism and its owned tests, not a ledger Runtime Unit: it has
-no UnitFile, server wrapper, image builder, Integration harness, firmware, or
-scene script.
+## Code map
 
-Source snapshot: `https://github.com/anreonyr/sqware.git` at
-`672d8d2deafc8067c94b6af340a5f89c6a765c9c`, branch
-`codex/shuyra-device-contracts-extraction`, public draft PR 45. The snapshot is
-the former `source/kernel/` tree: 490 tracked files, with only the root
-`Cargo.toml` adapted to declare this standalone workspace. All internal
-`#[path]`/`include!` projections stay inside this repository.
+| Entry | Responsibility |
+| --- | --- |
+| `src/`, `build.rs`, `link.x` | Kernel implementation and `shuyra` executable |
+| `allocator/` | Physical allocation mechanisms |
+| [`api/`](api/README.md) | Canonical types, call declarations and pure codecs |
+| [`client/`](client/README.md) | Trap transport and reusable memory/task mechanisms |
+| `tests/health/`, `tests/embedded.rs` | Target-side embedded health tests |
+| `tests/*/Cargo.toml` | Independent host fixtures |
+| [`tests/critical/`](tests/critical/README.md) | Halt-proof verifier and its host tests |
 
-## Layout
+The root, API and Client have separate Cargo workspaces. Root workspace commands
+do not include API, Client or independent host fixtures. Server consumes the API
+without a Client dependency; Client does not install startup, a panic handler or
+a global allocator.
 
-- Root package `kernel` 0.1.0: `src/`, `build.rs`, `link.x`.
-- `allocator/` - `kernel-allocator` mechanism package.
-- `tests/api/` - `kernel-test-api` shared control-wire package.
-- `tests/embedded.rs` + `tests/health/` - native `embedded-test` health suite.
-- `tests/{console-line,custody,dma-confirmation,export,frame-runs,pend,
-  scheduler-dispatch,wait-block,weak-copies}/` - nine independent owned
-  host workspaces; their lockfiles are included in the snapshot. Four are force-added
-  because the preserved nested Source `.gitignore` files still ignore
-  `/Cargo.lock`; those `.gitignore` files are byte-identical to Source.
-- `tests/critical/` - independent verifier scripts.
+## Build and verify
 
-`SOURCE-MANIFEST.tsv` maps all 490 source paths to provider paths with both
-SHA-256 values. 489 are byte-identical; only `Cargo.toml` is marked
-`adapted-manifest`.
-
-## Toolchain and build
-
-`rust-toolchain.toml` is copied from Source: nightly-2026-09-04. `Cargo.toml`
-declares edition 2024 and resolver 3. `.cargo/config.toml` pins the RV64 target and the same three
-rustflags as Source. It intentionally has no `runner` or `image` alias.
+Use the toolchain and components in `rust-toolchain.toml`
+(`nightly-2026-09-04`). The root Cargo configuration defaults to RV64, so host
+commands must select an explicit host target. Examples assume Linux x86-64.
 
 ```sh
-cargo metadata --locked --offline --format-version 1
 cargo build --locked --target riscv64gc-unknown-none-elf --lib --bins
 cargo build --locked --release --target riscv64gc-unknown-none-elf --lib --bins
+cargo test --manifest-path api/Cargo.toml --workspace --target x86_64-unknown-linux-gnu
+cargo check --manifest-path client/Cargo.toml --target riscv64gc-unknown-none-elf
+cargo test --manifest-path allocator/Cargo.toml --locked --target x86_64-unknown-linux-gnu
+for suite in console-line custody dma-confirmation export frame-runs pend scheduler-dispatch wait-block weak-copies; do
+  cargo test --manifest-path "tests/$suite/Cargo.toml" --locked --target x86_64-unknown-linux-gnu || exit 1
+done
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/critical
 ```
 
-The ten host suites are independent workspaces and must use the explicit host
-target because the provider root pins RV64:
+Client fixture and negative compilation commands are in
+[Client](client/README.md). Boundary probes require `sh`, `rg` and a populated
+Cargo dependency cache. `tests/trace/` has no Cargo manifest and is not a suite.
+Host fixtures and cross-compilation do not prove guest execution or hardware
+resource reclamation.
+
+## Native testing and limitations
+
+This repository contains no QEMU runner or firmware. Product integration uses
+[Vanllia](https://github.com/shuyra-arche/vanllia). The standalone embedded health
+suite retains an external harness dependency: `anreonyr/sqware` commit
+`672d8d2deafc8067c94b6af340a5f89c6a765c9c`, with `SBI.bin` SHA-256
+`c53d58aa9ab17f95fa1af159f0bf05fad5c5622ebc0f1084463435fa6e5752b6`.
+From this checkout, with `PUBLIC_HARNESS` pointing to that harness checkout:
 
 ```sh
-cargo test --manifest-path tests/<suite>/Cargo.toml \
-  --locked --target x86_64-unknown-linux-gnu
-```
-
-The allocator package equivalent is `cargo test --manifest-path
-allocator/Cargo.toml --locked --target x86_64-unknown-linux-gnu`.
-
-Host tests are owned-host type/byte/ledger checks. They are not native Kernel
-authentication or hardware-effect proof.
-
-## External test tool
-
-This provider does **not** bundle QEMU board arguments, runner scripts, or
-firmware. Native health is run through an immutable public Integration tool
-checkout, never linked into or projected into Cargo:
-
-- Tool: `https://github.com/anreonyr/sqware.git`
-- Revision: `672d8d2deafc8067c94b6af340a5f89c6a765c9c`
-- Firmware `SBI.bin` SHA-256:
-  `c53d58aa9ab17f95fa1af159f0bf05fad5c5622ebc0f1084463435fa6e5752b6`
-- Evidence-local checkout: `/home/anreonyr/Develop/shuyra/evidence/pr23/harness-source`
-
-Representative no-scene invocation from this provider root:
-
-```sh
-nu <PUBLIC-HARNESS>/scripts/qtest.nu --package kernel --scene '' -- \
+nu "$PUBLIC_HARNESS/scripts/qtest.nu" --package kernel --scene '' -- \
   --verbose -- external_retention_orders_real_frames_and_isolation
 ```
 
-The no-scene path does not call `cargo image`; board arguments and firmware come
-from the pinned public harness. This is not an Integration-scene pass and does
-not claim a self-contained firmware distribution.
+Ordinary execution has no kernel event stream. Exceptions and crash backtraces
+remain; optional `semihosting` exports explicit crash reports only. Integration
+verdicts require native task exits and reclamation receipts from System.
 
-## Status
-
-This snapshot covers provider preparation and acceptance. Source consumer
-cutover and removal of the old implementation are separate later steps.
-Verification is recorded in `evidence/pr23/provider` outside this repository.
-No license is added; the Source snapshot tracked no license.
-
-Copied test documentation retains its original Source-relative command paths.
-Use the provider-root commands and pinned external harness above for this
-snapshot; the copied paths do not indicate bundled Integration scripts.
+The pinned Rust toolchain and native runner need fresh validation before a
+runtime acceptance claim; prior checkpoints used a different nightly. See
+[contribution rules](CONTRIBUTING.md) and [source attribution](PROVENANCE.md).

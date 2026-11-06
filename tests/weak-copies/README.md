@@ -1,10 +1,12 @@
 # Concurrent weak-copy bookkeeping
 
-Run `cargo test --manifest-path kernel/tests/weak-copies/Cargo.toml --target x86_64-unknown-linux-gnu`.
+From the repository root:
 
-The fixture supplies only the hart identity. Tests include the actual production
-tracker and exercise eight concurrent harts, genuine held-copy failures and
-stored-to-temporary slot reuse. The concurrent test reproduced false Muster
-assertions against the former split occupancy/hart/origin implementation on the
-host; the single-record implementation passes the same test. Native four/eight
-hart daemon scenes independently retain the normal halt and frame equality gates.
+```sh
+cargo test --manifest-path tests/weak-copies/Cargo.toml --locked --target x86_64-unknown-linux-gnu
+```
+
+The fixture supplies hart identity and compiles the production tracker. It
+exercises eight concurrent simulated harts, held-copy failures and
+stored-to-temporary slot reuse. Host concurrency does not establish native SMP
+or DMA behavior.

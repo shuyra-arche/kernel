@@ -3,13 +3,11 @@
 Typed calls live under `call::{memory,unit,room,...}`. Their request types and
 return decoding belong to canonical `kernel-api-env`; `ecall::trap` owns the
 RV64 `ebreak` register boundary. Root `memory`, `unit`, and `room` expose the
-reusable mechanisms imported from production
-`execution@1b333a28bc4c34beaea3f7986a9bb6e8ab2db414`.
+reusable memory, heap, TLS and task mechanisms.
 
-The imported Rust mechanisms now route their former `env` effect calls through
-`crate::call`; raw memory calls cannot recurse into root `memory` wrappers.
-External product call sites are unchanged. Platform Runtime implementation and
-whole-product startup/exit policy are outside this API checkpoint.
+Mechanisms route effects through `crate::call`; raw memory calls must not recurse
+into root `memory` wrappers. Platform Runtime owns whole-product startup and
+exit policy.
 
 Client installs no `_start`, startup argument globals, panic handler, or global
 allocator. `memory::HeapAllocator` is a stateless registration handle for the
@@ -55,11 +53,9 @@ cargo test --manifest-path client/tests/contracts/Cargo.toml --target x86_64-unk
 sh client/tests/check-boundaries.sh
 ```
 
-The 13 original memory/heap tests retain allocation, stale snapshot, table-full,
-failure and retry assertions. The task fixture retains result publication,
-spawn/embark rollback, pruned tasks and abandoned results. The lifecycle fixture
-checks initialization failure, duplicate installation, failed detach/release,
-owner-specific retry, foreign Denied and real native terminal observation.
-Startup argument testing belongs to Platform Runtime after removal of the old
-global argument mechanism. RV64 Client compilation passes; real traps and
-whole-product QEMU integration are outside this checkpoint.
+Memory, task and lifecycle fixtures exercise production source with controlled
+host effects. They cover allocation failure, rollback, TLS ownership, native
+observation and return decoding. Compile-fail probes require specific diagnostics;
+an unavailable dependency is not a passing negative probe. Populate their Cargo
+cache before running the offline boundary script. These checks do not establish
+real traps, target execution or whole-product startup/exit acceptance.
