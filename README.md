@@ -55,7 +55,8 @@ suite retains an external harness dependency: `anreonyr/sqware` commit
 From this checkout, with `PUBLIC_HARNESS` pointing to that harness checkout:
 
 ```sh
-nu "$PUBLIC_HARNESS/scripts/qtest.nu" --package kernel --scene '' --   --verbose -- external_retention_orders_real_frames_and_isolation
+nu "$PUBLIC_HARNESS/scripts/qtest.nu" --package kernel --scene '' -- \
+  --verbose -- external_retention_orders_real_frames_and_isolation
 ```
 
 Ordinary execution has no kernel event stream. Exceptions and crash backtraces
