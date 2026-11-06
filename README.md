@@ -49,7 +49,7 @@ Consumers should pin a release tag or exact revision, coordinating a single
 canonical API source across their dependency graph.
 
 To release, update the root version and regenerate `Cargo.lock`, merge through a
-PR, then push a matching tag such as `v0.1.0` on that merged commit. The release
+PR, then push a matching tag such as `0.0.1` on that merged commit. The release
 workflow checks the version, main-branch ancestry and builds, then creates a
 GitHub Release with generated change notes. Tags with a prerelease suffix create
 prereleases. Release notes can be edited to explain compatibility changes.

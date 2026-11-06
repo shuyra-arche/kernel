@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['[0-9]*']
 
 permissions:
   contents: read
@@ -32,7 +32,7 @@ jobs:
           root = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['workspace']
           version = root['package']['version']
           assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?', version), 'invalid version'
-          assert os.environ['RELEASE_TAG'] == f'v{version}', 'tag must match workspace version'
+          assert os.environ['RELEASE_TAG'] == version, 'tag must match workspace version'
           for member in root['members']:
               package = tomllib.loads((pathlib.Path(member) / 'Cargo.toml').read_text())['package']
               assert package['version'] == {'workspace': True}, f'{member} must inherit workspace version'
@@ -61,4 +61,6 @@ jobs:
           if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
             args+=(--prerelease)
           fi
-          gh release create "$RELEASE_TAG" "${args[@]}"
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" "${args[@]}"
+          fi
