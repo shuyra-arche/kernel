@@ -45,12 +45,18 @@ same channel as CI:
 
 ```sh
 cargo test --locked -p kernel-api --tests --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-api --doc --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-client --test calls --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-api-macros --test envcall_boundary --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-api-macros --test declaration --target x86_64-unknown-linux-gnu
 ```
 
-These checks use a recording transport and never perform a native trap. Boot and system
+Tests, compile-fail fixtures, expected diagnostics and test support stay under
+each owning package's `tests/` tree, grouped by ABI, boot, call or declaration
+behavior. The production libraries remain unconditionally `no_std`; host
+integration tests use `std`. `trybuild` is a test-only dependency for public
+macro and operation type contracts. Library doctests are disabled.
+
+Host call checks exercise the public `invoke_with` boundary with a recording
+transport; they do not recompile private wrappers or perform native traps. Boot and system
 integration validation belong to [Vanllia](https://github.com/shuyra-arche/vanllia),
 which assembles the selected Units. Compilation alone does not establish guest
 execution or resource reclamation.

@@ -1,0 +1,5 @@
+error: number too large to fit in target type
+ --> tests/declaration/fixtures/slot_overflow.rs:3:22
+  |
+3 |     #[operation(slot=4294967296u64,output=(),infallible)]
+  |                      ^^^^^^^^^^^^^

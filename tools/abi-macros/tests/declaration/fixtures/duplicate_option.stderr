@@ -1,0 +1,5 @@
+error: duplicate option
+ --> tests/declaration/fixtures/duplicate_option.rs:3:24
+  |
+3 |     #[operation(slot=0,slot=1,output=(),infallible)]
+  |                        ^^^^^^

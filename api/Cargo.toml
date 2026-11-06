@@ -6,9 +6,13 @@ version.workspace = true
 
 [lib]
 test = false
+doctest = false
 bench = false
 
 [dependencies]
 kernel-api-macros = { path = "../tools/abi-macros" }
 bitflags.workspace = true
 erra.workspace = true
+
+[dev-dependencies]
+trybuild = "1.0.122"

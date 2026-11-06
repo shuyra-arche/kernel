@@ -23,9 +23,8 @@ jobs:
       - name: Check host ABI boundaries
         run: |
           cargo test --locked -p kernel-api --tests --target x86_64-unknown-linux-gnu
-          cargo test --locked -p kernel-api --doc --target x86_64-unknown-linux-gnu
-          cargo test --locked -p kernel-client --test calls --target x86_64-unknown-linux-gnu
-          cargo test --locked -p kernel-api-macros --test envcall_boundary --target x86_64-unknown-linux-gnu
+          cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu
+          cargo test --locked -p kernel-api-macros --test declaration --target x86_64-unknown-linux-gnu
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --target riscv64gc-unknown-none-elf
       - name: Build workspace (release)

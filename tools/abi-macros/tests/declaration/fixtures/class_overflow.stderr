@@ -1,0 +1,5 @@
+error: number too large to fit in target type
+ --> tests/declaration/fixtures/class_overflow.rs:1:38
+  |
+1 | #[kernel_api_macros::envcall(class = 4294967296u64)]
+  |                                      ^^^^^^^^^^^^^

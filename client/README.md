@@ -31,10 +31,12 @@ have been removed.
 
 ```sh
 cargo check --locked -p kernel-client --target riscv64gc-unknown-none-elf
-cargo test --locked -p kernel-client --test calls --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu
 ```
 
-Tests use a recording transport and never perform a native trap. Native call
+Tests exercise public `invoke_with` with a recording transport. They do not
+execute the named native-trap wrappers; RV64 compilation checks those wrappers.
+Native call
 execution is verified by the consuming integration project. See the API
 [compatibility notes](../api/README.md#source-migration-and-abi-compatibility)
 before updating a consumer's Kernel pin.

@@ -1,0 +1,5 @@
+error: unknown envcall option
+ --> tests/declaration/fixtures/unknown_envcall_option.rs:1:30
+  |
+1 | #[kernel_api_macros::envcall(clas = 0)]
+  |                              ^^^^

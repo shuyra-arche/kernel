@@ -7,10 +7,6 @@ use kernel_api::model::memory::{ViewId, ViewSelection};
 use kernel_api::model::wait::Wait;
 use kernel_client::invoke::invoke_with;
 
-#[macro_use]
-#[path = "../../src/call/macros.rs"]
-mod templates;
-
 #[derive(Default)]
 struct Transport {
     reply: (usize, usize, usize),
@@ -20,20 +16,13 @@ thread_local! {
     static TRANSPORT: RefCell<Transport> = RefCell::new(Transport::default());
 }
 
-unsafe fn invoke_call<C: KernelCall>(call: C) -> Result<C::Output, C::Error> {
+fn invoke<C: KernelCall>(call: C) -> Result<C::Output, C::Error> {
     invoke_with(call, |slot, arguments| {
         TRANSPORT.with_borrow_mut(|transport| {
             transport.calls.push((slot, arguments));
             transport.reply
         })
     })
-}
-
-#[allow(dead_code)]
-mod named {
-    use super::invoke_call;
-    use kernel_client::invoke::invoke_terminal;
-    include!("../../src/call/definitions.rs");
 }
 
 fn reply(value: (usize, usize, usize)) {
@@ -50,13 +39,16 @@ fn called(slot: usize, arguments: [usize; 6]) {
 #[test]
 fn infallible_returns_keep_the_high_bit_even_in_a_fallible_domain() {
     reply((usize::MAX, 0, 0));
-    assert_eq!(named::chrono::clock(), u64::MAX);
+    assert_eq!(
+        invoke(kernel_api::abi::call::chrono::operations::Clock).unwrap(),
+        u64::MAX
+    );
     called((4usize << 32) | 1, [0; 6]);
     reply((usize::MAX, 0, 0));
-    assert!(named::room::wake(19));
+    assert!(invoke(kernel_api::abi::call::room::operations::Wake { key: 19 }).unwrap());
     called(4, [19, 0, 0, 0, 0, 0]);
     reply((0, 0, 0));
-    named::room::starve();
+    invoke(kernel_api::abi::call::room::operations::Starve).unwrap();
     called(0, [0; 6]);
 }
 
@@ -65,7 +57,8 @@ fn failures_preserve_the_domain_and_do_not_retry() {
     reply(((-7isize) as usize, 0, 0));
     let reference =
         kernel_api::model::memory::FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap();
-    let error = named::memory::release(reference).unwrap_err();
+    let error =
+        invoke(kernel_api::abi::call::memory::operations::Release { reference }).unwrap_err();
     assert_eq!(error.source, MemoryFail::Busy);
     called((2usize << 32) | 6, [17, 0, 0, 0, 0, 0]);
 }
@@ -74,15 +67,15 @@ fn failures_preserve_the_domain_and_do_not_retry() {
 fn structured_arguments_keep_all_six_registers_and_the_explicit_slot() {
     reply((0, 0, 0));
     let view = ViewId::from_bytes(&23u64.to_le_bytes()).unwrap();
-    named::memory::set_access(
-        TeamId::new(17),
+    invoke(kernel_api::abi::call::memory::operations::SetAccess {
+        team: TeamId::new(17),
         view,
-        ViewSelection::Pages {
+        selection: ViewSelection::Pages {
             offset: 3,
             count: 5,
         },
-        6,
-    )
+        access: 6,
+    })
     .unwrap();
     called((2usize << 32) | 9, [17, 23, 1, 3, 5, 6]);
     let decoded =
@@ -96,10 +89,13 @@ fn structured_arguments_keep_all_six_registers_and_the_explicit_slot() {
 }
 
 #[test]
-fn three_word_returns_and_keyword_named_calls_are_preserved() {
+fn three_word_returns_are_preserved() {
     reply((7, 23, 91));
     let token = PieToken::mint(17);
-    assert_eq!(named::hole::peek(token).unwrap(), (7, TaskId::new(23), 91));
+    assert_eq!(
+        invoke(kernel_api::abi::call::hole::operations::Peek { token }).unwrap(),
+        (7, TaskId::new(23), 91)
+    );
     called((5usize << 32) | 4, [17, 0, 0, 0, 0, 0]);
 
     let expected = kernel_api::abi::reply::ToleAwaitReply::Source {
@@ -111,7 +107,14 @@ fn three_word_returns_and_keyword_named_calls_are_preserved() {
     };
     let words = expected.words();
     reply((words[0], words[1], words[2]));
-    assert_eq!(named::tole::await_(token, Wait::Forever).unwrap(), expected);
+    assert_eq!(
+        invoke(kernel_api::abi::call::tole::operations::Await {
+            tole: token,
+            millis: Wait::Forever
+        })
+        .unwrap(),
+        expected
+    );
     called((12usize << 32) | 4, [17, usize::MAX, 0, 0, 0, 0]);
 }
 

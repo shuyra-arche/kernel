@@ -1,0 +1,5 @@
+error: an explicit slot is required
+ --> tests/declaration/fixtures/missing_slot.rs:3:5
+  |
+3 |     #[operation(output=(),infallible)]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

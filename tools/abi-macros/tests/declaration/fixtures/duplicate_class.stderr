@@ -1,0 +1,5 @@
+error: duplicate option
+ --> tests/declaration/fixtures/duplicate_class.rs:1:41
+  |
+1 | #[kernel_api_macros::envcall(class = 0, class = 1)]
+  |                                         ^^^^^^^^^

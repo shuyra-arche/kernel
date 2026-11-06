@@ -1,0 +1,5 @@
+error: nonreturning operations have no output, error or reply decoder
+ --> tests/declaration/fixtures/terminal_output.rs:3:5
+  |
+3 |     #[operation(slot=0,output=(),nonreturning)]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

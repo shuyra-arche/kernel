@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: operation inputs exceed six ABI registers
+ --> tests/abi/fixtures/fail/oversized_request.rs:2:1
+  |
+2 | #[kernel_api_macros::envcall(class = 42)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `calls::_` failed here

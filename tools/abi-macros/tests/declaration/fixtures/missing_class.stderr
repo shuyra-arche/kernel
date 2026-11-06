@@ -1,0 +1,5 @@
+error: operation declarations require class
+ --> tests/declaration/fixtures/missing_class.rs:2:5
+  |
+2 | mod declaration {
+  |     ^^^^^^^^^^^

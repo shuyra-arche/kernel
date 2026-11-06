@@ -87,11 +87,12 @@ From the repository root:
 
 ```sh
 cargo test --locked -p kernel-api --tests --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-api --doc --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-api-macros --test envcall_boundary --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-api-macros --test declaration --target x86_64-unknown-linux-gnu
 ```
 
-The explicit `tests/contracts.rs` harness groups ABI and boot scenarios. Host
+The `tests/abi.rs` and `tests/boot.rs` suites group behavior under same-named
+subdirectories. Executable examples and compile-fail fixtures live under
+`tests/abi/`; library doctests are disabled. Host
 checks protect published slots, encoding, malformed input rejection and typed
 operation boundaries. They do not execute traps. See the root README for RV64
 builds and the separate responsibility for system integration.

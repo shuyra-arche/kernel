@@ -1,0 +1,5 @@
+error: an error-only declaration needs error domains and no class or call options
+ --> tests/declaration/fixtures/empty_declaration.rs:2:5
+  |
+2 | mod declaration {}
+  |     ^^^^^^^^^^^

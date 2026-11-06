@@ -1,0 +1,5 @@
+error: 这一格的号必须是 -1（域内自 -1 起、按声明顺序连续），写的是 -2
+ --> tests/declaration/fixtures/error_gap.rs:5:9
+  |
+5 |         Denied = -2,
+  |         ^^^^^^^^^^^
