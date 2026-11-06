@@ -6,6 +6,7 @@ pub enum PoleCondition {
 }
 
 impl crate::Wire for PoleCondition {
+    const WORDS: usize = 1;
     fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
         let Self::Signal(bit) = self;
         (3 + bit.index()).pack(words, at);

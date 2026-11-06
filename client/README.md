@@ -9,6 +9,28 @@ Mechanisms route effects through `crate::call`; raw memory calls must not recurs
 into root `memory` wrappers. Platform Runtime owns whole-product startup and
 exit policy.
 
+Client's transport is the Kernel register boundary. It provides no generic
+frame transport, service dispatch or request/reply protocol. Memory helpers use
+the concrete API descriptor encoders directly; no generic byte-codec dependency
+or Weave adapter is required. The root Env re-export follows the narrowed
+[API surface](../api/README.md#compatibility-and-validation).
+
+`call` exposes only the named call modules. Import API types directly from Env
+or the Client root; `call` no longer re-exports the Env API. Internal mechanisms
+use Env for types and `crate::call` for execution.
+
+`invoke::invoke_with(call, transport)` performs packing, one supplied register
+transport invocation, and API-owned result decoding. `unsafe invoke::invoke(call)`
+selects the native trap and requires the ABI operation's execution-context,
+pointer, and resource-lifetime obligations to hold.
+
+Named call signatures are Client-owned declarations in `src/call/definitions.rs`.
+The local macro in `src/call/macros.rs` removes wrapper boilerplate without
+defining slots, register layouts, or failure codes. Operations return their own
+success/error types; there is no domain return-enum extraction. Infallible
+wrappers eliminate `Infallible` through an exhaustive match. All 66 existing generated entry points keep their public
+signatures. `room::reap` constructs the terminal `Reap` operation and uses `invoke_terminal`.
+
 Client installs no `_start`, startup argument globals, panic handler, or global
 allocator. `memory::HeapAllocator` is a stateless registration handle for the
 one existing Talc heap. The heap table, TLS table and detached-result registry
@@ -49,6 +71,8 @@ Build from the repository root with:
 cargo check --locked -p kernel-client --target riscv64gc-unknown-none-elf
 ```
 
-Client shares the root workspace, lockfile and source version. Legacy host
-fixtures and boundary scripts have been removed. Runtime execution is validated
-by the consuming system; see the root [README](../README.md).
+Client shares the root workspace, lockfile and source version. `tests/calls.rs`
+uses the same Client signature declarations with an explicit recording transport
+to check packing, failure handling, high-bit infallible values, and three-word
+returns. It performs no native trap. Runtime execution is validated by the
+consuming system; see the root [README](../README.md).

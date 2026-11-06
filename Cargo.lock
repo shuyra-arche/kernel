@@ -92,14 +92,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iommu-hold"
-version = "0.1.0"
-source = "git+https://github.com/shuyra-arche/driver-iommu.git?rev=90f59ef91d3c4c157fb78bb691991ee7abe4f175#90f59ef91d3c4c157fb78bb691991ee7abe4f175"
-dependencies = [
- "kernel-api-env",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -114,7 +106,6 @@ dependencies = [
  "fack",
  "fdt",
  "hashbrown",
- "iommu-hold",
  "kernel-allocator",
  "kernel-api-env",
  "log",
@@ -139,7 +130,6 @@ name = "kernel-api"
 version = "0.0.1"
 dependencies = [
  "kernel-api-env",
- "kernel-api-wire",
 ]
 
 [[package]]
@@ -149,7 +139,6 @@ dependencies = [
  "bitflags",
  "erra",
  "kernel-api-macros",
- "kernel-api-wire",
 ]
 
 [[package]]
@@ -160,10 +149,6 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
-
-[[package]]
-name = "kernel-api-wire"
-version = "0.0.1"
 
 [[package]]
 name = "kernel-client"

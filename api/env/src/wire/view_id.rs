@@ -49,6 +49,7 @@ impl From<ViewId> for usize {
 }
 
 impl Wire for ViewId {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.0;
         *i += 1;

@@ -22,6 +22,7 @@ impl Bit {
 }
 
 impl crate::Wire for Bit {
+    const WORDS: usize = 1;
     fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
         self.index().pack(words, at);
     }

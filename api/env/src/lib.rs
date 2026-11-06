@@ -1,59 +1,39 @@
 #![no_std]
-//! 环境调用 ABI（env）：**过线的那些东西**——U 态任务与 S 态域任务共用的调用封装
-//! （slot 编码 + 载荷 codec + 线类型 + 纯返回解码），加门闩权限（位掩码 + 两族视图）。
+//! Kernel register operations, capability vocabulary and concrete ABI layouts.
 //!
-//! **不含服务目录协议**（`Request`/`Reply`/`MSG_LEN`）——那是纯用户态协议，住在
-//! 提供方 API（内核零引用）。用户态资源和执行支持分别由 resource、execution 提供。
+//! Each domain declares operations and failures together through `envcall`.
+//! Request values carry inputs; `Operation` owns success/error types, and
+//! `KernelCall` adds pure return decoding. Aggregate request enums serve Server
+//! dispatch. Client owns named execution entry points and the native trap.
 //!
-//! 方案 3（typed payload）：各调用域枚举（`RoomCall` 等）是带类型载荷的 variant，
-//! 字段类型为语义句柄（`PieToken`/`TaskId`/`VirtAddr`）或 `Permission`/裸量；
-//! `[call]` 载荷由 `derive(Envcall)` 生成 codec（`slot/pack/from_wire/decode_return`）。
-//! 返回类型经 `#[ret(T)]` 标注，derive 生成域 `*Ret` 枚举。
-//!
-//! **面的两层**：`pub mod` 是**全部**，下面的 `pub use` 是**便利层**——收的是"调用点当词汇
-//! 用"的那些名字（各调用域枚举、句柄、错误词汇、权限、名字、坐标、供给词汇…）。
-//!
-//! **串面就是 std 的那两枚**：借 `&str`、拥有 `String`——本仓**一个字都不新写**，
-//! 也没有第三个可转的名字（C 那一族是 C ABI 的形状，不是名字的）。线上那一格名字就是
-//! `String` 自己的 `Span` impl：**长度那一字节 ＋ 那几字节**；定宽、终止 NUL、零填充都不在了。
-//! **名字不报上界**（那一格 `MAX = None`）：它多长由**族**说——带它的帧写 `#[frame(len = …)]`。
-
+//! Byte formats are limited to Kernel memory descriptors and startup records.
+//! Generic service messages and protocol generation belong to consumers.
 extern crate alloc;
 extern crate self as env;
 
 pub mod abi;
 pub mod ecall;
 pub mod ledger;
-pub mod marks;
 pub mod wire;
 
-pub use abi::call::hole::{HoleCall, HoleCallRet, HoleCondition, HoleFail, HoleResult};
+pub use abi::call::hole::{HoleCall, HoleCondition, HoleFail, HoleResult};
 pub use abi::call::memory::PAGE_SIZE;
-pub use abi::call::nole::{NoleCall, NoleCallRet, NoleFail, NoleResult};
-pub use abi::call::pole::{PoleCall, PoleCallRet, PoleCondition, PoleFail, PoleResult};
+pub use abi::call::nole::{NoleCall, NoleFail, NoleResult};
+pub use abi::call::pole::{PoleCall, PoleCondition, PoleFail, PoleResult};
 pub use abi::call::tole::{
-    ToleAwaitReply, ToleCall, ToleCallRet, ToleEventFail, ToleEventSource, ToleFail, ToleResult,
+    ToleAwaitReply, ToleCall, ToleEventFail, ToleEventSource, ToleFail, ToleResult,
 };
 pub use abi::call::{
-    AcquireSource, Allocation, Bit, ChronoCall, ChronoCallRet, ControlCall, ControlCallRet,
-    ControlFail, ControlResult, DBCN_MAX, DebugCall, DebugCallRet, DebugFail, DebugResult,
-    DispatchFail, EnvCall, GrantRange, HoleLimits, MemoryCall, MemoryCallRet, MemoryFail,
-    MemoryResult, NOTE_MAX, Oversize, PieCall, PieCallRet, PieFail, PieInfo, PieResult, Placement,
-    PlacementAt, PlacementError, PullOutcome, ReferenceRange, ReleaseMode, RoomCall, RoomCallRet,
-    RoomFail, RoomResult, UnitCall, UnitCallRet, UnitFail, UnitResult, ViewControl, ViewSelection,
+    AcquireSource, Allocation, Bit, ChronoCall, ControlCall, ControlFail, ControlResult, DBCN_MAX,
+    DebugCall, DebugFail, DebugResult, DispatchFail, EnvCall, GrantRange, HoleLimits, MemoryCall,
+    MemoryFail, MemoryResult, NOTE_MAX, Oversize, PieCall, PieFail, PieInfo, PieResult, Placement,
+    PlacementAt, PlacementError, PullOutcome, ReferenceRange, ReleaseMode, RoomCall, RoomFail,
+    RoomResult, UnitCall, UnitFail, UnitResult, ViewControl, ViewSelection,
 };
 pub use abi::exit::{EXIT_FAULT, EXIT_OK, EXIT_PANIC, Reason};
 pub use abi::permission::{Access, Permission, Policy};
 pub use abi::wait::Wait;
-pub use ecall::{FailCode, make_fail};
-#[doc(hidden)]
-pub use erra::Error as __CallError;
-/// **`Frame`**：定长帧的一处定义。实现在 `mold`（**过程宏**那一半），这里只转出来
-/// 兼容环境类型及现有调用方的派生路径。
-pub use mold::Frame;
-/// **`WireCodes`**：失败域 ↔ 线上那一格的码表（实现在 `mold`，这里只转出来——与上面的
-/// `Frame` 同一条兼容路径）。
-pub use mold::WireCodes;
+pub use ecall::{FailCode, KernelCall, Operation, RegisterCall, TerminalCall, make_fail};
 pub use wire::pie_kind::PieKind;
 pub use wire::program_kind::ProgramKind;
 pub use wire::{

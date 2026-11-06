@@ -28,7 +28,7 @@ use super::{Decode, Wire};
 /// `PhantomData<*const ()>` 是这条规矩的**机制**，不是装饰：它让本类型 `!Send + !Sync`。于是
 ///
 ///   - 跨线程共享的账（`static`、`Arc`、`SpinLock<T>`）都要求 `Send`/`Sync` ⇒ **句柄装不进去**；
-///   - 产线程的闭包要求 `Send`、其结果也要求 `Send`（`execution::unit::task::spawn`）
+///   - 产线程的闭包要求 `Send`、其结果也要求 `Send`（`kernel_client::unit::task::spawn`）
 ///     ⇒ **捕获不进别的线程，也交不回来**。
 ///
 /// 跨线程只剩一条合法的路：`ship`——显式 `.get()` 变裸值过线，对端在自己的表里另落一枚。
@@ -105,6 +105,7 @@ impl From<PieToken> for usize {
 }
 
 impl Wire for PieToken {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.0;
         *i += 1;
@@ -137,6 +138,7 @@ impl From<TaskId> for usize {
 }
 
 impl Wire for TaskId {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.0;
         *i += 1;
@@ -170,6 +172,7 @@ impl From<VirtAddr> for usize {
 }
 
 impl Wire for VirtAddr {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.0;
         *i += 1;
@@ -240,6 +243,7 @@ impl Mark {
 }
 
 impl Wire for Mark {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.0 as usize;
         *i += 1;
@@ -272,6 +276,7 @@ impl From<TeamId> for usize {
 }
 
 impl Wire for TeamId {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.0;
         *i += 1;

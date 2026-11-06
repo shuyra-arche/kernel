@@ -2,20 +2,16 @@
 //!
 //! 本文件 = **契约核心**：[`Wire`] trait、[`Decode`] 失败域、基元与权限位的 impl。
 //! 字段**词汇表**按语义分居子模块（**声明次序即下表次序**，与下面的 `pub use` 同名）：
-//!   - [`frompair`] —— 内核回写的 `(a0, a1)`（宽那一格 `a0..a2`）→ 域 Ret 载荷蒸馏；
+//!   - [`frompair`] —— 内核回写的 `(a0, a1)`（宽那一格 `a0..a2`）→ 操作成功载荷；
 //!   - [`handle`] —— 语义句柄（[`PieToken`] / [`TaskId`] / [`TeamId`] / [`VirtAddr`]）＋ 记号 [`Mark`]；
-//!   - [`field`] —— 字节那一层：[`Wire`](crate::wire::Wire) 之外，过线的每一格怎么落字节。
+//! 内存描述与启动记录的字节编码由各自的 ABI 类型直接提供。
 //!
-//! **re-export 的口径**：可命名的类型一律在下面 re-export，故 `env::wire::Field` 与
-//! `env::wire::field::Field` 两条路都在。
-//!
-//! 这是方案 3（typed payload）的**唯一类型擦除点**：每个字段类型都实现 [`Wire`]，
-//! 由 [`derive(Envcall)`](mold) 生成的 codec 自动接线，用户侧与内核侧不再手写
+//! 每个寄存器字段类型都实现 [`Wire`]，
+//! 由 [`envcall`](kernel_api_macros::envcall) 生成的 codec 自动接线，用户侧与内核侧不再手写
 //! `as usize` / `from_bits_truncate`。非法位校验收敛在此：`Permission` 的 unpack
 //! 是 `from_bits(...).ok_or(...)`，而非静默截断。
 //!
-//! 通用性：本 trait 只依赖 `usize`，不绑 U-mode 语义——sbi 等 S-mode 调用封装
-//! 未来可直接复用同一 codec（derive 不写死 envcall 路径）。
+//! 此模块描述 Kernel 的六寄存器调用 ABI；不承担通用字节编码或服务消息协议。
 //!
 pub mod flat_reference;
 pub mod frompair;
@@ -29,15 +25,12 @@ pub use frompair::{FromPair, FromTriple};
 pub use handle::{Mark, PieToken, TaskId, TeamId, VirtAddr};
 pub use view_id::ViewId;
 
-/// 字段 ↔ usize 的契约。
-pub mod field;
-
-pub use field::{Field, Span, fetch_bytes, fetch_tail, store_bytes, store_tail, times, total};
-
 pub trait Wire: Sized {
-    /// 把自身 pack 进 `s`，游标 `i` 前进一格。
+    /// Exact register count consumed by both pack and unpack.
+    const WORDS: usize;
+    /// 把自身 pack 进 `s`，游标 `i` 前进 `WORDS` 格。
     fn pack(&self, s: &mut [usize; 6], i: &mut usize);
-    /// 从 `s` 读出自身，游标 `i` 前进一格；非法位 → `Err(Decode)`。
+    /// 从 `s` 读出自身，游标 `i` 前进 `WORDS` 格；非法位 → `Err(Decode)`。
     fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode>;
 }
 
@@ -55,6 +48,7 @@ pub enum Decode {
 // ── 基元 ────────────────────────────────────────────────────────────────
 
 impl Wire for usize {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = *self;
         *i += 1;
@@ -67,6 +61,7 @@ impl Wire for usize {
 }
 
 impl Wire for u64 {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = *self as usize;
         *i += 1;
@@ -79,6 +74,7 @@ impl Wire for u64 {
 }
 
 impl Wire for crate::abi::wait::Wait {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.to_wire();
         *i += 1;
@@ -92,6 +88,7 @@ impl Wire for crate::abi::wait::Wait {
 }
 
 impl Wire for bool {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = *self as usize;
         *i += 1;
@@ -108,6 +105,7 @@ impl Wire for bool {
 }
 
 impl Wire for crate::wire::program_kind::ProgramKind {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = match self {
             crate::wire::program_kind::ProgramKind::User => 0,
@@ -133,6 +131,7 @@ impl Wire for crate::wire::program_kind::ProgramKind {
 /// 把 32 位以上静默丢掉后再判合法——`0x1_0000_0002` 会被解成 `STORE` 而不是 `Invalid`，
 /// 那正是本条要根除的那类静默截断，只是搬到了高位。故先判宽度、再判位。
 impl Wire for crate::abi::permission::Permission {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.bits() as usize;
         *i += 1;

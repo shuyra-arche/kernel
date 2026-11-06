@@ -1,5 +1,4 @@
-use env::ledger::entry::{Header, VERSION};
-use env::wire::{Span, store_tail};
+use env::ledger::entry::{Header, store_entries};
 use env::{Entry, PieFail};
 
 pub(crate) const BLOCK_BYTES: usize = crate::core::memory::PAGE_SIZE;
@@ -26,15 +25,8 @@ pub(crate) fn write(entries: &[Entry]) -> Result<usize, PieFail> {
         return Err(PieFail::Denied);
     }
     let len = size(entries.len())?;
-    let count = u32::try_from(entries.len()).map_err(|_| PieFail::OoM)?;
     let out = unsafe { &mut *BLOCK.0.get() };
-    let at = Header {
-        version: VERSION,
-        count,
-    }
-    .store_at(out, 0)
-    .ok_or(PieFail::Denied)?;
-    let end = store_tail(out, at, entries).ok_or(PieFail::Denied)?;
+    let end = store_entries(out, entries).ok_or(PieFail::Denied)?;
     if end != len {
         return Err(PieFail::Denied);
     }

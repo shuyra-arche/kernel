@@ -3,7 +3,6 @@
 //! 页数非零且坐标不溢出（见 [`pages`](super::pages)）；这是 `Attach` 长度的
 //! 唯一来源，选址不另带一份长度。
 
-use crate::wire::Field;
 use crate::wire::FlatReference;
 use crate::{Decode, Wire};
 
@@ -54,6 +53,7 @@ impl ReferenceRange {
 }
 
 impl Wire for ReferenceRange {
+    const WORDS: usize = ReferenceRange::WORDS;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         self.reference.pack(s, i);
         self.offset.pack(s, i);
@@ -67,14 +67,15 @@ impl Wire for ReferenceRange {
     }
 }
 
-impl Field for ReferenceRange {
-    const WIDTH: usize = Self::WORDS * u64::WIDTH;
+impl ReferenceRange {
+    pub const WIDTH: usize = Self::WORDS * super::WORD_BYTES;
 
-    fn store(&self, out: &mut [u8]) {
+    /// Write the fixed ABI descriptor. `out` must have exactly `WIDTH` bytes.
+    pub fn store(&self, out: &mut [u8]) {
         super::store_words(self.encode(), out);
     }
 
-    fn fetch(bytes: &[u8]) -> Option<Self> {
+    pub fn fetch(bytes: &[u8]) -> Option<Self> {
         Self::decode(super::fetch_words(bytes)?).ok()
     }
 }

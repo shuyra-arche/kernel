@@ -7,6 +7,7 @@ pub enum HoleCondition {
 }
 
 impl crate::Wire for HoleCondition {
+    const WORDS: usize = 1;
     fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
         (*self as usize).pack(words, at);
     }

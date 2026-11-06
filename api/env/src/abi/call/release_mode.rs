@@ -7,6 +7,7 @@ pub enum ReleaseMode {
 }
 
 impl Wire for ReleaseMode {
+    const WORDS: usize = 1;
     fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
         (*self as usize).pack(words, at);
     }

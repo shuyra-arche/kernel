@@ -7,7 +7,6 @@
 //! `ReferenceRange`）。区域固定为普通用户窗口（旧 `Mmap` 同口径）。
 
 use crate::VirtAddr;
-use crate::wire::Field;
 
 use super::PAGE_SIZE;
 use super::placement_at::PlacementAt;
@@ -89,14 +88,15 @@ impl Placement {
     }
 }
 
-impl Field for Placement {
-    const WIDTH: usize = Self::WORDS * u64::WIDTH;
+impl Placement {
+    pub const WIDTH: usize = Self::WORDS * super::WORD_BYTES;
 
-    fn store(&self, out: &mut [u8]) {
+    /// Write the fixed ABI descriptor. `out` must have exactly `WIDTH` bytes.
+    pub fn store(&self, out: &mut [u8]) {
         super::store_words(self.encode(), out);
     }
 
-    fn fetch(bytes: &[u8]) -> Option<Self> {
+    pub fn fetch(bytes: &[u8]) -> Option<Self> {
         Self::decode_bytes(bytes).ok()
     }
 }

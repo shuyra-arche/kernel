@@ -1,7 +1,6 @@
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
-use env::wire::Field;
 use env::{AcquireSource, MemoryCall, MemoryFail, Permission, PieToken};
 
 use crate::core::memory::PAGE_SIZE;

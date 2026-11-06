@@ -8,10 +8,9 @@ version.workspace = true
 path = "src/lib.rs"
 test = false
 bench = false
-doctest = false
+doctest = true
 
 [dependencies]
-mold = { package = "kernel-api-macros", path = "../macros" }
-wire = { package = "kernel-api-wire", path = "../wire" }
+kernel-api-macros = { path = "../macros" }
 bitflags = { workspace = true }
 erra = { workspace = true }

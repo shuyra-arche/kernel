@@ -29,6 +29,7 @@ impl Allocation {
 }
 
 impl Wire for Allocation {
+    const WORDS: usize = Allocation::WORDS;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         self.size.pack(s, i);
         self.align.pack(s, i);

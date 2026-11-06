@@ -1,10 +1,6 @@
-//! pie_kind — 门闩那一类的**判别号**（[`PieKind`]）。
+//! Kernel 能力种类的 ABI 判别号。
 //!
-//! # 为什么它住 `env`
-//!
-//! 装配那一侧要**两侧读**——内核的 `build.rs`（宿主）与编排域（riscv）——而 `programs` /
-//! `protocol` 都依赖 execution（含 riscv 内联汇编）。故凡是"装配那一侧要摆出来的
-//! 东西"，定义都得住 `env`。
+//! 启动资源目录与能力授出方共享此标签；它不定义服务消息的字节编码。
 
 const KIND_POLE: u8 = PieKind::Pole as u8;
 const KIND_NOLE: u8 = PieKind::Nole as u8;
@@ -26,11 +22,7 @@ pub enum PieKind {
 }
 
 impl PieKind {
-    /// 线上那一格解回（**判别号不认识 ⇒ `None`**——读的人按"这一帧读不懂"处置，不猜）。
-    ///
-    /// **它为什么住类型自己身上**（impl 跟着类型走）：这一格的读者有两条
-    /// （驱动那几枚 `Ask` 与设备账认领那一帧的解回）——两处各写一遍 `match 0/1/…` 就是
-    /// 两份判别号表。
+    /// 从 ABI 判别号还原种类；未知值返回 `None`。
     pub const fn of(raw: u8) -> Option<PieKind> {
         match raw {
             KIND_POLE => Some(PieKind::Pole),
@@ -39,15 +31,5 @@ impl PieKind {
             KIND_TOLE => Some(PieKind::Tole),
             _ => None,
         }
-    }
-}
-
-impl crate::wire::Field for PieKind {
-    const WIDTH: usize = 1;
-    fn store(&self, out: &mut [u8]) {
-        out[0] = *self as u8;
-    }
-    fn fetch(bytes: &[u8]) -> Option<Self> {
-        Self::of(*bytes.first()?)
     }
 }
