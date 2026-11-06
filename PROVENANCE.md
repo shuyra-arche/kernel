@@ -1,5 +1,9 @@
 # Provenance
 
+This document records the initial provider import. Its file counts, hashes and
+byte-identity statements apply to that import checkpoint, not the current tree.
+Later changes are tracked in Git and the checkpoint notes linked below.
+
 ## Source
 
 - Repository: `https://github.com/anreonyr/sqware.git`
@@ -74,7 +78,18 @@ compiled here.
 
 ## Status
 
-At the worker preparation checkpoint, this was an unpublished, uncommitted
-candidate. Root owns acceptance and publication. Source consumer cutover and
-deletion of the old implementation are separate later steps; publishing the
-provider snapshot does not complete the Kernel extraction or stages 3–4.
+The initial preparation checkpoint was an unpublished candidate. The provider
+has since been published and developed further. Preserve `SOURCE-MANIFEST.tsv`
+as the original import record; do not regenerate it as though later edits were
+byte-identical to Source.
+
+Subsequent checkpoints include:
+
+- [Canonical API and Client boundary](api/README.md), with
+  [validation notes](api/VALIDATION.md).
+- [Client mechanism and lifecycle ownership](client/README.md).
+- [Event-log removal](validation/REMOVE-EVENT-LOG.md).
+
+Use Git history for the exact changes after import. External product consumer
+migration and native whole-product acceptance are separate from these
+checkpoints. See [CONTRIBUTING.md](CONTRIBUTING.md) for validation entry points.
