@@ -1,5 +1,5 @@
 use alloc::sync::{Arc, Weak};
-use env::{Mark, PieToken, TaskId};
+use kernel_api::{model::identity::Mark, model::identity::PieToken, model::identity::TaskId};
 
 use crate::core::work::grant::Grant;
 use crate::core::work::mail::Mail;
@@ -74,7 +74,7 @@ impl PieSnapshot {
             crate::core::memory::address::PageOffset,
             crate::core::memory::address::PageCount,
         )>,
-    ) -> Result<Pie, env::PieFail> {
+    ) -> Result<Pie, kernel_api::abi::call::pie::PieFail> {
         Pie::try_new_window(
             self.meta.clone(),
             mark,

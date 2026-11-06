@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use env::{ExitCause as TaskExitCause, UnitFail};
+use kernel_api::{abi::call::unit::UnitFail, model::unit::ExitCause as TaskExitCause};
 
 use crate::core::work::room::messenger::{Ticket, WaitCall, WakeKey};
 use crate::machine::hart::HartId;

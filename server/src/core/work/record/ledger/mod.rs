@@ -1,4 +1,4 @@
-use env::{Reason, TaskId};
+use kernel_api::{model::exit::Reason, model::identity::TaskId};
 
 use crate::machine::sync::SpinLock;
 

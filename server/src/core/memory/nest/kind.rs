@@ -18,11 +18,11 @@ impl SpaceKind {
     }
 }
 
-impl From<env::ProgramKind> for SpaceKind {
-    fn from(k: env::ProgramKind) -> Self {
+impl From<kernel_api::model::unit::ProgramKind> for SpaceKind {
+    fn from(k: kernel_api::model::unit::ProgramKind) -> Self {
         match k {
-            env::ProgramKind::User => SpaceKind::User,
-            env::ProgramKind::Supervisor => SpaceKind::Supervisor,
+            kernel_api::model::unit::ProgramKind::User => SpaceKind::User,
+            kernel_api::model::unit::ProgramKind::Supervisor => SpaceKind::Supervisor,
         }
     }
 }

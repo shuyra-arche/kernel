@@ -1,6 +1,9 @@
 use alloc::sync::Weak;
 
-use env::{PieFail, PieToken, ToleEventFail, ToleEventSource, ToleFail};
+use kernel_api::{
+    abi::call::pie::PieFail, abi::call::tole::ToleEventFail, abi::call::tole::ToleFail,
+    model::identity::PieToken, model::tole::ToleEventSource,
+};
 
 use crate::core::work::mail::{hole, nole, pole};
 use crate::core::work::pend::{Need, PieSnapshot};

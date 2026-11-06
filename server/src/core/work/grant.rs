@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use env::Permission;
+use kernel_api::model::permission::Permission;
 
 use crate::core::memory::address::{PageCount, PageOffset};
 
@@ -22,19 +22,21 @@ pub(crate) struct Grant {
 }
 
 impl Grant {
-    pub(crate) fn try_new(permission: Permission) -> Result<Arc<Self>, env::PieFail> {
+    pub(crate) fn try_new(
+        permission: Permission,
+    ) -> Result<Arc<Self>, kernel_api::abi::call::pie::PieFail> {
         Self::try_new_window(permission, None)
     }
 
     pub(crate) fn try_new_window(
         permission: Permission,
         window: Option<(PageOffset, PageCount)>,
-    ) -> Result<Arc<Self>, env::PieFail> {
+    ) -> Result<Arc<Self>, kernel_api::abi::call::pie::PieFail> {
         Arc::try_new(Self {
             permission: AtomicU32::new(permission.bits()),
             window,
         })
-        .map_err(|_| env::PieFail::OoM)
+        .map_err(|_| kernel_api::abi::call::pie::PieFail::OoM)
     }
 
     /// 这一枚分支的有效窗口；`None` = 整段来源。
@@ -47,16 +49,19 @@ impl Grant {
         (bits != 0).then(|| Permission::from_bits_retain(bits))
     }
 
-    pub(crate) fn narrow(&self, subset: Permission) -> Result<(), env::PieFail> {
+    pub(crate) fn narrow(
+        &self,
+        subset: Permission,
+    ) -> Result<(), kernel_api::abi::call::pie::PieFail> {
         let subset_bits = subset.bits();
         let mut current = self.permission.load(Ordering::Acquire);
         loop {
             if current == 0 {
-                return Err(env::PieFail::Dead);
+                return Err(kernel_api::abi::call::pie::PieFail::Dead);
             }
             let permission = Permission::from_bits_retain(current);
             if !narrows(permission, subset) {
-                return Err(env::PieFail::Denied);
+                return Err(kernel_api::abi::call::pie::PieFail::Denied);
             }
             match self.permission.compare_exchange_weak(
                 current,

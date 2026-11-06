@@ -1,0 +1,180 @@
+use super::{Decode, Wire};
+use crate::model::{
+    identity::{PieToken, TeamId},
+    memory::{
+        AcquireSource, Allocation, FlatReference, ReferenceRange, ViewControl, ViewId,
+        ViewSelection, pages,
+    },
+};
+
+impl Wire for AcquireSource {
+    const WORDS: usize = AcquireSource::WORDS;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        let words = match *self {
+            Self::Allocation(allocation) => [0, allocation.size, allocation.align, 0, 0],
+            Self::Reference(range) => [1, range.reference.get(), range.offset, range.count, 0],
+            Self::Source {
+                token,
+                offset,
+                count,
+            } => [2, token.get(), offset, count, 0],
+            Self::View {
+                team,
+                view,
+                offset,
+                count,
+            } => [3, team.get(), view.get(), offset, count],
+        };
+        for word in words {
+            word.pack(s, i);
+        }
+        debug_assert!(*i <= Self::WORDS);
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let mut w = [0usize; Self::WORDS];
+        for word in &mut w {
+            *word = usize::unpack(s, i)?;
+        }
+        let [tag, a, b, c, d] = w;
+        if tag >= Self::TAGS {
+            return Err(Decode::Invalid);
+        }
+        let window = |offset: usize, count: usize| {
+            pages(offset, count)
+                .map(|()| (offset, count))
+                .ok_or(Decode::Invalid)
+        };
+        match tag {
+            0 if c == 0 && d == 0 => Ok(Self::Allocation(
+                Allocation::new(a, b).ok_or(Decode::Invalid)?,
+            )),
+            1 if d == 0 => Ok(Self::Reference(
+                ReferenceRange::new(FlatReference::new(a), b, c).ok_or(Decode::Invalid)?,
+            )),
+            2 if d == 0 => {
+                let (offset, count) = window(b, c)?;
+                Ok(Self::Source {
+                    token: PieToken::new(a),
+                    offset,
+                    count,
+                })
+            }
+            3 => {
+                let (offset, count) = window(c, d)?;
+                Ok(Self::View {
+                    team: TeamId::new(a),
+                    view: ViewId::new(b),
+                    offset,
+                    count,
+                })
+            }
+            _ => Err(Decode::Invalid),
+        }
+    }
+}
+
+impl Wire for Allocation {
+    const WORDS: usize = Allocation::WORDS;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        self.size.pack(s, i);
+        self.align.pack(s, i);
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let size = usize::unpack(s, i)?;
+        let align = usize::unpack(s, i)?;
+        Self::new(size, align).ok_or(Decode::Invalid)
+    }
+}
+
+impl Wire for ReferenceRange {
+    const WORDS: usize = ReferenceRange::WORDS;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        self.reference.pack(s, i);
+        self.offset.pack(s, i);
+        self.count.pack(s, i);
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let reference = FlatReference::unpack(s, i)?;
+        let offset = usize::unpack(s, i)?;
+        let count = usize::unpack(s, i)?;
+        Self::new(reference, offset, count).ok_or(Decode::Invalid)
+    }
+}
+
+impl Wire for ViewSelection {
+    const WORDS: usize = ViewSelection::WORDS;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        match *self {
+            Self::Whole => {
+                0usize.pack(s, i);
+                0usize.pack(s, i);
+                0usize.pack(s, i);
+            }
+            Self::Pages { offset, count } => {
+                1usize.pack(s, i);
+                offset.pack(s, i);
+                count.pack(s, i);
+            }
+        }
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let tag = usize::unpack(s, i)?;
+        let offset = usize::unpack(s, i)?;
+        let count = usize::unpack(s, i)?;
+        match tag {
+            0 if offset == 0 && count == 0 => Ok(Self::Whole),
+            1 => Self::pages(offset, count).ok_or(Decode::Invalid),
+            _ => Err(Decode::Invalid),
+        }
+    }
+}
+
+impl Wire for ViewControl {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        let word = match self {
+            Self::Caller => 0usize,
+            Self::SpaceMembers => 1usize,
+        };
+        word.pack(s, i);
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        match usize::unpack(s, i)? {
+            0 => Ok(Self::Caller),
+            1 => Ok(Self::SpaceMembers),
+            _ => Err(Decode::Invalid),
+        }
+    }
+}
+
+impl Wire for FlatReference {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        s[*i] = self.0;
+        *i += 1;
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let v = *s.get(*i).ok_or(Decode::Overflow)?;
+        *i += 1;
+        if v > isize::MAX as usize {
+            return Err(Decode::Invalid);
+        }
+        Ok(Self::new(v))
+    }
+}
+
+impl Wire for ViewId {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        s[*i] = self.0;
+        *i += 1;
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let v = *s.get(*i).ok_or(Decode::Overflow)?;
+        *i += 1;
+        if v > isize::MAX as usize {
+            return Err(Decode::Invalid);
+        }
+        Ok(Self::new(v))
+    }
+}

@@ -1,6 +1,9 @@
 use alloc::sync::Weak;
 
-use env::{Permission, PieToken, TaskId, ToleEventSource, UnitTarget};
+use kernel_api::{
+    model::identity::PieToken, model::identity::TaskId, model::permission::Permission,
+    model::tole::ToleEventSource, model::unit::UnitTarget,
+};
 
 use crate::core::work::unit::join::JoinTarget;
 use crate::core::work::unit::task::Task;

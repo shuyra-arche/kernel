@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use env::{DebugCall, EnvCall};
+use kernel_api::{abi::call::EnvCall, abi::call::debug::DebugCall};
 
 use crate::core::work::unit::task::TaskIdent;
 use crate::machine::switcher::context::{Gprs, TrapContext};
@@ -40,7 +40,7 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
     let envcall = match EnvCall::from_wire(number, &regs) {
         Ok(c) => c,
         Err(_) => {
-            ret_err(frame, env::DispatchFail::Unknown);
+            ret_err(frame, kernel_api::abi::error::DispatchFail::Unknown);
             return Some(frame as *mut TrapContext);
         }
     };

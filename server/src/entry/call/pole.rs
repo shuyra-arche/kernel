@@ -1,8 +1,10 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use env::{
-    Bit, FlatReference, Mark, PieFail, PieKind, PieToken, PoleCall, PoleCondition, PoleFail, Wait,
+use kernel_api::{
+    abi::call::pie::PieFail, abi::call::pole::PoleCall, abi::call::pole::PoleFail,
+    model::identity::Mark, model::identity::PieToken, model::memory::FlatReference,
+    model::pie::PieKind, model::pole::Bit, model::pole::PoleCondition, model::wait::Wait,
 };
 
 use super::gate;

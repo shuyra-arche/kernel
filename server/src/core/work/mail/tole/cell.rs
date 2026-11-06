@@ -1,7 +1,10 @@
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
-use env::{PieFail, TaskId, ToleEventFail, ToleEventSource};
+use kernel_api::{
+    abi::call::pie::PieFail, abi::call::tole::ToleEventFail, model::identity::TaskId,
+    model::tole::ToleEventSource,
+};
 
 use crate::core::work::pend;
 use crate::core::work::room::messenger::WakeKey;
@@ -51,9 +54,14 @@ impl Cell {
                         return Some(None);
                     }
                 }
-                let join = JoinWait::new(selected.clone(), actor.ident.id, false, env::Wait::POLL);
+                let join = JoinWait::new(
+                    selected.clone(),
+                    actor.ident.id,
+                    false,
+                    kernel_api::model::wait::Wait::POLL,
+                );
                 match join.poll() {
-                    Ok(env::JoinReply::Pending) => None,
+                    Ok(kernel_api::model::unit::JoinReply::Pending) => None,
                     Ok(_) => Some(None),
                     Err(_) => Some(Some(ToleEventFail::Denied)),
                 }

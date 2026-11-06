@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use env::{ControlCall, ControlFail};
+use kernel_api::{abi::call::control::ControlCall, abi::call::control::ControlFail};
 
 use crate::core::memory::address::VirtAddr as KVirt;
 use crate::core::memory::nest::Access;

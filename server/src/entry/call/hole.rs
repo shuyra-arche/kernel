@@ -1,9 +1,11 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use env::{
-    HoleCall, HoleCondition, HoleFail, HoleLimits, Mark, Oversize, PieFail, PieKind, PieToken,
-    PullOutcome, TaskId, Wait,
+use kernel_api::{
+    abi::call::hole::HoleCall, abi::call::hole::HoleFail, abi::call::pie::PieFail,
+    model::hole::HoleCondition, model::hole::HoleLimits, model::hole::Oversize,
+    model::hole::PullOutcome, model::identity::Mark, model::identity::PieToken,
+    model::identity::TaskId, model::pie::PieKind, model::wait::Wait,
 };
 
 use super::gate;

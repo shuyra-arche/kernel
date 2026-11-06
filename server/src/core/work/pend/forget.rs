@@ -1,7 +1,9 @@
 use alloc::sync::Arc;
 
 use crate::core::work::unit::task::Task;
-use env::{Permission, PieFail, PieToken};
+use kernel_api::{
+    abi::call::pie::PieFail, model::identity::PieToken, model::permission::Permission,
+};
 
 pub(crate) fn forget(task: &Arc<Task>, token: PieToken) -> Result<(), PieFail> {
     for _ in 0..super::RETRIES {

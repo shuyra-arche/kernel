@@ -1,7 +1,9 @@
 use alloc::sync::{Arc, Weak};
 use core::time::Duration;
 
-use env::{PieToken, ToleAwaitReply, ToleFail};
+use kernel_api::{
+    abi::call::tole::ToleFail, abi::reply::ToleAwaitReply, model::identity::PieToken,
+};
 
 use crate::core::work::pend;
 use crate::core::work::room::messenger::{self, WakeKey};
@@ -26,13 +28,18 @@ fn inspect_key(actor: &Arc<Task>, token: PieToken) -> WakeKey {
 }
 
 impl AwaitWait {
-    pub fn new(group: Arc<ToleMeta>, token: PieToken, actor: &Arc<Task>, wait: env::Wait) -> Self {
+    pub fn new(
+        group: Arc<ToleMeta>,
+        token: PieToken,
+        actor: &Arc<Task>,
+        wait: kernel_api::model::wait::Wait,
+    ) -> Self {
         Self {
             group,
             token,
             actor: Arc::downgrade(actor),
             deadline: match wait {
-                env::Wait::Forever => None,
+                kernel_api::model::wait::Wait::Forever => None,
                 _ => Some(
                     crate::machine::clock::now()
                         .add(wait.into_duration())
@@ -90,7 +97,7 @@ impl AwaitWait {
         use crate::machine::switcher::context::Gprs;
         let words = match result {
             Ok(reply) => reply.words(),
-            Err(e) => [env::FailCode::code(e) as usize, 0, 0],
+            Err(e) => [kernel_api::abi::error::FailCode::code(e) as usize, 0, 0],
         };
         frame.gpr.set_x(Gprs::A0, words[0]);
         frame.gpr.set_x(Gprs::A1, words[1]);

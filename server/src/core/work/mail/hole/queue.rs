@@ -1,6 +1,6 @@
 use alloc::collections::VecDeque;
 
-use env::{HoleCondition, HoleLimits};
+use kernel_api::{model::hole::HoleCondition, model::hole::HoleLimits};
 
 use super::hand::Hand;
 use super::slot::Slot;

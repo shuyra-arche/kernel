@@ -1,78 +1,40 @@
 # Kernel Client
 
-Typed calls live under `call::{memory,unit,room,...}`. Their request types and
-return decoding belong to canonical `kernel-api-env`; `ecall::trap` owns the
-RV64 `ebreak` register boundary. Root `memory`, `unit`, and `room` expose the
-reusable memory, heap, TLS and task mechanisms.
+`kernel-client` is a `no_std` library for executing Kernel calls. It depends on
+`kernel-api` and the declared error type, and needs no allocator or runtime state.
 
-Mechanisms route effects through `crate::call`; raw memory calls must not recurse
-into root `memory` wrappers. Platform Runtime owns whole-product startup and
-exit policy.
+| Module | Responsibility |
+| --- | --- |
+| `call::{memory,unit,room,...}` | Named typed calls, including terminal `room::reap` |
+| `invoke` | Execute a returning or terminal API operation |
+| `transport` | RV64 `ebreak` register boundary |
 
-Client's transport is the Kernel register boundary. It provides no generic
-frame transport, service dispatch or request/reply protocol. Memory helpers use
-the concrete API descriptor encoders directly; no generic byte-codec dependency
-or Weave adapter is required. The root Env re-export follows the narrowed
-[API surface](../api/README.md#compatibility-and-validation).
+Import model and ABI types directly from `kernel_api`. Client owns no type
+prelude, heap, mapping ownership wrappers, closure task model, synchronization,
+TLS registry, startup adapter or exit policy. Language runtime/std work is
+separate from Kernel. The former `__private` adaptation interface is removed.
 
-`call` exposes only the named call modules. Import API types directly from Env
-or the Client root; `call` no longer re-exports the Env API. Internal mechanisms
-use Env for types and `crate::call` for execution.
+`invoke_with(call, transport)` packs inputs once, calls the supplied transport
+once and decodes the result once. It is the host-test entry point.
+`unsafe invoke(call)` selects the native trap; its caller must satisfy the
+operation's execution context, pointer validity and resource lifetime contract.
+`invoke_terminal(call)` enters a non-returning fault path if the terminal trap
+unexpectedly returns; it uses neither TLS nor a panic handler.
 
-`invoke::invoke_with(call, transport)` performs packing, one supplied register
-transport invocation, and API-owned result decoding. `unsafe invoke::invoke(call)`
-selects the native trap and requires the ABI operation's execution-context,
-pointer, and resource-lifetime obligations to hold.
-
-Named call signatures are Client-owned declarations in `src/call/definitions.rs`.
-The local macro in `src/call/macros.rs` removes wrapper boilerplate without
-defining slots, register layouts, or failure codes. Operations return their own
-success/error types; there is no domain return-enum extraction. Infallible
-wrappers eliminate `Infallible` through an exhaustive match. All 66 existing generated entry points keep their public
-signatures. `room::reap` constructs the terminal `Reap` operation and uses `invoke_terminal`.
-
-Client installs no `_start`, startup argument globals, panic handler, or global
-allocator. `memory::HeapAllocator` is a stateless registration handle for the
-one existing Talc heap. The heap table, TLS table and detached-result registry
-remain the sole authorities for their original responsibilities.
-
-`__private` is the runtime adaptation contract:
-
-```rust,ignore
-unsafe fn initialize_tls() -> MemoryResult<Tls>;
-unsafe fn retire_tls(token: Tls) -> Cleanup; // Complete | Deferred
-```
-
-Initialization installs `tp` only after successful setup. `Tls` is a unique,
-task-local slot token with no automatic Drop effect. Retirement clears `tp`
-before detaching; failed work stays in the existing table and returns Deferred.
-Main and closure tasks use the same mechanism. A runtime must finish all TLS
-users before retirement, then use a terminal path that needs no TLS. The room
-terminal trap faults if it unexpectedly returns, without invoking panic again.
-
-Legacy startup adapters may instead retain the Caller mapping through their
-existing Kernel terminal path. Native task termination owns that mapping's
-cleanup; a native terminal observation permits retiring local table bookkeeping.
-The existing TLS sweeper scans only while cleanup is owed or a reference release
-is pending, so it does not guarantee reclaiming an otherwise retained Live slot
-before the address space ends. Dropping the token does not clear `tp`, remove
-the mapping, or discharge the table's responsibility. This allowance preserves
-legacy startup and does not select a new Runtime exit policy.
-
-`unit::observe(target, wait)` always uses non-consuming native observation and
-does not clear TLS. Foreign Denied never establishes death. The private closure
-registry retains its original same-Team, self-created task prerequisite for
-interpreting a pruned member as terminal. Native Reaped permits retiring local
-bookkeeping; Server can still have deferred physical cleanup.
-
-Build from the repository root with:
+Named signatures are declared in `src/call/definitions.rs`. The local macro only
+removes execution boilerplate and does not define ABI values or generate service
+protocols. Each domain imports the types it uses. All 66 returning call signatures
+are retained. `call::room::reap(reason, note, len)` passes the three ABI fields
+directly; callers provide a valid note buffer and obey `abi::call::room::NOTE_MAX`.
+The old root `room::park(Duration)` and `room::reap(reason, Option<&str>)` adapters
+have been removed.
 
 ```sh
 cargo check --locked -p kernel-client --target riscv64gc-unknown-none-elf
+cargo test --locked -p kernel-client --test calls --target x86_64-unknown-linux-gnu
 ```
 
-Client shares the root workspace, lockfile and source version. `tests/calls.rs`
-uses the same Client signature declarations with an explicit recording transport
-to check packing, failure handling, high-bit infallible values, and three-word
-returns. It performs no native trap. Runtime execution is validated by the
-consuming system; see the root [README](../README.md).
+Tests use a recording transport and never perform a native trap. Native call
+execution is verified by the consuming integration project. See the API
+[compatibility notes](../api/README.md#source-migration-and-abi-compatibility)
+before updating a consumer's Kernel pin.

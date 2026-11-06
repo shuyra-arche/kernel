@@ -1,11 +1,11 @@
 use super::pie::Permission;
 use crate::core::work::grant::narrows;
 use crate::core::work::mail::pole::PoleOperation;
-use env::PieFail;
+use kernel_api::abi::call::pie::PieFail;
 
 pub(crate) fn reduce(
     task: &alloc::sync::Arc<crate::core::work::unit::task::Task>,
-    token: env::PieToken,
+    token: kernel_api::model::identity::PieToken,
     subset: Permission,
 ) -> Result<(), PieFail> {
     reduce_locked(task, token, subset)?;
@@ -15,7 +15,7 @@ pub(crate) fn reduce(
 
 fn reduce_locked(
     task: &alloc::sync::Arc<crate::core::work::unit::task::Task>,
-    token: env::PieToken,
+    token: kernel_api::model::identity::PieToken,
     subset: Permission,
 ) -> Result<(), PieFail> {
     use crate::core::memory::nest::Access;
@@ -43,7 +43,7 @@ fn reduce_locked(
             None
         } else {
             Some(
-                task.clan(env::TeamId::new(reserved))
+                task.clan(kernel_api::model::identity::TeamId::new(reserved))
                     .ok_or(PieFail::Denied)?,
             )
         };

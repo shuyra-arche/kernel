@@ -1,6 +1,9 @@
 use alloc::sync::Arc;
 
-use env::{PieFail, PieToken, TaskId, ViewControl};
+use kernel_api::{
+    abi::call::pie::PieFail, model::identity::PieToken, model::identity::TaskId,
+    model::memory::ViewControl,
+};
 
 use crate::machine::sync::SpinLock;
 

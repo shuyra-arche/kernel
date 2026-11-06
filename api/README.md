@@ -1,120 +1,97 @@
 # Kernel API
 
-Kernel owns the RV64 register ABI, capability vocabulary, memory descriptors and
-startup ledger. Client executes operations; Server decodes and dispatches them.
-Operation contracts perform no trap, retries, rollback or service communication.
+`kernel-api` is one `no_std` Cargo package. It owns the public Kernel contracts;
+Client executes them and Server implements them. It requires no heap, startup
+code or runtime state. There is no Env package or compatibility facade.
 
-| Package | Responsibility |
+## Public modules
+
+| Path | Responsibility |
 | --- | --- |
-| `kernel-api-env` | Operation contracts, register encodings, failures, handles, permissions and concrete Kernel byte layouts |
-| `kernel-api-macros` | One `envcall` declaration macro for operations and their error domains |
-| `kernel-api` | Re-export umbrella for Env |
-| `kernel-client` | Named call functions, native trap and reusable task/memory mechanisms |
+| `model::identity` | TaskId, TeamId, PieToken, VirtAddr and Mark |
+| `model::memory` | FlatReference, ViewId, allocation, reference ranges and placement |
+| `model::permission` | Permission, Access and Policy |
+| `model::unit` | ProgramKind, UnitTarget, task exit and join values |
+| `model::{pie,hole,pole,tole}` | Resource descriptions and event conditions |
+| `model::{wait,exit}` | Waiting and exit vocabulary |
+| `abi::call` | Operation declarations, domain failures and aggregate dispatch |
+| `abi::operation` | Operation, RegisterCall, KernelCall and TerminalCall traits |
+| `abi::register` | Checked request packing and unpacking, including Wire and Decode |
+| `abi::reply` | Success register decoding and the Tole reply contract |
+| `abi::layout` | Concrete caller-memory descriptor codecs |
+| `abi::error` | Common failure representation and dispatch errors |
+| `boot` | Initial-task arguments, Capsule, resource Ledger and initrd preamble |
 
-```text
-kernel-api (umbrella) ────────────> kernel-api-env
-kernel-client ───────────────────> kernel-api-env
-kernel (Server) / allocator ─────> kernel-api-env
-kernel-api-env ── build-time ────> kernel-api-macros
-```
+The crate root exposes these three domains directly. Import names from their
+owning modules; neither API nor Client flattens the whole vocabulary into a root
+prelude. Model values install no allocator, locks, TLS or task cleanup. Concrete
+descriptor methods remain inherent methods on their types; their implementations
+live in `abi::layout`.
 
-## Operation declarations
+## Operations and generation
 
-Each call domain declares its operations and failures together. For example:
+`tools/abi-macros` is a separate proc-macro package. Its `envcall` macro generates
+only Kernel operation declarations, register codecs, dispatch enums and failure
+codes. It is not a service protocol generator. Generated paths refer to
+`crate::abi`; API uses this tool at compile time.
 
-```rust,ignore
-#[kernel_api_macros::envcall(class = 2, call = MemoryCall)]
-pub mod operations {
-    #[error_domain]
-    pub enum MemoryFail {
-        Denied = -1,
-        OoM = -2,
-    }
+A request value contains inputs. `Operation` associates its success and error
+types; `RegisterCall` defines its slot and six-word request encoding.
+`KernelCall` adds pure return decoding. `TerminalCall` has no return decoder and
+cannot be used with a returning invocation. Returning operations use two or
+three success registers according to their declaration. Infallible operations
+preserve all success bits, including the high bit.
 
-    #[operation(slot = 6, output = (), error = MemoryFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Release {
-        pub reference: super::FlatReference,
-    }
-}
-```
+Call classes and operation slots are explicit 32-bit values. The macro checks
+register capacity and rejects contradictory declarations. Errors use explicit
+consecutive negative codes; an optional busy marker identifies not-ready results.
+Unknown call classes, slots and invalid request fields are rejected. Packing and
+decoding perform no trap, retry or rollback.
 
-The request value carries the inputs. `Operation` associates its success and
-failure types. `RegisterCall` defines its constant slot, six-word packing and
-request decoding. Returning operations also implement `KernelCall`, which
-provides pure result decoding. A fallible operation's error type remains
-`erra::Error<DeclaredFailure>`; `infallible` operations use `Infallible` and retain
-all success bits, including the high bit of the first register.
+## Boot boundary
 
-Every operation declares an explicit 32-bit slot; its domain declares a 32-bit
-class. `Wire::WORDS` describes each input's exact register consumption. The
-macro checks that their sum does not exceed six. `reply = 3` selects three-word
-success decoding; the default uses two words. Error codes are explicit,
-consecutive negative values starting at -1 within each domain; `#[busy]` marks
-its optional not-ready result. The macro generates conversions, `FailCode` and
-the standard error traits, including diagnostic `Display`.
+Kernel reads the initrd's initial eight-byte offset/length preamble and parses
+the selected Capsule. The resource Ledger contains named initial capabilities.
+Deployment selection, program catalogs, image packing and service protocols
+belong to the integration owner, not this package. The former deployment
+manifest parser and packer have been removed.
 
-A `nonreturning` operation has no output, error or result decoder. It implements
-`RegisterCall` and `TerminalCall`, and cannot enter the normal Client invocation.
-`Reap` uses this contract. Client owns the terminal trap and the fault path if
-that trap unexpectedly returns; the fault path uses neither TLS nor panic.
+## Source migration and ABI compatibility
 
-The macro also generates a named request enum such as `MemoryCall` for Server
-matching. Its variants retain their named fields; packing and slot constants
-belong to operation structs. `from_wire` checks both class
-and slot before decoding inputs. Returning calls decode directly to their own
-success type; there is no domain-wide return enum or runtime result extraction.
-Client owns the named function signatures and chooses execution independently.
+This is an intentional source break with no forwarding packages or aliases:
 
-`operation` and `error_domain` are markers consumed by `envcall`, not separate
-macros. Auxiliary error-only declarations use `#[envcall]` without a class or
-call enum. The macro accepts inline modules with imports, error enums and
-operation structs. Operations are public, concrete named-field or unit structs;
-generics and conditional fields/operations are rejected. Generated `crate::wire`
-and `crate::ecall` paths intentionally target the canonical Kernel API; this is
-not a general-purpose external code-generation library.
+| Previous use | Current use |
+| --- | --- |
+| `kernel-api-env` / dependency alias `env` | `kernel-api` |
+| `kernel_api::env` or Client root type exports | `kernel_api::{model,abi,boot}` and explicit imports |
+| `env::abi::call` | `kernel_api::abi::call` |
+| `env::{Operation,RegisterCall,KernelCall,TerminalCall}` | `kernel_api::abi::operation` |
+| `env::wire` | Types in `model`; codecs in `abi::{register,reply}` |
+| `env::ledger::{entry,name}` | `kernel_api::boot::ledger` |
+| `env::ledger::{args,capsule}` | `kernel_api::boot::{args,capsule}` |
+| `env::ledger::manifest` | Removed; deployment format belongs to Vanllia |
+| Client heap, mapping ownership, closure tasks, locks and TLS | Removed; language runtime/std owns these mechanisms |
 
-## Concrete byte layouts
+All 67 operation numbers, register layouts, failure codes and existing concrete
+byte formats remain unchanged. `call::room::reap(reason, note, len)` now exposes
+the terminal ABI directly; there is no duration/note adaptation or TLS cleanup.
 
-`Placement` and `ReferenceRange` are 24-byte little-endian descriptors. A ledger
-`Name` uses 16 bytes, `Header` uses 8, and `Entry` uses 32. Their inherent methods
-encode these specific ABI layouts without a generic byte-codec dependency.
+Publish this provider before migrating consumers. External consumers must update
+source imports, replace their use of removed runtime/deployment helpers, and pin
+one full Kernel commit for both API and Client. Older pinned revisions remain
+independent. This repository does not update external consumer pins.
 
-`store_entries` writes a startup ledger into caller-provided capacity and returns
-its used length. `Entries::new(&bytes[..used])` validates the complete ledger:
-version, records, reserved bytes, unique names and no trailing bytes.
+## Verification
 
-Generic byte codecs, service protocols and their macro generators are outside
-Kernel. `env::wire` is the register ABI vocabulary; `Mark` is a capability ABI
-value. No Weave dependency or adapter is required.
-
-## Compatibility and validation
-
-Call numbers, register and concrete byte layouts, failure codes, and the 66 named
-Client entry signatures are preserved. `room::reap` retains its separate `!`
-interface. Source users of the former derives, `*CallRet`, aggregate return
-decoding or the earlier `KernelCall` trait must use the operation contracts.
-Aggregate request enums no longer provide `slot` or `pack`; use operation types.
-Unused success-decoder implementations and `PieKind` byte-codec helpers have
-been removed. `Wire` implementations must provide their exact `WORDS` count. Consumers of the
-removed generic communication exports must supply those through their own
-communication library before updating Kernel. Older pinned revisions remain
-independent; external consumer repositories are not migrated here.
-
-Server and allocator use the same workspace API source. Consumer workspaces
-must coordinate source identity because path and Git copies define distinct
-Rust types.
-
-From the repository root (substitute the Windows host target when applicable):
+From the repository root:
 
 ```sh
-cargo test --locked -p kernel-api-env --tests --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-api-env --doc --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-api --tests --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-api --doc --target x86_64-unknown-linux-gnu
 cargo test --locked -p kernel-api-macros --test envcall_boundary --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-client --test calls --target x86_64-unknown-linux-gnu
 ```
 
-Host checks cover fixed bytes, all 67 published operation slots, typed results,
-request decoding, declaration diagnostics and rejected contract combinations.
-They never execute a native trap. See the root [README](../README.md) for RV64
-build commands and the separate responsibility for guest execution validation.
+The explicit `tests/contracts.rs` harness groups ABI and boot scenarios. Host
+checks protect published slots, encoding, malformed input rejection and typed
+operation boundaries. They do not execute traps. See the root README for RV64
+builds and the separate responsibility for system integration.

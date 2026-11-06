@@ -2,8 +2,7 @@
 resolver = "3"
 members = [
   "api",
-  "api/env",
-  "api/macros",
+  "tools/abi-macros",
   "client",
   "server",
   "server/allocator",
@@ -15,7 +14,7 @@ version = "0.0.1"
 edition = "2024"
 
 [workspace.dependencies]
-env = { package = "kernel-api-env", path = "api/env" }
+kernel-api = { path = "api" }
 bitflags = "2.13.1"
 erra = { version = "0.2.0", default-features = false }
 fack = { version = "0.2.0", default-features = false }

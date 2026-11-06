@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use env::{UnitCall, UnitFail, UnitTarget};
+use kernel_api::{abi::call::unit::UnitCall, abi::call::unit::UnitFail, model::unit::UnitTarget};
 
 use crate::core::memory::address::VirtAddr as KVirt;
 use crate::core::memory::nest::{NestError, SpaceKind};
@@ -83,7 +83,8 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             }
         }
         UnitCall::Build { kind, sire } => {
-            if kind == env::ProgramKind::Supervisor && !ident.team.space.kind().is_supervisor()
+            if kind == kernel_api::model::unit::ProgramKind::Supervisor
+                && !ident.team.space.kind().is_supervisor()
                 || !crate::core::work::pend::allows(
                     &me,
                     &crate::core::work::mail::Mail::Nole(super::resources::get().build.clone()),
@@ -161,7 +162,8 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             millis,
             receive,
         } => {
-            if target == UnitTarget::Task(ident.id) && millis != env::Wait::POLL {
+            if target == UnitTarget::Task(ident.id) && millis != kernel_api::model::wait::Wait::POLL
+            {
                 return Outcome::fail(frame, UnitFail::Denied);
             }
             let selected = match crate::core::work::unit::join::observe(&me, target) {

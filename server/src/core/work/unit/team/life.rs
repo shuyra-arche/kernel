@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use env::{TaskId, TeamId};
+use kernel_api::{model::identity::TaskId, model::identity::TeamId};
 
 use crate::core::work::unit::life::Life;
 use crate::machine::sync::SpinLock;
@@ -136,9 +136,9 @@ impl TeamLife {
     pub fn notify(&self) {
         let mut node = Some(self);
         while let Some(here) = node {
-            crate::core::work::room::messenger::signal(crate::core::work::room::messenger::WakeKey::Team {
-                id: here.id,
-            });
+            crate::core::work::room::messenger::signal(
+                crate::core::work::room::messenger::WakeKey::Team { id: here.id },
+            );
             node = here.parent.as_deref();
         }
     }

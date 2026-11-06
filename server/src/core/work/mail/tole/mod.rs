@@ -10,7 +10,10 @@ use crate::machine::sync::{Level, SpinLock};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use env::{TaskId, ToleAwaitReply, ToleEventSource, ToleFail};
+use kernel_api::{
+    abi::call::tole::ToleFail, abi::reply::ToleAwaitReply, model::identity::TaskId,
+    model::tole::ToleEventSource,
+};
 
 pub(crate) use await_wait::AwaitWait;
 pub(crate) use cell::Cell;
@@ -35,7 +38,9 @@ impl ToleMeta {
         Self::try_new(owner).expect("tole allocation failed")
     }
 
-    pub(crate) fn try_new(owner: TaskId) -> Result<Arc<Self>, crate::core::memory::nest::NestError> {
+    pub(crate) fn try_new(
+        owner: TaskId,
+    ) -> Result<Arc<Self>, crate::core::memory::nest::NestError> {
         Arc::try_new(Self {
             state: SpinLock::new_level(Level::L3, Liveness::Live),
             id: super::next_id(),
@@ -174,7 +179,10 @@ pub(crate) fn seal(meta: &ToleMeta) {
 }
 fn clear(meta: &ToleMeta) {
     *meta.state.lock() = Liveness::Dead;
-    messenger::wipe(WakeKey::seal(env::PieKind::Tole, meta.id));
+    messenger::wipe(WakeKey::seal(
+        kernel_api::model::pie::PieKind::Tole,
+        meta.id,
+    ));
     let cells = core::mem::take(&mut *meta.cells.lock());
     for cell in cells {
         for (key, _) in cell.keys.iter() {

@@ -5,7 +5,7 @@ mod state;
 
 pub(crate) use policy::ExitPolicy;
 
-use env::{PieToken, TaskId, UnitFail};
+use kernel_api::{abi::call::unit::UnitFail, model::identity::PieToken, model::identity::TaskId};
 
 use crate::core::work::mail::Mail;
 use crate::core::work::pend;
@@ -35,7 +35,9 @@ pub(crate) fn authorize(caller: &Task, token: PieToken) -> bool {
         return false;
     };
     if !pie.alive()
-        || !pie.permission().contains(env::Permission::FETCH)
+        || !pie
+            .permission()
+            .contains(kernel_api::model::permission::Permission::FETCH)
         || pie.owner() != Some(caller.ident.id)
     {
         return false;

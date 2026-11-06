@@ -1,5 +1,5 @@
 use alloc::sync::Arc;
-use env::ViewControl;
+use kernel_api::model::memory::ViewControl;
 
 use crate::core::memory::nest::NestError;
 use crate::core::work::unit::space::Space;

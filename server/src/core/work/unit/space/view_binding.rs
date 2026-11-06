@@ -2,7 +2,7 @@
 
 use alloc::sync::{Arc, Weak};
 
-use env::PieFail;
+use kernel_api::abi::call::pie::PieFail;
 
 use super::Space;
 

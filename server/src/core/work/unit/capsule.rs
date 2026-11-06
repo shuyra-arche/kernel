@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use env::ledger::capsule::{Capsule, PAGE, Region};
+use kernel_api::{boot::capsule::Capsule, boot::capsule::PAGE, boot::capsule::Region};
 
 use super::space::{Space, SpaceBuilder};
 use super::team::{Team, TeamBuilder};

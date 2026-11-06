@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use env::{TaskId, TeamId};
+use kernel_api::{model::identity::TaskId, model::identity::TeamId};
 
 /// 一条收据：某个家长（`owner`）还在哪些子团队根（`roots`）上欠着一次退出。
 pub(crate) struct Receipt {

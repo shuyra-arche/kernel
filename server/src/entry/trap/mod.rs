@@ -297,7 +297,7 @@ fn page_fault_wait(
     // 先放掉空间与身份，再进提交边界的 wait_until；等待捕获自己在其内部释放。
     drop(space);
     drop(ident);
-    match messenger::wait_until::<env::RoomFail, _>(
+    match messenger::wait_until::<kernel_api::abi::call::room::RoomFail, _>(
         key,
         life,
         waiting,
@@ -341,7 +341,11 @@ fn kill_fault(ident: Option<Identity>) -> *mut TrapContext {
         Some(Identity::Live(live)) => Some(live),
         _ => None,
     };
-    doom(live, env::ExitCause::Fault, messenger::EXIT_FAULT);
+    doom(
+        live,
+        kernel_api::model::unit::ExitCause::Fault,
+        messenger::EXIT_FAULT,
+    );
     quit(ident, messenger::EXIT_FAULT)
 }
 
@@ -363,7 +367,11 @@ pub(crate) fn envcall(
     let space = &ident.team.space;
     if let Err(resource) = space.nest.retry_invalidation() {
         log::error!("envcall: the address space cannot settle its sync: {resource:?}");
-        doom(Some(&ident), env::ExitCause::Fault, messenger::EXIT_FAULT);
+        doom(
+            Some(&ident),
+            kernel_api::model::unit::ExitCause::Fault,
+            messenger::EXIT_FAULT,
+        );
         return None;
     }
     let Some(length) = instr_len(space, frame.sepc) else {
@@ -371,7 +379,11 @@ pub(crate) fn envcall(
             "envcall: the instruction at sepc={:#x} is unreadable",
             frame.sepc.as_usize()
         );
-        doom(Some(&ident), env::ExitCause::Fault, messenger::EXIT_FAULT);
+        doom(
+            Some(&ident),
+            kernel_api::model::unit::ExitCause::Fault,
+            messenger::EXIT_FAULT,
+        );
         return None;
     };
     let Some(next_pc) = frame.sepc.as_usize().checked_add(length) else {
@@ -379,7 +391,11 @@ pub(crate) fn envcall(
             "envcall: sepc={:#x} plus an instruction length overflows",
             frame.sepc.as_usize()
         );
-        doom(Some(&ident), env::ExitCause::Fault, messenger::EXIT_FAULT);
+        doom(
+            Some(&ident),
+            kernel_api::model::unit::ExitCause::Fault,
+            messenger::EXIT_FAULT,
+        );
         return None;
     };
     frame.sepc = KVirt::wrap(next_pc);
@@ -399,7 +415,7 @@ fn instr_len(space: &Space, sepc: KVirt) -> Option<usize> {
 ///
 /// 身份指得到就只落在那一个上（环境调用与缺页两条路都按这份身份归责）；
 /// 指不到时才落到此刻在跑的那一个。
-fn doom(ident: Option<&Arc<TaskIdent>>, cause: env::ExitCause, reason: usize) {
+fn doom(ident: Option<&Arc<TaskIdent>>, cause: kernel_api::model::unit::ExitCause, reason: usize) {
     let task = match ident {
         Some(ident) => crate::core::work::room::scheduler::roster::muster(ident.id)
             .and_then(|weak| weak.upgrade()),

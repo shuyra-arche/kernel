@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use env::{NOTE_MAX, TaskId};
+use kernel_api::{abi::call::room::NOTE_MAX, model::identity::TaskId};
 
 use crate::core::memory::address::VirtAddr;
 use crate::core::work::record::ledger;

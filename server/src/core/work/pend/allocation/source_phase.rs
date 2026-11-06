@@ -7,7 +7,7 @@ use alloc::sync::{Arc, Weak};
 
 use crate::core::work::grant::Grant;
 use crate::core::work::mail::pole::PoleMeta;
-use env::PieToken;
+use kernel_api::model::identity::PieToken;
 
 #[derive(Clone)]
 pub(super) enum Phase {

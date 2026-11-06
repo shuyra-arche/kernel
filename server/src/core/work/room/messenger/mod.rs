@@ -56,7 +56,7 @@ fn take_exit_note() -> (usize, usize) {
     )
 }
 
-pub(crate) use env::EXIT_FAULT;
+pub(crate) use kernel_api::model::exit::EXIT_FAULT;
 
 pub(crate) const EXIT_DOOM: usize = 0xFFFF_FFFE;
 

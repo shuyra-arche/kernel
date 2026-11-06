@@ -19,7 +19,11 @@ use crate::core::work::room::messenger::{self, Handoff, WakeKey};
 use crate::core::work::unit::life::Life;
 use crate::core::work::unit::space::Space;
 use crate::machine::sync::{Level, SpinLock};
-use env::{Bit, Permission, PieFail, PieToken, PoleFail, TaskId, TeamId};
+use kernel_api::{
+    abi::call::pie::PieFail, abi::call::pole::PoleFail, model::identity::PieToken,
+    model::identity::TaskId, model::identity::TeamId, model::permission::Permission,
+    model::pole::Bit,
+};
 
 use authority::Authority;
 use held_map::HeldMap;
@@ -459,7 +463,10 @@ pub(crate) fn open(
     }
     // 这一枚分支的有效窗口：有窗口就只映那一段，本域看到的与报出去的都只是它。
     let source = match grant.window() {
-        Some((offset, count)) => meta.source().range(offset, count).map_err(|_| PieFail::Denied)?,
+        Some((offset, count)) => meta
+            .source()
+            .range(offset, count)
+            .map_err(|_| PieFail::Denied)?,
         None => meta.source(),
     };
     let size = source
@@ -582,7 +589,10 @@ pub(crate) fn key(meta: &PoleMeta, bit: Bit) -> WakeKey {
     WakeKey::Pole { id: meta.id, bit }
 }
 fn wipe(meta: &PoleMeta) {
-    messenger::wipe(WakeKey::seal(env::PieKind::Pole, meta.id));
+    messenger::wipe(WakeKey::seal(
+        kernel_api::model::pie::PieKind::Pole,
+        meta.id,
+    ));
     for index in 0..usize::BITS as usize {
         messenger::wipe(key(meta, Bit::wrap(index)));
     }

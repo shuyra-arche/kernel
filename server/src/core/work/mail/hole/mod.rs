@@ -12,7 +12,10 @@ use core::time::Duration;
 use crate::machine::clock;
 use crate::machine::sync::{Level, SpinLock};
 
-use env::{HoleCondition, HoleFail, HoleLimits, TaskId};
+use kernel_api::{
+    abi::call::hole::HoleFail, model::hole::HoleCondition, model::hole::HoleLimits,
+    model::identity::TaskId,
+};
 
 use crate::core::work::pend::Need;
 use crate::core::work::room::messenger::{self, Handoff, WakeKey};
@@ -277,7 +280,10 @@ pub(crate) fn seal(meta: &HoleMeta) {
         );
     }
     drop(pending);
-    messenger::wipe(WakeKey::seal(env::PieKind::Hole, meta.id));
+    messenger::wipe(WakeKey::seal(
+        kernel_api::model::pie::PieKind::Hole,
+        meta.id,
+    ));
     messenger::wipe(key(meta, HoleCondition::Pull));
     messenger::wipe(key(meta, HoleCondition::Empty));
     messenger::wipe(key(meta, HoleCondition::Push));

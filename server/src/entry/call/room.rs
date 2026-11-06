@@ -2,7 +2,7 @@ use ::core::time::Duration;
 
 use alloc::sync::Arc;
 
-use env::{RoomCall, RoomFail};
+use kernel_api::{abi::call::room::RoomCall, abi::call::room::RoomFail};
 
 use crate::core::work::room::conductor::current;
 use crate::core::work::room::messenger::{self, Handoff, WakeKey, park, park_until, wait, wake};

@@ -7,7 +7,7 @@ pub(super) enum Outcome {
 }
 
 impl Outcome {
-    pub(super) fn fail<E: env::FailCode>(frame: &mut TrapContext, e: E) -> Self {
+    pub(super) fn fail<E: kernel_api::abi::error::FailCode>(frame: &mut TrapContext, e: E) -> Self {
         ret_err(frame, e);
         Self::Resume
     }
@@ -24,18 +24,24 @@ impl Outcome {
     }
 }
 
-pub(super) fn ret_err<E: env::FailCode>(frame: &mut TrapContext, e: E) {
+pub(super) fn ret_err<E: kernel_api::abi::error::FailCode>(frame: &mut TrapContext, e: E) {
     frame.gpr.set_x(Gprs::A0, e.code() as usize);
 }
 
-pub(super) fn answer<F: env::FailCode>(frame: &mut TrapContext, result: Result<usize, F>) {
+pub(super) fn answer<F: kernel_api::abi::error::FailCode>(
+    frame: &mut TrapContext,
+    result: Result<usize, F>,
+) {
     match result {
         Ok(value) => frame.gpr.set_x(Gprs::A0, value),
         Err(e) => ret_err(frame, e),
     }
 }
 
-pub(super) fn answer_pair<F: env::FailCode>(frame: &mut TrapContext, result: Result<(usize, usize), F>) {
+pub(super) fn answer_pair<F: kernel_api::abi::error::FailCode>(
+    frame: &mut TrapContext,
+    result: Result<(usize, usize), F>,
+) {
     match result {
         Ok((first, second)) => {
             frame.gpr.set_x(Gprs::A0, first);

@@ -6,7 +6,7 @@
 
 use alloc::sync::Arc;
 
-use env::{TaskId, TeamId};
+use kernel_api::{model::identity::TaskId, model::identity::TeamId};
 
 use crate::core::memory::address::PhysAddr;
 use crate::core::work::unit::task::TaskIdent;

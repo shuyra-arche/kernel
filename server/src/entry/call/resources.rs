@@ -1,9 +1,12 @@
-use crate::machine::sync::OnceLock;
-use crate::entry::boot::resources::Registry;
 use crate::core::work::mail::{Mail, nole::NoleMeta};
 use crate::core::work::pend;
+use crate::entry::boot::resources::Registry;
+use crate::machine::sync::OnceLock;
 use alloc::sync::Arc;
-use env::{Call, Mark, Name, Permission, PieFail, TaskId};
+use kernel_api::{
+    abi::call::pie::PieFail, boot::ledger::Call, boot::ledger::Name, model::identity::Mark,
+    model::identity::TaskId, model::permission::Permission,
+};
 
 pub(crate) struct Resources {
     pub build: Arc<NoleMeta>,

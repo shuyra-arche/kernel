@@ -10,7 +10,7 @@
 use alloc::sync::Arc;
 
 use crate::core::memory::flat::{FlatRange, Residency};
-use env::TaskId;
+use kernel_api::model::identity::TaskId;
 
 use super::geometry::Geometry;
 use super::source_authorization::SourceAuthorization;

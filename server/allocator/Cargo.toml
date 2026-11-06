@@ -5,7 +5,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-env = { workspace = true }
+kernel-api = { workspace = true }
 fack = { workspace = true }
 erra = { workspace = true }
 

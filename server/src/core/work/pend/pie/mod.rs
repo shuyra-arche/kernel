@@ -3,7 +3,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use alloc::sync::{Arc, Weak};
 
-use env::{Mark, PieToken, TaskId};
+use kernel_api::{model::identity::Mark, model::identity::PieToken, model::identity::TaskId};
 
 use crate::core::work::grant::narrows;
 use crate::core::work::mail::Mail;
@@ -26,7 +26,7 @@ impl Pie {
         mark: Mark,
         permission: Permission,
         sire: Option<PieToken>,
-    ) -> Result<Pie, env::PieFail> {
+    ) -> Result<Pie, kernel_api::abi::call::pie::PieFail> {
         Self::try_new_window(meta, mark, permission, sire, None)
     }
 
@@ -36,8 +36,11 @@ impl Pie {
         mark: Mark,
         permission: Permission,
         sire: Option<PieToken>,
-        window: Option<(crate::core::memory::address::PageOffset, crate::core::memory::address::PageCount)>,
-    ) -> Result<Pie, env::PieFail> {
+        window: Option<(
+            crate::core::memory::address::PageOffset,
+            crate::core::memory::address::PageCount,
+        )>,
+    ) -> Result<Pie, kernel_api::abi::call::pie::PieFail> {
         let token = next_id();
         Ok(Pie {
             core: PieSnapshot {
@@ -69,12 +72,15 @@ impl Pie {
         self.core.heir = heir;
     }
 
-    pub(crate) fn narrow(&mut self, subset: Permission) -> Result<(), env::PieFail> {
+    pub(crate) fn narrow(
+        &mut self,
+        subset: Permission,
+    ) -> Result<(), kernel_api::abi::call::pie::PieFail> {
         if !self.core.alive() {
-            return Err(env::PieFail::Dead);
+            return Err(kernel_api::abi::call::pie::PieFail::Dead);
         }
         if !narrows(self.core.permission(), subset) {
-            return Err(env::PieFail::Denied);
+            return Err(kernel_api::abi::call::pie::PieFail::Denied);
         }
         self.core.grant.narrow(subset)
     }
@@ -96,7 +102,7 @@ impl Drop for Pie {
 
 unsafe impl Send for Pie {}
 
-pub use env::Permission;
+pub use kernel_api::model::permission::Permission;
 
 fn next_id() -> PieToken {
     static NEXT: AtomicUsize = AtomicUsize::new(1);
@@ -141,13 +147,13 @@ pub(crate) fn accede(
     task: &Arc<Task>,
     token: PieToken,
     need: Need,
-) -> Result<PieSnapshot, env::PieFail> {
-    let pie = locate(task, token).ok_or(env::PieFail::Denied)?;
+) -> Result<PieSnapshot, kernel_api::abi::call::pie::PieFail> {
+    let pie = locate(task, token).ok_or(kernel_api::abi::call::pie::PieFail::Denied)?;
     if !pie.alive() {
-        return Err(env::PieFail::Dead);
+        return Err(kernel_api::abi::call::pie::PieFail::Dead);
     }
     if !pie.allows(need) {
-        return Err(env::PieFail::Denied);
+        return Err(kernel_api::abi::call::pie::PieFail::Denied);
     }
     Ok(pie)
 }

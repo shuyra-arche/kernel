@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use env::ExitCause as TaskExitCause;
+use kernel_api::model::unit::ExitCause as TaskExitCause;
 
 use crate::core::work::room::messenger::{Ticket, WaitCall, WakeKey};
 use crate::core::work::unit::task::Task;

@@ -4,7 +4,7 @@ use crate::core::work::unit::space::Space;
 use crate::core::work::unit::task::TaskIdent;
 use crate::machine::switcher::context::{Gprs, TrapContext};
 use crate::putln;
-use env::DebugFail;
+use kernel_api::abi::call::debug::DebugFail;
 
 use super::outcome::ret_err;
 

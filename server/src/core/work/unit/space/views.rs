@@ -7,7 +7,10 @@ use alloc::vec::Vec;
 use crate::core::memory::nest::View;
 use crate::core::work::pend::SourceAuthorization;
 use crate::machine::sync::SpinLock;
-use env::{PieFail, PieToken, TaskId, ViewControl};
+use kernel_api::{
+    abi::call::pie::PieFail, model::identity::PieToken, model::identity::TaskId,
+    model::memory::ViewControl,
+};
 
 use super::{Space, ViewBinding, ViewControlRecord, ViewEntry};
 

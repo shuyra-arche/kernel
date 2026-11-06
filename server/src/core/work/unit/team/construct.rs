@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use env::{TaskId, TeamId};
+use kernel_api::{model::identity::TaskId, model::identity::TeamId};
 
 use crate::core::memory::nest::NestError;
 use crate::core::work::commit;

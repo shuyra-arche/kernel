@@ -1,4 +1,4 @@
-use env::Permission;
+use kernel_api::model::permission::Permission;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Need {

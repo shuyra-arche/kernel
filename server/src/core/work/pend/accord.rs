@@ -1,6 +1,6 @@
 use alloc::sync::{Arc, Weak};
 
-use env::{Mark, PieFail, PieToken};
+use kernel_api::{abi::call::pie::PieFail, model::identity::Mark, model::identity::PieToken};
 
 use super::Need;
 use super::pie::{Heir, Permission, PieSnapshot};
