@@ -1,12 +1,8 @@
-[workspace]
-resolver = "3"
-members = [".", "env", "wire", "macros", "compat/env", "compat/wire"]
-
 [package]
 name = "kernel-api"
-version = "0.1.0"
-edition = "2024"
 publish = false
+edition.workspace = true
+version.workspace = true
 
 [lib]
 path = "src/lib.rs"
@@ -17,8 +13,3 @@ doctest = false
 [dependencies]
 kernel-api-env = { path = "env" }
 kernel-api-wire = { path = "wire" }
-
-[dev-dependencies]
-env = { path = "compat/env" }
-wire = { path = "compat/wire" }
-mold = { package = "kernel-api-macros", path = "macros" }

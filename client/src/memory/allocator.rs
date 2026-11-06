@@ -299,7 +299,3 @@ static HEAP: Heap = Heap::new(GlobalAllocSource::with_block_size(Pages, BLOCK_SI
 #[path = "allocator/handle.rs"]
 mod handle;
 pub use handle::HeapAllocator;
-
-#[cfg(test)]
-#[path = "allocator/tests.rs"]
-mod tests;

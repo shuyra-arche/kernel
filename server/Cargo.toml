@@ -1,0 +1,46 @@
+[package]
+name = "kernel"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+semihosting = ["dep:serde_json", "dep:semihosting"]
+
+[lib]
+path = "src/lib.rs"
+test = false
+bench = false
+doctest = false
+
+[[bin]]
+name = "shuyra"
+path = "src/main.rs"
+test = false
+bench = false
+doctest = false
+
+[dependencies]
+iommu-hold = { git = "https://github.com/shuyra-arche/driver-iommu.git", rev = "90f59ef91d3c4c157fb78bb691991ee7abe4f175" }
+fdt = { version = "0.1.5", default-features = false }
+hashbrown = { version = "0.17.1", default-features = false, features = [
+  "alloc",
+  "default-hasher",
+] }
+log = { version = "0.4.33" }
+riscv = { version = "0.16.1", features = ["s-mode"] }
+serde = { version = "1.0", default-features = false, features = [
+  "derive",
+  "alloc",
+] }
+serde_json = { version = "1.0", default-features = false, features = [
+  "alloc",
+], optional = true }
+semihosting = { version = "0.1.25", features = ["fs"], optional = true }
+bitflags = { workspace = true }
+fack = { workspace = true }
+erra = { workspace = true }
+kernel-allocator = { path = "allocator" }
+sbi = { path = "sbi" }
+env = { workspace = true }

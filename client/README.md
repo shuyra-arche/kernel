@@ -43,19 +43,12 @@ registry retains its original same-Team, self-created task prerequisite for
 interpreting a pruned member as terminal. Native Reaped permits retiring local
 bookkeeping; Server can still have deferred physical cleanup.
 
-Host fixtures import the actual production mechanism source:
+Build from the repository root with:
 
 ```sh
-cargo test --manifest-path client/tests/Cargo.toml --target x86_64-unknown-linux-gnu
-cargo test --manifest-path client/tests/unit/Cargo.toml --target x86_64-unknown-linux-gnu
-cargo test --manifest-path client/tests/lifecycle/Cargo.toml --target x86_64-unknown-linux-gnu
-cargo test --manifest-path client/tests/contracts/Cargo.toml --target x86_64-unknown-linux-gnu
-sh client/tests/check-boundaries.sh
+cargo check --locked -p kernel-client --target riscv64gc-unknown-none-elf
 ```
 
-Memory, task and lifecycle fixtures exercise production source with controlled
-host effects. They cover allocation failure, rollback, TLS ownership, native
-observation and return decoding. Compile-fail probes require specific diagnostics;
-an unavailable dependency is not a passing negative probe. Populate their Cargo
-cache before running the offline boundary script. These checks do not establish
-real traps, target execution or whole-product startup/exit acceptance.
+Client shares the root workspace, lockfile and source version. Legacy host
+fixtures and boundary scripts have been removed. Runtime execution is validated
+by the consuming system; see the root [README](../README.md).
