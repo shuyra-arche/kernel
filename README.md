@@ -20,13 +20,15 @@ boundary, not a configuration file.
 
 ## Build
 
-Install Rust through rustup; `rust-toolchain.toml` pins the toolchain and RV64
-target. Run from the repository root:
+Kernel uses nightly Rust for `allocator_api`. The repository does not impose a
+local toolchain override. CI installs the latest nightly without pinning a date.
+To install or update nightly and build locally, run from the repository root:
 
 ```sh
-cargo build --locked --workspace --target riscv64gc-unknown-none-elf
-cargo build --locked --workspace --release --target riscv64gc-unknown-none-elf
-cargo build --locked -p kernel --all-features --target riscv64gc-unknown-none-elf
+rustup toolchain install nightly --profile minimal --target riscv64gc-unknown-none-elf
+cargo +nightly build --locked --workspace --target riscv64gc-unknown-none-elf
+cargo +nightly build --locked --workspace --release --target riscv64gc-unknown-none-elf
+cargo +nightly build --locked -p kernel --all-features --target riscv64gc-unknown-none-elf
 ```
 
 The Server package is still named `kernel`; its executable is still `shuyra`.
@@ -36,7 +38,9 @@ assertions, lock-order checks and crash diagnostics remain available.
 
 Legacy suites, fixtures, test workspaces, boot self-tests and fault-injection
 features have been removed. CI builds RV64 and runs focused host call-boundary
-and byte-layout regressions. Run the host checks explicitly (substitute your host target on Windows):
+and byte-layout regressions. Run the host checks explicitly (substitute your host
+target on Windows). Use `cargo +nightly` in place of `cargo` below to select the
+same channel as CI:
 
 ```sh
 cargo test --locked -p kernel-api-env --tests --target x86_64-unknown-linux-gnu
