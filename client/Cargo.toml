@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "kernel-client"
 publish = false
 edition.workspace = true
@@ -12,3 +13,7 @@ doctest = false
 [dependencies]
 kernel-api = { workspace = true }
 erra = { workspace = true }
+
+[[test]]
+name = "call"
+path = "tests/call/mod.rs"

@@ -90,9 +90,9 @@ cargo test --locked -p kernel-api --tests --target x86_64-unknown-linux-gnu
 cargo test --locked -p kernel-api-macros --test declaration --target x86_64-unknown-linux-gnu
 ```
 
-The `tests/abi.rs` and `tests/boot.rs` suites group behavior under same-named
-subdirectories. Executable examples and compile-fail fixtures live under
-`tests/abi/`; library doctests are disabled. Host
+The `tests/abi/mod.rs` and `tests/boot/mod.rs` suites group behavior by domain.
+Cargo declares these test entry points explicitly. Executable examples and
+compile-fail fixtures live under `tests/abi/`; library doctests are disabled. Host
 checks protect published slots, encoding, malformed input rejection and typed
 operation boundaries. They do not execute traps. See the root README for RV64
 builds and the separate responsibility for system integration.

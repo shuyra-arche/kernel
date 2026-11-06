@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "kernel-api-macros"
 publish = false
 edition.workspace = true
@@ -20,3 +21,7 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 erra = { workspace = true, default-features = false }
 kernel-api = { path = "../../api" }
 trybuild = "1.0.122"
+
+[[test]]
+name = "declaration"
+path = "tests/declaration/mod.rs"
