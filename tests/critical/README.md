@@ -1,26 +1,27 @@
-# Execution-domain stop evidence
+# Execution-domain stop verification
 
-The `critical-scene` feature adds one test that must remain halted. Its normal
-`cargo qtest` result is a timeout and exit 101. A timeout alone is not acceptance.
-The separate verifier requires the guard event, every peer's quiescence receipt,
-their ordering, and absence of the target's actual reference-cleanup event.
+The `critical-scene` embedded test deliberately remains halted. Its expected
+runner outcome is a timeout; a timeout alone is not acceptance. `verify.py`
+requires the guard diagnostic, peer-quiescence acknowledgement, their ordering,
+and absence of the target reference-cleanup diagnostic.
 
-Run the commands separately, with no concurrent QEMU builds:
+From this repository root, validate the verifier itself with:
 
 ```sh
-CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true QEMU_SMP=4 TRACE_OUT="$PWD/target/driver-composition/guard/critical-4-online" nu scripts/qtest.nu --package kernel -- --features semihosting,critical-scene --timeout 8 -- critical_domain_exit_stops
-python3 kernel/tests/critical/verify.py target/driver-composition/guard/critical-4-online/qtest.log 4
-CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true QEMU_SMP=8 TRACE_OUT="$PWD/target/driver-composition/guard/critical-8-online" nu scripts/qtest.nu --package kernel -- --features semihosting,critical-scene --timeout 8 -- critical_domain_exit_stops
-python3 kernel/tests/critical/verify.py target/driver-composition/guard/critical-8-online/qtest.log 8
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s kernel/tests/critical
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/critical
 ```
 
-The dedicated case starts the real secondary harts. Quiescence is acknowledged
-after a peer vacates its address-space lease and disables interrupts, before its
-non-returning HSM stop or fallback loop. Only then does the initiating hart park.
-The alarm's atomic owner chooses the coordinator; the alarm itself is not an
-acknowledgement that peers or devices have stopped.
+To inspect a native run, pass its qtest output and actual hart count:
 
-This kernel test slays a held protected task. It does not prove that deployed
-drivers are protected or that device DMA was drained. Control deployment wiring
-and unexpected driver-death scenes remain separate acceptance requirements.
+```sh
+python3 tests/critical/verify.py path/to/qtest.log 4
+```
+
+Native execution requires the external harness described in the root README,
+`critical-scene`, and at least two running harts. Keep QEMU builds isolated.
+Peer quiescence is acknowledged after vacating the address-space lease and
+disabling interrupts, before non-returning HSM stop or fallback. The alarm's
+coordinator election does not prove peers or devices stopped.
+
+This test slays a held protected task. It does not prove deployed drivers are
+protected or device DMA was drained; those need product-level acceptance.

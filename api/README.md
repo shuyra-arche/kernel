@@ -26,32 +26,17 @@ no entry generator, startup, panic handler, allocator registration, or Client
 dependency. Existing Server dispatch stays in the root Kernel implementation;
 no empty Server directory or new cluster is introduced.
 
-## Server integration and provenance
+## Dependency identity
 
-The candidate is based on Kernel main `8a2c5fb9263fb1b42b2088dbb88ddcb37e1e7348`.
-Its ABI tree comes from the already merged canonical API checkpoint
-`18bba00ce3dd722ee50d5a4acd00a642debe8223`. The source types and wire codec match
-production `env@d3000253cd5d13d466e91fafd4dbb27a5ec5aaae` and
-`wire@0ff77dc4573fa2620d2fe995a18c01949d9c7e57`. Production
-`mold@f52501f4c91b686eded8b4bcd743b4e96084b7f9` adds its old execution-bound
-entry macro; that entry remains excluded. Its frame comment update is retained.
-The effect/decoder split in this candidate is intentional.
-
-Root Server and `kernel-allocator` now use `kernel-api-env` directly.
-`iommu-hold@90f59ef91d3c4c157fb78bb691991ee7abe4f175` comes from the canonical
-`driver-iommu` repository and directly pins the public `kernel-api-env`. The root
-manifest patches that API package to `api/env`, unifying its Git identity with
-Server's checkout identity. It no longer patches legacy `env`. The resolved
-Server graph has one `kernel-api-env`, no legacy `env`/wire definitions, and no
-Client dependency. Server dispatch and scheduling source are unchanged.
-
-External product repositories and old effectful `env` consumers have not been
-migrated. They must move typed calls to Client in a separately validated
-integration; the compatibility adapter is deliberately type/codec-only.
+Root Server and allocator consume `kernel-api-env` directly. The root manifest
+patches the API dependency of `iommu-hold` to `api/env` so the resolved Server
+graph has one canonical owner. Consumer workspaces must coordinate their own
+source identity; a path and Git copy of the same types are distinct owners.
+Compatibility adapters are type/codec-only. Effectful calls use Client.
 
 ## Validation
 
-With the session's nightly toolchain:
+Use the repository's `rust-toolchain.toml`:
 
 ```sh
 cargo test --manifest-path api/Cargo.toml --workspace --target x86_64-unknown-linux-gnu
