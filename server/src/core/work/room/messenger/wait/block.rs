@@ -22,7 +22,10 @@ pub(super) fn block_with_call<E: WaitFail>(
         Site::ensure(&mut sites, key, &life).map_err(|()| E::oom())?;
     }
     let ticket = Ticket::next_id();
-    let at = (dur != Duration::MAX).then(|| clock::now().add(dur).as_ticks());
+    let at = match &wait {
+        Some(WaitCall::Value { deadline }) => *deadline,
+        _ => (dur != Duration::MAX).then(|| clock::now().add(dur).as_ticks()),
+    };
     if let Some(at) = at {
         hold(ticket, key, &me).map_err(|()| E::oom())?;
         if deadline::tock(ticket.raw(), at).is_err() {

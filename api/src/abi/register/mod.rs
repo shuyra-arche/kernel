@@ -35,6 +35,16 @@ impl Wire for usize {
     }
 }
 
+impl Wire for u32 {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        (*self as usize).pack(s, i);
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        u32::try_from(usize::unpack(s, i)?).map_err(|_| Decode::Invalid)
+    }
+}
+
 impl Wire for u64 {
     const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {

@@ -18,8 +18,10 @@ pub mod operations {
         /// 条件未就绪（等待那一路在退化上下文里答这一枚）。
         #[busy]
         Busy = -3,
-        /// 调用者没有 Doom Nole 的 FETCH 权限。
+        /// 缺少 Doom Nole 的 FETCH 权限，或条件等待地址不可读/未驻留。
         Denied = -4,
+        /// 条件等待地址未按 4 字节对齐，或超出调用者地址窗口。
+        Invalid = -5,
     }
     /// 主动让出处理器（词族 starve）。
     #[operation(slot = 0, output = (), infallible)]
@@ -99,6 +101,26 @@ pub mod operations {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct ParkUntil {
         pub at: u64,
+    }
+    /// 比较调用者空间中的 AtomicU32；相等才入队，与 WakeValue 串行化。
+    /// 返回 false 表示期限已到；true 表示值不等或被唤醒，调用者须重查条件。
+    /// 地址必须自然对齐、可读且已驻留；映射变更中返回 Busy，不可读返回 Denied。
+    /// 调用者须保持原子对象及其映射存活，直到所有等待调用返回。
+    /// 仅同一地址空间共享队列；不提供跨空间的物理页等待。
+    #[operation(slot = 7, output = bool, error = RoomFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct WaitValue {
+        pub address: super::VirtAddr,
+        pub expected: u32,
+        pub millis: super::Wait,
+    }
+    /// 唤醒该空间、该地址上的一个或全部等待者，返回移出队列的人数。
+    /// 不读取对象，也不记忆没有等待者时的通知；须先发布状态再调用。
+    #[operation(slot = 8, output = usize, error = RoomFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct WakeValue {
+        pub address: super::VirtAddr,
+        pub all: bool,
     }
 }
 pub use operations::{RoomCall, RoomFail};

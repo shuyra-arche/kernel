@@ -8,6 +8,8 @@ mod block;
 mod blocked;
 mod fail;
 mod unchain;
+mod value;
+pub(crate) use value::{wait_value, wake_value};
 
 use alloc::sync::{Arc, Weak};
 use core::time::Duration;
@@ -45,6 +47,13 @@ fn rise<I: IntoIterator<Item = Arc<Task>>>(tasks: I) -> usize {
         let t = task;
         if let Some(join) = t.take_wait() {
             let resumed = match join {
+                WaitCall::Value { deadline } => {
+                    use crate::machine::switcher::context::{Gprs, TrapContext};
+                    let timely = deadline.is_none_or(|at| clock::now().as_ticks() < at);
+                    let frame = unsafe { &mut *(t.ident.frame_pa.as_usize() as *mut TrapContext) };
+                    frame.gpr.set_x(Gprs::A0, timely as usize);
+                    true
+                }
                 WaitCall::Join(join) => resume_join(&t, join),
                 WaitCall::Mail(wait) => resume_await(&t, wait),
             };
@@ -238,7 +247,7 @@ pub(crate) fn wipe_space(space: Asid) -> usize {
                     .find(|k| {
                         matches!(
                             k,
-                            WakeKey::Space { space: s, .. } | WakeKey::View { space: s, .. }
+                            WakeKey::Space { space: s, .. } | WakeKey::View { space: s, .. } | WakeKey::Value { space: s, .. }
                                 if *s == space
                         )
                     })

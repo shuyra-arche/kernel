@@ -13,6 +13,7 @@ use crate::core::memory::nest::Asid;
 pub enum WakeKey {
     Space { space: Asid, slot: usize },
     View { space: Asid, view: usize },
+    Value { space: Asid, address: usize },
     Hole { hole: usize, dir: HoleCondition },
     Nole { id: usize },
     Pole { id: usize, bit: Bit },
@@ -37,6 +38,9 @@ impl WakeKey {
         match self {
             WakeKey::Space { space, slot } => {
                 (space.get() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ slot as u64
+            }
+            WakeKey::Value { space, address } => {
+                (space.get() as u64).wrapping_mul(0xA24B_AED4_963E_E407) ^ address as u64
             }
             WakeKey::View { space, view } => {
                 (space.get() as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93) ^ view as u64

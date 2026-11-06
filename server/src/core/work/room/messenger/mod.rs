@@ -89,7 +89,7 @@ pub(crate) fn probe_bookkeeping() -> (usize, usize) {
     (holders_n, husks_n)
 }
 
-pub(crate) use wait::unit_join;
+pub(crate) use wait::{unit_join, wait_value, wake_value};
 
 pub(crate) use wait::call::WaitCall;
 pub(crate) use wait::mail_await;

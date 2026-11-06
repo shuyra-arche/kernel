@@ -67,6 +67,38 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
                 Err(e) => Outcome::fail(frame, e),
             }
         }
+        RoomCall::WaitValue {
+            address,
+            expected,
+            millis,
+        } => {
+            let at = crate::core::memory::address::VirtAddr::from_raw(address.get());
+            if address.get() % 4 != 0 || !crate::core::work::unit::space::Space::user_range(at, 4) {
+                return Outcome::fail(frame, RoomFail::Invalid);
+            }
+            let space = ident.team.space.clone();
+            drop(ident);
+            match messenger::wait_value(space, at, expected, millis.into_duration()) {
+                Ok(Handoff::Resume(value)) => {
+                    frame.gpr.set_x(Gprs::A0, value as usize);
+                    Outcome::Resume
+                }
+                Ok(Handoff::Switch(pa)) => Outcome::Switch(pa as *mut TrapContext),
+                Err(error) => Outcome::fail(frame, error),
+            }
+        }
+        RoomCall::WakeValue { address, all } => {
+            let at = crate::core::memory::address::VirtAddr::from_raw(address.get());
+            if address.get() % 4 != 0 || !crate::core::work::unit::space::Space::user_range(at, 4) {
+                return Outcome::fail(frame, RoomFail::Invalid);
+            }
+            let key = WakeKey::Value {
+                space: ident.team.space.nest.asid(),
+                address: address.get(),
+            };
+            frame.gpr.set_x(Gprs::A0, messenger::wake_value(key, all));
+            Outcome::Resume
+        }
         RoomCall::Wait { key, millis } => {
             let (space, wlife) = {
                 let s = &ident.team.space;
