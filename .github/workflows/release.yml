@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['[0-9]*']
+    tags: ['d[0-9]*']
 
 permissions:
   contents: read
@@ -32,7 +32,7 @@ jobs:
           root = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['workspace']
           version = root['package']['version']
           assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?', version), 'invalid version'
-          assert os.environ['RELEASE_TAG'] == version, 'tag must match workspace version'
+          assert os.environ['RELEASE_TAG'] == f'd{version}', 'tag must be d followed by the workspace version'
           for member in root['members']:
               package = tomllib.loads((pathlib.Path(member) / 'Cargo.toml').read_text())['package']
               assert package['version'] == {'workspace': True}, f'{member} must inherit workspace version'
