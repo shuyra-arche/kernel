@@ -16,6 +16,7 @@ pub enum ViewControl {
 }
 
 impl Wire for ViewControl {
+    const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         let word = match self {
             Self::Caller => 0usize,

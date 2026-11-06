@@ -1,5 +1,4 @@
 use crate::PieKind;
-use crate::wire::Field;
 
 pub const NAME_LEN: usize = 16;
 
@@ -45,9 +44,11 @@ impl Name {
         }
     }
 }
-impl Field for Name {
-    const WIDTH: usize = NAME_LEN;
-    fn store(&self, out: &mut [u8]) {
+impl Name {
+    pub const WIDTH: usize = NAME_LEN;
+    /// Write a ledger name into exactly `WIDTH` bytes.
+    pub fn store(&self, out: &mut [u8]) {
+        assert_eq!(out.len(), Self::WIDTH);
         let (class, item, at): (u8, u8, u64) = match *self {
             Self::Trap(Trap::SupervisorExternal) => (0, 0, 0),
             Self::Trap(Trap::PageFault) => (0, 1, 0),
@@ -64,7 +65,7 @@ impl Field for Name {
         out[1] = item;
         out[8..16].copy_from_slice(&at.to_le_bytes());
     }
-    fn fetch(bytes: &[u8]) -> Option<Self> {
+    pub fn fetch(bytes: &[u8]) -> Option<Self> {
         let bytes = bytes.get(..NAME_LEN)?;
         if bytes[2..8].iter().any(|b| *b != 0) {
             return None;

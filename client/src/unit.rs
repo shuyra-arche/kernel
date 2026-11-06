@@ -3,13 +3,13 @@
 pub mod task;
 pub(crate) mod tls;
 
-use crate::call as env;
+use crate::call;
 
 use env::{TaskId, TeamId, UnitResult, VirtAddr};
 
 /// Create a held task with scalar startup arguments.
 pub fn spawn(team: TeamId, entry: usize, args: &[usize], stack: usize) -> UnitResult<TaskId> {
-    env::unit::spawn(
+    call::unit::spawn(
         team,
         entry,
         VirtAddr::new(args.as_ptr() as usize),
@@ -18,11 +18,11 @@ pub fn spawn(team: TeamId, entry: usize, args: &[usize], stack: usize) -> UnitRe
     )
 }
 
-pub use env::unit::{debark, embark, self_id, slay};
+pub use call::unit::{debark, embark, self_id, slay};
 
 /// Observe native completion without consuming a receipt or changing local TLS.
 pub fn observe(target: env::UnitTarget, wait: env::Wait) -> UnitResult<env::JoinReply> {
-    env::unit::join(target, wait, false)
+    call::unit::join(target, wait, false)
 }
 
 pub fn join_task(task: TaskId, wait: env::Wait) -> UnitResult<bool> {

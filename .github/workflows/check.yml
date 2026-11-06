@@ -17,6 +17,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install pinned toolchain
         run: rustup show active-toolchain
+      - name: Check host ABI boundaries
+        run: |
+          cargo test --locked -p kernel-api-env --tests --target x86_64-unknown-linux-gnu
+          cargo test --locked -p kernel-api-env --doc --target x86_64-unknown-linux-gnu
+          cargo test --locked -p kernel-client --test calls --target x86_64-unknown-linux-gnu
+          cargo test --locked -p kernel-api-macros --test envcall_boundary --target x86_64-unknown-linux-gnu
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --target riscv64gc-unknown-none-elf
       - name: Build workspace (release)

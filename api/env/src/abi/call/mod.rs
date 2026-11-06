@@ -8,11 +8,9 @@ pub mod debug;
 mod dispatch_fail;
 pub mod hole;
 mod hole_condition;
-mod hole_fail;
 mod hole_limits;
 pub mod memory;
 pub mod nole;
-mod nole_fail;
 mod oversize;
 pub mod pie;
 mod pie_info;
@@ -20,39 +18,36 @@ mod pie_range;
 pub mod pole;
 mod pole_bit;
 mod pole_condition;
-mod pole_fail;
 mod pull_outcome;
 mod release_mode;
 pub mod room;
 pub mod tole;
 mod tole_await_reply;
-mod tole_event_fail;
 mod tole_event_source;
-mod tole_fail;
 pub mod unit;
 
-pub use self::chrono::{ChronoCall, ChronoCallRet};
-pub use self::control::{ControlCall, ControlCallRet, ControlFail, ControlResult};
-pub use self::debug::{DBCN_MAX, DebugCall, DebugCallRet, DebugFail, DebugResult};
+pub use self::chrono::ChronoCall;
+pub use self::control::{ControlCall, ControlFail, ControlResult};
+pub use self::debug::{DBCN_MAX, DebugCall, DebugFail, DebugResult};
 pub use self::dispatch_fail::DispatchFail;
-pub use self::hole::{HoleCall, HoleCallRet, HoleCondition, HoleFail, HoleLimits, HoleResult};
+pub use self::hole::{HoleCall, HoleCondition, HoleFail, HoleLimits, HoleResult};
 pub use self::memory::{
-    AcquireSource, Allocation, MemoryCall, MemoryCallRet, MemoryFail, MemoryResult, Placement,
-    PlacementAt, PlacementError, ReferenceRange, ViewControl, ViewSelection,
+    AcquireSource, Allocation, MemoryCall, MemoryFail, MemoryResult, Placement, PlacementAt,
+    PlacementError, ReferenceRange, ViewControl, ViewSelection,
 };
-pub use self::nole::{NoleCall, NoleCallRet, NoleFail, NoleResult};
+pub use self::nole::{NoleCall, NoleFail, NoleResult};
 pub use self::oversize::Oversize;
-pub use self::pie::{PieCall, PieCallRet, PieFail, PieResult};
+pub use self::pie::{PieCall, PieFail, PieResult};
 pub use self::pie_info::PieInfo;
 pub use self::pie_range::GrantRange;
-pub use self::pole::{Bit, PoleCall, PoleCallRet, PoleCondition, PoleFail, PoleResult};
+pub use self::pole::{Bit, PoleCall, PoleCondition, PoleFail, PoleResult};
 pub use self::pull_outcome::PullOutcome;
 pub use self::release_mode::ReleaseMode;
-pub use self::room::{NOTE_MAX, RoomCall, RoomCallRet, RoomFail, RoomResult};
+pub use self::room::{NOTE_MAX, RoomCall, RoomFail, RoomResult};
 pub use self::tole::{
-    ToleAwaitReply, ToleCall, ToleCallRet, ToleEventFail, ToleEventSource, ToleFail, ToleResult,
+    ToleAwaitReply, ToleCall, ToleEventFail, ToleEventSource, ToleFail, ToleResult,
 };
-pub use self::unit::{UnitCall, UnitCallRet, UnitFail, UnitResult};
+pub use self::unit::{UnitCall, UnitFail, UnitResult};
 
 /// Decoded environment call.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

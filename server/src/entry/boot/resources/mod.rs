@@ -1,11 +1,10 @@
 use crate::core::work::pend::Pie;
-use env::wire::Field;
 use env::Name;
 
-pub(crate) mod ledger;
 mod failure;
 mod frozen;
 mod guard;
+pub(crate) mod ledger;
 mod registry;
 mod retention;
 

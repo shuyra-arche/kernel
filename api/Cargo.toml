@@ -12,4 +12,3 @@ doctest = false
 
 [dependencies]
 kernel-api-env = { path = "env" }
-kernel-api-wire = { path = "wire" }

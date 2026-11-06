@@ -6,7 +6,7 @@ Shuyra's RV64 kernel, canonical ABI and typed client mechanisms.
 
 | Path | Responsibility |
 | --- | --- |
-| `api/` | Canonical ABI, shared types, codecs and macros; `kernel-api` re-exports Env and Wire |
+| `api/` | Canonical register ABI, KernelCall contracts, concrete Kernel byte layouts and ABI macros; `kernel-api` re-exports Env |
 | `client/` | Typed calls, trap transport and reusable memory, task and TLS mechanisms |
 | `server/` | Kernel implementation, build script and linker script |
 | `server/allocator/` | Physical allocation mechanisms |
@@ -35,10 +35,24 @@ Its manifest is now `server/Cargo.toml`. Build output remains under the root
 assertions, lock-order checks and crash diagnostics remain available.
 
 Legacy suites, fixtures, test workspaces, boot self-tests and fault-injection
-features have been removed. CI checks compilation only. Boot and system
+features have been removed. CI builds RV64 and runs focused host call-boundary
+and byte-layout regressions. Run the host checks explicitly (substitute your host target on Windows):
+
+```sh
+cargo test --locked -p kernel-api-env --tests --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-api-env --doc --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-client --test calls --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-api-macros --test envcall_boundary --target x86_64-unknown-linux-gnu
+```
+
+These checks use a recording transport and never perform a native trap. Boot and system
 integration validation belong to [Vanllia](https://github.com/shuyra-arche/vanllia),
 which assembles the selected Units. Compilation alone does not establish guest
 execution or resource reclamation.
+
+Generic byte codecs and service-protocol macros are no longer part of Kernel.
+The [API migration notes](api/README.md#compatibility-and-validation) list removed
+source exports and preserved ABI layouts. Kernel has no Weave dependency.
 
 ## Versions
 

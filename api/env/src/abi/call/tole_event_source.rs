@@ -76,6 +76,7 @@ impl ToleEventSource {
 }
 
 impl Wire for ToleEventSource {
+    const WORDS: usize = 3;
     fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
         for word in self.words() {
             word.pack(words, at);

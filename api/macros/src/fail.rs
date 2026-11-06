@@ -1,48 +1,20 @@
-//! `#[derive(Fail)]` —— **域失败词汇**：域内自 `-1` 起的码，与它的读法。
+//! Internal error-domain generator used only by the unified `envcall` macro.
 //!
-//! 输入一枚**无字段枚举**，每个变体显式写号：
-//!
-//! ```ignore
-//! #[derive(Fail)]
-//! pub enum MemoryFail {
-//!     Denied = -1,
-//!     OoM = -2,
-//!     NotAligned = -3,
-//! }
-//! ```
-//!
-//! 产出（**这一处就是码的唯一真相**，别处一个数都不写）：
-//!   * `pub const fn code(self) -> isize`（判别值即码）＋ `pub const fn of_code(code) -> Option<Self>`
-//!   * `impl FailCode`（`code()`）＋ `Clone`/`Copy`/`Debug`/`PartialEq`/`Eq`/`Display`
-//!   * 标了 `#[busy]` 的那一枚额外给 `pub const fn is_busy(self) -> bool`
-//!   * 编译期断言：号自 `-1` 起按声明顺序连续、逐枚读得回来、表外答 `None`
-//!
-//! **号是各域自己的**：域内从 `-1` 起连续。同一条件在不同域不同号——读法按域
-//! （调用点知道自己在调哪一域），故本 derive **不做也不要求**任何"全局唯一"检查。
-//!
-//! `Display` 出 `<域>:<变体名>`（域 = 枚举名去掉 `Fail` 后缀、小写）——跨域日志靠
-//! 域名分，不靠号分。
-
+//! Kernel failure codes are consecutive negative values starting at -1 per
+//! domain. One variant may carry `busy`. The enclosing declaration validates
+//! the association between these domains and operations before emitting code.
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::quote;
-use syn::{Attribute, Data, DeriveInput, Expr, Fields, Lit, parse2};
+use syn::{Attribute, Expr, Fields, ItemEnum, Lit};
 
 /// 展开见文件头。
-pub fn expand(input: TokenStream2) -> TokenStream2 {
-    let ast = match parse2::<DeriveInput>(input) {
-        Ok(ast) => ast,
-        Err(e) => return e.to_compile_error(),
-    };
+pub fn expand(ast: &ItemEnum) -> syn::Result<TokenStream2> {
     let name = &ast.ident;
-    let data = match &ast.data {
-        Data::Enum(e) => e,
-        _ => {
-            return syn::Error::new_spanned(&ast, "Fail 只用于枚举（域失败词汇）")
-                .to_compile_error();
-        }
-    };
-    if data.variants.is_empty() {
-        return syn::Error::new_spanned(&ast, "空词表没有意义：一枚变体都没有").to_compile_error();
+    if ast.variants.is_empty() {
+        return Err(syn::Error::new_spanned(
+            ast,
+            "空词表没有意义：一枚变体都没有",
+        ));
     }
 
     // 域名词：`MemoryFail` → `memory`。
@@ -52,37 +24,36 @@ pub fn expand(input: TokenStream2) -> TokenStream2 {
     let mut idents = Vec::new();
     let mut codes = Vec::new();
     let mut busy = None;
-    for (at, v) in data.variants.iter().enumerate() {
+    for (at, v) in ast.variants.iter().enumerate() {
         if !matches!(v.fields, Fields::Unit) {
-            return syn::Error::new_spanned(v, "失败词汇的变体不带字段：一枚变体就是一格码")
-                .to_compile_error();
+            return Err(syn::Error::new_spanned(
+                v,
+                "失败词汇的变体不带字段：一枚变体就是一格码",
+            ));
         }
         let want = -(at as isize) - 1;
         let got = v.discriminant.as_ref().and_then(|(_, e)| int_of(e));
         match got {
             Some(g) if g == want => {}
             Some(g) => {
-                return syn::Error::new_spanned(
+                return Err(syn::Error::new_spanned(
                     v,
                     format!("这一格的号必须是 {want}（域内自 -1 起、按声明顺序连续），写的是 {g}"),
-                )
-                .to_compile_error();
+                ));
             }
             None => {
-                return syn::Error::new_spanned(
+                return Err(syn::Error::new_spanned(
                     v,
                     format!("这一格要显式写号：`= {want}`（域内自 -1 起、按声明顺序连续）"),
-                )
-                .to_compile_error();
+                ));
             }
         }
         if has_busy(&v.attrs) {
             if busy.is_some() {
-                return syn::Error::new_spanned(
+                return Err(syn::Error::new_spanned(
                     v,
                     "一个域只有一枚 `#[busy]`（「条件未就绪」是单数）",
-                )
-                .to_compile_error();
+                ));
             }
             busy = Some(&v.ident);
         }
@@ -103,7 +74,7 @@ pub fn expand(input: TokenStream2) -> TokenStream2 {
         }
     });
 
-    quote! {
+    Ok(quote! {
         impl #name {
             /// 域内判别值：**自 `-1` 起按声明顺序连续**（判别值即码）。
             pub const fn code(self) -> isize {
@@ -163,7 +134,6 @@ pub fn expand(input: TokenStream2) -> TokenStream2 {
         #busy_fn
 
         /// 逐域锁死：号自 `-1` 起连续、逐枚读得回来、表外答 `None`。
-        /// 同 `env::abi::ecall::Fail` 那两条编译期断言的纪律——**错一枚编不过**。
         const _: () = {
             #(assert!(#name::#idents.code() == #codes);)*
             #(assert!(matches!(#name::of_code(#codes), Some(#name::#idents)));)*
@@ -171,10 +141,10 @@ pub fn expand(input: TokenStream2) -> TokenStream2 {
             assert!(#name::of_code(1).is_none());
             assert!(#name::of_code(#out).is_none());
         };
-    }
+    })
 }
 
-/// `#[busy]` 标记（derive 的辅助属性，见 `lib.rs` 的 `attributes(busy)`）。
+/// `#[busy]` is consumed by the enclosing envcall declaration.
 fn has_busy(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|a| a.path().is_ident("busy"))
 }

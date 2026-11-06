@@ -7,6 +7,7 @@ extern crate alloc;
 pub mod __private;
 pub mod call;
 pub mod ecall;
+pub mod invoke;
 pub mod lock;
 pub mod memory;
 pub mod room;

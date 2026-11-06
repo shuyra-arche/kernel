@@ -32,6 +32,7 @@ impl GrantRange {
 }
 
 impl Wire for GrantRange {
+    const WORDS: usize = GrantRange::WORDS;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         match *self {
             Self::Inherit => {

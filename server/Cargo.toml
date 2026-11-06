@@ -22,7 +22,6 @@ bench = false
 doctest = false
 
 [dependencies]
-iommu-hold = { git = "https://github.com/shuyra-arche/driver-iommu.git", rev = "90f59ef91d3c4c157fb78bb691991ee7abe4f175" }
 fdt = { version = "0.1.5", default-features = false }
 hashbrown = { version = "0.17.1", default-features = false, features = [
   "alloc",

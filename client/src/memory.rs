@@ -1,6 +1,6 @@
 //! User memory: source holds, mappings and the program heap.
 
-use crate::call as env;
+use crate::call;
 
 pub use env::PAGE_SIZE;
 #[path = "memory/mapping_kernel.rs"]
@@ -16,7 +16,6 @@ mod reference;
 pub mod reference_kernel;
 #[path = "memory/view.rs"]
 mod view;
-use env::wire::Field;
 use env::{
     AcquireSource, Allocation, FlatReference, MemoryFail, MemoryResult, PieToken, Placement,
     ReferenceRange, TeamId, ViewControl, ViewId, ViewSelection, VirtAddr,
@@ -43,12 +42,12 @@ pub use allocator::HeapAllocator;
 
 /// 取一份来源持有（登记在**调用任务**的引用表里）。
 pub fn acquire(source: AcquireSource, retention: PieToken) -> MemoryResult<FlatReference> {
-    env::memory::acquire(source, retention)
+    call::memory::acquire(source, retention)
 }
 
 /// 解除这份持有：不隐式 Detach，不等待其他引用，不分配。
 pub fn release(reference: FlatReference) -> MemoryResult<()> {
-    env::memory::release(reference)
+    call::memory::release(reference)
 }
 
 /// 在目标域里预留地址并建立翻译关系，返回 `(关系句柄, 视图起点)`。
@@ -65,7 +64,7 @@ pub fn attach(
     let mut placement_bytes = [0; Placement::WIDTH];
     range.store(&mut range_bytes);
     placement.store(&mut placement_bytes);
-    env::memory::attach(
+    call::memory::attach(
         VirtAddr::new(range_bytes.as_ptr() as usize),
         team,
         VirtAddr::new(placement_bytes.as_ptr() as usize),
@@ -77,7 +76,7 @@ pub fn attach(
 
 /// 按身份安全撤销选定的映射区间。
 pub fn detach(team: TeamId, view: ViewId, selection: ViewSelection) -> MemoryResult<()> {
-    env::memory::detach(team, view, selection)
+    call::memory::detach(team, view, selection)
 }
 
 /// 修改选定区间的逻辑权限。
@@ -87,7 +86,7 @@ pub fn set_access(
     selection: ViewSelection,
     access: u64,
 ) -> MemoryResult<()> {
-    env::memory::set_access(team, view, selection, access)
+    call::memory::set_access(team, view, selection, access)
 }
 
 /// 把一份**独立保留**持有那一页窗口的稳定物理页起址读出来（每页一个 8 字节小端字）。
@@ -101,7 +100,7 @@ pub fn traverse(retention: PieToken, range: ReferenceRange, out: &mut [u64]) -> 
     }
     let mut range_bytes = [0; ReferenceRange::WIDTH];
     range.store(&mut range_bytes);
-    env::memory::traverse(
+    call::memory::traverse(
         retention,
         VirtAddr::new(range_bytes.as_ptr() as usize),
         VirtAddr::new(out.as_mut_ptr() as usize),
@@ -118,7 +117,7 @@ pub fn transfer(
     to: FlatReference,
     to_page: usize,
 ) -> MemoryResult<()> {
-    env::memory::transfer(from, from_page, to, to_page)
+    call::memory::transfer(from, from_page, to, to_page)
 }
 
 /// 便利分配的前半：Acquire → Attach。返回 `(地址, 关系句柄, 仍持有的那份引用)`。

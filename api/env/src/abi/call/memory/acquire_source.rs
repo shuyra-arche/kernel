@@ -41,6 +41,7 @@ impl AcquireSource {
 }
 
 impl Wire for AcquireSource {
+    const WORDS: usize = AcquireSource::WORDS;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         let words = match *self {
             Self::Allocation(allocation) => [0, allocation.size, allocation.align, 0, 0],

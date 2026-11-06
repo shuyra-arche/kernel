@@ -24,6 +24,7 @@ impl ViewSelection {
 }
 
 impl Wire for ViewSelection {
+    const WORDS: usize = ViewSelection::WORDS;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         match *self {
             Self::Whole => {

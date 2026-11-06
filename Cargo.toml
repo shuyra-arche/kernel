@@ -3,7 +3,6 @@ resolver = "3"
 members = [
   "api",
   "api/env",
-  "api/wire",
   "api/macros",
   "client",
   "server",
@@ -27,7 +26,3 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
-
-# Keep iommu-hold on the same canonical ABI owner as this workspace.
-[patch."https://github.com/shuyra-arche/kernel.git"]
-kernel-api-env = { path = "api/env" }

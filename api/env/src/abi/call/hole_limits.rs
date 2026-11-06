@@ -27,6 +27,7 @@ impl HoleLimits {
 }
 
 impl Wire for HoleLimits {
+    const WORDS: usize = 3;
     fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
         self.max_len.pack(words, at);
         self.max_messages.pack(words, at);

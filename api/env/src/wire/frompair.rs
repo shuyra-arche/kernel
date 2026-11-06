@@ -1,53 +1,21 @@
-//! 返回值蒸馏——内核回写的寄存器 → 域 Ret 载荷。
+//! 内核返回寄存器到操作成功载荷的转换。
 //!
-//! 每个 `#[ret(T)]` 的 `T` 在此实现 [`FromPair`]；derive 生成的 `decode_return()`
-//! 按 variant 的失败契约判定后调用 `<T as FromPair>::from_pair(v0, v1)`。
-//! 可失败格由域词表解释负码；无失败格保留完整字的位模式，故此处只见成功值。
-//!
-//! **宽返回那一格**（`#[ret3(T)]`，`HoleCall::Pull` 与 `HoleCall::Peek`）走
-//! [`FromTriple`]：两格寄存器装不下它那几件事实，故读 `a0..a2`。两条路的分工是**线宽**，
-//! 不是语义——能用一对说完的仍走 [`FromPair`]（三十格），别为了省一次改写把两件事挤进一格。
-//!
-//! # 本文件的校验口径（与 [`Wire`](crate::wire::Wire) 的分工）
-//!
-//! 两者**不是同一类东西**，故口径**本来就该不同**——但不同不等于不设防：
-//!
-//! | | [`Wire::unpack`](crate::wire::Wire::unpack) | 本文件 `from_pair` |
-//! |---|---|---|
-//! | 数据来自 | **用户态**（a0..a5，完全可控） | **内核回写**（a0/a1；宽那一格 a0..a2） |
-//! | 策略 | **拒绝**：非法位 / 超宽 → `Err(Decode)` | **按契约取位**（截断是位打包的一部分） |
-//! | 依据 | 不可信输入 | §"由内核保证" |
-//!
-//! 内核侧那一条不写成 `Err`，理由是**错误域的形状**：各域词表（`abi/call` 那一份）的
-//! D1 契约）说的都是**内核→用户**的答案（`Denied`/`Dead`/`Busy`/…）。把"内核自己违约"
-//! 塞进同一个域，等于让用户程序去处理内核的 bug，且每条 `decode_return()` 都要多一个分支。
-//!
-//! 故这里的纪律是：**只对"纯靠类型收窄、没有任何契约依据"的取值设防**——今天这样的
-//! 取值一处也没有（全树没有 `impl FromPair for u8` 一类），故下面每一处 `from_pair`
-//! 都不校验。有契约依据的取值（如 `(PieToken, Permission)` 从 v1 取位）不设防，
-//! 因为那个截断**就是**那条契约本身。
+//! `envcall` 先按操作契约识别失败码，再将成功值交给 `FromPair` 或
+//! `FromTriple`。无失败操作保留完整字的位模式，不把高位解释为错误。
+//! 输入寄存器由 `Wire::unpack` 校验；这里按 Kernel 保证的返回布局还原值。
 
 use super::{FlatReference, PieToken, TaskId, TeamId, ViewId, VirtAddr};
-use crate::abi::permission::Permission;
 
-/// 由内核回写的 `(a0, a1)` 还原「域 Ret 载荷」的契约（R3 蒸馏）。
+/// 从成功返回的 `(a0, a1)` 还原操作的 `Output`。
 ///
-/// derive(Envcall) 生成的 `decode_return()` 按 variant 的失败契约识别负码，
-/// 再调用 `<T as FromPair>::from_pair(v0, v1)` 组装 Ret 载荷。无失败格的
-/// 整字位模式都是载荷，高位不会被解释为错误。
+/// 默认双寄存器返回布局；失败码由操作的 `decode_return` 先行处理。
 pub trait FromPair: Sized {
     fn from_pair(v0: usize, v1: usize) -> Self;
 }
 
-/// 由内核回写的 `(a0, a1, a2)` 还原**那一格宽载荷**的契约（R3 蒸馏）。
+/// 从成功返回的 `(a0, a1, a2)` 还原操作的 `Output`。
 ///
-/// 与 [`FromPair`] 只差**线宽**：一对寄存器说不完的返回走这一条。derive 生成的
-/// `decode_return()` 对 `#[ret3(T)]` 那几个 variant 调 `<T as FromTriple>::from_triple(v0, v1, v2)`；
-/// **同一枚枚举里两条路可以并存**（Mail 的调用表同时使用两种宽度），按 variant 各走各的。
-///
-/// **为什么不是"给 [`FromPair`] 多加两个参数"**：那会让三十格只读 `a0`/`a1` 的
-/// 返回各自多背两个空位，而这一格只有一处用家。宽窄是**这一格自己的事实**，
-/// 故写在它自己的 impl 上。
+/// 用于声明了 `reply = 3` 的操作；同一调用域可以包含两种返回宽度。
 pub trait FromTriple: Sized {
     fn from_triple(v0: usize, v1: usize, v2: usize) -> Self;
 }
@@ -59,20 +27,6 @@ impl FromPair for () {
 impl FromPair for usize {
     fn from_pair(v0: usize, _v1: usize) -> Self {
         v0
-    }
-}
-
-/// `Pull` 的返回：`(实际长度, 发送者 task id)`。
-impl FromPair for (usize, TaskId) {
-    fn from_pair(v0: usize, v1: usize) -> Self {
-        (v0, TaskId(v1))
-    }
-}
-
-/// Two whole return words.
-impl FromPair for (usize, usize) {
-    fn from_pair(v0: usize, v1: usize) -> Self {
-        (v0, v1)
     }
 }
 
@@ -102,28 +56,10 @@ impl FromPair for u64 {
     }
 }
 
-impl FromPair for (u64, u64) {
-    fn from_pair(v0: usize, v1: usize) -> Self {
-        (v0 as u64, v1 as u64)
-    }
-}
-
-impl FromPair for (PieToken, PieToken) {
-    fn from_pair(v0: usize, v1: usize) -> Self {
-        (PieToken::new(v0), PieToken::new(v1))
-    }
-}
-
-impl FromPair for (PieToken, Permission) {
-    fn from_pair(v0: usize, v1: usize) -> Self {
-        (PieToken::new(v0), Permission::from_bits_truncate(v1 as u32))
-    }
-}
-
 /// `Peek` 的返回：`(长度, 发送者, 队里排着几只)`。
 ///
 /// 第三格是**队列深度**——写者据此知道"我还排着几手"（孔上可以排着至多 `QUEUE_CAP` 只手）。
-/// 三件事实两格装不下，故与 `Collect` 走同一条宽返回的路（`#[ret3]`）。
+/// 该操作使用三寄存器返回布局（`reply = 3`）。
 impl FromTriple for (usize, TaskId, usize) {
     fn from_triple(v0: usize, v1: usize, v2: usize) -> Self {
         (v0, TaskId(v1), v2)
@@ -151,11 +87,5 @@ impl FromPair for TaskId {
 impl FromPair for TeamId {
     fn from_pair(v0: usize, _v1: usize) -> Self {
         TeamId(v0)
-    }
-}
-
-impl FromPair for VirtAddr {
-    fn from_pair(v0: usize, _v1: usize) -> Self {
-        VirtAddr(v0)
     }
 }
