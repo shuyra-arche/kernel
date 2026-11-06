@@ -33,7 +33,15 @@ pub(crate) fn wait_value(
         };
         let life = space.life();
         drop(space);
-        block_with_call::<RoomFail>(key, life, duration, Some(WaitCall::Value { deadline }))?
+        match block_with_call::<RoomFail>(key, life, duration, Some(WaitCall::Value { deadline })) {
+            Ok(blocked) => blocked,
+            Err(error) => {
+                // A timer/holder allocation may fail after creating the site.
+                // Keep failed waits from accumulating empty address keys.
+                prune(&mut sites(key).lock(), key);
+                return Err(error);
+            }
+        }
     };
     Ok(match finish_block(blocked) {
         Handoff::Resume(()) => Handoff::Resume(true),
