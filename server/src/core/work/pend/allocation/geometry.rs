@@ -7,7 +7,7 @@
 use alloc::sync::Arc;
 
 use crate::core::memory::address::{PageCount, PageOffset};
-use env::PieFail;
+use kernel_api::abi::call::pie::PieFail;
 
 pub(crate) struct Geometry {
     offset: PageOffset,

@@ -1,5 +1,5 @@
 use ::core::fmt;
-use env::PieFail;
+use kernel_api::abi::call::pie::PieFail;
 
 pub(crate) struct Failure<T> {
     pub reason: PieFail,

@@ -5,11 +5,11 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::{InitError, Lock};
-use env::PAGE_SIZE;
+use kernel_api::model::memory::PAGE_SIZE;
 
-mod effect;
 #[path = "cell.rs"]
 mod cell;
+mod effect;
 #[path = "inner.rs"]
 mod inner;
 #[path = "pool.rs"]

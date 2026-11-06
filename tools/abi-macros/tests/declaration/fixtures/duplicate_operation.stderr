@@ -1,0 +1,5 @@
+error: duplicate #[operation]
+ --> tests/declaration/fixtures/duplicate_operation.rs:4:5
+  |
+4 |     #[operation(slot = 1)]
+  |     ^^^^^^^^^^^^^^^^^^^^^^

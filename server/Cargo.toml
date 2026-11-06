@@ -42,4 +42,4 @@ fack = { workspace = true }
 erra = { workspace = true }
 kernel-allocator = { path = "allocator" }
 sbi = { path = "sbi" }
-env = { workspace = true }
+kernel-api = { workspace = true }

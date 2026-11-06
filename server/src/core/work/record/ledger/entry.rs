@@ -1,4 +1,4 @@
-use env::{NOTE_MAX, Reason, TaskId};
+use kernel_api::{abi::call::room::NOTE_MAX, model::exit::Reason, model::identity::TaskId};
 
 #[derive(Clone, Copy)]
 pub struct Entry {

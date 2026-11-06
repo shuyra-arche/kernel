@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use env::PieFail;
+use kernel_api::abi::call::pie::PieFail;
 
 use crate::core::work::pend::SourceAuthorization;
 use crate::core::work::unit::space::ViewBinding;

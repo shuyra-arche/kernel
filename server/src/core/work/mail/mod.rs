@@ -1,14 +1,17 @@
 pub mod hole;
 mod liveness;
-mod nole_role;
 pub mod nole;
+mod nole_role;
 pub mod pole;
 pub mod tole;
 
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use env::{Permission, PieFail, PieKind, PieToken, TaskId};
+use kernel_api::{
+    abi::call::pie::PieFail, model::identity::PieToken, model::identity::TaskId,
+    model::permission::Permission, model::pie::PieKind,
+};
 
 use crate::core::work::grant::Grant;
 use crate::core::work::unit::life::Life;

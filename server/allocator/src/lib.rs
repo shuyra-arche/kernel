@@ -26,6 +26,6 @@ pub mod spare;
 
 pub use error::{InitError, InitResult};
 pub use facts::{MAX_RESERVED, MachineFacts};
+pub use kernel_api::model::memory::PAGE_SIZE;
 pub use lock::{Lock, LockRole};
-pub use env::PAGE_SIZE;
 pub use region::Region;

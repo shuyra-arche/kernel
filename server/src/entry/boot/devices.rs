@@ -3,7 +3,10 @@ use crate::core::work::mail::{self, Mail};
 use crate::core::work::pend::{self, Permission, SourceAuthorization};
 use crate::entry::boot::resources::Registry;
 use crate::machine::board;
-use env::{Mark, Name, Page, PieFail, TaskId};
+use kernel_api::{
+    abi::call::pie::PieFail, boot::ledger::Name, boot::ledger::Page, model::identity::Mark,
+    model::identity::TaskId,
+};
 
 pub(crate) fn register(registry: &mut Registry) -> Result<(), PieFail> {
     let dtb = board::info().dtb();

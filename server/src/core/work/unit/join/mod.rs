@@ -2,7 +2,9 @@ use crate::machine::clock;
 use crate::machine::switcher::context::{Gprs, TrapContext};
 use alloc::sync::Arc;
 use core::time::Duration;
-use env::{JoinReply, TaskId, UnitFail, Wait};
+use kernel_api::{
+    abi::call::unit::UnitFail, model::identity::TaskId, model::unit::JoinReply, model::wait::Wait,
+};
 
 mod target;
 pub(crate) use target::JoinTarget;
@@ -90,7 +92,7 @@ impl JoinWait {
             Ok(JoinReply::Pending) => [0, 0, 0],
             Ok(JoinReply::Complete) => [5, 0, 0],
             Ok(JoinReply::Reaped(exit)) => [exit.cause as usize, exit.task.get(), exit.reason],
-            Err(error) => [env::FailCode::code(error) as usize, 0, 0],
+            Err(error) => [kernel_api::abi::error::FailCode::code(error) as usize, 0, 0],
         };
         frame.gpr.set_x(Gprs::A0, words[0]);
         frame.gpr.set_x(Gprs::A1, words[1]);
@@ -100,19 +102,22 @@ impl JoinWait {
 
 pub(crate) fn observe(
     me: &Arc<super::task::Task>,
-    target: env::UnitTarget,
+    target: kernel_api::model::unit::UnitTarget,
 ) -> Result<JoinTarget, UnitFail> {
     let _commit = crate::core::work::commit();
     match target {
-        env::UnitTarget::Team(id) => {
+        kernel_api::model::unit::UnitTarget::Team(id) => {
             if id == me.ident.team.id {
                 return Err(UnitFail::Denied);
             }
-            me.ident.team.life.find_team(id)
+            me.ident
+                .team
+                .life
+                .find_team(id)
                 .map(JoinTarget::Team)
                 .ok_or(UnitFail::Denied)
         }
-        env::UnitTarget::Task(id) => {
+        kernel_api::model::unit::UnitTarget::Task(id) => {
             let member = me
                 .ident
                 .team

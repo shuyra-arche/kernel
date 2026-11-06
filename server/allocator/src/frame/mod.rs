@@ -3,7 +3,7 @@ use core::ptr::NonNull;
 use alloc::alloc::{AllocError, Allocator};
 
 use crate::{InitError, Lock, LockRole, Locked};
-use env::PAGE_SIZE;
+use kernel_api::model::memory::PAGE_SIZE;
 
 mod effect;
 #[path = "inner.rs"]

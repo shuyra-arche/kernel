@@ -2,7 +2,7 @@ use crate::core::work::unit::task::Task;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
-use env::{PieFail, PieToken};
+use kernel_api::{abi::call::pie::PieFail, model::identity::PieToken};
 mod forget;
 pub(crate) use forget::{forget, same};
 mod accord;
@@ -162,7 +162,7 @@ pub(crate) fn insert(task: &Task, pie: Pie) -> Result<(), PieFail> {
     Ok(())
 }
 
-pub(crate) fn notify(task: env::TaskId, token: PieToken) {
+pub(crate) fn notify(task: kernel_api::model::identity::TaskId, token: PieToken) {
     let _ = crate::core::work::room::messenger::signal(
         crate::core::work::room::messenger::WakeKey::Inspect {
             task,

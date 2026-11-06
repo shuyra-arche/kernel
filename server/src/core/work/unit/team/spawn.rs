@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use env::UnitFail;
+use kernel_api::abi::call::unit::UnitFail;
 
 use crate::core::memory::address::VirtAddr as KVirt;
 use crate::core::memory::nest::NestError;
@@ -122,11 +122,9 @@ pub(crate) fn spawn(
             {
                 return Err(UnitFail::Denied);
             }
-            if record
-                .control
-                .as_ref()
-                .is_some_and(|control| control.scope() == env::ViewControl::Caller)
-            {
+            if record.control.as_ref().is_some_and(|control| {
+                control.scope() == kernel_api::model::memory::ViewControl::Caller
+            }) {
                 prepared
                     .track_control(&target.space, item.view.identity())
                     .map_err(map_err)?;
@@ -137,7 +135,7 @@ pub(crate) fn spawn(
                 for paused in &sources[..index] {
                     paused.resume_publish();
                 }
-                return Err(if error == env::PieFail::Busy {
+                return Err(if error == kernel_api::abi::call::pie::PieFail::Busy {
                     UnitFail::Busy
                 } else {
                     UnitFail::Denied

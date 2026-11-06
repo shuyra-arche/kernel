@@ -1,0 +1,6 @@
+error: 一个域只有一枚 `#[busy]`（「条件未就绪」是单数）
+ --> tests/declaration/fixtures/duplicate_busy.rs:7:9
+  |
+7 | /         #[busy]
+8 | |         B = -2,
+  | |______________^

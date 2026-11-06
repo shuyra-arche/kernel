@@ -161,11 +161,11 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::core::work::unit::task
         source,
     })?;
 
-    let mut args = [0usize; env::ledger::args::LEN];
-    args[env::ledger::args::VIEW] = view.as_usize();
-    args[env::ledger::args::VIEW_LEN] = region.size;
-    args[env::ledger::args::LEDGER] = ledger.as_usize();
-    args[env::ledger::args::LEDGER_LEN] = ledger_len;
+    let mut args = [0usize; kernel_api::boot::args::LEN];
+    args[kernel_api::boot::args::VIEW] = view.as_usize();
+    args[kernel_api::boot::args::VIEW_LEN] = region.size;
+    args[kernel_api::boot::args::LEDGER] = ledger.as_usize();
+    args[kernel_api::boot::args::LEDGER_LEN] = ledger_len;
     let mut words = alloc::vec::Vec::new();
     words
         .try_reserve_exact(args.len())

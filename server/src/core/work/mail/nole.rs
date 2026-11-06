@@ -1,7 +1,7 @@
 use alloc::sync::{Arc, Weak};
 use core::time::Duration;
 
-use env::{NoleFail, TaskId};
+use kernel_api::{abi::call::nole::NoleFail, model::identity::TaskId};
 
 use super::Liveness;
 use super::nole_role::NoleRole;
@@ -140,6 +140,9 @@ pub(crate) fn wait(meta: &NoleMeta, dur: Duration) -> Result<Handoff<bool>, Nole
 
 pub(crate) fn seal(meta: &NoleMeta) {
     *meta.state.lock() = Liveness::Dead;
-    messenger::wipe(WakeKey::seal(env::PieKind::Nole, meta.id));
+    messenger::wipe(WakeKey::seal(
+        kernel_api::model::pie::PieKind::Nole,
+        meta.id,
+    ));
     messenger::wipe(key(meta));
 }

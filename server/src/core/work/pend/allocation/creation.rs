@@ -15,13 +15,14 @@ impl Creation {
         }
     }
 
-    pub(super) fn claim(&self) -> Result<(), env::PieFail> {
-        match self.state.compare_exchange(
-            AVAILABLE, CLAIMED, Ordering::AcqRel, Ordering::Acquire,
-        ) {
+    pub(super) fn claim(&self) -> Result<(), kernel_api::abi::call::pie::PieFail> {
+        match self
+            .state
+            .compare_exchange(AVAILABLE, CLAIMED, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => Ok(()),
-            Err(CLAIMED) => Err(env::PieFail::Busy),
-            Err(_) => Err(env::PieFail::Denied),
+            Err(CLAIMED) => Err(kernel_api::abi::call::pie::PieFail::Busy),
+            Err(_) => Err(kernel_api::abi::call::pie::PieFail::Denied),
         }
     }
 
@@ -30,8 +31,8 @@ impl Creation {
     }
 
     pub(super) fn release(&self) {
-        let _ = self.state.compare_exchange(
-            CLAIMED, AVAILABLE, Ordering::AcqRel, Ordering::Acquire,
-        );
+        let _ =
+            self.state
+                .compare_exchange(CLAIMED, AVAILABLE, Ordering::AcqRel, Ordering::Acquire);
     }
 }

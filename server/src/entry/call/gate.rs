@@ -5,7 +5,7 @@
 //! 以及「取到的这一枚还可用吗」共用。失败一律是 `PieFail`（权柄轴的状态），
 //! 各域用自己的词汇显式折叠。
 
-use env::{PieFail, PieToken};
+use kernel_api::{abi::call::pie::PieFail, model::identity::PieToken};
 
 use crate::core::work::pend::{self, Need, PieSnapshot, clear_heir};
 use crate::core::work::room::conductor::current;

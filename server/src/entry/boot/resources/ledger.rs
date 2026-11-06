@@ -1,5 +1,5 @@
-use env::ledger::entry::{Header, store_entries};
-use env::{Entry, PieFail};
+use kernel_api::{abi::call::pie::PieFail, boot::ledger::Entry};
+use kernel_api::{boot::ledger::Header, boot::ledger::store_entries};
 
 pub(crate) const BLOCK_BYTES: usize = crate::core::memory::PAGE_SIZE;
 #[repr(C, align(4096))]
@@ -12,7 +12,7 @@ pub(crate) fn block() -> (usize, usize) {
 }
 pub(crate) fn size(count: usize) -> Result<usize, PieFail> {
     let len = count
-        .checked_mul(env::ENTRY_LEN)
+        .checked_mul(kernel_api::boot::ledger::ENTRY_LEN)
         .and_then(|n| n.checked_add(Header::LEN))
         .ok_or(PieFail::OoM)?;
     if len > BLOCK_BYTES {

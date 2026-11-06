@@ -1,0 +1,22 @@
+[package]
+name = "kernel-api-macros"
+publish = false
+edition.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+proc-macro = true
+test = false
+bench = false
+doctest = false
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
+
+[dev-dependencies]
+erra = { workspace = true, default-features = false }
+kernel-api = { path = "../../api" }
+trybuild = "1.0.122"

@@ -41,12 +41,12 @@ pub enum BootError {
     },
     Resources {
         operation: ResourceOperation,
-        source: env::PieFail,
+        source: kernel_api::abi::call::pie::PieFail,
     },
     Bootstrap(NestError),
     BootstrapRelease {
-        task: env::TaskId,
-        source: env::UnitFail,
+        task: kernel_api::model::identity::TaskId,
+        source: kernel_api::abi::call::unit::UnitFail,
     },
     HartStart {
         hart: HartId,

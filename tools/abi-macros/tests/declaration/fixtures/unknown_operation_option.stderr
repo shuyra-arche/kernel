@@ -1,0 +1,5 @@
+error: unknown operation option
+ --> tests/declaration/fixtures/unknown_operation_option.rs:3:45
+  |
+3 |     #[operation(slot=0,output=(),infallible,typo)]
+  |                                             ^^^^

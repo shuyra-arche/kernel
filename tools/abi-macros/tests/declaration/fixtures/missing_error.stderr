@@ -1,0 +1,5 @@
+error: error must name an error_domain in this declaration
+ --> tests/declaration/fixtures/missing_error.rs:3:40
+  |
+3 |     #[operation(slot=0,output=(),error=Missing)]
+  |                                        ^^^^^^^

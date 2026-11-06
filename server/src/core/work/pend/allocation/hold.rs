@@ -14,7 +14,7 @@ use crate::core::memory::address::{PageCount, PageOffset};
 use crate::core::memory::flat::FlatRange;
 use crate::core::memory::nest::Access;
 use crate::core::work::grant::Grant;
-use env::PieToken;
+use kernel_api::model::identity::PieToken;
 
 use super::geometry::Geometry;
 use super::independent::IndependentHold;

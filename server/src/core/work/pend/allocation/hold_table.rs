@@ -11,7 +11,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::core::memory::address::{PageCount, PageOffset};
 use crate::core::memory::nest::Access;
 use crate::machine::sync::SpinLock;
-use env::PieFail;
+use kernel_api::abi::call::pie::PieFail;
 
 use super::hold::Hold;
 use super::independent::IndependentHold;
@@ -42,7 +42,10 @@ impl HoldTable {
         count: PageCount,
         ceiling: Access,
         retained: Option<IndependentHold>,
-        branch: Option<(env::PieToken, Arc<crate::core::work::grant::Grant>)>,
+        branch: Option<(
+            kernel_api::model::identity::PieToken,
+            Arc<crate::core::work::grant::Grant>,
+        )>,
     ) -> Result<usize, PieFail> {
         let mut holds = self.holds.lock();
         holds.try_reserve(1).map_err(|_| PieFail::OoM)?;

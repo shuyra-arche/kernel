@@ -1,8 +1,11 @@
-use crate::entry::boot::resources::Registry;
 use crate::core::work::mail::Mail;
 use crate::core::work::pend;
 use crate::core::work::room::interrupt;
-use env::{Mark, Name, Permission, PieFail, Trap};
+use crate::entry::boot::resources::Registry;
+use kernel_api::{
+    abi::call::pie::PieFail, boot::ledger::Name, boot::ledger::Trap, model::identity::Mark,
+    model::permission::Permission,
+};
 
 pub(crate) fn register(registry: &mut Registry) -> Result<(), PieFail> {
     let resources = interrupt::get();

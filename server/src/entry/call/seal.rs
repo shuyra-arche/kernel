@@ -3,7 +3,7 @@
 //! 各域的 `Seal` 入口只交代自己的词表与失败转换（`HoleFail`/`NoleFail`/
 //! `PoleFail`/`ToleFail`），核验与关图这一手共用。
 
-use env::{PieFail, PieKind, PieToken};
+use kernel_api::{abi::call::pie::PieFail, model::identity::PieToken, model::pie::PieKind};
 
 use crate::core::work::mail::pole::PoleOperation;
 use crate::core::work::pend;

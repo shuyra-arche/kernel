@@ -1,0 +1,5 @@
+error: returning operations require output and exactly one of error or infallible
+ --> tests/declaration/fixtures/missing_error_mode.rs:3:5
+  |
+3 |     #[operation(slot=0,output=())]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

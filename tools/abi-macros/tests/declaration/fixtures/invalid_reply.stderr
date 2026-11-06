@@ -1,0 +1,5 @@
+error: reply must be 2 or 3 registers
+ --> tests/declaration/fixtures/invalid_reply.rs:3:5
+  |
+3 |     #[operation(slot=0,output=(),infallible,reply=4)]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

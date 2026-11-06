@@ -11,7 +11,11 @@ use crate::core::work::unit::task::{Task, TaskIdent};
 use crate::machine::switcher::context::TrapContext;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use env::{PieFail, PieKind, PieToken, ToleCall, ToleEventSource, ToleFail, Wait};
+use kernel_api::{
+    abi::call::pie::PieFail, abi::call::tole::ToleCall, abi::call::tole::ToleFail,
+    model::identity::PieToken, model::pie::PieKind, model::tole::ToleEventSource,
+    model::wait::Wait,
+};
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: ToleCall, ident: Arc<TaskIdent>) -> Outcome {
     drop(ident);
@@ -42,12 +46,19 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: ToleCall, ident: Arc<TaskI
 pub(crate) fn create(shared: bool) -> Result<usize, ToleFail> {
     let task = current().running_task().ok_or(ToleFail::Denied)?;
     let meta = tole::ToleMeta::try_new(task.ident.id).map_err(|_| ToleFail::OoM)?;
-    let mut permission = env::Permission::FETCH | env::Permission::STORE | env::Permission::VEST;
+    let mut permission = kernel_api::model::permission::Permission::FETCH
+        | kernel_api::model::permission::Permission::STORE
+        | kernel_api::model::permission::Permission::VEST;
     if !shared {
-        permission |= env::Permission::ONLY;
+        permission |= kernel_api::model::permission::Permission::ONLY;
     }
-    let pie = pend::Pie::try_new(Mail::Tole(meta), env::Mark::NONE, permission, None)
-        .map_err(codec::pie_fail)?;
+    let pie = pend::Pie::try_new(
+        Mail::Tole(meta),
+        kernel_api::model::identity::Mark::NONE,
+        permission,
+        None,
+    )
+    .map_err(codec::pie_fail)?;
     let token = pie.token();
     pend::insert(&task, pie).map_err(codec::pie_fail)?;
     Ok(token.get())
@@ -164,7 +175,9 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: ToleEventSource) -> Result<C
                 holder: Arc::downgrade(&holder),
                 parent,
                 held,
-                access: pie.permission() & (env::Permission::FETCH | env::Permission::STORE),
+                access: pie.permission()
+                    & (kernel_api::model::permission::Permission::FETCH
+                        | kernel_api::model::permission::Permission::STORE),
             }
         }
     };

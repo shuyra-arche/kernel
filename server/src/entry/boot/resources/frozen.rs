@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use env::{Entry, Name, PieFail};
+use kernel_api::{abi::call::pie::PieFail, boot::ledger::Entry, boot::ledger::Name};
 
 use crate::core::work::pend::{self, Pie};
 use crate::core::work::unit::task::Task;

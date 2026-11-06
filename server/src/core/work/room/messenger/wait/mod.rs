@@ -326,14 +326,16 @@ pub fn redeem() -> bool {
 
 pub(crate) fn unit_join(
     join: crate::core::work::unit::join::JoinWait,
-) -> Result<Handoff<env::JoinReply>, env::UnitFail> {
+) -> Result<Handoff<kernel_api::model::unit::JoinReply>, kernel_api::abi::call::unit::UnitFail> {
     loop {
         let _commit = crate::core::work::commit();
         let reply = join.poll()?;
-        if reply != env::JoinReply::Pending || join.remaining() == Duration::ZERO {
+        if reply != kernel_api::model::unit::JoinReply::Pending
+            || join.remaining() == Duration::ZERO
+        {
             return Ok(Handoff::Resume(reply));
         }
-        let blocked = block_with_call::<env::UnitFail>(
+        let blocked = block_with_call::<kernel_api::abi::call::unit::UnitFail>(
             join.target.key(),
             join.target.life(),
             join.remaining(),
@@ -348,7 +350,7 @@ pub(crate) fn unit_join(
 }
 fn resume_join(task: &Arc<Task>, join: crate::core::work::unit::join::JoinWait) -> bool {
     use crate::machine::switcher::context::TrapContext;
-    use env::JoinReply;
+    use kernel_api::model::unit::JoinReply;
     let _commit = crate::core::work::commit();
     let result = join.poll();
     let result = if matches!(result, Ok(JoinReply::Pending)) && join.remaining() != Duration::ZERO {
@@ -358,7 +360,7 @@ fn resume_join(task: &Arc<Task>, join: crate::core::work::unit::join::JoinWait) 
             join.target.life(),
             join.remaining(),
             WaitCall::Join(join.clone()),
-            env::UnitFail::OoM,
+            kernel_api::abi::call::unit::UnitFail::OoM,
         ) {
             Ok(()) => return false,
             Err(error) => Err(error),
@@ -400,7 +402,8 @@ fn requeue<E: Copy>(
 
 pub(crate) fn mail_await(
     wait: crate::core::work::mail::tole::AwaitWait,
-) -> Result<Handoff<env::ToleAwaitReply>, env::ToleFail> {
+) -> Result<Handoff<kernel_api::abi::reply::ToleAwaitReply>, kernel_api::abi::call::tole::ToleFail>
+{
     loop {
         let commit = crate::core::work::commit();
         let reply = match wait.poll() {
@@ -410,12 +413,14 @@ pub(crate) fn mail_await(
                 return Err(e);
             }
         };
-        if reply != env::ToleAwaitReply::Pending || wait.remaining() == Duration::ZERO {
+        if reply != kernel_api::abi::reply::ToleAwaitReply::Pending
+            || wait.remaining() == Duration::ZERO
+        {
             wait.unwatch();
             return Ok(Handoff::Resume(reply));
         }
         wait.watch()?;
-        let blocked = match block_with_call::<env::ToleFail>(
+        let blocked = match block_with_call::<kernel_api::abi::call::tole::ToleFail>(
             wait.key(),
             wait.life(),
             wait.remaining(),
@@ -437,7 +442,7 @@ pub(crate) fn mail_await(
 fn resume_await(task: &Arc<Task>, wait: crate::core::work::mail::tole::AwaitWait) -> bool {
     let _commit = crate::core::work::commit();
     let result = wait.poll();
-    let result = if matches!(result, Ok(env::ToleAwaitReply::Pending))
+    let result = if matches!(result, Ok(kernel_api::abi::reply::ToleAwaitReply::Pending))
         && wait.remaining() != Duration::ZERO
     {
         match requeue(
@@ -446,7 +451,7 @@ fn resume_await(task: &Arc<Task>, wait: crate::core::work::mail::tole::AwaitWait
             wait.life(),
             wait.remaining(),
             WaitCall::Mail(wait.clone()),
-            env::ToleFail::OoM,
+            kernel_api::abi::call::tole::ToleFail::OoM,
         ) {
             Ok(()) => return false,
             Err(e) => Err(e),

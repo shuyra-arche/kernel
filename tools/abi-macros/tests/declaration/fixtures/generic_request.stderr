@@ -1,0 +1,5 @@
+error: ABI operations cannot be generic
+ --> tests/declaration/fixtures/generic_request.rs:4:17
+  |
+4 |     pub struct A<T> {
+  |                 ^^^

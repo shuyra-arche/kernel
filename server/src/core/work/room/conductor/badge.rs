@@ -4,7 +4,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use env::{TaskId, TeamId};
+use kernel_api::{model::identity::TaskId, model::identity::TeamId};
 
 use crate::core::work::room::identity::Identity;
 use crate::core::work::unit::task::TaskIdent;

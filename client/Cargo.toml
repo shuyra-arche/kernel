@@ -10,7 +10,5 @@ bench = false
 doctest = false
 
 [dependencies]
-talc = { version = "=5.1.1", default-features = false }
-spinning_top = { version = "=0.3.0", default-features = false }
-env = { workspace = true }
+kernel-api = { workspace = true }
 erra = { workspace = true }

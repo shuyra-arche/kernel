@@ -1,7 +1,10 @@
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
-use env::{AcquireSource, MemoryCall, MemoryFail, Permission, PieToken};
+use kernel_api::{
+    abi::call::memory::MemoryCall, abi::call::memory::MemoryFail, model::identity::PieToken,
+    model::memory::AcquireSource, model::permission::Permission,
+};
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageOffset, VirtAddr as KVirt};
@@ -72,7 +75,7 @@ fn execute(call: MemoryCall, ident: &Arc<TaskIdent>) -> Result<usize, MemoryFail
 
 /// 目标域：当前域，或调用者的 Constructing 子域（非零 Team 还要求仍在构造中）。
 fn resolve_team(
-    team: env::TeamId,
+    team: kernel_api::model::identity::TeamId,
     ident: &Arc<TaskIdent>,
     caller: &Arc<Task>,
 ) -> Result<Arc<Team>, MemoryFail> {
@@ -98,13 +101,13 @@ fn read_snapshot<const N: usize>(space: &Space, at: KVirt) -> Result<[u8; N], Me
 /// 把线外的选址描述换成 Nest 的选址；长度不在这里——由来源范围定。
 fn nest_placement(
     nest: &Nest,
-    placement: env::Placement,
+    placement: kernel_api::model::memory::Placement,
     size: usize,
 ) -> Result<Placement, MemoryFail> {
     let at = match placement.at() {
-        env::PlacementAt::Lowest => PlacementAt::Lowest,
-        env::PlacementAt::Highest => PlacementAt::Highest,
-        env::PlacementAt::Exact(address) => {
+        kernel_api::model::memory::PlacementAt::Lowest => PlacementAt::Lowest,
+        kernel_api::model::memory::PlacementAt::Highest => PlacementAt::Highest,
+        kernel_api::model::memory::PlacementAt::Exact(address) => {
             let address = KVirt::wrap(address.get());
             if !Space::user_range(address, size) {
                 return Err(MemoryFail::NotAligned);
@@ -147,28 +150,33 @@ pub(in crate::entry) fn rollback(
 /// 发布与撤销共取来源授权上那一把闸门：发布前确认没被撤销，发布后再复查一次；
 /// 撤销方在同一把门下置位。于是撤销要么看见这次发布、要么发布自己发现已被撤销。
 fn attach(
-    range_at: env::VirtAddr,
-    team: env::TeamId,
-    placement_at: env::VirtAddr,
+    range_at: kernel_api::model::identity::VirtAddr,
+    team: kernel_api::model::identity::TeamId,
+    placement_at: kernel_api::model::identity::VirtAddr,
     access: u64,
-    control: env::ViewControl,
+    control: kernel_api::model::memory::ViewControl,
     ident: &Arc<TaskIdent>,
 ) -> Result<(usize, usize), MemoryFail> {
     let caller_task = caller(ident).ok_or(MemoryFail::Denied)?;
     let caller_space = ident.team.space.clone();
-    let range = read_snapshot::<{ env::ReferenceRange::WIDTH }>(
+    let range = read_snapshot::<{ kernel_api::model::memory::ReferenceRange::WIDTH }>(
         &caller_space,
         KVirt::wrap(range_at.get()),
     )?;
-    let placement =
-        read_snapshot::<{ env::Placement::WIDTH }>(&caller_space, KVirt::wrap(placement_at.get()))?;
-    let range = env::ReferenceRange::fetch(&range).ok_or(MemoryFail::NotAligned)?;
-    let placement = match env::Placement::decode_bytes(&placement) {
+    let placement = read_snapshot::<{ kernel_api::model::memory::Placement::WIDTH }>(
+        &caller_space,
+        KVirt::wrap(placement_at.get()),
+    )?;
+    let range =
+        kernel_api::model::memory::ReferenceRange::fetch(&range).ok_or(MemoryFail::NotAligned)?;
+    let placement = match kernel_api::model::memory::Placement::decode_bytes(&placement) {
         Ok(placement) => placement,
         // 方式标签不认得：整段描述不是本 API 的请求。
-        Err(env::PlacementError::Tag) => return Err(MemoryFail::Denied),
+        Err(kernel_api::model::memory::PlacementError::Tag) => return Err(MemoryFail::Denied),
         // 方式认得而对齐/定点非法：格式可解，参数不合法。
-        Err(env::PlacementError::Align) => return Err(MemoryFail::NotAligned),
+        Err(kernel_api::model::memory::PlacementError::Align) => {
+            return Err(MemoryFail::NotAligned);
+        }
     };
     let access = Access::from_wire(access).ok_or(MemoryFail::Denied)?;
     // 空权限拒。执行权不由 Pie 权限位（更不由 VEST）表达：它只随**目标域授权**
@@ -320,7 +328,7 @@ fn attach(
         rollback(&space, id, Some(reservation), None);
         return Err(source_fail(error));
     }
-    if control == env::ViewControl::Caller
+    if control == kernel_api::model::memory::ViewControl::Caller
         && let Err(error) = caller_task.track_control(&space, id)
     {
         rollback(&space, id, Some(reservation), None);
@@ -403,16 +411,19 @@ fn attach(
 /// 整张表先物化齐了才写出去——失败不在调用者缓冲里留半张。
 fn traverse(
     retention: PieToken,
-    range_at: env::VirtAddr,
-    out: env::VirtAddr,
+    range_at: kernel_api::model::identity::VirtAddr,
+    out: kernel_api::model::identity::VirtAddr,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, MemoryFail> {
     let task = caller(ident).ok_or(MemoryFail::Denied)?;
     require_retention(&task, retention)?;
     let space = ident.team.space.clone();
-    let bytes =
-        read_snapshot::<{ env::ReferenceRange::WIDTH }>(&space, KVirt::wrap(range_at.get()))?;
-    let range = env::ReferenceRange::fetch(&bytes).ok_or(MemoryFail::NotAligned)?;
+    let bytes = read_snapshot::<{ kernel_api::model::memory::ReferenceRange::WIDTH }>(
+        &space,
+        KVirt::wrap(range_at.get()),
+    )?;
+    let range =
+        kernel_api::model::memory::ReferenceRange::fetch(&bytes).ok_or(MemoryFail::NotAligned)?;
     // 引用表下只取一份合法持有快照，随后立刻放锁：物化与写缓冲都不带着资源表锁做。
     let hold = {
         let _serial = task.pend.lock();
@@ -456,8 +467,8 @@ fn traverse(
 
 /// 按目标域与号取回控制登记；号本身不授予任何东西。
 fn with_view<T>(
-    team: env::TeamId,
-    view: env::ViewId,
+    team: kernel_api::model::identity::TeamId,
+    view: kernel_api::model::memory::ViewId,
     ident: &Arc<TaskIdent>,
     action: impl FnOnce(&Arc<Team>, &ViewEntry) -> Result<T, MemoryFail>,
 ) -> Result<T, MemoryFail> {
@@ -485,9 +496,11 @@ fn with_view<T>(
     let control = entry.control.as_ref().ok_or(MemoryFail::Denied)?;
     let (controller, _) = control.control();
     let allowed = match control.scope() {
-        env::ViewControl::Caller => controller == ident.id,
+        kernel_api::model::memory::ViewControl::Caller => controller == ident.id,
         // 显式把这一段交给本 Space 成员；不是“同 Space 自动全控”。
-        env::ViewControl::SpaceMembers => Arc::ptr_eq(&ident.team.space, &space),
+        kernel_api::model::memory::ViewControl::SpaceMembers => {
+            Arc::ptr_eq(&ident.team.space, &space)
+        }
     };
     if !allowed {
         return Err(MemoryFail::Denied);
@@ -496,11 +509,14 @@ fn with_view<T>(
 }
 
 /// 把线外的选择换成这一段关系上的身份选择。
-fn selection(entry: &ViewEntry, selection: env::ViewSelection) -> Result<ViewRange, MemoryFail> {
+fn selection(
+    entry: &ViewEntry,
+    selection: kernel_api::model::memory::ViewSelection,
+) -> Result<ViewRange, MemoryFail> {
     let view = entry.view().ok_or(MemoryFail::Denied)?;
     match selection {
-        env::ViewSelection::Whole => Ok(view.whole()),
-        env::ViewSelection::Pages { offset, count } => {
+        kernel_api::model::memory::ViewSelection::Whole => Ok(view.whole()),
+        kernel_api::model::memory::ViewSelection::Pages { offset, count } => {
             let count = PageCount::new(count).ok_or(MemoryFail::NotAligned)?;
             view.range(PageOffset::new(offset), count)
                 .map_err(|_| MemoryFail::NoRegion)
@@ -509,15 +525,15 @@ fn selection(entry: &ViewEntry, selection: env::ViewSelection) -> Result<ViewRan
 }
 
 fn detach(
-    team: env::TeamId,
-    view: env::ViewId,
-    choice: env::ViewSelection,
+    team: kernel_api::model::identity::TeamId,
+    view: kernel_api::model::memory::ViewId,
+    choice: kernel_api::model::memory::ViewSelection,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, MemoryFail> {
     with_view(team, view, ident, |target, entry| {
         let space = &target.space;
         let staged = target.find_staging(|item| item.view.identity() == view.get());
-        if staged.is_some() && !matches!(choice, env::ViewSelection::Whole) {
+        if staged.is_some() && !matches!(choice, kernel_api::model::memory::ViewSelection::Whole) {
             return Err(MemoryFail::Busy);
         }
         space.nest.retry_invalidation()?;
@@ -538,9 +554,9 @@ fn detach(
 }
 
 fn set_access(
-    team: env::TeamId,
-    view: env::ViewId,
-    choice: env::ViewSelection,
+    team: kernel_api::model::identity::TeamId,
+    view: kernel_api::model::memory::ViewId,
+    choice: kernel_api::model::memory::ViewSelection,
     access: u64,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, MemoryFail> {
@@ -568,11 +584,11 @@ fn caller(ident: &Arc<TaskIdent>) -> Option<Arc<Task>> {
 }
 
 /// 来源侧的失败码折成地址空间同轴的那一条。
-fn source_fail(error: env::PieFail) -> MemoryFail {
+fn source_fail(error: kernel_api::abi::call::pie::PieFail) -> MemoryFail {
     match error {
-        env::PieFail::OoM => MemoryFail::OoM,
-        env::PieFail::Busy => MemoryFail::Busy,
-        env::PieFail::NotAligned => MemoryFail::NotAligned,
+        kernel_api::abi::call::pie::PieFail::OoM => MemoryFail::OoM,
+        kernel_api::abi::call::pie::PieFail::Busy => MemoryFail::Busy,
+        kernel_api::abi::call::pie::PieFail::NotAligned => MemoryFail::NotAligned,
         _ => MemoryFail::Denied,
     }
 }
@@ -846,7 +862,10 @@ fn window(
 ///
 /// 独立保留随这一份引用结束：那是一个显式的“不再物理持有这一段”事件，
 /// 所以在这里重试父侧已可证明结束的分配槽；不可证明的照旧占着。
-fn release(reference: env::FlatReference, ident: &Arc<TaskIdent>) -> Result<usize, MemoryFail> {
+fn release(
+    reference: kernel_api::model::memory::FlatReference,
+    ident: &Arc<TaskIdent>,
+) -> Result<usize, MemoryFail> {
     let task = caller(ident).ok_or(MemoryFail::Denied)?;
     let _serial = task.pend.lock();
     let hold = task
@@ -893,9 +912,9 @@ fn next_flight_key() -> Result<usize, MemoryFail> {
 /// `PoleOperation` 不是授权，这里不取它：槽的独占与逐页撤销的串行由事务与各
 /// Nest 自己的临界区负责，另取一把 Pole 租约只会把“同根两端”变成第二个失败面。
 fn transfer(
-    from: env::FlatReference,
+    from: kernel_api::model::memory::FlatReference,
     from_page: usize,
-    to: env::FlatReference,
+    to: kernel_api::model::memory::FlatReference,
     to_page: usize,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, MemoryFail> {
@@ -972,7 +991,10 @@ fn transfer(
 ///
 /// 引用只在自己那张表里解析得动（伪号或已释放的旧号当场 `Denied`）；
 /// 解析不出窗口（来源已被根 Grant 接管并撤销）也是 `Denied`。
-fn endpoint(caller: &Arc<Task>, reference: env::FlatReference) -> Result<FlatRange, MemoryFail> {
+fn endpoint(
+    caller: &Arc<Task>,
+    reference: kernel_api::model::memory::FlatReference,
+) -> Result<FlatRange, MemoryFail> {
     let hold = caller
         .pend
         .references

@@ -1,9 +1,8 @@
 #![no_std]
-//! Canonical Kernel ABI umbrella.
-//!
-//! [`env`] owns register calls, handles, failures and concrete Kernel byte
-//! layouts. Generic codecs and service protocols belong to their consumers.
-
 #![forbid(unsafe_code)]
+//! Kernel contracts: shared model, call ABI and initial-task boot protocol.
+//! Client executes these contracts; Server implements them.
 
-pub use kernel_api_env as env;
+pub mod abi;
+pub mod boot;
+pub mod model;

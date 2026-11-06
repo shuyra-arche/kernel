@@ -1,8 +1,8 @@
-use alloc::sync::Arc;
-use ::core::sync::atomic::{AtomicUsize, Ordering};
 use crate::core::work::mail::{HoleMeta, nole::NoleMeta};
 use crate::machine::sync::OnceLock;
-use env::{PieFail, TaskId};
+use ::core::sync::atomic::{AtomicUsize, Ordering};
+use alloc::sync::Arc;
+use kernel_api::{abi::call::pie::PieFail, model::identity::TaskId};
 
 pub(crate) struct Interrupts {
     pub supervisor_external: Arc<NoleMeta>,
@@ -23,7 +23,10 @@ pub(crate) fn init() -> Result<(), PieFail> {
         supervisor_external: NoleMeta::try_new(TaskId::new(0)).map_err(|_| PieFail::OoM)?,
         page_fault: HoleMeta::try_new(TaskId::new(0)).map_err(|_| PieFail::OoM)?,
     };
-    assert!(INTERRUPTS.set(interrupts).is_ok(), "trap resources already initialized");
+    assert!(
+        INTERRUPTS.set(interrupts).is_ok(),
+        "trap resources already initialized"
+    );
     Ok(())
 }
 

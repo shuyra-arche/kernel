@@ -5,10 +5,14 @@ edition.workspace = true
 version.workspace = true
 
 [lib]
-path = "src/lib.rs"
 test = false
-bench = false
 doctest = false
+bench = false
 
 [dependencies]
-kernel-api-env = { path = "env" }
+kernel-api-macros = { path = "../tools/abi-macros" }
+bitflags.workspace = true
+erra.workspace = true
+
+[dev-dependencies]
+trybuild = "1.0.122"

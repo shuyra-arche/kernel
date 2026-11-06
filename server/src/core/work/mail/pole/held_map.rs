@@ -2,7 +2,7 @@ use alloc::sync::{Arc, Weak};
 
 use crate::core::memory::nest::{Access, View};
 use crate::core::work::unit::space::Space;
-use env::{PieToken, TeamId};
+use kernel_api::{model::identity::PieToken, model::identity::TeamId};
 
 use super::relation::Relation;
 

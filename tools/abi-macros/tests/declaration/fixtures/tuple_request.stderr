@@ -1,0 +1,5 @@
+error: use named fields or a unit operation
+ --> tests/declaration/fixtures/tuple_request.rs:4:17
+  |
+4 |     pub struct A(pub usize);
+  |                 ^^^^^^^^^^^

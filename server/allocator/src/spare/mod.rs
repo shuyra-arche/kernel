@@ -2,7 +2,7 @@ use core::alloc::{AllocError, Allocator, Layout};
 use core::ptr::NonNull;
 
 use crate::{InitError, Lock, LockRole, Locked};
-use env::PAGE_SIZE;
+use kernel_api::model::memory::PAGE_SIZE;
 
 #[path = "blk.rs"]
 mod blk;

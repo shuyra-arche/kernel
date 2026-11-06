@@ -1,0 +1,5 @@
+error: only doc and derive attributes are supported on ABI declarations
+ --> tests/declaration/fixtures/conditional_request.rs:3:5
+  |
+3 |     #[cfg(any())]
+  |     ^^^^^^^^^^^^^

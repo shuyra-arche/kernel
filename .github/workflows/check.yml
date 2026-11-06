@@ -17,15 +17,14 @@ jobs:
     name: RV64 build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install CI toolchain
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rust-src,rustfmt,clippy --target riscv64gc-unknown-none-elf
       - name: Check host ABI boundaries
         run: |
-          cargo test --locked -p kernel-api-env --tests --target x86_64-unknown-linux-gnu
-          cargo test --locked -p kernel-api-env --doc --target x86_64-unknown-linux-gnu
-          cargo test --locked -p kernel-client --test calls --target x86_64-unknown-linux-gnu
-          cargo test --locked -p kernel-api-macros --test envcall_boundary --target x86_64-unknown-linux-gnu
+          cargo test --locked -p kernel-api --tests --target x86_64-unknown-linux-gnu
+          cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu
+          cargo test --locked -p kernel-api-macros --test declaration --target x86_64-unknown-linux-gnu
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --target riscv64gc-unknown-none-elf
       - name: Build workspace (release)

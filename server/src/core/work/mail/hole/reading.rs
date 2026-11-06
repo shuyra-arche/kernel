@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 
-use env::{HoleCondition, HoleFail, TaskId};
+use kernel_api::{abi::call::hole::HoleFail, model::hole::HoleCondition, model::identity::TaskId};
 
 use super::pending::Pending;
 use super::slot::Slot;

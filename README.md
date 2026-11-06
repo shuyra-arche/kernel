@@ -1,21 +1,22 @@
 # Kernel
 
-Shuyra's RV64 kernel, canonical ABI and typed client mechanisms.
+Shuyra's RV64 kernel, public contracts and typed call transport.
 
 ## Layout
 
 | Path | Responsibility |
 | --- | --- |
-| `api/` | Canonical register ABI, KernelCall contracts, concrete Kernel byte layouts and ABI macros; `kernel-api` re-exports Env |
-| `client/` | Typed calls, trap transport and reusable memory, task and TLS mechanisms |
+| `api/` | One `kernel-api` package: semantic model, call ABI and boot contracts |
+| `client/` | Typed calls and RV64 trap transport |
+| `tools/abi-macros/` | Compile-time Kernel operation and ABI generation |
 | `server/` | Kernel implementation, build script and linker script |
 | `server/allocator/` | Physical allocation mechanisms |
 | `server/sbi/` | SBI calls used by the kernel |
 | `.github/workflows/` | Compilation checks and source version releases |
 
 One root Cargo workspace and lockfile cover all packages. Client and Server
-consume the same API; Server does not depend on Client. Runtime stays in
-[Platform](https://github.com/shuyra-arche/platform). Cluster is an organizational
+consume the same API; Server does not depend on Client. Language runtime/std support belongs to the separate Toolchain workstream.
+Platform denotes hardware porting; Kernel defines no Runtime/Execution layer. Cluster is an organizational
 boundary, not a configuration file.
 
 ## Build
@@ -43,19 +44,25 @@ target on Windows). Use `cargo +nightly` in place of `cargo` below to select the
 same channel as CI:
 
 ```sh
-cargo test --locked -p kernel-api-env --tests --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-api-env --doc --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-client --test calls --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-api-macros --test envcall_boundary --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-api --tests --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu
+cargo test --locked -p kernel-api-macros --test declaration --target x86_64-unknown-linux-gnu
 ```
 
-These checks use a recording transport and never perform a native trap. Boot and system
+Tests, compile-fail fixtures, expected diagnostics and test support stay under
+each owning package's `tests/` tree, grouped by ABI, boot, call or declaration
+behavior. The production libraries remain unconditionally `no_std`; host
+integration tests use `std`. `trybuild` is a test-only dependency for public
+macro and operation type contracts. Library doctests are disabled.
+
+Host call checks exercise the public `invoke_with` boundary with a recording
+transport; they do not recompile private wrappers or perform native traps. Boot and system
 integration validation belong to [Vanllia](https://github.com/shuyra-arche/vanllia),
 which assembles the selected Units. Compilation alone does not establish guest
 execution or resource reclamation.
 
 Generic byte codecs and service-protocol macros are no longer part of Kernel.
-The [API migration notes](api/README.md#compatibility-and-validation) list removed
+The [API migration notes](api/README.md#source-migration-and-abi-compatibility) list removed
 source exports and preserved ABI layouts. Kernel has no Weave dependency.
 
 ## Versions
@@ -79,7 +86,7 @@ published release, and the workflow does not publish packages to crates.io.
 ## Source
 
 Kernel and API derive from [anreonyr/sqware](https://github.com/anreonyr/sqware)
-commit `672d8d2deafc8067c94b6af340a5f89c6a765c9c`. Client mechanisms derive from
+commit `672d8d2deafc8067c94b6af340a5f89c6a765c9c`. Historical Client mechanisms derive from
 [Execution](https://github.com/shuyra-arche/execution) commit
 `1b333a28bc4c34beaea3f7986a9bb6e8ab2db414`. SBI was imported without source changes
 from [SBI](https://github.com/shuyra-arche/sbi) commit

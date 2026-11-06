@@ -24,7 +24,7 @@ pub(crate) struct PreparedTask {
 }
 
 impl PreparedTask {
-    pub(crate) fn id(&self) -> env::TaskId {
+    pub(crate) fn id(&self) -> kernel_api::model::identity::TaskId {
         self.ident.id
     }
 

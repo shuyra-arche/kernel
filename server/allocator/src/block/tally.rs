@@ -1,6 +1,6 @@
-use crate::lock::{Lock, LockRole};
 use crate::Locked;
-use env::PAGE_SIZE;
+use crate::lock::{Lock, LockRole};
+use kernel_api::model::memory::PAGE_SIZE;
 
 use super::PAGE_SHIFT;
 use super::cell::Cell;

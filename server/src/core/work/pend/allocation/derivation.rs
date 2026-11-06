@@ -8,7 +8,7 @@ use alloc::sync::{Arc, Weak};
 
 use crate::core::memory::address::{PageCount, PageOffset};
 use crate::machine::sync::SpinLock;
-use env::PieToken;
+use kernel_api::model::identity::PieToken;
 
 use super::geometry::Geometry;
 use super::source_authorization::SourceAuthorization;

@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use env::{Permission, PieToken};
+use kernel_api::{model::identity::PieToken, model::permission::Permission};
 
 use crate::core::work::grant::Grant;
 

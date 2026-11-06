@@ -1,6 +1,6 @@
 use alloc::collections::VecDeque;
 
-use env::{HoleCondition, HoleFail};
+use kernel_api::{abi::call::hole::HoleFail, model::hole::HoleCondition};
 
 use super::queue::Queue;
 use super::slot::Slot;

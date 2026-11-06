@@ -1,6 +1,6 @@
 //! Execute Kernel operations using a selected register transport.
 
-use env::{KernelCall, TerminalCall};
+use kernel_api::abi::operation::{KernelCall, TerminalCall};
 
 /// Pack once, invoke the supplied transport once, and decode once.
 /// The callback owns its effects and safety requirements. No native trap is
@@ -20,7 +20,9 @@ pub fn invoke_with<C: KernelCall>(
 /// operation's requirements, including pointer validity and resource lifetimes.
 #[inline]
 pub unsafe fn invoke<C: KernelCall>(call: C) -> Result<C::Output, C::Error> {
-    invoke_with(call, |slot, args| unsafe { crate::ecall::trap(slot, args) })
+    invoke_with(call, |slot, args| unsafe {
+        crate::transport::trap(slot, args)
+    })
 }
 
 /// Execute a terminal call, entering a non-returning fault path if it returns.
@@ -31,7 +33,7 @@ pub unsafe fn invoke<C: KernelCall>(call: C) -> Result<C::Output, C::Error> {
 #[inline]
 pub unsafe fn invoke_terminal<C: TerminalCall>(call: C) -> ! {
     unsafe {
-        crate::ecall::trap(C::SLOT, call.pack());
+        crate::transport::trap(C::SLOT, call.pack());
     }
     // Cannot use TLS or enter the runtime's panic handler after termination.
     loop {

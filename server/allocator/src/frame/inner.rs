@@ -3,7 +3,7 @@ use core::ptr::NonNull;
 use alloc::vec::Vec;
 
 use crate::{InitError, Link, MachineFacts};
-use env::PAGE_SIZE;
+use kernel_api::model::memory::PAGE_SIZE;
 
 static STALE_RM: ::core::sync::atomic::AtomicUsize = ::core::sync::atomic::AtomicUsize::new(0);
 

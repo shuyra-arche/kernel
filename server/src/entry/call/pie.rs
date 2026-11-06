@@ -1,9 +1,13 @@
 use alloc::sync::Arc;
 
-use env::{GrantRange, Mark, PieCall, PieFail, PieInfo, PieToken, ReleaseMode, TaskId, VirtAddr};
+use kernel_api::{
+    abi::call::pie::PieCall, abi::call::pie::PieFail, model::identity::Mark,
+    model::identity::PieToken, model::identity::TaskId, model::identity::VirtAddr,
+    model::pie::GrantRange, model::pie::PieInfo, model::pie::ReleaseMode,
+};
 
-use crate::core::memory::address::{PageCount, PageOffset};
 use crate::core::memory::address::VirtAddr as KVirt;
+use crate::core::memory::address::{PageCount, PageOffset};
 use crate::core::memory::nest::Access;
 use crate::core::work::pend::{self, Permission, PieSnapshot};
 use crate::core::work::room::conductor::current;

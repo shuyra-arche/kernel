@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use env::{TaskExit, TaskId};
+use kernel_api::{model::identity::TaskId, model::unit::TaskExit};
 
 use crate::core::work::unit::life::{Life, TeamLife};
 use crate::core::work::unit::task::{TaskState, TaskWeak};

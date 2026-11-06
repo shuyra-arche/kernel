@@ -2,7 +2,7 @@ use core::alloc::{AllocError, Layout};
 use core::ptr::NonNull;
 
 use crate::Lock;
-use env::PAGE_SIZE;
+use kernel_api::model::memory::PAGE_SIZE;
 
 use super::cell::Cell;
 use super::pool::Pool;
@@ -53,9 +53,7 @@ impl<L: Lock + 'static> BlockInner<L> {
         power: usize,
     ) -> Result<NonNull<u8>, AllocError> {
         let layout = Layout::from_size_align(PAGE_SIZE, PAGE_SIZE).unwrap();
-        let page = effect
-            .allocate_prime(layout)
-            .map_err(|_| AllocError)?;
+        let page = effect.allocate_prime(layout).map_err(|_| AllocError)?;
         effect.record_pool_take();
         let base = page.as_ptr() as *mut u8 as usize;
 
@@ -84,13 +82,7 @@ impl<L: Lock + 'static> BlockInner<L> {
         }
     }
 
-    fn drain(
-        &self,
-        effect: &impl super::Effect,
-        inner: &mut Pool,
-        power: usize,
-        page: usize,
-    ) {
+    fn drain(&self, effect: &impl super::Effect, inner: &mut Pool, power: usize, page: usize) {
         let mut keep: Option<NonNull<u8>> = None;
         let mut head = inner.freepool[power];
         let mut n = 0usize;

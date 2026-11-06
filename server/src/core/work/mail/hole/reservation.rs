@@ -4,7 +4,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::machine::clock;
 
-use env::{HoleCondition, HoleFail, TaskId};
+use kernel_api::{abi::call::hole::HoleFail, model::hole::HoleCondition, model::identity::TaskId};
 
 use super::hand::Hand;
 use super::pending::Pending;

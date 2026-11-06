@@ -1,16 +1,21 @@
-// Client-owned signatures. ABI values and codecs remain in env.
+// Client-owned signatures. ABI values and codecs remain in kernel_api.
 typed_calls! {
-    chrono {
+    chrono [] {
         infallible fn ticks() -> usize =
             op::Ticks;
         infallible fn clock() -> u64 =
             op::Clock;
     }
-    control {
+    control [
+        abi::call::control::ControlFail,
+    ] {
         fallible fn backtrace(buf: usize, frames: usize) -> Result<usize, erra::Error<ControlFail>> =
             op::Backtrace { buf, frames };
     }
-    debug {
+    debug [
+        abi::call::debug::DebugFail,
+        model::identity::VirtAddr,
+    ] {
         fallible fn put(buf: VirtAddr, len: usize) -> Result<usize, erra::Error<DebugFail>> =
             op::Put { buf, len };
         fallible fn get(buf: VirtAddr, len: usize) -> Result<usize, erra::Error<DebugFail>> =
@@ -18,7 +23,18 @@ typed_calls! {
         infallible fn set_trace(on: usize) -> () =
             op::SetTrace { on };
     }
-    hole {
+    hole [
+        model::hole::HoleCondition,
+        abi::call::hole::HoleFail,
+        model::hole::HoleLimits,
+        model::identity::Mark,
+        model::hole::Oversize,
+        model::identity::PieToken,
+        model::hole::PullOutcome,
+        model::identity::TaskId,
+        model::identity::VirtAddr,
+        model::wait::Wait,
+    ] {
         fallible fn unseal(mark: Mark, limits: HoleLimits) -> Result<PieToken, erra::Error<HoleFail>> =
             op::Unseal { mark, limits };
         fallible fn seal(token: PieToken) -> Result<(), erra::Error<HoleFail>> =
@@ -36,7 +52,17 @@ typed_calls! {
         fallible fn hush(token: PieToken) -> Result<(), erra::Error<HoleFail>> =
             op::Hush { token };
     }
-    memory {
+    memory [
+        model::memory::AcquireSource,
+        model::memory::FlatReference,
+        abi::call::memory::MemoryFail,
+        model::identity::PieToken,
+        model::identity::TeamId,
+        model::memory::ViewControl,
+        model::memory::ViewId,
+        model::memory::ViewSelection,
+        model::identity::VirtAddr,
+    ] {
         fallible fn acquire(source: AcquireSource, retention: PieToken) -> Result<FlatReference, erra::Error<MemoryFail>> =
             op::Acquire { source, retention };
         fallible fn release(reference: FlatReference) -> Result<(), erra::Error<MemoryFail>> =
@@ -52,7 +78,11 @@ typed_calls! {
         fallible fn transfer(from: FlatReference, from_page: usize, to: FlatReference, to_page: usize) -> Result<(), erra::Error<MemoryFail>> =
             op::Transfer { from, from_page, to, to_page };
     }
-    nole {
+    nole [
+        abi::call::nole::NoleFail,
+        model::identity::PieToken,
+        model::wait::Wait,
+    ] {
         fallible fn unseal() -> Result<PieToken, erra::Error<NoleFail>> =
             op::Unseal;
         fallible fn seal(token: PieToken) -> Result<(), erra::Error<NoleFail>> =
@@ -64,7 +94,16 @@ typed_calls! {
         fallible fn hush(token: PieToken) -> Result<(), erra::Error<NoleFail>> =
             op::Hush { token };
     }
-    pie {
+    pie [
+        model::pie::GrantRange,
+        model::identity::Mark,
+        model::permission::Permission,
+        abi::call::pie::PieFail,
+        model::identity::PieToken,
+        model::pie::ReleaseMode,
+        model::identity::TaskId,
+        model::identity::VirtAddr,
+    ] {
         fallible fn accord(src: PieToken, dst: TaskId, subset: Permission, mark: Mark) -> Result<PieToken, erra::Error<PieFail>> =
             op::Accord { src, dst, subset, mark };
         fallible fn narrow(token: PieToken, subset: Permission) -> Result<(), erra::Error<PieFail>> =
@@ -82,7 +121,15 @@ typed_calls! {
         fallible fn derive(src: PieToken, subset: Permission, mark: Mark, range: GrantRange) -> Result<PieToken, erra::Error<PieFail>> =
             op::Derive { src, subset, mark, range };
     }
-    pole {
+    pole [
+        model::pole::Bit,
+        model::memory::FlatReference,
+        model::identity::PieToken,
+        model::pole::PoleCondition,
+        abi::call::pole::PoleFail,
+        model::identity::VirtAddr,
+        model::wait::Wait,
+    ] {
         fallible fn unseal(reference: FlatReference, shared: bool) -> Result<PieToken, erra::Error<PoleFail>> =
             op::Unseal { reference, shared };
         fallible fn seal(token: PieToken) -> Result<(), erra::Error<PoleFail>> =
@@ -98,7 +145,15 @@ typed_calls! {
         fallible fn hush(token: PieToken, bit: Bit) -> Result<(), erra::Error<PoleFail>> =
             op::Hush { token, bit };
     }
-    room {
+    room [
+        model::exit::Reason,
+        model::identity::VirtAddr,
+        abi::call::room::RoomFail,
+        model::identity::TaskId,
+        model::wait::Wait,
+    ] {
+        terminal fn reap(reason: Reason, note: VirtAddr, len: usize) -> ! =
+            op::Reap { reason, note, len };
         infallible fn starve() -> () =
             op::Starve;
         fallible fn park(millis: usize) -> Result<(), erra::Error<RoomFail>> =
@@ -112,7 +167,13 @@ typed_calls! {
         fallible fn park_until(at: u64) -> Result<(), erra::Error<RoomFail>> =
             op::ParkUntil { at };
     }
-    tole {
+    tole [
+        model::identity::PieToken,
+        abi::reply::ToleAwaitReply,
+        model::tole::ToleEventSource,
+        abi::call::tole::ToleFail,
+        model::wait::Wait,
+    ] {
         fallible fn unseal(shared: bool) -> Result<PieToken, erra::Error<ToleFail>> =
             op::Unseal { shared };
         fallible fn seal(token: PieToken) -> Result<(), erra::Error<ToleFail>> =
@@ -124,7 +185,17 @@ typed_calls! {
         fallible fn await_(tole: PieToken, millis: Wait) -> Result<ToleAwaitReply, erra::Error<ToleFail>> =
             op::Await { tole, millis };
     }
-    unit {
+    unit [
+        model::unit::JoinReply,
+        model::identity::PieToken,
+        model::unit::ProgramKind,
+        model::identity::TaskId,
+        model::identity::TeamId,
+        abi::call::unit::UnitFail,
+        model::unit::UnitTarget,
+        model::identity::VirtAddr,
+        model::wait::Wait,
+    ] {
         fallible fn build(kind: ProgramKind, sire: TaskId) -> Result<TeamId, erra::Error<UnitFail>> =
             op::Build { kind, sire };
         fallible fn spawn(team: TeamId, entry: usize, args: VirtAddr, count: usize, stack: usize) -> Result<TaskId, erra::Error<UnitFail>> =

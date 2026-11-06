@@ -1,4 +1,7 @@
-use env::{Bit, HoleCondition, PieKind, TaskId, TeamId};
+use kernel_api::{
+    model::hole::HoleCondition, model::identity::TaskId, model::identity::TeamId,
+    model::pie::PieKind, model::pole::Bit,
+};
 
 use crate::core::memory::nest::Asid;
 

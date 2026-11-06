@@ -1,5 +1,8 @@
 use alloc::sync::Arc;
-use env::{NoleCall, NoleFail, PieFail, PieKind, PieToken, Wait};
+use kernel_api::{
+    abi::call::nole::NoleCall, abi::call::nole::NoleFail, abi::call::pie::PieFail,
+    model::identity::PieToken, model::pie::PieKind, model::wait::Wait,
+};
 
 use riscv::register::sie;
 
@@ -81,7 +84,7 @@ pub(crate) fn create() -> Result<usize, PieFail> {
     let meta = mail::nole::NoleMeta::try_new(task.ident.id).map_err(|_| PieFail::OoM)?;
     let pie = pend::Pie::try_new(
         Mail::Nole(meta),
-        env::Mark::NONE,
+        kernel_api::model::identity::Mark::NONE,
         Permission::FETCH | Permission::STORE | Permission::VEST,
         None,
     )?;

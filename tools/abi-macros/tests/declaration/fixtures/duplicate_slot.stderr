@@ -1,0 +1,5 @@
+error: duplicate call slot
+ --> tests/declaration/fixtures/duplicate_slot.rs:6:16
+  |
+6 |     pub struct B;
+  |                ^
