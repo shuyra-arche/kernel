@@ -1,0 +1,17 @@
+[package]
+name = "kernel-client"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+resolver = "3"
+
+[lib]
+test = false
+bench = false
+
+[dependencies]
+env = { package = "kernel-api-env", path = "../api/env" }
+erra = { version = "0.2.0", default-features = false }
+talc = { version = "=5.1.1", default-features = false }
+spinning_top = { version = "=0.3.0", default-features = false }

@@ -1,7 +1,7 @@
 //! 编码、通信接口与环境调用的过程宏。
 //!
 //! 本 crate 从 `mold` 的 codec/contract 机制迁移而来，但**不包含** `entry`：
-//! 入口汇编属于 kernel-rt 的独立范围，且会引入 `execution` 依赖。
+//! 入口汇编属于 Platform Runtime 的独立范围。
 //! 旧 `mold` 仍是 baseline；这里不导出、不展开任何 `execution::boot::entry` 路径。
 
 mod codes;
@@ -34,7 +34,7 @@ pub fn derive_frame(input: TokenStream) -> TokenStream {
 }
 
 /// **环境调用枚举**：给一枚带载荷的调用枚举生成 `slot` / `pack` / `from_wire` ＋ `Ret` 枚举
-/// ＋ `call` ＋ **每格一个精确签名的入口**（属性：类级 `#[call(class = N, fail = XxxFail)]`，
+/// ＋纯 `decode_return` ＋ Client 使用的 typed function 生成宏（属性：类级 `#[call(class = N, fail = XxxFail)]`，
 /// 变体级 `#[ret(T)]` / `#[ret3(T)]` / `#[infallible]` / `#[manual]`）。
 ///
 /// 详见 [`envcall`]。

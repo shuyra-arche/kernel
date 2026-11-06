@@ -1,4 +1,5 @@
 /target
+**/target/
 /trace/
 /sqware-diagnose.jsonl
 tests/*/target/

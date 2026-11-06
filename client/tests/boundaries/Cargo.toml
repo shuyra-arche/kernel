@@ -1,0 +1,39 @@
+[package]
+name = "kernel-client-boundary-probes"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+renamed_api = { package = "kernel-api-env", path = "../../../api/env" }
+kernel-client = { path = "../.." }
+
+[features]
+forbidden = []
+
+[[bin]]
+name = "api-trap"
+path = "api_trap.rs"
+required-features = ["forbidden"]
+
+[[bin]]
+name = "api-call"
+path = "api_call.rs"
+required-features = ["forbidden"]
+
+[[bin]]
+name = "tls-send"
+path = "tls_send.rs"
+required-features = ["forbidden"]
+
+[[bin]]
+name = "tls-copy"
+path = "tls_copy.rs"
+required-features = ["forbidden"]
+
+[[bin]]
+name = "tls-sync"
+path = "tls_sync.rs"
+required-features = ["forbidden"]
