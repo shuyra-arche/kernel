@@ -1,5 +1,5 @@
 #![no_std]
-//! Isolated `kernel-api` umbrella.
+//! `kernel-api` umbrella in the shared workspace.
 //!
 //! The canonical definitions now live in the owned packages under `env/` and
 //! `wire/`. This crate only re-exports those two packages; it defines no ABI,

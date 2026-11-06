@@ -1,9 +1,1 @@
-/target
-**/target/
-/trace/
-/sqware-diagnose.jsonl
-tests/*/target/
-__pycache__/
-
-# Owned host test locks are part of the provider snapshot.
-!tests/*/Cargo.lock
+/target/

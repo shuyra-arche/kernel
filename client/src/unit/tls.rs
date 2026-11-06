@@ -374,37 +374,10 @@ unsafe fn install(address: usize) {
 
 #[cfg(not(target_arch = "riscv64"))]
 fn base() -> usize {
-    #[cfg(test)]
-    {
-        TEST_TP.load(Ordering::Relaxed)
-    }
-    #[cfg(not(test))]
-    {
-        0
-    }
+    0
 }
 
 #[cfg(not(target_arch = "riscv64"))]
 unsafe fn install(_address: usize) {
-    #[cfg(test)]
-    TEST_TP.store(_address, Ordering::Relaxed);
-    #[cfg(not(test))]
     unimplemented!("TLS installation requires riscv64");
-}
-
-#[cfg(all(test, not(target_arch = "riscv64")))]
-static TEST_TP: AtomicUsize = AtomicUsize::new(0);
-
-#[cfg(test)]
-pub(crate) fn test_state() -> (usize, usize, usize, usize) {
-    (
-        BLOCKS
-            .lock()
-            .iter()
-            .filter(|slot| !matches!(slot, Slot::Free))
-            .count(),
-        OWED.load(Ordering::Acquire),
-        PENDING.load(Ordering::Acquire),
-        base(),
-    )
 }

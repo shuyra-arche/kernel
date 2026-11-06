@@ -1,0 +1,25 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: RV64 build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain
+      - name: Build workspace (debug)
+        run: cargo build --locked --workspace --target riscv64gc-unknown-none-elf
+      - name: Build workspace (release)
+        run: cargo build --locked --workspace --release --target riscv64gc-unknown-none-elf
+      - name: Build optional crash reporting
+        run: cargo build --locked -p kernel --all-features --target riscv64gc-unknown-none-elf
