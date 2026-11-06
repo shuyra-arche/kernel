@@ -166,3 +166,59 @@ fn operations_return_their_own_types_without_a_domain_result_enum() {
         invoke_with(Clock, |_, _| (usize::MAX, 0, 0));
     assert_eq!(clock, Ok(u64::MAX));
 }
+
+#[test]
+fn conditional_waits_encode_address_value_deadline_and_wake_scope() {
+    use kernel_api::abi::call::{
+        EnvCall,
+        room::{RoomCall, RoomFail, operations},
+    };
+    use kernel_api::model::identity::VirtAddr;
+    reply((1, 0, 0));
+    assert!(
+        invoke(operations::WaitValue {
+            address: VirtAddr::new(0x4000),
+            expected: u32::MAX,
+            millis: Wait::Forever,
+        })
+        .unwrap()
+    );
+    called(7, [0x4000, u32::MAX as usize, usize::MAX, 0, 0, 0]);
+    assert!(
+        matches!(EnvCall::from_wire(7, &[0x4000, 42, 0, 0, 0, 0]).unwrap(),
+        EnvCall::Room(RoomCall::WaitValue { address, expected: 42, millis: Wait::AtMost(0) })
+            if address == VirtAddr::new(0x4000))
+    );
+    assert!(EnvCall::from_wire(7, &[0x4000, (u32::MAX as usize) + 1, 0, 0, 0, 0]).is_err());
+    assert!(EnvCall::from_wire(8, &[0x4000, 2, 0, 0, 0, 0]).is_err());
+    reply((0, 0, 0));
+    assert!(
+        !invoke(operations::WaitValue {
+            address: VirtAddr::new(0x4000),
+            expected: 42,
+            millis: Wait::POLL,
+        })
+        .unwrap()
+    );
+    reply((3, 0, 0));
+    assert_eq!(
+        invoke(operations::WakeValue {
+            address: VirtAddr::new(0x4000),
+            all: true
+        })
+        .unwrap(),
+        3
+    );
+    called(8, [0x4000, 1, 0, 0, 0, 0]);
+    reply(((-5isize) as usize, 0, 0));
+    assert_eq!(
+        invoke(operations::WaitValue {
+            address: VirtAddr::new(1),
+            expected: 0,
+            millis: Wait::POLL,
+        })
+        .unwrap_err()
+        .source,
+        RoomFail::Invalid
+    );
+}

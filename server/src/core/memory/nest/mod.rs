@@ -1303,6 +1303,41 @@ impl Nest {
         self.access_range(start, size, need, None)
     }
 
+    /// 提交边界内的纯原子读；不能在这里推进 shootdown 或物化。
+    pub(crate) fn load_u32(&self, address: VirtAddr) -> Result<u32, NestError> {
+        use core::sync::atomic::{AtomicU32, Ordering};
+        let at = address.as_usize();
+        if at % core::mem::align_of::<AtomicU32>() != 0 {
+            return Err(NestError::NotAligned);
+        }
+        let state = self.state.lock();
+        if !state.invalidation.is_clean() {
+            return Err(NestError::Busy);
+        }
+        if state.phase.is_closed() {
+            return Err(NestError::NoRegion);
+        }
+        let view = state.index.find(at).ok_or(NestError::NoRegion)?;
+        let inner = view.state.lock();
+        let range = inner.range_at(at).ok_or(NestError::NoRegion)?;
+        let page = address.page_align();
+        let offset = PageOffset::new(view.page_index(page));
+        if !inner.source.can_materialize(offset)? {
+            return Err(NestError::Busy);
+        }
+        let (physical, flags) = state.root.walk_ref_geometry(page, self.geometry)?;
+        if !range.current.contains(Access::READ)
+            || !flags.contains(PteFlags::R | PteFlags::V)
+            || flags.contains(PteFlags::G)
+            || (!self.kind.is_supervisor() && !flags.contains(PteFlags::U))
+        {
+            return Err(NestError::NoRegion);
+        }
+        // Nest and View guards keep this resident frame mapped during the read.
+        let ptr = (physical.as_usize() + (at & (PAGE_SIZE - 1))) as *mut u32;
+        Ok(unsafe { AtomicU32::from_ptr(ptr) }.load(Ordering::Relaxed))
+    }
+
     pub(crate) fn copy_from(&self, start: VirtAddr, dst: &mut [u8], need: Access) -> bool {
         self.access_range(start, dst.len(), need, Some((dst.as_mut_ptr(), false)))
     }

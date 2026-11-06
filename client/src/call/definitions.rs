@@ -162,6 +162,10 @@ typed_calls! {
             op::Wait { key, millis };
         infallible fn wake(key: usize) -> bool =
             op::Wake { key };
+        fallible fn wait_value(address: VirtAddr, expected: u32, millis: Wait) -> Result<bool, erra::Error<RoomFail>> =
+            op::WaitValue { address, expected, millis };
+        fallible fn wake_value(address: VirtAddr, all: bool) -> Result<usize, erra::Error<RoomFail>> =
+            op::WakeValue { address, all };
         fallible fn doom(task: TaskId) -> Result<(), erra::Error<RoomFail>> =
             op::Doom { task };
         fallible fn park_until(at: u64) -> Result<(), erra::Error<RoomFail>> =

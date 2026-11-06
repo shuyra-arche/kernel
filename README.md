@@ -97,3 +97,10 @@ from [SBI](https://github.com/shuyra-arche/sbi) commit
 Original author identities and migration records remain in Git history. The
 source checkpoints contained no license grant; this repository adds none.
 Preserve third-party notices with their code.
+
+Room conditional waits (`WaitValue` / `WakeValue`) compare a resident, naturally
+aligned atomic `u32` and enqueue under the same commit lock as wake. Queues are
+private to an address space; wake removes one or all current waiters and never
+stores a notification. Timeout, task death and space retirement use the existing
+wait-ticket cleanup. Callers keep the object and mapping alive and recheck their
+condition after a successful wait. Concurrent mapping transactions report `Busy`.
