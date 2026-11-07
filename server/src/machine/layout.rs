@@ -1,5 +1,5 @@
-use crate::core::memory::PAGE_SIZE;
-use crate::core::memory::address::{PhysAddr, VirtAddr};
+use crate::basis::memory::PAGE_SIZE;
+use crate::basis::memory::address::{PhysAddr, VirtAddr};
 #[cfg(debug_assertions)]
 use crate::machine::mode;
 

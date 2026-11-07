@@ -9,11 +9,11 @@ use kernel_api::{
 
 use super::gate;
 use super::outcome::{Outcome, answer, answer_pair};
-use crate::core::memory::nest::Access;
-use crate::core::work::pend::{self, Modifiable, Need};
-use crate::core::work::room::conductor::current;
-use crate::core::work::unit::task::TaskIdent;
-use crate::core::work::view::{self, View};
+use crate::basis::memory::nest::Access;
+use crate::basis::work::pend::{self, Modifiable, Need};
+use crate::basis::work::room::conductor::current;
+use crate::basis::work::unit::task::TaskIdent;
+use crate::basis::work::view::{self, View};
 use crate::machine::switcher::context::TrapContext;
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: ShareCall, ident: Arc<TaskIdent>) -> Outcome {
@@ -56,7 +56,7 @@ fn subset_to_access(subset: Modifiable) -> Result<Access, PendFail> {
 }
 
 pub(crate) fn create_share(
-    task: &Arc<crate::core::work::unit::task::Task>,
+    task: &Arc<crate::basis::work::unit::task::Task>,
     reference: FlatReference,
     requested: Modifiable,
 ) -> Result<PendId, PendFail> {
@@ -123,7 +123,7 @@ pub(crate) fn create_share(
             .try_reserve(1)
             .map_err(|_| PendFail::OoM)?;
 
-        let _commit = crate::core::work::commit();
+        let _commit = crate::basis::work::commit();
         let _publication = authorization.begin_withdraw()?;
         if !pend::live(task) || !authorization.private_owner(task.ident.id) {
             return Err(PendFail::Denied);

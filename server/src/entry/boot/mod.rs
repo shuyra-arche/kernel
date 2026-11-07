@@ -17,15 +17,15 @@ use alloc::sync::Arc;
 
 use riscv::register::satp;
 
-use crate::core::memory::PAGE_SIZE;
-use crate::core::memory::address::{PhysAddr, VirtAddr};
-use crate::core::memory::flat::{BorrowedRegion, Flat, FlatRange};
-use crate::core::memory::nest::table::PteFlags;
-use crate::core::memory::nest::{
+use crate::basis::memory::PAGE_SIZE;
+use crate::basis::memory::address::{PhysAddr, VirtAddr};
+use crate::basis::memory::flat::{BorrowedRegion, Flat, FlatRange};
+use crate::basis::memory::nest::table::PteFlags;
+use crate::basis::memory::nest::{
     Access, ActiveRange, Nest, NestError, Placement, RegionId, identity,
 };
-use crate::core::work::room::{conductor, scheduler};
-use crate::core::work::unit::team::kernel;
+use crate::basis::work::room::{conductor, scheduler};
+use crate::basis::work::unit::team::kernel;
 use crate::machine::board;
 use crate::machine::hart::{self, HartId};
 use crate::machine::image::{ROOT_STACK_CANARY, root_stack_base};
@@ -56,10 +56,10 @@ pub fn start() -> Result<(), BootError> {
     register_runtime_hooks();
 
     if let Some(entry) = spawn_entry()? {
-        crate::core::work::room::halt::beacon::arm(&entry);
+        crate::basis::work::room::halt::beacon::arm(&entry);
     }
 
-    crate::core::work::unit::tally::rooted();
+    crate::basis::work::unit::tally::rooted();
 
     boot_harts()?;
 
@@ -76,24 +76,24 @@ pub fn run() -> ! {
 }
 
 pub(crate) fn register_runtime_hooks() {
-    use crate::core::work::room::halt;
+    use crate::basis::work::room::halt;
 
-    static EXIT_HOOKS: &[fn(&alloc::sync::Arc<crate::core::work::unit::task::Task>)] = &[
-        crate::core::work::unit::lifecycle::doom,
-        crate::core::work::pend::doom,
+    static EXIT_HOOKS: &[fn(&alloc::sync::Arc<crate::basis::work::unit::task::Task>)] = &[
+        crate::basis::work::unit::lifecycle::doom,
+        crate::basis::work::pend::doom,
     ];
-    crate::core::work::unit::lifecycle::hook(EXIT_HOOKS);
+    crate::basis::work::unit::lifecycle::hook(EXIT_HOOKS);
 
     const SHUTDOWN_HOOKS: &[fn()] = &[
         crate::entry::boot::iommu::shutdown,
         crate::entry::report::shutdown::report,
-        crate::core::work::room::scheduler::rip,
-        crate::core::memory::flat::allocator::block::flush,
+        crate::basis::work::room::scheduler::rip,
+        crate::basis::memory::flat::allocator::block::flush,
     ];
     halt::hook(SHUTDOWN_HOOKS, crate::entry::report::shutdown::waiting);
 }
 
-fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::core::work::unit::task::Task>>, BootError>
+fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::work::unit::task::Task>>, BootError>
 {
     let Some(region) = board::info().initrd() else {
         return Ok(None);
@@ -105,7 +105,7 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::core::work::unit::task
             base: region.base,
             size: region.size,
         })?;
-    let team = crate::core::work::unit::capsule::assemble(capsule).map_err(|source| {
+    let team = crate::basis::work::unit::capsule::assemble(capsule).map_err(|source| {
         BootError::Mapping {
             operation: MapOperation::AssembleCapsule,
             source,
@@ -212,7 +212,7 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::core::work::unit::task
             source,
         }
     })?;
-    crate::core::work::unit::task::Task::release(&bootstrap).map_err(|source| {
+    crate::basis::work::unit::task::Task::release(&bootstrap).map_err(|source| {
         BootError::BootstrapRelease {
             task: bootstrap.ident.id,
             source,
@@ -305,6 +305,6 @@ pub(crate) extern "C" fn boot_main() -> ! {
         ::core::arch::asm!("sfence.vma", "fence.i");
     }
     arm_hart();
-    identity::occupy(crate::core::memory::nest::Asid::kernel());
+    identity::occupy(crate::basis::memory::nest::Asid::kernel());
     run()
 }

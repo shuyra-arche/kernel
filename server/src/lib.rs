@@ -3,6 +3,6 @@
 
 extern crate alloc;
 
-mod core;
+mod basis;
 pub mod entry;
 mod machine;

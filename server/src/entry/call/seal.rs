@@ -5,9 +5,9 @@
 
 use kernel_api::{abi::call::pend::PendFail, model::identity::PendId, model::view::ViewKind};
 
-use crate::core::work::pend;
-use crate::core::work::room::conductor::current;
-use crate::core::work::view::share_view::ShareOperation;
+use crate::basis::work::pend;
+use crate::basis::work::room::conductor::current;
+use crate::basis::work::view::share_view::ShareOperation;
 
 /// 失活资源并关闭其关系；派生子图或在途发表未结时保留补关身份。
 ///
@@ -31,7 +31,7 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         if !pend.alive()
             && !share_view
                 .as_ref()
-                .is_some_and(|meta| crate::core::work::view::share_view::pending_close(meta))
+                .is_some_and(|meta| crate::basis::work::view::share_view::pending_close(meta))
         {
             return Err(PendFail::Dead);
         }
@@ -48,12 +48,12 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         } else {
             None
         };
-        let _commit = crate::core::work::commit();
+        let _commit = crate::basis::work::commit();
         pend.view().seal();
         (share_view, operation)
     };
     if let Some(share_view) = share_view {
-        crate::core::work::view::share_view::close(&share_view)?;
+        crate::basis::work::view::share_view::close(&share_view)?;
     }
     Ok(0)
 }

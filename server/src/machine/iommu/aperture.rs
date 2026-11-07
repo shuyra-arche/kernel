@@ -3,7 +3,7 @@
 //! configuration and IOMMU admission remain here.
 pub(crate) use super::config::Ecam;
 use super::{config, controllers::CONTROLLERS, pci::Endpoint, retirement};
-use crate::core::memory::{
+use crate::basis::memory::{
     cell::Owner as CellOwner,
     flat::{FlatRange, allocator::frame},
     nest::iommu::{

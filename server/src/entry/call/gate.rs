@@ -7,8 +7,8 @@
 
 use kernel_api::{abi::call::pend::PendFail, model::identity::PendId};
 
-use crate::core::work::pend::{self, Need, PendSnapshot};
-use crate::core::work::room::conductor::current;
+use crate::basis::work::pend::{self, Need, PendSnapshot};
+use crate::basis::work::room::conductor::current;
 
 pub(super) fn accede(token: PendId, need: Need) -> Result<PendSnapshot, PendFail> {
     let task = current().running_task().ok_or(PendFail::Denied)?;

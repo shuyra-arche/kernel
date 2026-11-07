@@ -10,10 +10,10 @@ mod region;
 mod reserved;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
-#[path = "../../src/core/memory/nest/iommu/riscv/topology/mod.rs"]
+#[path = "../../src/basis/memory/nest/iommu/riscv/topology/mod.rs"]
 pub(crate) mod topology;
 
-mod core {
+mod basis {
     pub(crate) mod memory {
         pub const PAGE_SIZE: usize = 4096;
         pub(crate) mod nest {

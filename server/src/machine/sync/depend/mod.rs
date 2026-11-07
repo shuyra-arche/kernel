@@ -39,8 +39,8 @@ use held_set::HeldSet;
 
 #[cfg(debug_assertions)]
 pub(crate) fn report(what: &'static str, lock: usize, caller: usize) -> ! {
-    crate::core::memory::flat::allocator::portal::switch(
-        crate::core::memory::flat::allocator::portal::Backend::Spare,
+    crate::basis::memory::flat::allocator::portal::switch(
+        crate::basis::memory::flat::allocator::portal::Backend::Spare,
     );
     let held = held().expect("depend: report outside collected set");
     let mut msg = format!("[depend] {what}: {lock:#x} ({lock:#x})",);

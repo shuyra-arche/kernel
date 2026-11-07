@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use kernel_api::{abi::call::pend::PendFail, boot::ledger::Name};
 
-use crate::core::work::pend::PendEntry;
+use crate::basis::work::pend::PendEntry;
 
 use super::{Failure, FreezeError, Frozen, RegisterError, valid};
 

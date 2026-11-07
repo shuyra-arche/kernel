@@ -1,11 +1,11 @@
 use riscv::register::satp;
 
-use crate::core::memory::PAGE_SHIFT;
+use crate::basis::memory::PAGE_SHIFT;
 use crate::machine::image;
 use crate::machine::sync::OnceLock;
 
-use crate::core::memory::address::VirtAddr;
-use crate::core::memory::nest::table::{PteFlags, TableNode};
+use crate::basis::memory::address::VirtAddr;
+use crate::basis::memory::nest::table::{PteFlags, TableNode};
 
 mod error;
 mod geometry;
@@ -52,14 +52,14 @@ fn try_mode(candidate: satp::Mode) -> Result<(), SatpError> {
         static _kernel_base: u8;
     }
     let range = ((&raw const _kernel_base).addr(), image::root_stack_edge());
-    let mut va = range.0 & !(crate::core::memory::PAGE_SIZE - 1);
+    let mut va = range.0 & !(crate::basis::memory::PAGE_SIZE - 1);
     while va < range.1 {
         let ppn = (va >> PAGE_SHIFT) as u64;
         let leaf = root
             .walk_mut(VirtAddr::wrap(va), true, geo.levels as usize)
             .map_err(|_| SatpError::OutOfMemory)?;
         leaf.set(ppn, PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::X);
-        va += crate::core::memory::PAGE_SIZE;
+        va += crate::basis::memory::PAGE_SIZE;
     }
     let ppn = root.ppn();
     unsafe {

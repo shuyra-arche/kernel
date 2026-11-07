@@ -1,4 +1,4 @@
-use crate::core::work::{room::interrupt, unit::task::Task};
+use crate::basis::work::{room::interrupt, unit::task::Task};
 use kernel_api::{
     abi::call::pend::PendFail,
     boot::ledger::ResourceKind,
@@ -7,7 +7,7 @@ use kernel_api::{
 };
 pub(crate) const ENTRIES: usize = 1;
 pub(crate) fn authority(target: &Task) -> Result<Entry, PendFail> {
-    let _commit = crate::core::work::commit();
+    let _commit = crate::basis::work::commit();
     let id = target
         .signs
         .install(

@@ -5,9 +5,9 @@ mod reserved;
 
 pub(crate) use reserved::discover as iommu_regions;
 
-use crate::core::memory::nest::Access;
-use crate::core::work::pend::{self, Modifiable, SourceAuthorization};
-use crate::core::work::view::{self, View};
+use crate::basis::memory::nest::Access;
+use crate::basis::work::pend::{self, Modifiable, SourceAuthorization};
+use crate::basis::work::view::{self, View};
 use crate::entry::boot::resources::Registry;
 use crate::machine::board;
 use kernel_api::{

@@ -1,6 +1,6 @@
-use crate::core::work::pend;
-use crate::core::work::room::interrupt;
-use crate::core::work::view::View;
+use crate::basis::work::pend;
+use crate::basis::work::room::interrupt;
+use crate::basis::work::view::View;
 use crate::entry::boot::resources::Registry;
 use kernel_api::{
     abi::call::pend::PendFail, boot::ledger::Name, boot::ledger::Trap, model::identity::Mark,

@@ -3,16 +3,16 @@ use alloc::vec::Vec;
 
 use kernel_api::{abi::call::unit::UnitCall, abi::call::unit::UnitFail, model::unit::UnitTarget};
 
-use crate::core::memory::address::VirtAddr as KVirt;
-use crate::core::memory::nest::{NestError, SpaceKind};
-use crate::core::work::room::Handoff;
-use crate::core::work::room::scheduler::roster::muster;
-use crate::core::work::sign::{self};
-use crate::core::work::unit::copies::Origin;
-use crate::core::work::unit::join::JoinWait;
-use crate::core::work::unit::life::TaskLife;
-use crate::core::work::unit::space::Space;
-use crate::core::work::unit::task::{MAX_ARGS, Task, TaskIdent, TaskWeak};
+use crate::basis::memory::address::VirtAddr as KVirt;
+use crate::basis::memory::nest::{NestError, SpaceKind};
+use crate::basis::work::room::Handoff;
+use crate::basis::work::room::scheduler::roster::muster;
+use crate::basis::work::sign::{self};
+use crate::basis::work::unit::copies::Origin;
+use crate::basis::work::unit::join::JoinWait;
+use crate::basis::work::unit::life::TaskLife;
+use crate::basis::work::unit::space::Space;
+use crate::basis::work::unit::task::{MAX_ARGS, Task, TaskIdent, TaskWeak};
 use crate::machine::switcher::context::{Gprs, TrapContext};
 
 use super::outcome::Outcome;
@@ -69,10 +69,10 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
         }
         UnitCall::Return { value } => {
             {
-                let _commit = crate::core::work::commit();
+                let _commit = crate::basis::work::commit();
                 let mut state = me.state.lock();
                 if !state.is_dead() {
-                    state.doom(None, crate::core::work::unit::task::TaskExitCause::Reap, 0);
+                    state.doom(None, crate::basis::work::unit::task::TaskExitCause::Reap, 0);
                     drop(state);
                     let member = me
                         .ident
@@ -83,17 +83,18 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                     *member.result.lock() = Some(value);
                 }
             }
-            crate::core::work::unit::lifecycle::set_exit_note(0, 0);
-            crate::core::work::unit::lifecycle::set_exit_reason(0);
+            crate::basis::work::unit::lifecycle::set_exit_note(0, 0);
+            crate::basis::work::unit::lifecycle::set_exit_reason(0);
             drop(me);
             drop(ident);
             return Outcome::Exit;
         }
         UnitCall::ReadResult { task } => {
             let result = (|| {
-                let _commit = crate::core::work::commit();
-                let selected = crate::core::work::unit::join::observe(&me, UnitTarget::Task(task))?;
-                let crate::core::work::unit::join::JoinTarget::Task(member) = selected else {
+                let _commit = crate::basis::work::commit();
+                let selected =
+                    crate::basis::work::unit::join::observe(&me, UnitTarget::Task(task))?;
+                let crate::basis::work::unit::join::JoinTarget::Task(member) = selected else {
                     unreachable!()
                 };
                 if !member.pending(me.ident.id) {
@@ -116,7 +117,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                 .and_then(|weak| weak.upgrade())
                 .ok_or(UnitFail::Denied)
                 .and_then(|target| {
-                    crate::core::work::unit::control::delegate(&me, &target, authority, delegable)
+                    crate::basis::work::unit::control::delegate(&me, &target, authority, delegable)
                 });
             match result {
                 Ok(id) => frame.gpr.set_x(Gprs::A0, id.get()),
@@ -124,7 +125,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             }
         }
         UnitCall::ReleaseControl { authority } => {
-            let _commit = crate::core::work::commit();
+            let _commit = crate::basis::work::commit();
             match me.administration.release(authority) {
                 Ok(()) => frame.gpr.set_x(Gprs::A0, 0),
                 Err(error) => return Outcome::fail(frame, error),
@@ -149,7 +150,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             let Some(words) = copy_words(&ident.team.space, KVirt::wrap(args.get()), count) else {
                 return Outcome::fail(frame, UnitFail::Denied);
             };
-            match crate::core::work::unit::team::spawn(&target, Some(&me), entry, words, stack) {
+            match crate::basis::work::unit::team::spawn(&target, Some(&me), entry, words, stack) {
                 Ok(task) => frame.gpr.set_x(Gprs::A0, task.ident.id.get()),
                 Err(error) => return Outcome::fail(frame, error),
             }
@@ -170,7 +171,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                 return Outcome::fail(frame, UnitFail::Denied);
             }
             let sire = TaskWeak::stored(Arc::downgrade(&parent), Origin::Sire);
-            match crate::core::work::unit::team::TeamBuilder::build_with_creator(
+            match crate::basis::work::unit::team::TeamBuilder::build_with_creator(
                 SpaceKind::from(kind),
                 sire,
                 me.ident.id,
@@ -197,7 +198,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             let mut page = [0u64; 64];
             let mut n = 0;
             {
-                let _commit = crate::core::work::commit();
+                let _commit = crate::basis::work::commit();
                 let heirs = me.heir.lock();
                 let mut cursor = after.get();
                 while n < capacity {
@@ -234,7 +235,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             {
                 return Outcome::fail(frame, UnitFail::Denied);
             }
-            let selected = match crate::core::work::unit::join::observe(&me, target) {
+            let selected = match crate::basis::work::unit::join::observe(&me, target) {
                 Ok(target) => target,
                 Err(error) => return Outcome::fail(frame, error),
             };
@@ -242,13 +243,13 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             let caller = ident.id;
             drop(me);
             drop(ident);
-            match crate::core::work::unit::join::wait::wait(join) {
+            match crate::basis::work::unit::join::wait::wait(join) {
                 Ok(Handoff::Resume(reply)) => JoinWait::write(frame, Ok(reply)),
                 Ok(Handoff::Switch(pa)) => return Outcome::Switch(pa as *mut TrapContext),
                 Err(error) => return Outcome::fail(frame, error),
             }
             {
-                let _commit = crate::core::work::commit();
+                let _commit = crate::basis::work::commit();
                 if let Some(me) = muster(caller).and_then(|w| w.upgrade()) {
                     me.ident.team.life.prune();
                     let mut at = 0;
@@ -260,7 +261,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             }
         }
         UnitCall::Oust { team } => {
-            if let Err(error) = crate::core::work::unit::team::oust(&me, team) {
+            if let Err(error) = crate::basis::work::unit::team::oust(&me, team) {
                 return Outcome::fail(frame, error);
             }
         }
@@ -283,7 +284,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                     let Some(task) = muster(id).and_then(|w| w.upgrade()) else {
                         return Outcome::fail(frame, UnitFail::Denied);
                     };
-                    if !crate::core::work::unit::control::manages(&me, &task) {
+                    if !crate::basis::work::unit::control::manages(&me, &task) {
                         return Outcome::fail(frame, UnitFail::Denied);
                     }
                     match call {
@@ -295,20 +296,20 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                                 drop(me);
                                 drop(ident);
                                 return Outcome::Switch(
-                                    crate::core::work::room::conductor::run::run()
+                                    crate::basis::work::room::conductor::run::run()
                                         as *mut TrapContext,
                                 );
                             }
                             result
                         }
                         UnitCall::Slay { .. } => {
-                            crate::core::work::unit::lifecycle::slay(&task);
+                            crate::basis::work::unit::lifecycle::slay(&task);
                             if id == ident.id {
                                 drop(task);
                                 drop(me);
                                 drop(ident);
                                 return Outcome::Switch(
-                                    crate::core::work::unit::lifecycle::quit() as *mut TrapContext
+                                    crate::basis::work::unit::lifecycle::quit() as *mut TrapContext,
                                 );
                             }
                             Ok(())
@@ -324,9 +325,9 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                         UnitCall::Embark { .. } => team.embark(),
                         UnitCall::Debark { .. } => team.debark(),
                         UnitCall::Slay { .. } => {
-                            crate::core::work::unit::lifecycle::cull(
+                            crate::basis::work::unit::lifecycle::cull(
                                 ::core::slice::from_ref(&team),
-                                crate::core::work::unit::lifecycle::EXIT_DOOM,
+                                crate::basis::work::unit::lifecycle::EXIT_DOOM,
                             );
                             Ok(())
                         }
@@ -344,7 +345,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                 None if team == ident.team.id => ident.team.clone(),
                 None => return Outcome::fail(frame, UnitFail::Denied),
             };
-            if !crate::core::work::unit::team::exit::authorize(me.as_ref(), authority) {
+            if !crate::basis::work::unit::team::exit::authorize(me.as_ref(), authority) {
                 return Outcome::fail(frame, UnitFail::Denied);
             }
             if let Err(error) = target.guard(ident.id) {
@@ -357,7 +358,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                 None if team == ident.team.id => ident.team.clone(),
                 None => return Outcome::fail(frame, UnitFail::Denied),
             };
-            if !crate::core::work::unit::team::exit::authorize(me.as_ref(), authority) {
+            if !crate::basis::work::unit::team::exit::authorize(me.as_ref(), authority) {
                 return Outcome::fail(frame, UnitFail::Denied);
             }
             if let Err(error) = target.unguard(ident.id) {

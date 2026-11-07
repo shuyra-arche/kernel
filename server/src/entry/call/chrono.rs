@@ -1,6 +1,6 @@
 use kernel_api::abi::call::chrono::ChronoCall;
 
-use crate::core::work::room::deadline;
+use crate::basis::work::room::deadline;
 use crate::machine::clock;
 use crate::machine::switcher::context::{Gprs, TrapContext};
 

@@ -1,6 +1,6 @@
 use super::{BootError, ResourceOperation};
-use crate::core::memory::flat;
-use crate::core::work::room::interrupt;
+use crate::basis::memory::flat;
+use crate::basis::work::room::interrupt;
 use crate::machine::{board, clock, console};
 
 pub fn init(dtp: usize) -> Result<(), BootError> {

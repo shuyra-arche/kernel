@@ -1,12 +1,12 @@
 //! Explicit QEMU EDU bootstrap binding. General PCI enumeration and placement
 //! policy belong to Units; this adapter admits only the fixed test endpoint.
-use crate::core::memory::nest::iommu::riscv::topology::Topology;
-use crate::core::memory::{
+use crate::basis::memory::nest::iommu::riscv::topology::Topology;
+use crate::basis::memory::{
     address::PhysAddr,
     flat::{BorrowedRegion, Flat},
     nest::{Access, Placement, RegionId},
 };
-use crate::core::work::unit::team::kernel;
+use crate::basis::work::unit::team::kernel;
 use crate::machine::iommu::pci::{Endpoint, Error};
 use crate::machine::{
     board,

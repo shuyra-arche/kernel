@@ -5,12 +5,12 @@
 extern crate alloc;
 
 #[allow(dead_code)]
-#[path = "../../../src/core/memory/cell/mod.rs"]
+#[path = "../../../src/basis/memory/cell/mod.rs"]
 mod cell;
 mod dma;
 mod edu;
 #[allow(dead_code)]
-#[path = "../../../src/core/memory/nest/iommu/mod.rs"]
+#[path = "../../../src/basis/memory/nest/iommu/mod.rs"]
 mod iommu;
 #[path = "../../../src/machine/iommu/mmio.rs"]
 mod mmio;
@@ -24,7 +24,7 @@ mod region;
 #[path = "../../../src/entry/boot/devices/reserved.rs"]
 mod reserved;
 
-mod core {
+mod basis {
     pub(crate) mod memory {
         pub const PAGE_SIZE: usize = 4096;
         pub(crate) use crate::cell;

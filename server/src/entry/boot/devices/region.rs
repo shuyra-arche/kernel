@@ -1,4 +1,4 @@
-use crate::core::memory::PAGE_SIZE;
+use crate::basis::memory::PAGE_SIZE;
 use kernel_api::abi::call::pend::PendFail;
 
 /// Original geometry names a boot resource; page coverage defines its authority.

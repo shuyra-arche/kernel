@@ -1,4 +1,4 @@
-use crate::core::memory::cell::Owner;
+use crate::basis::memory::cell::Owner;
 use crate::cell::{Cell, InternalPage};
 use alloc::boxed::Box;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
