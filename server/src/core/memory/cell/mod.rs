@@ -22,9 +22,9 @@ pub(crate) enum CellError {
     IdentityExhausted,
 }
 
-/// 一个 Internal Cell；自身不可 Clone，Flat / Nest 通过同一 Frame 保留它。
+/// 一个 Internal Cell；自身不可 Clone，建立槽后由 Arc<Cell> 保留同一实例。
 ///
-/// `page` 的析构是该承载唯一的物理归还出口。Frame、页槽、映射与退休记录
+/// `page` 的析构是该承载唯一的物理归还出口。页槽、映射与退休记录
 /// 只负责持有或解除持有。保留记录的完备性仍由现有 Nest 失效协议保证，
 /// 不能把引用计数本身解释成硬件已静止或独占借用的证明。
 #[derive(Debug)]
@@ -62,7 +62,7 @@ impl Cell {
 
 // SAFETY: Cell never creates Rust references to the payload. Consumers of its raw
 // pointer must supply their own access/synchronization proof; the owned allocation
-// remains alive until the last enclosing Frame retention has been released.
+// remains alive while a unique Cell or any Arc<Cell> retention exists.
 // InternalPage requires a Sync allocator so reclamation may occur on any hart.
 unsafe impl Send for Cell {}
 unsafe impl Sync for Cell {}

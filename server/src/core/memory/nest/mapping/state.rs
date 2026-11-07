@@ -1,16 +1,17 @@
+use crate::core::memory::cell::Cell;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::core::memory::flat::{FlatRange, Frame};
+use crate::core::memory::flat::FlatRange;
 
 use super::active::ActiveRange;
-use super::runs::FrameRuns;
+use super::runs::CellRuns;
 
 /// 一段活动关系的库存：活动区间、强持的平来源、已发布页的强持记录。
 pub(in crate::core::memory::nest) struct MappingState {
     pub(in crate::core::memory::nest) active: Vec<ActiveRange>,
     pub(in crate::core::memory::nest) source: FlatRange,
-    pub(in crate::core::memory::nest) published: Vec<(usize, Arc<Frame>)>,
+    pub(in crate::core::memory::nest) published: Vec<(usize, Arc<Cell>)>,
 }
 
 impl MappingState {
@@ -38,17 +39,17 @@ impl MappingState {
     }
 
     /// 按页号顺序插入发布记录。
-    pub(in crate::core::memory::nest) fn publish(&mut self, page: usize, frame: Arc<Frame>) {
+    pub(in crate::core::memory::nest) fn publish(&mut self, page: usize, cell: Arc<Cell>) {
         let at = self.published.partition_point(|(held, _)| *held < page);
-        self.published.insert(at, (page, frame));
+        self.published.insert(at, (page, cell));
     }
 
     /// 帧分段：以 `base` 为虚拟起点、按活动区间 current 与物理连续性切段。
     pub(in crate::core::memory::nest) fn runs<'a>(
         &'a self,
         base: crate::core::memory::address::VirtAddr,
-        frames: &'a [(usize, Arc<Frame>)],
-    ) -> FrameRuns<'a> {
-        FrameRuns::new(base, frames, &self.active)
+        cells: &'a [(usize, Arc<Cell>)],
+    ) -> CellRuns<'a> {
+        CellRuns::new(base, cells, &self.active)
     }
 }

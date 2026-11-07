@@ -72,7 +72,7 @@ pub fn allocator() -> &'static dyn Allocator {
 }
 
 /// 分配器一侧分配并清零 RAM，再将唯一归还凭证交给 Cell。
-pub(in crate::core::memory::flat) fn cell() -> Result<Cell, FlatError> {
+pub(crate) fn cell() -> Result<Cell, FlatError> {
     let allocator: &'static (dyn Allocator + Sync) = instance();
     let page: InternalPage = crate::tag!(Plain, unsafe {
         Box::try_new_zeroed_in(allocator)

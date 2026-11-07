@@ -2,32 +2,32 @@ use alloc::sync::Arc;
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PhysAddr, VirtAddr};
-use crate::core::memory::flat::Frame;
+use crate::core::memory::cell::Cell;
 use crate::core::memory::nest::NestError;
 use crate::core::memory::nest::mapping::{Access, ActiveRange};
 
-use super::run::FrameRun;
+use super::run::CellRun;
 
-/// 帧分段迭代器：把 `frames` 切成一串连续段，不再分配。
+/// 帧分段迭代器：把 `cells` 切成一串连续段，不再分配。
 ///
 /// 续段条件同时成立：页号相邻、物理地址相邻、所在区间 current 相同。
 /// 段起点虚拟地址为 `base + 帧页号 * PAGE_SIZE`；任一帧不在任何区间内 ⇒ NoRegion。
-pub(in crate::core::memory::nest) struct FrameRuns<'a> {
+pub(in crate::core::memory::nest) struct CellRuns<'a> {
     base: VirtAddr,
-    frames: &'a [(usize, Arc<Frame>)],
+    cells: &'a [(usize, Arc<Cell>)],
     active: &'a [ActiveRange],
     at: usize,
 }
 
-impl<'a> FrameRuns<'a> {
+impl<'a> CellRuns<'a> {
     pub(in crate::core::memory::nest) fn new(
         base: VirtAddr,
-        frames: &'a [(usize, Arc<Frame>)],
+        cells: &'a [(usize, Arc<Cell>)],
         active: &'a [ActiveRange],
     ) -> Self {
         Self {
             base,
-            frames,
+            cells,
             active,
             at: 0,
         }
@@ -39,8 +39,8 @@ impl<'a> FrameRuns<'a> {
 
     /// 第 `at` 帧能否续在 current 的段后面。
     fn joins(&self, at: usize, current: Access) -> bool {
-        let previous = &self.frames[at - 1];
-        let next = &self.frames[at];
+        let previous = &self.cells[at - 1];
+        let next = &self.cells[at];
         next.0 == previous.0 + 1
             && next.1.physical_address() == previous.1.physical_address() + PAGE_SIZE
             && ActiveRange::current_at(self.active, self.address(next.0).as_usize())
@@ -49,30 +49,30 @@ impl<'a> FrameRuns<'a> {
     }
 }
 
-impl Iterator for FrameRuns<'_> {
-    type Item = Result<FrameRun, NestError>;
+impl Iterator for CellRuns<'_> {
+    type Item = Result<CellRun, NestError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let first = self.at;
-        if first >= self.frames.len() {
+        if first >= self.cells.len() {
             return None;
         }
         self.at = first + 1;
         let current = match ActiveRange::current_at(
             self.active,
-            self.address(self.frames[first].0).as_usize(),
+            self.address(self.cells[first].0).as_usize(),
         ) {
             Some(current) => current,
             None => return Some(Err(NestError::NoRegion)),
         };
         let mut last = first + 1;
-        while last < self.frames.len() && self.joins(last, current) {
+        while last < self.cells.len() && self.joins(last, current) {
             last += 1;
         }
         self.at = last;
-        Some(Ok(FrameRun {
-            start: self.address(self.frames[first].0),
-            physical: PhysAddr::from_raw(self.frames[first].1.physical_address()),
+        Some(Ok(CellRun {
+            start: self.address(self.cells[first].0),
+            physical: PhysAddr::from_raw(self.cells[first].1.physical_address()),
             size: (last - first) * PAGE_SIZE,
             current,
         }))

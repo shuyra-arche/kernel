@@ -6,7 +6,7 @@ use super::space::{Space, SpaceBuilder};
 use super::team::{Team, TeamBuilder};
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageIndex, PhysAddr, VirtAddr};
-use crate::core::memory::flat::{Allocation, BorrowedRegion, Flat, FlatRange, Frame};
+use crate::core::memory::flat::{Allocation, BorrowedRegion, Flat, FlatRange};
 use crate::core::memory::nest::table::PteFlags;
 use crate::core::memory::nest::{Access, Nest, NestError, Placement, RegionId, Reservation};
 
@@ -82,7 +82,7 @@ fn image_frames(
         .try_reserve_exact(pages)
         .map_err(|_| NestError::OutOfMemory)?;
     for page in 0..pages {
-        let frame = crate::tag!(Image, Frame::allocate()?);
+        let frame = crate::tag!(Image, crate::core::memory::flat::allocate_cell()?);
         let start = region.payload + page * PAGE;
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -94,7 +94,7 @@ fn image_frames(
         indexed.push((PageIndex::new(page), frame));
     }
     let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;
-    Ok(Flat::from_frames(count, &indexed)?.whole())
+    Ok(Flat::from_cells(count, indexed)?.whole())
 }
 
 /// 在 `Normal` 窗口内登记一笔固定跨度；不动页表。

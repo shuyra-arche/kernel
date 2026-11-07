@@ -47,11 +47,14 @@ The Server mapping types, source index, Space registry and wait keys use
 `Mapping` to distinguish address projection from the planned cross-Unit `View`.
 The current public ABI still names mapping handles `ViewId`, `ViewSelection` and
 `ViewControl`; these are legacy mapping contracts, not the new interaction model.
-Allocator-managed 4 KiB RAM now has a `Cell`: it consumes the unique allocation
-receipt and assigns a non-reused instance identity. A Flat `Frame` retains that
-Cell and the existing transfer-custody state; it no longer stores a separate
-physical allocation. Mapping retention and retirement therefore keep the same
-Cell alive, and transfer withdrawal checks its identity before touching PTEs.
+Allocator-managed 4 KiB RAM has a `Cell`: it consumes the unique allocation
+receipt and assigns a non-reused instance identity. Flat consumes unique Cells
+when creating slots; each managed slot holds an `Arc<Cell>`. Mapping publication
+and retirement retain that same Cell directly. There is no intermediate Frame
+resource or separate Custody state. A retained `Arc<Cell>` cannot be imported
+into another Flat; sharing uses ranges of the existing Flat. Moving/Reserved
+slots and the Flat locks govern transfer admission, while Nest governs hardware
+withdrawal and settlement. Transfer does not create a new Cell or change its ID.
 
 This is the Internal backing foundation, not the complete Cell protocol. Unit
 owner assignment/transfer, larger Cells, and External registration remain in
@@ -105,10 +108,11 @@ which assembles the selected Units. Compilation alone does not establish guest
 execution or resource reclamation.
 
 The isolated host harness under `server/tests/` compiles the production Cell
-module directly, with a bounded test allocator to observe physical-address reuse
-and return counts. It does not load the RV64-only Server crate or mock Cell
-behavior. These checks cover instance identity and allocation lifetime; they do
-not establish Flat/Nest integration, TLB/DMA completion or Unit ownership.
+and slot-admission modules directly, with a bounded test allocator to observe
+physical-address reuse and return counts. It does not load the RV64-only Server
+crate or mock Cell behavior. These checks cover instance identity, allocation
+lifetime, consuming import and reference retention; they do not establish full
+Flat/Nest integration, transfer races, TLB/DMA completion or Unit ownership.
 
 Generic byte codecs and service-protocol macros are no longer part of Kernel.
 The [API migration notes](api/README.md#source-migration-and-abi-compatibility) list removed

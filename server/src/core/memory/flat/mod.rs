@@ -1,13 +1,12 @@
-//! 物理来源：分配器 RAM 的逻辑页持有，或外部借用物理区间的凭证。
+//! 逻辑承载组织：RAM 页槽持有 Cell，外部范围暂保留借用凭证。
 //!
-//! Flat 不含 VA、页表、Task 或授权账目；它是唯一的物化权威。
+//! Flat 不含 VA、页表、Task 或授权账目；它决定槽的物化与迁移，
+//! 槽持有不建立另一份物理所有权。共享访问使用同一 Flat 的范围与映射。
 
 pub mod allocator;
 
 mod allocation;
-mod custody;
 mod error;
-mod frame;
 mod pages;
 mod range;
 mod region;
@@ -23,11 +22,12 @@ use alloc::vec::Vec;
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageIndex, PageOffset, PhysAddr};
+use crate::core::memory::cell::Cell;
 use crate::machine::sync::{Level, SpinLock};
 
 pub use allocation::Allocation;
+pub(crate) use allocator::frame::cell as allocate_cell;
 pub use error::FlatError;
-pub use frame::Frame;
 pub use pages::Pages;
 pub use range::FlatRange;
 pub use region::BorrowedRegion;
@@ -57,31 +57,16 @@ impl Flat {
         )
     }
 
-    /// 可信内部接入合法既有帧：不清零、不改变 PA 或内容。
+    /// 消费新 Cell 建立逻辑槽；借来的 Arc<Cell> 不能导入为第二个承载来源。
     ///
-    /// 输入必须按页号严格递增；越界、重复与乱序都是 `OutOfRange`。
-    /// 接入的帧同时被登记为“已在别处”：它们不再参与迁移；这份来源自己也不可迁移。
-    pub fn from_frames(
+    /// 输入必须按页号严格递增；失败释放这批尚未发布的 Cell。
+    /// 导入来源保持不可迁移，沿用启动/镜像/任务内存的既有约束。
+    pub(crate) fn from_cells(
         page_count: PageCount,
-        frames: &[(PageIndex, Arc<Frame>)],
+        cells: Vec<(PageIndex, Cell)>,
     ) -> Result<Arc<Self>, FlatError> {
-        let mut slots = Vec::new();
-        slots
-            .try_reserve_exact(frames.len())
-            .map_err(|_| FlatError::OutOfMemory)?;
-        let mut previous = None;
-        for (index, frame) in frames {
-            let page = index.get();
-            if page >= page_count.get() || previous.is_some_and(|previous| previous >= page) {
-                return Err(FlatError::OutOfRange);
-            }
-            previous = Some(page);
-            slots.push((*index, Slot::Resident(frame.clone())));
-        }
-        let flat = Self::new(page_count, FlatSource::Managed(slots), false)?;
-        // 可失败的构造都过了，最后才登记托管：导入是永久效果，重复登记是幂等的。
-        custody::register(frames.iter().map(|(_, frame)| frame.custody()))?;
-        Ok(flat)
+        let slots = slot::admit(page_count.get(), cells)?;
+        Self::new(page_count, FlatSource::Managed(slots), false)
     }
 
     /// 保留外部借用物理区间：不分配数据页、不清零、不按 RAM 回收；也不可迁移。
@@ -214,8 +199,8 @@ impl Flat {
                 continue;
             }
             slots.try_reserve(1).map_err(|_| FlatError::OutOfMemory)?;
-            let frame = Frame::allocate()?;
-            slots.insert(at, (PageIndex::new(page), Slot::Resident(frame)));
+            let cell = Arc::try_new(allocate_cell()?).map_err(|_| FlatError::OutOfMemory)?;
+            slots.insert(at, (PageIndex::new(page), Slot::Resident(cell)));
             page += 1;
             at += 1;
         }
@@ -230,7 +215,7 @@ impl Flat {
         &self,
         index: PageIndex,
         count: PageCount,
-    ) -> Result<Vec<(PageOffset, Arc<Frame>)>, FlatError> {
+    ) -> Result<Vec<(PageOffset, Arc<Cell>)>, FlatError> {
         let end = index
             .get()
             .checked_add(count.get())
@@ -248,8 +233,8 @@ impl Flat {
         out.try_reserve(last - first)
             .map_err(|_| FlatError::OutOfMemory)?;
         for (slot, state) in &slots[first..last] {
-            if let Slot::Resident(frame) = state {
-                out.push((PageOffset::new(slot.get() - index.get()), frame.clone()));
+            if let Slot::Resident(cell) = state {
+                out.push((PageOffset::new(slot.get() - index.get()), cell.clone()));
             }
         }
         Ok(out)
@@ -331,7 +316,7 @@ impl Flat {
                     return Err(FlatError::OutOfRange);
                 }
                 match &slots[at].1 {
-                    Slot::Resident(frame) => Ok(PhysAddr::from_raw(frame.physical_address())),
+                    Slot::Resident(cell) => Ok(PhysAddr::from_raw(cell.physical_address())),
                     // 承载已移出：这是页槽自己的状态，不抹成“越界”。
                     Slot::Missing => Err(FlatError::Missing),
                     // 在途事务持有/预留的页没有可交出去的物理坐标。

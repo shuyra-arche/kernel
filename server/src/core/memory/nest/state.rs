@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::core::memory::flat::Frame;
+use crate::core::memory::cell::Cell;
 use crate::core::memory::nest::Mapping;
 use crate::core::memory::nest::synchronize::{ClosePhase, Invalidation};
 use crate::core::memory::nest::table::TableNode;
@@ -13,7 +13,7 @@ use super::index::Index;
 pub(super) struct NestState {
     pub(super) root: TableNode,
     pub(super) index: Index,
-    pub(super) retired_frames: Vec<Arc<Frame>>,
+    pub(super) retired_cells: Vec<Arc<Cell>>,
     pub(super) retired_tables: Vec<TableNode>,
     pub(super) invalidation: Invalidation,
     pub(super) pending_mappings: Vec<Arc<Mapping>>,
@@ -28,7 +28,7 @@ impl NestState {
         Self {
             root,
             index: Index::new(),
-            retired_frames: Vec::new(),
+            retired_cells: Vec::new(),
             retired_tables: Vec::new(),
             invalidation: Invalidation::Clean,
             pending_mappings: Vec::new(),

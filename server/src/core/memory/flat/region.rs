@@ -6,7 +6,7 @@ use crate::core::memory::address::PhysAddr;
 
 use super::error::FlatError;
 
-/// 调用者保证仍然保留的物理区间。它不冒充分配器拥有的 Frame，
+/// 调用者保证仍然保留的物理区间。它不冒充分配器拥有的 Cell，
 /// 其 Arc 不接管底层物理存储的所有权。
 pub struct BorrowedRegion {
     start: PhysAddr,

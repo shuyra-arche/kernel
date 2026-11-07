@@ -12,7 +12,8 @@ use riscv::register::satp;
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageOffset, PhysAddr, VirtAddr};
-use crate::core::memory::flat::{Frame, Pages};
+use crate::core::memory::cell::Cell;
+use crate::core::memory::flat::Pages;
 use crate::machine::layout::{TEAM_FRAME_BASE, TEAM_FRAME_WINDOW_SIZE, TRAP_STACK_BASE};
 use crate::machine::mode;
 use crate::machine::sync::{Level, SpinLock, SpinLockGuard};
@@ -420,7 +421,7 @@ impl Nest {
         }
         // 本关系要发布哪些页：Managed 只取已物化的，缺口留给缺页；
         // Borrowed 的整段都可用，挂载时就全部发布。
-        let mut published: Vec<(usize, Arc<Frame>)> = Vec::new();
+        let mut published: Vec<(usize, Arc<Cell>)> = Vec::new();
         let mut borrowed: Vec<(VirtAddr, usize, Access)> = Vec::new();
         let mut pages: Option<Pages> = None;
         // 发布窗口的短期驻留：在抓承载快照**之前**取得，覆盖 PTE 写入与发布记录提交，
@@ -440,15 +441,15 @@ impl Nest {
                     borrowed.push((range.start, range.size.get(), range.current));
                 }
             } else {
-                let materialized = inner.source.materialized_frames()?;
+                let materialized = inner.source.materialized_cells()?;
                 published
                     .try_reserve(materialized.len())
                     .map_err(|_| NestError::OutOfMemory)?;
-                for (offset, frame) in materialized {
+                for (offset, cell) in materialized {
                     let page = offset.get();
                     let address = start + page * PAGE_SIZE;
                     if inner.covers(address.as_usize(), address.as_usize()) {
-                        published.push((page, frame));
+                        published.push((page, cell));
                     }
                 }
             }
@@ -525,8 +526,8 @@ impl Nest {
         }
         {
             let mut inner = mapping.state.lock();
-            for (page, frame) in published {
-                inner.publish(page, frame);
+            for (page, cell) in published {
+                inner.publish(page, cell);
             }
         }
         state.index.insert(node);
@@ -577,15 +578,15 @@ impl Nest {
         // 发布窗口的短期驻留：在抓承载快照**之前**取得，覆盖 PTE 写入与发布记录提交。
         // 在途的移交槽会让这次驻留当场 Busy，正好与事务互斥。
         let lease = window.reside()?;
-        let materialized = window.materialized_frames()?;
+        let materialized = window.materialized_cells()?;
         let mut fresh = Vec::new();
         fresh
             .try_reserve(materialized.len())
             .map_err(|_| NestError::OutOfMemory)?;
-        for (offset, frame) in materialized {
+        for (offset, cell) in materialized {
             let page = first + offset.get();
             if !inner.publishes(page) {
-                fresh.push((page, frame));
+                fresh.push((page, cell));
             }
         }
         if fresh.is_empty() {
@@ -621,8 +622,8 @@ impl Nest {
                 self.geometry,
             );
         }
-        for (page, frame) in fresh {
-            inner.publish(page, frame);
+        for (page, cell) in fresh {
+            inner.publish(page, cell);
         }
         state.mark_dirty();
         drop(inner);
@@ -737,7 +738,7 @@ impl Nest {
 
     /// 按选择撤下：先退休该段占用，再撤 PTE，同步成功后只回收这一段。
     ///
-    /// 失败时退休票、Frame、表页、来源与待撤的活动全都保留，VA 禁复用；
+    /// 失败时退休票、Cell、表页、来源与待撤的活动全都保留，VA 禁复用；
     /// 沿用同一身份重试（再次 `detach`，或 `retry_invalidation`）才继续。
     pub(crate) fn detach(self: &Arc<Self>, selection: MappingRange) -> Result<(), NestError> {
         let mapping = selection.mapping().clone();
@@ -867,7 +868,7 @@ impl Nest {
             )
         };
         state
-            .retired_frames
+            .retired_cells
             .try_reserve(removed)
             .map_err(|_| NestError::OutOfMemory)?;
         state
@@ -909,8 +910,8 @@ impl Nest {
         for index in (0..inner.published.len()).rev() {
             let page = inner.published[index].0;
             if page >= first_page && page <= last_page {
-                let (_, frame) = inner.published.remove(index);
-                state.retired_frames.push(frame);
+                let (_, cell) = inner.published.remove(index);
+                state.retired_cells.push(cell);
             }
         }
         inner.active = next;
@@ -923,7 +924,7 @@ impl Nest {
         state.mark_dirty();
         drop(state);
         drop(occupancy);
-        // 三、同步成功之后才结算这一段的票；失败时票、Frame、表页与来源都留着。
+        // 三、同步成功之后才结算这一段的票；失败时票、Cell、表页与来源都留着。
         self.finish_invalidation()?;
         {
             let mut state = self.state.lock();
@@ -1076,7 +1077,7 @@ impl Nest {
 
             let result = identity::shootdown(self.asid).map_err(|_| NestError::Shootdown);
             let retired_tables;
-            let retired_frames;
+            let retired_cells;
             let pending_mappings;
             {
                 let mut state = self.state.lock();
@@ -1086,13 +1087,13 @@ impl Nest {
                 }
                 state.settle();
                 retired_tables = core::mem::take(&mut state.retired_tables);
-                retired_frames = core::mem::take(&mut state.retired_frames);
+                retired_cells = core::mem::take(&mut state.retired_cells);
                 pending_mappings = core::mem::take(&mut state.pending_mappings);
             }
-            // 退休 Frame / 表页可以随本次失效结清（shootdown 按 ASID 覆盖全部映射），
+            // 退休 Cell / 表页可以随本次失效结清（shootdown 按 ASID 覆盖全部映射），
             // 但占用票不在这里回收：它只由该段的本次撤下或显式 `retry_invalidation` 结算。
             drop(retired_tables);
-            drop(retired_frames);
+            drop(retired_cells);
             drop(pending_mappings);
             return Ok(());
         }
@@ -1121,13 +1122,13 @@ impl Nest {
             .try_reserve(state.index.len())
             .map_err(|_| NestError::OutOfMemory)?;
         state.index.collect(&mut mappings);
-        let frame_count = mappings
+        let cell_count = mappings
             .iter()
             .map(|mapping| mapping.state.lock().published.len())
             .sum();
         state
-            .retired_frames
-            .try_reserve(frame_count)
+            .retired_cells
+            .try_reserve(cell_count)
             .map_err(|_| NestError::OutOfMemory)?;
         state
             .pending_mappings
@@ -1155,8 +1156,8 @@ impl Nest {
         for mapping in mappings {
             state.pending_mappings.push(mapping.clone());
             let mut inner = mapping.state.lock();
-            for (_, frame) in inner.published.drain(..) {
-                state.retired_frames.push(frame);
+            for (_, cell) in inner.published.drain(..) {
+                state.retired_cells.push(cell);
             }
             inner.active.clear();
         }
@@ -1289,7 +1290,7 @@ impl Nest {
         {
             return Err(NestError::NoRegion);
         }
-        // Nest and Mapping guards keep this resident frame mapped during the read.
+        // Nest and Mapping guards keep this resident cell mapped during the read.
         let ptr = (physical.as_usize() + (at & (PAGE_SIZE - 1))) as *mut u32;
         Ok(unsafe { AtomicU32::from_ptr(ptr) }.load(Ordering::Relaxed))
     }
@@ -1563,18 +1564,18 @@ impl Nest {
                     assert_eq!(
                         last - first,
                         pages,
-                        "hardware leaf has pages without published Frames"
+                        "hardware leaf has pages without published Cells"
                     );
-                    for (offset, (page, frame)) in inner.published[first..last].iter().enumerate() {
+                    for (offset, (page, cell)) in inner.published[first..last].iter().enumerate() {
                         assert_eq!(
                             *page,
                             first_page + offset,
-                            "published Frame index gap under hardware leaf"
+                            "published Cell index gap under hardware leaf"
                         );
                         assert_eq!(
-                            frame.physical_address(),
+                            cell.physical_address(),
                             physical.as_usize() + offset * PAGE_SIZE,
-                            "published Frame physical address differs from hardware PTE"
+                            "published Cell physical address differs from hardware PTE"
                         );
                     }
                 }

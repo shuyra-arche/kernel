@@ -5,9 +5,9 @@ use crate::core::memory::address::{PageCount, PageIndex, PageOffset, PhysAddr};
 
 use super::Flat;
 use super::error::FlatError;
-use super::frame::Frame;
 use super::pages::Pages;
 use super::residency::Residency;
+use crate::core::memory::cell::Cell;
 
 /// 强持同一个 `Flat` 的校验范围。子范围用相对偏移选择，合成后仍是原来源身份，
 /// 不建立父范围链、不复制数据。
@@ -102,9 +102,9 @@ impl FlatRange {
         self.flat.is_pinned(self.index, self.count)
     }
 
-    /// 只读稀疏已物化的 `Frame`；不物化、不保证整个范围完整；借用来源没有 `Frame`。
+    /// 只读稀疏已物化的 `Cell`；不物化、不保证整个范围完整；借用来源没有 `Cell`。
     /// 偏移相对范围起点。
-    pub(crate) fn materialized_frames(&self) -> Result<Vec<(PageOffset, Arc<Frame>)>, FlatError> {
+    pub(crate) fn materialized_cells(&self) -> Result<Vec<(PageOffset, Arc<Cell>)>, FlatError> {
         self.flat.materialized(self.index, self.count)
     }
 
