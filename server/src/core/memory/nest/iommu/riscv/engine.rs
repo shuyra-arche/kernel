@@ -18,14 +18,16 @@ pub(crate) enum EngineError {
 }
 
 /// One physical command engine, not one engine per IoSpace. This first adapter
-/// keeps DDTP Off, never authorizes device DMA, and polls with bounded steps.
+/// keeps DDTP Off until an owning Domain installs a retained directory. Polls
+/// with bounded steps; queue shutdown is refused while that directory is active.
 /// CQ completion is local evidence; it is deliberately not a Hardware::observe
 /// implementation or a proof that an arbitrary device projection is reclaimable.
 pub(crate) struct Engine<R: Registers> {
-    registers: R,
+    pub(super) registers: R,
     pages: Option<Pages>,
     phase: Phase,
     tail: u32,
+    directory: u64,
 }
 
 impl<R: Registers> Engine<R> {
@@ -35,6 +37,7 @@ impl<R: Registers> Engine<R> {
             pages: Some(Pages::new(cells)?),
             phase: Phase::Prepared,
             tail: 0,
+            directory: 0,
         })
     }
 
@@ -58,7 +61,8 @@ impl<R: Registers> Engine<R> {
     }
 
     fn healthy(&mut self) -> Result<(), EngineError> {
-        if !self.off()
+        if self.registers.read64(DDTP) & !16 != self.directory
+            || self.registers.read32(PQCSR) & (ENABLE | ON | BUSY) != 0
             || self.registers.read32(CQCSR) & CQ_ERRORS != 0
             || self.registers.read32(FQCSR) & FQ_ERRORS != 0
         {
@@ -100,6 +104,7 @@ impl<R: Registers> Engine<R> {
                 self.healthy()?;
                 if self.registers.read32(FQCSR) & (ENABLE | ON | BUSY) == 0
                     && self.registers.read32(CQCSR) & (ENABLE | ON | BUSY) == 0
+                    && self.off()
                 {
                     self.registers.sync();
                     self.advance(Event::FaultsOff)?;
@@ -158,10 +163,21 @@ impl<R: Registers> Engine<R> {
     /// One batch at a time; a completed slot is reused only after its write AND
     /// command completion were observed. No arbitrary physical write interface.
     pub(crate) fn invalidate(&mut self) -> Result<BatchId, EngineError> {
+        self.submit(&[Command::invalidate_host()])
+    }
+
+    pub(super) fn invalidate_directory(&mut self) -> Result<BatchId, EngineError> {
+        self.submit(&[Command::invalidate_directory(), Command::invalidate_host()])
+    }
+
+    fn submit(&mut self, commands: &[Command]) -> Result<BatchId, EngineError> {
         if self.phase != Phase::Ready {
             return Err(EngineError::State);
         }
         self.healthy()?;
+        if self.registers.read64(DDTP) & 16 != 0 {
+            return Err(EngineError::State);
+        }
         if self.registers.read32(CQCSR) & (ENABLE | ON | BUSY) != ENABLE | ON
             || self.registers.read32(CQH) != self.tail
         {
@@ -178,7 +194,12 @@ impl<R: Registers> Engine<R> {
                 .as_mut_ptr()
                 .cast::<u32>()
                 .write_volatile(0);
-            for (i, command) in [Command::invalidate_host(), fence].into_iter().enumerate() {
+            for (i, command) in commands
+                .iter()
+                .copied()
+                .chain(core::iter::once(fence))
+                .enumerate()
+            {
                 let offset = ((self.tail as usize + i) & 255) * 16;
                 let slot = pages.command.as_mut_ptr().add(offset).cast::<u64>();
                 let [low, high] = command.words();
@@ -187,7 +208,7 @@ impl<R: Registers> Engine<R> {
             }
         }
         self.advance(Event::Submit(batch))?;
-        self.tail = (self.tail + 2) & 255;
+        self.tail = (self.tail + commands.len() as u32 + 1) & 255;
         self.registers.sync();
         self.registers.write32(CQT, self.tail);
         Ok(batch)
@@ -224,13 +245,63 @@ impl<R: Registers> Engine<R> {
         Ok(true)
     }
 
+    /// Only the owning Domain may change DDTP; its retained table pages must
+    /// already be published before a nonzero directory is passed here.
+    pub(super) unsafe fn directory(&mut self, value: u64) -> Result<(), EngineError> {
+        if self.phase != Phase::Ready || !self.directory_ready()? {
+            return Err(EngineError::State);
+        }
+        self.directory = value;
+        self.registers.sync();
+        self.registers.write64(DDTP, value);
+        Ok(())
+    }
+
+    pub(super) fn directory_ready(&mut self) -> Result<bool, EngineError> {
+        // During an asynchronous DDTP update the old mode/PPN may still be read.
+        if self.registers.read64(DDTP) & 16 != 0 {
+            return Ok(false);
+        }
+        self.healthy()?;
+        Ok(true)
+    }
+
+    pub(crate) fn fault(&mut self) -> Result<Option<super::Fault>, EngineError> {
+        if matches!(self.phase, Phase::Prepared | Phase::Closed | Phase::Failed) {
+            return Err(EngineError::State);
+        }
+        self.healthy()?;
+        if self.registers.read32(FQCSR) & (ENABLE | ON | BUSY) != ENABLE | ON {
+            return Err(EngineError::State);
+        }
+        let head = self.registers.read32(FQH);
+        let tail = self.registers.read32(FQT);
+        if head >= 128 || tail >= 128 {
+            return self.fail(EngineError::Hardware);
+        }
+        if head == tail {
+            return Ok(None);
+        }
+        self.registers.sync();
+        let page = &self.pages.as_ref().expect("live pages").fault;
+        // FQT publishes a complete record. It cannot be overwritten until FQH
+        // advances; copy all words before returning its slot to the producer.
+        let words = unsafe {
+            let ptr = page.as_mut_ptr().add(head as usize * 32).cast::<u64>();
+            core::array::from_fn(|i| u64::from_le(ptr.add(i).read_volatile()))
+        };
+        self.registers.sync();
+        self.registers.write32(FQH, (head + 1) & 127);
+        Ok(Some(super::Fault::decode(words)))
+    }
+
     pub(crate) fn stop(&mut self) -> Result<(), EngineError> {
         if self.phase == Phase::Prepared {
             self.advance(Event::Stop)?;
             self.pages.take(); // Prepared obligations cancel without hardware effects.
             return Ok(());
         }
-        if self.phase != Phase::Ready {
+        if self.phase != Phase::Ready || self.directory != 0 {
             return Err(EngineError::State);
         }
         self.healthy()?;

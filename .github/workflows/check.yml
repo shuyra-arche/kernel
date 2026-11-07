@@ -35,7 +35,7 @@ jobs:
         run: cargo build --locked -p kernel --all-features --target riscv64gc-unknown-none-elf
 
   iommu-hardware:
-    name: IOMMU command engine (QEMU)
+    name: IOMMU projection and reclamation (QEMU)
     runs-on: ubuntu-latest
     container: debian:trixie
     steps:
@@ -53,6 +53,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: iommu-command-engine
-          path: server/tests/target/iommu/target/evidence/
+          name: iommu-hardware
+          path: server/tests/guest/iommu/target/evidence/
           if-no-files-found: warn

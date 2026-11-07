@@ -7,6 +7,8 @@ extern crate alloc;
 #[allow(dead_code)]
 #[path = "../../../src/core/memory/cell/mod.rs"]
 mod cell;
+mod dma;
+mod edu;
 #[allow(dead_code)]
 #[path = "../../../src/core/memory/nest/iommu/mod.rs"]
 mod iommu;
@@ -96,6 +98,12 @@ extern "C" fn guest(dtb: usize) -> ! {
     let region = controller.reg().unwrap().next().unwrap();
     assert_eq!(region.size, Some(4096));
     let base = region.starting_address.addr();
+    if matches!(
+        fdt.chosen().bootargs(),
+        Some("dma" | "readonly" | "dma-abandon")
+    ) {
+        dma::run(base, fdt.chosen().bootargs().unwrap());
+    }
     let _ = writeln!(Uart, "BEGIN iommu-command-engine base={base:#x}");
     let cells = [
         POOL.cell().unwrap(),

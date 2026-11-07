@@ -7,6 +7,7 @@ pub(crate) const CQH: usize = 0x20;
 pub(crate) const CQT: usize = 0x24;
 pub(crate) const FQB: usize = 0x28;
 pub(crate) const FQH: usize = 0x30;
+pub(crate) const FQT: usize = 0x34;
 pub(crate) const CQCSR: usize = 0x48;
 pub(crate) const FQCSR: usize = 0x4c;
 pub(crate) const PQCSR: usize = 0x50;

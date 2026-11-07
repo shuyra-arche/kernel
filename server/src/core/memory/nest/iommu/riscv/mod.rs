@@ -1,13 +1,17 @@
 //! RISC-V CQ 编码、完成读数与受信任寄存器接口驱动的命令引擎。
-//! 引擎保持 DDTP Off，不为设备映射提供完整 Hardware 结算证明。
+//! 常规启动保持 DDTP Off；内部单设备 Domain 可发布 Sv39 投影。
+//! 翻译撤销与平台结清分开，不把 CQ/FQ 读数作为完整 Hardware 证明。
 //! 依据 RISC-V IOMMU v1.0.1 §4.1 / §5。
 
+pub(crate) mod domain;
 mod engine;
+mod fault;
 mod pages;
 mod phase;
 pub(crate) mod registers;
 
 pub(crate) use engine::{Engine, EngineError};
+pub(crate) use fault::Fault;
 pub(crate) use phase::Phase;
 
 use super::{BatchId, Error, HardwareError};
@@ -19,6 +23,10 @@ impl Command {
     /// Host 第一阶段全范围失效，包含全局翻译。不适用于第二阶段或设备 ATC。
     pub(crate) fn invalidate_host() -> Self {
         Self([1, 0])
+    }
+
+    pub(crate) fn invalidate_directory() -> Self {
+        Self([3, 0])
     }
 
     pub(crate) fn fence(

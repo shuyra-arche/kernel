@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 #[test]
 #[ignore = "requires QEMU RISC-V with virt,iommu-sys support (validated on 10.0.13)"]
-fn command_engine_on_real_qemu_registers() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/iommu");
+fn iommu_on_real_qemu_registers() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("guest/iommu");
     let output = Command::new("cargo")
         .args([
             "+nightly",
@@ -38,6 +38,11 @@ fn command_engine_on_real_qemu_registers() {
         .expect("sha256sum is required");
     assert!(hash.status.success());
     let evidence = root.join("target/evidence");
+    // This directory contains only generated results. Do not let a failed run
+    // inherit successful scenario logs from an earlier invocation.
+    if evidence.exists() {
+        std::fs::remove_dir_all(&evidence).unwrap();
+    }
     std::fs::create_dir_all(&evidence).unwrap();
     let receipt = format!(
         "{}\n{}\nfirmware=none; guest runs in M-mode\n",
@@ -60,6 +65,27 @@ fn command_engine_on_real_qemu_registers() {
             "PASS iommu-command-engine abandoned=3 returns=0",
             true,
         ),
+        (
+            "dma",
+            "virt,iommu-sys=on",
+            "dma",
+            "PASS iommu-dma revoked=1 reused=1 denied=3",
+            true,
+        ),
+        (
+            "readonly",
+            "virt,iommu-sys=on",
+            "readonly",
+            "PASS iommu-dma readonly=1 denied=5",
+            true,
+        ),
+        (
+            "dma-abandon",
+            "virt,iommu-sys=on",
+            "dma-abandon",
+            "PASS iommu-dma abandoned=8 returns=0",
+            true,
+        ),
         ("missing", "virt", "", "IOMMU missing", false),
     ] {
         let mut command = Command::new(&qemu);
@@ -70,6 +96,14 @@ fn command_engine_on_real_qemu_registers() {
             ])
             .arg(&guest)
             .args(["-nographic", "-monitor", "none", "-nic", "none"]);
+        if matches!(name, "dma" | "readonly" | "dma-abandon") {
+            command.args([
+                "-device",
+                "edu,addr=1.0,dma_mask=0xffffffffffffffff",
+                "-device",
+                "edu,addr=2.0,dma_mask=0xffffffffffffffff",
+            ]);
+        }
         if !args.is_empty() {
             command.args(["-append", args]);
         }
