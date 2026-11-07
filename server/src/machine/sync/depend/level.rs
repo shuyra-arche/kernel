@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[repr(u8)]
 pub enum Level {
@@ -13,7 +12,6 @@ pub enum Level {
     Roster = 8,
     Asid = 9,
     Frame = 10,
-    Block = 11,
     Tally = 12,
     Spare = 13,
     UnitState = 14,

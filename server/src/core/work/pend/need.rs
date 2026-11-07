@@ -1,18 +1,14 @@
-use kernel_api::model::permission::Permission;
-
+use kernel_api::model::modifiable::Modifiable;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Need {
-    Fetch,
-    Store,
-    Vest,
+    Read,
+    Write,
 }
-
 impl Need {
-    pub(crate) fn allowed_by(self, permission: Permission) -> bool {
-        permission.contains(match self {
-            Self::Fetch => Permission::FETCH,
-            Self::Store => Permission::STORE,
-            Self::Vest => Permission::VEST,
-        })
+    pub(crate) fn allowed_by(self, access: Modifiable) -> bool {
+        match self {
+            Self::Write => access == Modifiable::Yes,
+            Self::Read => true,
+        }
     }
 }

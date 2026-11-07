@@ -36,6 +36,7 @@ impl From<RetainError> for NestError {
     fn from(error: RetainError) -> Self {
         match error {
             RetainError::Quarantined => Self::Pinned,
+            RetainError::Borrowed => Self::Busy,
             RetainError::Exhausted => Self::OutOfMemory,
             RetainError::Unbalanced => unreachable!("unbalanced hardware retention"),
         }

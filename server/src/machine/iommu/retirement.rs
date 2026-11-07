@@ -46,3 +46,8 @@ pub(crate) fn fault(
 pub(crate) fn close(id: DomainId) -> Result<(), Error> {
     DOMAINS.lock().close(id)
 }
+
+/// Current retirement failure, retained until a successful retry.
+pub(crate) fn error(id: DomainId) -> Result<Option<Error>, Error> {
+    DOMAINS.lock().error(id)
+}

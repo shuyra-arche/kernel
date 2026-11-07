@@ -1,13 +1,12 @@
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
 
 use crate::core::memory::nest::NestError;
-use crate::core::work::pend::Pend;
+use crate::core::work::pend::Table;
 use crate::core::work::room::scheduler;
 use crate::core::work::unit::copies::Origin;
 use crate::core::work::unit::life::Life;
-use crate::core::work::unit::space::Space;
 use crate::core::work::unit::tally;
 use crate::core::work::unit::team::{MAX_MEMBERS, Member};
 use crate::machine::sync::SpinLock;
@@ -20,22 +19,9 @@ pub(crate) struct PreparedTask {
     life: Arc<Life>,
     state: Arc<SpinLock<TaskState>>,
     slot: Option<Arc<MaybeUninit<Task>>>,
-    controls: Vec<(Weak<Space>, usize)>,
 }
 
 impl PreparedTask {
-    pub(crate) fn id(&self) -> kernel_api::model::identity::TaskId {
-        self.ident.id
-    }
-
-    pub(crate) fn track_control(&mut self, space: &Arc<Space>, id: usize) -> Result<(), NestError> {
-        self.controls
-            .try_reserve(1)
-            .map_err(|_| NestError::OutOfMemory)?;
-        self.controls.push((Arc::downgrade(space), id));
-        Ok(())
-    }
-
     pub(crate) fn new(
         ident: Arc<TaskIdent>,
         life: Arc<Life>,
@@ -47,7 +33,6 @@ impl PreparedTask {
             life,
             state,
             slot: Some(slot),
-            controls: Vec::new(),
         }
     }
 
@@ -55,7 +40,20 @@ impl PreparedTask {
     /// 团队表与暂扣表。`commit` 是公开那一刻要回调的动作。
     pub(crate) fn publish(&mut self, commit: impl FnOnce()) -> Result<Arc<Task>, NestError> {
         let team = self.ident.team.clone();
-        let receipts = team.receipts()?;
+        let mut receipts = team.receipts()?;
+        let controller = self.ident.controller;
+        if controller.get() != 0 && !receipts.iter().any(|receipt| receipt.owner == controller) {
+            let mut roots = Vec::new();
+            roots.try_reserve(1).map_err(|_| NestError::OutOfMemory)?;
+            roots.push(team.id);
+            receipts
+                .try_reserve(1)
+                .map_err(|_| NestError::OutOfMemory)?;
+            receipts.push(crate::core::work::unit::team::Receipt {
+                owner: controller,
+                roots,
+            });
+        }
         let member = Arc::try_new(Member {
             id: self.ident.id,
             task: TaskWeak::empty(),
@@ -63,6 +61,7 @@ impl PreparedTask {
             state: self.state.clone(),
             life: self.life.clone(),
             receipts: SpinLock::new(receipts),
+            result: SpinLock::new(None),
         })
         .map_err(|_| NestError::OutOfMemory)?;
         scheduler::roster::reserve_publication().map_err(|_| NestError::OutOfMemory)?;
@@ -82,7 +81,7 @@ impl PreparedTask {
                 .map_err(|_| NestError::OutOfMemory)?;
         }
         let _commit = crate::core::work::commit();
-        if team.life.closed() {
+        if !team.life.admitting() {
             return Err(NestError::NoRegion);
         }
         let mut tasks = team.tasks.members.lock();
@@ -103,9 +102,11 @@ impl PreparedTask {
                     ident: self.ident.clone(),
                     life: self.life.clone(),
                     state: self.state.clone(),
-                    pend: Pend::new(),
+                    pend: Table::new(),
+                    signs: crate::core::work::sign::Table::new(),
+                    administration: crate::core::work::unit::control::Table::new(),
                     heir: SpinLock::new(Vec::new()),
-                    controls: SpinLock::new(core::mem::take(&mut self.controls)),
+                    controls: SpinLock::new(Vec::new()),
                 });
             let task = unsafe { slot.assume_init() };
             let mut member = member;

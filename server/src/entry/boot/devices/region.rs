@@ -1,5 +1,5 @@
 use crate::core::memory::PAGE_SIZE;
-use kernel_api::abi::call::pie::PieFail;
+use kernel_api::abi::call::pend::PendFail;
 
 /// Original geometry names a boot resource; page coverage defines its authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11,12 +11,12 @@ pub(crate) struct Region {
 }
 
 impl Region {
-    pub fn new(base: usize, size: usize) -> Result<Self, PieFail> {
+    pub fn new(base: usize, size: usize) -> Result<Self, PendFail> {
         let end = base
             .checked_add(size)
             .filter(|_| size != 0)
             .and_then(|end| end.checked_next_multiple_of(PAGE_SIZE))
-            .ok_or(PieFail::Denied)?;
+            .ok_or(PendFail::Denied)?;
         Ok(Self {
             base,
             size,

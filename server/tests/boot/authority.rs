@@ -1,4 +1,4 @@
-use kernel_api::abi::call::pie::PieFail;
+use kernel_api::abi::call::pend::PendFail;
 
 use super::{plan::Plan, tree::Node};
 
@@ -6,11 +6,15 @@ const IOMMU: u64 = 0x301_0000;
 const UART: u64 = 0x1000_0000;
 const DRAM: usize = 0x8000_0000;
 
-fn grants(root: Node) -> Result<Vec<(usize, usize)>, PieFail> {
+fn authorities(root: Node) -> Result<Vec<(usize, usize)>, PendFail> {
     let bytes = root.encode();
     let fdt = fdt::Fdt::new(&bytes).expect("valid fixture DTB");
-    Plan::discover(&fdt, DRAM, 0x1000_0000)
-        .map(|plan| plan.grants().iter().map(|r| (r.base, r.size)).collect())
+    Plan::discover(&fdt, DRAM, 0x1000_0000).map(|plan| {
+        plan.authorities()
+            .iter()
+            .map(|r| (r.base, r.size))
+            .collect()
+    })
 }
 
 fn root() -> Node {
@@ -59,7 +63,7 @@ fn platform_control_is_withheld_but_unrelated_windows_keep_their_names() {
         )
         .child(pci(0x4_0000_0000, 0x4_0000_0000));
     assert_eq!(
-        grants(tree).unwrap(),
+        authorities(tree).unwrap(),
         [
             (UART as usize, 0x100),
             (0x3000_0000, 0x1000_0000),
@@ -78,7 +82,7 @@ fn aliases_are_checked_after_discovery_regardless_of_node_order() {
         } else {
             root().child(alias).child(controller)
         };
-        assert!(grants(tree).unwrap().is_empty());
+        assert!(authorities(tree).unwrap().is_empty());
     }
 }
 
@@ -87,7 +91,7 @@ fn pci_aperture_cannot_reintroduce_control_registers() {
     let tree = root()
         .child(pci(IOMMU - 0x10000, 0x20000))
         .child(iommu(IOMMU, 0x1000));
-    assert_eq!(grants(tree).unwrap(), [(0x3000_0000, 0x1000_0000)]);
+    assert_eq!(authorities(tree).unwrap(), [(0x3000_0000, 0x1000_0000)]);
 }
 
 #[test]
@@ -97,7 +101,7 @@ fn exclusion_uses_page_coverage_including_neighboring_bytes() {
         .child(Node::new("after").reg(IOMMU + 0x180, 1))
         .child(Node::new("next-page").reg(IOMMU + 0x1000, 1))
         .child(iommu(IOMMU + 0x100, 0x80));
-    assert_eq!(grants(tree).unwrap(), [((IOMMU + 0x1000) as usize, 1)]);
+    assert_eq!(authorities(tree).unwrap(), [((IOMMU + 0x1000) as usize, 1)]);
 }
 
 #[test]
@@ -109,7 +113,7 @@ fn compatible_not_node_name_or_status_defines_control_pages() {
                 .reg(UART, 0x100),
         )
         .child(iommu(IOMMU, 0x1000).property("status", b"disabled\0"));
-    assert_eq!(grants(tree).unwrap(), [(UART as usize, 0x100)]);
+    assert_eq!(authorities(tree).unwrap(), [(UART as usize, 0x100)]);
 }
 
 #[test]
@@ -127,7 +131,7 @@ fn every_controller_and_reg_entry_is_reserved() {
         .child(iommu(IOMMU + 0x4000, 0x1000))
         .child(Node::new("alias").reg(IOMMU + 0x2000, 0x1000))
         .child(Node::new("second-alias").reg(IOMMU + 0x4000, 0x1000));
-    assert!(grants(tree).unwrap().is_empty());
+    assert!(authorities(tree).unwrap().is_empty());
 }
 
 #[test]
@@ -147,8 +151,8 @@ fn invalid_controller_geometry_never_falls_back_to_device_export() {
     ];
     for controller in cases {
         assert!(matches!(
-            grants(root().child(controller)),
-            Err(PieFail::Denied)
+            authorities(root().child(controller)),
+            Err(PendFail::Denied)
         ));
     }
 }
@@ -164,8 +168,8 @@ fn unsupported_iommu_discovery_fails_closed() {
             .reg(IOMMU, 0x1000),
     ] {
         assert!(matches!(
-            grants(root().child(controller)),
-            Err(PieFail::Denied)
+            authorities(root().child(controller)),
+            Err(PendFail::Denied)
         ));
     }
 }
@@ -183,7 +187,7 @@ fn controller_cell_widths_are_validated_before_parsing_registers() {
             .property("#address-cells", address)
             .property("#size-cells", size)
             .child(iommu(IOMMU, 0x1000));
-        assert!(matches!(grants(tree), Err(PieFail::Denied)));
+        assert!(matches!(authorities(tree), Err(PendFail::Denied)));
     }
     let register = [(IOMMU as u32).to_be_bytes(), 0x1000u32.to_be_bytes()].concat();
     let tree = Node::new("")
@@ -194,7 +198,7 @@ fn controller_cell_widths_are_validated_before_parsing_registers() {
                 .compatible("riscv,iommu")
                 .property("reg", register),
         );
-    assert!(grants(tree).unwrap().is_empty());
+    assert!(authorities(tree).unwrap().is_empty());
 }
 
 #[test]
@@ -204,8 +208,8 @@ fn bus_coordinates_must_be_explicitly_identity_mapped() {
         Node::new("soc").cells().property("ranges", [0; 24]),
     ] {
         assert!(matches!(
-            grants(root().child(bus.child(iommu(IOMMU, 0x1000)))),
-            Err(PieFail::Denied)
+            authorities(root().child(bus.child(iommu(IOMMU, 0x1000)))),
+            Err(PendFail::Denied)
         ));
     }
     // Identical node names under different parents cannot select the first parent.
@@ -217,31 +221,31 @@ fn bus_coordinates_must_be_explicitly_identity_mapped() {
                 .child(iommu(IOMMU, 0x1000)),
         )
         .child(Node::new("second").cells().child(iommu(IOMMU, 0x1000)));
-    assert!(matches!(grants(tree), Err(PieFail::Denied)));
+    assert!(matches!(authorities(tree), Err(PendFail::Denied)));
 }
 
 #[test]
 fn ram_aliases_do_not_expose_kernel_tables_or_future_allocations() {
     assert!(
-        grants(root().child(Node::new("alias").reg(DRAM as u64, 0x1000)))
+        authorities(root().child(Node::new("alias").reg(DRAM as u64, 0x1000)))
             .unwrap()
             .is_empty()
     );
     // A PCI aperture crossing into RAM must still reject the whole plan.
     assert!(matches!(
-        grants(root().child(pci(DRAM as u64 - 1, 2))),
-        Err(PieFail::Denied)
+        authorities(root().child(pci(DRAM as u64 - 1, 2))),
+        Err(PendFail::Denied)
     ));
 }
 
 #[test]
 fn no_controller_preserves_ordinary_grants_and_duplicate_names_fail() {
     assert_eq!(
-        grants(root().child(Node::new("uart").reg(UART, 0x100))).unwrap(),
+        authorities(root().child(Node::new("uart").reg(UART, 0x100))).unwrap(),
         [(UART as usize, 0x100)]
     );
     let tree = root()
         .child(Node::new("first").reg(UART, 0x100))
         .child(Node::new("second").reg(UART, 0x1000));
-    assert!(matches!(grants(tree), Err(PieFail::Denied)));
+    assert!(matches!(authorities(tree), Err(PendFail::Denied)));
 }

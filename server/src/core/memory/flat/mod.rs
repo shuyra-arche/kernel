@@ -17,6 +17,7 @@ mod source;
 mod state;
 pub(in crate::core::memory) mod transaction;
 
+use crate::core::memory::cell::Owner;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -43,17 +44,20 @@ use state::FlatState;
 /// 要么是分配器 RAM（页槽按需物化），要么是调用方仍保留的外部物理区间。
 /// 物化时机由调用方组合决定，来源本身不携带 eager / lazy 策略。
 pub struct Flat {
+    /// Recipient of future allocations; existing Cells retain their own owner.
+    allocation_owner: Owner,
     page_count: PageCount,
     state: SpinLock<FlatState>,
 }
 
 impl Flat {
     /// 建立 RAM 逻辑来源；不提前物化。这种来源是可迁移的。
-    pub fn acquire(allocation: Allocation) -> Result<Arc<Self>, FlatError> {
+    pub fn acquire(owner: Owner, allocation: Allocation) -> Result<Arc<Self>, FlatError> {
         Self::new(
             allocation.page_count(),
             FlatSource::Managed(Vec::new()),
             true,
+            owner,
         )
     }
 
@@ -62,25 +66,39 @@ impl Flat {
     /// 输入必须按页号严格递增；失败释放这批尚未发布的 Cell。
     /// 导入来源保持不可迁移，沿用启动/镜像/任务内存的既有约束。
     pub(crate) fn from_cells(
+        owner: Owner,
         page_count: PageCount,
         cells: Vec<(PageIndex, Cell)>,
     ) -> Result<Arc<Self>, FlatError> {
+        if cells
+            .iter()
+            .any(|(_, cell)| cell.owner() != owner.identity())
+        {
+            return Err(FlatError::OutOfRange);
+        }
         let slots = slot::admit(page_count.get(), cells)?;
-        Self::new(page_count, FlatSource::Managed(slots), false)
+        Self::new(page_count, FlatSource::Managed(slots), false, owner)
     }
 
     /// 保留外部借用物理区间：不分配数据页、不清零、不按 RAM 回收；也不可迁移。
     pub fn from_region(region: Arc<BorrowedRegion>) -> Result<Arc<Self>, FlatError> {
         let page_count = PageCount::new(region.size() / PAGE_SIZE).ok_or(FlatError::OutOfRange)?;
-        Self::new(page_count, FlatSource::Borrowed(region), false)
+        Self::new(
+            page_count,
+            FlatSource::Borrowed(region),
+            false,
+            Owner::Kernel,
+        )
     }
 
     fn new(
         page_count: PageCount,
         source: FlatSource,
         transferable: bool,
+        allocation_owner: Owner,
     ) -> Result<Arc<Self>, FlatError> {
         Arc::try_new(Self {
+            allocation_owner,
             page_count,
             state: SpinLock::new_level(Level::Flat, FlatState::new(source, transferable)),
         })
@@ -159,10 +177,6 @@ impl Flat {
         state.residencies.remove(at);
     }
 
-    pub(super) fn is_pinned(&self, index: PageIndex, count: PageCount) -> bool {
-        self.state.lock().is_pinned(index, count)
-    }
-
     /// 物化 [index, index + count)：只有 Fresh 的页会被分配，已有承载的页跳过。
     ///
     /// 已是 `Missing` 的页不补零也不新分配——那是承载移走后的墓碑，
@@ -199,7 +213,8 @@ impl Flat {
                 continue;
             }
             slots.try_reserve(1).map_err(|_| FlatError::OutOfMemory)?;
-            let cell = Arc::try_new(allocate_cell()?).map_err(|_| FlatError::OutOfMemory)?;
+            let cell = Arc::try_new(allocate_cell(self.allocation_owner.clone())?)
+                .map_err(|_| FlatError::OutOfMemory)?;
             slots.insert(at, (PageIndex::new(page), Slot::Resident(cell)));
             page += 1;
             at += 1;
@@ -238,36 +253,6 @@ impl Flat {
             }
         }
         Ok(out)
-    }
-
-    /// 该窗口是否每一页都是 Managed 的承载；借用来源没有物化页槽，不算。
-    ///
-    /// 只读快照：不物化、不分配。`Missing` 与 Fresh 一样不算承载。
-    pub(super) fn fully_materialized(
-        &self,
-        index: PageIndex,
-        count: PageCount,
-    ) -> Result<bool, FlatError> {
-        let end = index
-            .get()
-            .checked_add(count.get())
-            .ok_or(FlatError::OutOfRange)?;
-        if end > self.page_count.get() {
-            return Err(FlatError::OutOfRange);
-        }
-        let guard = self.state.lock();
-        let FlatSource::Managed(slots) = &guard.source else {
-            return Ok(false);
-        };
-        let first = slots.partition_point(|(slot, _)| slot.get() < index.get());
-        let last = slots.partition_point(|(slot, _)| slot.get() < end);
-        let mut expected = index.get();
-        for (slot, state) in &slots[first..last] {
-            if slot.get() == expected && matches!(state, Slot::Resident(_)) {
-                expected += 1;
-            }
-        }
-        Ok(expected == end)
     }
 
     /// 这一页此刻能不能物化出承载：`Fresh` 与 `Resident` 可以；`Missing` 墓碑与

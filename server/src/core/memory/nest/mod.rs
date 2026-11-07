@@ -159,12 +159,6 @@ impl Nest {
         self.asid
     }
 
-    /// 页表几何：健康面核对加载模式换算出的层数。
-    #[cfg(debug_assertions)]
-    pub(crate) fn geometry(&self) -> mode::Geo {
-        self.geometry
-    }
-
     pub(crate) fn root_ppn(&self) -> usize {
         self.state.lock().root.ppn()
     }
@@ -173,26 +167,6 @@ impl Nest {
         satp::Satp::from_bits(
             (mode::mode().into_usize() << 60) | (self.asid.get() << 44) | self.root_ppn(),
         )
-    }
-
-    #[cfg(debug_assertions)]
-    pub(crate) fn mapping_count(&self) -> usize {
-        self.state.lock().index.len()
-    }
-
-    #[cfg(debug_assertions)]
-    pub(crate) fn table_count(&self) -> usize {
-        let state = self.state.lock();
-        state.root.node_count()
-            + state
-                .retired_tables
-                .iter()
-                .map(TableNode::node_count)
-                .sum::<usize>()
-    }
-
-    pub(crate) fn probe(&self, address: VirtAddr) -> Option<Arc<Mapping>> {
-        self.ready_state().ok()?.index.find(address.as_usize())
     }
 
     /// 是否有活关系与 `[start, start + size)` 相交。
@@ -221,48 +195,6 @@ impl Nest {
         self.is_closed() || !self.contains_reservation(id)
     }
 
-    #[cfg(debug_assertions)]
-    pub(crate) fn pending_mappings(&self) -> Result<Vec<Arc<Mapping>>, NestError> {
-        let state = self.state.lock();
-        let mut mappings = Vec::new();
-        mappings
-            .try_reserve(state.pending_mappings.len())
-            .map_err(|_| NestError::OutOfMemory)?;
-        mappings.extend(state.pending_mappings.iter().cloned());
-        Ok(mappings)
-    }
-
-    /// 全部活动区间及其所属关系，按区间起点升序。
-    pub(crate) fn active_ranges(&self) -> Result<Vec<(Arc<Mapping>, ActiveRange)>, NestError> {
-        let state = self.state.lock();
-        let mut mappings = Vec::new();
-        mappings
-            .try_reserve(state.index.len())
-            .map_err(|_| NestError::OutOfMemory)?;
-        state.index.collect(&mut mappings);
-        let count = mappings
-            .iter()
-            .map(|mapping| mapping.state.lock().active.len())
-            .sum();
-        let mut ranges = Vec::new();
-        ranges
-            .try_reserve(count)
-            .map_err(|_| NestError::OutOfMemory)?;
-        for mapping in mappings {
-            ranges.extend(
-                mapping
-                    .state
-                    .lock()
-                    .active
-                    .iter()
-                    .copied()
-                    .map(|range| (mapping.clone(), range)),
-            );
-        }
-        ranges.sort_unstable_by_key(|(_, range)| range.start);
-        Ok(ranges)
-    }
-
     /// 普通挂载的架构属性：用户空间只对 `Normal` 区开 U，A/D 由内核自维护。
     pub(crate) fn attrs(&self, region: RegionId) -> PteFlags {
         let mut attrs = PteFlags::A | PteFlags::D;
@@ -270,17 +202,6 @@ impl Nest {
             attrs |= PteFlags::U;
         }
         attrs
-    }
-
-    /// 重设窗口边界；`edge` 是窗口的排他末端。
-    #[cfg(debug_assertions)]
-    pub(crate) fn attach_region(
-        &self,
-        region: RegionId,
-        base: usize,
-        edge: usize,
-    ) -> Result<(), NestError> {
-        self.occupancy.lock().configure(region, base, edge - 1)
     }
 
     /// 抬高窗口的选址下界；已登记的占用不动。
@@ -449,8 +370,15 @@ impl Nest {
                 for (offset, cell) in materialized {
                     let page = offset.get();
                     let address = start + page * PAGE_SIZE;
-                    if inner.covers(address.as_usize(), address.as_usize()) {
-                        published.push((page, cell.prepare_hardware()?));
+                    if let Some(range) = inner
+                        .active
+                        .iter()
+                        .find(|range| range.contains(address.as_usize()))
+                    {
+                        published.push((
+                            page,
+                            cell.prepare_hardware(range.ceiling.contains(Access::WRITE))?,
+                        ));
                     }
                 }
             }
@@ -590,7 +518,16 @@ impl Nest {
         for (offset, cell) in materialized {
             let page = first + offset.get();
             if !inner.publishes(page) {
-                fresh.push((page, cell.prepare_hardware()?));
+                let address = mapping.reservation.start() + page * PAGE_SIZE;
+                let range = inner
+                    .active
+                    .iter()
+                    .find(|range| range.contains(address.as_usize()))
+                    .ok_or(NestError::NoRegion)?;
+                fresh.push((
+                    page,
+                    cell.prepare_hardware(range.ceiling.contains(Access::WRITE))?,
+                ));
             }
         }
         if fresh.is_empty() {
@@ -1402,13 +1339,6 @@ impl Nest {
         Some((pa + address.offset(), flags))
     }
 
-    #[cfg(debug_assertions)]
-    pub(crate) fn leaf_span(&self, address: VirtAddr) -> Option<usize> {
-        let state = self.ready_state().ok()?;
-        state.index.find(address.as_usize())?;
-        state.root.leaf_span_geometry(address, self.geometry)
-    }
-
     /// 用户页错误的纯一致探针：只读当前的身份、活动权限、承载与硬件条目。
     ///
     /// 直取 `Nest → Mapping → Flat` 三层状态，不推进失效、不物化、不分配、不新造
@@ -1534,7 +1464,7 @@ impl Nest {
                         assert_eq!(
                             leaf.bits(),
                             expected.bits(),
-                            "hardware leaf crosses permission state"
+                            "hardware leaf crosses modifiable state"
                         );
                     } else {
                         expected = Some(leaf);
@@ -1550,7 +1480,7 @@ impl Nest {
                 assert_eq!(
                     (flags & mask).bits(),
                     (expected & mask).bits(),
-                    "hardware PTE permissions differ from Mapping state at {start:?}"
+                    "hardware PTE modifiability differ from Mapping state at {start:?}"
                 );
                 if inner.source.is_borrowed() {
                     let offset = start

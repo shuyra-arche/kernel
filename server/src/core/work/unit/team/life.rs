@@ -23,25 +23,18 @@ impl TeamLife {
         let local = matches!(self.state.lock().phase, TeamPhase::Paused);
         local || self.parent.as_ref().is_some_and(|p| p.paused())
     }
+    pub(crate) fn admitting(&self) -> bool {
+        let state = self.state.lock();
+        let local = state.admission.permits() && !state.terminal();
+        drop(state);
+        local && self.parent.as_ref().is_none_or(|parent| parent.admitting())
+    }
     pub fn closed(&self) -> bool {
         let local = self.state.lock().terminal();
         local || self.parent.as_ref().is_some_and(|p| p.closed())
     }
     pub fn member(&self, id: TaskId) -> Option<Arc<Member>> {
         self.tasks.lock().iter().find(|m| m.id == id).cloned()
-    }
-    pub fn find_team(self: &Arc<Self>, id: TeamId) -> Option<Arc<Self>> {
-        if self.id == id {
-            return Some(self.clone());
-        }
-        let mut at = 0;
-        loop {
-            let child = self.children.lock().get(at).cloned()?;
-            at += 1;
-            if let Some(found) = child.find_team(id) {
-                return Some(found);
-            }
-        }
     }
     pub fn visit(&self, run: &mut impl FnMut(&TeamLife)) {
         run(self);

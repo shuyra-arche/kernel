@@ -1,3 +1,4 @@
+use crate::core::memory::cell::Owner;
 use alloc::vec::Vec;
 use riscv::register::satp;
 
@@ -46,7 +47,10 @@ pub(super) fn init() -> Result<(), NestError> {
     let flags = PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::A | PteFlags::D;
     let attrs = flags & (PteFlags::U | PteFlags::G | PteFlags::A | PteFlags::D);
     for h in 0..segments {
-        let boot = crate::tag!(TrapStack, crate::core::memory::flat::allocate_cell()?);
+        let boot = crate::tag!(
+            TrapStack,
+            crate::core::memory::flat::allocate_cell(Owner::Kernel)?
+        );
         boot_stacks.push(boot);
 
         let mut indexed = Vec::new();
@@ -56,12 +60,15 @@ pub(super) fn init() -> Result<(), NestError> {
         for page in 0..body_pages {
             indexed.push((
                 PageIndex::new(page),
-                crate::tag!(TrapStack, crate::core::memory::flat::allocate_cell()?),
+                crate::tag!(
+                    TrapStack,
+                    crate::core::memory::flat::allocate_cell(Owner::Kernel)?
+                ),
             ));
         }
         let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;
         // 主体帧先备齐，再登记占用：来源准备失败不留无人持有的地址。
-        let source = Flat::from_cells(count, indexed)?.whole();
+        let source = Flat::from_cells(Owner::Kernel, count, indexed)?.whole();
         let body_va = trap_stack_base(HartId::new(h));
         attach_exact(&space.nest, body_va, source, Access::from_pte(flags), attrs)?;
         unsafe {

@@ -212,7 +212,7 @@ fn audit_index(
     for (lo, hi) in &local {
         assert!(
             !overlaps_other(node, &node.mapping, *lo, *hi),
-            "distinct Views overlap in the nest index"
+            "distinct mappings overlap in the nest index"
         );
     }
     assert_eq!(
@@ -305,7 +305,7 @@ fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: 
         assert_eq!(
             (flags & mask).bits(),
             (expected & mask).bits(),
-            "published Cell PTE permissions differ from Mapping state"
+            "published Cell PTE modifiability differ from Mapping state"
         );
     }
     drop(state);

@@ -1,8 +1,8 @@
 use alloc::{string::String, vec::Vec};
 use serde::Serialize;
 
-use crate::machine::hart;
 use crate::machine::clock;
+use crate::machine::hart;
 
 mod paragraph;
 pub use paragraph::Paragraph;
@@ -26,10 +26,5 @@ impl Report {
     pub fn seal(&mut self) -> &Self {
         self.seal = (hart::hart_id().get(), clock::now().as_ticks());
         self
-    }
-
-    #[allow(unused)]
-    pub fn clear(&mut self) {
-        self.paras.clear();
     }
 }

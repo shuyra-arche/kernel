@@ -1,22 +1,22 @@
 use crate::core::memory::nest::iommu::riscv::topology::Topology;
 use alloc::vec::Vec;
-use kernel_api::abi::call::pie::PieFail;
+use kernel_api::abi::call::pend::PendFail;
 
 use super::{ranges, region::Region, reserved};
 
 /// Pure boot admission. No authority is published until the whole plan succeeds.
 pub(super) struct Plan {
-    grants: Vec<Region>,
+    authorities: Vec<Region>,
 }
 
 impl Plan {
-    pub fn discover(fdt: &fdt::Fdt, dram_base: usize, dram_size: usize) -> Result<Self, PieFail> {
+    pub fn discover(fdt: &fdt::Fdt, dram_base: usize, dram_size: usize) -> Result<Self, PendFail> {
         let mut reserved = reserved::discover(fdt)?;
         let dram = Region::new(dram_base, dram_size)?;
         if reserved.iter().any(|region| region.overlaps(dram)) {
-            return Err(PieFail::Denied);
+            return Err(PendFail::Denied);
         }
-        reserved.try_reserve(1).map_err(|_| PieFail::OoM)?;
+        reserved.try_reserve(1).map_err(|_| PendFail::OoM)?;
         reserved.push(dram);
         if fdt.all_nodes().any(|node| {
             node.property("iommu-map").is_some()
@@ -33,13 +33,13 @@ impl Plan {
             }) {
                 for region in super::reserved::node_regions(fdt, node)? {
                     if region.overlaps(dram) {
-                        return Err(PieFail::Denied);
+                        return Err(PendFail::Denied);
                     }
-                    reserved.try_reserve(1).map_err(|_| PieFail::OoM)?;
+                    reserved.try_reserve(1).map_err(|_| PendFail::OoM)?;
                     reserved.push(region);
                 }
             }
-            let topology = Topology::discover(fdt).map_err(|_| PieFail::Denied)?;
+            let topology = Topology::discover(fdt).map_err(|_| PendFail::Denied)?;
             // A protected ECAM without protected BAR apertures is not exclusive
             // device custody: another Unit could still program the endpoint.
             for node in fdt
@@ -49,22 +49,24 @@ impl Plan {
                 for (base, size) in ranges::memory_windows(fdt, node)? {
                     let region = Region::new(base, size)?;
                     if region.overlaps(dram) {
-                        return Err(PieFail::Denied);
+                        return Err(PendFail::Denied);
                     }
-                    reserved.try_reserve(1).map_err(|_| PieFail::OoM)?;
+                    reserved.try_reserve(1).map_err(|_| PendFail::OoM)?;
                     reserved.push(region);
                 }
             }
             for (base, size) in topology.configurations() {
                 let region = Region::new(base, size)?;
                 if region.overlaps(dram) {
-                    return Err(PieFail::Denied);
+                    return Err(PendFail::Denied);
                 }
-                reserved.try_reserve(1).map_err(|_| PieFail::OoM)?;
+                reserved.try_reserve(1).map_err(|_| PendFail::OoM)?;
                 reserved.push(region);
             }
         }
-        let mut plan = Self { grants: Vec::new() };
+        let mut plan = Self {
+            authorities: Vec::new(),
+        };
         for node in fdt.all_nodes() {
             let stem = node.name.split('@').next().unwrap_or(node.name);
             if matches!(stem, "memory" | "clint") {
@@ -82,7 +84,7 @@ impl Plan {
                     // Retain the existing rejection of PCI apertures over RAM,
                     // including overlap introduced by page rounding.
                     if Region::new(base, size)?.overlaps(dram) {
-                        return Err(PieFail::Denied);
+                        return Err(PendFail::Denied);
                     }
                     plan.offer(base, size, &reserved)?;
                 }
@@ -91,11 +93,11 @@ impl Plan {
         Ok(plan)
     }
 
-    pub fn grants(&self) -> &[Region] {
-        &self.grants
+    pub fn authorities(&self) -> &[Region] {
+        &self.authorities
     }
 
-    fn offer(&mut self, base: usize, size: usize, reserved: &[Region]) -> Result<(), PieFail> {
+    fn offer(&mut self, base: usize, size: usize, reserved: &[Region]) -> Result<(), PendFail> {
         if base == 0 || size == 0 {
             return Ok(());
         }
@@ -106,11 +108,11 @@ impl Plan {
             return Ok(());
         }
         // Distinct root authorities must not silently compete for one ledger name.
-        if self.grants.iter().any(|prior| prior.base == base) {
-            return Err(PieFail::Denied);
+        if self.authorities.iter().any(|prior| prior.base == base) {
+            return Err(PendFail::Denied);
         }
-        self.grants.try_reserve(1).map_err(|_| PieFail::OoM)?;
-        self.grants.push(region);
+        self.authorities.try_reserve(1).map_err(|_| PendFail::OoM)?;
+        self.authorities.push(region);
         Ok(())
     }
 }

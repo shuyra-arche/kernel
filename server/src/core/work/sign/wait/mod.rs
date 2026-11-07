@@ -35,7 +35,7 @@ use crate::core::work::unit::task::WaitCall;
 
 fn fan_out(fwd: &Fwd) {
     for (id, life) in fwd.entries() {
-        knock(WakeKey::Tole { id }, life);
+        knock(WakeKey::Sign { id }, life);
     }
 }
 
@@ -125,7 +125,7 @@ where
 
 pub fn fall<E: WaitFail>(me: TaskLife, dur: Duration) -> Result<Handoff<bool>, E> {
     let TaskLife { id, life } = me;
-    match wait(WakeKey::Pies { task: id }, life, dur)? {
+    match wait(WakeKey::Pends { task: id }, life, dur)? {
         Handoff::Switch(pa) => Ok(Handoff::Switch(pa)),
         Handoff::Resume(()) => Ok(Handoff::Resume(true)),
     }
@@ -180,20 +180,20 @@ pub(crate) fn knock(key: WakeKey, life: &Weak<Life>) -> usize {
 pub(crate) fn forward(
     key: WakeKey,
     life: Weak<Life>,
-    tole: usize,
-    tole_life: Weak<Life>,
+    endpoint: usize,
+    endpoint_life: Weak<Life>,
 ) -> Result<(), ()> {
     let mut sites = sites(key).lock();
     let site = Site::ensure(&mut sites, key, &life)?;
-    let r = site.fwd.attach(tole, tole_life);
+    let r = site.fwd.attach(endpoint, endpoint_life);
     prune(&mut sites, key);
     r
 }
 
-pub(crate) fn unforward(key: WakeKey, tole: usize) {
+pub(crate) fn unforward(key: WakeKey, endpoint: usize) {
     let mut sites = sites(key).lock();
     if let Some(site) = sites.get_mut(&key) {
-        site.fwd.detach(tole);
+        site.fwd.detach(endpoint);
     }
     prune(&mut sites, key);
 }
@@ -215,13 +215,6 @@ pub(crate) fn signal(key: WakeKey) -> usize {
     };
     fan_out(&fwd);
     rise(Unchain::new(chain))
-}
-
-#[cfg(debug_assertions)]
-pub(crate) fn site_count() -> usize {
-    (0..SITE_SHARDS)
-        .map(|shard| shard_at(shard).lock().len())
-        .sum()
 }
 
 pub(crate) fn wipe_space(space: Asid) -> usize {
@@ -253,7 +246,7 @@ pub(crate) fn wipe_space(space: Asid) -> usize {
 pub fn wake(key: WakeKey, life: &Weak<Life>) -> bool {
     let _commit = crate::core::work::commit();
     debug_assert!(
-        !matches!(key, WakeKey::Tole { .. }),
+        !matches!(key, WakeKey::Sign { .. }),
         "组键要走 knock（提示型/整链放行），不能走 wake（交付型/一人）"
     );
     let (popped, fwd) = {

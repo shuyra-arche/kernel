@@ -19,7 +19,9 @@ impl HartInfo {
         }
         let mut seen = [false; MAX_HART_SLOTS];
         for node in cpus.children().filter(is_cpu) {
-            let id = node.property("reg").and_then(|property| property.as_usize());
+            let id = node
+                .property("reg")
+                .and_then(|property| property.as_usize());
             let Some(id) = id.filter(|id| *id < count) else {
                 return Err(MachineError::Harts { count, boot });
             };

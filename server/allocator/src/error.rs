@@ -1,7 +1,7 @@
 use fack::prelude::Error;
 
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(unused)]
+
 pub enum InitError {
     #[error("no free memory region configured")]
     NoFreeMemory,

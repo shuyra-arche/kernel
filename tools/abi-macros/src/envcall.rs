@@ -319,7 +319,7 @@ fn emit_operation(op: &Operation, class: u32, call: &Ident) -> TokenStream {
     let enum_value = if matches!(item.fields, Fields::Unit) {
         quote!(#call::#name)
     } else {
-        quote!(#call::#name { #(#ids: value.#ids),* })
+        quote!(#call::#name { #(#ids: _value.#ids),* })
     };
     let behavior = if op.nonreturning {
         quote!(impl crate::abi::operation::TerminalCall for #name {})
@@ -393,8 +393,7 @@ fn emit_operation(op: &Operation, class: u32, call: &Ident) -> TokenStream {
             }
         }
         impl From<#name> for #call {
-            #[allow(unused_variables)]
-            fn from(value: #name) -> Self { #enum_value }
+            fn from(_value: #name) -> Self { #enum_value }
         }
         #behavior
     }

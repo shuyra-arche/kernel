@@ -40,11 +40,6 @@ impl TeamBuilder {
         self
     }
 
-    /// 按 `kind` 起一个空间（非内核的会带跳板），再以 `sire` 落一座构造中的团队。
-    pub(crate) fn build(kind: SpaceKind, sire: TaskWeak) -> Result<Arc<Team>, NestError> {
-        Self::build_with_creator(kind, sire, kernel_api::model::identity::TaskId::new(0))
-    }
-
     pub(crate) fn build_with_creator(
         kind: SpaceKind,
         sire: TaskWeak,

@@ -32,12 +32,3 @@ pub fn discover(root: Node) -> Result<Topology, crate::topology::RouteError> {
     let bytes = root.encode();
     Topology::discover(&fdt::Fdt::new(&bytes).unwrap())
 }
-
-pub fn topology() -> Topology {
-    discover(
-        root()
-            .child(controller(CONTROLLER, 1))
-            .child(host(HOST, &[0, 1, 0, 0x10000])),
-    )
-    .unwrap()
-}

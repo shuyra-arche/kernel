@@ -1,4 +1,6 @@
-//! Named capabilities handed to the initial task.
+//! Typed handles handed to the initial Task; domains remain distinct.
+mod kind;
+pub use kind::ResourceKind;
 mod entry;
 mod name;
 

@@ -8,6 +8,8 @@ mod ranges;
 mod region;
 #[path = "../../src/entry/boot/devices/reserved.rs"]
 mod reserved;
+// This host harness imports only the portable subset of this production module.
+#[allow(dead_code)]
 #[path = "../../src/core/memory/nest/iommu/riscv/topology/mod.rs"]
 pub(crate) mod topology;
 
@@ -26,6 +28,8 @@ mod core {
 
 mod authority;
 mod interrupt;
+// This host harness imports only the portable subset of this production module.
+#[allow(dead_code)]
 #[path = "../../src/machine/iommu/interrupt/plan.rs"]
 mod interrupt_plan;
 mod routing;

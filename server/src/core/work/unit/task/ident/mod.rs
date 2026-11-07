@@ -4,8 +4,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use kernel_api::model::identity::TaskId;
 
 use crate::core::memory::address::PhysAddr;
-#[cfg(debug_assertions)]
-use crate::core::memory::address::VirtAddr;
 use crate::core::memory::nest::NestError;
 use crate::core::work::unit::team::Team;
 use crate::machine::sync::SpinLock;
@@ -30,27 +28,25 @@ pub(crate) fn next_id() -> Result<TaskId, NestError> {
 /// 的那段内存。
 pub(crate) struct TaskIdent {
     pub(crate) id: TaskId,
+    pub(crate) controller: TaskId,
     pub(crate) team: Arc<Team>,
     pub(crate) frame_pa: PhysAddr,
-    #[cfg(debug_assertions)]
-    pub(crate) frame_va: VirtAddr,
     memory: SpinLock<TaskMemory>,
 }
 
 impl TaskIdent {
     pub(crate) fn new(
         id: TaskId,
+        controller: TaskId,
         team: Arc<Team>,
         frame_pa: PhysAddr,
-        #[cfg(debug_assertions)] frame_va: VirtAddr,
         memory: TaskMemory,
     ) -> TaskIdent {
         TaskIdent {
             id,
+            controller,
             team,
             frame_pa,
-            #[cfg(debug_assertions)]
-            frame_va,
             memory: SpinLock::new(memory),
         }
     }

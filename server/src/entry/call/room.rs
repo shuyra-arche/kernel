@@ -30,11 +30,9 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
                 return Outcome::fail(frame, RoomFail::Denied);
             };
             if !Arc::ptr_eq(&me.ident, &ident)
-                || !crate::core::work::pend::allows(
-                    &me,
-                    &crate::core::work::mail::Mail::Nole(super::resources::get().doom.clone()),
-                    crate::core::work::pend::Need::Fetch,
-                )
+                || !me
+                    .administration
+                    .allows(kernel_api::model::unit::ControlKind::Doom)
             {
                 return Outcome::fail(frame, RoomFail::Denied);
             }

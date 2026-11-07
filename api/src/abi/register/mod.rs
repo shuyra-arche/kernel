@@ -16,7 +16,7 @@ pub enum Decode {
     BadSlot,
     /// 字段数超出 a0..a5。
     Overflow,
-    /// 非法位（如 `Permission` 含未定义位，或 bool 非 0/1）。
+    /// 非法位（如 `Modifiable` 含未定义位，或 bool 非 0/1）。
     Invalid,
 }
 
@@ -109,13 +109,8 @@ impl Wire for crate::model::unit::ProgramKind {
     }
 }
 
-/// 权限位掩码（envcall 单一真相；unpack 走 `from_bits` 校验，非法位 → `Invalid`，
-/// 替代旧 `from_bits_truncate` 的静默截断）。
-///
-/// **超宽值同样要拒**：`a2`/`a3` 是整寄存器（`usize`），故「先 `as u32` 再校验」等于
-/// 把 32 位以上静默丢掉后再判合法——`0x1_0000_0002` 会被解成 `STORE` 而不是 `Invalid`，
-/// 那正是本条要根除的那类静默截断，只是搬到了高位。故先判宽度、再判位。
-impl Wire for crate::model::permission::Permission {
+/// Decode Modifiable strictly: only whole-register values 0 and 1 are valid.
+impl Wire for crate::model::modifiable::Modifiable {
     const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.bits() as usize;
@@ -125,14 +120,13 @@ impl Wire for crate::model::permission::Permission {
         let v = *s.get(*i).ok_or(Decode::Overflow)?;
         *i += 1;
         let bits = u32::try_from(v).map_err(|_| Decode::Invalid)?;
-        crate::model::permission::Permission::from_bits(bits).ok_or(Decode::Invalid)
+        crate::model::modifiable::Modifiable::from_bits(bits).ok_or(Decode::Invalid)
     }
 }
 
-mod hole;
+mod clone_view;
 mod identity;
 mod memory;
-mod pie;
-mod pole;
-mod tole;
+mod pend;
+mod sign;
 mod unit;

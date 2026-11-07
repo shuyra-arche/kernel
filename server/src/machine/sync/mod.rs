@@ -1,12 +1,7 @@
-#![allow(unused)]
-
-mod bare;
 mod depend;
-mod lazy;
 mod once;
 mod pair;
 pub(crate) mod reentrant;
-mod rw;
 mod serial;
 pub(crate) mod spin;
 mod trap;
@@ -14,6 +9,7 @@ mod trap;
 pub(crate) use pair::with_pair;
 pub(crate) use serial::next_id;
 
+#[cfg(debug_assertions)]
 macro_rules! depend_enter {
     ($lock:expr) => {{
         let caller: usize;
@@ -65,21 +61,16 @@ macro_rules! depend_release {
 pub(crate) use depend_acquire;
 pub(crate) use depend_check;
 pub(crate) use depend_check_peer;
+#[cfg(debug_assertions)]
 pub(crate) use depend_enter;
 pub(crate) use depend_release;
 
-pub use bare::BareLock;
 #[cfg(debug_assertions)]
 pub use depend::DepInitError;
 pub use depend::Level;
 pub(crate) use depend::reserve as reserve_depend;
-#[cfg(debug_assertions)]
-pub(crate) use depend::verdict;
-#[cfg(debug_assertions)]
-pub(crate) use depend::{armed, held_len};
 pub use once::OnceLock;
 pub use reentrant::RelLock;
-pub use rw::RwLock;
 pub use spin::SpinLock;
 pub(crate) use spin::SpinLockGuard;
 

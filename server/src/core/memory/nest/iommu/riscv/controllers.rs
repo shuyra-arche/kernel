@@ -68,7 +68,7 @@ impl<R: Registers> Controllers<R> {
     /// # Safety
     /// Firmware describes the actual immutable routing; caller controls device
     /// ownership and excludes bypass/ATS/PRI. Proof covers this controller's
-    /// requesters. This is not a Pend/Cell grant: IoSpace::register still requires
+    /// requesters. This is not a Pend/Cell authority: IoSpace::register still requires
     /// separate borrowing/residency authorization. Tables are fresh allocations.
     pub(crate) unsafe fn bind<Q: Quiescence>(
         &mut self,

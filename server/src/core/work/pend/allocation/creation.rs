@@ -15,14 +15,14 @@ impl Creation {
         }
     }
 
-    pub(super) fn claim(&self) -> Result<(), kernel_api::abi::call::pie::PieFail> {
+    pub(super) fn claim(&self) -> Result<(), kernel_api::abi::call::pend::PendFail> {
         match self
             .state
             .compare_exchange(AVAILABLE, CLAIMED, Ordering::AcqRel, Ordering::Acquire)
         {
             Ok(_) => Ok(()),
-            Err(CLAIMED) => Err(kernel_api::abi::call::pie::PieFail::Busy),
-            Err(_) => Err(kernel_api::abi::call::pie::PieFail::Denied),
+            Err(CLAIMED) => Err(kernel_api::abi::call::pend::PendFail::Busy),
+            Err(_) => Err(kernel_api::abi::call::pend::PendFail::Denied),
         }
     }
 

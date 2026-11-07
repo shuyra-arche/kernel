@@ -54,7 +54,10 @@ pub fn ticks() -> u64 {
 
 pub fn beat_until(ceil: u64) {
     let delta = match due() {
-        Some(t) => t.as_ticks().saturating_sub(clock::now().as_ticks()).min(ceil),
+        Some(t) => t
+            .as_ticks()
+            .saturating_sub(clock::now().as_ticks())
+            .min(ceil),
         None => ceil,
     };
     clock::timer::beat(delta);

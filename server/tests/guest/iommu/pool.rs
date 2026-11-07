@@ -1,3 +1,4 @@
+use crate::core::memory::cell::Owner;
 use crate::cell::{Cell, InternalPage};
 use alloc::boxed::Box;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
@@ -43,7 +44,7 @@ impl Pool {
     pub fn cell(&'static self) -> Option<Cell> {
         let allocator: &'static (dyn Allocator + Sync) = self;
         let page: InternalPage = unsafe { Box::try_new_zeroed_in(allocator).ok()?.assume_init() };
-        Cell::from_internal(page).ok()
+        Cell::from_internal(Owner::Kernel, page).ok()
     }
 }
 

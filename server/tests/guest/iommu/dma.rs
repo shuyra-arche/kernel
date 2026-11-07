@@ -41,13 +41,13 @@ type Space<'a> = IoSpace<Adapter<mmio::Mmio, Platform<'a>>>;
 
 pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
     let topology = Topology::discover(fdt).unwrap();
-    // Exercise the production boot grant planner against QEMU's actual DTB,
+    // Exercise the production boot authority planner against QEMU's actual DTB,
     // including its zero-length tuple and PCI apertures, before touching devices.
     let plan = crate::plan::Plan::discover(fdt, 0x8000_0000, 128 << 20).unwrap();
-    for grant in plan.grants() {
-        assert!(!grant.overlaps(crate::region::Region::new(base, 4096).unwrap()));
+    for authority in plan.authorities() {
+        assert!(!authority.overlaps(crate::region::Region::new(base, 4096).unwrap()));
         for (ecam, size) in topology.configurations() {
-            assert!(!grant.overlaps(crate::region::Region::new(ecam, size).unwrap()));
+            assert!(!authority.overlaps(crate::region::Region::new(ecam, size).unwrap()));
         }
     }
     let mut controllers = Controllers::new(topology).unwrap();

@@ -40,9 +40,9 @@ impl Command {
         if completion_pa == 0 || !completion_pa.is_multiple_of(4) {
             return Err(Error::InvalidRange);
         }
-        let permissions = (1 << 12) | if modifiable { 1 << 13 } else { 0 };
+        let modifiability = (1 << 12) | if modifiable { 1 << 13 } else { 0 };
         Ok(Self([
-            2 | (1 << 10) | permissions | (u64::from(batch.value()) << 32),
+            2 | (1 << 10) | modifiability | (u64::from(batch.value()) << 32),
             completion_pa >> 2,
         ]))
     }

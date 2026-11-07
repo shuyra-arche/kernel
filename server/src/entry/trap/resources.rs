@@ -1,28 +1,19 @@
-use crate::core::work::mail::Mail;
 use crate::core::work::pend;
 use crate::core::work::room::interrupt;
+use crate::core::work::view::View;
 use crate::entry::boot::resources::Registry;
 use kernel_api::{
-    abi::call::pie::PieFail, boot::ledger::Name, boot::ledger::Trap, model::identity::Mark,
-    model::permission::Permission,
+    abi::call::pend::PendFail, boot::ledger::Name, boot::ledger::Trap, model::identity::Mark,
+    model::modifiable::Modifiable,
 };
 
-pub(crate) fn register(registry: &mut Registry) -> Result<(), PieFail> {
+pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     let resources = interrupt::get();
-    let permission = Permission::FETCH | Permission::VEST;
-    let external = pend::Pie::try_new(
-        Mail::Nole(resources.supervisor_external.clone()),
+    let modifiable = Modifiable::No;
+    let fault = pend::PendEntry::try_new(
+        View::Clone(resources.page_fault.clone()),
         Mark::NONE,
-        permission,
-        None,
-    )?;
-    registry
-        .register(Name::Trap(Trap::SupervisorExternal), external)
-        .map_err(|e| e.into_parts().0)?;
-    let fault = pend::Pie::try_new(
-        Mail::Hole(resources.page_fault.clone()),
-        Mark::NONE,
-        permission,
+        modifiable,
         None,
     )?;
     registry

@@ -4,8 +4,8 @@
 //! `FromTriple`。无失败操作保留完整字的位模式，不把高位解释为错误。
 //! 输入寄存器由 `Wire::unpack` 校验；这里按 Kernel 保证的返回布局还原值。
 
-use crate::model::identity::{PieToken, TaskId, TeamId, VirtAddr};
-use crate::model::memory::{FlatReference, ViewId};
+use crate::model::identity::{PendId, TaskId, TeamId, VirtAddr};
+use crate::model::memory::{FlatReference, MappingId};
 
 /// 从成功返回的 `(a0, a1)` 还原操作的 `Output`。
 ///
@@ -45,9 +45,9 @@ impl FromPair for FlatReference {
 }
 
 /// `Attach` 的返回：`(关系句柄, 视图起点)`——`a0` 是身份、`a1` 是地址。
-impl FromPair for (ViewId, VirtAddr) {
+impl FromPair for (MappingId, VirtAddr) {
     fn from_pair(v0: usize, v1: usize) -> Self {
-        (ViewId::new(v0), VirtAddr(v1))
+        (MappingId::new(v0), VirtAddr(v1))
     }
 }
 
@@ -73,9 +73,9 @@ impl FromPair for bool {
     }
 }
 
-impl FromPair for PieToken {
+impl FromPair for PendId {
     fn from_pair(v0: usize, _v1: usize) -> Self {
-        PieToken::new(v0)
+        PendId::new(v0)
     }
 }
 
@@ -91,13 +91,24 @@ impl FromPair for TeamId {
     }
 }
 
-mod tole;
-pub use tole::ToleAwaitReply;
+mod sign;
+pub use sign::SignReply;
 
 mod lifecycle;
 
 impl FromPair for (usize, usize) {
     fn from_pair(v0: usize, v1: usize) -> Self {
         (v0, v1)
+    }
+}
+
+impl FromPair for crate::model::sign::SignId {
+    fn from_pair(raw: usize, _: usize) -> Self {
+        Self::new(raw)
+    }
+}
+impl FromPair for crate::model::unit::ControlId {
+    fn from_pair(raw: usize, _: usize) -> Self {
+        Self::new(raw)
     }
 }

@@ -8,16 +8,16 @@ code or runtime state. There is no Env package or compatibility facade.
 
 | Path | Responsibility |
 | --- | --- |
-| `model::identity` | TaskId, TeamId, PieToken, VirtAddr and Mark |
-| `model::memory` | FlatReference, ViewId, allocation, reference ranges and placement |
-| `model::permission` | Permission, Access and Policy |
-| `model::unit` | ProgramKind, UnitTarget, task exit and join values |
-| `model::{pie,hole,pole,tole}` | Resource descriptions and event conditions |
+| `model::identity` | TaskId, TeamId, PendId, VirtAddr and Mark |
+| `model::memory` | FlatReference, MappingId, allocation, reference ranges and placement |
+| `model::modifiable` | Modifiable: shared read or exclusive write access |
+| `model::unit` | ProgramKind, UnitTarget, control authorities, task exit, result and join values |
+| `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
 | `model::{wait,exit}` | Waiting and exit vocabulary |
 | `abi::call` | Operation declarations, domain failures and aggregate dispatch |
 | `abi::operation` | Operation, RegisterCall, KernelCall and TerminalCall traits |
 | `abi::register` | Checked request packing and unpacking, including Wire and Decode |
-| `abi::reply` | Success register decoding and the Tole reply contract |
+| `abi::reply` | Success register decoding and the Sign reply contract |
 | `abi::layout` | Concrete caller-memory descriptor codecs |
 | `abi::error` | Common failure representation and dispatch errors |
 | `boot` | Initial-task arguments, Capsule, resource Ledger and initrd preamble |
@@ -58,28 +58,29 @@ manifest parser and packer have been removed.
 
 ## Source migration and ABI compatibility
 
-This is an intentional source break with no forwarding packages or aliases:
+This is an intentional model/ABI break with no legacy aliases:
 
-| Previous use | Current use |
+| Old contract | Current contract |
 | --- | --- |
-| `kernel-api-env` / dependency alias `env` | `kernel-api` |
-| `kernel_api::env` or Client root type exports | `kernel_api::{model,abi,boot}` and explicit imports |
-| `env::abi::call` | `kernel_api::abi::call` |
-| `env::{Operation,RegisterCall,KernelCall,TerminalCall}` | `kernel_api::abi::operation` |
-| `env::wire` | Types in `model`; codecs in `abi::{register,reply}` |
-| `env::ledger::{entry,name}` | `kernel_api::boot::ledger` |
-| `env::ledger::{args,capsule}` | `kernel_api::boot::{args,capsule}` |
-| `env::ledger::manifest` | Removed; deployment format belongs to Vanllia |
-| Client heap, mapping ownership, closure tasks, locks and TLS | Removed; language runtime/std owns these mechanisms |
+| Hole / Pole | Clone / Share View, addressed through PendId |
+| Pie / generic Grant | Pend borrow tree with Modifiable No or Yes |
+| FETCH/STORE/VEST/ONLY permissions | Modifiable for data; ControlId for administration |
+| Nole / Tole / View-local Ring and Hush | Sign Listen/Trigger/Route, retained state and checked delegation |
+| Nest View-prefixed handles | MappingId / MappingSelection / MappingControl |
+| Seven-word resource inspection | Eight-word PendInfo including ViewId and PendStatus |
+| All boot entries typed as data authority | Ledger version 2, ResourceKind-qualified raw handles |
+| Implicit writable bootstrap handoff | Spawn execution, then explicit Pend Accord before starting the child |
+| Implicit same-Team control | Explicit Task controller; membership does not grant peer control |
 
-All 67 operation numbers, register layouts, failure codes and existing concrete
-byte formats remain unchanged. `call::room::reap(reason, note, len)` now exposes
-the terminal ABI directly; there is no duration/note adaptation or TLS cleanup.
+Unchanged operations keep their slot numbers; removed operations are rejected.
+Do not infer compatibility from a matching call class: permission values and
+several layouts have deliberately changed. Build requires the caller's own
+TaskId as sire. Unit Return, ReadResult and Team Finish separate result data,
+execution exit, stable cohort completion and eventual resource reclamation.
 
-Publish this provider before migrating consumers. External consumers must update
-source imports, replace their use of removed runtime/deployment helpers, and pin
-one full Kernel commit for both API and Client. Older pinned revisions remain
-independent. This repository does not update external consumer pins.
+Publish this provider first. Migrate consumers together to matching API/Client
+revisions and regenerate boot ledgers. Previously compiled binaries are not
+compatible. Full upper-layer migration is outside this Kernel change.
 
 ## Verification
 

@@ -63,3 +63,7 @@ macro_rules! tag {
         $v
     };
 }
+
+pub(crate) use stats::{block_occupied, frame_occupied};
+#[cfg(debug_assertions)]
+pub(crate) use stats::{kinds, spare_available, spare_occupied};

@@ -1,30 +1,29 @@
+use crate::boot::ledger::ResourceKind;
 use crate::boot::ledger::{Name, Page};
-use crate::model::identity::PieToken;
-use crate::model::pie::PieKind;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Entry {
     name: Name,
-    kind: PieKind,
-    token: PieToken,
+    kind: ResourceKind,
+    handle: usize,
 }
 pub const ENTRY_LEN: usize = Entry::LEN;
 const _: () = assert!(ENTRY_LEN == 32);
 impl Entry {
     /// Encoded ledger entry size; independent of the Rust struct layout.
     pub const LEN: usize = 32;
-    pub const NONE: Self = Self::new(Name::Page(Page::Dtb), PieKind::Pole, PieToken::NONE);
-    pub const fn new(name: Name, kind: PieKind, token: PieToken) -> Self {
-        Self { name, kind, token }
+    pub const NONE: Self = Self::new(Name::Page(Page::Dtb), ResourceKind::Share, 0);
+    pub const fn new(name: Name, kind: ResourceKind, handle: usize) -> Self {
+        Self { name, kind, handle }
     }
     pub const fn name(&self) -> Name {
         self.name
     }
-    pub const fn kind(&self) -> PieKind {
+    pub const fn kind(&self) -> ResourceKind {
         self.kind
     }
-    pub const fn token(&self) -> PieToken {
-        self.token
+    pub const fn handle(&self) -> usize {
+        self.handle
     }
     /// Write one entry at `at`, returning the first byte after it.
     pub fn store_at(&self, out: &mut [u8], at: usize) -> Option<usize> {
@@ -33,7 +32,7 @@ impl Entry {
         self.name.store(&mut out[..16]);
         out[16] = self.kind as u8;
         out[17..24].fill(0);
-        out[24..32].copy_from_slice(&self.token.to_bytes());
+        out[24..32].copy_from_slice(&(self.handle as u64).to_le_bytes());
         Some(end)
     }
     /// Read one entry, validating its field encodings and reserved bytes.
@@ -47,19 +46,19 @@ impl Entry {
         Some((
             Self::new(
                 Name::fetch(&bytes[..16])?,
-                PieKind::of(bytes[16])?,
-                PieToken::from_bytes(&bytes[24..32])?,
+                ResourceKind::of(bytes[16])?,
+                usize::try_from(u64::from_le_bytes(bytes[24..32].try_into().ok()?)).ok()?,
             ),
             end,
         ))
     }
     pub fn valid(&self) -> bool {
-        self.token != PieToken::NONE
+        self.handle != 0
             && self.kind == self.name.kind()
             && !matches!(self.name, Name::Page(Page::Region(0)))
     }
 }
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 #[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub version: u32,

@@ -66,6 +66,7 @@ pub(crate) fn make_team(
         space,
         id,
         creator,
+        cells: crate::core::memory::cell::Owner::team(id).map_err(|_| NestError::OutOfMemory)?,
         sire: sire.as_ref().map_or_else(TaskWeak::empty, |task| {
             TaskWeak::stored(Arc::downgrade(task), Origin::Sire)
         }),
@@ -94,7 +95,7 @@ pub(crate) fn make_team(
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
         let _commit = commit();
-        if sire.dead() || parent.closed() {
+        if sire.dead() || !parent.admitting() {
             return Err(NestError::NoRegion);
         }
         let mut depth = 1;

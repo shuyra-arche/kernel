@@ -21,38 +21,29 @@ impl WaitFail for kernel_api::abi::call::unit::UnitFail {
     }
 }
 
-impl WaitFail for kernel_api::abi::call::hole::HoleFail {
+impl WaitFail for kernel_api::abi::call::clone_view::CloneFail {
     fn busy() -> Self {
-        kernel_api::abi::call::hole::HoleFail::Busy
+        kernel_api::abi::call::clone_view::CloneFail::Busy
     }
     fn oom() -> Self {
-        kernel_api::abi::call::hole::HoleFail::OoM
+        kernel_api::abi::call::clone_view::CloneFail::OoM
     }
 }
 
-impl WaitFail for kernel_api::abi::call::nole::NoleFail {
+impl WaitFail for kernel_api::abi::call::sign::SignFail {
     fn busy() -> Self {
-        kernel_api::abi::call::nole::NoleFail::Busy
+        kernel_api::abi::call::sign::SignFail::Busy
     }
     fn oom() -> Self {
-        kernel_api::abi::call::nole::NoleFail::OoM
+        kernel_api::abi::call::sign::SignFail::OoM
     }
 }
 
-impl WaitFail for kernel_api::abi::call::pole::PoleFail {
+impl WaitFail for kernel_api::abi::call::share_view::ShareFail {
     fn busy() -> Self {
-        kernel_api::abi::call::pole::PoleFail::Busy
+        kernel_api::abi::call::share_view::ShareFail::Busy
     }
     fn oom() -> Self {
-        kernel_api::abi::call::pole::PoleFail::OoM
-    }
-}
-
-impl WaitFail for kernel_api::abi::call::tole::ToleFail {
-    fn busy() -> Self {
-        kernel_api::abi::call::tole::ToleFail::Busy
-    }
-    fn oom() -> Self {
-        kernel_api::abi::call::tole::ToleFail::OoM
+        kernel_api::abi::call::share_view::ShareFail::OoM
     }
 }

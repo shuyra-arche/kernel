@@ -117,7 +117,7 @@ pub(crate) fn progress() {
     static CURSOR: AtomicUsize = AtomicUsize::new(0);
     let _commit = crate::core::work::commit();
     for _ in 0..4 {
-        let changed = {
+        let (changed, observer) = {
             let Some(mut devices) = DEVICES.try_lock() else {
                 return;
             };
@@ -129,19 +129,27 @@ pub(crate) fn progress() {
             let before = entry.endpoint.phase();
             let had_fault = entry.fault.is_some() || entry.queue_failed;
             dma::poll_fault(entry);
+            dma::revoke_borrow(entry);
             if (entry.endpoint.owner_closed() || entry.queue_failed)
                 && matches!(before, Phase::Owned | Phase::Active | Phase::Failed)
             {
                 let _ = entry.endpoint.retire();
             }
-            dma::settle(entry);
+            let observer = dma::settle(entry);
             if before != Phase::Closed && entry.endpoint.phase() == Phase::Closed {
                 OUTSTANDING.fetch_sub(1, Ordering::Release);
             }
-            (before != entry.endpoint.phase()
-                || had_fault != (entry.fault.is_some() || entry.queue_failed))
-                .then_some(at + 1)
+            (
+                (before != entry.endpoint.phase()
+                    || had_fault != (entry.fault.is_some() || entry.queue_failed))
+                    .then_some(at + 1),
+                observer,
+            )
         };
+        // Source polling may acquire DEVICES again. Notify only after releasing it.
+        if let Some((task, token)) = observer {
+            crate::core::work::pend::notify(task, token);
+        }
         if let Some(id) = changed {
             crate::core::work::sign::signal(crate::core::work::sign::WakeKey::Device { id });
         }
@@ -162,11 +170,9 @@ pub(crate) fn event(
     Error,
 > {
     let _commit = crate::core::work::commit();
-    let manager = crate::core::work::pend::allows_locked(
-        actor,
-        &crate::core::work::mail::Mail::Nole(crate::entry::call::resources::get().device.clone()),
-        crate::core::work::pend::Need::Fetch,
-    );
+    let manager = actor
+        .administration
+        .allows(kernel_api::model::unit::ControlKind::Device);
     let mut devices = DEVICES.lock();
     let entry = entry(&mut devices, id)?;
     if !manager && !entry.endpoint.owned_by(&actor.ident.team.space.dma) {

@@ -1,5 +1,7 @@
-use crate::model::identity::{PieToken, TeamId, VirtAddr};
-use crate::model::memory::{AcquireSource, FlatReference, ViewControl, ViewId, ViewSelection};
+use crate::model::identity::{TeamId, VirtAddr};
+use crate::model::memory::{
+    AcquireSource, FlatReference, MappingControl, MappingId, MappingSelection,
+};
 
 #[kernel_api_macros::envcall(class = 2, call = MemoryCall)]
 pub mod operations {
@@ -34,42 +36,42 @@ pub mod operations {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Acquire {
         pub source: super::AcquireSource,
-        pub retention: super::PieToken,
+        pub retention: crate::model::unit::ControlId,
     }
-    /// 解除这一份持有；不隐式 Detach，不等待其他引用，不收回其他 View。
+    /// 解除这一份持有；不隐式 Detach，不等待其他引用，不收回其他映射。
     #[operation(slot = 6, output = (), error = MemoryFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Release {
         pub reference: super::FlatReference,
     }
-    /// 在目标地址空间里预留地址并建立翻译关系；返回 (关系句柄, 视图起点)。
+    /// 在目标地址空间里预留地址并建立翻译关系；返回 (关系句柄, 映射起点)。
     /// 内部组合 Reserve → Attach，不增加独立 Reserve 调用号。
     /// `range` 与 `placement` 分别是指向定长描述的只读用户指针，从**调用者**的
     /// 地址空间各读一次快照；`control` 是这一段映射的控制权选择。
-    #[operation(slot = 7, output = (super::ViewId, super::VirtAddr), error = MemoryFail)]
+    #[operation(slot = 7, output = (super::MappingId, super::VirtAddr), error = MemoryFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Attach {
         pub range: super::VirtAddr,
         pub team: super::TeamId,
         pub placement: super::VirtAddr,
         pub access: u64,
-        pub control: super::ViewControl,
+        pub control: super::MappingControl,
     }
     /// 按身份安全撤销选定的映射区间。
     #[operation(slot = 8, output = (), error = MemoryFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Detach {
         pub team: super::TeamId,
-        pub view: super::ViewId,
-        pub selection: super::ViewSelection,
+        pub mapping: super::MappingId,
+        pub selection: super::MappingSelection,
     }
     /// 修改选定区间的逻辑权限。
     #[operation(slot = 9, output = (), error = MemoryFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct SetAccess {
         pub team: super::TeamId,
-        pub view: super::ViewId,
-        pub selection: super::ViewSelection,
+        pub mapping: super::MappingId,
+        pub selection: super::MappingSelection,
         pub access: u64,
     }
     /// 遍历本 Task 的驻留引用窗口，输出每页一个小端 u64 PA。
@@ -79,7 +81,7 @@ pub mod operations {
     #[operation(slot = 11, output = (), error = MemoryFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Traverse {
-        pub retention: super::PieToken,
+        pub retention: crate::model::unit::ControlId,
         pub range: super::VirtAddr,
         pub out: super::VirtAddr,
     }

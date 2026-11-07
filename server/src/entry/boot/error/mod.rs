@@ -41,7 +41,7 @@ pub enum BootError {
     },
     Resources {
         operation: ResourceOperation,
-        source: kernel_api::abi::call::pie::PieFail,
+        source: kernel_api::abi::call::pend::PendFail,
     },
     Bootstrap(NestError),
     BootstrapRelease {

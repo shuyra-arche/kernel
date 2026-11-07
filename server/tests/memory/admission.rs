@@ -3,13 +3,14 @@ use super::error::FlatError;
 use super::index::PageIndex;
 use super::slot::{self, Slot};
 use super::support::Pool;
+use crate::cell::Owner;
 
 #[test]
 fn sparse_admission_preserves_identity_and_retained_cells_outlive_slots() {
     let a = Pool::new(0);
     let b = Pool::new(0);
-    let first = Cell::from_internal(a.page().unwrap()).unwrap();
-    let second = Cell::from_internal(b.page().unwrap()).unwrap();
+    let first = Cell::from_internal(Owner::Kernel, a.page().unwrap()).unwrap();
+    let second = Cell::from_internal(Owner::Kernel, b.page().unwrap()).unwrap();
     let identities = [first.id(), second.id()];
     let slots = slot::admit(
         4,
@@ -43,7 +44,7 @@ fn invalid_indices_reject_the_entire_import_and_return_all_cells() {
             .map(|(index, pool)| {
                 (
                     PageIndex::new(index),
-                    Cell::from_internal(pool.page().unwrap()).unwrap(),
+                    Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap(),
                 )
             })
             .collect();

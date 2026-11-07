@@ -1,5 +1,5 @@
 use alloc::sync::Arc;
-use kernel_api::model::memory::ViewControl;
+use kernel_api::model::memory::MappingControl;
 
 use crate::core::memory::nest::NestError;
 use crate::core::work::unit::space::Space;
@@ -19,11 +19,6 @@ impl Task {
     /// 所有 Nest 共用单调、不复用的关系号；id 唯一标识这一笔控制。
     pub(crate) fn release_control(&self, id: usize) {
         self.controls.lock().retain(|(_, held)| *held != id);
-    }
-
-    #[cfg(debug_assertions)]
-    pub(crate) fn holds_control(&self, id: usize) -> bool {
-        self.controls.lock().iter().any(|(_, held)| *held == id)
     }
 
     /// 任务退场时收掉它控制的每一段关系；未结的登记原地留在本表里等既有重试。
@@ -58,7 +53,7 @@ impl Task {
                 continue;
             };
             let (controller, _) = control.control();
-            if controller != self.ident.id || control.scope() != ViewControl::Caller {
+            if controller != self.ident.id || control.scope() != MappingControl::Caller {
                 self.release_control(id);
                 continue;
             }

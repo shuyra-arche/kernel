@@ -1,4 +1,4 @@
-//! work 全域的提交锁：任务与团队的状态迁移、pend 的登记、mail 的交接都在它下面
+//! work 全域的提交锁：任务与团队的状态迁移、pend 的登记、view 的交接都在它下面
 //! 串行。
 
 static COMMIT: crate::machine::sync::RelLock<()> =

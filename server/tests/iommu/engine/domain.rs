@@ -1,4 +1,5 @@
 use super::{engine, registers::Device, start};
+use crate::cell::Owner as CellOwner;
 use crate::iommu::riscv::EngineError;
 use crate::iommu::riscv::adapter::{Adapter, Quiescence};
 use crate::iommu::riscv::controllers::{BindError, Controllers};
@@ -42,10 +43,10 @@ fn space(
     start(&mut engine);
     let tables = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
     let payload = Pool::new(0);
-    let cells = tables.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
-    let cell = Arc::new(Cell::from_internal(payload.page().unwrap()).unwrap());
+    let cells = tables.map(|p| Cell::from_internal(CellOwner::Kernel, p.page().unwrap()).unwrap());
+    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, payload.page().unwrap()).unwrap());
     let evidence = Arc::new(Mutex::new(Evidence::default()));
-    let mut controllers = Controllers::new(routing_fixture::topology()).unwrap();
+    let mut controllers = Controllers::new(super::topology()).unwrap();
     controllers
         .install(engine)
         .map_err(|(error, _)| error)
@@ -237,7 +238,7 @@ fn rejected_bindings_preserve_controller_and_return_unpublished_tables() {
     use crate::iommu::riscv::topology::RouteError;
     let (mut engine, device, queues) = engine();
     start(&mut engine);
-    let mut controllers = Controllers::new(routing_fixture::topology()).unwrap();
+    let mut controllers = Controllers::new(super::topology()).unwrap();
     controllers
         .install(engine)
         .map_err(|(error, _)| error)
@@ -256,7 +257,8 @@ fn rejected_bindings_preserve_controller_and_return_unpublished_tables() {
         ),
     ] {
         let tables = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
-        let cells = tables.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
+        let cells =
+            tables.map(|p| Cell::from_internal(CellOwner::Kernel, p.page().unwrap()).unwrap());
         let result = unsafe { controllers.bind(host, rid, cells, Proof(evidence.clone())) };
         assert_eq!(result.err(), Some(expected));
         assert_eq!(device.read64(DDTP), 0);
@@ -294,19 +296,19 @@ fn bound_controller_uses_translated_device_id_and_cannot_be_assigned_twice() {
         .map_err(|(error, _)| error)
         .unwrap();
     let tables = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
-    let cells = tables.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
+    let cells = tables.map(|p| Cell::from_internal(CellOwner::Kernel, p.page().unwrap()).unwrap());
     let proof = Arc::new(Mutex::new(Evidence::default()));
     let adapter = unsafe { controllers.bind(HOST, 8, cells, Proof(proof.clone())) }.unwrap();
     let mut space = IoSpace::new(adapter);
     let payload = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(payload.page().unwrap()).unwrap());
+    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, payload.page().unwrap()).unwrap());
     let id = publish(&mut space, &cell);
     active(&mut space, &device, id);
     let directory = ((device.read64(DDTP) >> 10) << 12) as *const u64;
     assert_eq!(unsafe { directory.add(16 * 8).read_volatile() } & 1, 1);
     assert_eq!(unsafe { directory.add(8 * 8).read_volatile() }, 0);
     let extra = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
-    let cells = extra.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
+    let cells = extra.map(|p| Cell::from_internal(CellOwner::Kernel, p.page().unwrap()).unwrap());
     assert_eq!(
         unsafe { controllers.bind(HOST, 9, cells, Proof(proof.clone())) }.err(),
         Some(BindError::Unavailable)
@@ -335,11 +337,11 @@ fn bound_controller_uses_translated_device_id_and_cannot_be_assigned_twice() {
 
 #[test]
 fn physical_controller_identity_must_match_firmware_before_installation() {
-    let mut controllers = Controllers::new(routing_fixture::topology()).unwrap();
+    let mut controllers = Controllers::new(super::topology()).unwrap();
     let mut device = Device::new();
     device.1 = 0x3020000;
     let pools = core::array::from_fn::<_, 3, _>(|_| Pool::new(0));
-    let cells = pools.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
+    let cells = pools.map(|p| Cell::from_internal(CellOwner::Kernel, p.page().unwrap()).unwrap());
     let engine = crate::iommu::riscv::Engine::new(device.clone(), cells).unwrap();
     let (error, mut engine) = controllers
         .install(engine)

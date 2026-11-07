@@ -16,7 +16,7 @@ impl Pages {
             unsafe { cell.as_mut_ptr().write_bytes(0, 4096) };
             Arc::try_new(cell)
                 .map_err(|_| EngineError::Memory)?
-                .prepare_external()
+                .prepare_external(true)
                 .map_err(|_| EngineError::Memory)
         };
         let [command, fault, completion] = cells;

@@ -3,7 +3,6 @@ use crate::core::memory::cell::RetainError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HardwareError {
     Unavailable,
-    QueueFull,
     Fault,
     Timeout,
 }

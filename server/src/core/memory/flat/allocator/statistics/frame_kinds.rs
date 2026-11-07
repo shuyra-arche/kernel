@@ -18,8 +18,7 @@ static FRAME_KINDS: OnceLock<FrameKinds> = OnceLock::new();
 
 pub(crate) fn install_frame_kinds(frames: usize) -> Result<(), InitError> {
     let mut v: Vec<Kind> = Vec::new();
-    v.try_reserve(frames)
-        .map_err(|_| InitError::OutOfMemory)?;
+    v.try_reserve(frames).map_err(|_| InitError::OutOfMemory)?;
     v.resize(frames, Kind::Plain);
     let slice: &'static mut [Kind] = Box::leak(v.into_boxed_slice());
     let h = FrameKinds {

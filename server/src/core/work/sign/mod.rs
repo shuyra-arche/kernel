@@ -1,11 +1,9 @@
-//! Control-flow notification, waiting and source routing.
-//!
-//! This first migration keeps existing source keys and notification policies.
-//! Unit owns lifecycle/results; a task owns its suspended continuation. Sign
-//! only delivers opportunities to resume and does not interpret result data.
-//! Public Sign handles and reliable event queues are separate follow-up work.
+//! Control-flow endpoints, pending notifications, source routing and waiting.
 
+pub(crate) mod endpoint;
+mod table;
 mod wait;
+pub(crate) use table::{Table, delegate};
 
 use wait::holder::holders;
 use wait::site::{SITE_SHARDS, shard_at};

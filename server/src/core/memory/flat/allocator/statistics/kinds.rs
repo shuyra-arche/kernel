@@ -8,10 +8,6 @@ impl Kinds {
         Self(values)
     }
 
-    pub(crate) fn get(&self, k: Kind) -> usize {
-        self.0[k.ix()]
-    }
-
     pub(crate) fn nonzero(&self) -> impl Iterator<Item = (Kind, usize)> + '_ {
         Kind::ALL
             .into_iter()

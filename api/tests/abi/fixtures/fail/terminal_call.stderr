@@ -7,12 +7,12 @@ error[E0277]: the trait bound `kernel_api::abi::call::room::operations::Reap: Ke
   = help: the following other types implement trait `KernelCall`:
             kernel_api::abi::call::chrono::operations::Clock
             kernel_api::abi::call::chrono::operations::Ticks
-            kernel_api::abi::call::control::operations::Backtrace
-            kernel_api::abi::call::debug::operations::Get
-            kernel_api::abi::call::debug::operations::Put
-            kernel_api::abi::call::debug::operations::SetTrace
-            kernel_api::abi::call::device::operations::Claim
-            kernel_api::abi::call::device::operations::Fault
+            kernel_api::abi::call::clone_view::operations::Peek
+            kernel_api::abi::call::clone_view::operations::Pull
+            kernel_api::abi::call::clone_view::operations::Push
+            kernel_api::abi::call::clone_view::operations::Seal
+            kernel_api::abi::call::clone_view::operations::Unseal
+            kernel_api::abi::call::clone_view::operations::Wait
           and $N others
 note: required by a bound in `returning`
  --> tests/abi/fixtures/fail/terminal_call.rs:2:17

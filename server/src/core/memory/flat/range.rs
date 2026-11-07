@@ -97,20 +97,10 @@ impl FlatRange {
         self.flat.mark_untransferable();
     }
 
-    /// Snapshot only; ownership changes must test under the same Flat state guard.
-    pub(crate) fn is_pinned(&self) -> bool {
-        self.flat.is_pinned(self.index, self.count)
-    }
-
     /// 只读稀疏已物化的 `Cell`；不物化、不保证整个范围完整；借用来源没有 `Cell`。
     /// 偏移相对范围起点。
     pub(crate) fn materialized_cells(&self) -> Result<Vec<(PageOffset, Arc<Cell>)>, FlatError> {
         self.flat.materialized(self.index, self.count)
-    }
-
-    /// 该范围是否已是 Managed 的完整物化结果；借用来源不算。只读，不物化。
-    pub(crate) fn fully_materialized(&self) -> Result<bool, FlatError> {
-        self.flat.fully_materialized(self.index, self.count)
     }
 
     pub(crate) fn is_borrowed(&self) -> bool {

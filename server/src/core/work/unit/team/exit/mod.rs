@@ -5,10 +5,12 @@ mod state;
 
 pub(crate) use policy::ExitPolicy;
 
-use kernel_api::{abi::call::unit::UnitFail, model::identity::PieToken, model::identity::TaskId};
+use kernel_api::{
+    abi::call::unit::UnitFail,
+    model::identity::TaskId,
+    model::unit::{ControlId, ControlKind},
+};
 
-use crate::core::work::mail::Mail;
-use crate::core::work::pend;
 use crate::core::work::unit::task::Task;
 
 use super::life::TeamLife;
@@ -30,19 +32,8 @@ pub(crate) fn conflicts(life: &TeamLife) -> bool {
     descendant
 }
 
-pub(crate) fn authorize(caller: &Task, token: PieToken) -> bool {
-    let Some(pie) = pend::locate(caller, token) else {
-        return false;
-    };
-    if !pie.alive()
-        || !pie
-            .permission()
-            .contains(kernel_api::model::permission::Permission::FETCH)
-        || pie.owner() != Some(caller.ident.id)
-    {
-        return false;
-    }
-    matches!(pie.mail(), Mail::Nole(meta) if meta.guards())
+pub(crate) fn authorize(caller: &Task, token: ControlId) -> bool {
+    caller.administration.matches(token, ControlKind::Guard)
 }
 
 pub(crate) fn member_dying(task: &Task, reason: usize) {

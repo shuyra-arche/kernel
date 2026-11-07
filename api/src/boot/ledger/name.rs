@@ -1,4 +1,4 @@
-use crate::model::pie::PieKind;
+use crate::boot::ledger::ResourceKind;
 
 pub const NAME_LEN: usize = 16;
 
@@ -38,11 +38,12 @@ impl Name {
             _ => None,
         }
     }
-    pub const fn kind(self) -> PieKind {
+    pub const fn kind(self) -> ResourceKind {
         match self {
-            Self::Trap(Trap::SupervisorExternal) | Self::Call(_) => PieKind::Nole,
-            Self::Trap(Trap::PageFault) => PieKind::Hole,
-            Self::Page(_) => PieKind::Pole,
+            Self::Trap(Trap::SupervisorExternal) => ResourceKind::Sign,
+            Self::Call(_) => ResourceKind::Control,
+            Self::Trap(Trap::PageFault) => ResourceKind::Clone,
+            Self::Page(_) => ResourceKind::Share,
         }
     }
 }

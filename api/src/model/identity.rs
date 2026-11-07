@@ -10,16 +10,16 @@
 //! **那一格是 `pub(crate)`，不是 `pub`**：这五枚类型各自只该有**有名字的门**
 //! （`new` / `mint` / `from_bytes` / `get`），而 `pub` 的元组字段等于给每一枚都开了
 //! 一扇无名门（`TaskId(0)` 与 `TaskId::new(0)` 就分不出哪一种才是本仓的口径）。
-//! `PieToken` 另有第二格（`PhantomData`）挡着，但那是**机制**（`!Send`），不是口径。
+//! `PendId` 另有第二格（`PhantomData`）挡着，但那是**机制**（`!Send`），不是口径。
 
 use core::marker::PhantomData;
 
 // ── 语义句柄 ────────────────────────────────────────────────────────────
 
-/// per-pie 全局唯一句柄（usize；0 = 无效哨兵）。
+/// per-pend 全局唯一句柄（usize；0 = 无效哨兵）。
 ///
 /// **号全局唯一，却只在"持有它的那张表"里解析得动**：内核按调用方自己的表找它
-/// （`pies.iter().find(|p| p.token() == token)`），不在那张表里＝用不动。故这一枚
+/// （`entries.iter().find(|p| p.token() == token)`），不在那张表里＝用不动。故这一枚
 /// **是表的，不是线程的**——同一个域里两枚线程各有一张表，给同域的线程交一枚孔，
 /// 照样要走 `Ship`（session 事实 8）。
 ///
@@ -36,22 +36,22 @@ use core::marker::PhantomData;
 /// **表的身份**。注意别把 [`VirtAddr`] 也归进来——那是**空间**的身份，同一个空间里的多枚线程
 /// 共用它，跨线程合法；判它在不在自己手里的是空间，不是表。
 ///
-/// **造号的两扇门**：[`PieToken::from_bytes`]（**收号**——号从线上/账上到来）与
-/// [`PieToken::mint`]（**铸号**——给"号的来源"那一侧：内核）。用户态那一面仍然只该经
+/// **造号的两扇门**：[`PendId::from_bytes`]（**收号**——号从线上/账上到来）与
+/// [`PendId::mint`]（**铸号**——给"号的来源"那一侧：内核）。用户态那一面仍然只该经
 /// `from_bytes` 收号；`new` 是 `pub(crate)` 的解码面。
 ///
 /// ：`mint` 不动能力面——`from_bytes` 本来就公开，用户态今天就能把任意数字拼
 /// 成号；而伪造的号在**调用方自己那张表**里查不到（`pend::locate` 只查表）⇒ 照旧
 /// `Denied`。两扇门的分工因此是**词汇**的分工："我收到一枚号" vs "我是这枚号的来源"。
 ///
-/// [`from_bytes`]: PieToken::from_bytes
-/// [`mint`]: PieToken::mint
-/// [`get`]: PieToken::get
+/// [`from_bytes`]: PendId::from_bytes
+/// [`mint`]: PendId::mint
+/// [`get`]: PendId::get
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
-pub struct PieToken(pub(crate) usize, PhantomData<*const ()>);
+pub struct PendId(pub(crate) usize, PhantomData<*const ()>);
 
-impl PieToken {
+impl PendId {
     /// 无效哨兵（0）：内核各处"越界不报错"的既有约定（`Reserve` 的 `TaskId(0)` 同理）。
     ///
     /// 命名是 `NONE` 而不是"零"：读的人关心的是"**这枚不是号**"，不是那一位的值。
@@ -62,14 +62,14 @@ impl PieToken {
 
     /// **造号**——只给本 crate 的解码面（`Wire::unpack` / `FromPair`）用。
     ///
-    /// 外面没有这扇门：号只能**到来**（[`PieToken::from_bytes`]）或**交出**（[`PieToken::get`]）。
+    /// 外面没有这扇门：号只能**到来**（[`PendId::from_bytes`]）或**交出**（[`PendId::get`]）。
     pub(crate) const fn new(v: usize) -> Self {
         Self(v, PhantomData)
     }
 
     /// **铸号**：号的来源那一侧（内核）的门——这枚号的出生地。
     ///
-    /// 用户态那一面没有这扇门的**位置**（它只该经 [`PieToken::from_bytes`] 收号）；
+    /// 用户态那一面没有这扇门的**位置**（它只该经 [`PendId::from_bytes`] 收号）；
     /// 这不是一扇新的能力门，理由见本类型头注。
     pub const fn mint(v: usize) -> Self {
         Self(v, PhantomData)
@@ -85,7 +85,7 @@ impl PieToken {
         Some(Self::new(raw as usize))
     }
 
-    /// **交出**：号变回线上的 8 字节（它的对偶面是 [`PieToken::from_bytes`]）。
+    /// **交出**：号变回线上的 8 字节（它的对偶面是 [`PendId::from_bytes`]）。
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         (self.0 as u64).to_le_bytes()
     }
@@ -95,8 +95,8 @@ impl PieToken {
     }
 }
 
-impl From<PieToken> for usize {
-    fn from(t: PieToken) -> Self {
+impl From<PendId> for usize {
+    fn from(t: PendId) -> Self {
         t.0
     }
 }
@@ -157,7 +157,7 @@ impl Mark {
     pub const NONE: Mark = Mark(0);
 
     /// 记号在**线上**的宽度（8 字节 LE）——"8"这个数在本类型里只此一处（[`Mark::to_bytes`]
-    /// 与 [`Mark::from_bytes`] 的数组长度都从它取）。与 [`PieToken::WIDTH`] 同形：号在线上
+    /// 与 [`Mark::from_bytes`] 的数组长度都从它取）。与 [`PendId::WIDTH`] 同形：号在线上
     /// 占多宽是该号自己的事实，不由调用点的 `[u8; 8]` 字面量替它说话。
     pub const WIDTH: usize = 8;
 

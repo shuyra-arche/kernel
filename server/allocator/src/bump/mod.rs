@@ -36,11 +36,8 @@ impl<L: Lock> BumpAllocator<L> {
     }
 
     pub fn boundary(&self) -> usize {
-        self.inner.with(|slot| {
-            slot.as_ref()
-                .expect("bump allocator not initialized")
-                .edge
-        })
+        self.inner
+            .with(|slot| slot.as_ref().expect("bump allocator not initialized").edge)
     }
 
     pub fn frontier(&self) -> usize {

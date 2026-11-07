@@ -23,8 +23,8 @@ unexpectedly returns; it uses neither TLS nor a panic handler.
 
 Named signatures are declared in `src/call/definitions.rs`. The local macro only
 removes execution boilerplate and does not define ABI values or generate service
-protocols. Each domain imports the types it uses. All 66 returning call signatures
-are retained. `call::room::reap(reason, note, len)` passes the three ABI fields
+protocols. Each domain imports the types it uses. Sign, View/Pend and Unit calls follow the current API model; old resource aliases
+are not retained. `call::room::reap(reason, note, len)` passes the three ABI fields
 directly; callers provide a valid note buffer and obey `abi::call::room::NOTE_MAX`.
 The old root `room::park(Duration)` and `room::reap(reason, Option<&str>)` adapters
 have been removed.

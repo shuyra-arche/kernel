@@ -1,5 +1,6 @@
 //! Cross-axis join: private Pend borrow + stable Flat residency + Kernel IoSpace.
 use super::{DEVICES, Entry, config, entry};
+use crate::core::memory::cell::Owner as CellOwner;
 use crate::core::memory::{
     flat::allocator::frame,
     nest::iommu::{
@@ -72,7 +73,12 @@ pub(crate) fn publish(
     if iova == 0 || !iova.is_multiple_of(4096) || iova >= 1usize << 38 {
         return Err(Error::Invalid);
     }
-    let tables = [frame::cell(), frame::cell(), frame::cell(), frame::cell()];
+    let tables = [
+        frame::cell(CellOwner::Kernel),
+        frame::cell(CellOwner::Kernel),
+        frame::cell(CellOwner::Kernel),
+        frame::cell(CellOwner::Kernel),
+    ];
     let [a, b, c, d] = tables;
     let tables = [
         a.map_err(|_| Error::Busy)?,
@@ -128,7 +134,12 @@ pub(crate) fn status(id: usize, owner: &Owner) -> Result<usize, Error> {
     if !entry.endpoint.owned_by(owner) {
         return Err(Error::Denied);
     }
-    if entry.queue_failed {
+    if entry.queue_failed
+        || entry.dma.as_ref().is_some_and(|dma| {
+            !dma.completion.settled()
+                && retirement::error(dma.domain).is_ok_and(|error| error.is_some())
+        })
+    {
         return Ok(5);
     }
     if entry.endpoint.phase() == Phase::Owned
@@ -178,9 +189,25 @@ pub(crate) fn retire(id: usize, owner: &Owner) -> Result<(), Error> {
     Ok(())
 }
 
+/// Revoking a Pend requests retirement without requiring Driver cooperation.
+pub(super) fn revoke_borrow(entry: &mut Entry) {
+    if let Some(dma) = &entry.dma
+        && dma.borrow.as_ref().is_some_and(ExternalBorrow::revoked)
+    {
+        let _ = entry.endpoint.retire();
+        let _ = retirement::close(dma.domain);
+    }
+}
+
 /// Called under work commit + device lock. Completion is a Kernel-minted receipt
 /// for this exact record, never a Unit acknowledgement or merely a CQ interrupt.
-pub(super) fn settle(entry: &mut Entry) {
+pub(super) fn settle(
+    entry: &mut Entry,
+) -> Option<(
+    kernel_api::model::identity::TaskId,
+    kernel_api::model::identity::PendId,
+)> {
+    let mut observer = None;
     if entry.endpoint.phase() == Phase::Retiring
         && entry
             .dma
@@ -189,12 +216,13 @@ pub(super) fn settle(entry: &mut Entry) {
     {
         if let Some(mut dma) = entry.dma.take() {
             if let Some(borrow) = dma.borrow.take() {
-                unsafe { borrow.settle() };
+                observer = unsafe { borrow.settle() };
             }
         }
         // Without a DMA record, bus mastering was never enabled by Kernel.
         unsafe { entry.endpoint.settle() }.expect("retiring endpoint");
     }
+    observer
 }
 
 pub(crate) fn observe(id: usize) -> Result<usize, Error> {

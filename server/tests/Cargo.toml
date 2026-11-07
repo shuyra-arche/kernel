@@ -27,3 +27,11 @@ path = "boot/mod.rs"
 [[test]]
 name = "hardware"
 path = "hardware/mod.rs"
+
+[[test]]
+name = "sign"
+path = "sign/mod.rs"
+
+[[test]]
+name = "pend"
+path = "pend/mod.rs"

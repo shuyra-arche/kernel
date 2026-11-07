@@ -1,3 +1,4 @@
+use crate::core::memory::cell::Owner;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use kernel_api::{boot::capsule::Capsule, boot::capsule::PAGE, boot::capsule::Region};
@@ -24,8 +25,8 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
         }
         image_end = image_end.max(region.va.checked_add(size).ok_or(NestError::NoRegion)?);
     }
-    let space = SpaceBuilder::supervisor().build()?;
-    let nest = &space.nest;
+    let team = TeamBuilder::new(SpaceBuilder::supervisor().build()?).spawn()?;
+    let nest = &team.space.nest;
     for i in 0..capsule.count {
         let region = capsule.region(i).ok_or(NestError::NoRegion)?;
         let size = region.pages.checked_mul(PAGE).ok_or(NestError::NoRegion)?;
@@ -39,7 +40,7 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
         if data_size > 0 {
             // 来源先备齐：可写段拷进新帧，只读段借用镜像自身那一段物理区间。
             let source = if access.contains(Access::WRITE) {
-                image_frames(bytes, &region, data_size)?
+                image_frames(bytes, &region, data_size, team.cells.clone())?
             } else {
                 let physical = bytes
                     .as_ptr()
@@ -56,14 +57,17 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
         if size > data_size {
             let bss_start = va + data_size;
             let bss_size = size - data_size;
-            let source = Flat::acquire(Allocation::new(bss_size / PAGE_SIZE, PAGE_SIZE)?)?.whole();
+            let source = Flat::acquire(
+                team.cells.clone(),
+                Allocation::new(bss_size / PAGE_SIZE, PAGE_SIZE)?,
+            )?
+            .whole();
             let reservation = reserve_at(nest, bss_start, bss_size)?;
             nest.attach(reservation, source, access, access)?;
         }
     }
     nest.advance_region(RegionId::Normal, image_end)?;
     crate::core::memory::nest::identity::sync_instructions()?;
-    let team = TeamBuilder::new(space).spawn()?;
     team.set_default_entry(capsule.entry);
     Ok(team)
 }
@@ -75,6 +79,7 @@ fn image_frames(
     bytes: &'static [u8],
     region: &Region,
     data_size: usize,
+    owner: Owner,
 ) -> Result<FlatRange, NestError> {
     let pages = data_size / PAGE_SIZE;
     let mut indexed = Vec::new();
@@ -82,7 +87,10 @@ fn image_frames(
         .try_reserve_exact(pages)
         .map_err(|_| NestError::OutOfMemory)?;
     for page in 0..pages {
-        let frame = crate::tag!(Image, crate::core::memory::flat::allocate_cell()?);
+        let frame = crate::tag!(
+            Image,
+            crate::core::memory::flat::allocate_cell(owner.clone())?
+        );
         let start = region.payload + page * PAGE;
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -94,7 +102,7 @@ fn image_frames(
         indexed.push((PageIndex::new(page), frame));
     }
     let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;
-    Ok(Flat::from_cells(count, indexed)?.whole())
+    Ok(Flat::from_cells(owner, count, indexed)?.whole())
 }
 
 /// 在 `Normal` 窗口内登记一笔固定跨度；不动页表。

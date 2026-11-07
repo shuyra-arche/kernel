@@ -1,3 +1,4 @@
+use crate::core::memory::cell::Owner;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -191,14 +192,21 @@ pub fn init() -> NestResult<()> {
 
             let n = hart::hart_count();
             for h in 0..n {
-                let frame = crate::tag!(HartFrame, crate::core::memory::flat::allocate_cell()?);
+                let frame = crate::tag!(
+                    HartFrame,
+                    crate::core::memory::flat::allocate_cell(Owner::Kernel)?
+                );
                 let mut indexed = Vec::new();
                 indexed
                     .try_reserve_exact(1)
                     .map_err(|_| NestError::OutOfMemory)?;
                 indexed.push((PageIndex::ZERO, frame));
-                let source =
-                    Flat::from_cells(PageCount::new(1).expect("one frame"), indexed)?.whole();
+                let source = Flat::from_cells(
+                    Owner::Kernel,
+                    PageCount::new(1).expect("one frame"),
+                    indexed,
+                )?
+                .whole();
                 let flags = PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::A | PteFlags::D;
                 attach_exact(
                     nest,

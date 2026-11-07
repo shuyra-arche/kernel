@@ -25,13 +25,13 @@ use pressing::Pressing;
 use record::Record;
 
 /// 全核唯一的一份关联：单链头，每条一个关系。
-struct SourceViews {
+struct SourceMappings {
     head: SpinLock<Option<Box<Record>>>,
 }
 
-fn registry() -> &'static SourceViews {
-    static REGISTRY: OnceLock<SourceViews> = OnceLock::new();
-    REGISTRY.get_or_init(|| SourceViews {
+fn registry() -> &'static SourceMappings {
+    static REGISTRY: OnceLock<SourceMappings> = OnceLock::new();
+    REGISTRY.get_or_init(|| SourceMappings {
         head: SpinLock::new_level(Level::L3, None),
     })
 }
@@ -261,17 +261,4 @@ fn pressing_page(mapping: &Mapping, source: &FlatRange, page: PageIndex) -> Opti
         .as_usize()
         .checked_add(offset.checked_mul(crate::core::memory::PAGE_SIZE)?)?;
     Some(VirtAddr::from_raw(address))
-}
-
-/// 链上现存条数（连尚未清理的死项）：元数据用量的真数，自检用。
-#[cfg(debug_assertions)]
-pub(crate) fn len() -> usize {
-    let head = registry().head.lock();
-    let mut count = 0usize;
-    let mut cursor = head.as_deref();
-    while let Some(node) = cursor {
-        count += 1;
-        cursor = node.next.as_deref();
-    }
-    count
 }

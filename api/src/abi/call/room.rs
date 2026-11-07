@@ -18,7 +18,7 @@ pub mod operations {
         /// 条件未就绪（等待那一路在退化上下文里答这一枚）。
         #[busy]
         Busy = -3,
-        /// 缺少 Doom Nole 的 FETCH 权限，或条件等待地址不可读/未驻留。
+        /// 缺少 Doom 控制资格，或条件等待地址不可读/未驻留。
         Denied = -4,
         /// 条件等待地址未按 4 字节对齐，或超出调用者地址窗口。
         Invalid = -5,
@@ -77,7 +77,7 @@ pub mod operations {
         pub key: usize,
     }
     /// 销毁目标所属的域及其子树；`task` 是指认域的手柄。
-    /// 当前任务须持有内核铸造的 Doom Nole，且带 FETCH 权限。
+    /// 当前任务须持有内核铸造的 Doom 控制资格。
     /// 目标域已收尾返回 `Dead`，缺少权限返回 `Denied`。
     /// 不等待回收；等待用 [`UnitCall::Join`]。
     ///

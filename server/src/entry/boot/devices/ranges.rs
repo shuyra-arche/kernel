@@ -1,4 +1,4 @@
-use kernel_api::abi::call::pie::PieFail;
+use kernel_api::abi::call::pend::PendFail;
 
 /// 是不是 PCI 宿主：`device_type` 必须**正好**是 `pci`。
 ///
@@ -50,17 +50,17 @@ pub(crate) fn ranges_windows(
     child: usize,
     parent: usize,
     size: usize,
-) -> Result<alloc::vec::Vec<(usize, usize)>, PieFail> {
+) -> Result<alloc::vec::Vec<(usize, usize)>, PendFail> {
     if child != 3 || !(1..=2).contains(&parent) || !(1..=2).contains(&size) {
-        return Err(PieFail::Denied);
+        return Err(PendFail::Denied);
     }
     let width = child + parent + size;
     if !value.len().is_multiple_of(width * 4) {
-        return Err(PieFail::Denied);
+        return Err(PendFail::Denied);
     }
     let count = value.len() / (width * 4);
     let mut windows = alloc::vec::Vec::new();
-    windows.try_reserve(count).map_err(|_| PieFail::OoM)?;
+    windows.try_reserve(count).map_err(|_| PendFail::OoM)?;
     for entry in value.chunks_exact(width * 4) {
         let cell = |at: usize| -> u64 {
             let bytes: [u8; 4] = entry[at * 4..at * 4 + 4].try_into().expect("whole cell");
@@ -72,18 +72,18 @@ pub(crate) fn ranges_windows(
         }
         let mut address = 0u64;
         for at in child..child + parent {
-            address = address.checked_shl(32).ok_or(PieFail::Denied)? | cell(at);
+            address = address.checked_shl(32).ok_or(PendFail::Denied)? | cell(at);
         }
         let mut length = 0u64;
         for at in child + parent..width {
-            length = length.checked_shl(32).ok_or(PieFail::Denied)? | cell(at);
+            length = length.checked_shl(32).ok_or(PendFail::Denied)? | cell(at);
         }
-        let base = usize::try_from(address).map_err(|_| PieFail::Denied)?;
-        let span = usize::try_from(length).map_err(|_| PieFail::Denied)?;
+        let base = usize::try_from(address).map_err(|_| PendFail::Denied)?;
+        let span = usize::try_from(length).map_err(|_| PendFail::Denied)?;
         if base == 0 || span == 0 {
             continue;
         }
-        base.checked_add(span).ok_or(PieFail::Denied)?;
+        base.checked_add(span).ok_or(PendFail::Denied)?;
         windows.push((base, span));
     }
     Ok(windows)
@@ -92,13 +92,13 @@ pub(crate) fn ranges_windows(
 pub(crate) fn memory_windows(
     fdt: &fdt::Fdt,
     node: fdt::node::FdtNode,
-) -> Result<alloc::vec::Vec<(usize, usize)>, PieFail> {
+) -> Result<alloc::vec::Vec<(usize, usize)>, PendFail> {
     let Some(ranges) = node.property("ranges") else {
         return Ok(alloc::vec::Vec::new());
     };
-    let child = cells(node, "#address-cells").ok_or(PieFail::Denied)?;
-    let size = cells(node, "#size-cells").ok_or(PieFail::Denied)?;
-    let parent = parent_of(fdt, node).ok_or(PieFail::Denied)?;
-    let parent = cells(parent, "#address-cells").ok_or(PieFail::Denied)?;
+    let child = cells(node, "#address-cells").ok_or(PendFail::Denied)?;
+    let size = cells(node, "#size-cells").ok_or(PendFail::Denied)?;
+    let parent = parent_of(fdt, node).ok_or(PendFail::Denied)?;
+    let parent = cells(parent, "#address-cells").ok_or(PendFail::Denied)?;
     ranges_windows(ranges.value, child, parent, size)
 }

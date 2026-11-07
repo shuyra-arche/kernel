@@ -1,11 +1,16 @@
+#[cfg(debug_assertions)]
 use ::core::cell::UnsafeCell;
 
+#[cfg(debug_assertions)]
 use alloc::boxed::Box;
+#[cfg(debug_assertions)]
 use alloc::format;
 #[cfg(debug_assertions)]
 use alloc::vec::Vec;
 
+#[cfg(debug_assertions)]
 use super::OnceLock;
+#[cfg(debug_assertions)]
 use crate::machine::hart;
 
 #[cfg(debug_assertions)]
@@ -110,18 +115,6 @@ fn held() -> Option<&'static mut HeldSet> {
         let this = &pool[h.get()];
         unsafe { &mut *this.0.get() }
     })
-}
-
-/// 锁序检测是否已经启用；未启用时每一次 check 都是空转（`NoHeld`）。
-#[cfg(debug_assertions)]
-pub(crate) fn armed() -> bool {
-    POOL.get().is_some()
-}
-
-/// 当前 hart 持有的锁个数；未启用时为 0。
-#[cfg(debug_assertions)]
-pub(crate) fn held_len() -> usize {
-    held().map_or(0, |held| held.len())
 }
 
 #[cfg(debug_assertions)]

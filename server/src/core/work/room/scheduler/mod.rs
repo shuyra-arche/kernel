@@ -58,11 +58,6 @@ fn schedulers() -> &'static [Conductor] {
     SCHEDULERS.get().expect("schedulers not initialized")
 }
 
-#[cfg(debug_assertions)]
-pub(crate) fn scheduler_addr(i: HartId) -> usize {
-    core::ptr::addr_of!(schedulers()[i.get()]) as usize
-}
-
 /// 把一枚就绪任务放到挑中的那颗核上。
 pub(crate) fn launch(task: Arc<Task>) {
     kick(pick(), task);

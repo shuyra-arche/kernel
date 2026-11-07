@@ -4,8 +4,8 @@ use ::core::sync::atomic::Ordering;
 
 use crate::machine::sync::trap::TrapGuard;
 
-use super::owner::Owner;
 use super::RelLock;
+use super::owner::Owner;
 
 pub struct RelLockGuard<'a, T: ?Sized> {
     lock: &'a RelLock<T>,
@@ -47,7 +47,6 @@ impl<T: ?Sized> Drop for RelLockGuard<'_, T> {
         if c == 0 {
             #[cfg(debug_assertions)]
             super::depend::release(self.lock as *const _ as *const () as usize);
-            self.lock.caller.store(0, Ordering::Relaxed);
             self.lock.owner.store(Owner::FREE.word(), Ordering::Release);
         }
     }

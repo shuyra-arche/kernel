@@ -77,9 +77,9 @@ fn error_domains_preserve_busy_and_auxiliary_codes() {
             .unwrap()
             .is_busy()
     );
-    assert_eq!(kernel_api::abi::call::tole::ToleEventFail::Busy.code(), -3);
+    assert_eq!(kernel_api::abi::call::sign::SignEventFail::Busy.code(), -3);
     assert!(
-        kernel_api::abi::call::tole::ToleEventFail::of_code(-3)
+        kernel_api::abi::call::sign::SignEventFail::of_code(-3)
             .unwrap()
             .is_busy()
     );
@@ -98,9 +98,9 @@ fn compound_field_widths_match_their_actual_register_consumption() {
         assert_eq!(T::unpack(&words, &mut unpacked).unwrap(), value);
         assert_eq!(unpacked, T::WORDS);
     }
-    let token = kernel_api::model::identity::PieToken::mint(17);
+    let token = kernel_api::model::identity::PendId::mint(17);
     let team = kernel_api::model::identity::TeamId::new(19);
-    let view = kernel_api::model::memory::ViewId::from_bytes(&23u64.to_le_bytes()).unwrap();
+    let mapping = kernel_api::model::memory::MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
     let reference =
         kernel_api::model::memory::FlatReference::from_bytes(&29u64.to_le_bytes()).unwrap();
     let range = kernel_api::model::memory::ReferenceRange::new(reference, 3, 5).unwrap();
@@ -116,26 +116,26 @@ fn compound_field_widths_match_their_actual_register_consumption() {
         offset: 3,
         count: 5,
     });
-    check(kernel_api::model::memory::AcquireSource::View {
+    check(kernel_api::model::memory::AcquireSource::Mapping {
         team,
-        view,
+        mapping,
         offset: 3,
         count: 5,
     });
-    check(kernel_api::model::pie::GrantRange::Inherit);
-    check(kernel_api::model::pie::GrantRange::pages(3, 5).unwrap());
-    check(kernel_api::model::memory::ViewSelection::Whole);
-    check(kernel_api::model::memory::ViewSelection::pages(3, 5).unwrap());
+    check(kernel_api::model::pend::PendRange::Inherit);
+    check(kernel_api::model::pend::PendRange::pages(3, 5).unwrap());
+    check(kernel_api::model::memory::MappingSelection::Whole);
+    check(kernel_api::model::memory::MappingSelection::pages(3, 5).unwrap());
     check(kernel_api::model::unit::UnitTarget::Task(
         kernel_api::model::identity::TaskId::new(31),
     ));
     check(kernel_api::model::unit::UnitTarget::Team(team));
-    check(kernel_api::model::hole::HoleLimits {
+    check(kernel_api::model::clone_view::CloneLimits {
         max_len: 64,
         max_messages: 2,
         max_bytes: 128,
     });
-    check(kernel_api::model::tole::ToleEventSource::Inspect {
+    check(kernel_api::model::sign::SignSource::Inspect {
         task: kernel_api::model::identity::TaskId::new(31),
         token,
     });
@@ -143,19 +143,71 @@ fn compound_field_widths_match_their_actual_register_consumption() {
 
 #[test]
 fn device_authority_is_not_an_address_and_event_tags_are_distinct() {
-    use kernel_api::{abi::call::device::operations::Publish, model::tole::ToleEventSource};
+    use kernel_api::{abi::call::device::operations::Publish, model::sign::SignSource};
     assert_eq!(Publish::SLOT, (13usize << 32) | 5);
     assert!(Publish::from_registers(&[1, 1, 0x400000, 2, 0, 0]).is_err());
     for source in [
-        ToleEventSource::DeviceRetired { device: 1 },
-        ToleEventSource::DeviceFault { device: 1 },
+        SignSource::DeviceRetired { device: 1 },
+        SignSource::DeviceFault { device: 1 },
     ] {
-        assert_eq!(ToleEventSource::of(source.words()), Some(source));
+        assert_eq!(SignSource::of(source.words()), Some(source));
         let mut words = source.words();
         words[1] = 0;
-        assert_eq!(ToleEventSource::of(words), None);
+        assert_eq!(SignSource::of(words), None);
         words = source.words();
         words[2] = 1;
-        assert_eq!(ToleEventSource::of(words), None);
+        assert_eq!(SignSource::of(words), None);
+    }
+}
+
+#[test]
+fn sign_rights_reject_unknown_and_empty_authority_without_truncation() {
+    use kernel_api::{abi::register::Wire, model::sign::SignRights};
+    for bits in [0, 8, 256, usize::MAX] {
+        assert!(SignRights::unpack(&[bits, 0, 0, 0, 0, 0], &mut 0).is_err());
+    }
+    for bits in 1..8 {
+        assert_eq!(
+            SignRights::unpack(&[bits, 0, 0, 0, 0, 0], &mut 0)
+                .unwrap()
+                .bits() as usize,
+            bits
+        );
+    }
+    assert!(!SignRights::LISTEN.contains(SignRights::TRIGGER));
+    assert!(!SignRights::TRIGGER.contains(SignRights::ROUTE));
+    assert!(kernel_api::abi::call::EnvCall::from_wire(12usize << 32, &[0; 6]).is_err());
+    use kernel_api::abi::reply::SignReply;
+    assert_eq!(
+        SignReply::of(SignReply::Triggered.words()),
+        Some(SignReply::Triggered)
+    );
+}
+
+#[test]
+fn data_authority_uses_one_bit_and_retired_signal_slots_are_invalid() {
+    use kernel_api::{
+        abi::{call::EnvCall, register::Wire},
+        model::modifiable::Modifiable,
+    };
+    for raw in [2, 4, 8, 16, 0x1_0000_0001usize, usize::MAX] {
+        assert!(Modifiable::unpack(&[raw, 0, 0, 0, 0, 0], &mut 0).is_err());
+    }
+    for (raw, expected) in [(0, Modifiable::No), (1, Modifiable::Yes)] {
+        assert_eq!(
+            Modifiable::unpack(&[raw, 0, 0, 0, 0, 0], &mut 0).unwrap(),
+            expected
+        );
+    }
+    for (class, slot) in [(5, 6), (5, 7), (10, 4), (10, 5), (10, 6)] {
+        assert!(EnvCall::from_wire((class << 32) | slot, &[0; 6]).is_err());
+    }
+    use kernel_api::model::pend::PendInfo;
+    let active = [1, 2, 0, 1, 3, 4, 5, 0];
+    assert_eq!(PendInfo::from_words(active).unwrap().words(), active);
+    for (index, value) in [(0, 0), (1, 0), (2, 1), (3, 2), (7, 4)] {
+        let mut bad = active;
+        bad[index] = value;
+        assert!(PendInfo::from_words(bad).is_none());
     }
 }

@@ -173,7 +173,7 @@ pub(crate) fn bury() {
             break;
         }
         wipe(WakeKey::Task { id: z.ident.id });
-        wipe(WakeKey::Pies { task: z.ident.id });
+        wipe(WakeKey::Pends { task: z.ident.id });
         z.ident.team.prune_tasks();
         let _pruned = crate::core::work::room::scheduler::roster::prune_dead();
         drop(z);
@@ -190,6 +190,11 @@ pub(crate) fn hook(hooks: &'static [Hook]) {
 }
 
 fn hooked(task: &Arc<Task>) {
+    {
+        let _commit = crate::core::work::commit();
+        task.signs.clear(task.ident.id);
+        task.administration.clear();
+    }
     if let Some(hooks) = HOOKS.get() {
         for h in hooks.iter() {
             h(task);

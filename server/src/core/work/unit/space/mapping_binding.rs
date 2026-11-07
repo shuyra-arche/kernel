@@ -2,7 +2,7 @@
 
 use alloc::sync::{Arc, Weak};
 
-use kernel_api::abi::call::pie::PieFail;
+use kernel_api::abi::call::pend::PendFail;
 
 use super::Space;
 
@@ -12,12 +12,12 @@ pub(crate) struct MappingBinding {
 }
 
 impl MappingBinding {
-    pub(crate) fn new(id: usize, space: &Arc<Space>) -> Result<Arc<Self>, PieFail> {
+    pub(crate) fn new(id: usize, space: &Arc<Space>) -> Result<Arc<Self>, PendFail> {
         Arc::try_new(Self {
             id,
             space: Arc::downgrade(space),
         })
-        .map_err(|_| PieFail::OoM)
+        .map_err(|_| PendFail::OoM)
     }
 
     pub(crate) fn id(&self) -> usize {

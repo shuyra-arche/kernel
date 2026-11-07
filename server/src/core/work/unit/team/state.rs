@@ -1,18 +1,15 @@
-use alloc::vec::Vec;
-
 use kernel_api::abi::call::unit::UnitFail;
 
 use crate::core::work::unit::control::Request;
 
-use super::Staging;
 use super::TeamPhase;
 use super::TeamStage;
 
-/// 团队状态机：阶段（`TeamStage`）、相位（`TeamPhase`）与暂存表。
+/// 团队状态机：阶段（`TeamStage`）、相位（`TeamPhase`）与成员准入。
 pub(crate) struct TeamState {
     pub(crate) stage: TeamStage,
+    pub(crate) admission: super::admission::Admission,
     pub(crate) phase: TeamPhase,
-    pub(crate) staged: Vec<Staging>,
 }
 
 unsafe impl Send for TeamState {}
@@ -21,8 +18,8 @@ impl TeamState {
     pub(crate) fn new(stage: TeamStage) -> TeamState {
         TeamState {
             stage,
+            admission: super::admission::Admission::Open,
             phase: TeamPhase::Live,
-            staged: Vec::new(),
         }
     }
 
@@ -63,38 +60,5 @@ impl TeamState {
     pub(crate) fn embark(&mut self) -> Result<(), UnitFail> {
         self.phase = self.phase.transition(Request::Resume)?;
         Ok(())
-    }
-
-    #[cfg(debug_assertions)]
-    pub(crate) fn staged_len(&self) -> usize {
-        self.staged.len()
-    }
-
-    pub(crate) fn push_staging(&mut self, item: Staging) {
-        self.staged.push(item);
-    }
-
-    pub(crate) fn find_staging(&self, hit: impl FnMut(&Staging) -> bool) -> Option<usize> {
-        self.staged.iter().position(hit)
-    }
-
-    pub(crate) fn staged_at(&self, index: usize) -> Option<Staging> {
-        self.staged.get(index).cloned()
-    }
-
-    pub(crate) fn remove_staging(&mut self, index: usize) {
-        if index < self.staged.len() {
-            self.staged.remove(index);
-        }
-    }
-
-    /// 摘走整表（连容量）：状态里留一块 0 容量的空壳，丢它不碰分配器。
-    pub(crate) fn take_staging(&mut self) -> Vec<Staging> {
-        core::mem::take(&mut self.staged)
-    }
-
-    /// 整表换进去，旧表交回调用方在锁外丢；锁内不搬元素也不释放内存。
-    pub(crate) fn swap_staging(&mut self, items: Vec<Staging>) -> Vec<Staging> {
-        core::mem::replace(&mut self.staged, items)
     }
 }

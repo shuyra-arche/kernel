@@ -23,14 +23,6 @@ impl HeldSet {
         self.slots.iter().filter_map(|h| h.level).max()
     }
 
-    pub(super) fn len(&self) -> usize {
-        self.slots.len()
-    }
-
-    pub(super) fn contains(&self, addr: usize) -> bool {
-        self.slots.iter().any(|h| h.addr == addr)
-    }
-
     pub(super) fn push(
         &mut self,
         addr: usize,

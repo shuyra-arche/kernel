@@ -1,13 +1,13 @@
 //! 一段**帧无关的页窗口**：相对某份来源起点的坐标。
 //!
 //! 它给两个用途共用：派生子段的几何（父侧分配槽与子记录共享同一个 `Arc`），
-//! 以及独立持有在来源记录上的登记窗口。它不持 `FlatRange`、`Cell` 或 `PoleMeta`，
+//! 以及独立持有在来源记录上的登记窗口。它不持 `FlatRange`、`Cell` 或 `ShareView`，
 //! 所以记住一段窗口不会强持来源；换成本地绝对页号只经 `FlatRange::range` 一次。
 
 use alloc::sync::Arc;
 
 use crate::core::memory::address::{PageCount, PageOffset};
-use kernel_api::abi::call::pie::PieFail;
+use kernel_api::abi::call::pend::PendFail;
 
 pub(crate) struct Geometry {
     offset: PageOffset,
@@ -16,8 +16,8 @@ pub(crate) struct Geometry {
 
 impl Geometry {
     /// 页窗口只在这一处成型，之后没有放宽的路。
-    pub(crate) fn new(offset: PageOffset, count: PageCount) -> Result<Arc<Self>, PieFail> {
-        Arc::try_new(Self { offset, count }).map_err(|_| PieFail::OoM)
+    pub(crate) fn new(offset: PageOffset, count: PageCount) -> Result<Arc<Self>, PendFail> {
+        Arc::try_new(Self { offset, count }).map_err(|_| PendFail::OoM)
     }
 
     /// 这一段窗口（相对某份来源起点的页偏移与页数）。
