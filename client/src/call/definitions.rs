@@ -28,7 +28,6 @@ typed_calls! {
         abi::call::clone_view::CloneFail,
         model::clone_view::CloneLimits,
         model::identity::Mark,
-        model::clone_view::Oversize,
         model::identity::PendId,
         model::clone_view::PullOutcome,
         model::identity::TaskId,
@@ -41,8 +40,8 @@ typed_calls! {
             op::Seal { token };
         fallible fn push(token: PendId, msg: VirtAddr, len: usize) -> Result<(), erra::Error<CloneFail>> =
             op::Push { token, msg, len };
-        fallible fn pull(token: PendId, buf: VirtAddr, max: usize, oversize: Oversize) -> Result<PullOutcome, erra::Error<CloneFail>> =
-            op::Pull { token, buf, max, oversize };
+        fallible fn pull(token: PendId, max_len: usize) -> Result<PullOutcome, erra::Error<CloneFail>> =
+            op::Pull { token, max_len };
         fallible fn peek(token: PendId) -> Result<(usize, TaskId, usize), erra::Error<CloneFail>> =
             op::Peek { token };
         fallible fn wait(token: PendId, condition: CloneCondition, millis: Wait) -> Result<bool, erra::Error<CloneFail>> =

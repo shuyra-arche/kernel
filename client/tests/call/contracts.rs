@@ -222,3 +222,19 @@ fn conditional_waits_encode_address_value_deadline_and_wake_scope() {
         RoomFail::Invalid
     );
 }
+
+#[test]
+fn clone_delivery_returns_authority_and_retires_copy_out_slot() {
+    use kernel_api::abi::call::{EnvCall, clone_view::operations::Pull};
+    reply((91, 5000, 23));
+    let received = invoke(Pull {
+        token: PendId::mint(17),
+        max_len: 8192,
+    })
+    .unwrap();
+    assert_eq!(received.token, PendId::mint(91));
+    assert_eq!(received.len, 5000);
+    assert_eq!(received.sender, TaskId::new(23));
+    called((5usize << 32) | 8, [17, 8192, 0, 0, 0, 0]);
+    assert!(EnvCall::from_wire((5usize << 32) | 3, &[17, 0x4000, 8192, 0, 0, 0]).is_err());
+}

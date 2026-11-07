@@ -239,28 +239,14 @@ fn note_hand_off(meta: &CloneView, from: TaskId, len: usize, at: u64) {
 
 pub(crate) fn hold_line() {
     crate::putln!(
-        "clone_view: push_hold_n={} push_hold_max_ms={} worst=clone_view#{} from={} owner={} live={} back_n={} back_max_len={}",
+        "clone_view: push_hold_n={} push_hold_max_ms={} worst=clone_view#{} from={} owner={} live={}",
         HOLD_N.load(Ordering::Relaxed),
         HOLD_MAX_MS.load(Ordering::Relaxed),
         HOLD_WORST.load(Ordering::Relaxed),
         HOLD_FROM.load(Ordering::Relaxed),
         HOLD_OWNER.load(Ordering::Relaxed),
         HANDS_LIVE.load(Ordering::Relaxed),
-        BACK_N.load(Ordering::Relaxed),
-        BACK_MAX_LEN.load(Ordering::Relaxed),
     );
-}
-
-static BACK_N: AtomicUsize = AtomicUsize::new(0);
-static BACK_MAX_LEN: AtomicUsize = AtomicUsize::new(0);
-static BACK_ALARMED: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn note_back(len: usize, max: usize) {
-    BACK_N.fetch_add(1, Ordering::Relaxed);
-    BACK_MAX_LEN.fetch_max(len, Ordering::Relaxed);
-    if !BACK_ALARMED.swap(true, Ordering::Relaxed) {
-        crate::putln!("view: hand returned len={} max={}", len, max);
-    }
 }
 
 pub(crate) fn seal(meta: &CloneView) {

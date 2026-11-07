@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use kernel_api::{
     abi::call::clone_view::CloneCall, abi::call::clone_view::CloneFail, abi::call::pend::PendFail,
-    model::clone_view::CloneCondition, model::clone_view::CloneLimits, model::clone_view::Oversize,
+    model::clone_view::CloneCondition, model::clone_view::CloneLimits,
     model::clone_view::PullOutcome, model::identity::Mark, model::identity::PendId,
     model::identity::TaskId, model::view::ViewKind, model::wait::Wait,
 };
@@ -14,7 +14,6 @@ use crate::core::memory::nest::Access;
 use crate::core::work::pend::{self, Modifiable, Need};
 use crate::core::work::room::Handoff;
 use crate::core::work::room::conductor::current;
-use crate::core::work::unit::space::Space;
 use crate::core::work::unit::task::TaskIdent;
 use crate::core::work::view::{self, View};
 use crate::machine::switcher::context::{Gprs, TrapContext};
@@ -33,12 +32,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: CloneCall, ident: Arc<Task
             Outcome::Resume
         }
         CloneCall::Push { token, msg, len } => push(frame, ident, token, msg.get(), len),
-        CloneCall::Pull {
-            token,
-            buf,
-            max,
-            oversize,
-        } => pull(frame, ident, token, buf.get(), max, oversize),
+        CloneCall::Pull { token, max_len } => pull(frame, token, max_len),
         CloneCall::Peek { token } => peek(frame, token),
         CloneCall::Wait {
             token,
@@ -76,67 +70,58 @@ fn push(
     Outcome::Resume
 }
 
-fn pull(
-    frame: &mut TrapContext,
-    ident: Arc<TaskIdent>,
-    token: PendId,
-    buf: usize,
-    max: usize,
-    oversize: Oversize,
-) -> Outcome {
-    if !Space::user_range(KVirt::wrap(buf), max) {
-        ret_err(frame, CloneFail::Denied);
-        return Outcome::Resume;
-    }
-    let r = with_clone(token, Need::Read, |meta| {
-        if !ident
-            .team
-            .space
-            .validate_access(KVirt::wrap(buf), max, Access::WRITE)
-        {
-            return Err(CloneFail::Denied);
+fn pull(frame: &mut TrapContext, token: PendId, max_len: usize) -> Outcome {
+    let result = receive(token, max_len);
+    match result {
+        Ok(delivery) => {
+            frame.gpr.set_x(Gprs::A0, delivery.token.get());
+            frame.gpr.set_x(Gprs::A1, delivery.len);
+            frame.gpr.set_x(Gprs::A2, delivery.sender.get());
         }
-        hand_over(meta, &ident.team.space, buf, max, oversize)
-    });
-    match r {
-        Ok(outcome) => {
-            let (n, from, discarded) = match outcome {
-                PullOutcome::Received { len, sender } => (len, sender, false),
-                PullOutcome::Discarded { len, sender } => (len, sender, true),
-            };
-            frame.gpr.set_x(Gprs::A0, n);
-            frame.gpr.set_x(Gprs::A1, from.get());
-            frame.gpr.set_x(Gprs::A2, discarded as usize);
-        }
-        Err(e) => ret_err(frame, e),
+        Err(error) => ret_err(frame, error),
     }
     Outcome::Resume
 }
 
-fn hand_over(
-    meta: &Arc<view::clone_view::CloneView>,
-    space: &Arc<Space>,
-    buf: usize,
-    max: usize,
-    oversize: Oversize,
-) -> Result<PullOutcome, CloneFail> {
-    let reading = view::clone_view::read(meta)?;
-    let from = reading.from;
+fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
+    let task = current().running_task().ok_or(CloneFail::Denied)?;
+    let observed = gate::accede(token, Need::Read).map_err(fail)?;
+    gate::usable(&observed).map_err(fail)?;
+    let meta = observed.view().clone_view().ok_or(CloneFail::Denied)?;
+    let mut reading = view::clone_view::read(&meta)?;
     let len = reading.bytes.len();
-    if len > max && oversize == Oversize::Discard {
-        reading.finish();
-        return Ok(PullOutcome::Discarded { len, sender: from });
-    }
-    if len > max || !space.validate_access(KVirt::wrap(buf), len, Access::WRITE) {
-        view::clone_view::note_back(len, max);
+    if len > max_len {
         return Err(CloneFail::Denied);
     }
-    if !reading.bytes.copy_out(space, buf) {
-        view::clone_view::note_back(len, max);
-        return Err(CloneFail::Denied);
+    let delivered = reading.bytes.prepare(task.ident.id).map_err(fail)?;
+    let outcome = PullOutcome {
+        token: delivered.token(),
+        len,
+        sender: reading.from,
+    };
+    {
+        let _serial = task.pend.lock();
+        task.pend
+            .entries
+            .lock()
+            .try_reserve(1)
+            .map_err(|_| CloneFail::OoM)?;
+        let _commit = crate::core::work::commit();
+        if !pend::live(&task) {
+            return Err(CloneFail::Dead);
+        }
+        let current = pend::locate(&task, token).ok_or(CloneFail::Denied)?;
+        if !current.view().same(observed.view()) || !current.allows(Need::Read) {
+            return Err(CloneFail::Denied);
+        }
+        let mut entries = task.pend.entries.lock();
+        reading.commit(|| {
+            entries.push(delivered);
+            pend::changed(&task);
+        })?;
     }
-    reading.finish();
-    Ok(PullOutcome::Received { len, sender: from })
+    // Reading wakes queue observers after all publication locks are released.
+    Ok(outcome)
 }
 
 fn peek(frame: &mut TrapContext, token: PendId) -> Outcome {

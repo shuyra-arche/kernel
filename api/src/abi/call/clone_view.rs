@@ -1,5 +1,5 @@
 //! Bounded message queues and counted notifications.
-use crate::model::clone_view::{Oversize, PullOutcome};
+use crate::model::clone_view::PullOutcome;
 use crate::model::identity::{Mark, PendId, TaskId, VirtAddr};
 use crate::model::wait::Wait;
 
@@ -36,13 +36,14 @@ pub mod operations {
         pub msg: super::VirtAddr,
         pub len: usize,
     }
-    #[operation(slot = 3, output = super::PullOutcome, error = CloneFail, reply = 3)]
+    /// Receive the existing copied Cells as a read-only payload Pend. The length
+    /// limit bounds admission; failure keeps the message queued. Slot 3 (copy-out)
+    /// is retired so old callers cannot mistake a Pend for a byte count.
+    #[operation(slot = 8, output = super::PullOutcome, error = CloneFail, reply = 3)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Pull {
         pub token: super::PendId,
-        pub buf: super::VirtAddr,
-        pub max: usize,
-        pub oversize: super::Oversize,
+        pub max_len: usize,
     }
     #[operation(slot = 4, output = (usize, super::TaskId, usize), error = CloneFail, reply = 3)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
