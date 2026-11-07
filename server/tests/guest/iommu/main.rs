@@ -100,7 +100,7 @@ extern "C" fn guest(dtb: usize) -> ! {
     let base = region.starting_address.addr();
     if matches!(
         fdt.chosen().bootargs(),
-        Some("dma" | "readonly" | "dma-abandon")
+        Some("dma" | "readonly" | "dma-abandon" | "owner-exit" | "activation-exit")
     ) {
         dma::run(base, fdt.chosen().bootargs().unwrap());
     }

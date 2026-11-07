@@ -1,5 +1,7 @@
-use crate::iommu::riscv::domain::{Domain, DomainPhase};
+use crate::iommu::retirement::{Owner, Registry};
+use crate::iommu::riscv::adapter::{Adapter, Quiescence};
 use crate::iommu::riscv::{Engine, Phase};
+use crate::iommu::{HardwareError, IoSpace};
 use crate::{
     Uart,
     edu::Edu,
@@ -7,14 +9,39 @@ use crate::{
     pool::{LIMIT, POOL, RETURNS},
     progress,
 };
+use alloc::sync::Arc;
 use core::fmt::Write;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 const IOVA: usize = 0x0040_0000;
 
+// Trusted QEMU fixture topology, not a driver-supplied acknowledgement. This
+// proof is intentionally not enabled on arbitrary physical PCI devices.
+struct Platform<'a> {
+    endpoints: [&'a Edu; 2],
+    allow: &'a AtomicBool,
+}
+// SAFETY: plain emulated EDU has no ATS/PRI/bypass; all accesses pass this IOMMU.
+// QEMU performs pci_dma accesses synchronously in its device callback. After
+// DDTP Off, PCI read completions order older accesses; future delayed callbacks
+// are denied. The test keeps DDTP Off and holds exclusive control of topology.
+unsafe impl Quiescence for Platform<'_> {
+    fn poll(&mut self) -> Result<bool, HardwareError> {
+        if !self.allow.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        for endpoint in self.endpoints {
+            endpoint.drain();
+        }
+        Ok(true)
+    }
+}
+
+type Space<'a> = IoSpace<Adapter<mmio::Mmio, Platform<'a>>>;
+
 pub fn run(base: usize, scenario: &str) -> ! {
     LIMIT.store(8, Ordering::Relaxed);
-    let payload = POOL.cell().unwrap();
+    let payload = Arc::new(POOL.cell().unwrap());
     let pa = payload.physical_address();
     let old_id = payload.id();
     let bytes = payload.as_mut_ptr();
@@ -25,73 +52,155 @@ pub fn run(base: usize, scenario: &str) -> ! {
     let mut engine = Engine::new(unsafe { mmio::Mmio::new(base) }, cells).unwrap();
     progress(&mut engine, Phase::Ready);
     let tables = core::array::from_fn(|_| POOL.cell().unwrap());
-    // QEMU-only fixture: both plain emulated EDU functions are behind this
-    // platform IOMMU, have no ATS/PRI capability, and no other hart or Unit runs.
-    let mut domain =
-        unsafe { Domain::new(engine, tables, payload, 8, IOVA, scenario != "readonly") }.unwrap();
-    domain.start().unwrap();
-    advance(&mut domain, DomainPhase::Active);
-    edu.enable(1);
-    outsider.enable(2);
-    if scenario == "readonly" {
-        edu.transfer(IOVA, true); // Cold translation: a forbidden write faults.
-        fault(&mut domain, 8, 15, IOVA);
-        check(bytes, 0x5a);
-    }
-    edu.transfer(IOVA, false); // Actual translated RAM -> endpoint DMA.
-    assert!(domain.fault().unwrap().is_none(), "read translation failed");
-    if scenario == "dma-abandon" {
-        drop(domain);
-        assert_eq!(RETURNS.load(Ordering::SeqCst), 0);
-        assert!(POOL.cell().is_none());
-        let _ = writeln!(Uart, "PASS iommu-dma abandoned=8 returns=0");
-        finish(true);
-    }
-    unsafe { bytes.write_bytes(0xa5, 64) };
-    edu.transfer(IOVA, true); // Endpoint -> same translated payload.
-    if scenario == "readonly" {
-        // QEMU 10's cached RO translation can deny the write in the generic
-        // memory layer without another FQ record. Memory integrity is required
-        // regardless; validate any records rather than depending on their count.
-        for _ in 0..128 {
-            let Some(fault) = domain.fault().unwrap() else {
+    let allow = AtomicBool::new(false);
+    let platform = Platform {
+        endpoints: [&edu, &outsider],
+        allow: &allow,
+    };
+    // Exclusive M-mode fixture, fixed coherent topology and whole-page borrowing.
+    let adapter = unsafe { Adapter::new(engine, tables, 8, platform) }
+        .map_err(|(error, _)| error)
+        .unwrap();
+    let mut registry = Registry::new();
+    let mut owner = Some(Owner::new().unwrap());
+    let domain = registry
+        .attach(owner.as_ref().unwrap(), adapter)
+        .map_err(|(e, _)| e)
+        .unwrap();
+    let binding = registry
+        .with_space(owner.as_ref().unwrap(), domain, |space| {
+            let id = unsafe { space.register(&payload, IOVA, scenario != "readonly") }?;
+            space.publish(id)?;
+            Ok(id)
+        })
+        .unwrap();
+    assert_eq!(Arc::strong_count(&payload), 2); // exactly one data obligation
+    drop(payload);
+    if scenario != "activation-exit" {
+        let mut active = false;
+        for _ in 0..1_000_000 {
+            if registry
+                .with_space(owner.as_ref().unwrap(), domain, |s| s.ready(binding))
+                .unwrap()
+            {
+                active = true;
                 break;
-            };
-            assert_eq!((fault.device, fault.cause, fault.transaction), (8, 15, 3));
-            assert!((IOVA as u64..IOVA as u64 + 64).contains(&fault.address));
+            }
         }
-        check(bytes, 0xa5);
-    } else {
-        assert!(domain.fault().unwrap().is_none());
-        check(bytes, 0x5a);
+        assert!(active, "activation deadline");
+        edu.enable(1);
+        outsider.enable(2);
+        if scenario == "readonly" {
+            edu.transfer(IOVA, true);
+            registry
+                .with_space(owner.as_ref().unwrap(), domain, |s| {
+                    fault(s, 8, 15, IOVA);
+                    Ok(())
+                })
+                .unwrap();
+            check(bytes, 0x5a);
+        }
+        edu.transfer(IOVA, false);
+        registry
+            .with_space(owner.as_ref().unwrap(), domain, |s| {
+                assert!(s.fault()?.is_none(), "read translation failed");
+                Ok(())
+            })
+            .unwrap();
+        if scenario == "dma-abandon" {
+            drop(registry);
+            drop(owner);
+            assert_eq!(RETURNS.load(Ordering::SeqCst), 0);
+            assert!(POOL.cell().is_none());
+            let _ = writeln!(Uart, "PASS iommu-dma abandoned=8 returns=0");
+            finish(true);
+        }
+        unsafe { bytes.write_bytes(0xa5, 64) };
+        edu.transfer(IOVA, true);
+        registry
+            .with_space(owner.as_ref().unwrap(), domain, |s| {
+                if scenario == "readonly" {
+                    // A cached RO denial need not produce another FQ record in QEMU.
+                    for _ in 0..128 {
+                        let Some(f) = s.fault()? else {
+                            break;
+                        };
+                        assert_eq!((f.device, f.cause, f.transaction), (8, 15, 3));
+                        assert!((IOVA as u64..IOVA as u64 + 64).contains(&f.address));
+                    }
+                    check(bytes, 0xa5);
+                } else {
+                    assert!(s.fault()?.is_none());
+                    check(bytes, 0x5a);
+                }
+                outsider.transfer(IOVA, true);
+                fault(s, 16, 258, IOVA);
+                edu.transfer(pa, true);
+                fault(s, 8, 15, pa);
+                Ok(())
+            })
+            .unwrap();
     }
-    // Neither another DID nor a physical-address alias receives this Cell.
-    outsider.transfer(IOVA, true);
-    fault(&mut domain, 16, 258, IOVA);
-    edu.transfer(pa, true);
-    fault(&mut domain, 8, 15, pa);
-    check(bytes, if scenario == "readonly" { 0xa5 } else { 0x5a });
-    domain.revoke().unwrap();
+    let exiting = matches!(scenario, "owner-exit" | "activation-exit");
+    if exiting {
+        if scenario == "owner-exit" {
+            edu.start(IOVA, true); // delayed DMA; requester disappears before it finishes
+            assert_ne!(edu.read(0x98) & 1, 0, "DMA was not pending at exit");
+        }
+        drop(owner.take()); // no hardware work and no transfer of records
+    } else {
+        registry
+            .with_space(owner.as_ref().unwrap(), domain, |s| s.revoke(binding))
+            .unwrap();
+    }
     assert_eq!(RETURNS.load(Ordering::SeqCst), 0);
     assert!(POOL.cell().is_none());
-    advance(&mut domain, DomainPhase::Blocked);
-    // A future request using the old IOVA must fault after cache invalidation.
-    edu.transfer(IOVA, true);
-    fault(&mut domain, 8, 15, IOVA);
-    check(bytes, if scenario == "readonly" { 0xa5 } else { 0x5a });
-    assert_eq!(RETURNS.load(Ordering::SeqCst), 0);
-    domain.close().unwrap();
-    advance(&mut domain, DomainPhase::Closed);
-    assert_eq!(RETURNS.load(Ordering::SeqCst), 3); // Only CQ/FQ/completion.
+    for _ in 0..1_000_000 {
+        if exiting {
+            registry.step(1);
+        } else {
+            assert!(
+                !registry
+                    .with_space(owner.as_ref().unwrap(), domain, |s| s.poll(binding))
+                    .unwrap()
+            );
+        }
+        if RETURNS.load(Ordering::SeqCst) == 3 {
+            break;
+        }
+    }
+    assert_eq!(RETURNS.load(Ordering::SeqCst), 3); // CQ/FQ/completion only
     let held: [_; 3] = core::array::from_fn(|_| POOL.cell().unwrap());
-    assert!(POOL.cell().is_none()); // No data/table release from CQ/FQ evidence.
-    // Trusted fixture performs PCI read completions after DDTP Off. EDU has no
-    // ATS, QEMU's emulated DMA accesses are synchronous in its device callback,
-    // and these reads order earlier requests. Future old-IOVA requests remain
-    // blocked by DDTP Off. This is a platform-specific proof, not a driver Ack.
-    edu.drain();
-    outsider.drain();
-    unsafe { domain.settle() }.unwrap();
+    assert!(POOL.cell().is_none());
+    // Many more complete queue observations cannot replace platform evidence.
+    for _ in 0..32 {
+        if exiting {
+            registry.step(1);
+        } else {
+            assert!(
+                !registry
+                    .with_space(owner.as_ref().unwrap(), domain, |s| s.poll(binding))
+                    .unwrap()
+            );
+        }
+    }
+    assert_eq!(registry.pending(), 1);
+    assert_eq!(RETURNS.load(Ordering::SeqCst), 3);
+    allow.store(true, Ordering::Release);
+    if let Some(owner) = owner.take() {
+        drop(owner);
+    }
+    for _ in 0..1_000_000 {
+        registry.step(1);
+        if registry.pending() == 0 {
+            break;
+        }
+    }
+    assert_eq!(registry.pending(), 0);
+    assert_eq!(
+        registry.error(domain),
+        Err(crate::iommu::Error::UnknownDomain)
+    );
     assert_eq!(RETURNS.load(Ordering::SeqCst), 8);
     let reused = POOL.cell().unwrap();
     assert_eq!(reused.physical_address(), pa);
@@ -103,14 +212,19 @@ pub fn run(base: usize, scenario: &str) -> ! {
             .all(|b| *b == 0)
     );
     unsafe { new_bytes.write_bytes(0xc3, 64) };
+    if scenario == "owner-exit" {
+        edu.wait();
+    } // late DMA cannot hit the reused Cell
+    edu.enable(1);
     edu.transfer(IOVA, true);
     edu.drain();
-    check(new_bytes, 0xc3); // Old DMA cannot corrupt the new Cell instance.
+    check(new_bytes, 0xc3);
     drop((reused, held));
-    let _ = if scenario == "readonly" {
-        writeln!(Uart, "PASS iommu-dma readonly=1 denied=5")
-    } else {
-        writeln!(Uart, "PASS iommu-dma revoked=1 reused=1 denied=3")
+    let _ = match scenario {
+        "readonly" => writeln!(Uart, "PASS iommu-dma readonly=1 denied=5"),
+        "owner-exit" => writeln!(Uart, "PASS iommu-dma owner-exit=1 delayed-dma=1 reused=1"),
+        "activation-exit" => writeln!(Uart, "PASS iommu-dma activation-exit=1 reused=1"),
+        _ => writeln!(Uart, "PASS iommu-dma revoked=1 reused=1 denied=3"),
     };
     finish(true)
 }
@@ -121,26 +235,15 @@ fn check(bytes: *mut u8, expected: u8) {
     }
 }
 
-fn advance(domain: &mut Domain<mmio::Mmio>, target: DomainPhase) {
+fn fault(space: &mut Space<'_>, device: u32, cause: u16, address: usize) {
     for _ in 0..1_000_000 {
-        if domain.step().unwrap() == target {
-            return;
-        }
-    }
-    panic!("domain deadline: {:?}", domain.phase());
-}
-
-fn fault(domain: &mut Domain<mmio::Mmio>, device: u32, cause: u16, address: usize) {
-    for _ in 0..1_000_000 {
-        if let Some(fault) = domain.fault().unwrap() {
-            assert_eq!(fault.device, device);
-            assert_eq!(fault.cause, cause);
-            assert_eq!(fault.transaction, 3);
-            assert_eq!(fault.address, address as u64);
-            // QEMU may split a rejected 64-byte request into several faulting
-            // transactions. Drain the bounded queue and validate every record.
+        if let Some(fault) = space.fault().unwrap() {
+            assert_eq!(
+                (fault.device, fault.cause, fault.transaction, fault.address),
+                (device, cause, 3, address as u64)
+            );
             for _ in 0..128 {
-                let Some(extra) = domain.fault().unwrap() else {
+                let Some(extra) = space.fault().unwrap() else {
                     return;
                 };
                 assert_eq!(

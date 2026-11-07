@@ -1,5 +1,5 @@
 //! Initial trusted platform binding. Device translation remains Off: these engines
-//! own only CQ/FQ/completion storage and do not yet implement IoSpace Hardware.
+//! own only CQ/FQ/completion storage. Runtime device binding is not enabled yet.
 use crate::core::memory::address::PhysAddr;
 use crate::core::memory::flat::{BorrowedRegion, Flat, allocator::frame};
 use crate::core::memory::nest::iommu::riscv::{Engine, Phase};

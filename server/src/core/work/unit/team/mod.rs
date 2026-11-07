@@ -239,6 +239,9 @@ impl Team {
             if !self.all_reaped() {
                 return Err(NestError::NoRegion);
             }
+            // CPU/task cleanup may fail later. DMA retirement must not depend
+            // on those steps succeeding or on this Team being dropped.
+            self.space.dma.close();
             self.life.visit(&mut |node| {
                 let mut state = node.state.lock();
                 if !state.terminal() {

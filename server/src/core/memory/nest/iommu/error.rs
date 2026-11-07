@@ -16,6 +16,8 @@ pub(crate) enum Error {
     WrongBatch,
     InvalidRange,
     Overlap,
+    Capacity,
+    UnknownDomain,
     OutOfMemory,
     Exhausted,
     Retain(RetainError),

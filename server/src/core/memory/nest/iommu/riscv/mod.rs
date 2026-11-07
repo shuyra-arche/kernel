@@ -3,6 +3,7 @@
 //! 翻译撤销与平台结清分开，不把 CQ/FQ 读数作为完整 Hardware 证明。
 //! 依据 RISC-V IOMMU v1.0.1 §4.1 / §5。
 
+pub(crate) mod adapter;
 pub(crate) mod domain;
 mod engine;
 mod fault;

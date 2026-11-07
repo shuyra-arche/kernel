@@ -1,8 +1,7 @@
 //! 设备地址投影的内核协议：登记、撤销批次与可信结清。
 //!
-//! 当前提供纯状态决策与受独占访问保护的效果编排。QEMU 平台已接入独立的
-//! 命令引擎，但尚无设备投影的完整 Hardware、用户态 ABI 或中断接线。
-//! 不能据此宣称运行中的 DMA 已受保护。
+//! 纯状态决策、Kernel 持有的回收记录与受独占访问保护的硬件效果。
+//! 单设备适配器已由 QEMU 验证；普通启动仍无 DMA 授权 ABI 或队列中断接线。
 
 mod binding;
 mod error;
@@ -10,6 +9,7 @@ mod hardware;
 mod identity;
 mod phase;
 mod projection;
+pub(crate) mod retirement;
 pub(crate) mod riscv;
 
 use alloc::sync::Arc;
@@ -32,6 +32,7 @@ pub(crate) struct IoSpace<H: Hardware> {
     hardware: Option<H>,
     bindings: Vec<Binding>,
     life: Life,
+    cursor: usize,
 }
 
 impl<H: Hardware> IoSpace<H> {
@@ -40,6 +41,7 @@ impl<H: Hardware> IoSpace<H> {
             hardware: Some(hardware),
             bindings: Vec::new(),
             life: Life::Open,
+            cursor: 0,
         }
     }
 
@@ -75,6 +77,9 @@ impl<H: Hardware> IoSpace<H> {
         if self.life != Life::Open {
             return Err(Error::Closed);
         }
+        if self.bindings.len() >= self.hardware.as_ref().expect("live space").capacity() {
+            return Err(Error::Capacity);
+        }
         let end = iova.checked_add(PAGE_SIZE).ok_or(Error::InvalidRange)?;
         if !iova.is_multiple_of(PAGE_SIZE) {
             return Err(Error::InvalidRange);
@@ -89,16 +94,21 @@ impl<H: Hardware> IoSpace<H> {
             .try_reserve(1)
             .map_err(|_| Error::OutOfMemory)?;
         let id = BindingId::allocate()?;
+        let projection = Projection {
+            id,
+            cell: cell.id(),
+            iova,
+            physical: cell.physical_address(),
+            size: PAGE_SIZE,
+            modifiable,
+        };
+        self.hardware
+            .as_ref()
+            .expect("live space")
+            .validate(projection)?;
         let retained = cell.prepare_external()?;
         self.bindings.push(Binding {
-            projection: Projection {
-                id,
-                cell: cell.id(),
-                iova,
-                physical: cell.physical_address(),
-                size: PAGE_SIZE,
-                modifiable,
-            },
+            projection,
             retention: Some(retained),
             phase: Phase::Prepared,
         });
@@ -132,6 +142,43 @@ impl<H: Hardware> IoSpace<H> {
         Ok(())
     }
 
+    /// Publication is asynchronous. No caller may start DMA before ready.
+    pub(crate) fn ready(&mut self, id: BindingId) -> Result<bool, Error> {
+        if self.life != Life::Open {
+            return Err(Error::Closed);
+        }
+        let at = self.index(id)?;
+        if !matches!(self.bindings[at].phase, Phase::Publishing | Phase::Active) {
+            return Err(Error::InvalidState);
+        }
+        match self
+            .hardware
+            .as_mut()
+            .expect("live space")
+            .ready(self.bindings[at].projection)
+        {
+            Ok(ready) => {
+                if ready {
+                    self.bindings[at].phase = self.bindings[at].phase.transition(Event::Ready)?;
+                }
+                Ok(ready)
+            }
+            Err(error) => {
+                self.bindings[at].begin_retirement();
+                self.bindings[at].phase = self.bindings[at].phase.transition(Event::Fail)?;
+                Err(error.into())
+            }
+        }
+    }
+
+    pub(crate) fn fault(&mut self) -> Result<Option<riscv::Fault>, Error> {
+        self.hardware
+            .as_mut()
+            .expect("live space")
+            .fault()
+            .map_err(Into::into)
+    }
+
     /// 开始撤销或在失败后重试。Waiting 重复调用保留原批次；Failed 重试分配新批次。
     /// None 只用于尚未发布的取消，不产生硬件效果。
     pub(crate) fn revoke(&mut self, id: BindingId) -> Result<Option<BatchId>, Error> {
@@ -143,13 +190,13 @@ impl<H: Hardware> IoSpace<H> {
         let next = phase.transition(Event::Revoke)?;
         if next == Phase::Settled {
             self.bindings.remove(at);
-            self.finish_close();
+            self.finish_close()?;
             return Ok(None);
         }
         // 身份耗尽不能让旧批次复活，也不能先消耗硬件效果再返回准备错误。
         let batch = BatchId::allocate()?;
         let binding = &mut self.bindings[at];
-        if phase == Phase::Active {
+        if matches!(phase, Phase::Publishing | Phase::Active) {
             binding.begin_retirement();
         }
         binding.phase = next;
@@ -196,14 +243,14 @@ impl<H: Hardware> IoSpace<H> {
                 .expect("retiring retention")
                 .settle()
         };
-        self.finish_close();
+        self.finish_close()?;
         Ok(true)
     }
 
     /// Unit 退出/正常关闭共用此入口：先关闭准入，再尽可能推进每条关系。
     /// 一条失败不阻止其他关系开始撤销；记录仍由 Kernel 保留，后续可重试。
     pub(crate) fn close(&mut self) -> Result<(), Error> {
-        self.life = self.life.close(self.bindings.is_empty());
+        self.begin_close();
         let mut first_error = None;
         let mut at = 0;
         while at < self.bindings.len() {
@@ -216,14 +263,46 @@ impl<H: Hardware> IoSpace<H> {
                 at += 1;
             }
         }
-        self.finish_close();
+        self.finish_close()?;
         first_error.map_or(Ok(()), Err)
     }
 
-    fn finish_close(&mut self) {
-        if self.life == Life::Closing && self.bindings.is_empty() {
+    fn begin_close(&mut self) {
+        if self.life == Life::Open {
+            self.life = Life::Closing;
+        }
+    }
+
+    /// One binding step per visit. Exit itself only marks admission closed;
+    /// the Kernel registry calls this under its own serialization boundary.
+    pub(crate) fn advance_close(&mut self) -> Result<bool, Error> {
+        self.begin_close();
+        if !self.bindings.is_empty() {
+            self.cursor %= self.bindings.len();
+            let id = self.bindings[self.cursor].projection.id;
+            let phase = self.bindings[self.cursor].phase;
+            self.cursor += 1;
+            match phase {
+                Phase::Waiting(_) => {
+                    self.poll(id)?;
+                }
+                _ => {
+                    self.revoke(id)?;
+                }
+            }
+        }
+        self.finish_close()?;
+        Ok(self.life == Life::Closed)
+    }
+
+    fn finish_close(&mut self) -> Result<(), Error> {
+        if self.life == Life::Closing
+            && self.bindings.is_empty()
+            && self.hardware.as_mut().expect("live space").shutdown()?
+        {
             self.life = Life::Closed;
         }
+        Ok(())
     }
 }
 

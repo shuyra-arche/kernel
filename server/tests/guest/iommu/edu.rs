@@ -43,10 +43,18 @@ impl Edu {
     }
 
     pub fn transfer(&self, address: usize, to_ram: bool) {
+        self.start(address, to_ram);
+        self.wait();
+    }
+
+    pub fn start(&self, address: usize, to_ram: bool) {
         self.write(0x80, if to_ram { 0x40000 } else { address as u64 });
         self.write(0x88, if to_ram { address as u64 } else { 0x40000 });
         self.write(0x90, 64);
         self.write(0x98, if to_ram { 3 } else { 1 });
+    }
+
+    pub fn wait(&self) {
         let start = ticks();
         loop {
             if self.read(0x98) & 1 == 0 {

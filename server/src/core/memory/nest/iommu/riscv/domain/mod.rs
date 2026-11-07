@@ -4,6 +4,7 @@
 //! Translation withdrawal and platform reclamation proof remain separate steps.
 mod phase;
 
+use super::super::Projection;
 use super::registers::{CAP, FCTL, Registers};
 use super::{Engine, EngineError, Fault, Phase};
 use crate::core::memory::cell::{Cell, Retention};
@@ -13,68 +14,33 @@ use phase::Event;
 
 pub(crate) struct Domain<R: Registers> {
     engine: Engine<R>,
-    // DDT, Sv39 root/middle/leaf, then payload. All are ordinary Cells.
-    pages: Option<[Retention; 5]>,
+    // DDT and Sv39 root/middle/leaf only. IoSpace retains the payload.
+    pages: Option<[Retention; 4]>,
     leaf: usize,
     phase: DomainPhase,
 }
 
 impl<R: Registers> Domain<R> {
-    /// Consume exclusive Cells; only this one payload page is made device-visible.
+    /// Consume prepared table obligations; only the supplied projection is made visible.
     /// The four table pages must be fresh allocations; all are cleared here.
     ///
     /// # Safety
     /// Caller is the trusted Kernel device-binding path: the device ID is correct,
     /// every access from it traverses this IOMMU, and no device uses bypass or
     /// retained ATS translations. CPU/device borrowing and residency have been
-    /// authorized for the complete Cell. None of these facts follow from Arc.
+    /// authorized for the complete Cell. The payload obligation must already be
+    /// published and retained until this Domain and platform access are settled.
     pub(crate) unsafe fn new(
         engine: Engine<R>,
-        tables: [Cell; 4],
-        payload: Cell,
+        pages: [Retention; 4],
+        projection: Projection,
         device: u32,
-        iova: usize,
-        modifiable: bool,
     ) -> Result<Self, EngineError> {
+        Self::validate(&engine, &pages, projection, device)?;
         let cap = engine.registers.read64(CAP);
-        let pas = (cap >> 32) & 63;
         let stride = if cap & (1 << 22) != 0 { 64 } else { 32 };
-        if engine.phase() != Phase::Ready {
-            return Err(EngineError::State);
-        }
-        if cap & (1 << 9) == 0 || engine.registers.read32(FCTL) & 5 != 0 {
-            return Err(EngineError::Unsupported);
-        }
-        if device as usize >= 4096 / stride
-            || iova >= (1usize << 38)
-            || !iova.is_multiple_of(4096)
-            || !(12..=56).contains(&pas)
-        {
-            return Err(EngineError::Address);
-        }
-        for page in tables.iter().chain(core::iter::once(&payload)) {
-            if (page.physical_address() as u64)
-                .checked_add(4095)
-                .is_none_or(|last| last >= 1u64 << pas)
-            {
-                return Err(EngineError::Address);
-            }
-        }
-        let [ddt, root, middle, leaf] = tables;
-        let prepare = |cell: Cell| {
-            Arc::try_new(cell)
-                .map_err(|_| EngineError::Memory)?
-                .prepare_external()
-                .map_err(|_| EngineError::Memory)
-        };
-        let pages = [
-            prepare(ddt)?,
-            prepare(root)?,
-            prepare(middle)?,
-            prepare(leaf)?,
-            prepare(payload)?,
-        ];
-        for page in &pages[..4] {
+        let iova = projection.iova;
+        for page in &pages {
             // Uniquely consumed table allocations have no mappings or hardware readers.
             unsafe { page.as_mut_ptr().write_bytes(0, 4096) };
         }
@@ -99,9 +65,70 @@ impl<R: Registers> Domain<R> {
         result.write(
             3,
             result.leaf,
-            pointer(&p[4]) | 2 | 16 | 64 | if modifiable { 4 | 128 } else { 0 },
+            ((projection.physical as u64 >> 12) << 10)
+                | 1
+                | 2
+                | 16
+                | 64
+                | if projection.modifiable { 4 | 128 } else { 0 },
         );
         Ok(result)
+    }
+
+    /// Complete all fallible metadata allocations before any payload publication.
+    pub(super) fn prepare(tables: [Cell; 4]) -> Result<[Retention; 4], EngineError> {
+        let [ddt, root, middle, leaf] = tables;
+        let prepare = |cell: Cell| {
+            Arc::try_new(cell)
+                .map_err(|_| EngineError::Memory)?
+                .prepare_external()
+                .map_err(|_| EngineError::Memory)
+        };
+        Ok([
+            prepare(ddt)?,
+            prepare(root)?,
+            prepare(middle)?,
+            prepare(leaf)?,
+        ])
+    }
+
+    pub(super) fn validate(
+        engine: &Engine<R>,
+        tables: &[Retention; 4],
+        projection: Projection,
+        device: u32,
+    ) -> Result<(), EngineError> {
+        let cap = engine.registers.read64(CAP);
+        let pas = (cap >> 32) & 63;
+        let stride = if cap & (1 << 22) != 0 { 64 } else { 32 };
+        if engine.phase() != Phase::Ready {
+            return Err(EngineError::State);
+        }
+        if cap & (1 << 9) == 0 || engine.registers.read32(FCTL) & 5 != 0 {
+            return Err(EngineError::Unsupported);
+        }
+        if device as usize >= 4096 / stride
+            || projection.size != 4096
+            || projection.iova >= (1usize << 38)
+            || !projection.iova.is_multiple_of(4096)
+            || !projection.physical.is_multiple_of(4096)
+            || !(12..=56).contains(&pas)
+        {
+            return Err(EngineError::Address);
+        }
+        for pa in tables
+            .iter()
+            .map(|page| page.physical_address())
+            .chain(core::iter::once(projection.physical))
+        {
+            if (pa as u64)
+                .checked_add(4095)
+                .is_none_or(|last| last >= 1u64 << pas)
+            {
+                return Err(EngineError::Address);
+            }
+        }
+        Ok(())
     }
 
     fn write(&self, page: usize, word: usize, value: u64) {
@@ -160,7 +187,7 @@ impl<R: Registers> Domain<R> {
 
     pub(crate) fn close(&mut self) -> Result<(), EngineError> {
         self.advance(Event::Close)?;
-        // Withdrawal has completed, but every table/payload remains retained.
+        // Withdrawal has completed, but every table remains retained; IoSpace keeps the payload.
         if let Err(error) = unsafe { self.engine.directory(0) } {
             self.phase = DomainPhase::Failed;
             return Err(error);
@@ -222,7 +249,7 @@ impl<R: Registers> Domain<R> {
     }
 
     /// Closed means translation/queue teardown only. It does NOT itself prove
-    /// platform quiescence, and Drop in Closed still retains these five Cells.
+    /// platform quiescence, and Drop in Closed still retains these four table Cells.
     ///
     /// # Safety
     /// Caller independently proved all old device requests and platform-specific
