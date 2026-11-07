@@ -5,16 +5,16 @@ use alloc::sync::Arc;
 use riscv::interrupt::{Exception, Interrupt, Trap};
 use riscv::register::{scause, sepc, sie, sip, stval};
 
-use crate::core::memory::address::VirtAddr as KVirt;
-use crate::core::memory::nest::identity::{self as asid, Asid};
-use crate::core::memory::nest::{FaultOutcome, Nest};
-use crate::core::work::room::Handoff;
-use crate::core::work::room::conductor::run::run;
-use crate::core::work::room::deadline;
-use crate::core::work::room::identity::{Identity, ident};
-use crate::core::work::sign::{self, WakeKey, redeem};
-use crate::core::work::unit::space::Space;
-use crate::core::work::unit::task::TaskIdent;
+use crate::basis::memory::address::VirtAddr as KVirt;
+use crate::basis::memory::nest::identity::{self as asid, Asid};
+use crate::basis::memory::nest::{FaultOutcome, Nest};
+use crate::basis::work::room::Handoff;
+use crate::basis::work::room::conductor::run::run;
+use crate::basis::work::room::deadline;
+use crate::basis::work::room::identity::{Identity, ident};
+use crate::basis::work::sign::{self, WakeKey, redeem};
+use crate::basis::work::unit::space::Space;
+use crate::basis::work::unit::task::TaskIdent;
 use crate::machine::hart::{self, HartId};
 use crate::machine::switcher::context::TrapContext;
 use crate::putln;
@@ -126,14 +126,14 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
     let next: *mut TrapContext = match trap {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             deadline::tick();
-            crate::core::work::unit::space::external::maintain();
+            crate::basis::work::unit::space::external::maintain();
             unsafe {
                 sie::set_sext();
             }
             deadline::beat_until(deadline::blind_ceiling());
             redeem();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
-                && let Some(reason) = crate::core::work::unit::lifecycle::take_doomed(running.id)
+                && let Some(reason) = crate::basis::work::unit::lifecycle::take_doomed(running.id)
             {
                 return quit(ident, reason);
             }
@@ -151,7 +151,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 sip::clear_ssoft();
             }
             if let Some(running) = ident.as_ref().and_then(Identity::live)
-                && let Some(reason) = crate::core::work::unit::lifecycle::take_doomed(running.id)
+                && let Some(reason) = crate::basis::work::unit::lifecycle::take_doomed(running.id)
             {
                 return quit(ident, reason);
             }
@@ -164,12 +164,12 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
         }
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
             if crate::machine::iommu::interrupt::handle() {
-                crate::core::work::unit::space::external::maintain();
+                crate::basis::work::unit::space::external::maintain();
             } else {
-                let result = crate::core::work::sign::endpoint::trigger(
-                    &crate::core::work::room::interrupt::get().supervisor_external,
+                let result = crate::basis::work::sign::endpoint::trigger(
+                    &crate::basis::work::room::interrupt::get().supervisor_external,
                 );
-                crate::core::work::room::interrupt::note_external(result.is_err(), false);
+                crate::basis::work::room::interrupt::note_external(result.is_err(), false);
                 if result.is_err() {
                     unsafe {
                         sie::clear_sext();
@@ -186,7 +186,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
             }
             match envcall(frame, ident) {
                 Some(next) => next,
-                None => crate::core::work::unit::lifecycle::quit() as *mut TrapContext,
+                None => crate::basis::work::unit::lifecycle::quit() as *mut TrapContext,
             }
         }
         Trap::Exception(
@@ -337,9 +337,9 @@ fn page_fault_killed(
 }
 
 fn quit(ident: Option<Identity>, reason: usize) -> *mut TrapContext {
-    crate::core::work::unit::lifecycle::set_exit_reason(reason);
+    crate::basis::work::unit::lifecycle::set_exit_reason(reason);
     drop(ident);
-    resume(crate::core::work::unit::lifecycle::quit() as *mut TrapContext)
+    resume(crate::basis::work::unit::lifecycle::quit() as *mut TrapContext)
 }
 
 fn kill_fault(ident: Option<Identity>) -> *mut TrapContext {
@@ -350,9 +350,9 @@ fn kill_fault(ident: Option<Identity>) -> *mut TrapContext {
     doom(
         live,
         kernel_api::model::unit::ExitCause::Fault,
-        crate::core::work::unit::lifecycle::EXIT_FAULT,
+        crate::basis::work::unit::lifecycle::EXIT_FAULT,
     );
-    quit(ident, crate::core::work::unit::lifecycle::EXIT_FAULT)
+    quit(ident, crate::basis::work::unit::lifecycle::EXIT_FAULT)
 }
 
 /// 环境调用那一支：先结清这张表上待结算的失效、再按真实长度把 `sepc` 推过那条
@@ -376,7 +376,7 @@ pub(crate) fn envcall(
         doom(
             Some(&ident),
             kernel_api::model::unit::ExitCause::Fault,
-            crate::core::work::unit::lifecycle::EXIT_FAULT,
+            crate::basis::work::unit::lifecycle::EXIT_FAULT,
         );
         return None;
     }
@@ -388,7 +388,7 @@ pub(crate) fn envcall(
         doom(
             Some(&ident),
             kernel_api::model::unit::ExitCause::Fault,
-            crate::core::work::unit::lifecycle::EXIT_FAULT,
+            crate::basis::work::unit::lifecycle::EXIT_FAULT,
         );
         return None;
     };
@@ -400,7 +400,7 @@ pub(crate) fn envcall(
         doom(
             Some(&ident),
             kernel_api::model::unit::ExitCause::Fault,
-            crate::core::work::unit::lifecycle::EXIT_FAULT,
+            crate::basis::work::unit::lifecycle::EXIT_FAULT,
         );
         return None;
     };
@@ -423,14 +423,14 @@ fn instr_len(space: &Space, sepc: KVirt) -> Option<usize> {
 /// 指不到时才落到此刻在跑的那一个。
 fn doom(ident: Option<&Arc<TaskIdent>>, cause: kernel_api::model::unit::ExitCause, reason: usize) {
     let task = match ident {
-        Some(ident) => crate::core::work::room::scheduler::roster::muster(ident.id)
+        Some(ident) => crate::basis::work::room::scheduler::roster::muster(ident.id)
             .and_then(|weak| weak.upgrade()),
         None => None,
     }
-    .or_else(|| crate::core::work::room::conductor::current().running_task());
+    .or_else(|| crate::basis::work::room::conductor::current().running_task());
     let Some(task) = task else { return };
-    let _commit = crate::core::work::commit();
-    crate::core::work::unit::team::exit::member_dying(&task, reason);
+    let _commit = crate::basis::work::commit();
+    crate::basis::work::unit::team::exit::member_dying(&task, reason);
     if !task.dead() {
         task.state
             .lock()

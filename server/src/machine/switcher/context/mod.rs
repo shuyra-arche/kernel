@@ -1,6 +1,6 @@
 use riscv::register::{satp, sstatus};
 
-use crate::core::memory::address::{PhysAddr, VirtAddr};
+use crate::basis::memory::address::{PhysAddr, VirtAddr};
 
 mod gprs;
 pub use gprs::Gprs;

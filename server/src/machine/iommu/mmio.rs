@@ -1,4 +1,4 @@
-use crate::core::memory::nest::iommu::riscv::registers::Registers;
+use crate::basis::memory::nest::iommu::riscv::registers::Registers;
 
 pub(crate) struct Mmio {
     base: usize,

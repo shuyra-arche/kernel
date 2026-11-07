@@ -8,10 +8,10 @@ use alloc::vec::Vec;
 use riscv::interrupt::{Exception, Interrupt, Trap};
 use riscv::register::{satp, scause, sepc, sscratch, sstatus, stval, stvec};
 
-use crate::core::memory::PAGE_SIZE;
-use crate::core::memory::address::VirtAddr;
-use crate::core::memory::nest::SpaceKind;
-use crate::core::work::room::identity::ident;
+use crate::basis::memory::PAGE_SIZE;
+use crate::basis::memory::address::VirtAddr;
+use crate::basis::memory::nest::SpaceKind;
+use crate::basis::work::room::identity::ident;
 use crate::entry::report::backtrace::{self, Backtrace, StackReader, WalkConfig};
 use crate::entry::report::report::Report;
 use crate::machine::switcher::context::{Gprs, TrapContext};

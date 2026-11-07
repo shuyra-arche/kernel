@@ -1,7 +1,7 @@
 use kernel_api::{abi::call::pend::PendFail, boot::ledger::Entry};
 use kernel_api::{boot::ledger::Header, boot::ledger::store_entries};
 
-pub(crate) const BLOCK_BYTES: usize = crate::core::memory::PAGE_SIZE;
+pub(crate) const BLOCK_BYTES: usize = crate::basis::memory::PAGE_SIZE;
 #[repr(C, align(4096))]
 struct Block(::core::cell::UnsafeCell<[u8; BLOCK_BYTES]>);
 unsafe impl Sync for Block {}

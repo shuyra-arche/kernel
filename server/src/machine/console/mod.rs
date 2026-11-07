@@ -2,7 +2,7 @@ use ::core::fmt;
 
 use sbi::{DbcnCall, ecall::SArgs, fid::Dbcn};
 
-use crate::core::memory::address::VirtAddr;
+use crate::basis::memory::address::VirtAddr;
 
 mod line;
 mod logger;
@@ -60,7 +60,7 @@ fn translate_kernel(va: usize, len: usize) -> Option<usize> {
     if VirtAddr::from_raw(va).is_user() {
         return None;
     }
-    let space = &crate::core::work::unit::team::kernel()?.space;
+    let space = &crate::basis::work::unit::team::kernel()?.space;
     let pa0 = space.nest.physical_at(VirtAddr::from_raw(va))?;
     let mut va_cur = va;
     let end = va + len;
@@ -69,7 +69,8 @@ fn translate_kernel(va: usize, len: usize) -> Option<usize> {
         if pa.as_usize() != pa0.as_usize() + (va_cur - va) {
             return None;
         }
-        va_cur = (va_cur & !(crate::core::memory::PAGE_SIZE - 1)) + crate::core::memory::PAGE_SIZE;
+        va_cur =
+            (va_cur & !(crate::basis::memory::PAGE_SIZE - 1)) + crate::basis::memory::PAGE_SIZE;
     }
     Some(pa0.as_usize())
 }

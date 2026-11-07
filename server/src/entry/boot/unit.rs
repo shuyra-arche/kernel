@@ -1,4 +1,4 @@
-use crate::core::memory::cell::Owner;
+use crate::basis::memory::cell::Owner;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -6,13 +6,13 @@ use erra::ResultExt;
 
 use riscv::register::satp;
 
-use crate::core::memory::PAGE_SIZE;
-use crate::core::memory::address::{PageCount, PageIndex, PhysAddr, VirtAddr};
-use crate::core::memory::flat::{BorrowedRegion, Flat, FlatRange};
-use crate::core::memory::nest::table::PteFlags;
-use crate::core::memory::nest::{Access, ActiveRange, NestError, Placement, RegionId, identity};
-use crate::core::work::unit::space::SpaceBuilder;
-use crate::core::work::unit::team;
+use crate::basis::memory::PAGE_SIZE;
+use crate::basis::memory::address::{PageCount, PageIndex, PhysAddr, VirtAddr};
+use crate::basis::memory::flat::{BorrowedRegion, Flat, FlatRange};
+use crate::basis::memory::nest::table::PteFlags;
+use crate::basis::memory::nest::{Access, ActiveRange, NestError, Placement, RegionId, identity};
+use crate::basis::work::unit::space::SpaceBuilder;
+use crate::basis::work::unit::team;
 use crate::machine::board;
 use crate::machine::hart;
 use crate::machine::image::kernel_edge;
@@ -21,7 +21,7 @@ use crate::machine::mode;
 
 use super::attach_exact;
 
-use crate::core::work::unit::NestResult;
+use crate::basis::work::unit::NestResult;
 
 unsafe extern "C" {
     static _kernel_base: u8;
@@ -194,7 +194,7 @@ pub fn init() -> NestResult<()> {
             for h in 0..n {
                 let frame = crate::tag!(
                     HartFrame,
-                    crate::core::memory::flat::allocate_cell(Owner::Kernel)?
+                    crate::basis::memory::flat::allocate_cell(Owner::Kernel)?
                 );
                 let mut indexed = Vec::new();
                 indexed

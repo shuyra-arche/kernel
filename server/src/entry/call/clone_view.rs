@@ -9,13 +9,13 @@ use kernel_api::{
 
 use super::gate;
 use super::outcome::{Outcome, answer, ret_err};
-use crate::core::memory::address::VirtAddr as KVirt;
-use crate::core::memory::nest::Access;
-use crate::core::work::pend::{self, Modifiable, Need};
-use crate::core::work::room::Handoff;
-use crate::core::work::room::conductor::current;
-use crate::core::work::unit::task::TaskIdent;
-use crate::core::work::view::{self, View};
+use crate::basis::memory::address::VirtAddr as KVirt;
+use crate::basis::memory::nest::Access;
+use crate::basis::work::pend::{self, Modifiable, Need};
+use crate::basis::work::room::Handoff;
+use crate::basis::work::room::conductor::current;
+use crate::basis::work::unit::task::TaskIdent;
+use crate::basis::work::view::{self, View};
 use crate::machine::switcher::context::{Gprs, TrapContext};
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: CloneCall, ident: Arc<TaskIdent>) -> Outcome {
@@ -106,7 +106,7 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
             .lock()
             .try_reserve(1)
             .map_err(|_| CloneFail::OoM)?;
-        let _commit = crate::core::work::commit();
+        let _commit = crate::basis::work::commit();
         if !pend::live(&task) {
             return Err(CloneFail::Dead);
         }

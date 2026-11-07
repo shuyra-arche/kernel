@@ -6,13 +6,13 @@ use kernel_api::{
     model::pend::PendInfo, model::pend::PendRange, model::pend::ReleaseMode,
 };
 
-use crate::core::memory::address::VirtAddr as KVirt;
-use crate::core::memory::address::{PageCount, PageOffset};
-use crate::core::memory::nest::Access;
-use crate::core::work::pend::{self, Modifiable, PendSnapshot};
-use crate::core::work::room::conductor::current;
-use crate::core::work::room::scheduler::roster::muster;
-use crate::core::work::unit::task::TaskIdent;
+use crate::basis::memory::address::VirtAddr as KVirt;
+use crate::basis::memory::address::{PageCount, PageOffset};
+use crate::basis::memory::nest::Access;
+use crate::basis::work::pend::{self, Modifiable, PendSnapshot};
+use crate::basis::work::room::conductor::current;
+use crate::basis::work::room::scheduler::roster::muster;
+use crate::basis::work::unit::task::TaskIdent;
 use crate::machine::switcher::context::TrapContext;
 
 use super::outcome::answer;
@@ -116,7 +116,7 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
     answer(frame, r);
 }
 
-fn information(task: &Arc<crate::core::work::unit::task::Task>, pend: &PendSnapshot) -> PendInfo {
+fn information(task: &Arc<crate::basis::work::unit::task::Task>, pend: &PendSnapshot) -> PendInfo {
     PendInfo {
         token: pend.token(),
         view: kernel_api::model::view::ViewId::new(pend.view().id()),

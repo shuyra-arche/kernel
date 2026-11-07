@@ -1,4 +1,4 @@
-use crate::core::work::pend::PendEntry;
+use crate::basis::work::pend::PendEntry;
 use kernel_api::boot::ledger::Name;
 
 mod failure;

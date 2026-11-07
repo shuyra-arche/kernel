@@ -1,9 +1,9 @@
 use alloc::sync::Arc;
 
-use crate::core::memory::PAGE_SIZE;
-use crate::core::memory::address::{PhysAddr, VirtAddr};
-use crate::core::memory::nest::table::{PteFlags, TableNode};
-use crate::core::work::unit::space::Space;
+use crate::basis::memory::PAGE_SIZE;
+use crate::basis::memory::address::{PhysAddr, VirtAddr};
+use crate::basis::memory::nest::table::{PteFlags, TableNode};
+use crate::basis::work::unit::space::Space;
 
 #[derive(Clone)]
 pub struct StackReader {

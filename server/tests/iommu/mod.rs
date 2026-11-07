@@ -3,14 +3,14 @@
 extern crate alloc;
 
 #[allow(dead_code)]
-#[path = "../../src/core/memory/cell/mod.rs"]
+#[path = "../../src/basis/memory/cell/mod.rs"]
 pub(crate) mod cell;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
-#[path = "../../src/core/memory/nest/iommu/mod.rs"]
+#[path = "../../src/basis/memory/nest/iommu/mod.rs"]
 mod iommu;
 
-mod core {
+mod basis {
     pub(crate) mod memory {
         pub(crate) use crate::cell;
     }

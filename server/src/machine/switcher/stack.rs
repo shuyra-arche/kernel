@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 use riscv::register::{sie, stvec};
 
-use crate::core::memory::PAGE_SIZE;
-use crate::core::memory::address::VirtAddr;
-use crate::core::memory::cell::Cell;
+use crate::basis::memory::PAGE_SIZE;
+use crate::basis::memory::address::VirtAddr;
+use crate::basis::memory::cell::Cell;
 use crate::machine::hart::HartId;
 use crate::machine::layout::{
     TRAP_STACK_BASE, TRAP_STACK_GUARD, TRAP_STACK_SLOT_SHIFT, TRAP_STACK_SLOT_SIZE,

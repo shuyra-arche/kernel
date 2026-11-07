@@ -63,8 +63,8 @@ extern "C" fn info(info: &PanicInfo) -> ! {
         unsafe { (crate::machine::image::root_stack_base() as *const usize).read_volatile() }
             == crate::machine::image::ROOT_STACK_CANARY;
 
-    crate::core::memory::flat::allocator::portal::switch(
-        crate::core::memory::flat::allocator::portal::Backend::Spare,
+    crate::basis::memory::flat::allocator::portal::switch(
+        crate::basis::memory::flat::allocator::portal::Backend::Spare,
     );
 
     let mut report = Report::default();
@@ -79,7 +79,7 @@ extern "C" fn info(info: &PanicInfo) -> ! {
             ));
         }
         let mut rows: Vec<Vec<Option<String>>> = Vec::new();
-        if let Some(i) = crate::core::work::room::identity::ident() {
+        if let Some(i) = crate::basis::work::room::identity::ident() {
             rows.push(vec![Some(format!(
                 "team #{} / task #{} @ hart {}",
                 i.team_id(),

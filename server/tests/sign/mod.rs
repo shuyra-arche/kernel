@@ -1,4 +1,4 @@
-#[path = "../../src/core/work/sign/endpoint/state.rs"]
+#[path = "../../src/basis/work/sign/endpoint/state.rs"]
 mod state;
 use state::{Event, Rejection, State};
 

@@ -1,7 +1,7 @@
 use ::core::fmt::{self, Write};
 
-use crate::core::memory::flat::allocator::InitError;
-use crate::core::memory::nest::NestError;
+use crate::basis::memory::flat::allocator::InitError;
+use crate::basis::memory::nest::NestError;
 use crate::entry::report::halt;
 use crate::machine::board::MachineError;
 use crate::machine::clock::ClockError;

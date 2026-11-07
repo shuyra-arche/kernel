@@ -1,4 +1,4 @@
-use crate::core::memory::PAGE_SIZE;
+use crate::basis::memory::PAGE_SIZE;
 use crate::machine::hart::HartId;
 use crate::machine::image::root_stack_edge;
 

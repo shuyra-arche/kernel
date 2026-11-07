@@ -1,4 +1,4 @@
-#[path = "../../src/core/work/pend/state.rs"]
+#[path = "../../src/basis/work/pend/state.rs"]
 mod state;
 use kernel_api::model::modifiable::Modifiable::{No, Yes};
 use state::{Event::*, Failure, Phase, State};

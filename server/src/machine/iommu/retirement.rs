@@ -1,7 +1,7 @@
 //! Kernel-lifetime storage, independent of Team/Task objects. Trusted device
 //! binding installs adapters before publishing any Unit data.
-use crate::core::memory::nest::iommu::retirement::{DomainId, Owner, Registry};
-use crate::core::memory::nest::iommu::{Error, Hardware, IoSpace};
+use crate::basis::memory::nest::iommu::retirement::{DomainId, Owner, Registry};
+use crate::basis::memory::nest::iommu::{Error, Hardware, IoSpace};
 use crate::machine::sync::SpinLock;
 use alloc::boxed::Box;
 
@@ -33,13 +33,13 @@ pub(crate) fn progress() -> bool {
 
 pub(crate) fn completion(
     id: DomainId,
-) -> Option<crate::core::memory::nest::iommu::retirement::Completion> {
+) -> Option<crate::basis::memory::nest::iommu::retirement::Completion> {
     DOMAINS.lock().completion(id)
 }
 
 pub(crate) fn fault(
     id: DomainId,
-) -> Result<Option<crate::core::memory::nest::iommu::riscv::Fault>, Error> {
+) -> Result<Option<crate::basis::memory::nest::iommu::riscv::Fault>, Error> {
     DOMAINS.lock().fault(id)
 }
 

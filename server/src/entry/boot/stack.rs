@@ -1,14 +1,14 @@
-use crate::core::memory::cell::Owner;
+use crate::basis::memory::cell::Owner;
 use alloc::vec::Vec;
 use riscv::register::satp;
 
-use crate::core::memory::PAGE_SIZE;
-use crate::core::memory::address::{PageCount, PageIndex, VirtAddr};
-use crate::core::memory::flat::Flat;
-use crate::core::memory::nest::table::PteFlags;
-use crate::core::memory::nest::{Access, NestError};
-use crate::core::work::room::deadline;
-use crate::core::work::unit::team::kernel;
+use crate::basis::memory::PAGE_SIZE;
+use crate::basis::memory::address::{PageCount, PageIndex, VirtAddr};
+use crate::basis::memory::flat::Flat;
+use crate::basis::memory::nest::table::PteFlags;
+use crate::basis::memory::nest::{Access, NestError};
+use crate::basis::work::room::deadline;
+use crate::basis::work::unit::team::kernel;
 use crate::machine::board;
 use crate::machine::hart::{self, HartId};
 use crate::machine::layout::{
@@ -49,7 +49,7 @@ pub(super) fn init() -> Result<(), NestError> {
     for h in 0..segments {
         let boot = crate::tag!(
             TrapStack,
-            crate::core::memory::flat::allocate_cell(Owner::Kernel)?
+            crate::basis::memory::flat::allocate_cell(Owner::Kernel)?
         );
         boot_stacks.push(boot);
 
@@ -62,7 +62,7 @@ pub(super) fn init() -> Result<(), NestError> {
                 PageIndex::new(page),
                 crate::tag!(
                     TrapStack,
-                    crate::core::memory::flat::allocate_cell(Owner::Kernel)?
+                    crate::basis::memory::flat::allocate_cell(Owner::Kernel)?
                 ),
             ));
         }

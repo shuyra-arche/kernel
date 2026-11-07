@@ -1,13 +1,13 @@
 //! Initial trusted platform binding. Device translation remains Off: these engines
 //! own CQ/FQ/completion storage until a runtime device binding consumes them.
-use crate::core::memory::address::PhysAddr;
-use crate::core::memory::cell::Owner;
-use crate::core::memory::flat::{BorrowedRegion, Flat, allocator::frame};
-use crate::core::memory::nest::iommu::riscv::{
+use crate::basis::memory::address::PhysAddr;
+use crate::basis::memory::cell::Owner;
+use crate::basis::memory::flat::{BorrowedRegion, Flat, allocator::frame};
+use crate::basis::memory::nest::iommu::riscv::{
     Engine, Phase, controllers::Controllers, topology::Topology,
 };
-use crate::core::memory::nest::{Access, Placement, RegionId};
-use crate::core::work::unit::team::kernel;
+use crate::basis::memory::nest::{Access, Placement, RegionId};
+use crate::basis::work::unit::team::kernel;
 use crate::machine::{
     board,
     iommu::{Mmio, controllers::CONTROLLERS},
@@ -145,7 +145,7 @@ pub(super) fn init() -> Result<(), PendFail> {
     Ok(())
 }
 
-fn failure(error: crate::core::memory::nest::iommu::riscv::EngineError) -> PendFail {
+fn failure(error: crate::basis::memory::nest::iommu::riscv::EngineError) -> PendFail {
     log::error!("iommu: command engine failure: {error:?}; hardware pages retained");
     PendFail::Denied
 }

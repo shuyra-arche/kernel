@@ -1,7 +1,7 @@
-use crate::core::memory::address::VirtAddr as KVirt;
-use crate::core::memory::nest::Access;
-use crate::core::work::unit::space::Space;
-use crate::core::work::unit::task::TaskIdent;
+use crate::basis::memory::address::VirtAddr as KVirt;
+use crate::basis::memory::nest::Access;
+use crate::basis::work::unit::space::Space;
+use crate::basis::work::unit::task::TaskIdent;
 use crate::machine::switcher::context::{Gprs, TrapContext};
 use crate::putln;
 use kernel_api::abi::call::debug::DebugFail;

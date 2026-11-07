@@ -10,6 +10,9 @@ Shuyra's RV64 kernel, public contracts and typed call transport.
 | `client/` | Typed calls and RV64 trap transport |
 | `tools/abi-macros/` | Compile-time Kernel operation and ABI generation |
 | `server/` | Kernel implementation, build script and linker script |
+| `server/src/basis/` | Memory and execution mechanisms, separate from Rust `core` |
+| `server/src/entry/` | Boot, traps, calls and diagnostic output |
+| `server/src/machine/` | Hardware mechanisms |
 | `server/allocator/` | Physical allocation mechanisms |
 | `server/sbi/` | SBI calls used by the kernel |
 | `.github/workflows/` | Compilation checks and source version releases |

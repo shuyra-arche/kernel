@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use kernel_api::{abi::call::EnvCall, abi::call::debug::DebugCall};
 
-use crate::core::work::unit::task::TaskIdent;
+use crate::basis::work::unit::task::TaskIdent;
 use crate::machine::switcher::context::{Gprs, TrapContext};
 
 mod chrono;

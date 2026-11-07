@@ -6,20 +6,20 @@ use kernel_api::{
     model::modifiable::Modifiable,
 };
 
-use crate::core::memory::PAGE_SIZE;
-use crate::core::memory::address::{PageCount, PageOffset, VirtAddr as KVirt};
-use crate::core::memory::flat::{Allocation, Flat, FlatError, FlatRange};
-use crate::core::memory::nest::{
+use crate::basis::memory::PAGE_SIZE;
+use crate::basis::memory::address::{PageCount, PageOffset, VirtAddr as KVirt};
+use crate::basis::memory::flat::{Allocation, Flat, FlatError, FlatRange};
+use crate::basis::memory::nest::{
     Access, Mapping, MappingRange, Nest, NestError, Placement, PlacementAt, RegionId, Reservation,
     identity,
 };
-use crate::core::memory::transfer::{Transfer, TransferError};
-use crate::core::work::pend::{self, Geometry, Hold, IndependentHold, SourceAuthorization};
-use crate::core::work::sign::{self, WakeKey};
-use crate::core::work::unit::space::{MappingEntry, Space};
-use crate::core::work::unit::task::{Task, TaskIdent};
-use crate::core::work::unit::team::Team;
-use crate::core::work::view::share_view::ShareOperation;
+use crate::basis::memory::transfer::{Transfer, TransferError};
+use crate::basis::work::pend::{self, Geometry, Hold, IndependentHold, SourceAuthorization};
+use crate::basis::work::sign::{self, WakeKey};
+use crate::basis::work::unit::space::{MappingEntry, Space};
+use crate::basis::work::unit::task::{Task, TaskIdent};
+use crate::basis::work::unit::team::Team;
+use crate::basis::work::view::share_view::ShareOperation;
 use crate::machine::switcher::context::TrapContext;
 
 use super::outcome::{answer, answer_pair};
@@ -42,11 +42,11 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: MemoryCall, ident: &Arc<Ta
             let result = (|| {
                 let actor = caller(ident).ok_or(MemoryFail::Denied)?;
                 let _serial = actor.pend.lock();
-                let _commit = crate::core::work::commit();
+                let _commit = crate::basis::work::commit();
                 let kernel_api::model::memory::MappingTarget::Io(token) = target else {
                     return Err(MemoryFail::Denied);
                 };
-                crate::core::work::unit::space::external::inspect(&actor, token, mapping)
+                crate::basis::work::unit::space::external::inspect(&actor, token, mapping)
             })();
             match result {
                 Ok(info) => {
@@ -81,8 +81,8 @@ fn execute(call: MemoryCall, ident: &Arc<TaskIdent>) -> Result<usize, MemoryFail
                 }
                 let actor = caller(ident).ok_or(MemoryFail::Denied)?;
                 let _serial = actor.pend.lock();
-                let _commit = crate::core::work::commit();
-                crate::core::work::unit::space::external::detach(&actor, token, mapping)?;
+                let _commit = crate::basis::work::commit();
+                crate::basis::work::unit::space::external::detach(&actor, token, mapping)?;
                 Ok(0)
             }
         },
@@ -372,8 +372,8 @@ fn attach(
     }
     let committed = (|| {
         let _serial = caller_task.pend.lock();
-        let _commit = crate::core::work::commit();
-        if !crate::core::work::pend::live(&caller_task)
+        let _commit = crate::basis::work::commit();
+        if !crate::basis::work::pend::live(&caller_task)
             || !authorization.branch_check(authority.as_deref(), access)
         {
             return Err(MemoryFail::Denied);
@@ -566,8 +566,8 @@ fn set_access(
 
 /// 发起调用的那个任务（正在跑的，或者是这个 ident 对应的）。
 fn caller(ident: &Arc<TaskIdent>) -> Option<Arc<Task>> {
-    use crate::core::work::room::conductor::current;
-    use crate::core::work::room::scheduler::roster::muster;
+    use crate::basis::work::room::conductor::current;
+    use crate::basis::work::room::scheduler::roster::muster;
     current()
         .running_task()
         .or_else(|| muster(ident.id).and_then(|task| task.upgrade()))
@@ -623,7 +623,7 @@ fn acquire(
     let _serial = task.pend.lock();
     // 登记、准入复核与写入同在一个 `commit` 段：独立持有的登记位与物理保留一起备好，
     // 这一段之后不再有可失败的准备，也不会在判完之后被人插进一条新占用。
-    let _commit = crate::core::work::commit();
+    let _commit = crate::basis::work::commit();
     let (authorization, offset, count, ceiling, retained, branch) = match source {
         AcquireSource::Allocation(allocation) => {
             // 新建来源本身就没有旧授权可挂，独立保留授权对它无意义。
@@ -699,7 +699,7 @@ fn acquire(
         } => {
             // 从 Share 的某一枚 PendEntry 取得：撤销边与上限按**这一枚**的子 Pend 算，
             // 不因同 Flat、共享根资格就并到根上去。
-            let pend = crate::core::work::pend::locate(&task, token).ok_or(MemoryFail::Denied)?;
+            let pend = crate::basis::work::pend::locate(&task, token).ok_or(MemoryFail::Denied)?;
             if !pend.alive() {
                 return Err(MemoryFail::Denied);
             }
@@ -787,7 +787,7 @@ fn acquire(
                 let (_, branch) = entry.control.as_ref().ok_or(MemoryFail::Denied)?.control();
                 let token = branch.unwrap_or(root_token);
                 let pend =
-                    crate::core::work::pend::locate(&task, token).ok_or(MemoryFail::Denied)?;
+                    crate::basis::work::pend::locate(&task, token).ok_or(MemoryFail::Denied)?;
                 let authority = meta.authority(token).ok_or(MemoryFail::Denied)?;
                 if !pend.alive()
                     || !pend.modifiable().allows(Modifiable::No)
@@ -941,7 +941,7 @@ fn transfer(
     // 自相矛盾交给移交自己的事务去拒），再落两端的在途窗口。执行期不再持 Unit，
     // 别的发表要么在段前看见占用被拒，要么在段后看见在途窗口被拒。
     {
-        let _commit = crate::core::work::commit();
+        let _commit = crate::basis::work::commit();
         for (hold, window) in &ends {
             let (offset, count) = window.window();
             hold.source()
@@ -1088,7 +1088,7 @@ fn attach_target(
     };
     let actor = caller(ident).ok_or(MemoryFail::Denied)?;
     let _serial = actor.pend.lock();
-    let _commit = crate::core::work::commit();
+    let _commit = crate::basis::work::commit();
     if !pend::live(&actor) {
         return Err(MemoryFail::Denied);
     }
@@ -1097,7 +1097,7 @@ fn attach_target(
         .references
         .get(range.reference.get())
         .ok_or(MemoryFail::Denied)?;
-    let id = crate::core::work::unit::space::external::attach(
+    let id = crate::basis::work::unit::space::external::attach(
         &actor,
         token,
         &hold,

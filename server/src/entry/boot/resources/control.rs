@@ -1,5 +1,5 @@
 //! Boot is the only mint for administrative qualifications.
-use crate::core::work::unit::task::Task;
+use crate::basis::work::unit::task::Task;
 use kernel_api::{
     abi::call::pend::PendFail,
     boot::ledger::ResourceKind,
@@ -8,7 +8,7 @@ use kernel_api::{
 };
 pub(crate) const ENTRIES: usize = 4;
 pub(crate) fn authority(target: &Task) -> Result<[Entry; ENTRIES], PendFail> {
-    let _commit = crate::core::work::commit();
+    let _commit = crate::basis::work::commit();
     let mut entries = [Entry::NONE; ENTRIES];
     for (slot, (call, kind, delegable)) in entries.iter_mut().zip([
         (Call::Build, ControlKind::Build, true),
