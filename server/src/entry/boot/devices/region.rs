@@ -3,7 +3,7 @@ use kernel_api::abi::call::pie::PieFail;
 
 /// Original geometry names a boot resource; page coverage defines its authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct Region {
+pub(crate) struct Region {
     pub base: usize,
     pub size: usize,
     start: usize,

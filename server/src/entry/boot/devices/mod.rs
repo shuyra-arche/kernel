@@ -3,6 +3,8 @@ mod ranges;
 mod region;
 mod reserved;
 
+pub(crate) use reserved::discover as iommu_regions;
+
 use crate::core::memory::nest::Access;
 use crate::core::work::mail::{self, Mail};
 use crate::core::work::pend::{self, Permission, SourceAuthorization};

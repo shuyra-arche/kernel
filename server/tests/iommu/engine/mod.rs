@@ -1,0 +1,106 @@
+mod registers;
+
+use crate::iommu::riscv::registers::{BUSY, CQCSR, DDTP, ENABLE, FQCSR, ON, Registers};
+use crate::iommu::riscv::{Engine, EngineError, Phase};
+use crate::{cell::Cell, support::Pool};
+use registers::Device;
+
+fn engine() -> (Engine<Device>, Device, [&'static Pool; 3]) {
+    let pools = [Pool::new(0), Pool::new(0), Pool::new(0)];
+    let cells = pools.map(|pool| Cell::from_internal(pool.page().unwrap()).unwrap());
+    let device = Device::new();
+    (Engine::new(device.clone(), cells).unwrap(), device, pools)
+}
+
+fn start(engine: &mut Engine<Device>) {
+    assert_eq!(engine.step(), Ok(Phase::StartingFaults));
+    assert_eq!(engine.step(), Ok(Phase::StartingCommands));
+    assert_eq!(engine.step(), Ok(Phase::Ready));
+}
+
+#[test]
+fn incomplete_fence_and_busy_shutdown_cannot_return_hardware_pages() {
+    let (mut engine, device, pools) = engine();
+    start(&mut engine);
+    let batch = engine.invalidate().unwrap();
+    assert_eq!(engine.stop(), Err(EngineError::State));
+    device.complete(false, true);
+    assert_eq!(engine.observe(batch), Ok(false));
+    device.complete(true, false);
+    assert_eq!(engine.observe(batch), Ok(true));
+    engine.stop().unwrap();
+    device.set32(CQCSR, ON | BUSY);
+    assert_eq!(engine.step(), Ok(Phase::StoppingCommands));
+    assert!(pools.iter().all(|p| p.gives() == 0));
+    device.set32(CQCSR, 0);
+    assert_eq!(engine.step(), Ok(Phase::StoppingFaults));
+    device.set32(FQCSR, ON | BUSY);
+    assert_eq!(engine.step(), Ok(Phase::StoppingFaults));
+    assert!(pools.iter().all(|p| p.gives() == 0));
+    device.set32(FQCSR, 0);
+    assert_eq!(engine.step(), Ok(Phase::Closed));
+    assert!(pools.iter().all(|p| p.gives() == 1));
+    drop(engine);
+    assert!(pools.iter().all(|p| p.gives() == 1));
+}
+
+#[test]
+fn ring_wrap_and_stale_completion_do_not_complete_the_next_batch() {
+    let (mut engine, device, _) = engine();
+    start(&mut engine);
+    let old = engine.invalidate().unwrap();
+    device.complete(true, true);
+    assert_eq!(engine.observe(old), Ok(true));
+    for _ in 0..300 {
+        let batch = engine.invalidate().unwrap();
+        assert_ne!(batch, old);
+        assert_eq!(engine.observe(old), Err(EngineError::WrongBatch));
+        device.complete(true, false);
+        assert_eq!(engine.observe(batch), Ok(false));
+        device.complete(true, true);
+        assert_eq!(engine.observe(batch), Ok(true));
+    }
+    engine.stop().unwrap();
+    engine.step().unwrap();
+    assert_eq!(engine.step(), Ok(Phase::Closed));
+}
+
+#[test]
+fn errors_and_abandoned_engine_keep_allocations_but_preparation_cancels() {
+    let (engine, _, pools) = engine();
+    drop(engine);
+    assert!(pools.iter().all(|p| p.gives() == 1));
+    let (mut engine, device, pools) = self::engine();
+    start(&mut engine);
+    let batch = engine.invalidate().unwrap();
+    device.complete(true, true);
+    device.set32(CQCSR, ENABLE | ON | (1 << 9));
+    assert_eq!(engine.observe(batch), Err(EngineError::Hardware));
+    assert_eq!(engine.phase(), Phase::Failed);
+    assert_eq!(engine.stop(), Err(EngineError::State));
+    drop(engine);
+    assert!(pools.iter().all(|p| p.gives() == 0 && p.page().is_err()));
+}
+
+#[test]
+fn active_hardware_is_rejected_before_register_mutation_or_publication() {
+    let (mut engine, mut device, pools) = engine();
+    device.write64(DDTP, 1); // Bare is not a safe reset state for this adapter.
+    assert_eq!(engine.step(), Err(EngineError::ActiveHardware));
+    assert_eq!(device.read64(DDTP), 1);
+    assert_eq!(engine.phase(), Phase::Prepared);
+    drop(engine);
+    assert!(pools.iter().all(|p| p.gives() == 1));
+}
+
+#[test]
+fn partial_startup_keeps_pages_when_fault_queue_reports_failure() {
+    let (mut engine, device, pools) = engine();
+    assert_eq!(engine.step(), Ok(Phase::StartingFaults));
+    device.set32(FQCSR, ENABLE | ON | (1 << 8));
+    assert_eq!(engine.step(), Err(EngineError::Hardware));
+    assert_eq!(engine.phase(), Phase::Failed);
+    assert_eq!(device.read32(CQCSR), 0);
+    drop(engine);
+    assert!(pools.iter().all(|p| p.gives() == 0 && p.page().is_err()));
+}

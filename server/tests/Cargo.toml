@@ -24,3 +24,7 @@ path = "iommu/mod.rs"
 [[test]]
 name = "boot"
 path = "boot/mod.rs"
+
+[[test]]
+name = "hardware"
+path = "hardware/mod.rs"

@@ -2,6 +2,7 @@
 pub enum ResourceOperation {
     InitializeTraps,
     InitializeCalls,
+    InitializeIommu,
     Devices,
     Traps,
     Calls,
@@ -16,6 +17,7 @@ impl ResourceOperation {
         match self {
             Self::InitializeTraps => "initialize trap resources",
             Self::InitializeCalls => "initialize call resources",
+            Self::InitializeIommu => "initialize IOMMU command engine",
             Self::Devices => "register device resources",
             Self::Traps => "register trap resources",
             Self::Calls => "register call resources",

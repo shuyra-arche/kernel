@@ -19,6 +19,10 @@ pub fn init(dtp: usize) -> Result<(), BootError> {
     crate::machine::mode::detect().map_err(BootError::PagingMode)?;
     super::unit::init().map_err(BootError::KernelSpace)?;
     clock::init().map_err(BootError::Clock)?;
+    super::iommu::init().map_err(|source| BootError::Resources {
+        operation: ResourceOperation::InitializeIommu,
+        source,
+    })?;
     interrupt::init().map_err(|source| BootError::Resources {
         operation: ResourceOperation::InitializeTraps,
         source,

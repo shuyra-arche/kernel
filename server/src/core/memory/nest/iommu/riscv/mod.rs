@@ -1,5 +1,14 @@
-//! RISC-V CQ 的最小编码与完成读数判定。不操作 MMIO，也不证明平台在途访问已结清。
-//! 依据 RISC-V IOMMU v1.0.1 §4.1；平台适配器必须在此之外履行 Hardware 契约。
+//! RISC-V CQ 编码、完成读数与受信任寄存器接口驱动的命令引擎。
+//! 引擎保持 DDTP Off，不为设备映射提供完整 Hardware 结算证明。
+//! 依据 RISC-V IOMMU v1.0.1 §4.1 / §5。
+
+mod engine;
+mod pages;
+mod phase;
+pub(crate) mod registers;
+
+pub(crate) use engine::{Engine, EngineError};
+pub(crate) use phase::Phase;
 
 use super::{BatchId, Error, HardwareError};
 

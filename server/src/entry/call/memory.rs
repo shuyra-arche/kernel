@@ -645,7 +645,7 @@ fn acquire(
             if retention != PieToken::NONE || allocation.align != PAGE_SIZE {
                 return Err(MemoryFail::NotAligned);
             }
-            let size = basic_bytes(allocation.size)?;
+            let size = allocation.bytes().ok_or(MemoryFail::Denied)?;
             let pages = size / PAGE_SIZE;
             let count = PageCount::new(pages).ok_or(MemoryFail::NotAligned)?;
             let range = Flat::acquire(Allocation::new(pages, PAGE_SIZE)?)?.whole();
@@ -1028,16 +1028,6 @@ fn wake(affected: Vec<Weak<Mapping>>) {
         };
         sign::signal(WakeKey::Mapping { space, mapping });
     }
-}
-
-/// basic 口径的线上尺寸：最少 1 字节，向上取整到页；溢出仍是 `Denied`。
-///
-/// 健康面（`entry::check`）直接调这几个真实入口核对线外口径，
-/// 不再各写一份副本；可见性只放宽到 `entry` 父域。
-pub(in crate::entry) fn basic_bytes(raw: usize) -> Result<usize, MemoryFail> {
-    raw.max(1)
-        .checked_next_multiple_of(PAGE_SIZE)
-        .ok_or(MemoryFail::Denied)
 }
 
 /// 地址空间失败折成线上码：`Denied` 兼收 `Pinned`、`NotMapped` 与 `DramOverlap`。
