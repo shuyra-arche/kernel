@@ -17,12 +17,16 @@ pub struct Space {
     pub(crate) nest: Arc<Nest>,
     pub(super) life: Arc<Life>,
     pub(crate) mappings: MappingRegistry,
+    pub(crate) dma: crate::core::memory::nest::iommu::retirement::Owner,
 }
 
 impl Space {
     /// 关闭同步成功后结清关系登记；ASID 归还失败仍保留号与根表供本入口重试。
     /// 已退休后不得再次 wipe，避免影响复用此 ASID 的空间。
     pub(crate) fn retire(&self) -> Result<(), NestError> {
+        // Hardware records already belong to Kernel. Closing admission requires
+        // neither successful CPU retirement nor a live requesting Unit.
+        self.dma.close();
         if self.nest.retired() {
             self.reap_mappings();
             return Ok(());

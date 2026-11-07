@@ -86,6 +86,20 @@ fn iommu_on_real_qemu_registers() {
             "PASS iommu-dma abandoned=8 returns=0",
             true,
         ),
+        (
+            "owner-exit",
+            "virt,iommu-sys=on",
+            "owner-exit",
+            "PASS iommu-dma owner-exit=1 delayed-dma=1 reused=1",
+            true,
+        ),
+        (
+            "activation-exit",
+            "virt,iommu-sys=on",
+            "activation-exit",
+            "PASS iommu-dma activation-exit=1 reused=1",
+            true,
+        ),
         ("missing", "virt", "", "IOMMU missing", false),
     ] {
         let mut command = Command::new(&qemu);
@@ -96,7 +110,10 @@ fn iommu_on_real_qemu_registers() {
             ])
             .arg(&guest)
             .args(["-nographic", "-monitor", "none", "-nic", "none"]);
-        if matches!(name, "dma" | "readonly" | "dma-abandon") {
+        if matches!(
+            name,
+            "dma" | "readonly" | "dma-abandon" | "owner-exit" | "activation-exit"
+        ) {
             command.args([
                 "-device",
                 "edu,addr=1.0,dma_mask=0xffffffffffffffff",

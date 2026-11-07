@@ -126,6 +126,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
     let next: *mut TrapContext = match trap {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             deadline::tick();
+            crate::machine::iommu::retirement::progress();
             unsafe {
                 sie::set_sext();
             }

@@ -50,6 +50,8 @@ impl SpaceBuilder {
             nest,
             life: Life::try_new()?,
             mappings: MappingRegistry::new(),
+            dma: crate::core::memory::nest::iommu::retirement::Owner::new()
+                .map_err(|_| NestError::OutOfMemory)?,
         };
         if !self.kernel {
             let source = team::kernel().expect("kernel team not initialized");

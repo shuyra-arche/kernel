@@ -18,5 +18,6 @@ mod completion;
 mod engine;
 mod hardware;
 mod lifecycle;
+mod retirement;
 #[path = "../memory/support.rs"]
 mod support;
