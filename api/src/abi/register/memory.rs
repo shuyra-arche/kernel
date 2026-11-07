@@ -1,6 +1,6 @@
 use super::{Decode, Wire};
 use crate::model::{
-    identity::{PieToken, TeamId},
+    identity::{PendId, TeamId},
     memory::{
         AcquireSource, Allocation, FlatReference, MappingControl, MappingId, MappingSelection,
         ReferenceRange, pages,
@@ -54,7 +54,7 @@ impl Wire for AcquireSource {
             2 if d == 0 => {
                 let (offset, count) = window(b, c)?;
                 Ok(Self::Source {
-                    token: PieToken::new(a),
+                    token: PendId::new(a),
                     offset,
                     count,
                 })

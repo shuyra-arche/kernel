@@ -305,7 +305,7 @@ fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: 
         assert_eq!(
             (flags & mask).bits(),
             (expected & mask).bits(),
-            "published Cell PTE permissions differ from Mapping state"
+            "published Cell PTE modifiability differ from Mapping state"
         );
     }
     drop(state);

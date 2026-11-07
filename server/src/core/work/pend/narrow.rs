@@ -1,13 +1,13 @@
-use super::pie::Permission;
-use crate::core::work::grant::narrows;
-use crate::core::work::mail::pole::PoleOperation;
-use kernel_api::abi::call::pie::PieFail;
+use super::pend_entry::Modifiable;
+use crate::core::work::pend::authority::narrows;
+use crate::core::work::view::share_view::ShareOperation;
+use kernel_api::abi::call::pend::PendFail;
 
 pub(crate) fn reduce(
     task: &alloc::sync::Arc<crate::core::work::unit::task::Task>,
-    token: kernel_api::model::identity::PieToken,
-    subset: Permission,
-) -> Result<(), PieFail> {
+    token: kernel_api::model::identity::PendId,
+    subset: Modifiable,
+) -> Result<(), PendFail> {
     reduce_locked(task, token, subset)?;
     super::notify(task.ident.id, token);
     Ok(())
@@ -15,62 +15,44 @@ pub(crate) fn reduce(
 
 fn reduce_locked(
     task: &alloc::sync::Arc<crate::core::work::unit::task::Task>,
-    token: kernel_api::model::identity::PieToken,
-    subset: Permission,
-) -> Result<(), PieFail> {
-    use crate::core::memory::nest::Access;
-    let pie = super::locate(task, token).ok_or(PieFail::Denied)?;
-    if !pie.alive() {
-        return Err(PieFail::Dead);
+    token: kernel_api::model::identity::PendId,
+    subset: Modifiable,
+) -> Result<(), PendFail> {
+    let pend_entry = super::locate(task, token).ok_or(PendFail::Denied)?;
+    if !pend_entry.alive() {
+        return Err(PendFail::Dead);
     }
-    if !narrows(pie.permission(), subset) {
-        return Err(PieFail::Denied);
+    if !narrows(pend_entry.modifiable(), subset) {
+        return Err(PendFail::Denied);
     }
-    if let Some(p) = pie.mail().pole() {
-        if !subset.contains(Permission::FETCH) {
-            return Err(PieFail::Denied);
-        }
-        let access = Access::READ
-            | if subset.contains(Permission::STORE) {
-                Access::WRITE
-            } else {
-                Access::empty()
-            };
+    if let Some(p) = pend_entry.view().share_view() {
         let meta = &p;
-        let _operation = PoleOperation::acquire(meta).ok_or(PieFail::Busy)?;
-        let reserved = meta.reserved();
-        let target = if reserved == 0 {
-            None
-        } else {
-            Some(
-                task.clan(kernel_api::model::identity::TeamId::new(reserved))
-                    .ok_or(PieFail::Denied)?,
-            )
-        };
-        let _construction = match &target {
-            Some(target) => Some(target.operation().ok_or(PieFail::Busy)?),
-            None => None,
-        };
-        crate::core::work::mail::pole::narrow(meta, token, access)?;
+        let _operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
+        if pend_entry.authority().modifiable().is_none() {
+            return Err(PendFail::Busy);
+        }
+        if subset != pend_entry.modifiable() {
+            meta.close_maps(Some(token))?;
+        }
         let _pend = task.pend.lock();
         let _commit = crate::core::work::commit();
-        let mut pies = task.pend.pies.lock();
-        let pie = pies
+        let mut entries = task.pend.entries.lock();
+        let pend_entry = entries
             .iter_mut()
-            .find(|pie| pie.token() == token)
-            .ok_or(PieFail::Denied)?;
-        pie.narrow(subset)?;
+            .find(|pend_entry| pend_entry.token() == token)
+            .ok_or(PendFail::Denied)?;
+        pend_entry.narrow(subset)?;
         super::changed(task);
         return Ok(());
     }
     let _pend = task.pend.lock();
     let _commit = crate::core::work::commit();
-    let mut pies = task.pend.pies.lock();
-    let pie = pies
+    let mut entries = task.pend.entries.lock();
+    let pend_entry = entries
         .iter_mut()
-        .find(|pie| pie.token() == token)
-        .ok_or(PieFail::Denied)?;
-    pie.narrow(subset)?;
+        .find(|pend_entry| pend_entry.token() == token)
+        .ok_or(PendFail::Denied)?;
+    pend_entry.narrow(subset)?;
     super::changed(task);
     Ok(())
 }

@@ -20,21 +20,21 @@ impl Fwd {
         }
     }
 
-    pub(super) fn attach(&mut self, tole: usize, life: Weak<Life>) -> Result<(), ()> {
-        if self.ids[..self.len].contains(&tole) {
+    pub(super) fn attach(&mut self, endpoint: usize, life: Weak<Life>) -> Result<(), ()> {
+        if self.ids[..self.len].contains(&endpoint) {
             return Ok(());
         }
         if self.len == FWD_MAX {
             return Err(());
         }
-        self.ids[self.len] = tole;
+        self.ids[self.len] = endpoint;
         self.lives[self.len] = life;
         self.len += 1;
         Ok(())
     }
 
-    pub(super) fn detach(&mut self, tole: usize) {
-        if let Some(at) = self.ids[..self.len].iter().position(|&i| i == tole) {
+    pub(super) fn detach(&mut self, endpoint: usize) {
+        if let Some(at) = self.ids[..self.len].iter().position(|&i| i == endpoint) {
             self.ids.copy_within(at + 1..self.len, at);
             for i in at..self.len - 1 {
                 self.lives.swap(i, i + 1);

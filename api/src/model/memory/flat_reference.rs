@@ -1,6 +1,6 @@
 //! 一份来源持有在**持有它的那张表**里的句柄（0 = 无效哨兵）。
 //!
-//! 与 [`PieToken`](crate::model::identity::PieToken) 同族：号只在自己那张表里解析得动，故本类型也
+//! 与 [`PendId`](crate::model::identity::PendId) 同族：号只在自己那张表里解析得动，故本类型也
 //! `!Send + !Sync`——跨线程只剩「交出裸值、对端另落一枚」这一条路。不装内核指针。
 
 use core::marker::PhantomData;
@@ -13,7 +13,7 @@ impl FlatReference {
     /// 无效哨兵（0）：没有这一份持有。
     pub const NONE: Self = Self(0, PhantomData);
 
-    /// 号在**线上**的宽度（8 字节 LE）——与 [`PieToken`](crate::model::identity::PieToken) 同形。
+    /// 号在**线上**的宽度（8 字节 LE）——与 [`PendId`](crate::model::identity::PendId) 同形。
     pub const WIDTH: usize = 8;
 
     /// 由裸值造一枚（线上解码面）。

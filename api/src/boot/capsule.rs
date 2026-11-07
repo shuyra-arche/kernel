@@ -92,8 +92,8 @@ impl<'a> Capsule<'a> {
             return None;
         }
         let at = HEADER + index * RECORD;
-        let permissions = number(self.bytes, at + 32, 4)?;
-        if number(self.bytes, at + 36, 4)? != 0 || permissions & !7 != 0 {
+        let modifiability = number(self.bytes, at + 32, 4)?;
+        if number(self.bytes, at + 36, 4)? != 0 || modifiability & !7 != 0 {
             return None;
         }
         Some(Region {
@@ -101,7 +101,7 @@ impl<'a> Capsule<'a> {
             pages: number(self.bytes, at + 8, 8)?,
             data_pages: number(self.bytes, at + 16, 8)?,
             payload: number(self.bytes, at + 24, 8)?,
-            flags: (permissions << 1) as u64,
+            flags: (modifiability << 1) as u64,
         })
     }
 }

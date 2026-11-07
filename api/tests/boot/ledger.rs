@@ -1,9 +1,8 @@
+use kernel_api::boot::ledger::ResourceKind;
 use kernel_api::boot::ledger::{Entries, Entry, Header, Name, Page, VERSION, store_entries};
-use kernel_api::model::identity::PieToken;
-use kernel_api::model::pie::PieKind;
 
 fn entry() -> Entry {
-    Entry::new(Name::Page(Page::Dtb), PieKind::Pole, PieToken::mint(19))
+    Entry::new(Name::Page(Page::Dtb), ResourceKind::Share, 19)
 }
 
 fn ledger(entries: &[Entry]) -> Vec<u8> {
@@ -25,7 +24,7 @@ fn ledger(entries: &[Entry]) -> Vec<u8> {
 fn ledger_keeps_header_entry_offsets_and_reserved_bytes() {
     let bytes = ledger(&[entry()]);
     let mut expected = vec![0u8; 40];
-    expected[0] = 1; // version
+    expected[0] = 2; // version
     expected[4] = 1; // count
     expected[8] = 2; // Name::Page class, Dtb item 0
     expected[32] = 19; // token, after name/kind/seven reserved bytes
@@ -55,12 +54,12 @@ fn ledger_rejects_truncation_trailing_data_duplicates_and_invalid_fields() {
     assert!(
         Entries::new(&ledger(&[Entry::new(
             Name::Page(Page::Dtb),
-            PieKind::Hole,
-            PieToken::mint(19)
+            ResourceKind::Clone,
+            19
         )]))
         .is_none()
     );
-    for (offset, value) in [(0, 2), (4, 255), (8, 255), (10, 1), (24, 255), (25, 1)] {
+    for (offset, value) in [(0, 1), (4, 255), (8, 255), (10, 1), (24, 255), (25, 1)] {
         let mut malformed = bytes.clone();
         malformed[offset] = value;
         assert!(Entries::new(&malformed).is_none(), "offset {offset}");
@@ -73,8 +72,7 @@ fn ledger_rejects_truncation_trailing_data_duplicates_and_invalid_fields() {
             .iter()
             .next()
             .unwrap()
-            .token()
-            .get(),
+            .handle(),
         (1usize << 63) | 19
     );
     assert_eq!(Entries::new(&ledger(&[])).unwrap().iter().count(), 0);
@@ -100,7 +98,7 @@ fn fixed_codecs_reject_overflowing_offsets_and_short_buffers() {
 fn ledger_writer_distinguishes_used_length_from_buffer_capacity() {
     let values = [
         entry(),
-        Entry::new(Name::Page(Page::Initrd), PieKind::Pole, PieToken::mint(23)),
+        Entry::new(Name::Page(Page::Initrd), ResourceKind::Share, 23),
     ];
     let expected = ledger(&values);
     let mut out = [0xaa; 128];

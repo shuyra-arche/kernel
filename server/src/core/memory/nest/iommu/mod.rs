@@ -106,7 +106,7 @@ impl<H: Hardware> IoSpace<H> {
             .as_ref()
             .expect("live space")
             .validate(projection)?;
-        let retained = cell.prepare_external()?;
+        let retained = cell.prepare_external(modifiable)?;
         self.bindings.push(Binding {
             projection,
             retention: Some(retained),

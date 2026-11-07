@@ -45,3 +45,5 @@ impl JoinReply {
         matches!(self, Self::Reaped(_))
     }
 }
+mod control;
+pub use control::{ControlId, ControlKind};

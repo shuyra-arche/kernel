@@ -1,7 +1,6 @@
 use super::{BootError, ResourceOperation};
 use crate::core::memory::flat;
 use crate::core::work::room::interrupt;
-use crate::entry::call;
 use crate::machine::{board, clock, console};
 
 pub fn init(dtp: usize) -> Result<(), BootError> {
@@ -29,10 +28,6 @@ pub fn init(dtp: usize) -> Result<(), BootError> {
     })?;
     interrupt::init().map_err(|source| BootError::Resources {
         operation: ResourceOperation::InitializeTraps,
-        source,
-    })?;
-    call::resources::init().map_err(|source| BootError::Resources {
-        operation: ResourceOperation::InitializeCalls,
         source,
     })?;
     super::stack::init().map_err(BootError::TrapStacks)?;

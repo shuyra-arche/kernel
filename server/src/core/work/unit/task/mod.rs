@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use kernel_api::{abi::call::unit::UnitFail, model::identity::TeamId};
 
 use crate::core::work::commit;
-use crate::core::work::pend::Pend;
+use crate::core::work::pend::Table;
 use crate::core::work::room::scheduler;
 use crate::core::work::sign::{Ticket, WakeKey};
 use crate::core::work::unit::life::Life;
@@ -41,7 +41,9 @@ pub struct Task {
     pub(crate) ident: Arc<TaskIdent>,
     pub(crate) life: Arc<Life>,
     pub(crate) state: Arc<SpinLock<TaskState>>,
-    pub(crate) pend: Pend,
+    pub(crate) pend: Table,
+    pub(crate) signs: crate::core::work::sign::Table,
+    pub(crate) administration: crate::core::work::unit::control::Table,
     pub(crate) heir: SpinLock<Vec<Arc<Team>>>,
     controls: SpinLock<Vec<(Weak<crate::core::work::unit::space::Space>, usize)>>,
 }
@@ -220,12 +222,14 @@ impl Task {
         Some(child)
     }
 
-    pub(crate) fn retire(&self) -> Result<(), crate::core::memory::nest::NestError> {
+    pub(crate) fn retire(self: &Arc<Self>) -> Result<(), crate::core::memory::nest::NestError> {
         let mut at = 0;
         while let Some(child) = self.heir_node(at) {
             child.retire()?;
             at += 1;
         }
+        crate::core::work::pend::retire(self)
+            .map_err(|_| crate::core::memory::nest::NestError::Shootdown)?;
         // 子空间先完成退休，才可解除本任务留在其中的控制；未结时仍保留任务重试。
         self.close_controls()?;
         self.ident.retire()
@@ -248,27 +252,33 @@ impl Task {
             return Some(child);
         }
         let mut found = None;
-        self.ident.team.life.visit(&mut |node| {
-            if node.id != id {
-                return;
-            }
-            found = node
-                .parent
-                .as_ref()
-                .and_then(|parent| parent.member(node.owner))
-                .and_then(|member| member.task.upgrade())
-                .and_then(|sire| sire.heir(id))
-                .or_else(|| {
-                    let mut at = 0;
-                    loop {
-                        let member = node.tasks.lock().get(at).cloned()?;
-                        at += 1;
-                        if let Some(task) = member.task.upgrade() {
-                            return Some(task.ident.team.clone());
+        // Execution authority follows teams created by this Task, not membership
+        // in the Task's own Team. Peers do not inherit each other's children.
+        let mut index = 0;
+        while let Some(root) = self.heir_node(index) {
+            index += 1;
+            root.life.visit(&mut |node| {
+                if node.id != id {
+                    return;
+                }
+                found = node
+                    .parent
+                    .as_ref()
+                    .and_then(|parent| parent.member(node.owner))
+                    .and_then(|member| member.task.upgrade())
+                    .and_then(|sire| sire.heir(id))
+                    .or_else(|| {
+                        let mut at = 0;
+                        loop {
+                            let member = node.tasks.lock().get(at).cloned()?;
+                            at += 1;
+                            if let Some(task) = member.task.upgrade() {
+                                return Some(task.ident.team.clone());
+                            }
                         }
-                    }
-                });
-        });
+                    });
+            });
+        }
         found.filter(|team| !team.state.lock().phase.ousted())
     }
 
@@ -280,12 +290,16 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         let _commit = commit();
+        self.signs.clear(self.ident.id);
+        self.administration.clear();
+        self.ident.team.life.clear(self.ident.id, None);
+        self.ident.team.life.prune();
         for child in self.heir.lock().iter() {
             child.life.clear(self.ident.id, None);
             child.life.prune();
         }
-        for pie in self.pend.pies.lock().iter() {
-            pie.invalidate();
+        for pend_entry in self.pend.entries.lock().iter() {
+            pend_entry.invalidate();
         }
         self.count_vanished();
     }

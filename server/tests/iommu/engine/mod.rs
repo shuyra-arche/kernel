@@ -1,6 +1,7 @@
 mod domain;
 mod registers;
 
+use crate::cell::Owner as CellOwner;
 use crate::iommu::riscv::registers::{BUSY, CQCSR, DDTP, ENABLE, FQCSR, ON, Registers};
 use crate::iommu::riscv::{Engine, EngineError, Phase};
 use crate::{cell::Cell, support::Pool};
@@ -8,7 +9,8 @@ use registers::Device;
 
 fn engine() -> (Engine<Device>, Device, [&'static Pool; 3]) {
     let pools = [Pool::new(0), Pool::new(0), Pool::new(0)];
-    let cells = pools.map(|pool| Cell::from_internal(pool.page().unwrap()).unwrap());
+    let cells =
+        pools.map(|pool| Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
     let device = Device::new();
     (Engine::new(device.clone(), cells).unwrap(), device, pools)
 }
@@ -136,4 +138,19 @@ fn wired_notifications_do_not_substitute_for_tagged_cq_completion() {
     engine.step().unwrap();
     engine.step().unwrap();
     assert!(pools.iter().all(|p| p.gives() == 1));
+}
+
+fn topology() -> crate::topology::Topology {
+    crate::routing_fixture::discover(
+        crate::routing_fixture::root()
+            .child(crate::routing_fixture::controller(
+                crate::routing_fixture::CONTROLLER,
+                1,
+            ))
+            .child(crate::routing_fixture::host(
+                crate::routing_fixture::HOST,
+                &[0, 1, 0, 0x10000],
+            )),
+    )
+    .unwrap()
 }

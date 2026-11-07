@@ -1,5 +1,5 @@
 use crate::model::{
-    hole::PullOutcome,
+    clone_view::PullOutcome,
     identity::TaskId,
     unit::{ExitCause, JoinReply, TaskExit},
 };

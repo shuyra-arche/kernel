@@ -1,31 +1,30 @@
 use alloc::sync::{Arc, Weak};
 
-use kernel_api::{abi::call::pie::PieFail, model::identity::Mark, model::identity::PieToken};
+use kernel_api::{abi::call::pend::PendFail, model::identity::Mark, model::identity::PendId};
 
-use super::Need;
-use super::pie::{Heir, Permission, PieSnapshot};
+use super::pend_entry::{Modifiable, PendSnapshot};
 use crate::core::memory::address::{PageCount, PageOffset};
-use crate::core::work::grant::narrows;
-use crate::core::work::mail::pole::PoleOperation;
+use crate::core::work::pend::authority::narrows;
 use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::task::Task;
+use crate::core::work::view::share_view::ShareOperation;
 
 /// 这一枚子分支的有效窗口。
 ///
 /// 不请求就**继承**父的那一段（带窗口的父派生出来的子仍带那一段，不是整段来源）；
 /// 请求的那一段必须落在父的有效窗口里（父没有窗口就是整段来源），越窗与溢出一律拒。
 /// ABI 解码检查非空与溢出；这一层检查父范围。
-/// 窗口只在 Pole（有真实来源）上成立。
+/// 窗口只在 Share（有真实来源）上成立。
 fn effective_window(
-    pie: &PieSnapshot,
+    pend_entry: &PendSnapshot,
     requested: Option<(PageOffset, PageCount)>,
-) -> Result<Option<(PageOffset, PageCount)>, PieFail> {
+) -> Result<Option<(PageOffset, PageCount)>, PendFail> {
     let Some(requested) = requested else {
-        return Ok(pie.grant().window());
+        return Ok(pend_entry.authority().window());
     };
-    let meta = pie.mail().pole().ok_or(PieFail::Denied)?;
-    let outer = pie
-        .grant()
+    let meta = pend_entry.view().share_view().ok_or(PendFail::Denied)?;
+    let outer = pend_entry
+        .authority()
         .window()
         .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
     let outer_end = outer.0.get().checked_add(outer.1.get());
@@ -36,29 +35,29 @@ fn effective_window(
             if requested.0.get() >= outer.0.get() && inner_end <= outer_end
     );
     if !inside {
-        return Err(PieFail::Denied);
+        return Err(PendFail::Denied);
     }
     Ok(Some(requested))
 }
 
 pub(crate) fn accord(
     caller: &Arc<Task>,
-    src: PieToken,
+    src: PendId,
     dst: &Weak<Task>,
-    subset: Permission,
+    subset: Modifiable,
     mark: Mark,
-) -> Result<usize, PieFail> {
+) -> Result<usize, PendFail> {
     publish(caller, src, dst, subset, mark, None)
 }
 
 /// 本地派生：目标就是 `caller`，范围继承或收窄，仍走同一条授权发布实现。
 pub(crate) fn derive(
     caller: &Arc<Task>,
-    src: PieToken,
-    subset: Permission,
+    src: PendId,
+    subset: Modifiable,
     mark: Mark,
     window: Option<(PageOffset, PageCount)>,
-) -> Result<usize, PieFail> {
+) -> Result<usize, PendFail> {
     publish(caller, src, &Arc::downgrade(caller), subset, mark, window)
 }
 
@@ -68,79 +67,94 @@ pub(crate) fn derive(
 /// 且必须落在父的有效窗口里：重复与嵌套派生只能单调收窄，没有放宽的路。
 fn publish(
     caller: &Arc<Task>,
-    src: PieToken,
+    src: PendId,
     dst: &Weak<Task>,
-    subset: Permission,
+    subset: Modifiable,
     mark: Mark,
     requested: Option<(PageOffset, PageCount)>,
-) -> Result<usize, PieFail> {
-    let target = dst.upgrade().ok_or(PieFail::Denied)?;
-    let token = super::with_pair(caller, &target, || {
-        if !super::live(caller) || !super::live(&target) {
-            return Err(PieFail::Dead);
-        }
-        let pie = super::locate(caller, src).ok_or(PieFail::Denied)?;
-        let pole = pie.mail().pole();
-        let _operation = if let Some(p) = &pole {
-            let operation = PoleOperation::acquire(p).ok_or(PieFail::Busy)?;
-            if p.reserved() != 0 {
-                return Err(PieFail::HandedOver);
+) -> Result<usize, PendFail> {
+    let target = dst.upgrade().ok_or(PendFail::Denied)?;
+    if !crate::core::work::unit::control::adjacent(caller, &target) {
+        return Err(PendFail::Denied);
+    }
+    let observed = super::locate(caller, src).ok_or(PendFail::Denied)?;
+    if !narrows(observed.modifiable(), subset) {
+        return Err(PendFail::Denied);
+    }
+    let share_view = observed.view().share_view();
+    let _operation = if let Some(meta) = &share_view {
+        let operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
+        Some(operation)
+    } else {
+        None
+    };
+    let token = super::with_pair_uncommitted(caller, &target, || {
+        let (pend_entry, granted) = {
+            let _commit = crate::core::work::commit();
+            if !super::live(caller) || !super::live(&target) {
+                return Err(PendFail::Dead);
             }
-            Some(operation)
-        } else {
-            None
-        };
-        if !pie.alive() {
-            return Err(PieFail::Dead);
-        }
-        if !pie.allows(Need::Vest) || !narrows(pie.permission(), subset) {
-            return Err(PieFail::Denied);
-        }
-        if pie.heir().is_some() {
-            return Err(PieFail::HandedOver);
-        }
-        if pie.mail().tole().is_some_and(|p| p.has_cells()) {
-            return Err(PieFail::Denied);
-        }
-        let mark = if mark == Mark::NONE { pie.mark() } else { mark };
-        let window = effective_window(&pie, requested)?;
-        // 授权发布操作的是这一段窗口：这一段的子段或别人的独立持有仍在占用就不建
-        // 新分支，也不隐式裁到剩余范围（建新授权不享受“持有人自己”那一档）。
-        if let Some(meta) = &pole
-            && let Some(authorization) = meta.authorization()
-        {
-            let (offset, count) = window.unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-            authorization.check_publish(offset, count, None)?;
-        }
-        let mut granted = pie.vest_window(mark, subset, window)?;
-        granted.parent(src, Arc::downgrade(caller));
-        caller
-            .pend
-            .heirs
-            .lock()
-            .try_reserve(1)
-            .map_err(|_| PieFail::OoM)?;
-        target
-            .pend
-            .pies
-            .lock()
-            .try_reserve(1)
-            .map_err(|_| PieFail::OoM)?;
-        let token = granted.token();
-        super::insert_heir(caller, src, Arc::downgrade(&target), token);
-        if pie.permission().contains(Permission::ONLY) {
-            let mut pies = caller.pend.pies.lock();
-            let source = pies
-                .iter_mut()
-                .find(|p| p.token() == src)
-                .expect("locked source");
-            let heir = Heir {
-                task: target.ident.id,
-                token,
+            let pend_entry = super::locate(caller, src).ok_or(PendFail::Denied)?;
+            if !pend_entry.alive() {
+                return Err(PendFail::Dead);
+            }
+            if !narrows(pend_entry.modifiable(), subset) {
+                return Err(PendFail::Denied);
+            }
+            let mark = if mark == Mark::NONE {
+                pend_entry.mark()
+            } else {
+                mark
             };
-            source.set_heir(Some(heir));
+            let window = effective_window(&pend_entry, requested)?;
+            // 授权发布操作的是这一段窗口：这一段的子段或别人的独立持有仍在占用就不建
+            // 新分支，也不隐式裁到剩余范围（建新授权不享受“持有人自己”那一档）。
+            if let Some(meta) = &share_view
+                && let Some(authorization) = meta.authorization()
+            {
+                let (offset, count) =
+                    window.unwrap_or((PageOffset::ZERO, meta.source().page_count()));
+                authorization.check_publish(offset, count, None)?;
+            }
+            if share_view.is_some() {
+                pend_entry.authority().can_borrow(subset)?;
+            }
+            let mut granted = pend_entry.vest_window(mark, subset, window)?;
+            granted.parent(src, Arc::downgrade(caller));
+            caller
+                .pend
+                .heirs
+                .lock()
+                .try_reserve(1)
+                .map_err(|_| PendFail::OoM)?;
+            target
+                .pend
+                .entries
+                .lock()
+                .try_reserve(1)
+                .map_err(|_| PendFail::OoM)?;
+            (pend_entry, granted)
+        };
+        // Prepared metadata and table capacity cannot fail after withdrawal. The
+        // source/recipient tables stay locked, but remote TLB completion never
+        // runs under the global work commit lock.
+        if let Some(meta) = &share_view
+            && pend_entry.modifiable() == Modifiable::Yes
+        {
+            meta.close_maps(Some(src))?;
         }
-        target.pend.pies.lock().push(granted);
+        let _commit = crate::core::work::commit();
+        if !super::live(caller) || !super::live(&target) {
+            return Err(PendFail::Dead);
+        }
+        let token = granted.token();
+        // For Share a mutable parent loses all CPU access before lending. Readers
+        // may coexist; a writer is always exclusive. Clone owns independent payloads.
+        if share_view.is_some() {
+            pend_entry.authority().borrow(granted.authority())?;
+        }
+        super::insert_heir(caller, src, Arc::downgrade(&target), token);
+        target.pend.entries.lock().push(granted);
         super::changed(caller);
         if !Arc::ptr_eq(caller, &target) {
             super::changed(&target);
@@ -148,7 +162,7 @@ fn publish(
         Ok(token)
     })?;
     let _ = sign::wake(
-        WakeKey::Pies {
+        WakeKey::Pends {
             task: target.ident.id,
         },
         &target.life(),
@@ -156,42 +170,4 @@ fn publish(
     super::notify(caller.ident.id, src);
     super::notify(target.ident.id, token);
     Ok(token.get())
-}
-
-pub(crate) fn clear_heir(task: &Task, token: PieToken, expected: Heir) -> bool {
-    let pend_guard = task.pend.lock();
-    let commit_guard = crate::core::work::commit();
-    let child = {
-        let heirs = task.pend.heirs.lock();
-        heirs
-            .iter()
-            .find(|(parent, _, child)| *parent == token && *child == expected.token)
-            .and_then(|(_, task, _)| task.upgrade())
-    };
-    if child.is_some_and(|child| super::locate(&child, expected.token).is_some()) {
-        return false;
-    }
-    let cleared = clear_heir_locked(task, token, expected);
-    if cleared {
-        super::remove_heir(task, token, expected.token);
-    }
-    drop(commit_guard);
-    drop(pend_guard);
-    if cleared {
-        super::notify(task.ident.id, token);
-    }
-    cleared
-}
-
-pub(super) fn clear_heir_locked(task: &Task, token: PieToken, expected: Heir) -> bool {
-    let mut pies = task.pend.pies.lock();
-    let Some(pie) = pies.iter_mut().find(|p| p.token() == token) else {
-        return false;
-    };
-    if pie.heir() != Some(&expected) {
-        return false;
-    }
-    pie.set_heir(None);
-    super::changed(task);
-    true
 }

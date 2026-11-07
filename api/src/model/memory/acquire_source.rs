@@ -3,7 +3,7 @@
 //! 独立的保留授权**不在本枚举里**：它是同一次 `Acquire` 的另一个可选入参
 //! （那一格的载荷自己说）。
 
-use crate::model::identity::{PieToken, TeamId};
+use crate::model::identity::{PendId, TeamId};
 use crate::model::memory::MappingId;
 
 use super::allocation::Allocation;
@@ -15,9 +15,9 @@ pub enum AcquireSource {
     Allocation(Allocation),
     /// 自己已有引用上的子范围：同来源、同授权上限、同撤销依赖。
     Reference(ReferenceRange),
-    /// Pole 的 Pie 与授权范围内的页窗口。
+    /// Share 的 Pend 与授权范围内的页窗口。
     Source {
-        token: PieToken,
+        token: PendId,
         offset: usize,
         count: usize,
     },

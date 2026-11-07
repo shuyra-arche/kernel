@@ -18,6 +18,8 @@ pub(crate) struct Member {
     pub state: Arc<SpinLock<TaskState>>,
     pub life: Arc<Life>,
     pub receipts: SpinLock<Vec<Receipt>>,
+    /// Explicitly returned value, retained with the completion receipts.
+    pub result: SpinLock<Option<usize>>,
 }
 
 impl Member {

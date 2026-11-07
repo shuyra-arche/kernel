@@ -66,7 +66,7 @@ fn wait() -> Option<usize> {
         }
         if sip::read().sext() && !crate::machine::iommu::interrupt::handle() {
             let resources = crate::core::work::room::interrupt::get();
-            let result = crate::core::work::mail::nole::ring(&resources.supervisor_external);
+            let result = crate::core::work::sign::endpoint::trigger(&resources.supervisor_external);
             crate::core::work::room::interrupt::note_external(result.is_err(), true);
         }
         if let Some(pa) = dispatch() {

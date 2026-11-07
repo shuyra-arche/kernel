@@ -7,7 +7,7 @@ use alloc::sync::Arc;
 pub(crate) enum WaitCall {
     Value { deadline: Option<u64> },
     Join(crate::core::work::unit::join::JoinWait),
-    Mail(crate::core::work::mail::tole::AwaitWait),
+    Sign(crate::core::work::sign::endpoint::AwaitWait),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,12 +27,12 @@ impl WaitCall {
                 Resumption::Complete
             }
             Self::Join(join) => crate::core::work::unit::join::wait::resume(task, join),
-            Self::Mail(wait) => crate::core::work::mail::tole::wait::resume(task, wait),
+            Self::Sign(wait) => crate::core::work::sign::endpoint::wait::resume(task, wait),
         }
     }
 
     pub(crate) fn cancel(self) {
-        if let Self::Mail(wait) = self {
+        if let Self::Sign(wait) = self {
             wait.unwatch();
         }
     }

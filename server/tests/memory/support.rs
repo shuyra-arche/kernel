@@ -44,7 +44,7 @@ impl Pool {
     }
 }
 
-// SAFETY: successful allocate grants unique use until deallocate; the bytes are
+// SAFETY: successful allocate authorities unique use until deallocate; the bytes are
 // accessed only through that allocation. Counters and admission are atomic.
 unsafe impl Sync for Pool {}
 

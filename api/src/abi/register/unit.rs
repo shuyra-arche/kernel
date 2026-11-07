@@ -26,3 +26,13 @@ impl crate::abi::register::Wire for UnitTarget {
         }
     }
 }
+
+impl super::Wire for crate::model::unit::ControlId {
+    const WORDS: usize = 1;
+    fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
+        self.get().pack(words, at);
+    }
+    fn unpack(words: &[usize; 6], at: &mut usize) -> Result<Self, super::Decode> {
+        usize::unpack(words, at).map(Self::new)
+    }
+}

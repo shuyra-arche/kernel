@@ -17,6 +17,7 @@ mod source;
 mod state;
 pub(in crate::core::memory) mod transaction;
 
+use crate::core::memory::cell::Owner;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -43,17 +44,20 @@ use state::FlatState;
 /// 要么是分配器 RAM（页槽按需物化），要么是调用方仍保留的外部物理区间。
 /// 物化时机由调用方组合决定，来源本身不携带 eager / lazy 策略。
 pub struct Flat {
+    /// Recipient of future allocations; existing Cells retain their own owner.
+    allocation_owner: Owner,
     page_count: PageCount,
     state: SpinLock<FlatState>,
 }
 
 impl Flat {
     /// 建立 RAM 逻辑来源；不提前物化。这种来源是可迁移的。
-    pub fn acquire(allocation: Allocation) -> Result<Arc<Self>, FlatError> {
+    pub fn acquire(owner: Owner, allocation: Allocation) -> Result<Arc<Self>, FlatError> {
         Self::new(
             allocation.page_count(),
             FlatSource::Managed(Vec::new()),
             true,
+            owner,
         )
     }
 
@@ -62,25 +66,39 @@ impl Flat {
     /// 输入必须按页号严格递增；失败释放这批尚未发布的 Cell。
     /// 导入来源保持不可迁移，沿用启动/镜像/任务内存的既有约束。
     pub(crate) fn from_cells(
+        owner: Owner,
         page_count: PageCount,
         cells: Vec<(PageIndex, Cell)>,
     ) -> Result<Arc<Self>, FlatError> {
+        if cells
+            .iter()
+            .any(|(_, cell)| cell.owner() != owner.identity())
+        {
+            return Err(FlatError::OutOfRange);
+        }
         let slots = slot::admit(page_count.get(), cells)?;
-        Self::new(page_count, FlatSource::Managed(slots), false)
+        Self::new(page_count, FlatSource::Managed(slots), false, owner)
     }
 
     /// 保留外部借用物理区间：不分配数据页、不清零、不按 RAM 回收；也不可迁移。
     pub fn from_region(region: Arc<BorrowedRegion>) -> Result<Arc<Self>, FlatError> {
         let page_count = PageCount::new(region.size() / PAGE_SIZE).ok_or(FlatError::OutOfRange)?;
-        Self::new(page_count, FlatSource::Borrowed(region), false)
+        Self::new(
+            page_count,
+            FlatSource::Borrowed(region),
+            false,
+            Owner::Kernel,
+        )
     }
 
     fn new(
         page_count: PageCount,
         source: FlatSource,
         transferable: bool,
+        allocation_owner: Owner,
     ) -> Result<Arc<Self>, FlatError> {
         Arc::try_new(Self {
+            allocation_owner,
             page_count,
             state: SpinLock::new_level(Level::Flat, FlatState::new(source, transferable)),
         })
@@ -195,7 +213,8 @@ impl Flat {
                 continue;
             }
             slots.try_reserve(1).map_err(|_| FlatError::OutOfMemory)?;
-            let cell = Arc::try_new(allocate_cell()?).map_err(|_| FlatError::OutOfMemory)?;
+            let cell = Arc::try_new(allocate_cell(self.allocation_owner.clone())?)
+                .map_err(|_| FlatError::OutOfMemory)?;
             slots.insert(at, (PageIndex::new(page), Slot::Resident(cell)));
             page += 1;
             at += 1;

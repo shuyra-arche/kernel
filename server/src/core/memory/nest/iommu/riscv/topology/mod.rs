@@ -1,4 +1,4 @@
-//! Validated firmware routing, not a grant to a Unit. The trusted binding path
+//! Validated firmware routing, not a authority to a Unit. The trusted binding path
 //! must still establish device ownership, immutable topology, borrowing and
 //! platform quiescence. No register is read or written while building this plan.
 mod tree;
@@ -114,7 +114,7 @@ impl Topology {
                 return Err(RouteError::Unsupported);
             }
             // Masking out RID bits aliases otherwise independent requesters.
-            // Supporting those requires isolation groups, not individual grants.
+            // Supporting those requires isolation groups, not individual authorities.
             if scalar(node, "iommu-map-mask")?.is_some_and(|mask| mask & 0xffff != 0xffff) {
                 return Err(RouteError::Unsupported);
             }
@@ -164,7 +164,7 @@ impl Topology {
                     return Err(RouteError::Malformed);
                 }
                 // QEMU 10.0 emits an empty interval before its effective mapping.
-                // It grants nothing; still validate its target and arithmetic.
+                // It authorities nothing; still validate its target and arithmetic.
                 if length == 0 {
                     continue;
                 }

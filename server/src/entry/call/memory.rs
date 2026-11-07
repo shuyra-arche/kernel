@@ -2,8 +2,8 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
 use kernel_api::{
-    abi::call::memory::MemoryCall, abi::call::memory::MemoryFail, model::identity::PieToken,
-    model::memory::AcquireSource, model::permission::Permission,
+    abi::call::memory::MemoryCall, abi::call::memory::MemoryFail, model::memory::AcquireSource,
+    model::modifiable::Modifiable,
 };
 
 use crate::core::memory::PAGE_SIZE;
@@ -14,13 +14,12 @@ use crate::core::memory::nest::{
     identity,
 };
 use crate::core::memory::transfer::{Transfer, TransferError};
-use crate::core::work::mail::Mail;
-use crate::core::work::mail::pole::PoleOperation;
 use crate::core::work::pend::{self, Geometry, Hold, IndependentHold, SourceAuthorization};
 use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::space::{MappingEntry, Space};
 use crate::core::work::unit::task::{Task, TaskIdent};
 use crate::core::work::unit::team::Team;
+use crate::core::work::view::share_view::ShareOperation;
 use crate::machine::switcher::context::TrapContext;
 
 use super::outcome::{answer, answer_pair};
@@ -180,7 +179,7 @@ fn attach(
         }
     };
     let access = Access::from_wire(access).ok_or(MemoryFail::Denied)?;
-    // 空权限拒。执行权不由 Pie 权限位（更不由 VEST）表达：它只随**目标域授权**
+    // 空权限拒。执行权不由 Pend 的 Modifiable表达：它只随**目标域授权**
     // 与来源上限走，所以放到 `resolve_team` 之后判。
     if access.is_empty() {
         return Err(MemoryFail::Denied);
@@ -237,24 +236,25 @@ fn attach(
         .branch()
         .map(|(token, _)| token)
         .or_else(|| root.as_ref().map(|(_, token, _)| *token));
-    let pole = root.map(|(meta, _, _)| meta);
-    let grant = hold.grant().cloned().or_else(|| {
-        pole.as_ref()
+    let share_view = root.map(|(meta, _, _)| meta);
+    let authority = hold.authority().cloned().or_else(|| {
+        share_view
+            .as_ref()
             .zip(branch)
-            .and_then(|(meta, token)| meta.grant(token))
+            .and_then(|(meta, token)| meta.authority(token))
     });
-    let _operation = pole
+    let _operation = share_view
         .as_ref()
-        .map(|meta| PoleOperation::acquire(meta).ok_or(MemoryFail::Busy))
+        .map(|meta| ShareOperation::acquire(meta).ok_or(MemoryFail::Busy))
         .transpose()?;
-    let permission = match &grant {
-        Some(grant) => grant.permission(),
-        None => authorization.permission(),
+    let modifiable = match &authority {
+        Some(authority) => authority.modifiable(),
+        None => authorization.modifiable(),
     }
     .ok_or(MemoryFail::Denied)?;
-    if !permission.contains(Permission::FETCH)
-        || (access.contains(Access::WRITE) && !permission.contains(Permission::STORE))
-        || (!own_space && !permission.contains(Permission::VEST))
+    if !modifiable.allows(Modifiable::No)
+        || (access.contains(Access::WRITE) && modifiable != Modifiable::Yes)
+        || (!own_space && !modifiable.allows(Modifiable::No))
     {
         return Err(MemoryFail::Denied);
     }
@@ -262,55 +262,33 @@ fn attach(
         return Err(MemoryFail::WidenDenied);
     }
     let mut ceiling = hold.ceiling();
-    if !permission.contains(Permission::STORE) {
+    if modifiable != Modifiable::Yes {
         ceiling.remove(Access::WRITE);
     }
     if !own_space {
         ceiling &= access;
-    } else if pole.is_some() {
+    } else if share_view.is_some() {
         ceiling &= Access::READ | Access::WRITE;
     }
-    let mut staged = false;
-    if let Some(meta) = &pole {
-        if !meta.alive() || meta.reserved() != 0 {
-            return Err(MemoryFail::Busy);
-        }
-        if !own_space {
-            if permission.contains(Permission::ONLY) {
-                let token = branch.ok_or(MemoryFail::Denied)?;
-                let pie = crate::core::work::pend::locate(&caller_task, token)
-                    .ok_or(MemoryFail::Denied)?;
-                if pie.sire().is_some()
-                    || pie.heir().is_some()
-                    || meta.owner() != ident.id
-                    || !meta.exclusive()
-                    || !source.same_range(&meta.source())
-                    || access.contains(Access::EXECUTE)
-                    || meta.mapped()
-                {
-                    return Err(MemoryFail::Busy);
-                }
-                target.reserve_staging(1)?;
-                staged = true;
-            } else if !meta.readonly() || access.contains(Access::WRITE) {
-                return Err(MemoryFail::Busy);
-            }
-        }
-    } else {
-        if !authorization.private_owner(ident.id) {
+    if let Some(meta) = &share_view {
+        if !meta.alive() {
             return Err(MemoryFail::Denied);
         }
-        if !own_space && access.contains(Access::EXECUTE) {
+        // Bootstrap executable/read-only mappings remain attached to their Pend.
+        // Writable cross-Unit data requires a Pend delegated to the receiving Task.
+        if !own_space
+            && (modifiable != Modifiable::No || !meta.readonly() || access.contains(Access::WRITE))
+        {
             return Err(MemoryFail::Denied);
         }
+    } else if !authorization.private_owner(ident.id) || !own_space {
+        return Err(MemoryFail::Denied);
     }
     let nest = &space.nest;
     nest.retry_invalidation()?;
     space.reap_mappings();
     // 分支下的登记位先备好（只在本域安装时才需要）：提交时只替换，不再可能失败。
-    if (own_space || staged)
-        && let Some(meta) = &pole
-    {
+    if let Some(meta) = &share_view {
         meta.reserve_records(1).map_err(source_fail)?;
     }
     let reservation = nest.reserve(nest_placement(nest, placement, size)?)?;
@@ -335,7 +313,7 @@ fn attach(
         rollback(&space, id, Some(reservation), None);
         return Err(error.into());
     }
-    if let Err(error) = authorization.enter_publish(id, grant.as_deref(), access) {
+    if let Err(error) = authorization.enter_publish(id, authority.as_deref(), access) {
         rollback(&space, id, Some(reservation), None);
         return Err(source_fail(error));
     }
@@ -360,7 +338,7 @@ fn attach(
         let _serial = caller_task.pend.lock();
         let _commit = crate::core::work::commit();
         if !crate::core::work::pend::live(&caller_task)
-            || !authorization.branch_check(grant.as_deref(), access)
+            || !authorization.branch_check(authority.as_deref(), access)
         {
             return Err(MemoryFail::Denied);
         }
@@ -368,26 +346,10 @@ fn attach(
         authorization
             .check_publish(used, count, own)
             .map_err(source_fail)?;
-        if (own_space || staged)
-            && let (Some(meta), Some(token)) = (&pole, branch)
-            && meta
-                .record(
-                    token,
-                    &space,
-                    mapping.clone(),
-                    staged.then_some(target.id),
-                    false,
-                )
-                .is_err()
+        if let (Some(meta), Some(token)) = (&share_view, branch)
+            && meta.record(token, &space, mapping.clone(), false).is_err()
         {
             return Err(MemoryFail::Denied);
-        }
-        if staged {
-            target.push_staging(crate::core::work::unit::team::Staging {
-                token: branch.expect("staged root token"),
-                meta: pole.as_ref().expect("staged Pole").clone(),
-                mapping: mapping.clone(),
-            });
         }
         space.mappings.commit(id, mapping.clone());
         Ok(())
@@ -396,9 +358,6 @@ fn attach(
         rollback(&space, id, None, Some(mapping));
         authorization.leave_publish(id);
         return Err(error);
-    }
-    if staged {
-        crate::core::work::pend::notify(ident.id, branch.expect("staged root token"));
     }
     authorization.leave_publish(id);
     Ok((id, address))
@@ -411,7 +370,7 @@ fn attach(
 /// 活保留 cap（`require_retention`）＋ 这份引用本身就是 cap 登记出来的 retained 引用。
 /// 整张表先物化齐了才写出去——失败不在调用者缓冲里留半张。
 fn traverse(
-    retention: PieToken,
+    retention: kernel_api::model::unit::ControlId,
     range_at: kernel_api::model::identity::VirtAddr,
     out: kernel_api::model::identity::VirtAddr,
     ident: &Arc<TaskIdent>,
@@ -537,23 +496,12 @@ fn detach(
 ) -> Result<usize, MemoryFail> {
     with_mapping(team, mapping, ident, |target, entry| {
         let space = &target.space;
-        let staged = target.find_staging(|item| item.mapping.identity() == mapping.get());
-        if staged.is_some() && !matches!(choice, kernel_api::model::memory::MappingSelection::Whole)
-        {
-            return Err(MemoryFail::Busy);
-        }
         space.nest.retry_invalidation()?;
         if !space.nest.settled(mapping.get()) {
             space.withdraw(selection(entry, choice)?)?;
         }
         if space.nest.settled(mapping.get()) {
             space.retire_mapping(mapping.get());
-            if let Some(at) = staged {
-                let item = target.staged_at(at).ok_or(MemoryFail::Denied)?;
-                item.meta.detach_staging(item.token, target.id);
-                target.remove_staging(at);
-                crate::core::work::pend::notify(item.meta.owner(), item.token);
-            }
         }
         Ok(0)
     })
@@ -590,28 +538,28 @@ fn caller(ident: &Arc<TaskIdent>) -> Option<Arc<Task>> {
 }
 
 /// 来源侧的失败码折成地址空间同轴的那一条。
-fn source_fail(error: kernel_api::abi::call::pie::PieFail) -> MemoryFail {
+fn source_fail(error: kernel_api::abi::call::pend::PendFail) -> MemoryFail {
     match error {
-        kernel_api::abi::call::pie::PieFail::OoM => MemoryFail::OoM,
-        kernel_api::abi::call::pie::PieFail::Busy => MemoryFail::Busy,
-        kernel_api::abi::call::pie::PieFail::NotAligned => MemoryFail::NotAligned,
+        kernel_api::abi::call::pend::PendFail::OoM => MemoryFail::OoM,
+        kernel_api::abi::call::pend::PendFail::Busy => MemoryFail::Busy,
+        kernel_api::abi::call::pend::PendFail::NotAligned => MemoryFail::NotAligned,
         _ => MemoryFail::Denied,
     }
 }
 
-/// 核验调用者表内活的 VEST 授权及内核铸造的保留对象身份。
-fn require_retention(task: &Arc<Task>, token: PieToken) -> Result<(), MemoryFail> {
-    let pie = crate::core::work::pend::locate(task, token).ok_or(MemoryFail::Denied)?;
-    if !pie.alive() || !pie.permission().contains(Permission::VEST) {
-        return Err(MemoryFail::Denied);
+/// 核验调用者表内活的 Retain 控制授权及内核铸造的保留对象身份。
+fn require_retention(
+    task: &Arc<Task>,
+    token: kernel_api::model::unit::ControlId,
+) -> Result<(), MemoryFail> {
+    if task
+        .administration
+        .matches(token, kernel_api::model::unit::ControlKind::Retain)
+    {
+        Ok(())
+    } else {
+        Err(MemoryFail::Denied)
     }
-    let Mail::Nole(meta) = pie.mail() else {
-        return Err(MemoryFail::Denied);
-    };
-    if !meta.retains() {
-        return Err(MemoryFail::Denied);
-    }
-    Ok(())
 }
 
 /// 登记一份来源持有，返回它在**调用任务**引用表里的句柄。
@@ -632,7 +580,7 @@ fn require_retention(task: &Arc<Task>, token: PieToken) -> Result<(), MemoryFail
 ///   将来若添直接建引用的入口，它必须同样从一枚按窗口筛过的分支上建，这条不变量才继续成立。
 fn acquire(
     source: AcquireSource,
-    retention: PieToken,
+    retention: kernel_api::model::unit::ControlId,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, MemoryFail> {
     let task = caller(ident).ok_or(MemoryFail::Denied)?;
@@ -643,13 +591,17 @@ fn acquire(
     let (authorization, offset, count, ceiling, retained, branch) = match source {
         AcquireSource::Allocation(allocation) => {
             // 新建来源本身就没有旧授权可挂，独立保留授权对它无意义。
-            if retention != PieToken::NONE || allocation.align != PAGE_SIZE {
+            if retention != kernel_api::model::unit::ControlId::NONE
+                || allocation.align != PAGE_SIZE
+            {
                 return Err(MemoryFail::NotAligned);
             }
             let size = allocation.bytes().ok_or(MemoryFail::Denied)?;
             let pages = size / PAGE_SIZE;
             let count = PageCount::new(pages).ok_or(MemoryFail::NotAligned)?;
-            let range = Flat::acquire(Allocation::new(pages, PAGE_SIZE)?)?.whole();
+            let range =
+                Flat::acquire(ident.team.cells.clone(), Allocation::new(pages, PAGE_SIZE)?)?
+                    .whole();
             let authorization =
                 SourceAuthorization::new(range, Access::all(), ident.id).map_err(source_fail)?;
             let ceiling = authorization.ceiling();
@@ -675,14 +627,12 @@ fn acquire(
                     .ok_or(MemoryFail::NotAligned)?,
             );
             // 独立持有：此刻把这段范围从当前授权上解下来自己强持，
-            // 于是它跨 Grant 撤销继续持同一批帧；不带保留的仍随授权生死。
+            // 于是它跨 Pend 撤销继续持同一批帧；不带保留的仍随授权生死。
             // 从持有人自己那条引用上取的，不再把这一段当别人的占用；这一条只核子段
             // （见 `check_use` 的说明：取得又一份持有不是发表）。
-            hold.source()
-                .check_use(offset, count)
-                .map_err(source_fail)?;
+            hold.source().ensure_internal().map_err(source_fail)?;
             // 它在来源记录上的登记与物理保留一起生：登记位先备、写入不再失败。
-            let retained = if retention == PieToken::NONE {
+            let retained = if retention == kernel_api::model::unit::ControlId::NONE {
                 None
             } else {
                 require_retention(&task, retention)?;
@@ -702,7 +652,8 @@ fn acquire(
                 count,
                 hold.ceiling(),
                 retained,
-                hold.branch().map(|(token, grant)| (token, grant.clone())),
+                hold.branch()
+                    .map(|(token, authority)| (token, authority.clone())),
             )
         }
         AcquireSource::Source {
@@ -710,27 +661,24 @@ fn acquire(
             offset,
             count,
         } => {
-            // 从 Pole 的某一枚 Pie 取得：撤销边与上限按**这一枚**的子 Grant 算，
+            // 从 Share 的某一枚 PendEntry 取得：撤销边与上限按**这一枚**的子 Pend 算，
             // 不因同 Flat、共享根资格就并到根上去。
-            let pie = crate::core::work::pend::locate(&task, token).ok_or(MemoryFail::Denied)?;
-            if !pie.alive() {
+            let pend = crate::core::work::pend::locate(&task, token).ok_or(MemoryFail::Denied)?;
+            if !pend.alive() {
                 return Err(MemoryFail::Denied);
             }
-            let meta = pie.mail().pole().ok_or(MemoryFail::Denied)?;
-            if meta.reserved() != 0 {
-                return Err(MemoryFail::Denied);
-            }
-            if !pie.permission().contains(Permission::FETCH) {
+            let meta = pend.view().share_view().ok_or(MemoryFail::Denied)?;
+            if !pend.modifiable().allows(Modifiable::No) {
                 return Err(MemoryFail::Denied);
             }
             let authorization = meta.authorization().ok_or(MemoryFail::Denied)?;
             let ceiling = authorization.ceiling();
-            // 分支就是调用者手里这一枚 Pie 的 token 与它的 Grant。
-            let grant = pie.grant().clone();
+            // 分支就是调用者手里这一枚 PendEntry 的 token 与它的 Pend。
+            let authority = pend.authority().clone();
             let (offset, count) = self::window(&authorization, offset, count)?;
             // 这一枚分支若有有效窗口，请求的那一段必须落在它里面。
             // 两边都是**相对来源起点的绝对页偏移**，故嵌套派生不会叠加两层偏移。
-            if let Some((window_offset, window_count)) = grant.window() {
+            if let Some((window_offset, window_count)) = authority.window() {
                 let end = window_offset
                     .get()
                     .checked_add(window_count.get())
@@ -744,10 +692,8 @@ fn acquire(
                 }
             }
             // 从分支取引用不是发表：只核子段，不再落一份独立持有也不交出这一段。
-            authorization
-                .check_use(offset, count)
-                .map_err(source_fail)?;
-            let retained = if retention == PieToken::NONE {
+            authorization.ensure_internal().map_err(source_fail)?;
+            let retained = if retention == kernel_api::model::unit::ControlId::NONE {
                 None
             } else {
                 require_retention(&task, retention)?;
@@ -771,7 +717,7 @@ fn acquire(
                 count,
                 ceiling,
                 retained,
-                Some((token, grant)),
+                Some((token, authority)),
             )
         }
         AcquireSource::Mapping {
@@ -804,16 +750,16 @@ fn acquire(
             let branch = if let Some((meta, root_token, _)) = authorization.root() {
                 let (_, branch) = entry.control.as_ref().ok_or(MemoryFail::Denied)?.control();
                 let token = branch.unwrap_or(root_token);
-                let pie =
+                let pend =
                     crate::core::work::pend::locate(&task, token).ok_or(MemoryFail::Denied)?;
-                let grant = meta.grant(token).ok_or(MemoryFail::Denied)?;
-                if !pie.alive()
-                    || !pie.permission().contains(Permission::FETCH)
-                    || !Arc::ptr_eq(pie.grant(), &grant)
+                let authority = meta.authority(token).ok_or(MemoryFail::Denied)?;
+                if !pend.alive()
+                    || !pend.modifiable().allows(Modifiable::No)
+                    || !Arc::ptr_eq(pend.authority(), &authority)
                 {
                     return Err(MemoryFail::Denied);
                 }
-                Some((token, grant))
+                Some((token, authority))
             } else {
                 if !authorization.private_owner(ident.id) {
                     return Err(MemoryFail::Denied);
@@ -821,10 +767,8 @@ fn acquire(
                 None
             };
             // 从已授权关系取引用也不是发表：只核子段。
-            authorization
-                .check_use(offset, count)
-                .map_err(source_fail)?;
-            let retained = if retention == PieToken::NONE {
+            authorization.ensure_internal().map_err(source_fail)?;
+            let retained = if retention == kernel_api::model::unit::ControlId::NONE {
                 None
             } else {
                 require_retention(&task, retention)?;
@@ -879,9 +823,7 @@ fn release(
         .references
         .remove(reference.get())
         .ok_or(MemoryFail::Denied)?;
-    let source = hold.source().clone();
     drop(hold);
-    source.reap_derivations();
     Ok(0)
 }
 
@@ -905,7 +847,7 @@ fn next_flight_key() -> Result<usize, MemoryFail> {
 ///
 /// 两端的**管理授权**都在同一个 `caller.pend` 下核，且这个 pend 一直持到
 /// 执行结算或回退完毕：授权失效的每一处写点（doom 先清引用再关控制、
-/// cull/release/revoke、accord、Grant 收窄、入口 Seal）都要同一把 pend 串行，
+/// cull/release/revoke、accord、Pend 收窄、入口 Seal）都要同一把 pend 串行，
 /// 所以迁移期间来源不会在脚下被撤走。这里不取另一个 Task 的 pend。
 ///
 /// **提交段只盖准入与在途登记**：两端各自那一页在同一 `commit` 段里核完新使用
@@ -915,8 +857,8 @@ fn next_flight_key() -> Result<usize, MemoryFail> {
 /// 结算后按同一笔键一次撤完（两域同号互不干涉，见 `next_flight_key`）。
 /// 旧引用因此不能把已分出的子段或别人的独立持有移来移去，也不会把对端饿死在锁上。
 ///
-/// `PoleOperation` 不是授权，这里不取它：槽的独占与逐页撤销的串行由事务与各
-/// Nest 自己的临界区负责，另取一把 Pole 租约只会把“同根两端”变成第二个失败面。
+/// `ShareOperation` 不是授权，这里不取它：槽的独占与逐页撤销的串行由事务与各
+/// Nest 自己的临界区负责，另取一把 Share 租约只会把“同根两端”变成第二个失败面。
 fn transfer(
     from: kernel_api::model::memory::FlatReference,
     from_page: usize,
@@ -996,7 +938,7 @@ fn transfer(
 /// 一端：向这份引用解析出它的窗口，同时当场核对调用者是不是那份来源的管理者。
 ///
 /// 引用只在自己那张表里解析得动（伪号或已释放的旧号当场 `Denied`）；
-/// 解析不出窗口（来源已被根 Grant 接管并撤销）也是 `Denied`。
+/// 解析不出窗口（来源已被根 Pend 接管并撤销）也是 `Denied`。
 fn endpoint(
     caller: &Arc<Task>,
     reference: kernel_api::model::memory::FlatReference,

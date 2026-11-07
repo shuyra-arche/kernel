@@ -6,43 +6,33 @@ mod reserved;
 pub(crate) use reserved::discover as iommu_regions;
 
 use crate::core::memory::nest::Access;
-use crate::core::work::mail::{self, Mail};
-use crate::core::work::pend::{self, Permission, SourceAuthorization};
+use crate::core::work::pend::{self, Modifiable, SourceAuthorization};
+use crate::core::work::view::{self, View};
 use crate::entry::boot::resources::Registry;
 use crate::machine::board;
 use kernel_api::{
-    abi::call::pie::PieFail, boot::ledger::Name, boot::ledger::Page, model::identity::Mark,
+    abi::call::pend::PendFail, boot::ledger::Name, boot::ledger::Page, model::identity::Mark,
     model::identity::TaskId,
 };
 use plan::Plan;
 
-pub(crate) fn register(registry: &mut Registry) -> Result<(), PieFail> {
+pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     let dtb = board::info().dtb();
-    let fdt = board::device_tree().ok_or(PieFail::Denied)?;
+    let fdt = board::device_tree().ok_or(PendFail::Denied)?;
     let dram = board::info().dram;
     // Discover and validate every reservation before creating any device authority.
     let plan = Plan::discover(&fdt, dram.base, dram.size)?;
-    for region in plan.grants() {
+    for region in plan.authorities() {
         grant_region(registry, *region)?;
     }
-    let meta = mail::pole::region(dtb.base, dtb.size, TaskId::new(0))?;
-    let root = pend::Pie::try_new(
-        Mail::Pole(meta),
-        Mark::NONE,
-        Permission::FETCH | Permission::VEST,
-        None,
-    )?;
+    let meta = view::share_view::region(dtb.base, dtb.size, TaskId::new(0))?;
+    let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
     registry
         .register(Name::Page(Page::Dtb), root)
         .map_err(|e| e.into_parts().0)?;
     if let Some(initrd) = board::info().initrd() {
-        let meta = mail::pole::region(initrd.base, initrd.size, TaskId::new(0))?;
-        let root = pend::Pie::try_new(
-            Mail::Pole(meta),
-            Mark::NONE,
-            Permission::FETCH | Permission::VEST,
-            None,
-        )?;
+        let meta = view::share_view::region(initrd.base, initrd.size, TaskId::new(0))?;
+        let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
         registry
             .register(Name::Page(Page::Initrd), root)
             .map_err(|e| e.into_parts().0)?;
@@ -50,30 +40,26 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PieFail> {
     Ok(())
 }
 
-fn grant_region(registry: &mut Registry, region: region::Region) -> Result<(), PieFail> {
+fn grant_region(registry: &mut Registry, region: region::Region) -> Result<(), PendFail> {
     let (base, size) = (region.base, region.size);
-    let meta = mail::pole::region(base, size, TaskId::new(0))?;
+    let meta = view::share_view::region(base, size, TaskId::new(0))?;
     let source = meta.source();
-    let root = pend::Pie::try_new(
-        Mail::Pole(meta.clone()),
-        Mark::NONE,
-        Permission::FETCH | Permission::STORE | Permission::VEST | Permission::ONLY,
-        None,
-    )?;
+    let root =
+        pend::PendEntry::try_new(View::Share(meta.clone()), Mark::NONE, Modifiable::Yes, None)?;
     // 借来的区也算一份来源：把授权记录接上，持有者就能取得**自己那一小段**子窗口
-    // （而不是只能攞整段）。与 `Unseal::Pole` 接手私有根同一套，不另造旁路。
+    // （而不是只能攞整段）。与 `Unseal::Share` 接手私有根同一套，不另造旁路。
     // 上限就是 MMIO 的读写两位：设备区不开执行映射。
     let authorization =
         SourceAuthorization::new(source, Access::READ | Access::WRITE, TaskId::new(0))?;
     meta.attach_source(&authorization);
-    authorization.adopt(&meta, root.token(), root.grant().clone())?;
+    authorization.adopt(&meta, root.token(), root.authority().clone())?;
     registry
         .register(Name::Page(Page::Region(base as u64)), root)
         .map_err(|e| e.into_parts().0)
 }
 
-/// Validate the exact same grant plan before configuring any protected endpoint.
-pub(super) fn validate(fdt: &fdt::Fdt) -> Result<(), PieFail> {
+/// Validate the exact same authority plan before configuring any protected endpoint.
+pub(super) fn validate(fdt: &fdt::Fdt) -> Result<(), PendFail> {
     let dram = board::info().dram;
     Plan::discover(fdt, dram.base, dram.size).map(|_| ())
 }

@@ -1,7 +1,7 @@
 //! call::unit — **Unit 域（class 1：装域 / 创建 task / 血缘）**：调用表（[`UnitCall`]）与失败词汇（[`UnitFail`]）。
 
-use crate::model::identity::{PieToken, TaskId, TeamId, VirtAddr};
-use crate::model::unit::ProgramKind;
+use crate::model::identity::{TaskId, TeamId, VirtAddr};
+use crate::model::unit::{ControlId, ProgramKind};
 use crate::model::wait::Wait;
 
 /// `UnitFail` 的结果别名。
@@ -26,6 +26,8 @@ pub mod operations {
         /// 入口不是当前域内有效、对齐的可执行地址。
         BadEntry = -5,
     }
+    /// Create a Team under the caller Task; sire must equal SelfId.
+    /// Membership alone does not grant control over peer Tasks.
     #[operation(slot = 32, output = super::TeamId, error = UnitFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Build {
@@ -90,16 +92,50 @@ pub mod operations {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Guard {
         pub team: super::TeamId,
-        pub authority: super::PieToken,
+        pub authority: super::ControlId,
     }
     #[operation(slot = 44, output = (), error = UnitFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Unguard {
         pub team: super::TeamId,
-        pub authority: super::PieToken,
+        pub authority: super::ControlId,
     }
     #[operation(slot = 45, output = super::TaskId, infallible)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Creator;
+    #[operation(slot = 46, output = super::ControlId, error = UnitFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct DelegateControl {
+        pub authority: super::ControlId,
+        pub target: super::TaskId,
+        pub delegable: bool,
+    }
+    #[operation(slot = 47, output = (), error = UnitFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct ReleaseControl {
+        pub authority: super::ControlId,
+    }
+    /// Close membership admission recursively without resuming, pausing or killing
+    /// existing members. Whole-Team Join becomes complete only after this cohort ends.
+    #[operation(slot = 48, output = (), error = UnitFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Finish {
+        pub team: super::TeamId,
+    }
+    /// End this execution normally and publish an explicit result value to its
+    /// completion recipients. A previously committed termination wins the race.
+    #[operation(slot = 49, nonreturning)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Return {
+        pub value: usize,
+    }
+    /// Read before Join(receive=true), which consumes the completion receipt.
+    /// Returns (1, value) for Return, (0, 0) for an exit without returned data.
+    /// Busy means execution has not completed; it says nothing about cleanup.
+    #[operation(slot = 50, output = (usize, usize), error = UnitFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct ReadResult {
+        pub task: super::TaskId,
+    }
 }
 pub use operations::{UnitCall, UnitFail};

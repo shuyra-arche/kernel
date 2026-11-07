@@ -370,8 +370,15 @@ impl Nest {
                 for (offset, cell) in materialized {
                     let page = offset.get();
                     let address = start + page * PAGE_SIZE;
-                    if inner.covers(address.as_usize(), address.as_usize()) {
-                        published.push((page, cell.prepare_hardware()?));
+                    if let Some(range) = inner
+                        .active
+                        .iter()
+                        .find(|range| range.contains(address.as_usize()))
+                    {
+                        published.push((
+                            page,
+                            cell.prepare_hardware(range.ceiling.contains(Access::WRITE))?,
+                        ));
                     }
                 }
             }
@@ -511,7 +518,16 @@ impl Nest {
         for (offset, cell) in materialized {
             let page = first + offset.get();
             if !inner.publishes(page) {
-                fresh.push((page, cell.prepare_hardware()?));
+                let address = mapping.reservation.start() + page * PAGE_SIZE;
+                let range = inner
+                    .active
+                    .iter()
+                    .find(|range| range.contains(address.as_usize()))
+                    .ok_or(NestError::NoRegion)?;
+                fresh.push((
+                    page,
+                    cell.prepare_hardware(range.ceiling.contains(Access::WRITE))?,
+                ));
             }
         }
         if fresh.is_empty() {
@@ -1448,7 +1464,7 @@ impl Nest {
                         assert_eq!(
                             leaf.bits(),
                             expected.bits(),
-                            "hardware leaf crosses permission state"
+                            "hardware leaf crosses modifiable state"
                         );
                     } else {
                         expected = Some(leaf);
@@ -1464,7 +1480,7 @@ impl Nest {
                 assert_eq!(
                     (flags & mask).bits(),
                     (expected & mask).bits(),
-                    "hardware PTE permissions differ from Mapping state at {start:?}"
+                    "hardware PTE modifiability differ from Mapping state at {start:?}"
                 );
                 if inner.source.is_borrowed() {
                     let offset = start

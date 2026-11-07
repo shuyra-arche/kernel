@@ -1,7 +1,7 @@
 use super::{Decode, Wire};
-use crate::model::identity::{Mark, PieToken, TaskId, TeamId, VirtAddr};
+use crate::model::identity::{Mark, PendId, TaskId, TeamId, VirtAddr};
 
-impl Wire for PieToken {
+impl Wire for PendId {
     const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.get();
@@ -10,7 +10,7 @@ impl Wire for PieToken {
     fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
         let v = *s.get(*i).ok_or(Decode::Overflow)?;
         *i += 1;
-        Ok(PieToken::new(v))
+        Ok(PendId::new(v))
     }
 }
 

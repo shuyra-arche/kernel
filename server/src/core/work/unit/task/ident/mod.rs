@@ -28,6 +28,7 @@ pub(crate) fn next_id() -> Result<TaskId, NestError> {
 /// 的那段内存。
 pub(crate) struct TaskIdent {
     pub(crate) id: TaskId,
+    pub(crate) controller: TaskId,
     pub(crate) team: Arc<Team>,
     pub(crate) frame_pa: PhysAddr,
     memory: SpinLock<TaskMemory>,
@@ -36,12 +37,14 @@ pub(crate) struct TaskIdent {
 impl TaskIdent {
     pub(crate) fn new(
         id: TaskId,
+        controller: TaskId,
         team: Arc<Team>,
         frame_pa: PhysAddr,
         memory: TaskMemory,
     ) -> TaskIdent {
         TaskIdent {
             id,
+            controller,
             team,
             frame_pa,
             memory: SpinLock::new(memory),

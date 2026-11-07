@@ -12,21 +12,28 @@ enum Phase {
     Settled,
 }
 
-/// 内核持有的硬件访问责任。不是 Pend，不授予读写权，也不能复制为两个完成凭证。
+/// 内核持有的硬件访问责任和读写互斥预留。
+/// 它落实已获授权的访问，不创建授权；不能复制为两个完成凭证。
 #[derive(Debug)]
 pub(crate) struct Retention {
     cell: Option<Arc<Cell>>,
     phase: Phase,
     kind: Kind,
+    modifiable: bool,
 }
 
 impl Retention {
-    pub(super) fn prepare(cell: &Arc<Cell>, kind: Kind) -> Result<Self, RetainError> {
-        cell.reclaim.register(kind)?;
+    pub(super) fn prepare(
+        cell: &Arc<Cell>,
+        kind: Kind,
+        modifiable: bool,
+    ) -> Result<Self, RetainError> {
+        cell.reclaim.register(kind, modifiable)?;
         Ok(Self {
             cell: Some(cell.clone()),
             phase: Phase::Prepared,
             kind,
+            modifiable,
         })
     }
 
@@ -52,7 +59,7 @@ impl Retention {
     /// Unit 退出、通知、请求已提交或用户态 Ack 都不构成这个证明。
     pub(crate) unsafe fn settle(mut self) {
         assert_eq!(self.phase, Phase::Retiring);
-        self.cell().reclaim.discharge(self.kind);
+        self.cell().reclaim.discharge(self.kind, self.modifiable);
         self.phase = Phase::Settled;
     }
 }
@@ -67,7 +74,7 @@ impl Deref for Retention {
 impl Drop for Retention {
     fn drop(&mut self) {
         match self.phase {
-            Phase::Prepared => self.cell().reclaim.discharge(self.kind),
+            Phase::Prepared => self.cell().reclaim.discharge(self.kind, self.modifiable),
             Phase::Settled => {}
             Phase::Published | Phase::Retiring => {
                 // 非正常遗失责任时永久隔离：保留身份、账目和物理分配，禁止新登记。

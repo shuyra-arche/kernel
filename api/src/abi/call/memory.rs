@@ -1,4 +1,4 @@
-use crate::model::identity::{PieToken, TeamId, VirtAddr};
+use crate::model::identity::{TeamId, VirtAddr};
 use crate::model::memory::{
     AcquireSource, FlatReference, MappingControl, MappingId, MappingSelection,
 };
@@ -36,7 +36,7 @@ pub mod operations {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Acquire {
         pub source: super::AcquireSource,
-        pub retention: super::PieToken,
+        pub retention: crate::model::unit::ControlId,
     }
     /// 解除这一份持有；不隐式 Detach，不等待其他引用，不收回其他映射。
     #[operation(slot = 6, output = (), error = MemoryFail)]
@@ -81,7 +81,7 @@ pub mod operations {
     #[operation(slot = 11, output = (), error = MemoryFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Traverse {
-        pub retention: super::PieToken,
+        pub retention: crate::model::unit::ControlId,
         pub range: super::VirtAddr,
         pub out: super::VirtAddr,
     }

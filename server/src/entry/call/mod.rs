@@ -6,20 +6,18 @@ use crate::core::work::unit::task::TaskIdent;
 use crate::machine::switcher::context::{Gprs, TrapContext};
 
 mod chrono;
+mod clone_view;
 mod control;
 mod debug;
 mod device;
 mod gate;
-mod hole;
 pub(in crate::entry) mod memory;
-mod nole;
 mod outcome;
-mod pie;
-pub(crate) mod pole;
-pub(crate) mod resources;
+mod pend;
 mod room;
 mod seal;
-pub(crate) mod tole;
+pub(crate) mod share_view;
+pub(crate) mod sign;
 mod unit;
 
 use outcome::{Outcome, ret_err};
@@ -60,16 +58,15 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
             chrono::dispatch(frame, call);
             Outcome::Resume
         }
-        EnvCall::Hole(call) => hole::dispatch(frame, call, ident),
-        EnvCall::Nole(call) => nole::dispatch(frame, call, ident),
-        EnvCall::Pole(call) => pole::dispatch(frame, call, ident),
-        EnvCall::Tole(call) => tole::dispatch(frame, call, ident),
+        EnvCall::Clone(call) => clone_view::dispatch(frame, call, ident),
+        EnvCall::Share(call) => share_view::dispatch(frame, call, ident),
+        EnvCall::Sign(call) => sign::dispatch(frame, call, ident),
         EnvCall::Control(call) => {
             control::dispatch(frame, call, &ident);
             Outcome::Resume
         }
-        EnvCall::Pie(call) => {
-            pie::dispatch(frame, call, ident);
+        EnvCall::Pend(call) => {
+            pend::dispatch(frame, call, ident);
             Outcome::Resume
         }
         EnvCall::Debug(DebugCall::Put { buf, len }) => {

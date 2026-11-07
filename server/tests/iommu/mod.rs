@@ -5,6 +5,8 @@ extern crate alloc;
 #[allow(dead_code)]
 #[path = "../../src/core/memory/cell/mod.rs"]
 pub(crate) mod cell;
+// This host harness imports only the portable subset of this production module.
+#[allow(dead_code)]
 #[path = "../../src/core/memory/nest/iommu/mod.rs"]
 mod iommu;
 
@@ -32,5 +34,7 @@ mod tree;
 
 #[path = "device/mod.rs"]
 mod custody_tests;
+// This host harness imports only the portable subset of this production module.
+#[allow(dead_code)]
 #[path = "../../src/core/work/device/mod.rs"]
 mod device;

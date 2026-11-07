@@ -1,13 +1,13 @@
 use ::core::fmt;
-use kernel_api::abi::call::pie::PieFail;
+use kernel_api::abi::call::pend::PendFail;
 
 pub(crate) struct Failure<T> {
-    pub reason: PieFail,
+    pub reason: PendFail,
     pub value: T,
 }
 
 impl<T> Failure<T> {
-    pub(crate) fn into_parts(self) -> (PieFail, T) {
+    pub(crate) fn into_parts(self) -> (PendFail, T) {
         (self.reason, self.value)
     }
 }

@@ -45,8 +45,7 @@ impl JoinWait {
             }
             JoinTarget::Team(t) => {
                 if !self.receive {
-                    let constructing = t.state.lock().constructing();
-                    return Ok(if !constructing && t.all_reaped() {
+                    return Ok(if !t.admitting() && t.all_reaped() {
                         JoinReply::Complete
                     } else {
                         JoinReply::Pending
@@ -111,11 +110,8 @@ pub(crate) fn observe(
             if id == me.ident.team.id {
                 return Err(UnitFail::Denied);
             }
-            me.ident
-                .team
-                .life
-                .find_team(id)
-                .map(JoinTarget::Team)
+            me.clan(id)
+                .map(|team| JoinTarget::Team(team.life.clone()))
                 .ok_or(UnitFail::Denied)
         }
         kernel_api::model::unit::UnitTarget::Task(id) => {
@@ -125,7 +121,10 @@ pub(crate) fn observe(
                 .life
                 .member(id)
                 .or_else(|| me.ident.team.life.find(id));
-            member.map(JoinTarget::Task).ok_or(UnitFail::Denied)
+            member
+                .filter(|member| member.pending(me.ident.id))
+                .map(JoinTarget::Task)
+                .ok_or(UnitFail::Denied)
         }
     }
 }

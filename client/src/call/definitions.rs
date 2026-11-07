@@ -23,47 +23,43 @@ typed_calls! {
         infallible fn set_trace(on: usize) -> () =
             op::SetTrace { on };
     }
-    hole [
-        model::hole::HoleCondition,
-        abi::call::hole::HoleFail,
-        model::hole::HoleLimits,
+    clone_view [
+        model::clone_view::CloneCondition,
+        abi::call::clone_view::CloneFail,
+        model::clone_view::CloneLimits,
         model::identity::Mark,
-        model::hole::Oversize,
-        model::identity::PieToken,
-        model::hole::PullOutcome,
+        model::clone_view::Oversize,
+        model::identity::PendId,
+        model::clone_view::PullOutcome,
         model::identity::TaskId,
         model::identity::VirtAddr,
         model::wait::Wait,
     ] {
-        fallible fn unseal(mark: Mark, limits: HoleLimits) -> Result<PieToken, erra::Error<HoleFail>> =
+        fallible fn unseal(mark: Mark, limits: CloneLimits) -> Result<PendId, erra::Error<CloneFail>> =
             op::Unseal { mark, limits };
-        fallible fn seal(token: PieToken) -> Result<(), erra::Error<HoleFail>> =
+        fallible fn seal(token: PendId) -> Result<(), erra::Error<CloneFail>> =
             op::Seal { token };
-        fallible fn push(token: PieToken, msg: VirtAddr, len: usize) -> Result<(), erra::Error<HoleFail>> =
+        fallible fn push(token: PendId, msg: VirtAddr, len: usize) -> Result<(), erra::Error<CloneFail>> =
             op::Push { token, msg, len };
-        fallible fn pull(token: PieToken, buf: VirtAddr, max: usize, oversize: Oversize) -> Result<PullOutcome, erra::Error<HoleFail>> =
+        fallible fn pull(token: PendId, buf: VirtAddr, max: usize, oversize: Oversize) -> Result<PullOutcome, erra::Error<CloneFail>> =
             op::Pull { token, buf, max, oversize };
-        fallible fn peek(token: PieToken) -> Result<(usize, TaskId, usize), erra::Error<HoleFail>> =
+        fallible fn peek(token: PendId) -> Result<(usize, TaskId, usize), erra::Error<CloneFail>> =
             op::Peek { token };
-        fallible fn wait(token: PieToken, condition: HoleCondition, millis: Wait) -> Result<bool, erra::Error<HoleFail>> =
+        fallible fn wait(token: PendId, condition: CloneCondition, millis: Wait) -> Result<bool, erra::Error<CloneFail>> =
             op::Wait { token, condition, millis };
-        fallible fn ring(token: PieToken) -> Result<(), erra::Error<HoleFail>> =
-            op::Ring { token };
-        fallible fn hush(token: PieToken) -> Result<(), erra::Error<HoleFail>> =
-            op::Hush { token };
     }
     memory [
         model::memory::AcquireSource,
         model::memory::FlatReference,
         abi::call::memory::MemoryFail,
-        model::identity::PieToken,
+
         model::identity::TeamId,
         model::memory::MappingControl,
         model::memory::MappingId,
         model::memory::MappingSelection,
         model::identity::VirtAddr,
     ] {
-        fallible fn acquire(source: AcquireSource, retention: PieToken) -> Result<FlatReference, erra::Error<MemoryFail>> =
+        fallible fn acquire(source: AcquireSource, retention: kernel_api::model::unit::ControlId) -> Result<FlatReference, erra::Error<MemoryFail>> =
             op::Acquire { source, retention };
         fallible fn release(reference: FlatReference) -> Result<(), erra::Error<MemoryFail>> =
             op::Release { reference };
@@ -73,77 +69,53 @@ typed_calls! {
             op::Detach { team, mapping, selection };
         fallible fn set_access(team: TeamId, mapping: MappingId, selection: MappingSelection, access: u64) -> Result<(), erra::Error<MemoryFail>> =
             op::SetAccess { team, mapping, selection, access };
-        fallible fn traverse(retention: PieToken, range: VirtAddr, out: VirtAddr) -> Result<(), erra::Error<MemoryFail>> =
+        fallible fn traverse(retention: kernel_api::model::unit::ControlId, range: VirtAddr, out: VirtAddr) -> Result<(), erra::Error<MemoryFail>> =
             op::Traverse { retention, range, out };
         fallible fn transfer(from: FlatReference, from_page: usize, to: FlatReference, to_page: usize) -> Result<(), erra::Error<MemoryFail>> =
             op::Transfer { from, from_page, to, to_page };
     }
-    nole [
-        abi::call::nole::NoleFail,
-        model::identity::PieToken,
-        model::wait::Wait,
-    ] {
-        fallible fn unseal() -> Result<PieToken, erra::Error<NoleFail>> =
-            op::Unseal;
-        fallible fn seal(token: PieToken) -> Result<(), erra::Error<NoleFail>> =
-            op::Seal { token };
-        fallible fn wait(token: PieToken, millis: Wait) -> Result<bool, erra::Error<NoleFail>> =
-            op::Wait { token, millis };
-        fallible fn ring(token: PieToken) -> Result<(), erra::Error<NoleFail>> =
-            op::Ring { token };
-        fallible fn hush(token: PieToken) -> Result<(), erra::Error<NoleFail>> =
-            op::Hush { token };
-    }
-    pie [
-        model::pie::GrantRange,
+    pend [
+        model::pend::PendRange,
         model::identity::Mark,
-        model::permission::Permission,
-        abi::call::pie::PieFail,
-        model::identity::PieToken,
-        model::pie::ReleaseMode,
+        model::modifiable::Modifiable,
+        abi::call::pend::PendFail,
+        model::identity::PendId,
+        model::pend::ReleaseMode,
         model::identity::TaskId,
         model::identity::VirtAddr,
     ] {
-        fallible fn accord(src: PieToken, dst: TaskId, subset: Permission, mark: Mark) -> Result<PieToken, erra::Error<PieFail>> =
+        fallible fn accord(src: PendId, dst: TaskId, subset: Modifiable, mark: Mark) -> Result<PendId, erra::Error<PendFail>> =
             op::Accord { src, dst, subset, mark };
-        fallible fn narrow(token: PieToken, subset: Permission) -> Result<(), erra::Error<PieFail>> =
+        fallible fn narrow(token: PendId, subset: Modifiable) -> Result<(), erra::Error<PendFail>> =
             op::Narrow { token, subset };
-        fallible fn revoke(dst: TaskId, token: PieToken) -> Result<(), erra::Error<PieFail>> =
+        fallible fn revoke(dst: TaskId, token: PendId) -> Result<(), erra::Error<PendFail>> =
             op::Revoke { dst, token };
-        fallible fn release(token: PieToken, mode: ReleaseMode) -> Result<(), erra::Error<PieFail>> =
+        fallible fn release(token: PendId, mode: ReleaseMode) -> Result<(), erra::Error<PendFail>> =
             op::Release { token, mode };
-        fallible fn inspect(token: PieToken, buf: VirtAddr) -> Result<(), erra::Error<PieFail>> =
+        fallible fn inspect(token: PendId, buf: VirtAddr) -> Result<(), erra::Error<PendFail>> =
             op::Inspect { token, buf };
-        fallible fn collect(after: PieToken, buf: VirtAddr, capacity: usize) -> Result<usize, erra::Error<PieFail>> =
+        fallible fn collect(after: PendId, buf: VirtAddr, capacity: usize) -> Result<usize, erra::Error<PendFail>> =
             op::Collect { after, buf, capacity };
-        fallible fn same(a: PieToken, b: PieToken) -> Result<bool, erra::Error<PieFail>> =
+        fallible fn same(a: PendId, b: PendId) -> Result<bool, erra::Error<PendFail>> =
             op::Same { a, b };
-        fallible fn derive(src: PieToken, subset: Permission, mark: Mark, range: GrantRange) -> Result<PieToken, erra::Error<PieFail>> =
+        fallible fn derive(src: PendId, subset: Modifiable, mark: Mark, range: PendRange) -> Result<PendId, erra::Error<PendFail>> =
             op::Derive { src, subset, mark, range };
     }
-    pole [
-        model::pole::Bit,
+    share_view [
+        model::modifiable::Modifiable,
         model::memory::FlatReference,
-        model::identity::PieToken,
-        model::pole::PoleCondition,
-        abi::call::pole::PoleFail,
+        model::identity::PendId,
+        abi::call::share_view::ShareFail,
         model::identity::VirtAddr,
-        model::wait::Wait,
     ] {
-        fallible fn unseal(reference: FlatReference, shared: bool) -> Result<PieToken, erra::Error<PoleFail>> =
-            op::Unseal { reference, shared };
-        fallible fn seal(token: PieToken) -> Result<(), erra::Error<PoleFail>> =
+        fallible fn unseal(reference: FlatReference, modifiable: Modifiable) -> Result<PendId, erra::Error<ShareFail>> =
+            op::Unseal { reference, modifiable };
+        fallible fn seal(token: PendId) -> Result<(), erra::Error<ShareFail>> =
             op::Seal { token };
-        fallible fn open(token: PieToken) -> Result<(VirtAddr, usize), erra::Error<PoleFail>> =
+        fallible fn open(token: PendId) -> Result<(VirtAddr, usize), erra::Error<ShareFail>> =
             op::Open { token };
-        fallible fn shut(token: PieToken) -> Result<(), erra::Error<PoleFail>> =
+        fallible fn shut(token: PendId) -> Result<(), erra::Error<ShareFail>> =
             op::Shut { token };
-        fallible fn wait(token: PieToken, condition: PoleCondition, millis: Wait) -> Result<bool, erra::Error<PoleFail>> =
-            op::Wait { token, condition, millis };
-        fallible fn ring(token: PieToken, bit: Bit) -> Result<(), erra::Error<PoleFail>> =
-            op::Ring { token, bit };
-        fallible fn hush(token: PieToken, bit: Bit) -> Result<(), erra::Error<PoleFail>> =
-            op::Hush { token, bit };
     }
     room [
         model::exit::Reason,
@@ -171,23 +143,20 @@ typed_calls! {
         fallible fn park_until(at: u64) -> Result<(), erra::Error<RoomFail>> =
             op::ParkUntil { at };
     }
-    tole [
-        model::identity::PieToken,
-        abi::reply::ToleAwaitReply,
-        model::tole::ToleEventSource,
-        abi::call::tole::ToleFail,
-        model::wait::Wait,
+    sign [
+        model::identity::TaskId, model::sign::{SignId, SignRights}, abi::reply::SignReply,
+        model::sign::SignSource, abi::call::sign::SignFail, model::wait::Wait,
     ] {
-        fallible fn unseal(shared: bool) -> Result<PieToken, erra::Error<ToleFail>> =
-            op::Unseal { shared };
-        fallible fn seal(token: PieToken) -> Result<(), erra::Error<ToleFail>> =
-            op::Seal { token };
-        fallible fn attach(tole: PieToken, source: ToleEventSource) -> Result<(), erra::Error<ToleFail>> =
-            op::Attach { tole, source };
-        fallible fn detach(tole: PieToken, source: ToleEventSource) -> Result<(), erra::Error<ToleFail>> =
-            op::Detach { tole, source };
-        fallible fn await_(tole: PieToken, millis: Wait) -> Result<ToleAwaitReply, erra::Error<ToleFail>> =
-            op::Await { tole, millis };
+        fallible fn next(after: usize) -> Result<(usize, usize), erra::Error<SignFail>> = op::Next { after };
+        fallible fn create() -> Result<SignId, erra::Error<SignFail>> = op::Create;
+        fallible fn close(token: SignId) -> Result<(), erra::Error<SignFail>> = op::Close { token };
+        fallible fn listen(token: SignId, millis: Wait) -> Result<SignReply, erra::Error<SignFail>> = op::Listen { token, millis };
+        fallible fn trigger(token: SignId) -> Result<(), erra::Error<SignFail>> = op::Trigger { token };
+        fallible fn consume(token: SignId) -> Result<(), erra::Error<SignFail>> = op::Consume { token };
+        fallible fn route(token: SignId, source: SignSource) -> Result<(), erra::Error<SignFail>> = op::Route { token, source };
+        fallible fn unroute(token: SignId, source: SignSource) -> Result<(), erra::Error<SignFail>> = op::Unroute { token, source };
+        fallible fn delegate(token: SignId, target: TaskId, rights: SignRights) -> Result<SignId, erra::Error<SignFail>> = op::Delegate { token, target, rights };
+        fallible fn release(token: SignId) -> Result<(), erra::Error<SignFail>> = op::Release { token };
     }
     device [model::identity::TeamId, model::memory::FlatReference, abi::call::device::DeviceFail] {
         fallible fn fault(device: usize) -> Result<(usize, usize), erra::Error<DeviceFail>> = op::Fault { device };
@@ -203,7 +172,7 @@ typed_calls! {
     }
     unit [
         model::unit::JoinReply,
-        model::identity::PieToken,
+
         model::unit::ProgramKind,
         model::identity::TaskId,
         model::identity::TeamId,
@@ -234,9 +203,14 @@ typed_calls! {
             op::Sire;
         fallible fn fall(millis: Wait) -> Result<bool, erra::Error<UnitFail>> =
             op::Fall { millis };
-        fallible fn guard(team: TeamId, authority: PieToken) -> Result<(), erra::Error<UnitFail>> =
+        fallible fn finish(team: TeamId) -> Result<(), erra::Error<UnitFail>> = op::Finish { team };
+        terminal fn return_(value: usize) -> ! = op::Return { value };
+        fallible fn read_result(task: TaskId) -> Result<(usize, usize), erra::Error<UnitFail>> = op::ReadResult { task };
+        fallible fn delegate_control(authority: kernel_api::model::unit::ControlId, target: TaskId, delegable: bool) -> Result<kernel_api::model::unit::ControlId, erra::Error<UnitFail>> = op::DelegateControl { authority, target, delegable };
+        fallible fn release_control(authority: kernel_api::model::unit::ControlId) -> Result<(), erra::Error<UnitFail>> = op::ReleaseControl { authority };
+        fallible fn guard(team: TeamId, authority: kernel_api::model::unit::ControlId) -> Result<(), erra::Error<UnitFail>> =
             op::Guard { team, authority };
-        fallible fn unguard(team: TeamId, authority: PieToken) -> Result<(), erra::Error<UnitFail>> =
+        fallible fn unguard(team: TeamId, authority: kernel_api::model::unit::ControlId) -> Result<(), erra::Error<UnitFail>> =
             op::Unguard { team, authority };
         infallible fn creator() -> TaskId =
             op::Creator;

@@ -1,3 +1,4 @@
+use crate::core::memory::cell::Owner;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::MaybeUninit;
@@ -41,6 +42,7 @@ fn write_args(space: &Space, at: VirtAddr, args: &[usize]) {
 /// 装配一个任务：起一个外壳、栈与参数，再交给 `PreparedTask` 等着公开。
 pub struct TaskBuilder {
     team: Arc<Team>,
+    controller: kernel_api::model::identity::TaskId,
     entry: VirtAddr,
     args: Vec<usize>,
     stack: usize,
@@ -53,11 +55,17 @@ impl TaskBuilder {
             e => VirtAddr::from_raw(e),
         };
         TaskBuilder {
+            controller: team.creator,
             team,
             entry,
             args: Vec::new(),
             stack: TASK_STACK_SIZE,
         }
+    }
+
+    pub(crate) fn controller(mut self, controller: kernel_api::model::identity::TaskId) -> Self {
+        self.controller = controller;
+        self
     }
 
     pub fn args(mut self, args: Vec<usize>) -> TaskBuilder {
@@ -110,11 +118,11 @@ impl TaskBuilder {
         for page in 0..stack_size / PAGE_SIZE {
             indexed.push((
                 PageIndex::new(page),
-                crate::core::memory::flat::allocate_cell()?,
+                crate::core::memory::flat::allocate_cell(self.team.cells.clone())?,
             ));
         }
         let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;
-        let source = Flat::from_cells(count, indexed)?.whole();
+        let source = Flat::from_cells(self.team.cells.clone(), count, indexed)?.whole();
         let slot = nest.reserve(Placement::highest(
             RegionId::Normal,
             stack_size + crate::machine::layout::TASK_STACK_GUARD,
@@ -126,14 +134,19 @@ impl TaskBuilder {
         let rw = Access::READ | Access::WRITE;
         memory.stack = Some(nest.attach(body, source, rw, rw)?);
 
-        let frame = crate::core::memory::flat::allocate_cell()?;
+        let frame = crate::core::memory::flat::allocate_cell(Owner::Kernel)?;
         let frame_pa = PhysAddr::from_raw(frame.physical_address());
         let mut indexed = Vec::new();
         indexed
             .try_reserve_exact(1)
             .map_err(|_| NestError::OutOfMemory)?;
         indexed.push((PageIndex::ZERO, frame));
-        let source = Flat::from_cells(PageCount::new(1).expect("one frame"), indexed)?.whole();
+        let source = Flat::from_cells(
+            Owner::Kernel,
+            PageCount::new(1).expect("one frame"),
+            indexed,
+        )?
+        .whole();
         let reservation =
             nest.reserve(Placement::lowest(RegionId::Kernel, PAGE_SIZE, PAGE_SIZE)?)?;
         let frame_va = reservation.start();
@@ -174,7 +187,7 @@ impl TaskBuilder {
             let ident = crate::tag!(
                 Task,
                 Arc::try_new_in(
-                    TaskIdent::new(id, self.team.clone(), frame_pa, memory,),
+                    TaskIdent::new(id, self.controller, self.team.clone(), frame_pa, memory),
                     alloc,
                 )
             )

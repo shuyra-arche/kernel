@@ -1,3 +1,4 @@
+use crate::core::memory::cell::Owner;
 use alloc::alloc::Allocator;
 use alloc::boxed::Box;
 
@@ -72,14 +73,15 @@ pub fn allocator() -> &'static dyn Allocator {
 }
 
 /// 分配器一侧分配并清零 RAM，再将唯一归还凭证交给 Cell。
-pub(crate) fn cell() -> Result<Cell, FlatError> {
+pub(crate) fn cell(owner: Owner) -> Result<Cell, FlatError> {
     let allocator: &'static (dyn Allocator + Sync) = instance();
     let page: InternalPage = crate::tag!(Plain, unsafe {
         Box::try_new_zeroed_in(allocator)
             .map_err(|_| FlatError::OutOfMemory)?
             .assume_init()
     });
-    Cell::from_internal(page).map_err(|error| match error {
+    Cell::from_internal(owner, page).map_err(|error| match error {
+        CellError::InvalidOwner => FlatError::OutOfRange,
         CellError::InvalidRange => FlatError::NotAligned,
         CellError::IdentityExhausted => FlatError::OutOfMemory,
     })

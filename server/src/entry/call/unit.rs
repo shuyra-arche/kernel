@@ -60,6 +60,77 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
         return Outcome::fail(frame, UnitFail::Denied);
     };
     match call {
+        UnitCall::Finish { team } => {
+            let Some(target) = me.clan(team) else {
+                return Outcome::fail(frame, UnitFail::Denied);
+            };
+            target.finish();
+            frame.gpr.set_x(Gprs::A0, 0);
+        }
+        UnitCall::Return { value } => {
+            {
+                let _commit = crate::core::work::commit();
+                let mut state = me.state.lock();
+                if !state.is_dead() {
+                    state.doom(None, crate::core::work::unit::task::TaskExitCause::Reap, 0);
+                    drop(state);
+                    let member = me
+                        .ident
+                        .team
+                        .life
+                        .member(me.ident.id)
+                        .expect("published Task member");
+                    *member.result.lock() = Some(value);
+                }
+            }
+            crate::core::work::unit::lifecycle::set_exit_note(0, 0);
+            crate::core::work::unit::lifecycle::set_exit_reason(0);
+            drop(me);
+            drop(ident);
+            return Outcome::Exit;
+        }
+        UnitCall::ReadResult { task } => {
+            let result = (|| {
+                let _commit = crate::core::work::commit();
+                let selected = crate::core::work::unit::join::observe(&me, UnitTarget::Task(task))?;
+                let crate::core::work::unit::join::JoinTarget::Task(member) = selected else {
+                    unreachable!()
+                };
+                if !member.pending(me.ident.id) {
+                    return Err(UnitFail::Denied);
+                }
+                if member.exit().is_none() {
+                    return Err(UnitFail::Busy);
+                }
+                Ok(member.result.lock().map_or((0, 0), |value| (1, value)))
+            })();
+            super::outcome::answer_pair(frame, result);
+        }
+
+        UnitCall::DelegateControl {
+            authority,
+            target,
+            delegable,
+        } => {
+            let result = muster(target)
+                .and_then(|weak| weak.upgrade())
+                .ok_or(UnitFail::Denied)
+                .and_then(|target| {
+                    crate::core::work::unit::control::delegate(&me, &target, authority, delegable)
+                });
+            match result {
+                Ok(id) => frame.gpr.set_x(Gprs::A0, id.get()),
+                Err(error) => return Outcome::fail(frame, error),
+            }
+        }
+        UnitCall::ReleaseControl { authority } => {
+            let _commit = crate::core::work::commit();
+            match me.administration.release(authority) {
+                Ok(()) => frame.gpr.set_x(Gprs::A0, 0),
+                Err(error) => return Outcome::fail(frame, error),
+            }
+        }
+
         UnitCall::Spawn {
             team,
             entry,
@@ -86,20 +157,16 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
         UnitCall::Build { kind, sire } => {
             if kind == kernel_api::model::unit::ProgramKind::Supervisor
                 && !ident.team.space.kind().is_supervisor()
-                || !crate::core::work::pend::allows(
-                    &me,
-                    &crate::core::work::mail::Mail::Nole(super::resources::get().build.clone()),
-                    crate::core::work::pend::Need::Fetch,
-                )
+                || !me
+                    .administration
+                    .allows(kernel_api::model::unit::ControlKind::Build)
             {
                 return Outcome::fail(frame, UnitFail::Denied);
             }
             let Some(parent) = muster(sire).and_then(|w| w.upgrade()) else {
                 return Outcome::fail(frame, UnitFail::Denied);
             };
-            if parent.dead()
-                || parent.ident.team.id != ident.team.id && me.clan(parent.ident.team.id).is_none()
-            {
+            if parent.dead() || parent.ident.id != me.ident.id {
                 return Outcome::fail(frame, UnitFail::Denied);
             }
             let sire = TaskWeak::stored(Arc::downgrade(&parent), Origin::Sire);
@@ -216,8 +283,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                     let Some(task) = muster(id).and_then(|w| w.upgrade()) else {
                         return Outcome::fail(frame, UnitFail::Denied);
                     };
-                    if task.ident.team.id != ident.team.id && me.clan(task.ident.team.id).is_none()
-                    {
+                    if !crate::core::work::unit::control::manages(&me, &task) {
                         return Outcome::fail(frame, UnitFail::Denied);
                     }
                     match call {

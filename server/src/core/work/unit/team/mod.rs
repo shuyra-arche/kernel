@@ -11,13 +11,11 @@ use crate::core::work::unit::space::Space;
 use crate::core::work::unit::task::{Task, TaskBuilder, TaskState, TaskWeak};
 use crate::machine::sync::{SpinLock, SpinLockGuard};
 
-use lease::StagingLease;
-
+mod admission;
 mod builder;
 mod construct;
 pub(crate) mod exit;
 mod kernel;
-mod lease;
 pub(super) mod life;
 mod member;
 mod oust;
@@ -25,7 +23,6 @@ mod phase;
 mod receipt;
 mod spawn;
 mod stage;
-mod staging;
 mod state;
 mod tasks;
 
@@ -37,7 +34,6 @@ pub(crate) use phase::TeamPhase;
 pub(crate) use receipt::Receipt;
 pub(crate) use spawn::spawn;
 pub(crate) use stage::TeamStage;
-pub(crate) use staging::Staging;
 pub(crate) use state::TeamState;
 pub(crate) use tasks::Tasks;
 
@@ -49,6 +45,7 @@ pub(crate) const MAX_CHILDREN: usize = 1024;
 pub struct Team {
     pub(crate) space: Arc<Space>,
     pub(crate) id: TeamId,
+    pub(crate) cells: crate::core::memory::cell::Owner,
     pub(crate) sire: TaskWeak,
     pub(crate) creator: TaskId,
     pub(crate) state: Arc<SpinLock<TeamState>>,
@@ -156,75 +153,8 @@ impl Team {
         self.state.lock().constructing()
     }
 
-    /// 为暂存表留出容量。
-    ///
-    /// 扩容要向分配器取块，而状态锁是 `UnitState`（锁序里在分配器之后）：
-    /// 所以把表摘下来在锁外扩容，再整表换回去；锁内只换表，不碰分配器。
-    pub(crate) fn reserve_staging(&self, extra: usize) -> Result<(), NestError> {
-        let mut staged = self.state.lock().take_staging();
-        if staged.try_reserve(extra).is_err() {
-            let shell = self.state.lock().swap_staging(staged);
-            drop(shell);
-            return Err(NestError::OutOfMemory);
-        }
-        let shell = self.state.lock().swap_staging(staged);
-        drop(shell);
-        Ok(())
-    }
-
-    pub(crate) fn push_staging(&self, item: Staging) {
-        self.state.lock().push_staging(item);
-    }
-
-    pub(crate) fn find_staging(&self, hit: impl FnMut(&Staging) -> bool) -> Option<usize> {
-        self.state.lock().find_staging(hit)
-    }
-
-    pub(crate) fn staged_at(&self, index: usize) -> Option<Staging> {
-        self.state.lock().staged_at(index)
-    }
-
-    pub(crate) fn remove_staging(&self, index: usize) {
-        self.state.lock().remove_staging(index);
-    }
-
-    fn take_staging(&self) -> Vec<Staging> {
-        self.state.lock().take_staging()
-    }
-
-    /// 把租约摘走的暂存项还回团队。
-    ///
-    /// 合并与扩容同样在锁外做：锁内只换表。
-    fn restore_staging(&self, mut items: Vec<Staging>) {
-        let mut current = self.state.lock().take_staging();
-        if !current.is_empty() {
-            current.extend(items);
-            items = current;
-        }
-        let shell = self.state.lock().swap_staging(items);
-        drop(shell);
-    }
-
     pub(crate) fn operation(&self) -> Option<SpinLockGuard<'_, ()>> {
         self.operation.try_lock()
-    }
-
-    pub(crate) fn cancel_staging(&self) -> Result<(), NestError> {
-        let mut staged = StagingLease::hold(self);
-        while let Some(item) = staged.items.last() {
-            self.space.nest.retry_invalidation()?;
-            let id = item.mapping.identity();
-            if !self.space.nest.settled(id) {
-                self.space.withdraw(item.mapping.whole())?;
-            }
-            self.space.retire_mapping(id);
-            item.meta.detach_staging(item.token, self.id);
-            let owner = item.meta.owner();
-            let token = item.token;
-            staged.items.pop();
-            crate::core::work::pend::notify(owner, token);
-        }
-        Ok(())
     }
 
     pub(crate) fn retire(&self) -> Result<(), NestError> {
@@ -236,6 +166,7 @@ impl Team {
             }
             // CPU/task cleanup may fail later. DMA retirement must not depend
             // on those steps succeeding or on this Team being dropped.
+            self.cells.close();
             self.space.dma.close();
             self.life.visit(&mut |node| {
                 let mut state = node.state.lock();
@@ -254,13 +185,23 @@ impl Team {
                 task.retire()?;
             }
         }
-        self.cancel_staging()?;
         self.space.retire()
     }
 
     pub(crate) fn prune_tasks(&self) {
         let _commit = commit();
         self.life.prune();
+    }
+
+    /// Fix the completion cohort: existing members keep their execution states,
+    /// while new members and descendant Teams can no longer enter this subtree.
+    pub(crate) fn finish(&self) {
+        let _commit = commit();
+        self.life.visit(&mut |node| {
+            let mut state = node.state.lock();
+            state.admission = state.admission.finish();
+        });
+        self.life.notify();
     }
 
     pub(crate) fn all_reaped(&self) -> bool {
@@ -328,7 +269,7 @@ impl Team {
 
 impl Drop for Team {
     fn drop(&mut self) {
-        self.cancel_staging().expect("team staging release");
+        self.cells.close();
         let _commit = commit();
         self.state.lock().phase = TeamPhase::Ousted;
         self.life.prune();

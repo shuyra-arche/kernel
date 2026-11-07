@@ -8,7 +8,7 @@ use crate::core::memory::nest::Mapping;
 use crate::core::work::pend::SourceAuthorization;
 use crate::machine::sync::SpinLock;
 use kernel_api::{
-    abi::call::pie::PieFail, model::identity::PieToken, model::identity::TaskId,
+    abi::call::pend::PendFail, model::identity::PendId, model::identity::TaskId,
     model::memory::MappingControl,
 };
 
@@ -36,8 +36,8 @@ impl MappingRegistry {
         controller: TaskId,
         scope: MappingControl,
         source: Arc<SourceAuthorization>,
-        branch: Option<PieToken>,
-    ) -> Result<(), PieFail> {
+        branch: Option<PendId>,
+    ) -> Result<(), PendFail> {
         let control = MappingControlRecord::new(controller, scope, branch)?;
         self.claim_entry(id, space, source, Some(control))
     }
@@ -47,7 +47,7 @@ impl MappingRegistry {
         id: usize,
         space: &Arc<Space>,
         source: Arc<SourceAuthorization>,
-    ) -> Result<(), PieFail> {
+    ) -> Result<(), PendFail> {
         self.claim_entry(id, space, source, None)
     }
 
@@ -57,15 +57,15 @@ impl MappingRegistry {
         space: &Arc<Space>,
         source: Arc<SourceAuthorization>,
         control: Option<Arc<MappingControlRecord>>,
-    ) -> Result<(), PieFail> {
+    ) -> Result<(), PendFail> {
         let _commit = crate::core::work::commit();
         let binding = MappingBinding::new(id, space)?;
         {
             let mut entries = self.entries.lock();
             if entries.iter().any(|entry| entry.binding.id() == id) {
-                return Err(PieFail::Busy);
+                return Err(PendFail::Busy);
             }
-            entries.try_reserve(1).map_err(|_| PieFail::OoM)?;
+            entries.try_reserve(1).map_err(|_| PendFail::OoM)?;
         }
         source.reserve_binding()?;
         source.register_binding(binding.clone());
@@ -126,53 +126,20 @@ impl MappingRegistry {
         Some(entries.remove(at))
     }
 
-    /// 转交显式控制记录，CPU 关系身份与来源成员不变。
-    /// 两把短锁不重叠，保持发布段的持锁预算。
-    pub(crate) fn hand_over(&self, id: usize, controller: TaskId) {
-        let control = {
-            let entries = self.entries.lock();
-            entries
-                .iter()
-                .find(|entry| entry.binding.id() == id && entry.mapping.is_some())
-                .expect("prepared staged mapping")
-                .control
-                .as_ref()
-                .expect("staged mapping control")
-                .clone()
-        };
-        control.hand_over(controller);
-    }
-
     /// 分支改指：只改这一份来源自己那些仍带着被忘掉那枚 token 的记录。
     ///
     /// 授权快照与控制身份都不动——这里只改历史分支索引。
-    pub(crate) fn retarget_branch(
-        &self,
-        source: &Arc<SourceAuthorization>,
-        forgotten: PieToken,
-        parent: PieToken,
-    ) {
-        let entries = self.entries.lock();
-        for entry in entries
-            .iter()
-            .filter(|entry| Arc::ptr_eq(&entry.source, source))
-        {
-            if let Some(control) = &entry.control {
-                control.retarget(forgotten, parent);
-            }
-        }
-    }
 
     /// 一份来源名下已登记的项（撤销时取出，在锁外关）。
     pub(crate) fn owned_by(
         &self,
         source: &Arc<SourceAuthorization>,
-    ) -> Result<Vec<MappingEntry>, PieFail> {
+    ) -> Result<Vec<MappingEntry>, PendFail> {
         let entries = self.entries.lock();
         let mut result = Vec::new();
         result
             .try_reserve(entries.len())
-            .map_err(|_| PieFail::OoM)?;
+            .map_err(|_| PendFail::OoM)?;
         result.extend(
             entries
                 .iter()

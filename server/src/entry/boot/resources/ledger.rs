@@ -1,4 +1,4 @@
-use kernel_api::{abi::call::pie::PieFail, boot::ledger::Entry};
+use kernel_api::{abi::call::pend::PendFail, boot::ledger::Entry};
 use kernel_api::{boot::ledger::Header, boot::ledger::store_entries};
 
 pub(crate) const BLOCK_BYTES: usize = crate::core::memory::PAGE_SIZE;
@@ -10,25 +10,25 @@ static BLOCK: Block = Block(::core::cell::UnsafeCell::new([0; BLOCK_BYTES]));
 pub(crate) fn block() -> (usize, usize) {
     (::core::ptr::addr_of!(BLOCK) as usize, BLOCK_BYTES)
 }
-pub(crate) fn size(count: usize) -> Result<usize, PieFail> {
+pub(crate) fn size(count: usize) -> Result<usize, PendFail> {
     let len = count
         .checked_mul(kernel_api::boot::ledger::ENTRY_LEN)
         .and_then(|n| n.checked_add(Header::LEN))
-        .ok_or(PieFail::OoM)?;
+        .ok_or(PendFail::OoM)?;
     if len > BLOCK_BYTES {
-        return Err(PieFail::OoM);
+        return Err(PendFail::OoM);
     }
     Ok(len)
 }
-pub(crate) fn write(entries: &[Entry]) -> Result<usize, PieFail> {
+pub(crate) fn write(entries: &[Entry]) -> Result<usize, PendFail> {
     if entries.iter().any(|entry| !entry.valid()) {
-        return Err(PieFail::Denied);
+        return Err(PendFail::Denied);
     }
     let len = size(entries.len())?;
     let out = unsafe { &mut *BLOCK.0.get() };
-    let end = store_entries(out, entries).ok_or(PieFail::Denied)?;
+    let end = store_entries(out, entries).ok_or(PendFail::Denied)?;
     if end != len {
-        return Err(PieFail::Denied);
+        return Err(PendFail::Denied);
     }
     Ok(len)
 }

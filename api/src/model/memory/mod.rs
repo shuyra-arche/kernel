@@ -2,6 +2,7 @@
 
 mod acquire_source;
 mod allocation;
+mod cell_owner;
 mod flat_reference;
 mod mapping_control;
 mod mapping_id;
@@ -13,6 +14,7 @@ mod reference_range;
 
 pub use acquire_source::AcquireSource;
 pub use allocation::Allocation;
+pub use cell_owner::CellOwner;
 pub use flat_reference::FlatReference;
 pub use mapping_control::MappingControl;
 pub use mapping_id::MappingId;

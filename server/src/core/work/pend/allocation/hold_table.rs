@@ -11,7 +11,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::core::memory::address::{PageCount, PageOffset};
 use crate::core::memory::nest::Access;
 use crate::machine::sync::SpinLock;
-use kernel_api::abi::call::pie::PieFail;
+use kernel_api::abi::call::pend::PendFail;
 
 use super::hold::Hold;
 use super::independent::IndependentHold;
@@ -22,9 +22,9 @@ pub(crate) struct HoldTable {
 }
 
 /// 铸一个全局唯一的引用号；耗尽（或超出符号上界）即明确失败，不回收旧号。
-fn next_id() -> Result<usize, PieFail> {
+fn next_id() -> Result<usize, PendFail> {
     static NEXT: AtomicUsize = AtomicUsize::new(1);
-    crate::machine::sync::next_id(&NEXT).ok_or(PieFail::OoM)
+    crate::machine::sync::next_id(&NEXT).ok_or(PendFail::OoM)
 }
 
 impl HoldTable {
@@ -43,17 +43,17 @@ impl HoldTable {
         ceiling: Access,
         retained: Option<IndependentHold>,
         branch: Option<(
-            kernel_api::model::identity::PieToken,
-            Arc<crate::core::work::grant::Grant>,
+            kernel_api::model::identity::PendId,
+            Arc<crate::core::work::pend::authority::Pend>,
         )>,
-    ) -> Result<usize, PieFail> {
+    ) -> Result<usize, PendFail> {
         let mut holds = self.holds.lock();
-        holds.try_reserve(1).map_err(|_| PieFail::OoM)?;
+        holds.try_reserve(1).map_err(|_| PendFail::OoM)?;
         let id = next_id()?;
         let hold = Arc::try_new(Hold::new(
             id, source, offset, count, ceiling, retained, branch,
         ))
-        .map_err(|_| PieFail::OoM)?;
+        .map_err(|_| PendFail::OoM)?;
         if !hold.retains() {
             hold.source().claim_hold();
         }

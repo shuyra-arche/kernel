@@ -121,8 +121,12 @@ fn protected_configuration_and_aliases_are_withheld_before_boot_grants() {
     let bytes = root.encode();
     let fdt = fdt::Fdt::new(&bytes).unwrap();
     let plan = Plan::discover(&fdt, 0x80000000, 0x10000000).unwrap();
-    let grants: Vec<_> = plan.grants().iter().map(|r| (r.base, r.size)).collect();
-    assert_eq!(grants, [(0x40000000, 0x100000)]);
+    let authorities: Vec<_> = plan
+        .authorities()
+        .iter()
+        .map(|r| (r.base, r.size))
+        .collect();
+    assert_eq!(authorities, [(0x40000000, 0x100000)]);
 }
 
 #[test]
@@ -144,7 +148,7 @@ fn disabled_hosts_have_no_route_and_still_cannot_export_configuration() {
     assert!(
         Plan::discover(&fdt, 0x80000000, 0x10000000)
             .unwrap()
-            .grants()
+            .authorities()
             .is_empty()
     );
 }
@@ -173,7 +177,7 @@ fn protected_bar_windows_and_plic_aliases_never_reach_units() {
     let fdt = fdt::Fdt::new(&bytes).unwrap();
     let plan = Plan::discover(&fdt, 0x80000000, 0x10000000).unwrap();
     assert_eq!(
-        plan.grants()
+        plan.authorities()
             .iter()
             .map(|r| (r.base, r.size))
             .collect::<Vec<_>>(),

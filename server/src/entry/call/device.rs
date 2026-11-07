@@ -1,10 +1,7 @@
 use super::outcome::answer_pair;
+use crate::core::work::pend;
 use crate::core::work::room::scheduler::roster::muster;
-use crate::core::work::{
-    mail::Mail,
-    pend::{self, Need},
-    unit::task::TaskIdent,
-};
+use crate::core::work::unit::task::TaskIdent;
 use crate::machine::{device, switcher::context::TrapContext};
 use alloc::sync::Arc;
 use kernel_api::abi::call::device::{DeviceCall, DeviceFail};
@@ -36,11 +33,10 @@ fn execute(call: DeviceCall, ident: &Arc<TaskIdent>) -> Result<(usize, usize), D
     if matches!(
         call,
         DeviceCall::Scan { .. } | DeviceCall::Claim { .. } | DeviceCall::Observe { .. }
-    ) && !pend::allows_locked(
-        &me,
-        &Mail::Nole(super::resources::get().device.clone()),
-        Need::Fetch,
-    ) {
+    ) && !me
+        .administration
+        .allows(kernel_api::model::unit::ControlKind::Device)
+    {
         return Err(DeviceFail::Denied);
     }
     let owner = &ident.team.space.dma;
@@ -58,14 +54,13 @@ fn execute(call: DeviceCall, ident: &Arc<TaskIdent>) -> Result<(usize, usize), D
                 .references
                 .get(reference.get())
                 .ok_or(DeviceFail::Denied)?;
-            let borrow =
-                pend::ExternalBorrow::prepare(&hold, ident.id, modifiable).map_err(|error| {
-                    match error {
-                        kernel_api::abi::call::pie::PieFail::OoM => DeviceFail::OoM,
-                        kernel_api::abi::call::pie::PieFail::Busy => DeviceFail::Busy,
-                        _ => DeviceFail::Denied,
-                    }
-                })?;
+            let borrow = pend::ExternalBorrow::prepare(&hold, &me, modifiable).map_err(
+                |error| match error {
+                    kernel_api::abi::call::pend::PendFail::OoM => DeviceFail::OoM,
+                    kernel_api::abi::call::pend::PendFail::Busy => DeviceFail::Busy,
+                    _ => DeviceFail::Denied,
+                },
+            )?;
             device::publish(id, owner, borrow, iova, modifiable).map_err(failure)?;
             Ok((0, 0))
         }
