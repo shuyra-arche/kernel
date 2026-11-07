@@ -2,13 +2,13 @@ use crate::iommu::riscv::registers::*;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
-pub struct Device(pub Arc<Mutex<[u64; 16]>>);
+pub struct Device(pub Arc<Mutex<[u64; 16]>>, pub usize);
 
 impl Device {
     pub fn new() -> Self {
         let mut words = [0; 16];
         words[CAP / 8] = 0x10 | (56u64 << 32) | (1 << 9) | (1 << 22);
-        Self(Arc::new(Mutex::new(words)))
+        Self(Arc::new(Mutex::new(words)), 0x3010000)
     }
 
     pub fn set32(&self, offset: usize, value: u32) {
@@ -41,6 +41,9 @@ impl Device {
 // SAFETY: test-owned storage and serialized access emulate coherent MMIO. The
 // fixture makes no claim about real DMA quiescence and is not a Hardware adapter.
 unsafe impl Registers for Device {
+    fn physical_base(&self) -> usize {
+        self.1
+    }
     fn read32(&self, offset: usize) -> u32 {
         (self.0.lock().unwrap()[offset / 8] >> ((offset % 8) * 8)) as u32
     }

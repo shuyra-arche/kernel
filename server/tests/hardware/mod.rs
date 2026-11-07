@@ -101,6 +101,13 @@ fn iommu_on_real_qemu_registers() {
             true,
         ),
         ("missing", "virt", "", "IOMMU missing", false),
+        (
+            "route-reject",
+            "virt,iommu-sys=on",
+            "route-reject",
+            "PASS iommu-binding rejected=1 returned=8",
+            true,
+        ),
     ] {
         let mut command = Command::new(&qemu);
         command
@@ -112,7 +119,7 @@ fn iommu_on_real_qemu_registers() {
             .args(["-nographic", "-monitor", "none", "-nic", "none"]);
         if matches!(
             name,
-            "dma" | "readonly" | "dma-abandon" | "owner-exit" | "activation-exit"
+            "dma" | "readonly" | "dma-abandon" | "owner-exit" | "activation-exit" | "route-reject"
         ) {
             command.args([
                 "-device",
