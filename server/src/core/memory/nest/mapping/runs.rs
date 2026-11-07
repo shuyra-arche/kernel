@@ -1,8 +1,6 @@
-use alloc::sync::Arc;
-
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PhysAddr, VirtAddr};
-use crate::core::memory::cell::Cell;
+use crate::core::memory::cell::Retention;
 use crate::core::memory::nest::NestError;
 use crate::core::memory::nest::mapping::{Access, ActiveRange};
 
@@ -14,7 +12,7 @@ use super::run::CellRun;
 /// 段起点虚拟地址为 `base + 帧页号 * PAGE_SIZE`；任一帧不在任何区间内 ⇒ NoRegion。
 pub(in crate::core::memory::nest) struct CellRuns<'a> {
     base: VirtAddr,
-    cells: &'a [(usize, Arc<Cell>)],
+    cells: &'a [(usize, Retention)],
     active: &'a [ActiveRange],
     at: usize,
 }
@@ -22,7 +20,7 @@ pub(in crate::core::memory::nest) struct CellRuns<'a> {
 impl<'a> CellRuns<'a> {
     pub(in crate::core::memory::nest) fn new(
         base: VirtAddr,
-        cells: &'a [(usize, Arc<Cell>)],
+        cells: &'a [(usize, Retention)],
         active: &'a [ActiveRange],
     ) -> Self {
         Self {

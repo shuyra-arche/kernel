@@ -4,14 +4,20 @@
 //! 在统一外部登记与 Unit 归属协议建立前，不把裸物理映射伪装成新的 Cell。
 
 mod identity;
+mod reclaim;
+mod retention;
 
 use alloc::alloc::Allocator;
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use core::cell::UnsafeCell;
+use core::mem::ManuallyDrop;
 
 use kernel_api::model::memory::PAGE_SIZE;
 
 pub(crate) use identity::CellId;
+pub(crate) use reclaim::RetainError;
+pub(crate) use retention::Retention;
 
 /// 分配器交出的唯一承载。构造 Cell 后只有 Cell 保留这份回收凭证。
 pub(crate) type InternalPage = Box<UnsafeCell<[u8; PAGE_SIZE]>, &'static (dyn Allocator + Sync)>;
@@ -24,13 +30,15 @@ pub(crate) enum CellError {
 
 /// 一个 Internal Cell；自身不可 Clone，建立槽后由 Arc<Cell> 保留同一实例。
 ///
-/// `page` 的析构是该承载唯一的物理归还出口。页槽、映射与退休记录
-/// 只负责持有或解除持有。保留记录的完备性仍由现有 Nest 失效协议保证，
-/// 不能把引用计数本身解释成硬件已静止或独占借用的证明。
+/// Cell 析构是该承载唯一的物理归还出口，还须通过自身硬件责任账目的判定。
+/// 页槽保留实例；Nest 在发布前登记硬件责任，在失效成功后显式结清。
+/// 丢失已发布责任会永久保留承载，不能把普通引用消失解释成硬件已静止。
+/// 此处尚未接入 DMA / External，也不证明独占借用或 Unit 归属。
 #[derive(Debug)]
 pub(crate) struct Cell {
     id: CellId,
-    page: InternalPage,
+    page: ManuallyDrop<InternalPage>,
+    reclaim: reclaim::Reclaim,
 }
 
 impl Cell {
@@ -43,7 +51,8 @@ impl Cell {
         }
         Ok(Self {
             id: CellId::allocate().ok_or(CellError::IdentityExhausted)?,
-            page,
+            page: ManuallyDrop::new(page),
+            reclaim: reclaim::Reclaim::new(),
         })
     }
 
@@ -57,6 +66,27 @@ impl Cell {
 
     pub(crate) fn as_mut_ptr(&self) -> *mut u8 {
         self.page.get().cast()
+    }
+
+    /// 先登记访问责任，再由调用方发布；登记失败不能继续建立硬件访问。
+    pub(crate) fn prepare_hardware(self: &Arc<Self>) -> Result<Retention, RetainError> {
+        Retention::prepare(self)
+    }
+
+    /// 只回答硬件责任是否允许物理归还；实际归还还要求持有已全部结束。
+    pub(crate) fn allows_return(&self) -> bool {
+        self.reclaim.allows_return()
+    }
+}
+
+impl Drop for Cell {
+    fn drop(&mut self) {
+        if self.allows_return() {
+            // SAFETY: Cell exclusively owns the allocation and no registered
+            // hardware obligation remains. This is its only physical return path.
+            unsafe { ManuallyDrop::drop(&mut self.page) };
+        }
+        // 无法证明安全时不执行 allocator deallocate，宁可保留物理容量。
     }
 }
 

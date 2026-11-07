@@ -17,6 +17,9 @@ pub(crate) mod index;
 #[path = "../../src/core/memory/flat/slot.rs"]
 mod slot;
 
+#[path = "../../src/core/memory/nest/synchronize/scope.rs"]
+mod scope;
+
 // Resolve production module paths using the real types, without loading the
 // RV64-specific address-space machinery into the host harness.
 mod core {
@@ -30,4 +33,5 @@ mod core {
 
 mod admission;
 mod ownership;
+mod retention;
 mod support;
