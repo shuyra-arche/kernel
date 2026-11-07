@@ -142,21 +142,40 @@ fn compound_field_widths_match_their_actual_register_consumption() {
 }
 
 #[test]
-fn device_authority_is_not_an_address_and_event_tags_are_distinct() {
-    use kernel_api::{abi::call::device::operations::Publish, model::sign::SignSource};
-    assert_eq!(Publish::SLOT, (13usize << 32) | 5);
-    assert!(Publish::from_registers(&[1, 1, 0x400000, 2, 0, 0]).is_err());
+fn external_mapping_requires_a_target_pend_and_retired_device_abi_is_rejected() {
+    use kernel_api::{
+        abi::call::{EnvCall, memory::operations::Attach},
+        model::{
+            identity::{PendId, TeamId},
+            memory::{MappingId, MappingTarget},
+            sign::SignSource,
+        },
+    };
+    assert_eq!(Attach::SLOT, (2usize << 32) | 12);
+    for slot in 0..10 {
+        assert!(EnvCall::from_wire((13usize << 32) | slot, &[1; 6]).is_err());
+    }
+    for slot in [7, 8] {
+        assert!(EnvCall::from_wire((2usize << 32) | slot, &[1; 6]).is_err());
+    }
+    let token = PendId::mint(17);
+    let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
     for source in [
-        SignSource::DeviceRetired { device: 1 },
-        SignSource::DeviceFault { device: 1 },
+        SignSource::MappingRetired { token, mapping },
+        SignSource::MappingFault { token, mapping },
     ] {
         assert_eq!(SignSource::of(source.words()), Some(source));
         let mut words = source.words();
-        words[1] = 0;
+        words[2] = 0;
         assert_eq!(SignSource::of(words), None);
-        words = source.words();
-        words[2] = 1;
-        assert_eq!(SignSource::of(words), None);
+    }
+    assert!(SignSource::of([7, 1, 0]).is_none());
+    assert!(SignSource::of([8, 1, 0]).is_none());
+    use kernel_api::abi::register::Wire;
+    for target in [MappingTarget::Cpu(TeamId::new(0)), MappingTarget::Io(token)] {
+        let mut words = [0; 6];
+        target.pack(&mut words, &mut 0);
+        assert_eq!(MappingTarget::unpack(&words, &mut 0).unwrap(), target);
     }
 }
 

@@ -86,23 +86,44 @@ that all CPU/DMA reclamation work has finished.
 
 ## DMA boundary
 
-Kernel owns IOMMU register authority, trusted queue storage, mapping records,
-withdrawal and safe Cell reuse. Driver Units configure business DMA descriptors;
-business completion and FQ/PQ/CQ interrupts are not reclamation receipts.
-Kernel CQ progress checks the exact fence completion and platform quiescence.
-Driver exit or Pend revocation requests retirement independently of the Driver.
-DMA reborrows use the same Pend tree: read-only CPU and device access may coexist;
-a writable external borrow suspends its parent. Notifications follow committed
-state transitions and run outside the device registry lock.
+External access is an address projection, not a separate device work object.
+There is no DeviceCall, Device administrative qualification or work/device.
+A boot MMIO View is delegated with Pend; Driver Units map it through Share Open
+and perform their own register operations. Kernel never proxies business BAR
+reads or writes.
 
-The production adapter is intentionally bounded to coherent QEMU virt with the
-`qemu-edu-dma` feature, a protected EDU endpoint, one whole payload Cell and a
-one-shot domain. Boot routing validates controller/requester identity and rejects
-unsupported topology. ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough
-are not supported by this adapter. PQ remains disabled. Unsettled hardware errors
-retain storage; no timeout fabricates safe completion. The ordinary build does
-not enable business DMA. Physical hardware qualification and upper service
-migration remain separate work.
+Memory Attach/Detach select MappingTarget::Cpu(TeamId) or Io(PendId). The I/O
+Pend identifies a platform-bound MMIO View; a numeric address or ordinary RAM
+View cannot mint a route. Source Cells use the existing Pend borrow tree and
+Flat residency. Nest IoSpace retains mapping and fence obligations. Inspect
+returns mapping state and the first fault; Sign routes MappingRetired and
+MappingFault for that exact MappingId, rechecking target authority. Parent
+holders may observe while lending, but cannot use a suspended Pend to publish.
+
+External projection records in Unit Space join Pend obligations to Nest
+completion. They survive execution exit; source revocation, target revocation,
+explicit Detach and creator exit all close admission. A live I/O projection
+retains a routing obligation on its target Pend: ordinary BAR access remains
+available, while reborrowing or narrowing waits for hardware settlement. Cells remain External
+until the matching trusted completion settles. Notifications run after commit
+and registry locks are released. An interrupt or business completion is never a
+reclamation receipt. Failed synchronization retains the obligation.
+
+The platform adapter remains deliberately bounded to coherent QEMU virt under
+qemu-edu-dma: the explicitly configured EDU at bus 0/slot 1, one full payload
+Cell, exact IOVA and a one-shot domain. Bootstrap validates and sets up that
+fixture's BAR; this is not a general PCI enumerator or allocation policy.
+Protected PCI configuration, IOMMU registers, private queues, interrupts and
+platform quiescence stay in machine/iommu. ECAM and the surrounding aperture
+are withheld; only the validated BAR is exported as a Pend. General PCI policy
+belongs to upper Units. ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough
+remain unsupported; PQ is disabled. The normal build exports no such route.
+Settled mapping receipts are retained for this bounded one-shot deployment.
+
+ABI changes: Device class 13 and its event tags 7/8 are retired. Generalized
+Attach/Detach use slots 12/13; Inspect uses slot 14. Mapping events use tags 9/10.
+SetAccess remains CPU-only; an external mapping's access is fixed at publication.
+Upper product migration is deferred; the minimal real-Unit test is updated.
 
 ## Build and verification
 

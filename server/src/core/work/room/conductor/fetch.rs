@@ -54,7 +54,7 @@ fn wait() -> Option<usize> {
         }
         beacon::idle(me);
 
-        let device_pending = crate::machine::device::maintain();
+        let device_pending = crate::core::work::unit::space::external::maintain();
         let fallback = if beacon::shutting_down() || device_pending {
             BEACON_TICK
         } else {

@@ -178,3 +178,31 @@ impl Wire for MappingId {
         Ok(Self::new(v))
     }
 }
+
+impl Wire for crate::model::memory::MappingTarget {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        let raw = match *self {
+            Self::Cpu(team) => {
+                assert!(team.get() <= isize::MAX as usize);
+                team.get()
+            }
+            Self::Io(token) => {
+                assert!(token.get() > 0 && token.get() <= isize::MAX as usize);
+                token.get() | (1usize << (usize::BITS - 1))
+            }
+        };
+        raw.pack(s, i);
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let raw = usize::unpack(s, i)?;
+        let tag = 1usize << (usize::BITS - 1);
+        if raw & tag == 0 {
+            Ok(Self::Cpu(TeamId::new(raw)))
+        } else if raw != tag {
+            Ok(Self::Io(PendId::new(raw & !tag)))
+        } else {
+            Err(Decode::Invalid)
+        }
+    }
+}

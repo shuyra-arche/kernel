@@ -1,8 +1,4 @@
-use crate::device::{
-    Phase,
-    pci::{Config, Endpoint, Error},
-};
-use crate::iommu::retirement::Owner;
+use crate::pci::{Config, Endpoint, Error};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -56,36 +52,18 @@ unsafe impl Config for Pci {
 }
 
 #[test]
-fn ownership_config_and_bar_boundaries_share_one_admission() {
+fn mmio_decode_and_master_enable_are_distinct_hardware_effects() {
     let io = Pci::new();
-    let mut device = Endpoint::discover(io.clone()).unwrap();
+    let mut port = Endpoint::discover(io.clone()).unwrap();
     assert_eq!(io.read32(4) & 7, 0);
     assert_eq!(io.read32(0x40) & (1 << 16), 0);
-    assert_eq!(device.size(), 1 << 20);
-    unsafe { device.place(0x40000000) }.unwrap();
-    let owner = Owner::new().unwrap();
-    let stranger = Owner::new().unwrap();
-    device.claim(&owner).unwrap();
-    assert_eq!(device.claim(&stranger), Err(Error::Busy));
-    assert_eq!(device.inspect(&owner, 0), Ok(0x11e81234));
-    for offset in [4, 0x10, 0x34, 0x40, 0x100, usize::MAX] {
-        assert_eq!(device.inspect(&owner, offset), Err(Error::Denied));
-    }
-    assert_eq!(device.access(&stranger, 0, 4), Err(Error::Denied));
-    assert_eq!(device.access(&owner, (1 << 20) - 8, 8), Ok(0x400ffff8));
-    for (offset, width) in [(1, 4), (0, 3), ((1 << 20) - 4, 8), (usize::MAX, 1)] {
-        assert_eq!(device.access(&owner, offset, width), Err(Error::Invalid));
-    }
-    unsafe { device.activate(&owner) }.unwrap();
+    unsafe { port.place(0x40000000) }.unwrap();
+    port.decode().unwrap();
+    assert_eq!(io.read32(4) & 7, 2);
+    unsafe { port.activate() }.unwrap();
     assert_eq!(io.read32(4) & 7, 6);
-    owner.close();
-    assert!(device.owner_closed());
-    assert_eq!(device.access(&owner, 0, 4), Err(Error::Denied));
-    device.retire().unwrap();
+    port.stop().unwrap();
     assert_eq!(io.read32(4) & 7, 0);
-    assert_eq!(device.phase(), Phase::Retiring); // not a completion proof
-    unsafe { device.settle() }.unwrap();
-    assert_eq!(device.claim(&stranger), Err(Error::Busy));
 }
 
 #[test]
@@ -117,19 +95,15 @@ fn unsupported_configuration_never_enables_master_or_leaves_sizing_values() {
 }
 
 #[test]
-fn failed_disable_keeps_endpoint_unusable_and_retryable() {
+fn failed_hardware_admission_close_is_reported_and_retryable() {
     let io = Pci::new();
-    let mut device = Endpoint::discover(io.clone()).unwrap();
-    unsafe { device.place(0x40000000) }.unwrap();
-    let owner = Owner::new().unwrap();
-    device.claim(&owner).unwrap();
-    unsafe { device.activate(&owner) }.unwrap();
+    let mut port = Endpoint::discover(io.clone()).unwrap();
+    unsafe { port.place(0x40000000) }.unwrap();
+    port.decode().unwrap();
+    unsafe { port.activate() }.unwrap();
     io.0.lock().unwrap().stuck = true;
-    assert_eq!(device.retire(), Err(Error::Hardware));
-    assert_eq!(device.phase(), Phase::Failed);
-    assert_eq!(device.access(&owner, 0, 4), Err(Error::Denied));
-    assert!(unsafe { device.settle() }.is_err());
+    assert_eq!(port.stop(), Err(Error::Hardware));
     io.0.lock().unwrap().stuck = false;
-    device.retire().unwrap();
-    assert_eq!(device.phase(), Phase::Retiring);
+    port.stop().unwrap();
+    assert_eq!(io.read32(4) & 7, 0);
 }

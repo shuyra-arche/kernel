@@ -3,7 +3,6 @@ pub mod chrono;
 pub mod clone_view;
 pub mod control;
 pub mod debug;
-pub mod device;
 pub mod memory;
 pub mod pend;
 pub mod room;
@@ -14,7 +13,6 @@ pub mod unit;
 /// Decoded environment call.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EnvCall {
-    Device(self::device::DeviceCall),
     Room(self::room::RoomCall),
     Unit(self::unit::UnitCall),
     Memory(self::memory::MemoryCall),
@@ -55,9 +53,6 @@ impl EnvCall {
                 slot, regs,
             )?)),
             11 => Ok(EnvCall::Sign(self::sign::SignCall::from_wire(slot, regs)?)),
-            13 => Ok(EnvCall::Device(self::device::DeviceCall::from_wire(
-                slot, regs,
-            )?)),
             _ => Err(crate::abi::register::Decode::BadSlot),
         }
     }

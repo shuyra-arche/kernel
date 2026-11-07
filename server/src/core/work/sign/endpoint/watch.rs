@@ -13,8 +13,9 @@ pub(crate) enum Watch {
     Direct {
         token: kernel_api::model::sign::SignId,
     },
-    Device {
-        id: usize,
+    ExternalMapping {
+        token: kernel_api::model::identity::PendId,
+        mapping: kernel_api::model::memory::MappingId,
         fault: bool,
     },
     Resource {
@@ -38,11 +39,21 @@ impl Watch {
     pub(crate) fn source(&self) -> SignSource {
         match self {
             Watch::Direct { token } => SignSource::Sign { token: *token },
-            Watch::Device { id, fault } => {
+            Watch::ExternalMapping {
+                token,
+                mapping,
+                fault,
+            } => {
                 if *fault {
-                    SignSource::DeviceFault { device: *id }
+                    SignSource::MappingFault {
+                        token: *token,
+                        mapping: *mapping,
+                    }
                 } else {
-                    SignSource::DeviceRetired { device: *id }
+                    SignSource::MappingRetired {
+                        token: *token,
+                        mapping: *mapping,
+                    }
                 }
             }
             Watch::Resource { source } => *source,

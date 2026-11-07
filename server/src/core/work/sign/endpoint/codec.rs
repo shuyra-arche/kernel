@@ -39,8 +39,8 @@ pub(crate) fn source_watch(source: SignSource) -> Option<(PendId, Need)> {
         SignSource::Sign { .. }
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
-        | SignSource::DeviceRetired { .. }
-        | SignSource::DeviceFault { .. } => None,
+        | SignSource::MappingRetired { .. }
+        | SignSource::MappingFault { .. } => None,
     }
 }
 
@@ -58,8 +58,8 @@ pub(crate) fn source_key(
         SignSource::Sign { .. }
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
-        | SignSource::DeviceRetired { .. }
-        | SignSource::DeviceFault { .. } => None,
+        | SignSource::MappingRetired { .. }
+        | SignSource::MappingFault { .. } => None,
     }
 }
 
@@ -71,7 +71,7 @@ pub(crate) fn source_ready(pend_entry: &PendSnapshot, source: SignSource) -> Opt
         SignSource::Sign { .. }
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
-        | SignSource::DeviceRetired { .. }
-        | SignSource::DeviceFault { .. } => None,
+        | SignSource::MappingRetired { .. }
+        | SignSource::MappingFault { .. } => None,
     }
 }

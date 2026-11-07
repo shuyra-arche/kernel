@@ -5,13 +5,15 @@ use crate::model::unit::UnitTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignSource {
-    /// Kernel device retirement, independently of the requesting Unit lifetime.
-    DeviceRetired {
-        device: usize,
+    /// Retained external mapping completion, independent of execution exit.
+    MappingRetired {
+        token: PendId,
+        mapping: crate::model::memory::MappingId,
     },
-    /// First hardware queue fault; observation does not clear or settle it.
-    DeviceFault {
-        device: usize,
+    /// First I/O fault; observing it never discharges a Cell obligation.
+    MappingFault {
+        token: PendId,
+        mapping: crate::model::memory::MappingId,
     },
     Clone {
         token: PendId,
@@ -32,8 +34,8 @@ pub enum SignSource {
 impl SignSource {
     pub fn words(self) -> [usize; 3] {
         match self {
-            Self::DeviceRetired { device } => [7, device, 0],
-            Self::DeviceFault { device } => [8, device, 0],
+            Self::MappingRetired { token, mapping } => [9, token.get(), mapping.get()],
+            Self::MappingFault { token, mapping } => [10, token.get(), mapping.get()],
             Self::Clone { token, condition } => [1, token.get(), condition as usize],
             Self::Join {
                 target: UnitTarget::Task(task),
@@ -48,11 +50,20 @@ impl SignSource {
 
     pub fn of(words: [usize; 3]) -> Option<Self> {
         match words {
-            [8, device, 0] if device != 0 && device <= isize::MAX as usize => {
-                Some(Self::DeviceFault { device })
-            }
-            [7, device, 0] if device != 0 && device <= isize::MAX as usize => {
-                Some(Self::DeviceRetired { device })
+            [tag, token, mapping]
+                if matches!(tag, 9 | 10)
+                    && token != 0
+                    && mapping != 0
+                    && token <= isize::MAX as usize
+                    && mapping <= isize::MAX as usize =>
+            {
+                let token = PendId::new(token);
+                let mapping = crate::model::memory::MappingId::new(mapping);
+                Some(if tag == 9 {
+                    Self::MappingRetired { token, mapping }
+                } else {
+                    Self::MappingFault { token, mapping }
+                })
             }
             [1, token, condition] if token != 0 => {
                 let condition = match condition {

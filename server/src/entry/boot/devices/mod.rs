@@ -25,6 +25,28 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     for region in plan.authorities() {
         grant_region(registry, *region)?;
     }
+    // Export each validated BAR through the ordinary View/Pend boot ledger.
+    let apertures = crate::machine::iommu::aperture::APERTURES.lock();
+    for aperture in apertures.iter() {
+        let source = aperture.source.clone();
+        let size = source
+            .page_count()
+            .checked_bytes()
+            .ok_or(PendFail::Denied)?;
+        let meta = view::ShareView::from_source(source.clone(), size, TaskId::new(0))?;
+        let root =
+            pend::PendEntry::try_new(View::Share(meta.clone()), Mark::NONE, Modifiable::Yes, None)?;
+        let authorization =
+            SourceAuthorization::new(source, Access::READ | Access::WRITE, TaskId::new(0))?;
+        meta.attach_source(&authorization);
+        authorization.adopt(&meta, root.token(), root.authority().clone())?;
+        authorization.consume();
+        meta.commit_source();
+        registry
+            .register(Name::Page(Page::Region(aperture.port.base() as u64)), root)
+            .map_err(|e| e.into_parts().0)?;
+    }
+    drop(apertures);
     let meta = view::share_view::region(dtb.base, dtb.size, TaskId::new(0))?;
     let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
     registry

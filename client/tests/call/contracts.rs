@@ -238,3 +238,24 @@ fn clone_delivery_returns_authority_and_retires_copy_out_slot() {
     called((5usize << 32) | 8, [17, 8192, 0, 0, 0, 0]);
     assert!(EnvCall::from_wire((5usize << 32) | 3, &[17, 0x4000, 8192, 0, 0, 0]).is_err());
 }
+
+#[test]
+fn external_mapping_inspection_preserves_target_authority_and_fault_receipt() {
+    use kernel_api::{
+        abi::call::memory::operations::Inspect,
+        model::memory::{MappingState, MappingTarget},
+    };
+    reply((4, 13, 0x500000));
+    let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
+    let info = invoke(Inspect {
+        target: MappingTarget::Io(PendId::mint(17)),
+        mapping,
+    })
+    .unwrap();
+    assert_eq!(info.state, MappingState::Settled);
+    assert_eq!((info.fault_cause, info.fault_address), (13, 0x500000));
+    called(
+        (2usize << 32) | 14,
+        [(1usize << (usize::BITS - 1)) | 17, 23, 0, 0, 0, 0],
+    );
+}

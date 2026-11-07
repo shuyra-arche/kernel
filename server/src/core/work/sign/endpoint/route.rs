@@ -40,10 +40,16 @@ impl Route {
                 Err(kernel_api::abi::call::sign::SignFail::Dead) => Some(Some(SignEventFail::Dead)),
                 Err(_) => Some(Some(SignEventFail::Denied)),
             },
-            Watch::Device { id, fault } => {
-                match crate::machine::device::event(actor, *id, *fault) {
-                    Ok((_, 4)) => Some(None),
-                    Ok((_, 5)) => Some(Some(SignEventFail::Busy)),
+            Watch::ExternalMapping {
+                token,
+                mapping,
+                fault,
+            } => {
+                match crate::core::work::unit::space::external::event(
+                    actor, *token, *mapping, *fault,
+                ) {
+                    Ok((_, Some(true))) => Some(None),
+                    Ok((_, Some(false))) => Some(Some(SignEventFail::Busy)),
                     Ok(_) => None,
                     Err(_) => Some(Some(SignEventFail::Denied)),
                 }

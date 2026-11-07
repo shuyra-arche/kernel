@@ -13,3 +13,5 @@ pub(crate) use mappings::MappingRegistry;
 pub use space::Space;
 
 pub(crate) mod wait;
+
+pub(crate) mod external;

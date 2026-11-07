@@ -13,9 +13,6 @@ mod iommu;
 mod core {
     pub(crate) mod memory {
         pub(crate) use crate::cell;
-        pub(crate) mod nest {
-            pub(crate) use crate::iommu;
-        }
     }
 }
 
@@ -32,9 +29,9 @@ mod support;
 #[path = "../boot/tree.rs"]
 mod tree;
 
-#[path = "device/mod.rs"]
-mod custody_tests;
+#[path = "pci/mod.rs"]
+mod pci_tests;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
-#[path = "../../src/core/work/device/mod.rs"]
-mod device;
+#[path = "../../src/machine/iommu/pci.rs"]
+mod pci;

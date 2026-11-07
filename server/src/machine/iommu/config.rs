@@ -1,4 +1,4 @@
-use crate::core::work::device::pci::Config;
+use super::pci::Config;
 
 pub(crate) struct Ecam {
     base: usize,

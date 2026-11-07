@@ -144,12 +144,18 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: SignSource) -> Result<Route,
     let mut keys = Vec::new();
     keys.try_reserve(4).map_err(|_| SignFail::OoM)?;
     let watch = match source {
-        SignSource::DeviceRetired { device } | SignSource::DeviceFault { device } => {
-            let fault = matches!(source, SignSource::DeviceFault { .. });
-            let (life, _) = crate::machine::device::event(actor, device, fault)
-                .map_err(|_| SignFail::Denied)?;
-            keys.push((WakeKey::Device { id: device }, life));
-            Watch::Device { id: device, fault }
+        SignSource::MappingRetired { token, mapping }
+        | SignSource::MappingFault { token, mapping } => {
+            let fault = matches!(source, SignSource::MappingFault { .. });
+            let (life, _) =
+                crate::core::work::unit::space::external::event(actor, token, mapping, fault)
+                    .map_err(|_| SignFail::Denied)?;
+            keys.push((WakeKey::ExternalMapping { id: mapping.get() }, life));
+            Watch::ExternalMapping {
+                token,
+                mapping,
+                fault,
+            }
         }
         SignSource::Sign { token } => {
             let source = actor.signs.get(token, SignRights::LISTEN)?;

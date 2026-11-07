@@ -16,7 +16,6 @@ impl ControlId {
 pub enum ControlKind {
     Build,
     Doom,
-    Device,
     Retain,
     Guard,
 }

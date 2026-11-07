@@ -4,7 +4,7 @@ use crate::{
     machine::sync::SpinLock,
 };
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::{abi::call::pend::PendFail, model::modifiable::Modifiable};
 
 pub(crate) fn narrows(from: Modifiable, to: Modifiable) -> bool {
@@ -18,6 +18,7 @@ pub(crate) struct Pend {
     window: Option<(PageOffset, PageCount)>,
     parent: SpinLock<Option<(Arc<Pend>, Modifiable, bool)>>,
     external: AtomicUsize,
+    routing: AtomicBool,
 }
 fn fail(error: Failure) -> PendFail {
     match error {
@@ -36,6 +37,7 @@ impl Pend {
             window,
             parent: SpinLock::new(None),
             external: AtomicUsize::new(0),
+            routing: AtomicBool::new(false),
         })
         .map_err(|_| PendFail::OoM)
     }
@@ -63,6 +65,9 @@ impl Pend {
         state.usable().then_some(state.access)
     }
     pub(crate) fn can_borrow(&self, access: Modifiable) -> Result<(), PendFail> {
+        if self.routing.load(Ordering::Acquire) {
+            return Err(PendFail::Busy);
+        }
         self.state
             .lock()
             .transition(Event::Borrow(access))
@@ -78,6 +83,9 @@ impl Pend {
     fn borrow_kind(self: &Arc<Self>, child: &Arc<Self>, external: bool) -> Result<(), PendFail> {
         let access = child.configured();
         let mut state = self.state.lock();
+        if self.routing.load(Ordering::Acquire) {
+            return Err(PendFail::Busy);
+        }
         *state = state.transition(Event::Borrow(access)).map_err(fail)?;
         if external {
             self.external.fetch_add(1, Ordering::Release);
@@ -85,13 +93,44 @@ impl Pend {
         *child.parent.lock() = Some((self.clone(), access, external));
         Ok(())
     }
+    pub(crate) fn can_narrow(&self, access: Modifiable) -> Result<(), PendFail> {
+        let state = self.state.lock();
+        if self.routing.load(Ordering::Acquire) {
+            return Err(PendFail::Busy);
+        }
+        state
+            .transition(Event::Narrow(access))
+            .map(|_| ())
+            .map_err(fail)
+    }
     pub(crate) fn narrow(&self, access: Modifiable) -> Result<(), PendFail> {
         let mut state = self.state.lock();
+        if self.routing.load(Ordering::Acquire) {
+            return Err(PendFail::Busy);
+        }
         *state = state.transition(Event::Narrow(access)).map_err(fail)?;
         Ok(())
     }
     pub(crate) fn external_pending(&self) -> bool {
-        self.external.load(Ordering::Acquire) != 0
+        self.external.load(Ordering::Acquire) != 0 || self.routing.load(Ordering::Acquire)
+    }
+    /// Retain routing responsibility without lending the BAR's CPU access.
+    /// Caller holds work commit; publication must either cancel or retain this
+    /// obligation until the matching IoSpace completion has settled.
+    pub(crate) fn retain_route(&self) -> Result<(), PendFail> {
+        let state = self.state.lock();
+        if !state.usable() || state.access != Modifiable::Yes {
+            return Err(PendFail::Denied);
+        }
+        self.routing
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|_| PendFail::Busy)
+    }
+    /// # Safety
+    /// The route was never published, or its exact hardware completion settled.
+    pub(crate) unsafe fn release_route(&self) {
+        assert!(self.routing.swap(false, Ordering::AcqRel));
     }
     pub(crate) fn retiring(&self) -> bool {
         self.state.lock().phase != Phase::Active
@@ -102,6 +141,9 @@ impl Pend {
     }
     /// Only after actual mapping withdrawal. Drop deliberately does not call this.
     pub(crate) fn settle(&self) -> Result<(), PendFail> {
+        if self.routing.load(Ordering::Acquire) {
+            return Err(PendFail::Busy);
+        }
         let mut state = self.state.lock();
         *state = state.transition(Event::Settle).map_err(fail)?;
         drop(state);

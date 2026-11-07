@@ -58,11 +58,11 @@ fn every_operation_keeps_its_published_slot() {
     );
     assert_eq!(
         <kernel_api::abi::call::memory::operations::Attach as kernel_api::abi::operation::RegisterCall>::SLOT,
-        8589934599u64 as usize
+        8589934604u64 as usize
     );
     assert_eq!(
         <kernel_api::abi::call::memory::operations::Detach as kernel_api::abi::operation::RegisterCall>::SLOT,
-        8589934600u64 as usize
+        8589934605u64 as usize
     );
     assert_eq!(
         <kernel_api::abi::call::memory::operations::SetAccess as kernel_api::abi::operation::RegisterCall>::SLOT,

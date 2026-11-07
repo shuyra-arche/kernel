@@ -28,6 +28,7 @@ fn reduce_locked(
     if let Some(p) = pend_entry.view().share_view() {
         let meta = &p;
         let _operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
+        pend_entry.authority().can_narrow(subset)?;
         if pend_entry.authority().modifiable().is_none() {
             return Err(PendFail::Busy);
         }

@@ -17,22 +17,9 @@ impl Owner {
     }
 }
 
-/// A Kernel-held admission observation; it cannot mint or reopen an owner.
-pub(crate) struct Admission(Arc<AtomicBool>);
-impl Admission {
-    pub(crate) fn closed(&self) -> bool {
-        self.0.load(Ordering::Acquire)
-    }
-    pub(crate) fn accepts(&self, owner: &Owner) -> bool {
-        Arc::ptr_eq(&self.0, &owner.0) && !self.closed()
-    }
-}
 impl Owner {
     pub(crate) fn closed(&self) -> bool {
         self.0.load(Ordering::Acquire)
-    }
-    pub(crate) fn admission(&self) -> Admission {
-        Admission(self.0.clone())
     }
 }
 
