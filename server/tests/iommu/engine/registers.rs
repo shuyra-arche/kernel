@@ -2,11 +2,11 @@ use crate::iommu::riscv::registers::*;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
-pub struct Device(pub Arc<Mutex<[u64; 16]>>, pub usize);
+pub struct Device(pub Arc<Mutex<[u64; 512]>>, pub usize);
 
 impl Device {
     pub fn new() -> Self {
-        let mut words = [0; 16];
+        let mut words = [0; 512];
         words[CAP / 8] = 0x10 | (56u64 << 32) | (1 << 9) | (1 << 22);
         Self(Arc::new(Mutex::new(words)), 0x3010000)
     }
@@ -52,7 +52,14 @@ unsafe impl Registers for Device {
     }
     fn write32(&mut self, offset: usize, value: u32) {
         if offset == CQCSR || offset == FQCSR {
-            self.set32(offset, if value & ENABLE != 0 { ENABLE | ON } else { 0 });
+            self.set32(
+                offset,
+                if value & ENABLE != 0 {
+                    ENABLE | ON | (value & INTERRUPT)
+                } else {
+                    0
+                },
+            );
         } else {
             self.set32(offset, value);
         }

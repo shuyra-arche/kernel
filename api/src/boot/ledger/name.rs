@@ -21,6 +21,8 @@ pub enum Call {
     Retain,
     /// Boot-minted authority for the kernel execution-domain guard.
     Guard,
+    /// Assigns Kernel-mediated protected PCI endpoints.
+    Device,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
@@ -56,6 +58,7 @@ impl Name {
             Self::Call(Call::Doom) => (1, 1, 0),
             Self::Call(Call::Retain) => (1, 2, 0),
             Self::Call(Call::Guard) => (1, 3, 0),
+            Self::Call(Call::Device) => (1, 4, 0),
             Self::Page(Page::Dtb) => (2, 0, 0),
             Self::Page(Page::Initrd) => (2, 1, 0),
             Self::Page(Page::Region(base)) => (2, 2, base),
@@ -78,6 +81,7 @@ impl Name {
             (1, 1, 0) => Some(Self::Call(Call::Doom)),
             (1, 2, 0) => Some(Self::Call(Call::Retain)),
             (1, 3, 0) => Some(Self::Call(Call::Guard)),
+            (1, 4, 0) => Some(Self::Call(Call::Device)),
             (2, 0, 0) => Some(Self::Page(Page::Dtb)),
             (2, 1, 0) => Some(Self::Page(Page::Initrd)),
             (2, 2, base) if base != 0 => Some(Self::Page(Page::Region(base))),

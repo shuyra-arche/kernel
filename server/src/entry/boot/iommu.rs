@@ -1,5 +1,5 @@
 //! Initial trusted platform binding. Device translation remains Off: these engines
-//! own only CQ/FQ/completion storage. Runtime device binding is not enabled yet.
+//! own CQ/FQ/completion storage until a runtime device binding consumes them.
 use crate::core::memory::address::PhysAddr;
 use crate::core::memory::flat::{BorrowedRegion, Flat, allocator::frame};
 use crate::core::memory::nest::iommu::riscv::{
@@ -60,6 +60,19 @@ pub(super) fn init() -> Result<(), PieFail> {
     {
         return Err(PieFail::Denied);
     }
+    super::devices::validate(&tree)?;
+    if regions.len() != 1 {
+        return Err(PieFail::Denied);
+    }
+    let route = crate::machine::iommu::interrupt::plan::Plan::discover(
+        &tree,
+        crate::machine::hart::hart_id().get(),
+        regions[0].base,
+    )
+    .map_err(|_| PieFail::Denied)?;
+    let plic = super::pci::mapped(route.base, route.size)?;
+    unsafe { crate::machine::iommu::interrupt::install(plic, route) }
+        .map_err(|_| PieFail::Denied)?;
     let mut storage = CONTROLLERS.lock();
     if storage.is_some() {
         return Err(PieFail::Denied);
@@ -92,7 +105,8 @@ pub(super) fn init() -> Result<(), PieFail> {
         // SAFETY: trusted QEMU platform discovery; Kernel-only MMIO mapping and
         // all overlapping boot grants are withheld. No other MMIO owner exists.
         let registers = unsafe { Mmio::new(mapping.initial_start().as_usize(), region.base) };
-        let engine = Engine::new(registers, cells).map_err(|_| PieFail::OoM)?;
+        let mut engine = Engine::new(registers, cells).map_err(|_| PieFail::OoM)?;
+        engine.enable_interrupts().map_err(failure)?;
         controllers.install(engine).map_err(|_| PieFail::Denied)?;
         let engine = controllers
             .engine(region.base)
@@ -132,6 +146,7 @@ fn failure(error: crate::core::memory::nest::iommu::riscv::EngineError) -> PieFa
 }
 
 pub(super) fn shutdown() {
+    crate::machine::iommu::interrupt::report();
     let mut storage = CONTROLLERS.lock();
     let Some(controllers) = storage.as_mut() else {
         return;

@@ -1,4 +1,5 @@
 mod commit;
+pub(crate) mod device;
 pub(crate) mod grant;
 pub mod mail;
 pub mod pend;

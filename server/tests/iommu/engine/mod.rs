@@ -109,3 +109,31 @@ fn partial_startup_keeps_pages_when_fault_queue_reports_failure() {
     drop(engine);
     assert!(pools.iter().all(|p| p.gives() == 0 && p.page().is_err()));
 }
+
+#[test]
+fn wired_notifications_do_not_substitute_for_tagged_cq_completion() {
+    use crate::iommu::riscv::registers::{CAP, FCTL, ICVEC, INTERRUPT, IPSR, PQCSR};
+    let (mut engine, mut device, pools) = engine();
+    assert_eq!(engine.enable_interrupts(), Err(EngineError::Unsupported));
+    assert_eq!(device.read32(FCTL), 0);
+    device.write64(CAP, device.read64(CAP) | (1 << 28));
+    engine.enable_interrupts().unwrap();
+    assert_eq!(device.read64(ICVEC), 0x3210);
+    start(&mut engine);
+    assert_eq!(device.read32(CQCSR) & INTERRUPT, INTERRUPT);
+    assert_eq!(device.read32(FQCSR) & INTERRUPT, INTERRUPT);
+    assert_eq!(device.read32(PQCSR), 0);
+    let batch = engine.invalidate().unwrap();
+    device.set32(IPSR, 1);
+    assert_eq!(engine.observe(batch), Ok(false));
+    device.complete(true, false);
+    assert_eq!(engine.observe(batch), Ok(false));
+    assert!(pools.iter().all(|p| p.gives() == 0));
+    device.complete(true, true);
+    assert_eq!(engine.observe(batch), Ok(true));
+    assert!(pools.iter().all(|p| p.gives() == 0));
+    engine.stop().unwrap();
+    engine.step().unwrap();
+    engine.step().unwrap();
+    assert!(pools.iter().all(|p| p.gives() == 1));
+}

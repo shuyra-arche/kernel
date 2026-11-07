@@ -21,26 +21,11 @@ pub(crate) fn discover(fdt: &fdt::Fdt) -> Result<Vec<Region>, PieFail> {
         if !platform || compatible(node, "riscv,pci-iommu") {
             return Err(PieFail::Denied);
         }
-        let parent = parent_of(fdt, node).ok_or(PieFail::Denied)?;
-        identity_path(fdt, parent)?;
-        let address = cell_count(parent, "#address-cells", 2)?;
-        let size = cell_count(parent, "#size-cells", 1)?;
-        if !(1..=2).contains(&address) || !(1..=2).contains(&size) {
-            return Err(PieFail::Denied);
-        }
-        let reg = node.property("reg").ok_or(PieFail::Denied)?.value;
-        let width = (address + size) * 4;
-        if reg.is_empty() || !reg.len().is_multiple_of(width) {
-            return Err(PieFail::Denied);
-        }
+        let regions = node_regions(fdt, node)?;
         reserved
-            .try_reserve(reg.len() / width)
+            .try_reserve(regions.len())
             .map_err(|_| PieFail::OoM)?;
-        for entry in reg.chunks_exact(width) {
-            let base = number(&entry[..address * 4])?;
-            let size = number(&entry[address * 4..])?;
-            reserved.push(Region::new(base, size)?);
-        }
+        reserved.extend(regions);
     }
     Ok(reserved)
 }
@@ -89,4 +74,30 @@ fn identity_path<'b, 'a>(fdt: &'b fdt::Fdt<'a>, mut bus: FdtNode<'b, 'a>) -> Res
         bus = parent;
     }
     Ok(())
+}
+
+/// Checked physical control ranges, shared by IOMMU and PLIC reservation.
+pub(super) fn node_regions(fdt: &fdt::Fdt, node: FdtNode) -> Result<Vec<Region>, PieFail> {
+    let parent = parent_of(fdt, node).ok_or(PieFail::Denied)?;
+    identity_path(fdt, parent)?;
+    let address = cell_count(parent, "#address-cells", 2)?;
+    let size = cell_count(parent, "#size-cells", 1)?;
+    if !(1..=2).contains(&address) || !(1..=2).contains(&size) {
+        return Err(PieFail::Denied);
+    }
+    let reg = node.property("reg").ok_or(PieFail::Denied)?.value;
+    let width = (address + size) * 4;
+    if reg.is_empty() || !reg.len().is_multiple_of(width) {
+        return Err(PieFail::Denied);
+    }
+    let mut reserved = Vec::new();
+    reserved
+        .try_reserve(reg.len() / width)
+        .map_err(|_| PieFail::OoM)?;
+    for entry in reg.chunks_exact(width) {
+        let base = number(&entry[..address * 4])?;
+        let size = number(&entry[address * 4..])?;
+        reserved.push(Region::new(base, size)?);
+    }
+    Ok(reserved)
 }

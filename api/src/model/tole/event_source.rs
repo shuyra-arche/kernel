@@ -5,6 +5,14 @@ use crate::model::unit::UnitTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToleEventSource {
+    /// Kernel device retirement, independently of the requesting Unit lifetime.
+    DeviceRetired {
+        device: usize,
+    },
+    /// First hardware queue fault; observation does not clear or settle it.
+    DeviceFault {
+        device: usize,
+    },
     Hole {
         token: PieToken,
         condition: HoleCondition,
@@ -28,6 +36,8 @@ pub enum ToleEventSource {
 impl ToleEventSource {
     pub fn words(self) -> [usize; 3] {
         match self {
+            Self::DeviceRetired { device } => [7, device, 0],
+            Self::DeviceFault { device } => [8, device, 0],
             Self::Hole { token, condition } => [1, token.get(), condition as usize],
             Self::Join {
                 target: UnitTarget::Task(task),
@@ -43,6 +53,12 @@ impl ToleEventSource {
 
     pub fn of(words: [usize; 3]) -> Option<Self> {
         match words {
+            [8, device, 0] if device != 0 && device <= isize::MAX as usize => {
+                Some(Self::DeviceFault { device })
+            }
+            [7, device, 0] if device != 0 && device <= isize::MAX as usize => {
+                Some(Self::DeviceRetired { device })
+            }
             [1, token, condition] if token != 0 => {
                 let condition = match condition {
                     0 => HoleCondition::Pull,

@@ -140,3 +140,22 @@ fn compound_field_widths_match_their_actual_register_consumption() {
         token,
     });
 }
+
+#[test]
+fn device_authority_is_not_an_address_and_event_tags_are_distinct() {
+    use kernel_api::{abi::call::device::operations::Publish, model::tole::ToleEventSource};
+    assert_eq!(Publish::SLOT, (13usize << 32) | 5);
+    assert!(Publish::from_registers(&[1, 1, 0x400000, 2, 0, 0]).is_err());
+    for source in [
+        ToleEventSource::DeviceRetired { device: 1 },
+        ToleEventSource::DeviceFault { device: 1 },
+    ] {
+        assert_eq!(ToleEventSource::of(source.words()), Some(source));
+        let mut words = source.words();
+        words[1] = 0;
+        assert_eq!(ToleEventSource::of(words), None);
+        words = source.words();
+        words[2] = 1;
+        assert_eq!(ToleEventSource::of(words), None);
+    }
+}

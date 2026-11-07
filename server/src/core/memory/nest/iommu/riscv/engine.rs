@@ -28,6 +28,7 @@ pub(crate) struct Engine<R: Registers> {
     phase: Phase,
     tail: u32,
     directory: u64,
+    wired: bool,
 }
 
 impl<R: Registers> Engine<R> {
@@ -41,7 +42,30 @@ impl<R: Registers> Engine<R> {
             phase: Phase::Prepared,
             tail: 0,
             directory: 0,
+            wired: false,
         })
+    }
+
+    /// Before any queue starts, select wired interrupts for a trusted platform
+    /// route. Queue interrupts only prompt observation; never settle a Cell.
+    pub(crate) fn enable_interrupts(&mut self) -> Result<(), EngineError> {
+        if self.phase != Phase::Prepared
+            || !self.off()
+            || [CQCSR, FQCSR]
+                .into_iter()
+                .any(|r| self.registers.read32(r) & (ENABLE | ON | BUSY) != 0)
+            || !matches!((self.registers.read64(CAP) >> 28) & 3, 1 | 2)
+        {
+            return Err(EngineError::Unsupported);
+        }
+        self.registers.write32(FCTL, 2);
+        self.registers.write64(ICVEC, 0x3210);
+        self.registers.sync();
+        if self.registers.read32(FCTL) != 2 || self.registers.read64(ICVEC) != 0x3210 {
+            return Err(EngineError::Unsupported);
+        }
+        self.wired = true;
+        Ok(())
     }
 
     pub(crate) fn phase(&self) -> Phase {
@@ -85,7 +109,8 @@ impl<R: Registers> Engine<R> {
                         return self.fail(EngineError::ActiveHardware);
                     }
                     self.advance(Event::FaultsOn)?;
-                    self.registers.write32(CQCSR, ENABLE);
+                    self.registers
+                        .write32(CQCSR, ENABLE | if self.wired { INTERRUPT } else { 0 });
                 }
             }
             Phase::StartingCommands => {
@@ -158,7 +183,8 @@ impl<R: Registers> Engine<R> {
         }
         self.registers.write32(CQT, 0);
         self.registers.write32(FQH, 0);
-        self.registers.write32(FQCSR, ENABLE);
+        self.registers
+            .write32(FQCSR, ENABLE | if self.wired { INTERRUPT } else { 0 });
         Ok(())
     }
 
@@ -188,8 +214,11 @@ impl<R: Registers> Engine<R> {
         }
         let batch = BatchId::allocate().map_err(|_| EngineError::Exhausted)?;
         let pages = self.pages.as_ref().expect("live pages");
-        let fence = Command::fence(batch, pages.completion.physical_address() as u64, true)
+        let mut fence = Command::fence(batch, pages.completion.physical_address() as u64, true)
             .map_err(|_| EngineError::Address)?;
+        if self.wired {
+            fence = fence.interrupt();
+        }
         // SAFETY: exclusive Cell storage, no outstanding batch or completion write.
         unsafe {
             pages
@@ -244,6 +273,11 @@ impl<R: Registers> Engine<R> {
             return Ok(false);
         }
         self.registers.sync();
+        if self.wired {
+            self.registers
+                .write32(CQCSR, ENABLE | INTERRUPT | (1 << 11));
+            self.registers.write32(IPSR, 1);
+        }
         self.advance(Event::Complete(batch))?;
         Ok(true)
     }
@@ -283,6 +317,9 @@ impl<R: Registers> Engine<R> {
             return self.fail(EngineError::Hardware);
         }
         if head == tail {
+            if self.wired {
+                self.registers.write32(IPSR, 2);
+            }
             return Ok(None);
         }
         self.registers.sync();

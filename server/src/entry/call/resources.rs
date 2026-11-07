@@ -11,11 +11,16 @@ use kernel_api::{
 pub(crate) struct Resources {
     pub build: Arc<NoleMeta>,
     pub doom: Arc<NoleMeta>,
+    pub device: Arc<NoleMeta>,
 }
 static RESOURCES: OnceLock<Resources> = OnceLock::new();
 
 pub(crate) fn register(registry: &mut Registry) -> Result<(), PieFail> {
-    for (call, meta) in [(Call::Build, &get().build), (Call::Doom, &get().doom)] {
+    for (call, meta) in [
+        (Call::Build, &get().build),
+        (Call::Doom, &get().doom),
+        (Call::Device, &get().device),
+    ] {
         let root = pend::Pie::try_new(
             Mail::Nole(meta.clone()),
             Mark::NONE,
@@ -33,6 +38,7 @@ pub(crate) fn init() -> Result<(), PieFail> {
         return Ok(());
     }
     let resources = Resources {
+        device: NoleMeta::try_new(TaskId::new(0)).map_err(|_| PieFail::OoM)?,
         build: NoleMeta::try_new(TaskId::new(0)).map_err(|_| PieFail::OoM)?,
         doom: NoleMeta::try_new(TaskId::new(0)).map_err(|_| PieFail::OoM)?,
     };

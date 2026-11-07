@@ -95,3 +95,9 @@ mod tole;
 pub use tole::ToleAwaitReply;
 
 mod lifecycle;
+
+impl FromPair for (usize, usize) {
+    fn from_pair(v0: usize, v1: usize) -> Self {
+        (v0, v1)
+    }
+}

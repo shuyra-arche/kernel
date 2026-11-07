@@ -54,7 +54,8 @@ fn wait() -> Option<usize> {
         }
         beacon::idle(me);
 
-        let fallback = if beacon::shutting_down() {
+        let device_pending = crate::machine::device::maintain();
+        let fallback = if beacon::shutting_down() || device_pending {
             BEACON_TICK
         } else {
             WFI_FAR
@@ -63,7 +64,7 @@ fn wait() -> Option<usize> {
         unsafe {
             sie::set_sext();
         }
-        if sip::read().sext() {
+        if sip::read().sext() && !crate::machine::iommu::interrupt::handle() {
             let resources = crate::core::work::room::interrupt::get();
             let result = crate::core::work::mail::nole::ring(&resources.supervisor_external);
             crate::core::work::room::interrupt::note_external(result.is_err(), true);

@@ -160,6 +160,12 @@ pub(crate) fn accede(
 
 pub(crate) fn allows(task: &Task, resource: &Mail, need: Need) -> bool {
     let _pend = task.pend.lock();
+    allows_locked(task, resource, need)
+}
+
+/// Caller holds the Pend serial lock, or the work commit boundary shared by
+/// authority mutations. Do not acquire Pend again while already holding commit.
+pub(crate) fn allows_locked(task: &Task, resource: &Mail, need: Need) -> bool {
     task.pend.pies.lock().iter().any(|pie| {
         pie.meta.same(resource) && pie.alive() && pie.heir().is_none() && pie.allows(need)
     })

@@ -1,4 +1,4 @@
-//! Registers used by the initial, polling-only command engine (IOMMU v1.0.1 §5).
+//! Registers used by the command engine (IOMMU v1.0.1 §5).
 pub(crate) const CAP: usize = 0;
 pub(crate) const FCTL: usize = 8;
 pub(crate) const DDTP: usize = 0x10;
@@ -11,6 +11,9 @@ pub(crate) const FQT: usize = 0x34;
 pub(crate) const CQCSR: usize = 0x48;
 pub(crate) const FQCSR: usize = 0x4c;
 pub(crate) const PQCSR: usize = 0x50;
+pub(crate) const IPSR: usize = 0x54;
+pub(crate) const ICVEC: usize = 0x2f8;
+pub(crate) const INTERRUPT: u32 = 2;
 pub(crate) const ENABLE: u32 = 1;
 pub(crate) const ON: u32 = 1 << 16;
 pub(crate) const BUSY: u32 = 1 << 17;

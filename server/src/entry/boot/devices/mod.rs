@@ -71,3 +71,9 @@ fn grant_region(registry: &mut Registry, region: region::Region) -> Result<(), P
         .register(Name::Page(Page::Region(base as u64)), root)
         .map_err(|e| e.into_parts().0)
 }
+
+/// Validate the exact same grant plan before configuring any protected endpoint.
+pub(super) fn validate(fdt: &fdt::Fdt) -> Result<(), PieFail> {
+    let dram = board::info().dram;
+    Plan::discover(fdt, dram.base, dram.size).map(|_| ())
+}

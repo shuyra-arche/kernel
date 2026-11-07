@@ -3,6 +3,7 @@ pub(crate) mod error;
 mod init;
 pub(crate) mod initrd;
 mod iommu;
+mod pci;
 pub(crate) mod resources;
 mod stack;
 pub(crate) mod unit;

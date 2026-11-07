@@ -148,3 +148,35 @@ fn disabled_hosts_have_no_route_and_still_cannot_export_configuration() {
             .is_empty()
     );
 }
+
+#[test]
+fn protected_bar_windows_and_plic_aliases_never_reach_units() {
+    let host = host(HOST, &[0, 1, 0, 65536])
+        .property("#address-cells", words(&[3]))
+        .property("#size-cells", words(&[2]))
+        .property(
+            "ranges",
+            words(&[0x02000000, 0, 0x40000000, 0, 0x40000000, 0, 0x10000000]),
+        );
+    let bytes = root()
+        .child(controller(CONTROLLER, 1))
+        .child(host)
+        .child(
+            Node::new("plic")
+                .compatible("riscv,plic0")
+                .reg(0xc000000, 0x600000),
+        )
+        .child(Node::new("plic-alias").reg(0xc001000, 4096))
+        .child(Node::new("bar-alias").reg(0x40001000, 4096))
+        .child(Node::new("uart").reg(0x10000000, 4096))
+        .encode();
+    let fdt = fdt::Fdt::new(&bytes).unwrap();
+    let plan = Plan::discover(&fdt, 0x80000000, 0x10000000).unwrap();
+    assert_eq!(
+        plan.grants()
+            .iter()
+            .map(|r| (r.base, r.size))
+            .collect::<Vec<_>>(),
+        [(0x10000000, 4096)]
+    );
+}

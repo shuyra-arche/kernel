@@ -10,6 +10,10 @@ use crate::core::work::unit::task::Task;
 
 #[derive(Clone)]
 pub(crate) enum Watch {
+    Device {
+        id: usize,
+        fault: bool,
+    },
     Resource {
         source: ToleEventSource,
     },
@@ -30,6 +34,13 @@ pub(crate) enum Watch {
 impl Watch {
     pub(crate) fn source(&self) -> ToleEventSource {
         match self {
+            Watch::Device { id, fault } => {
+                if *fault {
+                    ToleEventSource::DeviceFault { device: *id }
+                } else {
+                    ToleEventSource::DeviceRetired { device: *id }
+                }
+            }
             Watch::Resource { source } => *source,
             Watch::Join { target, .. } => ToleEventSource::Join { target: *target },
             Watch::Inspect { task, token, .. } => ToleEventSource::Inspect {

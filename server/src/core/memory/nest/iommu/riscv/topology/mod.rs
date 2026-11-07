@@ -36,6 +36,12 @@ pub(crate) struct Route {
     pub(super) device: u32,
 }
 
+impl Route {
+    pub(crate) fn device(&self) -> u32 {
+        self.device
+    }
+}
+
 pub(crate) struct Topology {
     controllers: Vec<Controller>,
     windows: Vec<Window>,

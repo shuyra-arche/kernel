@@ -32,6 +32,14 @@ impl Cell {
 
     pub(super) fn poll(&self, actor: &Arc<Task>) -> Option<Option<ToleEventFail>> {
         match &self.watch {
+            Watch::Device { id, fault } => {
+                match crate::machine::device::event(actor, *id, *fault) {
+                    Ok((_, 4)) => Some(None),
+                    Ok((_, 5)) => Some(Some(ToleEventFail::Busy)),
+                    Ok(_) => None,
+                    Err(_) => Some(Some(ToleEventFail::Denied)),
+                }
+            }
             Watch::Resource { source } => {
                 let Some((token, need)) = super::codec::source_watch(*source) else {
                     return Some(Some(ToleEventFail::Denied));
