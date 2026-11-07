@@ -34,12 +34,15 @@ impl crate::abi::reply::FromTriple for JoinReply {
 }
 
 impl crate::abi::reply::FromTriple for PullOutcome {
-    fn from_triple(len: usize, sender: usize, tag: usize) -> Self {
-        let sender = TaskId::new(sender);
-        match tag {
-            0 => Self::Received { len, sender },
-            1 => Self::Discarded { len, sender },
-            _ => unreachable!("invalid Pull result"),
+    fn from_triple(token: usize, len: usize, sender: usize) -> Self {
+        assert!(
+            token > 0 && token <= isize::MAX as usize && len > 0,
+            "invalid payload delivery"
+        );
+        Self {
+            token: crate::model::identity::PendId::new(token),
+            len,
+            sender: TaskId::new(sender),
         }
     }
 }

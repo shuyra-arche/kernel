@@ -38,7 +38,7 @@ fn every_operation_keeps_its_published_slot() {
     );
     assert_eq!(
         <kernel_api::abi::call::clone_view::operations::Pull as kernel_api::abi::operation::RegisterCall>::SLOT,
-        21474836483u64 as usize
+        21474836488u64 as usize
     );
     assert_eq!(
         <kernel_api::abi::call::clone_view::operations::Peek as kernel_api::abi::operation::RegisterCall>::SLOT,

@@ -52,12 +52,21 @@ and Task cleanup retries it. Windows contain whole 4 KiB Cells; this initial
 borrow model conservatively suspends the entire parent even for a narrower child.
 Larger physical Cells and parallel disjoint writers are not implemented.
 
-Clone queues contain immutable copied Cells, independent of the sender after
-publication. Receivers copy into their own authorized, resident destination.
-A failed receive keeps the queued payload, but callers must treat its destination
-as unspecified after a failed copy. Same-Team Tasks share an address space;
-trusted language wrappers must synchronize ordinary concurrent memory access.
-Pend does not create hardware isolation between Tasks in that same address space.
+Clone Push copies bytes once into immutable, zero-filled Kernel-owned Cells.
+Pull(queue, max_len) returns a separate read-only payload Pend, its exact byte
+length and sender. Opening that Pend maps the existing Cells, with zeroed padding
+up to the page boundary; receiving performs no second data copy. The payload
+uses Share access to the copy, not the sender's original memory. A failed Pull
+retains the message, including when max_len is too small; Peek reports its size.
+Publication and dequeue commit together. A later Open failure can be retried on
+the returned Pend. Closing the queue does not revoke delivered payloads. Release
+or Task exit withdraws their mappings and holds before Cell reclamation.
+
+This replaces the copy-out Pull ABI: slot 3 is retired, mapped Pull uses slot 8,
+and Oversize is removed. Callers must rebuild and release received payload Pends.
+Same-Team Tasks share an address space; trusted language wrappers must synchronize
+ordinary concurrent memory access. Pend does not create hardware isolation
+between Tasks in that same address space.
 
 Control authority uses separate ControlId handles, never data Pend flags. Sign
 has explicit Listen/Trigger/Route rights, delegated subsets, close/release and

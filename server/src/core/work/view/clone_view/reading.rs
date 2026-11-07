@@ -19,15 +19,44 @@ pub(crate) struct Reading<'a> {
 }
 
 impl Reading<'_> {
-    pub(crate) fn finish(mut self) {
-        taken(self.meta);
-        self.finished = true;
+    /// Caller serializes its Pend table and holds work commit. Validate queue
+    /// identity, publish prepared authority and consume under one queue guard.
+    /// The callback must be infallible, allocation-free, and never inspect this queue.
+    pub(crate) fn commit(&mut self, publish: impl FnOnce()) -> Result<(), CloneFail> {
+        let hand = {
+            let mut pending = self.meta.pending.lock();
+            let Pending::Queue(q) = &mut *pending else {
+                return Err(CloneFail::Dead);
+            };
+            if !q.taking
+                || !q
+                    .head()
+                    .is_some_and(|head| Arc::ptr_eq(&head.buf, &self.bytes))
+            {
+                return Err(CloneFail::Busy);
+            }
+            publish();
+            let Some(Slot::Ready(hand)) = q.hands.pop_front() else {
+                unreachable!("validated queue head")
+            };
+            q.bytes -= hand.buf.len();
+            q.taking = false;
+            self.finished = true;
+            hand
+        };
+        HANDS_LIVE.fetch_sub(1, Ordering::Relaxed);
+        note_hand_off(self.meta, hand.from, hand.buf.len(), hand.at);
+        Ok(())
     }
 }
-
 impl Drop for Reading<'_> {
     fn drop(&mut self) {
-        if !self.finished {
+        // The caller drops its Task/table/commit guards before this reservation.
+        if self.finished {
+            let _ = sign::wake(key(self.meta, CloneCondition::Empty), &self.meta.life());
+            let _ = sign::wake(key(self.meta, CloneCondition::Push), &self.meta.life());
+            let _ = sign::wake(key(self.meta, CloneCondition::Pull), &self.meta.life());
+        } else {
             back(self.meta);
         }
     }
@@ -69,36 +98,6 @@ pub(crate) fn peek(meta: &CloneView) -> Result<(usize, TaskId, usize), CloneFail
         },
         Pending::Dead => Err(CloneFail::Dead),
     }
-}
-
-pub(super) fn taken(meta: &CloneView) {
-    let mut off = None;
-    {
-        let mut pending = meta.pending.lock();
-        if let Pending::Queue(q) = &mut *pending {
-            if q.taking {
-                q.taking = false;
-                off = q.hands.pop_front().and_then(|slot| match slot {
-                    Slot::Ready(hand) => {
-                        q.bytes -= hand.buf.len();
-                        Some(hand)
-                    }
-                    Slot::Reserved(_, len) => {
-                        q.bytes -= len;
-                        None
-                    }
-                });
-            }
-        }
-    }
-    if let Some(hand) = off {
-        let len = hand.buf.len();
-        HANDS_LIVE.fetch_sub(1, Ordering::Relaxed);
-        note_hand_off(meta, hand.from, len, hand.at);
-    }
-    let _ = sign::wake(key(meta, CloneCondition::Empty), &meta.life());
-    let _ = sign::wake(key(meta, CloneCondition::Push), &meta.life());
-    let _ = sign::wake(key(meta, CloneCondition::Pull), &meta.life());
 }
 
 pub(super) fn back(meta: &CloneView) {
