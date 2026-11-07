@@ -3,6 +3,7 @@
 //! 本批只接入分配器管理的 4 KiB RAM。外部物理区间仍使用 BorrowedRegion；
 //! 在统一外部登记与 Unit 归属协议建立前，不把裸物理映射伪装成新的 Cell。
 
+mod exposure;
 mod identity;
 mod reclaim;
 mod retention;
@@ -15,6 +16,7 @@ use core::mem::ManuallyDrop;
 
 use kernel_api::model::memory::PAGE_SIZE;
 
+pub(crate) use exposure::Exposure;
 pub(crate) use identity::CellId;
 pub(crate) use reclaim::RetainError;
 pub(crate) use retention::Retention;
@@ -28,12 +30,13 @@ pub(crate) enum CellError {
     IdentityExhausted,
 }
 
-/// 一个 Internal Cell；自身不可 Clone，建立槽后由 Arc<Cell> 保留同一实例。
+/// 一个托管 RAM Cell；自身不可 Clone，建立槽后由 Arc<Cell> 保留同一实例。
 ///
 /// Cell 析构是该承载唯一的物理归还出口，还须通过自身硬件责任账目的判定。
 /// 页槽保留实例；Nest 在发布前登记硬件责任，在失效成功后显式结清。
 /// 丢失已发布责任会永久保留承载，不能把普通引用消失解释成硬件已静止。
-/// 此处尚未接入 DMA / External，也不证明独占借用或 Unit 归属。
+/// External 从已登记的设备访问责任推导，不证明独占借用或 Unit 归属。
+/// 尚未登记的裸物理访问不在本账目保护范围内。
 #[derive(Debug)]
 pub(crate) struct Cell {
     id: CellId,
@@ -70,7 +73,16 @@ impl Cell {
 
     /// 先登记访问责任，再由调用方发布；登记失败不能继续建立硬件访问。
     pub(crate) fn prepare_hardware(self: &Arc<Self>) -> Result<Retention, RetainError> {
-        Retention::prepare(self)
+        Retention::prepare(self, reclaim::Kind::Cpu)
+    }
+
+    /// 在设备可达之前登记；未发布取消或可信结清后才解除这一条 External 责任。
+    pub(crate) fn prepare_external(self: &Arc<Self>) -> Result<Retention, RetainError> {
+        Retention::prepare(self, reclaim::Kind::Device)
+    }
+
+    pub(crate) fn exposure(&self) -> Exposure {
+        self.reclaim.exposure()
     }
 
     /// 只回答硬件责任是否允许物理归还；实际归还还要求持有已全部结束。
