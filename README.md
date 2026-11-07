@@ -65,12 +65,26 @@ Dropping an unsettled published obligation permanently retains the Cell and
 allocation and rejects new registrations. This allocation-free fallback is a
 leak, not a recoverable quarantine queue. Cell destruction returns memory only
 when its hardware ledger is clear; ordinary references must also have ended.
-DMA/IOMMU queue processing and External reclamation are not wired into this
-protocol yet.
+Cell now accounts for CPU and device obligations separately in one atomic state.
+Its Internal/External exposure reflects outstanding device obligations, including
+unpublished preparations and failed retirements; returning to Internal does not
+discharge CPU obligations or ordinary holders.
 
-This is the Internal backing foundation, not the complete Cell protocol. Unit
-owner assignment/transfer, larger Cells, and External registration remain in
-#14. `BorrowedRegion` still represents caller-retained physical ranges, including
+The internal `Nest::iommu::IoSpace` protocol registers a whole managed Cell before
+device publication, retains its projection, and associates each withdrawal with
+a non-reused completion batch. Closing seals admission and preserves failed work
+for retry; an old or foreign completion cannot settle a new attempt. Hardware
+effects are supplied through a trusted unsafe adapter contract that includes
+platform-specific synchronization, not merely a CQ completion flag. No platform
+adapter, device discovery, Unit-exit hook or PQ/CQ/FQ interrupt routing is installed
+yet, and the current user-space IOMMU service has not been migrated. This is the
+External protocol milestone, not protection of currently running DMA. Registration
+also requires the caller to uphold borrowing and Flat residency; the protocol does
+not implement Pend authorization.
+
+Unit owner assignment/transfer, larger Cells, platform DMA integration and
+registration of externally supplied physical ranges remain in #14.
+`BorrowedRegion` still represents caller-retained physical ranges, including
 bootstrap aliases and repeated trampoline mappings; importing each such range as
 an independent Cell would create duplicate identities. Neither Cell identity nor
 reference counts alone prove exclusive access or hardware quiescence.
@@ -126,6 +140,13 @@ crate or mock Cell behavior. These checks cover instance identity, allocation
 lifetime, consuming import, hardware-obligation retention and concurrent
 settlement bookkeeping. They do not establish full Flat/Nest integration,
 transfer races, actual TLB/DMA completion or Unit ownership.
+
+The IOMMU host suite runs the production Cell and IoSpace with scripted hardware
+effects. It checks ordering, partial publication failure, closure, retry, stale
+completion rejection, independent CPU/device lifetimes and physical return counts.
+RISC-V command encoding and CQ completion samples are checked separately; these
+samples alone never authorize Cell settlement. The fixture cannot establish that
+an actual hardware adapter meets its unsafe contract.
 
 Generic byte codecs and service-protocol macros are no longer part of Kernel.
 The [API migration notes](api/README.md#source-migration-and-abi-compatibility) list removed

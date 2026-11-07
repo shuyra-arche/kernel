@@ -15,3 +15,7 @@ fack = { version = "0.2.0", default-features = false }
 [[test]]
 name = "memory"
 path = "memory/mod.rs"
+
+[[test]]
+name = "iommu"
+path = "iommu/mod.rs"

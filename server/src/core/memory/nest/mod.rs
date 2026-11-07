@@ -31,6 +31,7 @@ mod state;
 mod unpublish;
 
 pub(crate) mod identity;
+pub(crate) mod iommu;
 pub(crate) mod mapping;
 pub(crate) mod synchronize;
 pub(crate) mod table;
