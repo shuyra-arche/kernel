@@ -1,0 +1,16 @@
+[package]
+name = "kernel-memory-tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autotests = false
+
+# Keep the host harness separate from the RV64-only Server library and binary.
+[workspace]
+
+[dependencies]
+kernel-api = { path = "../../api" }
+
+[[test]]
+name = "memory"
+path = "memory/mod.rs"

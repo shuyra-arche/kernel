@@ -3,6 +3,8 @@ use alloc::boxed::Box;
 
 use erra::ResultExt;
 
+use crate::core::memory::cell::{Cell, CellError, InternalPage};
+use crate::core::memory::flat::FlatError;
 use crate::core::memory::flat::allocator::{InitError, InitResult, bump, statistics};
 use crate::machine::sync::SpinLock;
 use kernel_allocator::MachineFacts;
@@ -67,6 +69,20 @@ pub(crate) fn instance() -> &'static FrameAllocator {
 
 pub fn allocator() -> &'static dyn Allocator {
     instance()
+}
+
+/// 分配器一侧分配并清零 RAM，再将唯一归还凭证交给 Cell。
+pub(in crate::core::memory::flat) fn cell() -> Result<Cell, FlatError> {
+    let allocator: &'static (dyn Allocator + Sync) = instance();
+    let page: InternalPage = crate::tag!(Plain, unsafe {
+        Box::try_new_zeroed_in(allocator)
+            .map_err(|_| FlatError::OutOfMemory)?
+            .assume_init()
+    });
+    Cell::from_internal(page).map_err(|error| match error {
+        CellError::InvalidRange => FlatError::NotAligned,
+        CellError::IdentityExhausted => FlatError::OutOfMemory,
+    })
 }
 
 pub fn init() -> InitResult<()> {

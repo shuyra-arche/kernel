@@ -1,28 +1,22 @@
-use alloc::alloc::Allocator;
-use alloc::boxed::Box;
 use alloc::sync::Arc;
-use core::cell::UnsafeCell;
 
-use crate::core::memory::PAGE_SIZE;
+use crate::core::memory::cell::{Cell, CellId};
 
 use super::custody::Custody;
 use super::error::FlatError;
 
 #[derive(Debug)]
 pub struct Frame {
-    page: Box<UnsafeCell<[u8; PAGE_SIZE]>, &'static dyn Allocator>,
+    /// Flat 的单页承载适配；物理身份与回收凭证只保存在 Cell 中。
+    cell: Cell,
     custody: Custody,
 }
 
 impl Frame {
     pub fn allocate() -> Result<Arc<Self>, FlatError> {
-        let page = crate::tag!(Plain, unsafe {
-            Box::try_new_zeroed_in(super::allocator::frame::allocator())
-                .map_err(|_| FlatError::OutOfMemory)?
-                .assume_init()
-        });
+        let cell = super::allocator::frame::cell()?;
         Arc::try_new(Self {
-            page,
+            cell,
             custody: Custody::new(),
         })
         .map_err(|_| FlatError::OutOfMemory)
@@ -34,18 +28,19 @@ impl Frame {
     }
 
     pub fn physical_address(&self) -> usize {
-        self.page.get() as usize
+        self.cell.physical_address()
+    }
+
+    pub(crate) fn cell_id(&self) -> CellId {
+        self.cell.id()
     }
 
     #[cfg(debug_assertions)]
     pub fn as_ptr(&self) -> *const u8 {
-        self.page.get().cast()
+        self.cell.as_mut_ptr().cast_const()
     }
 
     pub fn as_mut_ptr(&self) -> *mut u8 {
-        self.page.get().cast()
+        self.cell.as_mut_ptr()
     }
 }
-
-unsafe impl Send for Frame {}
-unsafe impl Sync for Frame {}

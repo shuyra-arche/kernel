@@ -61,10 +61,10 @@ impl Nest {
         if state.phase.is_closed() {
             return Err(NestError::Pinned);
         }
-        // 身份在取出发布记录之后、任何 PTE 被撕下之前核。
+        // 核对物理 Cell 实例，不能只比较 PA 或逻辑槽；检查先于任何 PTE 撤销。
         assert!(
-            Arc::ptr_eq(&inner.published[at].1, expected),
-            "the published page holds the frame this transfer handed over"
+            inner.published[at].1.cell_id() == expected.cell_id(),
+            "the published page holds the Cell this transfer handed over"
         );
         debug_assert!(
             inner.covers(address.as_usize(), address.as_usize()),
