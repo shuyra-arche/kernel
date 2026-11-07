@@ -14,10 +14,19 @@ mod edu;
 mod iommu;
 #[path = "../../../src/machine/iommu/mmio.rs"]
 mod mmio;
+#[path = "../../../src/entry/boot/devices/plan.rs"]
+mod plan;
 mod pool;
+#[path = "../../../src/entry/boot/devices/ranges.rs"]
+mod ranges;
+#[path = "../../../src/entry/boot/devices/region.rs"]
+mod region;
+#[path = "../../../src/entry/boot/devices/reserved.rs"]
+mod reserved;
 
 mod core {
     pub(crate) mod memory {
+        pub const PAGE_SIZE: usize = 4096;
         pub(crate) use crate::cell;
         pub(crate) mod nest {
             pub(crate) use crate::iommu;
@@ -100,9 +109,11 @@ extern "C" fn guest(dtb: usize) -> ! {
     let base = region.starting_address.addr();
     if matches!(
         fdt.chosen().bootargs(),
-        Some("dma" | "readonly" | "dma-abandon" | "owner-exit" | "activation-exit")
+        Some(
+            "dma" | "readonly" | "dma-abandon" | "owner-exit" | "activation-exit" | "route-reject"
+        )
     ) {
-        dma::run(base, fdt.chosen().bootargs().unwrap());
+        dma::run(base, fdt.chosen().bootargs().unwrap(), &fdt);
     }
     let _ = writeln!(Uart, "BEGIN iommu-command-engine base={base:#x}");
     let cells = [
@@ -114,7 +125,7 @@ extern "C" fn guest(dtb: usize) -> ! {
     let first_id = cells[0].id();
     // QEMU virt's platform IOMMU provides coherent access. This guest owns the
     // full machine, never enables device domains and keeps other harts absent.
-    let mut engine = Engine::new(unsafe { mmio::Mmio::new(base) }, cells).unwrap();
+    let mut engine = Engine::new(unsafe { mmio::Mmio::new(base, base) }, cells).unwrap();
     progress(&mut engine, Phase::Ready);
     assert!(POOL.cell().is_none());
     if fdt.chosen().bootargs() == Some("abandon") {

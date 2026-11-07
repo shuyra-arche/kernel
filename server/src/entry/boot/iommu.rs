@@ -2,14 +2,17 @@
 //! own only CQ/FQ/completion storage. Runtime device binding is not enabled yet.
 use crate::core::memory::address::PhysAddr;
 use crate::core::memory::flat::{BorrowedRegion, Flat, allocator::frame};
-use crate::core::memory::nest::iommu::riscv::{Engine, Phase};
+use crate::core::memory::nest::iommu::riscv::{
+    Engine, Phase, controllers::Controllers, topology::Topology,
+};
 use crate::core::memory::nest::{Access, Placement, RegionId};
 use crate::core::work::unit::team::kernel;
-use crate::machine::{board, iommu::Mmio, sync::SpinLock};
-use alloc::vec::Vec;
+use crate::machine::{
+    board,
+    iommu::{Mmio, controllers::CONTROLLERS},
+};
 use kernel_api::abi::call::pie::PieFail;
 
-static ENGINES: SpinLock<Vec<Engine<Mmio>>> = SpinLock::new(Vec::new());
 const STEP_BUDGET: usize = 1_000_000;
 
 pub(super) fn init() -> Result<(), PieFail> {
@@ -48,13 +51,21 @@ pub(super) fn init() -> Result<(), PieFail> {
             return Err(PieFail::Denied);
         }
     }
-    let mut engines = ENGINES.lock();
-    if !engines.is_empty() {
+    let topology = Topology::discover(&tree).map_err(|_| PieFail::Denied)?;
+    // Never silently skip reserved but disabled/unresolved hardware: its initial
+    // DMA state is unknown. Reject the whole setup before starting any engine.
+    if regions
+        .iter()
+        .any(|region| !topology.controllers().any(|base| base == region.base))
+    {
         return Err(PieFail::Denied);
     }
-    engines
-        .try_reserve_exact(regions.len())
-        .map_err(|_| PieFail::OoM)?;
+    let mut storage = CONTROLLERS.lock();
+    if storage.is_some() {
+        return Err(PieFail::Denied);
+    }
+    *storage = Some(Controllers::new(topology).map_err(|_| PieFail::OoM)?);
+    let controllers = storage.as_mut().expect("installed controller registry");
     let nest = &kernel().ok_or(PieFail::Denied)?.space.nest;
     for region in regions {
         // MMIO remains a borrowed physical range, not an allocator-owned Cell.
@@ -80,10 +91,12 @@ pub(super) fn init() -> Result<(), PieFail> {
         ];
         // SAFETY: trusted QEMU platform discovery; Kernel-only MMIO mapping and
         // all overlapping boot grants are withheld. No other MMIO owner exists.
-        let registers = unsafe { Mmio::new(mapping.initial_start().as_usize()) };
+        let registers = unsafe { Mmio::new(mapping.initial_start().as_usize(), region.base) };
         let engine = Engine::new(registers, cells).map_err(|_| PieFail::OoM)?;
-        engines.push(engine); // Keep responsibility even when initialization fails.
-        let engine = engines.last_mut().expect("inserted engine");
+        controllers.install(engine).map_err(|_| PieFail::Denied)?;
+        let engine = controllers
+            .engine(region.base)
+            .map_err(|_| PieFail::Denied)?;
         let mut ready = false;
         for _ in 0..STEP_BUDGET {
             if engine.step().map_err(failure)? == Phase::Ready {
@@ -119,7 +132,11 @@ fn failure(error: crate::core::memory::nest::iommu::riscv::EngineError) -> PieFa
 }
 
 pub(super) fn shutdown() {
-    for engine in ENGINES.lock().iter_mut() {
+    let mut storage = CONTROLLERS.lock();
+    let Some(controllers) = storage.as_mut() else {
+        return;
+    };
+    for engine in controllers.unassigned() {
         if engine.phase() == Phase::Closed {
             continue;
         }

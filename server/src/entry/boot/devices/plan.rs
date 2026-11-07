@@ -1,3 +1,4 @@
+use crate::core::memory::nest::iommu::riscv::topology::Topology;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pie::PieFail;
 
@@ -17,6 +18,21 @@ impl Plan {
         }
         reserved.try_reserve(1).map_err(|_| PieFail::OoM)?;
         reserved.push(dram);
+        if fdt.all_nodes().any(|node| {
+            node.property("iommu-map").is_some()
+                || node.property("iommu-map-mask").is_some()
+                || node.property("iommus").is_some()
+        }) {
+            let topology = Topology::discover(fdt).map_err(|_| PieFail::Denied)?;
+            for (base, size) in topology.configurations() {
+                let region = Region::new(base, size)?;
+                if region.overlaps(dram) {
+                    return Err(PieFail::Denied);
+                }
+                reserved.try_reserve(1).map_err(|_| PieFail::OoM)?;
+                reserved.push(region);
+            }
+        }
         let mut plan = Self { grants: Vec::new() };
         for node in fdt.all_nodes() {
             let stem = node.name.split('@').next().unwrap_or(node.name);

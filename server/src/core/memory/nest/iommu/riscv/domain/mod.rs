@@ -30,7 +30,7 @@ impl<R: Registers> Domain<R> {
     /// retained ATS translations. CPU/device borrowing and residency have been
     /// authorized for the complete Cell. The payload obligation must already be
     /// published and retained until this Domain and platform access are settled.
-    pub(crate) unsafe fn new(
+    pub(super) unsafe fn new(
         engine: Engine<R>,
         pages: [Retention; 4],
         projection: Projection,
@@ -100,15 +100,8 @@ impl<R: Registers> Domain<R> {
     ) -> Result<(), EngineError> {
         let cap = engine.registers.read64(CAP);
         let pas = (cap >> 32) & 63;
-        let stride = if cap & (1 << 22) != 0 { 64 } else { 32 };
-        if engine.phase() != Phase::Ready {
-            return Err(EngineError::State);
-        }
-        if cap & (1 << 9) == 0 || engine.registers.read32(FCTL) & 5 != 0 {
-            return Err(EngineError::Unsupported);
-        }
-        if device as usize >= 4096 / stride
-            || projection.size != 4096
+        Self::supports_device(engine, device)?;
+        if projection.size != 4096
             || projection.iova >= (1usize << 38)
             || !projection.iova.is_multiple_of(4096)
             || !projection.physical.is_multiple_of(4096)
@@ -127,6 +120,21 @@ impl<R: Registers> Domain<R> {
             {
                 return Err(EngineError::Address);
             }
+        }
+        Ok(())
+    }
+
+    pub(super) fn supports_device(engine: &Engine<R>, device: u32) -> Result<(), EngineError> {
+        let cap = engine.registers.read64(CAP);
+        let stride = if cap & (1 << 22) != 0 { 64 } else { 32 };
+        if engine.phase() != Phase::Ready {
+            return Err(EngineError::State);
+        }
+        if cap & (1 << 9) == 0 || engine.registers.read32(FCTL) & 5 != 0 {
+            return Err(EngineError::Unsupported);
+        }
+        if device as usize >= 4096 / stride {
+            return Err(EngineError::Address);
         }
         Ok(())
     }

@@ -19,5 +19,10 @@ mod engine;
 mod hardware;
 mod lifecycle;
 mod retirement;
+pub(crate) use iommu::riscv::topology;
+#[path = "../boot/routing/fixtures.rs"]
+mod routing_fixture;
 #[path = "../memory/support.rs"]
 mod support;
+#[path = "../boot/tree.rs"]
+mod tree;

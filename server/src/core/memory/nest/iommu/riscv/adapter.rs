@@ -44,12 +44,15 @@ impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
     /// The proof covers this entire controller, including every possible requester.
     /// This constructor does not authorize CPU/device borrowing (IoSpace::register).
     /// Preparation failure returns the Engine so its live queues can still be stopped.
-    pub(crate) unsafe fn new(
+    pub(super) unsafe fn new(
         engine: Engine<R>,
         tables: [Cell; 4],
         device: u32,
         proof: Q,
     ) -> Result<Self, (EngineError, Engine<R>)> {
+        if let Err(error) = Domain::supports_device(&engine, device) {
+            return Err((error, engine));
+        }
         let tables = match Domain::<R>::prepare(tables) {
             Ok(tables) => tables,
             Err(error) => return Err((error, engine)),

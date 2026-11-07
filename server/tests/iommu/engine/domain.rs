@@ -1,8 +1,10 @@
 use super::{engine, registers::Device, start};
 use crate::iommu::riscv::EngineError;
 use crate::iommu::riscv::adapter::{Adapter, Quiescence};
+use crate::iommu::riscv::controllers::{BindError, Controllers};
 use crate::iommu::riscv::registers::*;
 use crate::iommu::{BindingId, Error, HardwareError, IoSpace, Life, Phase};
+use crate::routing_fixture;
 use crate::{
     cell::{Cell, Exposure},
     support::Pool,
@@ -43,9 +45,20 @@ fn space(
     let cells = tables.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
     let cell = Arc::new(Cell::from_internal(payload.page().unwrap()).unwrap());
     let evidence = Arc::new(Mutex::new(Evidence::default()));
-    let adapter = unsafe { Adapter::new(engine, cells, device_id, Proof(evidence.clone())) }
+    let mut controllers = Controllers::new(routing_fixture::topology()).unwrap();
+    controllers
+        .install(engine)
         .map_err(|(error, _)| error)
         .unwrap();
+    let adapter = unsafe {
+        controllers.bind(
+            routing_fixture::HOST,
+            device_id as u16,
+            cells,
+            Proof(evidence.clone()),
+        )
+    }
+    .unwrap();
     (
         IoSpace::new(adapter),
         device,
@@ -187,7 +200,7 @@ fn domain_failure_keeps_both_payload_and_hardware_tables() {
 
 #[test]
 fn invalid_geometry_and_extra_binding_fail_before_publication() {
-    for (device_id, iova) in [(64, 0x400000), (8, 1), (8, 1usize << 38)] {
+    for (device_id, iova) in [(8, 1), (8, 1usize << 38)] {
         let (mut space, device, pools, cell, _) = space(device_id);
         assert!(unsafe { space.register(&cell, iova, true) }.is_err());
         assert_eq!(space.pending(), 0);
@@ -216,6 +229,125 @@ fn invalid_geometry_and_extra_binding_fail_before_publication() {
         }
     }
     assert_eq!(device.read64(DDTP), 0);
+    assert!(pools.iter().all(|p| p.gives() == 1));
+}
+
+#[test]
+fn rejected_bindings_preserve_controller_and_return_unpublished_tables() {
+    use crate::iommu::riscv::topology::RouteError;
+    let (mut engine, device, queues) = engine();
+    start(&mut engine);
+    let mut controllers = Controllers::new(routing_fixture::topology()).unwrap();
+    controllers
+        .install(engine)
+        .map_err(|(error, _)| error)
+        .unwrap();
+    let evidence = Arc::new(Mutex::new(Evidence::default()));
+    for (host, rid, expected) in [
+        (
+            routing_fixture::HOST + 4096,
+            8,
+            BindError::Route(RouteError::Unmapped),
+        ),
+        (
+            routing_fixture::HOST,
+            64,
+            BindError::Engine(EngineError::Address),
+        ),
+    ] {
+        let tables = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
+        let cells = tables.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
+        let result = unsafe { controllers.bind(host, rid, cells, Proof(evidence.clone())) };
+        assert_eq!(result.err(), Some(expected));
+        assert_eq!(device.read64(DDTP), 0);
+        assert_eq!(
+            controllers
+                .engine(routing_fixture::CONTROLLER)
+                .unwrap()
+                .phase(),
+            crate::iommu::riscv::Phase::Ready
+        );
+        assert!(tables.iter().all(|p| p.gives() == 1));
+        assert!(queues.iter().all(|p| p.gives() == 0));
+    }
+    let engine = controllers.engine(routing_fixture::CONTROLLER).unwrap();
+    engine.stop().unwrap();
+    engine.step().unwrap();
+    engine.step().unwrap();
+    assert!(queues.iter().all(|p| p.gives() == 1));
+}
+
+#[test]
+fn bound_controller_uses_translated_device_id_and_cannot_be_assigned_twice() {
+    use routing_fixture::*;
+    let (mut engine, device, queues) = engine();
+    start(&mut engine);
+    let topology = discover(
+        root()
+            .child(controller(CONTROLLER, 1))
+            .child(host(HOST, &[8, 1, 16, 8])),
+    )
+    .unwrap();
+    let mut controllers = Controllers::new(topology).unwrap();
+    controllers
+        .install(engine)
+        .map_err(|(error, _)| error)
+        .unwrap();
+    let tables = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
+    let cells = tables.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
+    let proof = Arc::new(Mutex::new(Evidence::default()));
+    let adapter = unsafe { controllers.bind(HOST, 8, cells, Proof(proof.clone())) }.unwrap();
+    let mut space = IoSpace::new(adapter);
+    let payload = Pool::new(0);
+    let cell = Arc::new(Cell::from_internal(payload.page().unwrap()).unwrap());
+    let id = publish(&mut space, &cell);
+    active(&mut space, &device, id);
+    let directory = ((device.read64(DDTP) >> 10) << 12) as *const u64;
+    assert_eq!(unsafe { directory.add(16 * 8).read_volatile() } & 1, 1);
+    assert_eq!(unsafe { directory.add(8 * 8).read_volatile() }, 0);
+    let extra = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
+    let cells = extra.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
+    assert_eq!(
+        unsafe { controllers.bind(HOST, 9, cells, Proof(proof.clone())) }.err(),
+        Some(BindError::Unavailable)
+    );
+    assert!(extra.iter().all(|p| p.gives() == 1));
+    assert!(matches!(
+        controllers.engine(CONTROLLER),
+        Err(BindError::Unavailable)
+    ));
+    drop(cell);
+    proof.lock().unwrap().outcomes.push_back(Ok(true));
+    for _ in 0..30 {
+        complete(&device);
+        if space.advance_close().unwrap() {
+            break;
+        }
+    }
+    assert_eq!(space.life(), Life::Closed);
+    assert_eq!(payload.gives(), 1);
+    assert!(tables.iter().chain(queues.iter()).all(|p| p.gives() == 1));
+    assert!(matches!(
+        controllers.engine(CONTROLLER),
+        Err(BindError::Unavailable)
+    ));
+}
+
+#[test]
+fn physical_controller_identity_must_match_firmware_before_installation() {
+    let mut controllers = Controllers::new(routing_fixture::topology()).unwrap();
+    let mut device = Device::new();
+    device.1 = 0x3020000;
+    let pools = core::array::from_fn::<_, 3, _>(|_| Pool::new(0));
+    let cells = pools.map(|p| Cell::from_internal(p.page().unwrap()).unwrap());
+    let engine = crate::iommu::riscv::Engine::new(device.clone(), cells).unwrap();
+    let (error, mut engine) = controllers
+        .install(engine)
+        .err()
+        .expect("foreign MMIO rejected");
+    assert_eq!(error, BindError::UnknownController);
+    assert_eq!(device.read64(DDTP), 0);
+    engine.stop().unwrap();
     assert!(pools.iter().all(|p| p.gives() == 1));
 }
 

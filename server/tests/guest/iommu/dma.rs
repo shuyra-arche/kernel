@@ -1,6 +1,6 @@
 use crate::iommu::retirement::{Owner, Registry};
 use crate::iommu::riscv::adapter::{Adapter, Quiescence};
-use crate::iommu::riscv::{Engine, Phase};
+use crate::iommu::riscv::{Engine, Phase, controllers::Controllers, topology::Topology};
 use crate::iommu::{HardwareError, IoSpace};
 use crate::{
     Uart,
@@ -39,7 +39,18 @@ unsafe impl Quiescence for Platform<'_> {
 
 type Space<'a> = IoSpace<Adapter<mmio::Mmio, Platform<'a>>>;
 
-pub fn run(base: usize, scenario: &str) -> ! {
+pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
+    let topology = Topology::discover(fdt).unwrap();
+    // Exercise the production boot grant planner against QEMU's actual DTB,
+    // including its zero-length tuple and PCI apertures, before touching devices.
+    let plan = crate::plan::Plan::discover(fdt, 0x8000_0000, 128 << 20).unwrap();
+    for grant in plan.grants() {
+        assert!(!grant.overlaps(crate::region::Region::new(base, 4096).unwrap()));
+        for (ecam, size) in topology.configurations() {
+            assert!(!grant.overlaps(crate::region::Region::new(ecam, size).unwrap()));
+        }
+    }
+    let mut controllers = Controllers::new(topology).unwrap();
     LIMIT.store(8, Ordering::Relaxed);
     let payload = Arc::new(POOL.cell().unwrap());
     let pa = payload.physical_address();
@@ -49,7 +60,7 @@ pub fn run(base: usize, scenario: &str) -> ! {
     let edu = Edu::new(1);
     let outsider = Edu::new(2);
     let cells = core::array::from_fn(|_| POOL.cell().unwrap());
-    let mut engine = Engine::new(unsafe { mmio::Mmio::new(base) }, cells).unwrap();
+    let mut engine = Engine::new(unsafe { mmio::Mmio::new(base, base) }, cells).unwrap();
     progress(&mut engine, Phase::Ready);
     let tables = core::array::from_fn(|_| POOL.cell().unwrap());
     let allow = AtomicBool::new(false);
@@ -58,9 +69,31 @@ pub fn run(base: usize, scenario: &str) -> ! {
         allow: &allow,
     };
     // Exclusive M-mode fixture, fixed coherent topology and whole-page borrowing.
-    let adapter = unsafe { Adapter::new(engine, tables, 8, platform) }
+    controllers
+        .install(engine)
         .map_err(|(error, _)| error)
         .unwrap();
+    if scenario == "route-reject" {
+        let result = unsafe { controllers.bind(0x3000_1000, 8, tables, platform) };
+        assert!(matches!(
+            result,
+            Err(crate::iommu::riscv::controllers::BindError::Route(
+                crate::iommu::riscv::topology::RouteError::Unmapped
+            ))
+        ));
+        assert_eq!(RETURNS.load(Ordering::SeqCst), 4); // unused tables returned
+        let engine = controllers.engine(base).unwrap();
+        assert_eq!(engine.phase(), Phase::Ready); // ownership was not consumed
+        assert_eq!(unsafe { ((base + 0x10) as *const u64).read_volatile() }, 0);
+        check(bytes, 0x5a);
+        engine.stop().unwrap();
+        progress(engine, Phase::Closed);
+        drop(payload);
+        assert_eq!(RETURNS.load(Ordering::SeqCst), 8);
+        let _ = writeln!(Uart, "PASS iommu-binding rejected=1 returned=8");
+        finish(true);
+    }
+    let adapter = unsafe { controllers.bind(0x3000_0000, 8, tables, platform) }.unwrap();
     let mut registry = Registry::new();
     let mut owner = Some(Owner::new().unwrap());
     let domain = registry

@@ -26,6 +26,9 @@ pub(crate) const FQ_ERRORS: u32 = (1 << 8) | (1 << 9);
 /// The device must honor the v1.0.1 queue completion/off guarantees. A noncoherent
 /// platform requires cache maintenance and cannot use a fence-only implementation.
 pub(crate) unsafe trait Registers {
+    /// Physical identity of this controller, independent of its CPU mapping.
+    /// It must identify the same controller as every register access below.
+    fn physical_base(&self) -> usize;
     fn read32(&self, offset: usize) -> u32;
     fn read64(&self, offset: usize) -> u64;
     fn write32(&mut self, offset: usize, value: u32);

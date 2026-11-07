@@ -4,12 +4,14 @@
 //! 依据 RISC-V IOMMU v1.0.1 §4.1 / §5。
 
 pub(crate) mod adapter;
+pub(crate) mod controllers;
 pub(crate) mod domain;
 mod engine;
 mod fault;
 mod pages;
 mod phase;
 pub(crate) mod registers;
+pub(crate) mod topology;
 
 pub(crate) use engine::{Engine, EngineError};
 pub(crate) use fault::Fault;

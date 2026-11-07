@@ -31,6 +31,9 @@ pub(crate) struct Engine<R: Registers> {
 }
 
 impl<R: Registers> Engine<R> {
+    pub(crate) fn physical_base(&self) -> usize {
+        self.registers.physical_base()
+    }
     pub(crate) fn new(registers: R, cells: [Cell; 3]) -> Result<Self, EngineError> {
         Ok(Self {
             registers,
