@@ -47,8 +47,18 @@ The Server mapping types, source index, Space registry and wait keys use
 `Mapping` to distinguish address projection from the planned cross-Unit `View`.
 The current public ABI still names mapping handles `ViewId`, `ViewSelection` and
 `ViewControl`; these are legacy mapping contracts, not the new interaction model.
-Cell identity, unique ownership and Internal/External reclamation remain tracked
-in #14; the existing Frame allocator is not yet a Cell implementation.
+Allocator-managed 4 KiB RAM now has a `Cell`: it consumes the unique allocation
+receipt and assigns a non-reused instance identity. A Flat `Frame` retains that
+Cell and the existing transfer-custody state; it no longer stores a separate
+physical allocation. Mapping retention and retirement therefore keep the same
+Cell alive, and transfer withdrawal checks its identity before touching PTEs.
+
+This is the Internal backing foundation, not the complete Cell protocol. Unit
+owner assignment/transfer, larger Cells, and External registration remain in
+#14. `BorrowedRegion` still represents caller-retained physical ranges, including
+bootstrap aliases and repeated trampoline mappings; importing each such range as
+an independent Cell would create duplicate identities. Neither Cell identity nor
+reference counts alone prove exclusive access or hardware quiescence.
 
 ## Build
 
@@ -78,6 +88,7 @@ same channel as CI:
 cargo test --locked -p kernel-api --tests --target x86_64-unknown-linux-gnu
 cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu
 cargo test --locked -p kernel-api-macros --test declaration --target x86_64-unknown-linux-gnu
+cargo test --locked --manifest-path server/tests/Cargo.toml --target x86_64-unknown-linux-gnu
 ```
 
 Tests, compile-fail fixtures, expected diagnostics and test support stay under
@@ -92,6 +103,12 @@ transport; they do not recompile private wrappers or perform native traps. Boot 
 integration validation belong to [Vanllia](https://github.com/shuyra-arche/vanllia),
 which assembles the selected Units. Compilation alone does not establish guest
 execution or resource reclamation.
+
+The isolated host harness under `server/tests/` compiles the production Cell
+module directly, with a bounded test allocator to observe physical-address reuse
+and return counts. It does not load the RV64-only Server crate or mock Cell
+behavior. These checks cover instance identity and allocation lifetime; they do
+not establish Flat/Nest integration, TLB/DMA completion or Unit ownership.
 
 Generic byte codecs and service-protocol macros are no longer part of Kernel.
 The [API migration notes](api/README.md#source-migration-and-abi-compatibility) list removed
