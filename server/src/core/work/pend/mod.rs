@@ -14,12 +14,13 @@ mod need;
 mod pie;
 
 pub(crate) use allocation::{
-    Derivation, Geometry, Hold, HoldTable, IndependentHold, Lineage, SourceAuthorization,
+    Derivation, ExternalBorrow, Geometry, Hold, HoldTable, IndependentHold, Lineage,
+    SourceAuthorization,
 };
 pub(crate) use ledger::Pend;
 pub(crate) use need::Need;
 
-pub(crate) use pie::{Permission, Pie, PieSnapshot, accede, allows, locate, vestor};
+pub(crate) use pie::{Permission, Pie, PieSnapshot, accede, allows, allows_locked, locate, vestor};
 
 pub(crate) use accord::{accord, clear_heir, derive};
 pub(crate) use cull::{doom, release, revoke};

@@ -8,6 +8,7 @@ use crate::machine::switcher::context::{Gprs, TrapContext};
 mod chrono;
 mod control;
 mod debug;
+mod device;
 mod gate;
 mod hole;
 pub(in crate::entry) mod memory;
@@ -45,6 +46,10 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
         }
     };
     let outcome = match envcall {
+        EnvCall::Device(call) => {
+            device::dispatch(frame, call, &ident);
+            Outcome::Resume
+        }
         EnvCall::Room(call) => room::dispatch(frame, call, ident),
         EnvCall::Unit(call) => unit::dispatch(frame, call, ident),
         EnvCall::Memory(call) => {

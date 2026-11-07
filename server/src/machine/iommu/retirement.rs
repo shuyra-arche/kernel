@@ -1,5 +1,5 @@
 //! Kernel-lifetime storage, independent of Team/Task objects. Trusted device
-//! binding will install adapters here; normal boot still exposes no DMA ABI.
+//! binding installs adapters before publishing any Unit data.
 use crate::core::memory::nest::iommu::retirement::{DomainId, Owner, Registry};
 use crate::core::memory::nest::iommu::{Error, Hardware, IoSpace};
 use crate::machine::sync::SpinLock;
@@ -21,9 +21,28 @@ pub(crate) fn with_space<T>(
 }
 
 /// Timer fallback, no waiting for MMIO/queues and no lock spinning in the trap.
-/// Queue interrupts and Sign event routing remain separate follow-up work.
-pub(crate) fn progress() {
+/// Queue interrupts and idle fallback also call this bounded progress path.
+pub(crate) fn progress() -> bool {
     if let Some(mut domains) = DOMAINS.try_lock() {
         domains.step(4);
+        domains.pending() != 0
+    } else {
+        true
     }
+}
+
+pub(crate) fn completion(
+    id: DomainId,
+) -> Option<crate::core::memory::nest::iommu::retirement::Completion> {
+    DOMAINS.lock().completion(id)
+}
+
+pub(crate) fn fault(
+    id: DomainId,
+) -> Result<Option<crate::core::memory::nest::iommu::riscv::Fault>, Error> {
+    DOMAINS.lock().fault(id)
+}
+
+pub(crate) fn close(id: DomainId) -> Result<(), Error> {
+    DOMAINS.lock().close(id)
 }

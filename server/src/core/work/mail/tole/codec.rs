@@ -39,7 +39,10 @@ pub(crate) fn source_watch(source: ToleEventSource) -> Option<(PieToken, Need)> 
         ToleEventSource::Pole { token, .. } | ToleEventSource::Nole { token } => {
             Some((token, Need::Fetch))
         }
-        ToleEventSource::Join { .. } | ToleEventSource::Inspect { .. } => None,
+        ToleEventSource::Join { .. }
+        | ToleEventSource::Inspect { .. }
+        | ToleEventSource::DeviceRetired { .. }
+        | ToleEventSource::DeviceFault { .. } => None,
     }
 }
 
@@ -62,7 +65,10 @@ pub(crate) fn source_key(
             let meta = mail.nole()?;
             Some((nole::key(&meta), meta.life()))
         }
-        ToleEventSource::Join { .. } | ToleEventSource::Inspect { .. } => None,
+        ToleEventSource::Join { .. }
+        | ToleEventSource::Inspect { .. }
+        | ToleEventSource::DeviceRetired { .. }
+        | ToleEventSource::DeviceFault { .. } => None,
     }
 }
 
@@ -73,6 +79,9 @@ pub(crate) fn source_ready(pie: &PieSnapshot, source: ToleEventSource) -> Option
         ToleEventSource::Hole { condition, .. } => Some(mail.hole()?.ready(condition)),
         ToleEventSource::Pole { bit, .. } => Some(mail.pole()?.ready(bit)),
         ToleEventSource::Nole { .. } => Some(mail.nole()?.ready()),
-        ToleEventSource::Join { .. } | ToleEventSource::Inspect { .. } => None,
+        ToleEventSource::Join { .. }
+        | ToleEventSource::Inspect { .. }
+        | ToleEventSource::DeviceRetired { .. }
+        | ToleEventSource::DeviceFault { .. } => None,
     }
 }

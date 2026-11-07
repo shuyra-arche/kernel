@@ -9,3 +9,5 @@ pub(crate) mod mode;
 pub(crate) mod stop;
 pub(crate) mod switcher;
 pub(crate) mod sync;
+
+pub(crate) mod device;

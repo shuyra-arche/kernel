@@ -11,6 +11,7 @@ use crate::core::memory::nest::Asid;
 /// 空间清场按 ASID 一并清掉 `Space` 与 `Mapping`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WakeKey {
+    Device { id: usize },
     Space { space: Asid, slot: usize },
     Mapping { space: Asid, mapping: usize },
     Value { space: Asid, address: usize },
@@ -36,6 +37,7 @@ impl WakeKey {
 
     pub(super) fn fold(self) -> u64 {
         match self {
+            WakeKey::Device { id } => (id as u64).wrapping_mul(0xB8A7_641D_2C39_EF05),
             WakeKey::Space { space, slot } => {
                 (space.get() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ slot as u64
             }

@@ -11,6 +11,9 @@ mod iommu;
 mod core {
     pub(crate) mod memory {
         pub(crate) use crate::cell;
+        pub(crate) mod nest {
+            pub(crate) use crate::iommu;
+        }
     }
 }
 
@@ -26,3 +29,8 @@ mod routing_fixture;
 mod support;
 #[path = "../boot/tree.rs"]
 mod tree;
+
+#[path = "device/mod.rs"]
+mod custody_tests;
+#[path = "../../src/core/work/device/mod.rs"]
+mod device;

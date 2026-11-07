@@ -2,6 +2,7 @@
 pub mod chrono;
 pub mod control;
 pub mod debug;
+pub mod device;
 pub mod hole;
 pub mod memory;
 pub mod nole;
@@ -14,6 +15,7 @@ pub mod unit;
 /// Decoded environment call.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EnvCall {
+    Device(self::device::DeviceCall),
     Room(self::room::RoomCall),
     Unit(self::unit::UnitCall),
     Memory(self::memory::MemoryCall),
@@ -52,6 +54,9 @@ impl EnvCall {
             10 => Ok(EnvCall::Pole(self::pole::PoleCall::from_wire(slot, regs)?)),
             11 => Ok(EnvCall::Nole(self::nole::NoleCall::from_wire(slot, regs)?)),
             12 => Ok(EnvCall::Tole(self::tole::ToleCall::from_wire(slot, regs)?)),
+            13 => Ok(EnvCall::Device(self::device::DeviceCall::from_wire(
+                slot, regs,
+            )?)),
             _ => Err(crate::abi::register::Decode::BadSlot),
         }
     }

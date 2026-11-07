@@ -47,6 +47,11 @@ impl Command {
         ]))
     }
 
+    pub(crate) fn interrupt(mut self) -> Self {
+        self.0[0] |= 1 << 11;
+        self
+    }
+
     pub(crate) fn words(self) -> [u64; 2] {
         self.0
     }

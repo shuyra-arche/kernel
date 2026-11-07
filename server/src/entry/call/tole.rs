@@ -104,6 +104,13 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: ToleEventSource) -> Result<C
     let mut keys = Vec::new();
     keys.try_reserve(4).map_err(|_| ToleFail::OoM)?;
     let watch = match source {
+        ToleEventSource::DeviceRetired { device } | ToleEventSource::DeviceFault { device } => {
+            let fault = matches!(source, ToleEventSource::DeviceFault { .. });
+            let (life, _) = crate::machine::device::event(actor, device, fault)
+                .map_err(|_| ToleFail::Denied)?;
+            keys.push((WakeKey::Device { id: device }, life));
+            Watch::Device { id: device, fault }
+        }
         ToleEventSource::Hole { .. }
         | ToleEventSource::Pole { .. }
         | ToleEventSource::Nole { .. } => {

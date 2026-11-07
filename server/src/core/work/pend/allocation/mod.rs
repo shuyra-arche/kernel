@@ -15,3 +15,6 @@ pub(crate) use hold_table::HoldTable;
 pub(crate) use independent::IndependentHold;
 pub(crate) use lineage::Lineage;
 pub(crate) use source_authorization::SourceAuthorization;
+
+mod external;
+pub(crate) use external::ExternalBorrow;

@@ -25,5 +25,8 @@ mod core {
 }
 
 mod authority;
+mod interrupt;
+#[path = "../../src/machine/iommu/interrupt/plan.rs"]
+mod interrupt_plan;
 mod routing;
 mod tree;

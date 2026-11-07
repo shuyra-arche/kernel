@@ -183,3 +183,45 @@ fn publication_admitted_before_concurrent_exit_remains_in_kernel_custody() {
     assert_eq!(registry.step(1).reclaimed, 1);
     assert_eq!(pool.gives(), 1);
 }
+
+#[test]
+fn explicit_close_settles_only_its_receipt_without_requiring_owner_exit() {
+    let mut registry = Registry::new();
+    let owner = Owner::new().unwrap();
+    let (hardware, trace) = Scripted::new();
+    let id = registry
+        .attach(&owner, hardware)
+        .map_err(|(e, _)| e)
+        .unwrap();
+    let receipt = registry.completion(id).unwrap();
+    let (other_hardware, _) = Scripted::new();
+    let other = registry
+        .attach(&owner, other_hardware)
+        .map_err(|(e, _)| e)
+        .unwrap();
+    let other_receipt = registry.completion(other).unwrap();
+    let pool = Pool::new(0);
+    let cell = Arc::new(Cell::from_internal(pool.page().unwrap()).unwrap());
+    registry
+        .with_space(&owner, id, |space| {
+            let binding = unsafe { space.register(&cell, 0x400000, true) }?;
+            space.publish(binding)?;
+            space.close()
+        })
+        .unwrap();
+    drop(cell);
+    registry.step(4);
+    assert!(!receipt.settled());
+    assert_eq!(pool.gives(), 0);
+    let batch = latest(&trace);
+    trace.lock().unwrap().completion.push_back(Ok(Some(batch)));
+    assert_eq!(registry.step(4).reclaimed, 1);
+    assert!(receipt.settled());
+    assert!(!other_receipt.settled());
+    assert!(registry.completion(id).is_none());
+    assert_eq!(pool.gives(), 1);
+    assert!(!owner.closed());
+    owner.close();
+    registry.step(4);
+    assert!(other_receipt.settled());
+}

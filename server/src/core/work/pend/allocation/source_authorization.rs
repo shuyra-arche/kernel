@@ -10,7 +10,7 @@
 
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::core::memory::address::{PageCount, PageIndex, PageOffset};
 use crate::core::memory::flat::FlatRange;
@@ -37,6 +37,7 @@ pub(crate) struct SourceAuthorization {
     ceiling: Access,
     owner: TaskId,
     qualification: Creation,
+    external: AtomicBool,
     /// 还活着的普通引用份数（成员资格，不是 `Arc` 强计数）。
     holds: AtomicUsize,
     /// **在途发布**的键：闸门下登记，撤销方看到它就不结清。
@@ -90,6 +91,7 @@ impl SourceAuthorization {
             ceiling,
             owner,
             qualification: Creation::new(),
+            external: AtomicBool::new(false),
             holds: AtomicUsize::new(0),
             inflight: SpinLock::new(Vec::new()),
             revoked: SpinLock::new(false),
@@ -119,6 +121,7 @@ impl SourceAuthorization {
             ceiling,
             owner,
             qualification: Creation::new(),
+            external: AtomicBool::new(false),
             holds: AtomicUsize::new(0),
             inflight: SpinLock::new(Vec::new()),
             revoked: SpinLock::new(false),
@@ -135,6 +138,34 @@ impl SourceAuthorization {
         .map_err(|_| PieFail::OoM)
     }
 
+    /// Under the shared work commit boundary: no old CPU publication may remain,
+    /// and every future source publication observes this distinct borrow state.
+    pub(super) fn begin_external(&self, task: TaskId) -> Result<(), PieFail> {
+        #[cfg(debug_assertions)]
+        crate::core::work::assert_held();
+        if !self.private_owner(task) {
+            return Err(PieFail::Denied);
+        }
+        let gate = self.revoked.lock();
+        if *gate
+            || !self.bindings.lock().is_empty()
+            || !self.inflight.lock().is_empty()
+            || !self.derivations.lock().is_empty()
+            || !self.retentions.lock().is_empty()
+        {
+            return Err(PieFail::Busy);
+        }
+        self.external
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|_| PieFail::Busy)
+    }
+    pub(super) fn end_external(&self) {
+        #[cfg(debug_assertions)]
+        crate::core::work::assert_held();
+        self.external.store(false, Ordering::Release);
+    }
+
     /// 整段来源范围；已交给根 Grant 就是 `None`（真实范围在 Pole 手里）。
     pub(crate) fn own_range(&self) -> Option<FlatRange> {
         self.range.lock().clone()
@@ -145,7 +176,9 @@ impl SourceAuthorization {
     }
 
     pub(crate) fn private_owner(&self, task: TaskId) -> bool {
-        self.owner == task && matches!(&*self.phase.lock(), Phase::Private)
+        !self.external.load(Ordering::Acquire)
+            && self.owner == task
+            && matches!(&*self.phase.lock(), Phase::Private)
     }
 
     /// 相对整段来源的页窗口解析成可用范围。
@@ -198,6 +231,9 @@ impl SourceAuthorization {
     }
 
     fn branch_permits(&self, branch: Option<&Grant>, access: Access) -> bool {
+        if self.external.load(Ordering::Acquire) {
+            return false;
+        }
         // 先把相位拷出来放锁，再升弱引用：临时 `Arc` 可能是最后一份强持，
         // 它的析构会走到 `retire_mapping` / `settle` 再回本文件取锁。同 `manages`。
         let phase = Phase::clone(&self.phase.lock());
@@ -364,6 +400,9 @@ impl SourceAuthorization {
     /// 不自己取提交锁——单拿谓词去判、再在段外发表，中间会有人插进一条新占用。
     /// 已可靠结束的分配槽在这一步里顺带收掉（摘槽也取提交段，见 `settle`）。
     pub(crate) fn check_use(&self, offset: PageOffset, count: PageCount) -> Result<(), PieFail> {
+        if self.external.load(Ordering::Acquire) {
+            return Err(PieFail::Busy);
+        }
         #[cfg(debug_assertions)]
         crate::core::work::assert_held();
         self.reap_derivations();

@@ -17,6 +17,25 @@ impl Owner {
     }
 }
 
+/// A Kernel-held admission observation; it cannot mint or reopen an owner.
+pub(crate) struct Admission(Arc<AtomicBool>);
+impl Admission {
+    pub(crate) fn closed(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+    pub(crate) fn accepts(&self, owner: &Owner) -> bool {
+        Arc::ptr_eq(&self.0, &owner.0) && !self.closed()
+    }
+}
+impl Owner {
+    pub(crate) fn closed(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+    pub(crate) fn admission(&self) -> Admission {
+        Admission(self.0.clone())
+    }
+}
+
 impl Drop for Owner {
     fn drop(&mut self) {
         self.close();
@@ -31,6 +50,7 @@ struct Entry<H: Hardware> {
     closed: Arc<AtomicBool>,
     space: IoSpace<H>,
     error: Option<Error>,
+    completed: Arc<AtomicBool>,
 }
 
 pub(crate) struct Registry<H: Hardware> {
@@ -68,6 +88,10 @@ impl<H: Hardware> Registry<H> {
                 .map_err(|_| Error::OutOfMemory)?;
             BindingId::allocate().map(DomainId)
         };
+        let completed = match Arc::try_new(AtomicBool::new(false)) {
+            Ok(value) => value,
+            Err(_) => return Err((Error::OutOfMemory, hardware)),
+        };
         let id = match prepare() {
             Ok(id) => id,
             Err(e) => return Err((e, hardware)),
@@ -77,6 +101,7 @@ impl<H: Hardware> Registry<H> {
             closed: owner.0.clone(),
             space: IoSpace::new(hardware),
             error: None,
+            completed,
         });
         Ok(id)
     }
@@ -104,6 +129,33 @@ impl<H: Hardware> Registry<H> {
         action(&mut entry.space)
     }
 
+    /// Kernel failure handling closes a retained record without Unit consent.
+    pub(crate) fn close(&mut self, id: DomainId) -> Result<(), Error> {
+        self.entries
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .ok_or(Error::UnknownDomain)?
+            .space
+            .close()
+    }
+
+    /// Kernel-only queue observation; an exited Unit cannot prevent draining.
+    pub(crate) fn fault(&mut self, id: DomainId) -> Result<Option<super::riscv::Fault>, Error> {
+        self.entries
+            .iter_mut()
+            .find(|entry| entry.id == id)
+            .ok_or(Error::UnknownDomain)?
+            .space
+            .fault()
+    }
+
+    pub(crate) fn completion(&self, id: DomainId) -> Option<Completion> {
+        self.entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| Completion(entry.completed.clone()))
+    }
+
     pub(crate) fn error(&self, id: DomainId) -> Result<Option<Error>, Error> {
         self.entries
             .iter()
@@ -122,9 +174,10 @@ impl<H: Hardware> Registry<H> {
             self.cursor %= self.entries.len();
             let entry = &mut self.entries[self.cursor];
             progress.visited += 1;
-            if entry.closed.load(Ordering::Acquire) {
+            if entry.closed.load(Ordering::Acquire) || entry.space.life() != super::Life::Open {
                 match entry.space.advance_close() {
                     Ok(true) => {
+                        entry.completed.store(true, Ordering::Release);
                         self.entries.remove(self.cursor);
                         progress.reclaimed += 1;
                         continue;
@@ -141,5 +194,14 @@ impl<H: Hardware> Registry<H> {
             self.cursor += 1;
         }
         progress
+    }
+}
+
+/// Read-only receipt, minted only for an installed Kernel record. Disappearance
+/// or a guessed ID cannot manufacture settlement.
+pub(crate) struct Completion(Arc<AtomicBool>);
+impl Completion {
+    pub(crate) fn settled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
     }
 }

@@ -23,7 +23,38 @@ impl Plan {
                 || node.property("iommu-map-mask").is_some()
                 || node.property("iommus").is_some()
         }) {
+            // Kernel owns the shared interrupt controller on this restricted
+            // platform. Withhold aliases too; queue routing cannot be delegated.
+            for node in fdt.all_nodes().filter(|n| {
+                n.compatible().is_some_and(|c| {
+                    c.all()
+                        .any(|v| matches!(v, "riscv,plic0" | "sifive,plic-1.0.0"))
+                })
+            }) {
+                for region in super::reserved::node_regions(fdt, node)? {
+                    if region.overlaps(dram) {
+                        return Err(PieFail::Denied);
+                    }
+                    reserved.try_reserve(1).map_err(|_| PieFail::OoM)?;
+                    reserved.push(region);
+                }
+            }
             let topology = Topology::discover(fdt).map_err(|_| PieFail::Denied)?;
+            // A protected ECAM without protected BAR apertures is not exclusive
+            // device custody: another Unit could still program the endpoint.
+            for node in fdt
+                .all_nodes()
+                .filter(|n| n.property("iommu-map").is_some())
+            {
+                for (base, size) in ranges::memory_windows(fdt, node)? {
+                    let region = Region::new(base, size)?;
+                    if region.overlaps(dram) {
+                        return Err(PieFail::Denied);
+                    }
+                    reserved.try_reserve(1).map_err(|_| PieFail::OoM)?;
+                    reserved.push(region);
+                }
+            }
             for (base, size) in topology.configurations() {
                 let region = Region::new(base, size)?;
                 if region.overlaps(dram) {

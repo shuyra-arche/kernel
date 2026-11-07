@@ -189,6 +189,18 @@ typed_calls! {
         fallible fn await_(tole: PieToken, millis: Wait) -> Result<ToleAwaitReply, erra::Error<ToleFail>> =
             op::Await { tole, millis };
     }
+    device [model::identity::TeamId, model::memory::FlatReference, abi::call::device::DeviceFail] {
+        fallible fn fault(device: usize) -> Result<(usize, usize), erra::Error<DeviceFail>> = op::Fault { device };
+        fallible fn observe(device: usize) -> Result<usize, erra::Error<DeviceFail>> = op::Observe { device };
+        fallible fn publish(device: usize, reference: FlatReference, iova: usize, modifiable: bool) -> Result<(), erra::Error<DeviceFail>> = op::Publish { device, reference, iova, modifiable };
+        fallible fn status(device: usize) -> Result<usize, erra::Error<DeviceFail>> = op::Status { device };
+        fallible fn retire(device: usize) -> Result<(), erra::Error<DeviceFail>> = op::Retire { device };
+        fallible fn scan(after: usize) -> Result<(usize, usize), erra::Error<DeviceFail>> = op::Scan { after };
+        fallible fn claim(device: usize, team: TeamId) -> Result<(), erra::Error<DeviceFail>> = op::Claim { device, team };
+        fallible fn inspect(device: usize, offset: usize) -> Result<usize, erra::Error<DeviceFail>> = op::Inspect { device, offset };
+        fallible fn read(device: usize, offset: usize, width: usize) -> Result<(usize, usize), erra::Error<DeviceFail>> = op::Read { device, offset, width };
+        fallible fn write(device: usize, offset: usize, width: usize, value: u64) -> Result<(), erra::Error<DeviceFail>> = op::Write { device, offset, width, value };
+    }
     unit [
         model::unit::JoinReply,
         model::identity::PieToken,

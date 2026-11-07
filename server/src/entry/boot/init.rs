@@ -23,6 +23,10 @@ pub fn init(dtp: usize) -> Result<(), BootError> {
         operation: ResourceOperation::InitializeIommu,
         source,
     })?;
+    super::pci::init().map_err(|source| BootError::Resources {
+        operation: ResourceOperation::Devices,
+        source,
+    })?;
     interrupt::init().map_err(|source| BootError::Resources {
         operation: ResourceOperation::InitializeTraps,
         source,

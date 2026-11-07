@@ -57,6 +57,20 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
         }
         let (cause, reason) = state.dying().unwrap_or((cause, reason));
         state.doom(None, cause, reason);
+        drop(state);
+        // Last member stops device admission before fallible Pend/CPU cleanup.
+        // Parent Join/Oust and Driver cooperation are not prerequisites.
+        if task
+            .ident
+            .team
+            .life
+            .tasks
+            .lock()
+            .iter()
+            .all(|member| member.state.lock().is_dead())
+        {
+            task.ident.team.space.dma.close();
+        }
         (cause, reason)
     };
     crate::core::work::unit::team::exit::member_dying(&task, reason);
