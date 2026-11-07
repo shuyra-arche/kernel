@@ -1,5 +1,4 @@
 mod commit;
-pub(crate) mod device;
 
 pub mod pend;
 pub(crate) mod record;

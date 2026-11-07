@@ -1,16 +1,10 @@
-//! Restricted conventional PCI endpoint. No raw config write interface exists.
-//! Bridges, multifunction devices, PCIe/ATS/PRI/SR-IOV, ROM, IO/64-bit BARs and
-//! MSI-X need their own isolation protocol and are deliberately not admitted.
-use super::{Phase, phase::Event};
-use crate::core::memory::nest::iommu::retirement::{Admission, Owner};
-
+//! Protected PCI configuration effects for a platform-bound IOMMU adapter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Error {
     Absent,
     Unsupported,
     Invalid,
     Busy,
-    Denied,
     Hardware,
 }
 
@@ -31,8 +25,6 @@ pub(crate) struct Endpoint<C: Config> {
     identity: u32,
     size: usize,
     bar: usize,
-    phase: Phase,
-    owner: Option<Admission>,
 }
 
 impl<C: Config> Endpoint<C> {
@@ -116,28 +108,25 @@ impl<C: Config> Endpoint<C> {
             identity,
             size,
             bar: 0,
-            phase: Phase::Available,
-            owner: None,
         })
     }
 
     pub(crate) fn identity(&self) -> u32 {
         self.identity
     }
+    pub(crate) fn base(&self) -> usize {
+        self.bar
+    }
     pub(crate) fn size(&self) -> usize {
         self.size
     }
-    pub(crate) fn phase(&self) -> Phase {
-        self.phase
-    }
-
     /// The bus allocator supplies an exclusive, identity-translated aperture.
     /// # Safety
     /// [base, base + size) is reserved for this BAR for the entire Endpoint
     /// lifetime, is disjoint from RAM, ECAM and protected MMIO, and is not exposed
     /// through another Unit mapping. No other device decodes this range.
     pub(crate) unsafe fn place(&mut self, base: usize) -> Result<(), Error> {
-        if self.phase != Phase::Available || self.bar != 0 {
+        if self.bar != 0 {
             return Err(Error::Busy);
         }
         if base == 0
@@ -151,114 +140,32 @@ impl<C: Config> Endpoint<C> {
         self.config.write32(0x10, base as u32);
         self.config.sync();
         if self.config.read32(0x10) != base as u32 {
-            self.fail();
             return Err(Error::Hardware);
         }
         self.bar = base;
         Ok(())
     }
 
-    pub(crate) fn claim(&mut self, owner: &Owner) -> Result<(), Error> {
-        if self.bar == 0 || owner.closed() {
-            return Err(Error::Denied);
-        }
-        let phase = self.phase.transition(Event::Claim).ok_or(Error::Busy)?;
-        self.owner = Some(owner.admission());
-        self.phase = phase;
-        self.config.write16(4, (1 << 10) | 2);
-        self.config.sync();
-        if self.config.read32(4) & 0x407 != 0x402 {
-            self.fail();
-            return Err(Error::Hardware);
-        }
-        Ok(())
+    /// Enable MMIO decode while bus mastering remains disabled.
+    pub(crate) fn decode(&mut self) -> Result<(), Error> {
+        self.command(0x402)
     }
-
-    fn authorize(&self, owner: &Owner) -> Result<(), Error> {
-        if !matches!(self.phase, Phase::Owned | Phase::Active)
-            || !self.owner.as_ref().is_some_and(|held| held.accepts(owner))
-        {
-            return Err(Error::Denied);
-        }
-        Ok(())
-    }
-
-    pub(crate) fn owned_by(&self, owner: &Owner) -> bool {
-        self.owner.as_ref().is_some_and(|held| held.accepts(owner))
-    }
-
-    /// Only immutable standard-header fields. Capability space is never a
-    /// caller-selected effects channel and no config write is exposed.
-    pub(crate) fn inspect(&self, owner: &Owner, offset: usize) -> Result<u32, Error> {
-        self.authorize(owner)?;
-        if !matches!(offset, 0 | 8 | 12 | 0x2c) {
-            return Err(Error::Denied);
-        }
-        Ok(self.config.read32(offset))
-    }
-
-    /// Resolve one BAR access after checking the actual owner and bounds. The
-    /// executor must keep its serialization guard until the MMIO effect ends.
-    pub(crate) fn access(
-        &self,
-        owner: &Owner,
-        offset: usize,
-        width: usize,
-    ) -> Result<usize, Error> {
-        self.authorize(owner)?;
-        if !matches!(width, 1 | 2 | 4 | 8)
-            || !offset.is_multiple_of(width)
-            || offset.checked_add(width).is_none_or(|end| end > self.size)
-        {
-            return Err(Error::Invalid);
-        }
-        Ok(self.bar + offset)
-    }
-
     /// # Safety
-    /// The matching controller/DID has a retained, Active IoSpace projection;
-    /// the caller keeps that responsibility until this endpoint stops admission.
-    /// Device identity, routing and absence of bypass/ATS remain trusted.
-    pub(crate) unsafe fn activate(&mut self, owner: &Owner) -> Result<(), Error> {
-        self.authorize(owner)?;
-        let next = self.phase.transition(Event::Activate).ok_or(Error::Busy)?;
-        self.phase = next; // partial effects are already live responsibility
-        self.config.write16(4, (1 << 10) | 6);
+    /// The trusted IOMMU projection is active before enabling bus mastering.
+    pub(crate) unsafe fn activate(&mut self) -> Result<(), Error> {
+        self.command(0x406)
+    }
+    /// Close admission only; this is never a DMA completion receipt.
+    pub(crate) fn stop(&mut self) -> Result<(), Error> {
+        self.command(0x400)
+    }
+    fn command(&mut self, command: u16) -> Result<(), Error> {
+        self.config.write16(4, command);
         self.config.sync();
-        if self.config.read32(4) & 0x407 != 0x406 {
-            self.fail();
-            return Err(Error::Hardware);
+        if self.config.read32(4) & 0x407 == u32::from(command) {
+            Ok(())
+        } else {
+            Err(Error::Hardware)
         }
-        Ok(())
-    }
-
-    /// No Unit cooperation, allocations or busy-wait. This is admission closure,
-    /// NOT a proof that prior DMA completed or that any Cell is reclaimable.
-    pub(crate) fn retire(&mut self) -> Result<(), Error> {
-        let next = self.phase.transition(Event::Retire).ok_or(Error::Denied)?;
-        self.phase = next;
-        self.config.write16(4, 1 << 10);
-        self.config.sync();
-        if self.config.read32(4) & 7 != 0 {
-            self.fail();
-            return Err(Error::Hardware);
-        }
-        Ok(())
-    }
-
-    pub(crate) fn owner_closed(&self) -> bool {
-        self.owner.as_ref().is_some_and(Admission::closed)
-    }
-
-    /// # Safety
-    /// All device projections, platform in-flight effects and CPU BAR access
-    /// have settled. Even then the one-shot endpoint is not reassigned.
-    pub(crate) unsafe fn settle(&mut self) -> Result<(), Error> {
-        self.phase = self.phase.transition(Event::Settle).ok_or(Error::Denied)?;
-        Ok(())
-    }
-
-    fn fail(&mut self) {
-        self.phase = self.phase.transition(Event::Fail).unwrap_or(self.phase);
     }
 }

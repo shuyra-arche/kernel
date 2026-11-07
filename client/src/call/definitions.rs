@@ -54,18 +54,21 @@ typed_calls! {
 
         model::identity::TeamId,
         model::memory::MappingControl,
+        model::memory::MappingTarget,
+        model::memory::MappingInfo,
         model::memory::MappingId,
         model::memory::MappingSelection,
         model::identity::VirtAddr,
     ] {
         fallible fn acquire(source: AcquireSource, retention: kernel_api::model::unit::ControlId) -> Result<FlatReference, erra::Error<MemoryFail>> =
             op::Acquire { source, retention };
+        fallible fn inspect(target: MappingTarget, mapping: MappingId) -> Result<MappingInfo, erra::Error<MemoryFail>> = op::Inspect { target, mapping };
         fallible fn release(reference: FlatReference) -> Result<(), erra::Error<MemoryFail>> =
             op::Release { reference };
-        fallible fn attach(range: VirtAddr, team: TeamId, placement: VirtAddr, access: u64, control: MappingControl) -> Result<(MappingId, VirtAddr), erra::Error<MemoryFail>> =
-            op::Attach { range, team, placement, access, control };
-        fallible fn detach(team: TeamId, mapping: MappingId, selection: MappingSelection) -> Result<(), erra::Error<MemoryFail>> =
-            op::Detach { team, mapping, selection };
+        fallible fn attach(range: VirtAddr, target: MappingTarget, placement: VirtAddr, access: u64, control: MappingControl) -> Result<(MappingId, VirtAddr), erra::Error<MemoryFail>> =
+            op::Attach { range, target, placement, access, control };
+        fallible fn detach(target: MappingTarget, mapping: MappingId, selection: MappingSelection) -> Result<(), erra::Error<MemoryFail>> =
+            op::Detach { target, mapping, selection };
         fallible fn set_access(team: TeamId, mapping: MappingId, selection: MappingSelection, access: u64) -> Result<(), erra::Error<MemoryFail>> =
             op::SetAccess { team, mapping, selection, access };
         fallible fn traverse(retention: kernel_api::model::unit::ControlId, range: VirtAddr, out: VirtAddr) -> Result<(), erra::Error<MemoryFail>> =
@@ -156,18 +159,6 @@ typed_calls! {
         fallible fn unroute(token: SignId, source: SignSource) -> Result<(), erra::Error<SignFail>> = op::Unroute { token, source };
         fallible fn delegate(token: SignId, target: TaskId, rights: SignRights) -> Result<SignId, erra::Error<SignFail>> = op::Delegate { token, target, rights };
         fallible fn release(token: SignId) -> Result<(), erra::Error<SignFail>> = op::Release { token };
-    }
-    device [model::identity::TeamId, model::memory::FlatReference, abi::call::device::DeviceFail] {
-        fallible fn fault(device: usize) -> Result<(usize, usize), erra::Error<DeviceFail>> = op::Fault { device };
-        fallible fn observe(device: usize) -> Result<usize, erra::Error<DeviceFail>> = op::Observe { device };
-        fallible fn publish(device: usize, reference: FlatReference, iova: usize, modifiable: bool) -> Result<(), erra::Error<DeviceFail>> = op::Publish { device, reference, iova, modifiable };
-        fallible fn status(device: usize) -> Result<usize, erra::Error<DeviceFail>> = op::Status { device };
-        fallible fn retire(device: usize) -> Result<(), erra::Error<DeviceFail>> = op::Retire { device };
-        fallible fn scan(after: usize) -> Result<(usize, usize), erra::Error<DeviceFail>> = op::Scan { after };
-        fallible fn claim(device: usize, team: TeamId) -> Result<(), erra::Error<DeviceFail>> = op::Claim { device, team };
-        fallible fn inspect(device: usize, offset: usize) -> Result<usize, erra::Error<DeviceFail>> = op::Inspect { device, offset };
-        fallible fn read(device: usize, offset: usize, width: usize) -> Result<(usize, usize), erra::Error<DeviceFail>> = op::Read { device, offset, width };
-        fallible fn write(device: usize, offset: usize, width: usize, value: u64) -> Result<(), erra::Error<DeviceFail>> = op::Write { device, offset, width, value };
     }
     unit [
         model::unit::JoinReply,

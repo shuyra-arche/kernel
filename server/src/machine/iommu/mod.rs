@@ -4,3 +4,7 @@ pub(crate) mod interrupt;
 mod mmio;
 pub(crate) mod retirement;
 pub(crate) use mmio::Mmio;
+
+pub(crate) mod aperture;
+mod config;
+pub(crate) mod pci;

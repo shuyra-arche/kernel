@@ -40,3 +40,8 @@ pub(crate) fn pages(offset: usize, count: usize) -> Option<()> {
     end.checked_mul(PAGE_SIZE)?;
     Some(())
 }
+
+mod mapping_info;
+mod mapping_target;
+pub use mapping_info::{MappingInfo, MappingState};
+pub use mapping_target::MappingTarget;

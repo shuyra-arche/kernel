@@ -126,7 +126,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
     let next: *mut TrapContext = match trap {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             deadline::tick();
-            crate::machine::device::maintain();
+            crate::core::work::unit::space::external::maintain();
             unsafe {
                 sie::set_sext();
             }
@@ -164,7 +164,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
         }
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
             if crate::machine::iommu::interrupt::handle() {
-                crate::machine::device::maintain();
+                crate::core::work::unit::space::external::maintain();
             } else {
                 let result = crate::core::work::sign::endpoint::trigger(
                     &crate::core::work::room::interrupt::get().supervisor_external,

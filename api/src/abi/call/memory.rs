@@ -1,6 +1,7 @@
 use crate::model::identity::{TeamId, VirtAddr};
 use crate::model::memory::{
-    AcquireSource, FlatReference, MappingControl, MappingId, MappingSelection,
+    AcquireSource, FlatReference, MappingControl, MappingId, MappingInfo, MappingSelection,
+    MappingTarget,
 };
 
 #[kernel_api_macros::envcall(class = 2, call = MemoryCall)]
@@ -44,24 +45,29 @@ pub mod operations {
     pub struct Release {
         pub reference: super::FlatReference,
     }
-    /// 在目标地址空间里预留地址并建立翻译关系；返回 (关系句柄, 映射起点)。
+    /// Map authorized Cells into the selected CPU or I/O address space.
+    /// CPU targets use Team control. I/O targets use a trusted MMIO View Pend;
+    /// the current adapter accepts one whole 4 KiB Cell, Exact IOVA, READ or
+    /// READ|WRITE, and Caller control. I/O publication is asynchronous: wait for
+    /// Inspect::Active before starting DMA. Slots 7/8 are retired.
     /// 内部组合 Reserve → Attach，不增加独立 Reserve 调用号。
     /// `range` 与 `placement` 分别是指向定长描述的只读用户指针，从**调用者**的
     /// 地址空间各读一次快照；`control` 是这一段映射的控制权选择。
-    #[operation(slot = 7, output = (super::MappingId, super::VirtAddr), error = MemoryFail)]
+    #[operation(slot = 12, output = (super::MappingId, super::VirtAddr), error = MemoryFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Attach {
         pub range: super::VirtAddr,
-        pub team: super::TeamId,
+        pub target: super::MappingTarget,
         pub placement: super::VirtAddr,
         pub access: u64,
         pub control: super::MappingControl,
     }
-    /// 按身份安全撤销选定的映射区间。
-    #[operation(slot = 8, output = (), error = MemoryFail)]
+    /// Withdraw the selected mapping. I/O supports Whole; success closes
+    /// admission but reclamation requires Inspect::Settled or MappingRetired.
+    #[operation(slot = 13, output = (), error = MemoryFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Detach {
-        pub team: super::TeamId,
+        pub target: super::MappingTarget,
         pub mapping: super::MappingId,
         pub selection: super::MappingSelection,
     }
@@ -95,6 +101,13 @@ pub mod operations {
         pub from_page: usize,
         pub to: super::FlatReference,
         pub to_page: usize,
+    }
+    /// Observe retained external mapping state; the target Pend is revalidated.
+    #[operation(slot = 14, output = super::MappingInfo, error = MemoryFail, reply = 3)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Inspect {
+        pub target: super::MappingTarget,
+        pub mapping: super::MappingId,
     }
 }
 pub use operations::{MemoryCall, MemoryFail};

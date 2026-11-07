@@ -1,19 +1,16 @@
-//! Restricted boot census: direct bus-0 conventional PCI functions and one
-//! identity-translated non-prefetchable 32-bit aperture per protected host.
-//! The consumer never receives either the configuration or aperture mapping.
+//! Explicit QEMU EDU bootstrap binding. General PCI enumeration and placement
+//! policy belong to Units; this adapter admits only the fixed test endpoint.
 use crate::core::memory::nest::iommu::riscv::topology::Topology;
 use crate::core::memory::{
     address::PhysAddr,
     flat::{BorrowedRegion, Flat},
     nest::{Access, Placement, RegionId},
 };
-use crate::core::work::{
-    device::pci::{Endpoint, Error},
-    unit::team::kernel,
-};
+use crate::core::work::unit::team::kernel;
+use crate::machine::iommu::pci::{Endpoint, Error};
 use crate::machine::{
     board,
-    device::{DEVICES, Ecam, Entry},
+    iommu::aperture::{APERTURES, Aperture, Ecam},
 };
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
@@ -36,13 +33,16 @@ pub(super) fn mapped(base: usize, size: usize) -> Result<usize, PendFail> {
 }
 
 pub(super) fn init() -> Result<(), PendFail> {
+    if !cfg!(feature = "qemu-edu-dma") {
+        return Ok(());
+    }
     let tree = board::device_tree().ok_or(PendFail::Denied)?;
     if !tree.all_nodes().any(|n| n.property("iommu-map").is_some()) {
         return Ok(());
     }
     super::devices::validate(&tree)?;
     let topology = Topology::discover(&tree).map_err(|_| PendFail::Denied)?;
-    let mut devices = DEVICES.lock();
+    let mut devices = APERTURES.lock();
     if !devices.is_empty() {
         return Err(PendFail::Denied);
     }
@@ -111,7 +111,7 @@ pub(super) fn init() -> Result<(), PendFail> {
         }
         allocated.try_reserve(1).map_err(|_| PendFail::OoM)?;
         allocated.push((cursor, end));
-        for slot in 0..32 {
+        for slot in [1] {
             let rid = slot << 3;
             let Ok(route) = topology.resolve(host, rid) else {
                 continue;
@@ -126,6 +126,9 @@ pub(super) fn init() -> Result<(), PendFail> {
                 Err(Error::Absent | Error::Unsupported) => continue,
                 Err(_) => return Err(PendFail::Denied),
             };
+            if endpoint.identity() != 0x11e81234 {
+                return Err(PendFail::Denied);
+            }
             cursor = cursor
                 .checked_next_multiple_of(endpoint.size())
                 .ok_or(PendFail::Denied)?;
@@ -134,31 +137,27 @@ pub(super) fn init() -> Result<(), PendFail> {
                 .filter(|next| *next <= end)
                 .ok_or(PendFail::OoM)?;
             devices.try_reserve(1).map_err(|_| PendFail::OoM)?;
-            let va = mapped(cursor, endpoint.size())?;
-            let events =
-                crate::core::work::unit::life::Life::try_new().map_err(|_| PendFail::OoM)?;
-            // Validated immutable route; exclusive aperture allocation, checked
-            // against RAM/controls/ECAM and withheld from all Unit boot authorities.
+            let source = Flat::from_region(
+                unsafe { BorrowedRegion::new(PhysAddr::from_raw(cursor), endpoint.size()) }
+                    .map_err(|_| PendFail::Denied)?,
+            )
+            .map_err(|_| PendFail::OoM)?
+            .whole();
+            // Only this validated BAR is exported; ECAM and IOMMU controls stay private.
             unsafe { endpoint.place(cursor) }.map_err(|_| PendFail::Denied)?;
-            devices.push(Entry {
+            endpoint.decode().map_err(|_| PendFail::Denied)?;
+            devices.push(Aperture {
                 host,
                 rid,
                 did,
-                endpoint,
-                bar: cursor,
-                mapped: va,
+                port: endpoint,
                 config: config_va,
-                events,
-                fault: None,
-                queue_failed: false,
-                dma: None,
+                source,
+                used: false,
             });
             cursor = next;
         }
     }
-    log::info!(
-        "pci: {} protected endpoints in Kernel custody",
-        devices.len()
-    );
+    log::info!("iommu: {} trusted platform apertures", devices.len());
     Ok(())
 }

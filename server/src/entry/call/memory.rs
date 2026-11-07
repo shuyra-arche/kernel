@@ -28,15 +28,35 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: MemoryCall, ident: &Arc<Ta
     match call {
         MemoryCall::Attach {
             range,
-            team,
+            target,
             placement,
             access,
             control,
         } => {
             answer_pair(
                 frame,
-                attach(range, team, placement, access, control, ident),
+                attach_target(range, target, placement, access, control, ident),
             );
+        }
+        MemoryCall::Inspect { target, mapping } => {
+            let result = (|| {
+                let actor = caller(ident).ok_or(MemoryFail::Denied)?;
+                let _serial = actor.pend.lock();
+                let _commit = crate::core::work::commit();
+                let kernel_api::model::memory::MappingTarget::Io(token) = target else {
+                    return Err(MemoryFail::Denied);
+                };
+                crate::core::work::unit::space::external::inspect(&actor, token, mapping)
+            })();
+            match result {
+                Ok(info) => {
+                    use crate::machine::switcher::context::Gprs;
+                    frame.gpr.set_x(Gprs::A0, info.state as usize);
+                    frame.gpr.set_x(Gprs::A1, info.fault_cause);
+                    frame.gpr.set_x(Gprs::A2, info.fault_address);
+                }
+                Err(e) => super::outcome::ret_err(frame, e),
+            }
         }
         _ => answer(frame, execute(call, ident)),
     }
@@ -48,10 +68,24 @@ fn execute(call: MemoryCall, ident: &Arc<TaskIdent>) -> Result<usize, MemoryFail
         MemoryCall::Acquire { source, retention } => acquire(source, retention, ident),
         MemoryCall::Release { reference } => release(reference, ident),
         MemoryCall::Detach {
-            team,
+            target,
             mapping,
             selection,
-        } => detach(team, mapping, selection, ident),
+        } => match target {
+            kernel_api::model::memory::MappingTarget::Cpu(team) => {
+                detach(team, mapping, selection, ident)
+            }
+            kernel_api::model::memory::MappingTarget::Io(token) => {
+                if selection != kernel_api::model::memory::MappingSelection::Whole {
+                    return Err(MemoryFail::Denied);
+                }
+                let actor = caller(ident).ok_or(MemoryFail::Denied)?;
+                let _serial = actor.pend.lock();
+                let _commit = crate::core::work::commit();
+                crate::core::work::unit::space::external::detach(&actor, token, mapping)?;
+                Ok(0)
+            }
+        },
         MemoryCall::SetAccess {
             team,
             mapping,
@@ -69,7 +103,9 @@ fn execute(call: MemoryCall, ident: &Arc<TaskIdent>) -> Result<usize, MemoryFail
             to,
             to_page,
         } => transfer(from, from_page, to, to_page, ident),
-        MemoryCall::Attach { .. } => unreachable!("Attach answers a pair"),
+        MemoryCall::Attach { .. } | MemoryCall::Inspect { .. } => {
+            unreachable!("Attach answers a pair")
+        }
     }
 }
 
@@ -1013,4 +1049,60 @@ impl From<TransferError> for MemoryFail {
             TransferError::Busy => MemoryFail::Busy,
         }
     }
+}
+
+fn attach_target(
+    range_at: kernel_api::model::identity::VirtAddr,
+    target: kernel_api::model::memory::MappingTarget,
+    placement_at: kernel_api::model::identity::VirtAddr,
+    access: u64,
+    control: kernel_api::model::memory::MappingControl,
+    ident: &Arc<TaskIdent>,
+) -> Result<(usize, usize), MemoryFail> {
+    use kernel_api::model::memory::{
+        MappingControl, MappingTarget, Placement as WirePlacement, PlacementAt as WireAt,
+        ReferenceRange,
+    };
+    let token = match target {
+        MappingTarget::Cpu(team) => {
+            return attach(range_at, team, placement_at, access, control, ident);
+        }
+        MappingTarget::Io(token) => token,
+    };
+    if control != MappingControl::Caller || !matches!(access, 2 | 6) {
+        return Err(MemoryFail::Denied);
+    }
+    let range =
+        read_snapshot::<{ ReferenceRange::WIDTH }>(&ident.team.space, KVirt::wrap(range_at.get()))?;
+    let range = ReferenceRange::fetch(&range).ok_or(MemoryFail::NotAligned)?;
+    if range.offset != 0 || range.count != 1 {
+        return Err(MemoryFail::Denied);
+    }
+    let placement = read_snapshot::<{ WirePlacement::WIDTH }>(
+        &ident.team.space,
+        KVirt::wrap(placement_at.get()),
+    )?;
+    let placement = WirePlacement::decode_bytes(&placement).map_err(|_| MemoryFail::NotAligned)?;
+    let WireAt::Exact(address) = placement.at() else {
+        return Err(MemoryFail::Denied);
+    };
+    let actor = caller(ident).ok_or(MemoryFail::Denied)?;
+    let _serial = actor.pend.lock();
+    let _commit = crate::core::work::commit();
+    if !pend::live(&actor) {
+        return Err(MemoryFail::Denied);
+    }
+    let hold = actor
+        .pend
+        .references
+        .get(range.reference.get())
+        .ok_or(MemoryFail::Denied)?;
+    let id = crate::core::work::unit::space::external::attach(
+        &actor,
+        token,
+        &hold,
+        address.get(),
+        access == 6,
+    )?;
+    Ok((id, address.get()))
 }
