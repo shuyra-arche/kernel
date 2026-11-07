@@ -1,7 +1,8 @@
-use super::cell::Cell;
+use super::cell::Page;
 use super::error::FlatError;
 use super::index::PageIndex;
-use super::slot::{self, Slot};
+use super::slot;
+use super::slot::Slot;
 use super::support::Pool;
 use crate::cell::Owner;
 
@@ -9,8 +10,8 @@ use crate::cell::Owner;
 fn sparse_admission_preserves_identity_and_retained_cells_outlive_slots() {
     let a = Pool::new(0);
     let b = Pool::new(0);
-    let first = Cell::from_internal(Owner::Kernel, a.page().unwrap()).unwrap();
-    let second = Cell::from_internal(Owner::Kernel, b.page().unwrap()).unwrap();
+    let first = Page::from_internal(Owner::Kernel, a.page().unwrap()).unwrap();
+    let second = Page::from_internal(Owner::Kernel, b.page().unwrap()).unwrap();
     let identities = [first.id(), second.id()];
     let slots = slot::admit(
         4,
@@ -21,7 +22,7 @@ fn sparse_admission_preserves_identity_and_retained_cells_outlive_slots() {
         .iter()
         .map(|(_, slot)| match slot {
             Slot::Resident(cell) => cell.clone(),
-            _ => panic!("an admitted Cell is resident"),
+            _ => panic!("an admitted Page is resident"),
         })
         .collect();
     assert_eq!(
@@ -44,7 +45,7 @@ fn invalid_indices_reject_the_entire_import_and_return_all_cells() {
             .map(|(index, pool)| {
                 (
                     PageIndex::new(index),
-                    Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap(),
+                    Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap(),
                 )
             })
             .collect();

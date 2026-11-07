@@ -5,14 +5,14 @@
 extern crate alloc;
 
 #[allow(dead_code)]
-#[path = "../../../src/basis/memory/cell/mod.rs"]
+#[path = "../../../src/basis/cell/page/mod.rs"]
 mod cell;
 mod dma;
 mod edu;
 #[allow(dead_code)]
-#[path = "../../../src/basis/memory/nest/iommu/mod.rs"]
-mod iommu;
-#[path = "../../../src/machine/iommu/mmio.rs"]
+#[path = "../../support/iommu/mod.rs"]
+pub(crate) mod iommu;
+#[path = "../../../src/machine/iommu/riscv/mmio.rs"]
 mod mmio;
 #[path = "../../../src/entry/boot/devices/plan.rs"]
 mod plan;
@@ -25,19 +25,18 @@ mod region;
 mod reserved;
 
 mod basis {
-    pub(crate) mod memory {
-        pub const PAGE_SIZE: usize = 4096;
-        pub(crate) use crate::cell;
-        pub(crate) mod nest {
-            pub(crate) use crate::iommu;
-        }
+    pub(crate) mod cell {
+        pub(crate) use crate::cell as page;
     }
 }
 
-use ::core::fmt::{self, Write};
+use ::core::fmt;
+use ::core::fmt::Write;
 use ::core::sync::atomic::Ordering;
-use iommu::riscv::{Engine, Phase};
-use pool::{POOL, RETURNS};
+use iommu::riscv::Engine;
+use iommu::riscv::Phase;
+use pool::POOL;
+use pool::RETURNS;
 
 ::core::arch::global_asm!(
     ".section .text.entry",
@@ -110,7 +109,13 @@ extern "C" fn guest(dtb: usize) -> ! {
     if matches!(
         fdt.chosen().bootargs(),
         Some(
-            "dma" | "readonly" | "dma-abandon" | "owner-exit" | "activation-exit" | "route-reject"
+            "dma"
+                | "dma-change"
+                | "readonly"
+                | "dma-abandon"
+                | "owner-exit"
+                | "activation-exit"
+                | "route-reject"
         )
     ) {
         dma::run(base, fdt.chosen().bootargs().unwrap(), &fdt);
@@ -175,4 +180,8 @@ fn progress(engine: &mut Engine<mmio::Mmio>, target: Phase) {
         }
     }
     panic!("engine deadline: {:?}", engine.phase());
+}
+
+mod machine {
+    pub(crate) use crate::iommu;
 }

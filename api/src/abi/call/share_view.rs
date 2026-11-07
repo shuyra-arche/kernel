@@ -1,6 +1,7 @@
 //! Share Views and Pend-authorized CPU mappings.
-use crate::model::identity::{PendId, VirtAddr};
-use crate::model::memory::FlatReference;
+use crate::address::VirtAddr;
+use crate::model::cell::FlatReference;
+use crate::model::identity::PendId;
 
 pub type ShareResult<T> = Result<T, erra::Error<ShareFail>>;
 
@@ -38,4 +39,5 @@ pub mod operations {
         pub token: super::PendId,
     }
 }
-pub use operations::{ShareCall, ShareFail};
+pub use operations::ShareCall;
+pub use operations::ShareFail;

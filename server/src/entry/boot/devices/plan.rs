@@ -1,8 +1,10 @@
-use crate::basis::memory::nest::iommu::riscv::topology::Topology;
+use crate::machine::iommu::riscv::topology::Topology;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
 
-use super::{ranges, region::Region, reserved};
+use super::ranges;
+use super::region::Region;
+use super::reserved;
 
 /// Pure boot admission. No authority is published until the whole plan succeeds.
 pub(super) struct Plan {

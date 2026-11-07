@@ -1,4 +1,5 @@
-use crate::model::memory::{MappingInfo, MappingState};
+use crate::model::cell::MappingInfo;
+use crate::model::cell::MappingState;
 
 impl crate::abi::reply::FromTriple for MappingInfo {
     fn from_triple(state: usize, fault_cause: usize, fault_address: usize) -> Self {

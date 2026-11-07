@@ -1,9 +1,13 @@
-use std::alloc::{AllocError, Allocator, Layout};
+use std::alloc::AllocError;
+use std::alloc::Allocator;
+use std::alloc::Layout;
 use std::cell::UnsafeCell;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
-use kernel_api::model::memory::PAGE_SIZE;
+use kernel_api::model::cell::PAGE_SIZE;
 
 use super::cell::InternalPage;
 

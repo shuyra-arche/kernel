@@ -1,4 +1,4 @@
-use crate::basis::memory::nest::SpaceKind;
+use crate::basis::nest::SpaceKind;
 
 mod config;
 mod frame;
@@ -25,8 +25,8 @@ impl Backtrace {
     fn new(world: SpaceKind) -> Self {
         Self {
             frames: [Frame {
-                pc: crate::basis::memory::address::VirtAddr::from_raw(0),
-                sp: crate::basis::memory::address::VirtAddr::from_raw(0),
+                pc: crate::machine::mmu::riscv::canonical(0),
+                sp: crate::machine::mmu::riscv::canonical(0),
                 fp: None,
                 space: world,
             }; DEPTH],

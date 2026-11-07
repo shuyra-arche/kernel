@@ -1,9 +1,13 @@
 //! Bounded message queues and counted notifications.
+use crate::address::VirtAddr;
 use crate::model::clone_view::PullOutcome;
-use crate::model::identity::{Mark, PendId, TaskId, VirtAddr};
+use crate::model::identity::Mark;
+use crate::model::identity::PendId;
+use crate::model::identity::TaskId;
 use crate::model::wait::Wait;
 
-use crate::model::clone_view::{CloneCondition, CloneLimits};
+use crate::model::clone_view::CloneCondition;
+use crate::model::clone_view::CloneLimits;
 pub type CloneResult<T> = Result<T, erra::Error<CloneFail>>;
 
 #[kernel_api_macros::envcall(class = 5, call = CloneCall)]
@@ -58,4 +62,5 @@ pub mod operations {
         pub millis: super::Wait,
     }
 }
-pub use operations::{CloneCall, CloneFail};
+pub use operations::CloneCall;
+pub use operations::CloneFail;

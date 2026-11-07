@@ -1,11 +1,16 @@
 use ::core::fmt::Write;
 
-use alloc::{format, string::String, vec, vec::Vec};
+use alloc::format;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
 
-use crate::basis::memory::address::VirtAddr;
-use crate::entry::report::report::{Paragraph, Report};
+use crate::entry::report::report::Paragraph;
+use crate::entry::report::report::Report;
+use kernel_api::address::VirtAddr;
 
-use super::backtrace::{Backtrace, FrameKind};
+use super::backtrace::Backtrace;
+use super::backtrace::FrameKind;
 
 pub(super) fn hex(x: usize) -> String {
     format!("{x:#018x}")

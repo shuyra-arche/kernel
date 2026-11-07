@@ -1,4 +1,5 @@
-use crate::basis::memory::address::VirtAddr;
+use crate::machine::mmu::riscv::Address;
+use kernel_api::address::VirtAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FrameKind {

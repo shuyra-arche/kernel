@@ -1,6 +1,7 @@
 //! call::room — **Room 域（class 0：调度词族）**：调用表（[`RoomCall`]）与失败词汇（[`RoomFail`]）。
 
-use crate::model::identity::{TaskId, VirtAddr};
+use crate::address::VirtAddr;
+use crate::model::identity::TaskId;
 use crate::model::wait::Wait;
 
 /// `RoomFail` 的结果别名。
@@ -123,7 +124,8 @@ pub mod operations {
         pub all: bool,
     }
 }
-pub use operations::{RoomCall, RoomFail};
+pub use operations::RoomCall;
+pub use operations::RoomFail;
 
 /// `Reap { note }` 的上限：域带的那句话最多这么长，超出部分内核**截断**（不拒绝：
 /// 一句被截断的话仍有诊断价值，而拒绝会让"域正在死"这件事多一个失败模式）。

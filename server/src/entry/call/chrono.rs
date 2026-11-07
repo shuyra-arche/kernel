@@ -1,8 +1,9 @@
 use kernel_api::abi::call::chrono::ChronoCall;
 
-use crate::basis::work::room::deadline;
+use crate::basis::room::deadline;
 use crate::machine::clock;
-use crate::machine::switcher::context::{Gprs, TrapContext};
+use crate::machine::switcher::context::Gprs;
+use crate::machine::switcher::context::TrapContext;
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: ChronoCall) {
     match call {

@@ -1,4 +1,5 @@
-use crate::{topology::Topology, tree::Node};
+use crate::topology::Topology;
+use crate::tree::Node;
 
 pub const CONTROLLER: usize = 0x3010000;
 pub const HOST: usize = 0x30000000;

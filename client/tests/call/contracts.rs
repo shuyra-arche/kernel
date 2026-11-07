@@ -1,9 +1,14 @@
 use std::cell::RefCell;
 
-use kernel_api::abi::call::memory::MemoryFail;
-use kernel_api::abi::operation::{KernelCall, Operation, RegisterCall};
-use kernel_api::model::identity::{PendId, TaskId, TeamId};
-use kernel_api::model::memory::{MappingId, MappingSelection};
+use kernel_api::abi::call::cell::CellFail;
+use kernel_api::abi::operation::KernelCall;
+use kernel_api::abi::operation::Operation;
+use kernel_api::abi::operation::RegisterCall;
+use kernel_api::model::cell::MappingId;
+use kernel_api::model::cell::MappingSelection;
+use kernel_api::model::identity::PendId;
+use kernel_api::model::identity::TaskId;
+use kernel_api::model::identity::TeamId;
 use kernel_api::model::wait::Wait;
 use kernel_client::invoke::invoke_with;
 
@@ -56,10 +61,9 @@ fn infallible_returns_keep_the_high_bit_even_in_a_fallible_domain() {
 fn failures_preserve_the_domain_and_do_not_retry() {
     reply(((-7isize) as usize, 0, 0));
     let reference =
-        kernel_api::model::memory::FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap();
-    let error =
-        invoke(kernel_api::abi::call::memory::operations::Release { reference }).unwrap_err();
-    assert_eq!(error.source, MemoryFail::Busy);
+        kernel_api::model::cell::FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap();
+    let error = invoke(kernel_api::abi::call::cell::operations::Release { reference }).unwrap_err();
+    assert_eq!(error.source, CellFail::Busy);
     called((2usize << 32) | 6, [17, 0, 0, 0, 0, 0]);
 }
 
@@ -67,7 +71,7 @@ fn failures_preserve_the_domain_and_do_not_retry() {
 fn structured_arguments_keep_all_six_registers_and_the_explicit_slot() {
     reply((0, 0, 0));
     let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
-    invoke(kernel_api::abi::call::memory::operations::SetAccess {
+    invoke(kernel_api::abi::call::cell::operations::SetAccess {
         team: TeamId::new(17),
         mapping,
         selection: MappingSelection::Pages {
@@ -82,7 +86,7 @@ fn structured_arguments_keep_all_six_registers_and_the_explicit_slot() {
         kernel_api::abi::call::EnvCall::from_wire((2usize << 32) | 9, &[17, 23, 1, 3, 5, 6])
             .unwrap();
     assert!(
-        matches!(decoded, kernel_api::abi::call::EnvCall::Memory(kernel_api::abi::call::memory::MemoryCall::SetAccess {
+        matches!(decoded, kernel_api::abi::call::EnvCall::Cell(kernel_api::abi::call::cell::CellCall::SetAccess {
         team, mapping: decoded_mapping, selection: MappingSelection::Pages { offset: 3, count: 5 }, access: 6,
     }) if team == TeamId::new(17) && decoded_mapping == mapping)
     );
@@ -156,10 +160,10 @@ fn generic_invocation_orders_packing_transport_and_decode_once() {
 
 #[test]
 fn operations_return_their_own_types_without_a_domain_result_enum() {
-    use kernel_api::abi::call::{chrono::operations::Clock, memory::operations::Release};
+    use kernel_api::abi::call::{cell::operations::Release, chrono::operations::Clock};
     let reference =
-        kernel_api::model::memory::FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap();
-    let released: Result<(), erra::Error<MemoryFail>> =
+        kernel_api::model::cell::FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap();
+    let released: Result<(), erra::Error<CellFail>> =
         invoke_with(Release { reference }, |_, _| (0, 0, 0));
     assert_eq!(released.unwrap(), ());
     let clock: Result<u64, core::convert::Infallible> =
@@ -173,7 +177,7 @@ fn conditional_waits_encode_address_value_deadline_and_wake_scope() {
         EnvCall,
         room::{RoomCall, RoomFail, operations},
     };
-    use kernel_api::model::identity::VirtAddr;
+    use kernel_api::address::VirtAddr;
     reply((1, 0, 0));
     assert!(
         invoke(operations::WaitValue {
@@ -242,8 +246,8 @@ fn clone_delivery_returns_authority_and_retires_copy_out_slot() {
 #[test]
 fn external_mapping_inspection_preserves_target_authority_and_fault_receipt() {
     use kernel_api::{
-        abi::call::memory::operations::Inspect,
-        model::memory::{MappingState, MappingTarget},
+        abi::call::cell::operations::Inspect,
+        model::cell::{MappingState, MappingTarget},
     };
     reply((4, 13, 0x500000));
     let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();

@@ -1,10 +1,15 @@
-use crate::basis::memory::cell::Owner;
-use crate::cell::{Cell, InternalPage};
+use crate::basis::cell::page::Owner;
+use crate::cell::InternalPage;
+use crate::cell::Page;
 use alloc::boxed::Box;
-use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
+use core::alloc::AllocError;
+use core::alloc::Allocator;
+use core::alloc::GlobalAlloc;
+use core::alloc::Layout;
 use core::cell::UnsafeCell;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::Ordering;
 
 #[repr(align(4096))]
 struct Storage<const N: usize>(UnsafeCell<[u8; N]>);
@@ -41,10 +46,10 @@ pub struct Pool;
 pub static POOL: Pool = Pool;
 
 impl Pool {
-    pub fn cell(&'static self) -> Option<Cell> {
+    pub fn cell(&'static self) -> Option<Page> {
         let allocator: &'static (dyn Allocator + Sync) = self;
         let page: InternalPage = unsafe { Box::try_new_zeroed_in(allocator).ok()?.assume_init() };
-        Cell::from_internal(Owner::Kernel, page).ok()
+        Page::from_internal(Owner::Kernel, page).ok()
     }
 }
 

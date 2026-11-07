@@ -5,7 +5,7 @@
 
 | Module | Responsibility |
 | --- | --- |
-| `call::{memory,unit,room,...}` | Named typed calls, including terminal `room::reap` |
+| `call::{cell,unit,room,...}` | Named typed calls, including terminal `room::reap` |
 | `invoke` | Execute a returning or terminal API operation |
 | `transport` | RV64 `ebreak` register boundary |
 

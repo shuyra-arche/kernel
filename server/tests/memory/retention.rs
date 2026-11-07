@@ -1,16 +1,19 @@
 use crate::cell::Owner;
-use std::sync::{Arc, Barrier};
+use std::sync::Arc;
+use std::sync::Barrier;
 
-use super::cell::{Cell, RetainError};
+use super::cell::Page;
+use super::cell::RetainError;
 use super::index::PageIndex;
 use super::scope::Scope;
-use super::slot::{self, Slot};
+use super::slot;
+use super::slot::Slot;
 use super::support::Pool;
 
 #[test]
 fn cancelled_preparation_releases_its_obligation_but_not_other_holders() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let prepared = cell.prepare_hardware(false).unwrap();
     assert!(!cell.allows_return());
     drop(prepared);
@@ -27,7 +30,7 @@ fn retirement_outlives_the_source_slot_until_explicit_settlement() {
         1,
         vec![(
             PageIndex::ZERO,
-            Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap(),
+            Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap(),
         )],
     )
     .unwrap();
@@ -47,14 +50,14 @@ fn retirement_outlives_the_source_slot_until_explicit_settlement() {
     // the real bookkeeping; it does not establish hardware fence correctness.
     unsafe { retired.settle() };
     assert_eq!(pool.gives(), 1);
-    let next = Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap();
+    let next = Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap();
     assert_ne!(next.id(), identity);
 }
 
 #[test]
 fn one_completed_mapping_cannot_discharge_another_mapping() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let mut a = cell.prepare_hardware(false).unwrap();
     let mut b = cell.prepare_hardware(false).unwrap();
     a.publish();
@@ -77,7 +80,7 @@ fn one_completed_mapping_cannot_discharge_another_mapping() {
 fn abandoned_access_remains_quarantined_after_other_accesses_complete() {
     for retire_first in [false, true] {
         let pool = Pool::new(0);
-        let cell = Arc::new(Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+        let cell = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
         let mut lost = cell.prepare_hardware(false).unwrap();
         let mut completed = cell.prepare_hardware(false).unwrap();
         let cancelled = cell.prepare_hardware(false).unwrap();
@@ -107,7 +110,7 @@ fn abandoned_access_remains_quarantined_after_other_accesses_complete() {
 #[test]
 fn concurrent_settlement_preserves_the_remaining_obligation() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let mut remaining = cell.prepare_hardware(false).unwrap();
     remaining.publish();
     let barrier = Arc::new(Barrier::new(8));
@@ -151,7 +154,7 @@ fn non_global_updates_cannot_shrink_a_pending_global_scope() {
 #[test]
 fn shared_readers_block_writers_across_cpu_and_device_until_settled() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let mut cpu = cell.prepare_hardware(false).unwrap();
     let mut device = cell.prepare_external(false).unwrap();
     cpu.publish();
@@ -192,7 +195,7 @@ fn shared_readers_block_writers_across_cpu_and_device_until_settled() {
 #[test]
 fn competing_writers_have_exactly_one_winner_before_any_publication() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let start = Arc::new(Barrier::new(8));
     let finish = Arc::new(Barrier::new(8));
     let winners = std::thread::scope(|scope| {

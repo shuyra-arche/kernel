@@ -1,6 +1,9 @@
 //! call::pend — **Pend 域（class 7，权柄轴：许可的生死与流动）**：调用表（[`PendCall`]）与失败词汇（[`PendFail`]）。
 
-use crate::model::identity::{Mark, PendId, TaskId, VirtAddr};
+use crate::address::VirtAddr;
+use crate::model::identity::Mark;
+use crate::model::identity::PendId;
+use crate::model::identity::TaskId;
 use crate::model::modifiable::Modifiable;
 
 use crate::model::pend::PendRange;
@@ -88,4 +91,5 @@ pub mod operations {
         pub range: super::PendRange,
     }
 }
-pub use operations::{PendCall, PendFail};
+pub use operations::PendCall;
+pub use operations::PendFail;

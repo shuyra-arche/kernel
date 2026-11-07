@@ -2,14 +2,21 @@ use ::core::time::Duration;
 
 use alloc::sync::Arc;
 
-use kernel_api::{abi::call::room::RoomCall, abi::call::room::RoomFail};
+use kernel_api::abi::call::room::RoomCall;
+use kernel_api::abi::call::room::RoomFail;
 
-use crate::basis::work::room::Handoff;
-use crate::basis::work::room::conductor::current;
-use crate::basis::work::room::scheduler::roster::muster;
-use crate::basis::work::sign::{self, WakeKey, park, park_until, wait, wake};
-use crate::basis::work::unit::task::TaskIdent;
-use crate::machine::switcher::context::{Gprs, TrapContext};
+use crate::basis::room::Handoff;
+use crate::basis::room::conductor::current;
+use crate::basis::room::scheduler::roster::muster;
+use crate::basis::sign;
+use crate::basis::sign::WakeKey;
+use crate::basis::sign::park;
+use crate::basis::sign::park_until;
+use crate::basis::sign::wait;
+use crate::basis::sign::wake;
+use crate::basis::unit::task::TaskIdent;
+use crate::machine::switcher::context::Gprs;
+use crate::machine::switcher::context::TrapContext;
 
 use super::outcome::Outcome;
 
@@ -20,8 +27,8 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             Outcome::Switch(current().starve() as *mut TrapContext)
         }
         RoomCall::Reap { reason, note, len } => {
-            crate::basis::work::unit::lifecycle::set_exit_note(note.get(), len);
-            crate::basis::work::unit::lifecycle::set_exit_reason(reason);
+            crate::basis::unit::lifecycle::set_exit_note(note.get(), len);
+            crate::basis::unit::lifecycle::set_exit_reason(reason);
             drop(ident);
             Outcome::Exit
         }
@@ -47,10 +54,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             }
             drop(target);
             drop(ident);
-            crate::basis::work::unit::lifecycle::cull(
-                &[team],
-                crate::basis::work::unit::lifecycle::EXIT_DOOM,
-            );
+            crate::basis::unit::lifecycle::cull(&[team], crate::basis::unit::lifecycle::EXIT_DOOM);
             frame.gpr.set_x(Gprs::A0, 0);
             Outcome::Resume
         }
@@ -74,14 +78,13 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             expected,
             millis,
         } => {
-            let at = crate::basis::memory::address::VirtAddr::from_raw(address.get());
-            if address.get() % 4 != 0 || !crate::basis::work::unit::space::Space::user_range(at, 4)
-            {
+            let at = crate::machine::mmu::riscv::canonical(address.get());
+            if address.get() % 4 != 0 || !crate::basis::unit::space::Space::user_range(at, 4) {
                 return Outcome::fail(frame, RoomFail::Invalid);
             }
             let space = ident.team.space.clone();
             drop(ident);
-            match crate::basis::work::unit::space::wait::wait_value(
+            match crate::basis::unit::space::wait::wait_value(
                 space,
                 at,
                 expected,
@@ -96,9 +99,8 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             }
         }
         RoomCall::WakeValue { address, all } => {
-            let at = crate::basis::memory::address::VirtAddr::from_raw(address.get());
-            if address.get() % 4 != 0 || !crate::basis::work::unit::space::Space::user_range(at, 4)
-            {
+            let at = crate::machine::mmu::riscv::canonical(address.get());
+            if address.get() % 4 != 0 || !crate::basis::unit::space::Space::user_range(at, 4) {
                 return Outcome::fail(frame, RoomFail::Invalid);
             }
             let key = WakeKey::Value {

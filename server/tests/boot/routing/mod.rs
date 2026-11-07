@@ -1,5 +1,7 @@
 mod fixtures;
-use crate::{plan::Plan, topology::RouteError, tree::Node};
+use crate::plan::Plan;
+use crate::topology::RouteError;
+use crate::tree::Node;
 use fixtures::*;
 
 #[test]

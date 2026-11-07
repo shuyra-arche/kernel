@@ -1,16 +1,25 @@
 mod domain;
 mod registers;
 
-use crate::cell::Owner as CellOwner;
-use crate::iommu::riscv::registers::{BUSY, CQCSR, DDTP, ENABLE, FQCSR, ON, Registers};
-use crate::iommu::riscv::{Engine, EngineError, Phase};
-use crate::{cell::Cell, support::Pool};
+use crate::cell::Owner as PageOwner;
+use crate::cell::Page;
+use crate::iommu::riscv::Engine;
+use crate::iommu::riscv::EngineError;
+use crate::iommu::riscv::Phase;
+use crate::iommu::riscv::registers::BUSY;
+use crate::iommu::riscv::registers::CQCSR;
+use crate::iommu::riscv::registers::DDTP;
+use crate::iommu::riscv::registers::ENABLE;
+use crate::iommu::riscv::registers::FQCSR;
+use crate::iommu::riscv::registers::ON;
+use crate::iommu::riscv::registers::Registers;
+use crate::support::Pool;
 use registers::Device;
 
 fn engine() -> (Engine<Device>, Device, [&'static Pool; 3]) {
     let pools = [Pool::new(0), Pool::new(0), Pool::new(0)];
     let cells =
-        pools.map(|pool| Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+        pools.map(|pool| Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let device = Device::new();
     (Engine::new(device.clone(), cells).unwrap(), device, pools)
 }

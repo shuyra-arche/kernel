@@ -1,5 +1,5 @@
-use crate::basis::memory::address::VirtAddr;
-use crate::basis::memory::nest::SpaceKind;
+use crate::basis::nest::SpaceKind;
+use kernel_api::address::VirtAddr;
 
 mod kind;
 pub(crate) use kind::FrameKind;

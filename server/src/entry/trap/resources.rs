@@ -1,11 +1,12 @@
-use crate::basis::work::pend;
-use crate::basis::work::room::interrupt;
-use crate::basis::work::view::View;
+use crate::basis::pend;
+use crate::basis::room::interrupt;
+use crate::basis::view::View;
 use crate::entry::boot::resources::Registry;
-use kernel_api::{
-    abi::call::pend::PendFail, boot::ledger::Name, boot::ledger::Trap, model::identity::Mark,
-    model::modifiable::Modifiable,
-};
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::boot::ledger::Name;
+use kernel_api::boot::ledger::Trap;
+use kernel_api::model::identity::Mark;
+use kernel_api::model::modifiable::Modifiable;
 
 pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     let resources = interrupt::get();

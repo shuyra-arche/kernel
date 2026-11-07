@@ -1,8 +1,9 @@
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::address::VirtAddr;
-use crate::basis::memory::nest::SpaceKind;
+use crate::basis::nest::SpaceKind;
+use kernel_api::address::PAGE_SIZE;
 
-use super::{Backtrace, Frame, StackReader};
+use super::Backtrace;
+use super::Frame;
+use super::StackReader;
 
 pub(super) struct Walk<'a> {
     reader: &'a mut StackReader,
@@ -28,9 +29,10 @@ impl<'a> Walk<'a> {
                 break;
             };
             self.backtrace.push(Frame {
-                pc: VirtAddr::from_raw(ra),
-                sp: VirtAddr::from_raw(f),
-                fp: (caller != 0 && caller > f).then(|| VirtAddr::from_raw(caller)),
+                pc: crate::machine::mmu::riscv::canonical(ra),
+                sp: crate::machine::mmu::riscv::canonical(f),
+                fp: (caller != 0 && caller > f)
+                    .then(|| crate::machine::mmu::riscv::canonical(caller)),
                 space: world,
             });
             if caller == 0 || caller <= f {
@@ -55,8 +57,8 @@ impl<'a> Walk<'a> {
                 Some(w) => {
                     if code(w) {
                         self.backtrace.push(Frame {
-                            pc: VirtAddr::from_raw(w),
-                            sp: VirtAddr::from_raw(a),
+                            pc: crate::machine::mmu::riscv::canonical(w),
+                            sp: crate::machine::mmu::riscv::canonical(a),
                             fp: None,
                             space: world,
                         });

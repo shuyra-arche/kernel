@@ -2,31 +2,31 @@
 
 extern crate alloc;
 
-// Compile the production Cell itself, without RV64 instructions, fake Cell
+// Compile the production Page itself, without RV64 instructions, fake Page
 // implementations, or changes to the production library's no_std configuration.
-#[path = "../../src/basis/memory/cell/mod.rs"]
+#[path = "../../src/basis/cell/page/mod.rs"]
 pub(crate) mod cell;
 
 #[allow(dead_code)]
-#[path = "../../src/basis/memory/flat/error.rs"]
+#[path = "../../src/basis/flat/error.rs"]
 mod error;
+pub(crate) mod index {
+    pub(crate) use kernel_api::address::PageIndex;
+}
 #[allow(dead_code)]
-#[path = "../../src/basis/memory/address/index.rs"]
-pub(crate) mod index;
-#[allow(dead_code)]
-#[path = "../../src/basis/memory/flat/slot.rs"]
+#[path = "../../src/basis/flat/slot.rs"]
 mod slot;
 
-#[path = "../../src/basis/memory/nest/synchronize/scope.rs"]
+#[path = "../../src/machine/mmu/riscv/synchronize/scope.rs"]
 mod scope;
 
 // Resolve production module paths using the real types, without loading the
 // RV64-specific address-space machinery into the host harness.
 mod basis {
-    pub(crate) mod memory {
-        pub(crate) use crate::cell;
-        pub(crate) mod address {
-            pub(crate) use crate::index::PageIndex;
+    pub(crate) mod cell {
+        pub(crate) use crate::cell as page;
+        pub(crate) mod operation {
+            pub(crate) use crate::transfer_error::TransferError;
         }
     }
 }
@@ -35,3 +35,28 @@ mod admission;
 mod ownership;
 mod retention;
 mod support;
+
+mod change;
+#[path = "../../src/basis/nest/memo.rs"]
+mod memo;
+
+#[allow(dead_code)]
+#[path = "../../src/basis/flat/source.rs"]
+mod source;
+
+#[allow(dead_code)]
+#[path = "../../src/basis/flat/state.rs"]
+mod state;
+
+#[allow(dead_code)]
+#[path = "../../src/basis/flat/region.rs"]
+mod region;
+
+#[allow(dead_code)]
+#[path = "../../src/basis/flat/residency_entry.rs"]
+mod residency_entry;
+
+mod transaction;
+#[allow(dead_code)]
+#[path = "../../src/basis/cell/operation/error.rs"]
+mod transfer_error;

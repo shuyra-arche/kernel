@@ -1,5 +1,8 @@
-use crate::basis::work::room::{deadline, halt, interrupt, scheduler};
-use crate::basis::work::unit::tally;
+use crate::basis::room::deadline;
+use crate::basis::room::halt;
+use crate::basis::room::interrupt;
+use crate::basis::room::scheduler;
+use crate::basis::unit::tally;
 use crate::machine::clock;
 use crate::putln;
 
@@ -26,7 +29,7 @@ pub(crate) fn report() {
         "timer: late_n={late_n} late_max_ms={max_ms} late_avg_ms={avg_ms} late_max_tick={late_max} traps={} tocks={tocks} mutes={mutes}",
         deadline::ticks()
     );
-    let (held, starved, blocked, nudged) = crate::basis::work::unit::lifecycle::branch_stats();
+    let (held, starved, blocked, nudged) = crate::basis::unit::lifecycle::branch_stats();
     putln!("doom: held={held} starved={starved} blocked={blocked} nudged={nudged}");
     let (kicks, fallback) = scheduler::kick_stats();
     putln!("sched: kicks={kicks} fallback={fallback}");
@@ -34,8 +37,8 @@ pub(crate) fn report() {
     putln!(
         "supervisor_external: ring={ring} busy={busy} idle_ring={idle_ring} idle_busy={idle_busy}"
     );
-    crate::basis::work::view::clone_view::hold_line();
-    use crate::basis::memory::flat::allocator::statistics;
+    crate::basis::view::clone_view::hold_line();
+    use crate::machine::allocator::statistics;
     putln!(
         "memory: frames={} pools={}",
         statistics::frame_occupied(),
@@ -48,7 +51,7 @@ pub(crate) fn report() {
         statistics::spare_available(),
         statistics::kinds()
     );
-    crate::basis::work::unit::lifecycle::diagnostics::each(|entry| {
+    crate::basis::unit::lifecycle::diagnostics::each(|entry| {
         putln!(
             "unclaimed exit: task={} reason={} note={}",
             entry.task.get(),

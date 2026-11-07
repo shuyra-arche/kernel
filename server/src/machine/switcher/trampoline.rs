@@ -1,9 +1,10 @@
 use ::core::arch::global_asm;
 
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::nest::identity::{self as asid, Asid};
 use crate::machine::layout::TRAMPOLINE;
+use crate::machine::mmu::riscv::identity as asid;
+use crate::machine::mmu::riscv::identity::Asid;
 use crate::machine::switcher::context::TrapContext;
+use kernel_api::address::PAGE_SIZE;
 
 global_asm!(
     ".section .trampoline, \"ax\"",

@@ -33,7 +33,7 @@ use core::marker::PhantomData;
 /// 要绕过这一层必须**写出**那个 `.get()`：一个可 grep 的动作，不再是顺手存进去。
 ///
 /// 与 [`TaskId`]／[`TeamId`] 成对偶：那两个是**全局身份**（谁都能提谁，可跨线程），这一枚是
-/// **表的身份**。注意别把 [`VirtAddr`] 也归进来——那是**空间**的身份，同一个空间里的多枚线程
+/// **表的身份**。注意别把 [`crate::address::VirtAddr`] 也归进来——那是**空间**的身份，同一个空间里的多枚线程
 /// 共用它，跨线程合法；判它在不在自己手里的是空间，不是表。
 ///
 /// **造号的两扇门**：[`PendId::from_bytes`]（**收号**——号从线上/账上到来）与
@@ -118,27 +118,6 @@ impl TaskId {
 impl From<TaskId> for usize {
     fn from(t: TaskId) -> Self {
         t.0
-    }
-}
-
-/// 用户虚拟地址 / 窗口指针（envcall 侧仅作 ABI 语义标记；内核侧以 `VirtAddr::from_raw`
-/// 转入具体地址语义）。
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
-pub struct VirtAddr(pub(crate) usize);
-
-impl VirtAddr {
-    pub const fn new(v: usize) -> Self {
-        Self(v)
-    }
-    pub const fn get(self) -> usize {
-        self.0
-    }
-}
-
-impl From<VirtAddr> for usize {
-    fn from(v: VirtAddr) -> Self {
-        v.0
     }
 }
 

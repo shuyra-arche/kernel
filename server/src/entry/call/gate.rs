@@ -5,10 +5,13 @@
 //! 以及「取到的这一枚还可用吗」共用。失败一律是 `PendFail`（权柄轴的状态），
 //! 各域用自己的词汇显式折叠。
 
-use kernel_api::{abi::call::pend::PendFail, model::identity::PendId};
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::model::identity::PendId;
 
-use crate::basis::work::pend::{self, Need, PendSnapshot};
-use crate::basis::work::room::conductor::current;
+use crate::basis::pend;
+use crate::basis::pend::Need;
+use crate::basis::pend::PendSnapshot;
+use crate::basis::room::conductor::current;
 
 pub(super) fn accede(token: PendId, need: Need) -> Result<PendSnapshot, PendFail> {
     let task = current().running_task().ok_or(PendFail::Denied)?;

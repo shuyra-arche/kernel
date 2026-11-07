@@ -1,6 +1,8 @@
 use super::SignId;
 use crate::model::clone_view::CloneCondition;
-use crate::model::identity::{PendId, TaskId, TeamId};
+use crate::model::identity::PendId;
+use crate::model::identity::TaskId;
+use crate::model::identity::TeamId;
 use crate::model::unit::UnitTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8,12 +10,12 @@ pub enum SignSource {
     /// Retained external mapping completion, independent of execution exit.
     MappingRetired {
         token: PendId,
-        mapping: crate::model::memory::MappingId,
+        mapping: crate::model::cell::MappingId,
     },
-    /// First I/O fault; observing it never discharges a Cell obligation.
+    /// First I/O fault; observing it never discharges a Page obligation.
     MappingFault {
         token: PendId,
-        mapping: crate::model::memory::MappingId,
+        mapping: crate::model::cell::MappingId,
     },
     Clone {
         token: PendId,
@@ -58,7 +60,7 @@ impl SignSource {
                     && mapping <= isize::MAX as usize =>
             {
                 let token = PendId::new(token);
-                let mapping = crate::model::memory::MappingId::new(mapping);
+                let mapping = crate::model::cell::MappingId::new(mapping);
                 Some(if tag == 9 {
                     Self::MappingRetired { token, mapping }
                 } else {

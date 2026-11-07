@@ -1,16 +1,18 @@
 use alloc::sync::Arc;
 
-use kernel_api::{abi::call::EnvCall, abi::call::debug::DebugCall};
+use kernel_api::abi::call::EnvCall;
+use kernel_api::abi::call::debug::DebugCall;
 
-use crate::basis::work::unit::task::TaskIdent;
-use crate::machine::switcher::context::{Gprs, TrapContext};
+use crate::basis::unit::task::TaskIdent;
+use crate::machine::switcher::context::Gprs;
+use crate::machine::switcher::context::TrapContext;
 
+pub(in crate::entry) mod cell;
 mod chrono;
 mod clone_view;
 mod control;
 mod debug;
 mod gate;
-pub(in crate::entry) mod memory;
 mod outcome;
 mod pend;
 mod room;
@@ -19,7 +21,8 @@ pub(crate) mod share_view;
 pub(crate) mod sign;
 mod unit;
 
-use outcome::{Outcome, ret_err};
+use outcome::Outcome;
+use outcome::ret_err;
 
 /// 把这一次调用做掉，交回要接着跑的那一帧。
 ///
@@ -45,8 +48,8 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
     let outcome = match envcall {
         EnvCall::Room(call) => room::dispatch(frame, call, ident),
         EnvCall::Unit(call) => unit::dispatch(frame, call, ident),
-        EnvCall::Memory(call) => {
-            memory::dispatch(frame, call, &ident);
+        EnvCall::Cell(call) => {
+            cell::dispatch(frame, call, &ident);
             Outcome::Resume
         }
         EnvCall::Chrono(call) => {

@@ -1,6 +1,10 @@
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
+use std::process::Output;
+use std::process::Stdio;
+use std::time::Duration;
+use std::time::Instant;
 
 #[test]
 #[ignore = "requires QEMU RISC-V with virt,iommu-sys support (validated on 10.0.13)"]
@@ -73,6 +77,13 @@ fn iommu_on_real_qemu_registers() {
             true,
         ),
         (
+            "dma-change",
+            "virt,iommu-sys=on",
+            "dma-change",
+            "PASS iommu-dma change=1 revoked=1 reused=1",
+            true,
+        ),
+        (
             "readonly",
             "virt,iommu-sys=on",
             "readonly",
@@ -119,7 +130,13 @@ fn iommu_on_real_qemu_registers() {
             .args(["-nographic", "-monitor", "none", "-nic", "none"]);
         if matches!(
             name,
-            "dma" | "readonly" | "dma-abandon" | "owner-exit" | "activation-exit" | "route-reject"
+            "dma"
+                | "dma-change"
+                | "readonly"
+                | "dma-abandon"
+                | "owner-exit"
+                | "activation-exit"
+                | "route-reject"
         ) {
             command.args([
                 "-device",
@@ -176,3 +193,6 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str) -> Output {
     );
     output
 }
+
+mod image;
+mod kernel;

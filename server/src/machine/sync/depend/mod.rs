@@ -27,7 +27,9 @@ pub(crate) mod verdict;
 
 pub use level::Level;
 #[cfg(debug_assertions)]
-pub(crate) use verdict::{peer, strict};
+pub(crate) use verdict::peer;
+#[cfg(debug_assertions)]
+pub(crate) use verdict::strict;
 
 #[cfg(debug_assertions)]
 pub use error::DepInitError;
@@ -39,9 +41,7 @@ use held_set::HeldSet;
 
 #[cfg(debug_assertions)]
 pub(crate) fn report(what: &'static str, lock: usize, caller: usize) -> ! {
-    crate::basis::memory::flat::allocator::portal::switch(
-        crate::basis::memory::flat::allocator::portal::Backend::Spare,
-    );
+    crate::machine::allocator::portal::switch(crate::machine::allocator::portal::Backend::Spare);
     let held = held().expect("depend: report outside collected set");
     let mut msg = format!("[depend] {what}: {lock:#x} ({lock:#x})",);
     if caller != 0 {

@@ -1,6 +1,9 @@
 use crate::machine::hart;
-use ::core::sync::atomic::{AtomicUsize, Ordering};
-use sbi::{self, ecall::SArgs, fid};
+use ::core::sync::atomic::AtomicUsize;
+use ::core::sync::atomic::Ordering;
+use sbi;
+use sbi::ecall::SArgs;
+use sbi::fid;
 
 static ALARMER: AtomicUsize = AtomicUsize::new(usize::MAX);
 static QUIET: AtomicUsize = AtomicUsize::new(0);
@@ -13,7 +16,7 @@ pub(crate) fn hush() {
 }
 
 fn hunker() -> ! {
-    crate::basis::memory::nest::identity::vacate();
+    crate::machine::mmu::riscv::identity::vacate();
     unsafe { ::core::arch::asm!("csrci sstatus, 2") };
     // This path never returns: each peer acknowledges once after vacating its lease.
     QUIET.fetch_add(1, Ordering::Release);

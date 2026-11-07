@@ -1,4 +1,4 @@
-use crate::basis::memory::nest::SpaceKind;
+use crate::basis::nest::SpaceKind;
 
 #[derive(Debug, Clone, Copy)]
 pub struct WalkConfig {

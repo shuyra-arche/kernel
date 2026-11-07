@@ -1,6 +1,7 @@
 use kernel_api::abi::call::pend::PendFail;
 
-use super::{plan::Plan, tree::Node};
+use super::plan::Plan;
+use super::tree::Node;
 
 const IOMMU: u64 = 0x301_0000;
 const UART: u64 = 0x1000_0000;

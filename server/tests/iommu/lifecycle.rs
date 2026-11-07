@@ -1,15 +1,23 @@
-use crate::cell::Owner as CellOwner;
-use std::sync::{Arc, Barrier};
+use crate::cell::Owner as PageOwner;
+use std::sync::Arc;
+use std::sync::Barrier;
 
-use super::cell::{Cell, Exposure, RetainError};
-use super::hardware::{Call, Scripted};
-use super::iommu::{Error, HardwareError, IoSpace, Life, Phase};
+use super::cell::Exposure;
+use super::cell::Page;
+use super::cell::RetainError;
+use super::hardware::Call;
+use super::hardware::Scripted;
+use super::iommu::Error;
+use super::iommu::HardwareError;
+use super::iommu::IoSpace;
+use super::iommu::Life;
+use super::iommu::Phase;
 use super::support::Pool;
 
 #[test]
 fn preparation_is_external_before_publication_and_cancellation_has_no_effects() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     assert_eq!(cell.exposure(), Exposure::Internal);
@@ -29,7 +37,7 @@ fn preparation_is_external_before_publication_and_cancellation_has_no_effects() 
 #[test]
 fn closing_retains_external_memory_until_its_batch_actually_completes() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     // SAFETY: no actual hardware or other payload access.
@@ -74,7 +82,7 @@ fn closing_retains_external_memory_until_its_batch_actually_completes() {
 #[test]
 fn external_settlement_neither_discharges_another_device_nor_cpu_access() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let mut cpu = cell.prepare_hardware(false).unwrap();
     cpu.publish();
     let (hardware, trace) = Scripted::new();
@@ -103,7 +111,7 @@ fn external_settlement_neither_discharges_another_device_nor_cpu_access() {
 #[test]
 fn partial_publication_failure_requires_revocation_and_cannot_be_cancelled() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     // SAFETY: no actual hardware or payload access.
@@ -129,7 +137,7 @@ fn close_rejects_new_work_but_advances_other_bindings_when_one_revoke_fails() {
     let pools = [Pool::new(0), Pool::new(0)];
     let cells: Vec<_> = pools
         .iter()
-        .map(|pool| Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap()))
+        .map(|pool| Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap()))
         .collect();
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
@@ -173,7 +181,7 @@ fn close_rejects_new_work_but_advances_other_bindings_when_one_revoke_fails() {
 fn abandoned_space_retains_hardware_and_cell_but_unpublished_space_can_cancel() {
     for published in [false, true] {
         let pool = Pool::new(0);
-        let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+        let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
         let (hardware, trace) = Scripted::new();
         let mut space = IoSpace::new(hardware);
         // SAFETY: no actual hardware or payload access.
@@ -202,7 +210,7 @@ fn abandoned_space_retains_hardware_and_cell_but_unpublished_space_can_cancel() 
 #[test]
 fn mixed_cpu_device_concurrency_never_clears_the_remaining_external_use() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let mut remaining = cell.prepare_external(false).unwrap();
     remaining.publish();
     let barrier = Arc::new(Barrier::new(8));
@@ -242,7 +250,7 @@ fn mixed_cpu_device_concurrency_never_clears_the_remaining_external_use() {
 #[test]
 fn writable_dma_rejects_cpu_aliases_until_the_exact_retirement_completes() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let cpu = cell.prepare_hardware(false).unwrap();
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
@@ -272,4 +280,40 @@ fn writable_dma_rejects_cpu_aliases_until_the_exact_retirement_completes() {
     let cpu = cell.prepare_hardware(true).unwrap();
     drop(cpu);
     assert!(cell.allows_return());
+}
+
+#[test]
+fn changed_admission_binds_exact_page_and_survives_the_receipt() {
+    let pool = Pool::new(0);
+    let page = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
+    let other_pool = Pool::new(0);
+    let other =
+        Arc::new(Page::from_internal(PageOwner::Kernel, other_pool.page().unwrap()).unwrap());
+    let change = page.begin().unwrap();
+    let (hardware, trace) = Scripted::new();
+    let mut space = IoSpace::new(hardware);
+    assert_eq!(
+        unsafe { space.register(&page, 0x1000, true) },
+        Err(Error::Retain(RetainError::Busy))
+    );
+    assert_eq!(
+        unsafe { space.register_during(&other, 0x1000, true, Some(&change)) },
+        Err(Error::InvalidRange)
+    );
+    assert_eq!(space.pending(), 0);
+    assert!(trace.lock().unwrap().calls.is_empty());
+    let id = unsafe { space.register_during(&page, 0x1000, true, Some(&change)) }.unwrap();
+    space.publish(id).unwrap();
+    drop(change);
+    assert_eq!(page.exposure(), Exposure::External);
+    assert_eq!(
+        page.prepare_hardware(false).unwrap_err(),
+        RetainError::Borrowed
+    );
+    let batch = space.revoke(id).unwrap().unwrap();
+    drop(page);
+    assert_eq!(pool.gives(), 0);
+    trace.lock().unwrap().completion.push_back(Ok(Some(batch)));
+    assert_eq!(space.poll(id), Ok(true));
+    assert_eq!(pool.gives(), 1);
 }

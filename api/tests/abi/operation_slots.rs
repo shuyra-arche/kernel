@@ -49,32 +49,32 @@ fn every_operation_keeps_its_published_slot() {
         21474836485u64 as usize
     );
     assert_eq!(
-        <kernel_api::abi::call::memory::operations::Acquire as kernel_api::abi::operation::RegisterCall>::SLOT,
+        <kernel_api::abi::call::cell::operations::Acquire as kernel_api::abi::operation::RegisterCall>::SLOT,
         8589934597u64 as usize
     );
     assert_eq!(
-        <kernel_api::abi::call::memory::operations::Release as kernel_api::abi::operation::RegisterCall>::SLOT,
+        <kernel_api::abi::call::cell::operations::Release as kernel_api::abi::operation::RegisterCall>::SLOT,
         8589934598u64 as usize
     );
     assert_eq!(
-        <kernel_api::abi::call::memory::operations::Attach as kernel_api::abi::operation::RegisterCall>::SLOT,
-        8589934604u64 as usize
+        <kernel_api::abi::call::cell::operations::Attach as kernel_api::abi::operation::RegisterCall>::SLOT,
+        8589934611u64 as usize
     );
     assert_eq!(
-        <kernel_api::abi::call::memory::operations::Detach as kernel_api::abi::operation::RegisterCall>::SLOT,
+        <kernel_api::abi::call::cell::operations::Detach as kernel_api::abi::operation::RegisterCall>::SLOT,
         8589934605u64 as usize
     );
     assert_eq!(
-        <kernel_api::abi::call::memory::operations::SetAccess as kernel_api::abi::operation::RegisterCall>::SLOT,
+        <kernel_api::abi::call::cell::operations::SetAccess as kernel_api::abi::operation::RegisterCall>::SLOT,
         8589934601u64 as usize
     );
     assert_eq!(
-        <kernel_api::abi::call::memory::operations::Traverse as kernel_api::abi::operation::RegisterCall>::SLOT,
+        <kernel_api::abi::call::cell::operations::Traverse as kernel_api::abi::operation::RegisterCall>::SLOT,
         8589934603u64 as usize
     );
     assert_eq!(
-        <kernel_api::abi::call::memory::operations::Transfer as kernel_api::abi::operation::RegisterCall>::SLOT,
-        8589934602u64 as usize
+        <kernel_api::abi::call::cell::operations::Push as kernel_api::abi::operation::RegisterCall>::SLOT,
+        8589934607u64 as usize
     );
     assert_eq!(
         <kernel_api::abi::call::pend::operations::Accord as kernel_api::abi::operation::RegisterCall>::SLOT,

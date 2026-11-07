@@ -122,7 +122,6 @@ dependencies = [
  "fack",
  "fdt",
  "hashbrown",
- "kernel-allocator",
  "kernel-api",
  "log",
  "riscv",
@@ -130,15 +129,6 @@ dependencies = [
  "semihosting",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "kernel-allocator"
-version = "0.0.1"
-dependencies = [
- "erra",
- "fack",
- "kernel-api",
 ]
 
 [[package]]

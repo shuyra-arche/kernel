@@ -1,4 +1,5 @@
-use crate::{interrupt_plan::Plan, tree::Node};
+use crate::interrupt_plan::Plan;
+use crate::tree::Node;
 fn words(v: &[u32]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_be_bytes()).collect()
 }

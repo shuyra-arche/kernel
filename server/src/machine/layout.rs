@@ -1,7 +1,10 @@
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::address::{PhysAddr, VirtAddr};
 #[cfg(debug_assertions)]
-use crate::machine::mode;
+use crate::machine::mmu::riscv::Address;
+#[cfg(debug_assertions)]
+use crate::machine::mmu::riscv::mode;
+use kernel_api::address::PAGE_SIZE;
+use kernel_api::address::PhysAddr;
+use kernel_api::address::VirtAddr;
 
 pub const IMAGE_BASE: VirtAddr = VirtAddr::wrap(0x1_0000);
 

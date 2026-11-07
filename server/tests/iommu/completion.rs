@@ -1,15 +1,20 @@
-use crate::cell::Owner as CellOwner;
+use crate::cell::Owner as PageOwner;
 use std::sync::Arc;
 
-use super::cell::{Cell, Exposure};
+use super::cell::Exposure;
+use super::cell::Page;
 use super::hardware::Scripted;
-use super::iommu::{Error, HardwareError, IoSpace, Phase, riscv};
+use super::iommu::Error;
+use super::iommu::HardwareError;
+use super::iommu::IoSpace;
+use super::iommu::Phase;
+use super::iommu::riscv;
 use super::support::Pool;
 
 #[test]
 fn old_retry_completion_and_cross_domain_identity_cannot_release_memory() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let (hardware, trace) = Scripted::new();
     let (other, other_trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
@@ -57,7 +62,7 @@ fn old_retry_completion_and_cross_domain_identity_cannot_release_memory() {
 #[test]
 fn fence_submission_failure_keeps_iova_reserved_until_retry_settlement() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     // SAFETY: no hardware or payload access.
@@ -90,7 +95,7 @@ fn fence_submission_failure_keeps_iova_reserved_until_retry_settlement() {
 #[test]
 fn rejected_geometry_does_not_register_external_risk() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     for iova in [1, usize::MAX - 4095] {
@@ -111,7 +116,7 @@ fn rejected_geometry_does_not_register_external_risk() {
 #[test]
 fn riscv_fence_encoding_and_error_status_do_not_confuse_notification_with_success() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     // SAFETY: no hardware or payload accesses; obtains a real production batch.

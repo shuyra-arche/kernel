@@ -6,3 +6,5 @@
 pub mod abi;
 pub mod boot;
 pub mod model;
+
+pub mod address;

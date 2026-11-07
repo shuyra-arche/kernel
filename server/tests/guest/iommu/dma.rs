@@ -1,17 +1,25 @@
-use crate::iommu::retirement::{Owner, Registry};
-use crate::iommu::riscv::adapter::{Adapter, Quiescence};
-use crate::iommu::riscv::{Engine, Phase, controllers::Controllers, topology::Topology};
-use crate::iommu::{HardwareError, IoSpace};
-use crate::{
-    Uart,
-    edu::Edu,
-    finish, mmio,
-    pool::{LIMIT, POOL, RETURNS},
-    progress,
-};
+use crate::Uart;
+use crate::edu::Edu;
+use crate::finish;
+use crate::iommu::HardwareError;
+use crate::iommu::IoSpace;
+use crate::iommu::retirement::Owner;
+use crate::iommu::retirement::Registry;
+use crate::iommu::riscv::Engine;
+use crate::iommu::riscv::Phase;
+use crate::iommu::riscv::adapter::Adapter;
+use crate::iommu::riscv::adapter::Quiescence;
+use crate::iommu::riscv::controllers::Controllers;
+use crate::iommu::riscv::topology::Topology;
+use crate::mmio;
+use crate::pool::LIMIT;
+use crate::pool::POOL;
+use crate::pool::RETURNS;
+use crate::progress;
 use alloc::sync::Arc;
 use core::fmt::Write;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering;
 
 const IOVA: usize = 0x0040_0000;
 
@@ -100,13 +108,20 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
         .attach(owner.as_ref().unwrap(), adapter)
         .map_err(|(e, _)| e)
         .unwrap();
+    let change = (scenario == "dma-change").then(|| payload.begin().unwrap());
     let binding = registry
         .with_space(owner.as_ref().unwrap(), domain, |space| {
-            let id = unsafe { space.register(&payload, IOVA, scenario != "readonly") }?;
+            let id = if let Some(change) = &change {
+                assert!(unsafe { space.register(&payload, IOVA, true) }.is_err());
+                unsafe { space.register_during(&payload, IOVA, true, Some(change)) }?
+            } else {
+                unsafe { space.register(&payload, IOVA, scenario != "readonly") }?
+            };
             space.publish(id)?;
             Ok(id)
         })
         .unwrap();
+    drop(change);
     assert_eq!(Arc::strong_count(&payload), 2); // exactly one data obligation
     drop(payload);
     if scenario != "activation-exit" {
@@ -247,13 +262,14 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
     unsafe { new_bytes.write_bytes(0xc3, 64) };
     if scenario == "owner-exit" {
         edu.wait();
-    } // late DMA cannot hit the reused Cell
+    } // late DMA cannot hit the reused Page
     edu.enable(1);
     edu.transfer(IOVA, true);
     edu.drain();
     check(new_bytes, 0xc3);
     drop((reused, held));
     let _ = match scenario {
+        "dma-change" => writeln!(Uart, "PASS iommu-dma change=1 revoked=1 reused=1"),
         "readonly" => writeln!(Uart, "PASS iommu-dma readonly=1 denied=5"),
         "owner-exit" => writeln!(Uart, "PASS iommu-dma owner-exit=1 delayed-dma=1 reused=1"),
         "activation-exit" => writeln!(Uart, "PASS iommu-dma activation-exit=1 reused=1"),

@@ -14,7 +14,7 @@ typed_calls! {
     }
     debug [
         abi::call::debug::DebugFail,
-        model::identity::VirtAddr,
+        address::VirtAddr,
     ] {
         fallible fn put(buf: VirtAddr, len: usize) -> Result<usize, erra::Error<DebugFail>> =
             op::Put { buf, len };
@@ -31,7 +31,7 @@ typed_calls! {
         model::identity::PendId,
         model::clone_view::PullOutcome,
         model::identity::TaskId,
-        model::identity::VirtAddr,
+        address::VirtAddr,
         model::wait::Wait,
     ] {
         fallible fn unseal(mark: Mark, limits: CloneLimits) -> Result<PendId, erra::Error<CloneFail>> =
@@ -47,34 +47,35 @@ typed_calls! {
         fallible fn wait(token: PendId, condition: CloneCondition, millis: Wait) -> Result<bool, erra::Error<CloneFail>> =
             op::Wait { token, condition, millis };
     }
-    memory [
-        model::memory::AcquireSource,
-        model::memory::FlatReference,
-        abi::call::memory::MemoryFail,
+    cell [
+        model::cell::AcquireSource,
+        model::cell::FlatReference,
+        abi::call::cell::CellFail,
 
         model::identity::TeamId,
-        model::memory::MappingControl,
-        model::memory::MappingTarget,
-        model::memory::MappingInfo,
-        model::memory::MappingId,
-        model::memory::MappingSelection,
-        model::identity::VirtAddr,
+        model::cell::MappingTarget,
+        model::cell::MappingInfo,
+        model::cell::MappingId,
+        model::cell::MappingSelection,
+        address::VirtAddr,
     ] {
-        fallible fn acquire(source: AcquireSource, retention: kernel_api::model::unit::ControlId) -> Result<FlatReference, erra::Error<MemoryFail>> =
+        fallible fn acquire(source: AcquireSource, retention: kernel_api::model::unit::ControlId) -> Result<FlatReference, erra::Error<CellFail>> =
             op::Acquire { source, retention };
-        fallible fn inspect(target: MappingTarget, mapping: MappingId) -> Result<MappingInfo, erra::Error<MemoryFail>> = op::Inspect { target, mapping };
-        fallible fn release(reference: FlatReference) -> Result<(), erra::Error<MemoryFail>> =
+        fallible fn inspect(target: MappingTarget, mapping: MappingId) -> Result<MappingInfo, erra::Error<CellFail>> = op::Inspect { target, mapping };
+        fallible fn release(reference: FlatReference) -> Result<(), erra::Error<CellFail>> =
             op::Release { reference };
-        fallible fn attach(range: VirtAddr, target: MappingTarget, placement: VirtAddr, access: u64, control: MappingControl) -> Result<(MappingId, VirtAddr), erra::Error<MemoryFail>> =
-            op::Attach { range, target, placement, access, control };
-        fallible fn detach(target: MappingTarget, mapping: MappingId, selection: MappingSelection) -> Result<(), erra::Error<MemoryFail>> =
+        fallible fn attach(target: MappingTarget, request: VirtAddr) -> Result<(MappingId, VirtAddr), erra::Error<CellFail>> =
+            op::Attach { target, request };
+        fallible fn detach(target: MappingTarget, mapping: MappingId, selection: MappingSelection) -> Result<(), erra::Error<CellFail>> =
             op::Detach { target, mapping, selection };
-        fallible fn set_access(team: TeamId, mapping: MappingId, selection: MappingSelection, access: u64) -> Result<(), erra::Error<MemoryFail>> =
+        fallible fn set_access(team: TeamId, mapping: MappingId, selection: MappingSelection, access: u64) -> Result<(), erra::Error<CellFail>> =
             op::SetAccess { team, mapping, selection, access };
-        fallible fn traverse(retention: kernel_api::model::unit::ControlId, range: VirtAddr, out: VirtAddr) -> Result<(), erra::Error<MemoryFail>> =
+        fallible fn traverse(retention: kernel_api::model::unit::ControlId, range: VirtAddr, out: VirtAddr) -> Result<(), erra::Error<CellFail>> =
             op::Traverse { retention, range, out };
-        fallible fn transfer(from: FlatReference, from_page: usize, to: FlatReference, to_page: usize) -> Result<(), erra::Error<MemoryFail>> =
-            op::Transfer { from, from_page, to, to_page };
+        fallible fn push(source: FlatReference, page: usize, target: VirtAddr, change: usize) -> Result<(), erra::Error<CellFail>> = op::Push { source, page, target, change };
+        fallible fn pull(source: VirtAddr, destination: FlatReference, page: usize, change: usize) -> Result<(), erra::Error<CellFail>> = op::Pull { source, destination, page, change };
+        fallible fn begin(source: FlatReference, page: usize) -> Result<usize, erra::Error<CellFail>> = op::Begin { source, page };
+        fallible fn end(change: usize) -> Result<(), erra::Error<CellFail>> = op::End { change };
     }
     pend [
         model::pend::PendRange,
@@ -84,7 +85,7 @@ typed_calls! {
         model::identity::PendId,
         model::pend::ReleaseMode,
         model::identity::TaskId,
-        model::identity::VirtAddr,
+        address::VirtAddr,
     ] {
         fallible fn accord(src: PendId, dst: TaskId, subset: Modifiable, mark: Mark) -> Result<PendId, erra::Error<PendFail>> =
             op::Accord { src, dst, subset, mark };
@@ -105,10 +106,10 @@ typed_calls! {
     }
     share_view [
         model::modifiable::Modifiable,
-        model::memory::FlatReference,
+        model::cell::FlatReference,
         model::identity::PendId,
         abi::call::share_view::ShareFail,
-        model::identity::VirtAddr,
+        address::VirtAddr,
     ] {
         fallible fn unseal(reference: FlatReference, modifiable: Modifiable) -> Result<PendId, erra::Error<ShareFail>> =
             op::Unseal { reference, modifiable };
@@ -121,7 +122,7 @@ typed_calls! {
     }
     room [
         model::exit::Reason,
-        model::identity::VirtAddr,
+        address::VirtAddr,
         abi::call::room::RoomFail,
         model::identity::TaskId,
         model::wait::Wait,
@@ -168,7 +169,7 @@ typed_calls! {
         model::identity::TeamId,
         abi::call::unit::UnitFail,
         model::unit::UnitTarget,
-        model::identity::VirtAddr,
+        address::VirtAddr,
         model::wait::Wait,
     ] {
         fallible fn build(kind: ProgramKind, sire: TaskId) -> Result<TeamId, erra::Error<UnitFail>> =

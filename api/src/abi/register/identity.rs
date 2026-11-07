@@ -1,5 +1,10 @@
-use super::{Decode, Wire};
-use crate::model::identity::{Mark, PendId, TaskId, TeamId, VirtAddr};
+use super::Decode;
+use super::Wire;
+use crate::address::VirtAddr;
+use crate::model::identity::Mark;
+use crate::model::identity::PendId;
+use crate::model::identity::TaskId;
+use crate::model::identity::TeamId;
 
 impl Wire for PendId {
     const WORDS: usize = 1;

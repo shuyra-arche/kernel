@@ -1,0 +1,21 @@
+[package]
+name = "kernel-cell-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autotests = false
+
+[workspace]
+
+[[bin]]
+name = "cell-guest"
+path = "main.rs"
+test = false
+bench = false
+
+[dependencies]
+kernel-api = { path = "../../../../api" }
+kernel-client = { path = "../../../../client" }
+
+[profile.release]
+panic = "abort"

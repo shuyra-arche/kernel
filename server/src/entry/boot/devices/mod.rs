@@ -5,15 +5,19 @@ mod reserved;
 
 pub(crate) use reserved::discover as iommu_regions;
 
-use crate::basis::memory::nest::Access;
-use crate::basis::work::pend::{self, Modifiable, SourceAuthorization};
-use crate::basis::work::view::{self, View};
+use crate::basis::nest::Access;
+use crate::basis::pend;
+use crate::basis::pend::Modifiable;
+use crate::basis::pend::SourceAuthorization;
+use crate::basis::view;
+use crate::basis::view::View;
 use crate::entry::boot::resources::Registry;
 use crate::machine::board;
-use kernel_api::{
-    abi::call::pend::PendFail, boot::ledger::Name, boot::ledger::Page, model::identity::Mark,
-    model::identity::TaskId,
-};
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::boot::ledger::Name;
+use kernel_api::boot::ledger::Page;
+use kernel_api::model::identity::Mark;
+use kernel_api::model::identity::TaskId;
 use plan::Plan;
 
 pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
@@ -26,7 +30,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
         grant_region(registry, *region)?;
     }
     // Export each validated BAR through the ordinary View/Pend boot ledger.
-    let apertures = crate::machine::iommu::aperture::APERTURES.lock();
+    let apertures = crate::machine::iommu::riscv::aperture::APERTURES.lock();
     for aperture in apertures.iter() {
         let source = aperture.source.clone();
         let size = source

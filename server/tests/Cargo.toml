@@ -35,3 +35,7 @@ path = "sign/mod.rs"
 [[test]]
 name = "pend"
 path = "pend/mod.rs"
+
+[[test]]
+name = "zone"
+path = "zone/mod.rs"

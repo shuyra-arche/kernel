@@ -4,8 +4,12 @@
 //! `FromTriple`。无失败操作保留完整字的位模式，不把高位解释为错误。
 //! 输入寄存器由 `Wire::unpack` 校验；这里按 Kernel 保证的返回布局还原值。
 
-use crate::model::identity::{PendId, TaskId, TeamId, VirtAddr};
-use crate::model::memory::{FlatReference, MappingId};
+use crate::address::VirtAddr;
+use crate::model::cell::FlatReference;
+use crate::model::cell::MappingId;
+use crate::model::identity::PendId;
+use crate::model::identity::TaskId;
+use crate::model::identity::TeamId;
 
 /// 从成功返回的 `(a0, a1)` 还原操作的 `Output`。
 ///

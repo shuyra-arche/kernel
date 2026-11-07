@@ -17,7 +17,7 @@ pub enum Trap {
 pub enum Call {
     Build,
     Doom,
-    /// Authorizes the independently retained form of MemoryCall::Acquire.
+    /// Authorizes the independently retained form of CellCall::Acquire.
     Retain,
     /// Boot-minted authority for the kernel execution-domain guard.
     Guard,

@@ -1,5 +1,6 @@
 use ::core::cell::UnsafeCell;
-use ::core::sync::atomic::{AtomicBool, Ordering};
+use ::core::sync::atomic::AtomicBool;
+use ::core::sync::atomic::Ordering;
 
 use super::depend;
 use super::trap::TrapGuard;
@@ -92,28 +93,9 @@ impl<T: ?Sized> SpinLock<T> {
 
 // 分配器机制只认这一条原生 unit guard：层级、TrapGuard、IRQ 恢复、!Send 与 lockdep
 // 全部留在本类型里，不经过任何包装锁。
-unsafe impl kernel_allocator::Lock for SpinLock<()> {
-    type Guard<'a>
-        = SpinLockGuard<'a, ()>
-    where
-        Self: 'a;
 
-    fn new(role: Option<kernel_allocator::LockRole>) -> Self {
-        match role {
-            Some(kernel_allocator::LockRole::Frame) => {
-                SpinLock::new_level(depend::Level::Frame, ())
-            }
-            Some(kernel_allocator::LockRole::Tally) => {
-                SpinLock::new_level(depend::Level::Tally, ())
-            }
-            Some(kernel_allocator::LockRole::Spare) => {
-                SpinLock::new_level(depend::Level::Spare, ())
-            }
-            None => SpinLock::new(()),
-        }
-    }
-
-    fn lock(&self) -> Self::Guard<'_> {
-        SpinLock::lock(self)
+impl<T> SpinLock<T> {
+    pub(crate) fn with<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        f(&mut *self.lock())
     }
 }

@@ -1,5 +1,5 @@
 pub const MAGIC: [u8; 8] = *b"SQBOOT01";
-pub const PAGE: usize = crate::model::memory::PAGE_SIZE;
+pub const PAGE: usize = crate::model::cell::PAGE_SIZE;
 pub const HEADER: usize = 32;
 pub const RECORD: usize = 40;
 

@@ -1,21 +1,28 @@
-use super::outcome::{Outcome, answer, answer_pair};
-use crate::basis::work::pend;
-use crate::basis::work::room::Handoff;
-use crate::basis::work::room::conductor::current;
-use crate::basis::work::room::scheduler::roster::muster;
-use crate::basis::work::sign::WakeKey;
-use crate::basis::work::sign::endpoint::{self, AwaitWait, Route, Watch, codec};
-use crate::basis::work::unit::task::{Task, TaskIdent};
+use super::outcome::Outcome;
+use super::outcome::answer;
+use super::outcome::answer_pair;
+use crate::basis::pend;
+use crate::basis::room::Handoff;
+use crate::basis::room::conductor::current;
+use crate::basis::room::scheduler::roster::muster;
+use crate::basis::sign::WakeKey;
+use crate::basis::sign::endpoint;
+use crate::basis::sign::endpoint::AwaitWait;
+use crate::basis::sign::endpoint::Route;
+use crate::basis::sign::endpoint::Watch;
+use crate::basis::sign::endpoint::codec;
+use crate::basis::unit::task::Task;
+use crate::basis::unit::task::TaskIdent;
 use crate::machine::switcher::context::TrapContext;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use kernel_api::{
-    abi::call::pend::PendFail,
-    abi::call::sign::SignCall,
-    abi::call::sign::SignFail,
-    model::sign::{SignId, SignRights, SignSource},
-    model::wait::Wait,
-};
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::abi::call::sign::SignCall;
+use kernel_api::abi::call::sign::SignFail;
+use kernel_api::model::sign::SignId;
+use kernel_api::model::sign::SignRights;
+use kernel_api::model::sign::SignSource;
+use kernel_api::model::wait::Wait;
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskIdent>) -> Outcome {
     drop(ident);
@@ -31,7 +38,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
         SignCall::Close { token } => answer(
             frame,
             (|| {
-                let _commit = crate::basis::work::commit();
+                let _commit = crate::basis::commit();
                 let task = current().running_task().ok_or(SignFail::Denied)?;
                 task.signs.close(task.ident.id, token).map(|()| 0)
             })(),
@@ -39,7 +46,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
         SignCall::Release { token } => answer(
             frame,
             (|| {
-                let _commit = crate::basis::work::commit();
+                let _commit = crate::basis::commit();
                 let task = current().running_task().ok_or(SignFail::Denied)?;
                 task.signs.release(task.ident.id, token).map(|()| 0)
             })(),
@@ -55,7 +62,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
                 let target = muster(target)
                     .and_then(|weak| weak.upgrade())
                     .ok_or(SignFail::Denied)?;
-                crate::basis::work::sign::delegate(&task, &target, token, rights).map(SignId::get)
+                crate::basis::sign::delegate(&task, &target, token, rights).map(SignId::get)
             })(),
         ),
         SignCall::Route { token, source } => {
@@ -65,7 +72,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
             );
         }
         SignCall::Unroute { token, source } => {
-            let _commit = crate::basis::work::commit();
+            let _commit = crate::basis::commit();
             let result = with_group(token, SignRights::ROUTE, |task, group| {
                 endpoint::detach(group, task.ident.id, source)
             });
@@ -83,7 +90,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
             frame,
             with_group(token, SignRights::LISTEN, |_, endpoint| {
                 endpoint::consume(endpoint)?;
-                crate::basis::work::room::interrupt::acknowledge(endpoint);
+                crate::basis::room::interrupt::acknowledge(endpoint);
                 Ok(0)
             }),
         ),
@@ -92,7 +99,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
 }
 
 pub(crate) fn create() -> Result<usize, SignFail> {
-    let _commit = crate::basis::work::commit();
+    let _commit = crate::basis::commit();
     let task = current().running_task().ok_or(SignFail::Denied)?;
     if !pend::live(&task) {
         return Err(SignFail::Dead);
@@ -108,7 +115,7 @@ fn with_group<T>(
     need: SignRights,
     operation: impl FnOnce(&Arc<Task>, &Arc<endpoint::Endpoint>) -> Result<T, SignFail>,
 ) -> Result<T, SignFail> {
-    let _commit = crate::basis::work::commit();
+    let _commit = crate::basis::commit();
     let task = current().running_task().ok_or(SignFail::Denied)?;
     if !pend::live(&task) {
         return Err(SignFail::Dead);
@@ -121,7 +128,7 @@ fn attach(
     token: SignId,
     registration: impl FnOnce(&Arc<Task>) -> Result<Route, SignFail>,
 ) -> Result<(), SignFail> {
-    let _commit = crate::basis::work::commit();
+    let _commit = crate::basis::commit();
     with_group(token, SignRights::ROUTE, |task, group| {
         endpoint::attach(group, registration(task)?)
     })
@@ -131,7 +138,7 @@ fn await_group(frame: &mut TrapContext, token: SignId, millis: Wait) -> Outcome 
     let result = with_group(token, SignRights::LISTEN, |task, group| {
         Ok(AwaitWait::new(group.clone(), token, task, millis))
     })
-    .and_then(crate::basis::work::sign::endpoint::wait::wait);
+    .and_then(crate::basis::sign::endpoint::wait::wait);
     match result {
         Ok(Handoff::Resume(reply)) => AwaitWait::write_result(frame, Ok(reply)),
         Ok(Handoff::Switch(pa)) => return Outcome::Switch(pa as *mut TrapContext),
@@ -148,7 +155,7 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: SignSource) -> Result<Route,
         | SignSource::MappingFault { token, mapping } => {
             let fault = matches!(source, SignSource::MappingFault { .. });
             let (life, _) =
-                crate::basis::work::unit::space::external::event(actor, token, mapping, fault)
+                crate::basis::unit::space::external::event(actor, token, mapping, fault)
                     .map_err(|_| SignFail::Denied)?;
             keys.push((WakeKey::ExternalMapping { id: mapping.get() }, life));
             Watch::ExternalMapping {
@@ -185,9 +192,9 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: SignSource) -> Result<Route,
             Watch::Resource { source }
         }
         SignSource::Join { target } => {
-            let selected = crate::basis::work::unit::join::observe(actor, target)
-                .map_err(|_| SignFail::Denied)?;
-            let wait = crate::basis::work::unit::join::JoinWait::new(
+            let selected =
+                crate::basis::unit::join::observe(actor, target).map_err(|_| SignFail::Denied)?;
+            let wait = crate::basis::unit::join::JoinWait::new(
                 selected.clone(),
                 actor.ident.id,
                 false,

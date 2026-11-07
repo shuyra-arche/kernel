@@ -1,19 +1,26 @@
 use alloc::sync::Arc;
 
-use kernel_api::{
-    abi::call::pend::PendCall, abi::call::pend::PendFail, model::identity::Mark,
-    model::identity::PendId, model::identity::TaskId, model::identity::VirtAddr,
-    model::pend::PendInfo, model::pend::PendRange, model::pend::ReleaseMode,
-};
+use kernel_api::abi::call::pend::PendCall;
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::address::VirtAddr;
+use kernel_api::model::identity::Mark;
+use kernel_api::model::identity::PendId;
+use kernel_api::model::identity::TaskId;
+use kernel_api::model::pend::PendInfo;
+use kernel_api::model::pend::PendRange;
+use kernel_api::model::pend::ReleaseMode;
 
-use crate::basis::memory::address::VirtAddr as KVirt;
-use crate::basis::memory::address::{PageCount, PageOffset};
-use crate::basis::memory::nest::Access;
-use crate::basis::work::pend::{self, Modifiable, PendSnapshot};
-use crate::basis::work::room::conductor::current;
-use crate::basis::work::room::scheduler::roster::muster;
-use crate::basis::work::unit::task::TaskIdent;
+use crate::basis::nest::Access;
+use crate::basis::pend;
+use crate::basis::pend::Modifiable;
+use crate::basis::pend::PendSnapshot;
+use crate::basis::room::conductor::current;
+use crate::basis::room::scheduler::roster::muster;
+use crate::basis::unit::task::TaskIdent;
 use crate::machine::switcher::context::TrapContext;
+use kernel_api::address::PageCount;
+use kernel_api::address::PageOffset;
+use kernel_api::address::VirtAddr as KVirt;
 
 use super::outcome::answer;
 
@@ -116,7 +123,7 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
     answer(frame, r);
 }
 
-fn information(task: &Arc<crate::basis::work::unit::task::Task>, pend: &PendSnapshot) -> PendInfo {
+fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendSnapshot) -> PendInfo {
     PendInfo {
         token: pend.token(),
         view: kernel_api::model::view::ViewId::new(pend.view().id()),

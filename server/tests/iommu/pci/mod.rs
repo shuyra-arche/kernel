@@ -1,5 +1,8 @@
-use crate::pci::{Config, Endpoint, Error};
-use std::sync::{Arc, Mutex};
+use crate::pci::Config;
+use crate::pci::Endpoint;
+use crate::pci::Error;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[derive(Clone)]
 struct Pci(Arc<Mutex<Registers>>);

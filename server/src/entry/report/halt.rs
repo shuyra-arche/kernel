@@ -8,7 +8,9 @@ use alloc::vec::Vec;
 use crate::entry::report::report::Report;
 use crate::machine::hart;
 use crate::machine::image::ROOT_STACK_SIZE;
-use crate::machine::stop::{alarm, broadcast, claim};
+use crate::machine::stop::alarm;
+use crate::machine::stop::broadcast;
+use crate::machine::stop::claim;
 use sbi::fid;
 
 static mut SCENE: [usize; 2] = [0; 2];
@@ -63,9 +65,7 @@ extern "C" fn info(info: &PanicInfo) -> ! {
         unsafe { (crate::machine::image::root_stack_base() as *const usize).read_volatile() }
             == crate::machine::image::ROOT_STACK_CANARY;
 
-    crate::basis::memory::flat::allocator::portal::switch(
-        crate::basis::memory::flat::allocator::portal::Backend::Spare,
-    );
+    crate::machine::allocator::portal::switch(crate::machine::allocator::portal::Backend::Spare);
 
     let mut report = Report::default();
     {
@@ -79,7 +79,7 @@ extern "C" fn info(info: &PanicInfo) -> ! {
             ));
         }
         let mut rows: Vec<Vec<Option<String>>> = Vec::new();
-        if let Some(i) = crate::basis::work::room::identity::ident() {
+        if let Some(i) = crate::basis::room::identity::ident() {
             rows.push(vec![Some(format!(
                 "team #{} / task #{} @ hart {}",
                 i.team_id(),

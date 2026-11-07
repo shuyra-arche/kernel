@@ -13,7 +13,9 @@ Shuyra's RV64 kernel, public contracts and typed call transport.
 | `server/src/basis/` | Memory and execution mechanisms, separate from Rust `core` |
 | `server/src/entry/` | Boot, traps, calls and diagnostic output |
 | `server/src/machine/` | Hardware mechanisms |
-| `server/allocator/` | Physical allocation mechanisms |
+| `server/src/machine/allocator/` | Allocation algorithms, platform facts and allocator instances |
+| `server/src/machine/mmu/riscv/` | CPU page tables, ASIDs and TLB synchronization |
+| `server/src/machine/iommu/riscv/` | Device translation, command queues and trusted completion |
 | `server/sbi/` | SBI calls used by the kernel |
 | `.github/workflows/` | Compilation checks and source version releases |
 
@@ -30,21 +32,54 @@ The reconstruction is tracked in [#14](https://github.com/shuyra-arche/kernel/is
 
 | Element | Responsibility |
 | --- | --- |
-| Cell | Unique physical identity, ownership epoch and CPU/device reclamation obligations |
-| Flat | Logical backing slots, residency and migration of existing Cells |
-| Nest / Mapping | CPU or IOMMU address projection and hardware withdrawal |
+| Cell | A range of Slots (Flat) or Memos (Nest), with position-based Page operations |
+| Page | Unique physical identity, ownership epoch and CPU/device reclamation obligations |
+| Flat | Logical backing slots, residency and movement of existing Pages |
+| Nest / Mapping / Memo | CPU address relations and explicit per-position publication state |
+| Zone | Address windows, occupancy generations and retirement tickets |
 | View | Clone payload delivery or Share access to whole Cells |
 | Pend | Access authority, Modifiable and the explicit borrow tree |
 | Sign | Retained events, source observation, routing and waiting |
 | Team / Task | Membership admission, execution control, results and eventual cleanup |
 
-Managed Cells are currently 4 KiB RAM allocations. Flat slots and mappings retain
-that same Cell; they do not create another owner. A Team ownership epoch closes
+Managed Pages are currently 4 KiB RAM allocations. Flat slots and Memos retain
+that same Page; they do not create another owner. A Team ownership epoch closes
 at retirement, transferring residual responsibilities to Kernel without changing
-Cell identity or discharging hardware access. Reallocation requires all holders
+Page identity or discharging hardware access. Reallocation requires all holders
 released and all CPU/device obligations safely settled. Failed or abandoned
 published obligations retain the allocation. `BorrowedRegion` represents trusted
-external ranges without inventing duplicate managed Cell identities.
+external ranges without inventing duplicate managed Page identities.
+
+`basis` contains `cell`, `flat`, `nest`, `zone`, `view`, `pend`, `sign`, `unit`
+and `room`. Flat and Nest are peers. Zone owns the actual address occupancy
+algorithm; it does not contain Nest. The allocator implementation and its
+instances live together in `machine/allocator`; there is no allocator adapter
+package. `api::address` owns address/page-coordinate types; machine-dependent
+canonicalization stays in the CPU MMU backend.
+
+`CellCall::Push` / `Pull` select a 32-byte `Position`. Slot-to-Slot movement
+preserves existing Memos and Page identity. CPU Memo Push publishes into a
+pre-authorized source position; Memo Pull withdraws one Page while preserving
+the address relation, and grants no ownership. Missing Slots are tombstones:
+faults never refill them with zeroes. A replacement Page must be moved back into
+the original source position before its Memo can be supplied.
+
+`Begin` closes new Page admission and returns a Task-scoped, nonreused receipt.
+Existing accesses continue until explicitly withdrawn. Operations carrying that
+receipt can supply a CPU Memo or attach an authorized I/O mapping; they still
+undergo source, target and Pend checks. `End` and Task death release the receipt;
+they cannot discharge hardware obligations. Short changes are used when the
+receipt is zero. Retained operations keep admission closed until they finish.
+Publication/withdrawal use `Publishing`, `Mapped` and `Withdrawing` states;
+unmapped positions have no sparse entry. State decisions precede hardware effects,
+and allocation or shootdown failures keep the necessary cleanup responsibility.
+
+For swap, the Page service holds a change across withdrawal and I/O, waits for
+trusted completion, then restores/supplies the original source position and ends
+the change. The kernel provides these mechanisms; backing-store policy, logical
+content identity and victim selection remain service responsibilities.
+`Internal` / `External` here describe absence/presence of retained device access
+responsibilities, independently of physical resource origin and CPU address domain.
 
 A Share View has a single Pend tree. Modifiable is its only data access flag:
 readers coexist, a writer excludes all other borrowers, and a mutable parent
@@ -95,7 +130,7 @@ A boot MMIO View is delegated with Pend; Driver Units map it through Share Open
 and perform their own register operations. Kernel never proxies business BAR
 reads or writes.
 
-Memory Attach/Detach select MappingTarget::Cpu(TeamId) or Io(PendId). The I/O
+Cell Attach/Detach select MappingTarget::Cpu(TeamId) or Io(PendId). The I/O
 Pend identifies a platform-bound MMIO View; a numeric address or ordinary RAM
 View cannot mint a route. Source Cells use the existing Pend borrow tree and
 Flat residency. Nest IoSpace retains mapping and fence obligations. Inspect
@@ -124,7 +159,7 @@ remain unsupported; PQ is disabled. The normal build exports no such route.
 Settled mapping receipts are retained for this bounded one-shot deployment.
 
 ABI changes: Device class 13 and its event tags 7/8 are retired. Generalized
-Attach/Detach use slots 12/13; Inspect uses slot 14. Mapping events use tags 9/10.
+Attach uses slot 19 and one 72-byte Attachment snapshot; Detach uses slot 13 and Inspect slot 14. Slots 10 (Transfer) and 12 (old Attach) are rejected. Mapping events use tags 9/10.
 SetAccess remains CPU-only; an external mapping's access is fixed at publication.
 Upper product migration is deferred; the minimal real-Unit test is updated.
 
@@ -170,6 +205,18 @@ This change intentionally breaks the old Mail/Pie ABI. See the
 [API compatibility notes](api/README.md#source-migration-and-abi-compatibility).
 Upper-layer migrations are deferred; pin API and Client to the same provider
 revision when migrating a consumer. Kernel has no concrete Driver dependency.
+
+The hardware suite now includes an initial Unit built against the new Client.
+It boots the actual Kernel through the public Capsule format and exercises
+Attach, multi-Slot movement with an existing CPU mapping, wrong/stale receipts,
+Memo withdrawal/supply, replacement backing and cleanup on one/four harts
+(debug) and four harts (release). This tests the kernel-side swap protocol; it
+uses an in-memory backing value, not a disk/page-service implementation. The
+separate IOMMU guest executes ten QEMU hardware scenarios, including DMA under
+a change receipt, stale completions, exit and denied DMA after physical reuse.
+Evidence and exact commands are generated beneath each guest's `target/evidence`.
+`QEMU_RISCV64` selects QEMU; `QEMU_OPENSBI` optionally supplies the kernel guest's
+firmware path. Default CI uses the installed QEMU/OpenSBI firmware.
 
 ## Versions
 
