@@ -6,7 +6,7 @@ use super::region::Region;
 
 /// Platform IOMMU control pages never become externally grantable boot resources.
 /// This discovers authority boundaries only; it neither starts nor settles DMA.
-pub(super) fn discover(fdt: &fdt::Fdt) -> Result<Vec<Region>, PieFail> {
+pub(crate) fn discover(fdt: &fdt::Fdt) -> Result<Vec<Region>, PieFail> {
     let mut reserved = Vec::new();
     for node in fdt.all_nodes() {
         let platform = compatible(node, "riscv,iommu");

@@ -15,6 +15,7 @@ mod core {
 }
 
 mod completion;
+mod engine;
 mod hardware;
 mod lifecycle;
 #[path = "../memory/support.rs"]

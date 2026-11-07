@@ -75,9 +75,10 @@ device publication, retains its projection, and associates each withdrawal with
 a non-reused completion batch. Closing seals admission and preserves failed work
 for retry; an old or foreign completion cannot settle a new attempt. Hardware
 effects are supplied through a trusted unsafe adapter contract that includes
-platform-specific synchronization, not merely a CQ completion flag. No platform
+platform-specific synchronization, not merely a CQ completion flag. A polling
+command engine is installed for coherent QEMU virt, but no complete device-projection
 adapter, runtime device binding, Unit-exit hook or PQ/CQ/FQ interrupt routing is installed
-yet, and the current user-space IOMMU service has not been migrated. This is the
+yet, and the current user-space IOMMU service has not been migrated. This remains the
 External protocol milestone, not protection of currently running DMA. Registration
 also requires the caller to uphold borrowing and Flat residency; the protocol does
 not implement Pend authorization.
@@ -96,9 +97,28 @@ This intentionally removes System's raw `platform/iommu` register supply. The ol
 IOMMU Unit and deployments requiring that supply cannot run unchanged. Nonoverlapping
 ECAM and PCI apertures retain their existing boot resource names for the current
 platform-IOMMU topology; this does not secure the movable BAR/configuration of a PCI
-IOMMU. A trusted hardware adapter, startup integration and consumer migration are
+IOMMU. Device mapping/settlement and consumer migration are
 still required before an IOMMU deployment can run with Kernel-managed DMA. Merely
 withholding register authority neither disables existing DMA nor proves reclamation.
+
+On QEMU virt, boot now requires DDTP Off and idle queues, maps the reserved register
+page only into Kernel, and retains three ordinary Cells for CQ, FQ and completion
+storage. All three register External obligations before publishing queue addresses.
+The command engine executes one tagged invalidation/fence batch at a time; completion
+requires the matching write and the CQ head past that fence. Shutdown requires every
+submitted batch completed and both queues off/not busy before settling the Cells.
+Failure or abandonment retains published storage; no reset/recovery path is supplied
+yet. Polling steps are bounded, and bootstrap/shutdown use finite step budgets.
+DDTP stays Off, PQ and queue interrupts stay disabled. CQ success is not a device-DMA
+reclamation proof. Other hardware needs an explicit coherence and ordering adapter.
+
+Public Memory Allocation requests must be at least 4096 bytes. Smaller requests are
+rejected at decode and Server admission; valid lengths are rounded up with checked
+arithmetic (4097 becomes 8192). An allocation can span multiple noncontiguous Cells.
+This restriction does not apply to Kernel's internal heap. Unit-local small objects
+remain the runtime/Talc allocator's responsibility. No Private/Shared Cell types or
+alternate physical ownership are introduced. The new Share/Pend whole-Cell contract
+and larger Cell sizes remain work in [#22](https://github.com/shuyra-arche/kernel/issues/22).
 
 Unit owner assignment/transfer, larger Cells, platform DMA integration and
 registration of externally supplied physical ranges remain in #14.
@@ -170,6 +190,29 @@ The boot host suite feeds encoded DTBs through the production parser and admissi
 planner. It checks controller aliases, page rounding, PCI windows, malformed and
 unsupported discovery, RAM exclusion and unchanged names for unrelated resources.
 It does not execute boot authority publication or establish hardware isolation.
+
+The isolated RV64 hardware guest lives under `server/tests/target/iommu/`. It compiles
+the production Cell, command engine and MMIO adapter, using its own bounded allocator,
+M-mode entry and failure reporter. It executes 300 real CQ batches (including ring
+wrap), checks no premature return, closes both queues, and reuses a page with a new
+Cell identity and zero contents. A second run abandons an active engine and verifies
+that all three allocations remain retained; a missing-IOMMU run must fail. It does
+not install device translation or perform endpoint DMA, and does not test IRQs,
+noncoherent hardware or cross-Unit cleanup.
+
+With QEMU RISC-V supporting `virt,iommu-sys=on` (validated on 10.0.13), run:
+
+```sh
+cargo +nightly test --locked --manifest-path server/tests/Cargo.toml \
+  --test hardware --target x86_64-unknown-linux-gnu -- --ignored --nocapture
+```
+
+`QEMU_RISCV64` can select a local executable. The runner builds the release guest,
+uses no external firmware, imposes a 30-second deadline, and saves QEMU version,
+guest SHA-256, commands and serial evidence under the guest's ignored `target/evidence/`.
+The CI hardware job installs QEMU in Debian trixie and runs this explicit check;
+ordinary host tests keep it ignored. Firmware-backed production boot and assembled
+Unit/DMA lifecycle acceptance remain distinct from this isolated guest.
 
 Generic byte codecs and service-protocol macros are no longer part of Kernel.
 The [API migration notes](api/README.md#source-migration-and-abi-compatibility) list removed

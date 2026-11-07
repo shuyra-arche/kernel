@@ -2,6 +2,7 @@ pub(crate) mod devices;
 pub(crate) mod error;
 mod init;
 pub(crate) mod initrd;
+mod iommu;
 pub(crate) mod resources;
 mod stack;
 pub(crate) mod unit;
@@ -83,6 +84,7 @@ pub(crate) fn register_runtime_hooks() {
     crate::core::work::unit::lifecycle::hook(EXIT_HOOKS);
 
     const SHUTDOWN_HOOKS: &[fn()] = &[
+        crate::entry::boot::iommu::shutdown,
         crate::entry::report::shutdown::report,
         crate::core::work::room::scheduler::rip,
         crate::core::memory::flat::allocator::block::flush,
