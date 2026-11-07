@@ -2,11 +2,8 @@
 #[repr(transparent)]
 pub struct Gprs(pub [usize; 32]);
 
-#[allow(unused)]
 impl Gprs {
-    pub const RA: usize = 1;
     pub const SP: usize = 2;
-    pub const GP: usize = 3;
     pub const TP: usize = 4;
     pub const S0: usize = 8;
     pub const A0: usize = 10;
@@ -15,7 +12,6 @@ impl Gprs {
     pub const A3: usize = 13;
     pub const A4: usize = 14;
     pub const A5: usize = 15;
-    pub const A6: usize = 16;
     pub const A7: usize = 17;
 
     #[inline]

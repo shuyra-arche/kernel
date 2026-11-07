@@ -33,12 +33,6 @@ impl Derivation {
         }
     }
 
-    /// 历史分支索引（自检读口）。
-    #[cfg(debug_assertions)]
-    pub(crate) fn token(&self) -> PieToken {
-        *self.token.lock()
-    }
-
     /// 分支改指：只换历史索引，权限仍是创建时的快照。
     pub(crate) fn retarget(&self, forgotten: PieToken, parent: PieToken) {
         let mut token = self.token.lock();

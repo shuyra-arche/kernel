@@ -35,4 +35,27 @@ pub(crate) fn report() {
         "supervisor_external: ring={ring} busy={busy} idle_ring={idle_ring} idle_busy={idle_busy}"
     );
     crate::core::work::mail::hole::hold_line();
+    use crate::core::memory::flat::allocator::statistics;
+    putln!(
+        "memory: frames={} pools={}",
+        statistics::frame_occupied(),
+        statistics::block_occupied()
+    );
+    #[cfg(debug_assertions)]
+    putln!(
+        "memory: spare_used={} spare_available={} kinds={}",
+        statistics::spare_occupied(),
+        statistics::spare_available(),
+        statistics::kinds()
+    );
+    crate::core::work::record::ledger::each(|entry| {
+        putln!(
+            "unclaimed exit: task={} reason={} note={}",
+            entry.task.get(),
+            entry.reason,
+            entry.note()
+        );
+    });
+    #[cfg(feature = "semihosting")]
+    super::export::complete();
 }

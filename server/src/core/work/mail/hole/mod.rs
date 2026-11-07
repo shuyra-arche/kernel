@@ -41,11 +41,6 @@ pub struct HoleMeta {
 }
 
 impl HoleMeta {
-    #[cfg(debug_assertions)]
-    pub(crate) fn new(owner: TaskId) -> Arc<Self> {
-        Self::try_new(owner).expect("hole allocation failed")
-    }
-
     pub(crate) fn try_new(
         owner: TaskId,
     ) -> Result<Arc<Self>, crate::core::memory::nest::NestError> {

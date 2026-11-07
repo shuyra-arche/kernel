@@ -1,6 +1,6 @@
-pub(crate) mod timer;
 mod error;
 mod instant;
+pub(crate) mod timer;
 
 pub use error::ClockError;
 pub use instant::Instant;

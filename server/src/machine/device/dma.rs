@@ -128,7 +128,12 @@ pub(crate) fn status(id: usize, owner: &Owner) -> Result<usize, Error> {
     if !entry.endpoint.owned_by(owner) {
         return Err(Error::Denied);
     }
-    if entry.queue_failed {
+    if entry.queue_failed
+        || entry.dma.as_ref().is_some_and(|dma| {
+            !dma.completion.settled()
+                && retirement::error(dma.domain).is_ok_and(|error| error.is_some())
+        })
+    {
         return Ok(5);
     }
     if entry.endpoint.phase() == Phase::Owned

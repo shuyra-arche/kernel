@@ -34,11 +34,6 @@ fn key(meta: &ToleMeta) -> WakeKey {
     WakeKey::Tole { id: meta.id }
 }
 impl ToleMeta {
-    #[cfg(debug_assertions)]
-    pub(crate) fn new(owner: TaskId) -> Arc<Self> {
-        Self::try_new(owner).expect("tole allocation failed")
-    }
-
     pub(crate) fn try_new(
         owner: TaskId,
     ) -> Result<Arc<Self>, crate::core::memory::nest::NestError> {
@@ -64,10 +59,6 @@ impl ToleMeta {
     }
     pub(crate) fn has_cells(&self) -> bool {
         !self.cells.lock().is_empty()
-    }
-    #[cfg(debug_assertions)]
-    pub(crate) fn cells_len(&self) -> usize {
-        self.cells.lock().len()
     }
     pub(crate) fn poll(&self, task: &Arc<Task>) -> Result<ToleAwaitReply, ToleFail> {
         if !self.alive() {

@@ -4,8 +4,8 @@ use crate::core::memory::PAGE_SHIFT;
 use crate::machine::image;
 use crate::machine::sync::OnceLock;
 
-use crate::core::memory::nest::table::{PteFlags, TableNode};
 use crate::core::memory::address::VirtAddr;
+use crate::core::memory::nest::table::{PteFlags, TableNode};
 
 mod error;
 mod geometry;

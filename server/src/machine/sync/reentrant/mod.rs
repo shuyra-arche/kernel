@@ -17,8 +17,8 @@ use owner::Owner;
 pub struct RelLock<T: ?Sized> {
     owner: AtomicUsize,
     count: UnsafeCell<usize>,
-    caller: AtomicUsize,
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+
+    #[cfg(debug_assertions)]
     level: Option<depend::Level>,
     data: UnsafeCell<T>,
 }
@@ -26,23 +26,12 @@ pub struct RelLock<T: ?Sized> {
 unsafe impl<T: ?Sized + Send> Sync for RelLock<T> {}
 
 impl<T> RelLock<T> {
-    pub const fn new(val: T) -> Self {
+    pub const fn new_level(_level: depend::Level, val: T) -> Self {
         RelLock {
             owner: AtomicUsize::new(0),
             count: UnsafeCell::new(0),
-            caller: AtomicUsize::new(0),
-            level: None,
-            data: UnsafeCell::new(val),
-        }
-    }
-
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
-    pub const fn new_level(level: depend::Level, val: T) -> Self {
-        RelLock {
-            owner: AtomicUsize::new(0),
-            count: UnsafeCell::new(0),
-            caller: AtomicUsize::new(0),
-            level: Some(level),
+            #[cfg(debug_assertions)]
+            level: Some(_level),
             data: UnsafeCell::new(val),
         }
     }
@@ -54,14 +43,10 @@ impl<T: ?Sized> RelLock<T> {
         self.owner.load(Ordering::Relaxed) == Owner::of(hart::hart_id()).word()
     }
 
-    pub(crate) fn read_unlocked(&self) -> *const T {
-        self.data.get()
-    }
-
     #[inline(never)]
     pub fn lock(&self) -> RelLockGuard<'_, T> {
-        let caller: usize;
-        unsafe { ::core::arch::asm!("mv {}, ra", out(reg) caller) };
+        #[cfg(debug_assertions)]
+        let caller = crate::machine::sync::depend_enter!(self);
         let trap = unsafe { TrapGuard::save() };
         let me = Owner::of(hart::hart_id());
 
@@ -83,7 +68,6 @@ impl<T: ?Sized> RelLock<T> {
             ) {
                 Ok(_) => {
                     unsafe { *self.count.get() = 1 };
-                    self.caller.store(caller, Ordering::Relaxed);
                     #[cfg(debug_assertions)]
                     depend::acquire(
                         self as *const Self as *const () as usize,

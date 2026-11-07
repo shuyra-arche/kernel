@@ -58,21 +58,21 @@ typed_calls! {
         abi::call::memory::MemoryFail,
         model::identity::PieToken,
         model::identity::TeamId,
-        model::memory::ViewControl,
-        model::memory::ViewId,
-        model::memory::ViewSelection,
+        model::memory::MappingControl,
+        model::memory::MappingId,
+        model::memory::MappingSelection,
         model::identity::VirtAddr,
     ] {
         fallible fn acquire(source: AcquireSource, retention: PieToken) -> Result<FlatReference, erra::Error<MemoryFail>> =
             op::Acquire { source, retention };
         fallible fn release(reference: FlatReference) -> Result<(), erra::Error<MemoryFail>> =
             op::Release { reference };
-        fallible fn attach(range: VirtAddr, team: TeamId, placement: VirtAddr, access: u64, control: ViewControl) -> Result<(ViewId, VirtAddr), erra::Error<MemoryFail>> =
+        fallible fn attach(range: VirtAddr, team: TeamId, placement: VirtAddr, access: u64, control: MappingControl) -> Result<(MappingId, VirtAddr), erra::Error<MemoryFail>> =
             op::Attach { range, team, placement, access, control };
-        fallible fn detach(team: TeamId, view: ViewId, selection: ViewSelection) -> Result<(), erra::Error<MemoryFail>> =
-            op::Detach { team, view, selection };
-        fallible fn set_access(team: TeamId, view: ViewId, selection: ViewSelection, access: u64) -> Result<(), erra::Error<MemoryFail>> =
-            op::SetAccess { team, view, selection, access };
+        fallible fn detach(team: TeamId, mapping: MappingId, selection: MappingSelection) -> Result<(), erra::Error<MemoryFail>> =
+            op::Detach { team, mapping, selection };
+        fallible fn set_access(team: TeamId, mapping: MappingId, selection: MappingSelection, access: u64) -> Result<(), erra::Error<MemoryFail>> =
+            op::SetAccess { team, mapping, selection, access };
         fallible fn traverse(retention: PieToken, range: VirtAddr, out: VirtAddr) -> Result<(), erra::Error<MemoryFail>> =
             op::Traverse { retention, range, out };
         fallible fn transfer(from: FlatReference, from_page: usize, to: FlatReference, to_page: usize) -> Result<(), erra::Error<MemoryFail>> =

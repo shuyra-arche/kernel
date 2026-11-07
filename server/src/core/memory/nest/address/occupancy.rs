@@ -52,32 +52,6 @@ impl Occupancy {
         Ok(())
     }
 
-    /// 重设已有窗口的边界；不得排除已经登记在该窗口的占用。
-    #[cfg(debug_assertions)]
-    pub(crate) fn configure(
-        &mut self,
-        id: RegionId,
-        base: usize,
-        last: usize,
-    ) -> Result<(), NestError> {
-        if base > last || id == RegionId::Static {
-            return Err(NestError::NoRegion);
-        }
-        if let Some(window) = self.windows.iter_mut().find(|window| window.id == id) {
-            if self
-                .slots
-                .iter()
-                .any(|slot| slot.region == id && (slot.start < base || slot.last > last))
-            {
-                return Err(NestError::AlreadyMapped);
-            }
-            window.base = base;
-            window.last = last;
-            return Ok(());
-        }
-        self.attach(id, base, last)
-    }
-
     /// 抬高已有窗口的选址下界；已登记的占用留在表里。
     pub(crate) fn advance(&mut self, id: RegionId, base: usize) -> Result<(), NestError> {
         let window = self

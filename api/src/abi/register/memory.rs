@@ -2,8 +2,8 @@ use super::{Decode, Wire};
 use crate::model::{
     identity::{PieToken, TeamId},
     memory::{
-        AcquireSource, Allocation, FlatReference, ReferenceRange, ViewControl, ViewId,
-        ViewSelection, pages,
+        AcquireSource, Allocation, FlatReference, MappingControl, MappingId, MappingSelection,
+        ReferenceRange, pages,
     },
 };
 
@@ -18,12 +18,12 @@ impl Wire for AcquireSource {
                 offset,
                 count,
             } => [2, token.get(), offset, count, 0],
-            Self::View {
+            Self::Mapping {
                 team,
-                view,
+                mapping,
                 offset,
                 count,
-            } => [3, team.get(), view.get(), offset, count],
+            } => [3, team.get(), mapping.get(), offset, count],
         };
         for word in words {
             word.pack(s, i);
@@ -61,9 +61,9 @@ impl Wire for AcquireSource {
             }
             3 => {
                 let (offset, count) = window(c, d)?;
-                Ok(Self::View {
+                Ok(Self::Mapping {
                     team: TeamId::new(a),
-                    view: ViewId::new(b),
+                    mapping: MappingId::new(b),
                     offset,
                     count,
                 })
@@ -101,8 +101,8 @@ impl Wire for ReferenceRange {
     }
 }
 
-impl Wire for ViewSelection {
-    const WORDS: usize = ViewSelection::WORDS;
+impl Wire for MappingSelection {
+    const WORDS: usize = MappingSelection::WORDS;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         match *self {
             Self::Whole => {
@@ -129,7 +129,7 @@ impl Wire for ViewSelection {
     }
 }
 
-impl Wire for ViewControl {
+impl Wire for MappingControl {
     const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         let word = match self {
@@ -163,7 +163,7 @@ impl Wire for FlatReference {
     }
 }
 
-impl Wire for ViewId {
+impl Wire for MappingId {
     const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.0;

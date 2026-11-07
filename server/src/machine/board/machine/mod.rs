@@ -22,7 +22,8 @@ pub struct Machine {
 
 impl Machine {
     pub(super) fn parse(dtp: usize, boot: HartId) -> Result<Self, MachineError> {
-        let fdt = unsafe { fdt::Fdt::from_ptr(dtp as *const u8) }.map_err(MachineError::DeviceTree)?;
+        let fdt =
+            unsafe { fdt::Fdt::from_ptr(dtp as *const u8) }.map_err(MachineError::DeviceTree)?;
         let hart = HartInfo::parse(&fdt, boot)?;
         let mem = fdt
             .find_node("/memory")

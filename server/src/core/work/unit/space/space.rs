@@ -46,7 +46,7 @@ impl Space {
         let id = entry.binding.id();
         entry.source.release_binding(&entry.binding);
         if let Some(control) = &entry.control
-            && control.scope() == kernel_api::model::memory::ViewControl::Caller
+            && control.scope() == kernel_api::model::memory::MappingControl::Caller
         {
             let (controller, _) = control.control();
             if let Some(task) = roster::muster(controller).and_then(|task| task.upgrade()) {

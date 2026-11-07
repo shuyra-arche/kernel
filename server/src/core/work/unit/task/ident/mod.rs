@@ -4,8 +4,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use kernel_api::model::identity::TaskId;
 
 use crate::core::memory::address::PhysAddr;
-#[cfg(debug_assertions)]
-use crate::core::memory::address::VirtAddr;
 use crate::core::memory::nest::NestError;
 use crate::core::work::unit::team::Team;
 use crate::machine::sync::SpinLock;
@@ -32,8 +30,6 @@ pub(crate) struct TaskIdent {
     pub(crate) id: TaskId,
     pub(crate) team: Arc<Team>,
     pub(crate) frame_pa: PhysAddr,
-    #[cfg(debug_assertions)]
-    pub(crate) frame_va: VirtAddr,
     memory: SpinLock<TaskMemory>,
 }
 
@@ -42,15 +38,12 @@ impl TaskIdent {
         id: TaskId,
         team: Arc<Team>,
         frame_pa: PhysAddr,
-        #[cfg(debug_assertions)] frame_va: VirtAddr,
         memory: TaskMemory,
     ) -> TaskIdent {
         TaskIdent {
             id,
             team,
             frame_pa,
-            #[cfg(debug_assertions)]
-            frame_va,
             memory: SpinLock::new(memory),
         }
     }

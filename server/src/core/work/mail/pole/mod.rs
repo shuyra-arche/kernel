@@ -103,12 +103,6 @@ impl PoleMeta {
     pub(crate) fn owner(&self) -> TaskId {
         self.owner
     }
-    pub(crate) fn size(&self) -> usize {
-        self.source
-            .page_count()
-            .checked_bytes()
-            .expect("validated Pole source size")
-    }
     /// 授权的来源范围。普通 clone 只是强持同一 `Flat`，不产生独立 Hold。
     pub(crate) fn source(&self) -> FlatRange {
         self.source.clone()
@@ -123,23 +117,6 @@ impl PoleMeta {
     pub(crate) fn attach_source(&self, authorization: &Arc<SourceAuthorization>) {
         *self.authorization.lock() = Some(authorization.clone());
     }
-    /// 授权范围内的一段页对齐子范围；越界或非页对齐都拒。
-    pub(crate) fn window(&self, offset: usize, size: usize) -> Result<FlatRange, PieFail> {
-        if size == 0
-            || !offset.is_multiple_of(PAGE_SIZE)
-            || !size.is_multiple_of(PAGE_SIZE)
-            || offset.checked_add(size).is_none_or(|end| end > self.size())
-        {
-            return Err(PieFail::NotAligned);
-        }
-        if offset == 0 && size == self.size() {
-            return Ok(self.source());
-        }
-        let count = PageCount::new(size / PAGE_SIZE).ok_or(PieFail::NotAligned)?;
-        self.source
-            .range(PageOffset::new(offset / PAGE_SIZE), count)
-            .map_err(|_| PieFail::NotAligned)
-    }
     pub(crate) fn life(&self) -> Weak<Life> {
         Arc::downgrade(&self.life)
     }
@@ -148,13 +125,6 @@ impl PoleMeta {
     }
     pub(crate) fn ready(&self, bit: Bit) -> bool {
         *self.ring.lock() & bit.mask() != 0
-    }
-
-    /// 来源是否完整：只有 Managed 的整段物化才算自有，借用来源没有物化页槽。
-    ///
-    /// 只读快照：不物化、不分配。
-    pub(crate) fn owned(&self) -> bool {
-        self.source.fully_materialized().unwrap_or(false)
     }
 
     /// 登记一份授权：首个授权同时接管输入映射，它成为该 token 下的活跃关系。
@@ -230,13 +200,6 @@ impl PoleMeta {
             .iter()
             .find_map(|entry| entry.staged())
             .map_or(0, TeamId::get)
-    }
-
-    pub(crate) fn opened(&self, mapping: &Arc<Mapping>) -> bool {
-        self.maps
-            .lock()
-            .iter()
-            .any(|entry| entry.opened() && Arc::ptr_eq(&entry.mapping, mapping) && entry.live())
     }
 
     pub(crate) fn mapped(&self) -> bool {

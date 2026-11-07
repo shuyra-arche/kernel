@@ -9,7 +9,7 @@ code or runtime state. There is no Env package or compatibility facade.
 | Path | Responsibility |
 | --- | --- |
 | `model::identity` | TaskId, TeamId, PieToken, VirtAddr and Mark |
-| `model::memory` | FlatReference, ViewId, allocation, reference ranges and placement |
+| `model::memory` | FlatReference, MappingId, allocation, reference ranges and placement |
 | `model::permission` | Permission, Access and Policy |
 | `model::unit` | ProgramKind, UnitTarget, task exit and join values |
 | `model::{pie,hole,pole,tole}` | Resource descriptions and event conditions |

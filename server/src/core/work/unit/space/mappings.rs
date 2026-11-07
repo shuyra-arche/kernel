@@ -9,7 +9,7 @@ use crate::core::work::pend::SourceAuthorization;
 use crate::machine::sync::SpinLock;
 use kernel_api::{
     abi::call::pie::PieFail, model::identity::PieToken, model::identity::TaskId,
-    model::memory::ViewControl,
+    model::memory::MappingControl,
 };
 
 use super::{MappingBinding, MappingControlRecord, MappingEntry, Space};
@@ -34,7 +34,7 @@ impl MappingRegistry {
         id: usize,
         space: &Arc<Space>,
         controller: TaskId,
-        scope: ViewControl,
+        scope: MappingControl,
         source: Arc<SourceAuthorization>,
         branch: Option<PieToken>,
     ) -> Result<(), PieFail> {
@@ -103,14 +103,6 @@ impl MappingRegistry {
     pub(crate) fn locate(&self, id: usize) -> Option<MappingEntry> {
         self.registered(id)
             .filter(|entry| entry.mapping.is_some() && entry.control.is_some())
-    }
-
-    /// 还没提交的发布登记：可能仍在发布，也可能把清理责任留在 Nest 等结清。
-    ///
-    /// 与 `locate` 分开：等在途槽不是可用控制，但它同样持有来源与 controller。
-    #[cfg(debug_assertions)]
-    pub(crate) fn pending(&self, id: usize) -> Option<MappingEntry> {
-        self.registered(id).filter(|entry| entry.mapping.is_none())
     }
 
     /// 取回这一段关系的登记（连同它持有的关系与来源），由调用方在锁外结清。

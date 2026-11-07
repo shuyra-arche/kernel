@@ -212,7 +212,7 @@ fn audit_index(
     for (lo, hi) in &local {
         assert!(
             !overlaps_other(node, &node.mapping, *lo, *hi),
-            "distinct Views overlap in the nest index"
+            "distinct mappings overlap in the nest index"
         );
     }
     assert_eq!(

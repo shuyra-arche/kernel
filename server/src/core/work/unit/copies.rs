@@ -1,5 +1,8 @@
 #[cfg(debug_assertions)]
-use core::sync::atomic::{AtomicUsize, Ordering::{Acquire, Relaxed, Release}};
+use core::sync::atomic::{
+    AtomicUsize,
+    Ordering::{Acquire, Relaxed, Release},
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Origin {

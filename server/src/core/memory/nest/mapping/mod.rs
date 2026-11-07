@@ -11,8 +11,6 @@ use alloc::vec::Vec;
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageOffset, VirtAddr};
-#[cfg(debug_assertions)]
-use crate::core::memory::cell::Cell;
 use crate::core::memory::flat::FlatRange;
 use crate::core::memory::nest::NestError;
 use crate::core::memory::nest::reservation::Reservation;
@@ -32,7 +30,7 @@ use super::source_mappings;
 ///
 /// 发布记录持有 Cell 的硬件责任凭证，只有撤销并完成失效才能结清；
 /// 它不建立另一份物理所有权，丢弃凭证也不能解除回收限制。
-/// 跨 Unit 的交互 View 与它是不同的对象；当前 ABI 的 ViewId 仍指这段映射。
+/// 跨 Unit 的交互 View 与它是不同的对象；当前 ABI 的 MappingId 仍指这段映射。
 ///
 /// U/G/A/D 是整段关系共有的架构属性，随挂载政策定下；改权不动它。
 pub struct Mapping {
@@ -125,7 +123,7 @@ impl Mapping {
         (self.initial_start(), self.initial_size())
     }
 
-    /// 这段映射在占用表里的身份（generation）；现有 ABI 的 `ViewId` 就是它。
+    /// 这段映射在占用表里的身份（generation）；现有 ABI 的 `MappingId` 就是它。
     pub(crate) fn identity(&self) -> usize {
         self.reservation.id()
     }
@@ -155,11 +153,6 @@ impl Mapping {
             .map_err(|_| NestError::OutOfMemory)?;
         active.extend_from_slice(&state.active);
         Ok(active)
-    }
-
-    /// 已发布 PTE 的页数。
-    pub fn cell_count(&self) -> usize {
-        self.state.lock().published.len()
     }
 
     pub fn is_live(&self) -> bool {
@@ -200,51 +193,6 @@ impl Mapping {
     /// 不能作为它已经不再压着某个物理页的证据。
     pub(crate) fn is_global(&self) -> bool {
         self.attrs.contains(PteFlags::G)
-    }
-
-    #[cfg(debug_assertions)]
-    pub fn cells_in(
-        &self,
-        start: VirtAddr,
-        size: usize,
-    ) -> Result<Vec<(usize, Arc<Cell>)>, NestError> {
-        if size == 0 || start.offset() != 0 || size & (PAGE_SIZE - 1) != 0 {
-            return Err(NestError::NotAligned);
-        }
-        let end = start
-            .as_usize()
-            .checked_add(size - 1)
-            .ok_or(NestError::NotAligned)?;
-        let state = self.state.lock();
-        if !state.covers(start.as_usize(), end) || state.source.is_borrowed() {
-            return Err(NestError::NoRegion);
-        }
-        let first = start
-            .as_usize()
-            .checked_sub(self.initial_start().as_usize())
-            .ok_or(NestError::NoRegion)?
-            / PAGE_SIZE;
-        let pages = size / PAGE_SIZE;
-        let last = first.checked_add(pages).ok_or(NestError::NotAligned)?;
-        let count = state
-            .published
-            .iter()
-            .filter(|(page, _)| *page >= first && *page < last)
-            .count();
-        if count != pages {
-            return Err(NestError::NoRegion);
-        }
-        let mut out = Vec::new();
-        out.try_reserve_exact(pages)
-            .map_err(|_| NestError::OutOfMemory)?;
-        out.extend(
-            state
-                .published
-                .iter()
-                .filter(|(page, _)| *page >= first && *page < last)
-                .map(|(page, cell)| (page - first, cell.cell().clone())),
-        );
-        Ok(out)
     }
 
     /// `address` 相对初始范围的页号；调用方保证它在初始范围内。

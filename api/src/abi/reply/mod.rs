@@ -5,7 +5,7 @@
 //! 输入寄存器由 `Wire::unpack` 校验；这里按 Kernel 保证的返回布局还原值。
 
 use crate::model::identity::{PieToken, TaskId, TeamId, VirtAddr};
-use crate::model::memory::{FlatReference, ViewId};
+use crate::model::memory::{FlatReference, MappingId};
 
 /// 从成功返回的 `(a0, a1)` 还原操作的 `Output`。
 ///
@@ -45,9 +45,9 @@ impl FromPair for FlatReference {
 }
 
 /// `Attach` 的返回：`(关系句柄, 视图起点)`——`a0` 是身份、`a1` 是地址。
-impl FromPair for (ViewId, VirtAddr) {
+impl FromPair for (MappingId, VirtAddr) {
     fn from_pair(v0: usize, v1: usize) -> Self {
-        (ViewId::new(v0), VirtAddr(v1))
+        (MappingId::new(v0), VirtAddr(v1))
     }
 }
 

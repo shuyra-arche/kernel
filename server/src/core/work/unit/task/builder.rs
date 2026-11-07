@@ -174,14 +174,7 @@ impl TaskBuilder {
             let ident = crate::tag!(
                 Task,
                 Arc::try_new_in(
-                    TaskIdent::new(
-                        id,
-                        self.team.clone(),
-                        frame_pa,
-                        #[cfg(debug_assertions)]
-                        frame_va,
-                        memory,
-                    ),
+                    TaskIdent::new(id, self.team.clone(), frame_pa, memory,),
                     alloc,
                 )
             )

@@ -22,12 +22,6 @@ pub(crate) struct Grant {
 }
 
 impl Grant {
-    pub(crate) fn try_new(
-        permission: Permission,
-    ) -> Result<Arc<Self>, kernel_api::abi::call::pie::PieFail> {
-        Self::try_new_window(permission, None)
-    }
-
     pub(crate) fn try_new_window(
         permission: Permission,
         window: Option<(PageOffset, PageCount)>,

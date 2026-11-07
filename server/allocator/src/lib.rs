@@ -1,5 +1,5 @@
 #![no_std]
-#![feature(allocator_api)]
+#![feature(allocator_ext)]
 //! 内核分配器机制：Bump / Frame / Block / Hybrid / Spare 的状态与算法。
 //!
 //! 这里没有全局实例、没有 `#[global_allocator]`、没有启动或 panic 责任。

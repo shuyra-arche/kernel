@@ -159,10 +159,6 @@ impl Flat {
         state.residencies.remove(at);
     }
 
-    pub(super) fn is_pinned(&self, index: PageIndex, count: PageCount) -> bool {
-        self.state.lock().is_pinned(index, count)
-    }
-
     /// 物化 [index, index + count)：只有 Fresh 的页会被分配，已有承载的页跳过。
     ///
     /// 已是 `Missing` 的页不补零也不新分配——那是承载移走后的墓碑，
@@ -238,36 +234,6 @@ impl Flat {
             }
         }
         Ok(out)
-    }
-
-    /// 该窗口是否每一页都是 Managed 的承载；借用来源没有物化页槽，不算。
-    ///
-    /// 只读快照：不物化、不分配。`Missing` 与 Fresh 一样不算承载。
-    pub(super) fn fully_materialized(
-        &self,
-        index: PageIndex,
-        count: PageCount,
-    ) -> Result<bool, FlatError> {
-        let end = index
-            .get()
-            .checked_add(count.get())
-            .ok_or(FlatError::OutOfRange)?;
-        if end > self.page_count.get() {
-            return Err(FlatError::OutOfRange);
-        }
-        let guard = self.state.lock();
-        let FlatSource::Managed(slots) = &guard.source else {
-            return Ok(false);
-        };
-        let first = slots.partition_point(|(slot, _)| slot.get() < index.get());
-        let last = slots.partition_point(|(slot, _)| slot.get() < end);
-        let mut expected = index.get();
-        for (slot, state) in &slots[first..last] {
-            if slot.get() == expected && matches!(state, Slot::Resident(_)) {
-                expected += 1;
-            }
-        }
-        Ok(expected == end)
     }
 
     /// 这一页此刻能不能物化出承载：`Fresh` 与 `Resident` 可以；`Missing` 墓碑与

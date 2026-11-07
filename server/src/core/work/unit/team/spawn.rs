@@ -123,7 +123,7 @@ pub(crate) fn spawn(
                 return Err(UnitFail::Denied);
             }
             if record.control.as_ref().is_some_and(|control| {
-                control.scope() == kernel_api::model::memory::ViewControl::Caller
+                control.scope() == kernel_api::model::memory::MappingControl::Caller
             }) {
                 prepared
                     .track_control(&target.space, item.mapping.identity())

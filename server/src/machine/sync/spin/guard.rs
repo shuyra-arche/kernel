@@ -40,6 +40,5 @@ impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
     fn drop(&mut self) {
         crate::machine::sync::depend_release!(self.lock);
         self.lock.locked.store(false, Ordering::Release);
-        self.lock.caller.store(0, Ordering::Relaxed);
     }
 }

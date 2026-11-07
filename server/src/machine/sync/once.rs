@@ -63,10 +63,4 @@ impl<T> OnceLock<T> {
         }
         self.get().unwrap()
     }
-
-    #[inline]
-    #[allow(dead_code)]
-    pub fn is_initialized(&self) -> bool {
-        self.state.load(Ordering::Acquire) == READY
-    }
 }

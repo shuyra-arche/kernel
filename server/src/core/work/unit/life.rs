@@ -7,11 +7,6 @@ pub(crate) use super::team::life::TeamLife;
 pub(crate) struct Life;
 
 impl Life {
-    #[cfg(debug_assertions)]
-    pub(crate) fn new() -> Arc<Life> {
-        Arc::new(Life)
-    }
-
     pub(crate) fn try_new() -> Result<Arc<Life>, crate::core::memory::nest::NestError> {
         Arc::try_new_in(Life, alloc::alloc::Global)
             .map_err(|_| crate::core::memory::nest::NestError::OutOfMemory)

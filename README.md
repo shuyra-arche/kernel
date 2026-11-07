@@ -46,8 +46,11 @@ and retained resources remain explicit until shootdown succeeds.
 
 The Server mapping types, source index, Space registry and wait keys use
 `Mapping` to distinguish address projection from the planned cross-Unit `View`.
-The current public ABI still names mapping handles `ViewId`, `ViewSelection` and
-`ViewControl`; these are legacy mapping contracts, not the new interaction model.
+The public API names address-projection handles `MappingId`, `MappingSelection`
+and `MappingControl`. Their wire layout and operation numbers are unchanged;
+this is a source-breaking rename from the former View-prefixed mapping types,
+`AcquireSource::View` and the `view` call fields (now `Mapping` / `mapping`).
+Cross-Unit interaction View remains separate work.
 Allocator-managed 4 KiB RAM has a `Cell`: it consumes the unique allocation
 receipt and assigns a non-reused instance identity. Flat consumes unique Cells
 when creating slots; each managed slot holds an `Arc<Cell>`. Mapping publication
@@ -148,7 +151,7 @@ reference counts alone prove exclusive access or hardware quiescence.
 
 ## Build
 
-Kernel uses nightly Rust for `allocator_api`. The repository does not impose a
+Kernel uses nightly Rust for `allocator_ext`. The repository does not impose a
 local toolchain override. CI installs the latest nightly without pinning a date.
 To install or update nightly and build locally, run from the repository root:
 
@@ -161,7 +164,9 @@ cargo +nightly build --locked -p kernel --all-features --target riscv64gc-unknow
 
 The Server package is still named `kernel`; its executable is still `shuyra`.
 Its manifest is now `server/Cargo.toml`. Build output remains under the root
-`target/`. The optional `semihosting` feature exports crash reports. Normal
+`target/`. RV64 production builds deny warnings through the existing target
+configuration; keep its relocation, frame-pointer and code-model flags when
+overriding `RUSTFLAGS`. Production source has no blanket unused/dead-code allowances. The optional `semihosting` feature exports crash reports. Normal
 assertions, lock-order checks and crash diagnostics remain available.
 
 Run all Host suites through Cargo's workspace selection:

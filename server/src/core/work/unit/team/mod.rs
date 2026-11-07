@@ -156,11 +156,6 @@ impl Team {
         self.state.lock().constructing()
     }
 
-    #[cfg(debug_assertions)]
-    pub(crate) fn staged_len(&self) -> usize {
-        self.state.lock().staged_len()
-    }
-
     /// 为暂存表留出容量。
     ///
     /// 扩容要向分配器取块，而状态锁是 `UnitState`（锁序里在分配器之后）：

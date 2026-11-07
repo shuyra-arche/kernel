@@ -1,4 +1,4 @@
-use core::alloc::{AllocError, Allocator, Layout};
+use core::alloc::{AllocError, Layout};
 use core::ptr::NonNull;
 
 use erra::ResultExt;
@@ -81,10 +81,6 @@ pub(crate) fn heap() -> &'static BlockAllocator {
 
 pub(crate) fn flush() {
     heap().flush();
-}
-
-pub fn allocator() -> &'static dyn Allocator {
-    heap()
 }
 
 pub fn init() -> InitResult<()> {

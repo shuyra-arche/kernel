@@ -62,10 +62,10 @@ fn fence_submission_failure_keeps_iova_reserved_until_retry_settlement() {
     // SAFETY: no hardware or payload access.
     let id = unsafe { space.register(&cell, 4096, true) }.unwrap();
     space.publish(id).unwrap();
-    trace.lock().unwrap().fail_fence = Some(HardwareError::QueueFull);
+    trace.lock().unwrap().fail_fence = Some(HardwareError::Unavailable);
     assert_eq!(
         space.revoke(id),
-        Err(Error::Hardware(HardwareError::QueueFull))
+        Err(Error::Hardware(HardwareError::Unavailable))
     );
     assert_eq!(space.phase(id), Ok(Phase::Failed));
     // SAFETY: rejected before producing any hardware effect.

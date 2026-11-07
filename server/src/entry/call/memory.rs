@@ -43,19 +43,19 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: MemoryCall, ident: &Arc<Ta
     }
 }
 
-// 现有 ABI 的 ViewId / view 字段表示地址映射；在此边界转换为 Mapping 语义。
+// MappingId locates an address projection; access and control are checked separately.
 fn execute(call: MemoryCall, ident: &Arc<TaskIdent>) -> Result<usize, MemoryFail> {
     match call {
         MemoryCall::Acquire { source, retention } => acquire(source, retention, ident),
         MemoryCall::Release { reference } => release(reference, ident),
         MemoryCall::Detach {
             team,
-            view: mapping,
+            mapping,
             selection,
         } => detach(team, mapping, selection, ident),
         MemoryCall::SetAccess {
             team,
-            view: mapping,
+            mapping,
             selection,
             access,
         } => set_access(team, mapping, selection, access, ident),
@@ -155,7 +155,7 @@ fn attach(
     team: kernel_api::model::identity::TeamId,
     placement_at: kernel_api::model::identity::VirtAddr,
     access: u64,
-    control: kernel_api::model::memory::ViewControl,
+    control: kernel_api::model::memory::MappingControl,
     ident: &Arc<TaskIdent>,
 ) -> Result<(usize, usize), MemoryFail> {
     let caller_task = caller(ident).ok_or(MemoryFail::Denied)?;
@@ -329,7 +329,7 @@ fn attach(
         rollback(&space, id, Some(reservation), None);
         return Err(source_fail(error));
     }
-    if control == kernel_api::model::memory::ViewControl::Caller
+    if control == kernel_api::model::memory::MappingControl::Caller
         && let Err(error) = caller_task.track_control(&space, id)
     {
         rollback(&space, id, Some(reservation), None);
@@ -469,7 +469,7 @@ fn traverse(
 /// 按目标域与号取回控制登记；号本身不授予任何东西。
 fn with_mapping<T>(
     team: kernel_api::model::identity::TeamId,
-    mapping: kernel_api::model::memory::ViewId,
+    mapping: kernel_api::model::memory::MappingId,
     ident: &Arc<TaskIdent>,
     action: impl FnOnce(&Arc<Team>, &MappingEntry) -> Result<T, MemoryFail>,
 ) -> Result<T, MemoryFail> {
@@ -500,9 +500,9 @@ fn with_mapping<T>(
     let control = entry.control.as_ref().ok_or(MemoryFail::Denied)?;
     let (controller, _) = control.control();
     let allowed = match control.scope() {
-        kernel_api::model::memory::ViewControl::Caller => controller == ident.id,
+        kernel_api::model::memory::MappingControl::Caller => controller == ident.id,
         // 显式把这一段交给本 Space 成员；不是“同 Space 自动全控”。
-        kernel_api::model::memory::ViewControl::SpaceMembers => {
+        kernel_api::model::memory::MappingControl::SpaceMembers => {
             Arc::ptr_eq(&ident.team.space, &space)
         }
     };
@@ -515,12 +515,12 @@ fn with_mapping<T>(
 /// 把线外的选择换成这一段关系上的身份选择。
 fn selection(
     entry: &MappingEntry,
-    selection: kernel_api::model::memory::ViewSelection,
+    selection: kernel_api::model::memory::MappingSelection,
 ) -> Result<MappingRange, MemoryFail> {
     let mapping = entry.mapping().ok_or(MemoryFail::Denied)?;
     match selection {
-        kernel_api::model::memory::ViewSelection::Whole => Ok(mapping.whole()),
-        kernel_api::model::memory::ViewSelection::Pages { offset, count } => {
+        kernel_api::model::memory::MappingSelection::Whole => Ok(mapping.whole()),
+        kernel_api::model::memory::MappingSelection::Pages { offset, count } => {
             let count = PageCount::new(count).ok_or(MemoryFail::NotAligned)?;
             mapping
                 .range(PageOffset::new(offset), count)
@@ -531,14 +531,15 @@ fn selection(
 
 fn detach(
     team: kernel_api::model::identity::TeamId,
-    mapping: kernel_api::model::memory::ViewId,
-    choice: kernel_api::model::memory::ViewSelection,
+    mapping: kernel_api::model::memory::MappingId,
+    choice: kernel_api::model::memory::MappingSelection,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, MemoryFail> {
     with_mapping(team, mapping, ident, |target, entry| {
         let space = &target.space;
         let staged = target.find_staging(|item| item.mapping.identity() == mapping.get());
-        if staged.is_some() && !matches!(choice, kernel_api::model::memory::ViewSelection::Whole) {
+        if staged.is_some() && !matches!(choice, kernel_api::model::memory::MappingSelection::Whole)
+        {
             return Err(MemoryFail::Busy);
         }
         space.nest.retry_invalidation()?;
@@ -560,8 +561,8 @@ fn detach(
 
 fn set_access(
     team: kernel_api::model::identity::TeamId,
-    mapping: kernel_api::model::memory::ViewId,
-    choice: kernel_api::model::memory::ViewSelection,
+    mapping: kernel_api::model::memory::MappingId,
+    choice: kernel_api::model::memory::MappingSelection,
     access: u64,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, MemoryFail> {
@@ -773,14 +774,14 @@ fn acquire(
                 Some((token, grant)),
             )
         }
-        AcquireSource::View {
+        AcquireSource::Mapping {
             team,
-            view: mapping,
+            mapping,
             offset,
             count,
         } => with_mapping(team, mapping, ident, |_target, entry| {
             // 从已授权的关系取得它的来源范围；域、所属关系与来源授权都要核，
-            // ViewId 或可读 VA 本身不是凭证。
+            // MappingId 或可读 VA 本身不是凭证。
             let mapping = entry.mapping().ok_or(MemoryFail::Denied)?.clone();
             let authorization = entry.source.clone();
             let count = PageCount::new(count).ok_or(MemoryFail::NotAligned)?;

@@ -44,11 +44,6 @@ impl TableNode {
         Box::as_ptr(&self.page) as usize >> PAGE_SHIFT
     }
 
-    #[cfg(debug_assertions)]
-    pub(crate) fn count(&self) -> usize {
-        1 + self.children.iter().map(|(_, c)| c.count()).sum::<usize>()
-    }
-
     pub(crate) fn node_count(&self) -> usize {
         1 + self
             .children
@@ -314,12 +309,6 @@ impl TableNode {
         None
     }
 
-    #[cfg(debug_assertions)]
-    pub(crate) fn leaf_span_geometry(&self, vaddr: VirtAddr, geo: mode::Geo) -> Option<usize> {
-        let (entry, level) = self.leaf_ref_geometry(vaddr, geo).ok()?;
-        (entry.is_valid() && entry.is_leaf()).then(|| Self::span(level))
-    }
-
     pub(crate) fn walk_ref_geometry(
         &self,
         vaddr: VirtAddr,
@@ -420,34 +409,6 @@ impl TableNode {
             "preflighted leaf mapping"
         );
         leaf.set_flags((leaf.flags() - (PteFlags::R | PteFlags::W | PteFlags::X)) | flags);
-    }
-
-    #[cfg(debug_assertions)]
-    pub(crate) fn protect_permissions_geometry(
-        &mut self,
-        va: VirtAddr,
-        size: usize,
-        flags: PteFlags,
-        geo: mode::Geo,
-    ) -> Result<(), NestError> {
-        self.prepare_geometry(va, size, geo)?;
-        let mut offset = 0;
-        while offset < size {
-            let (entry, level) = self.leaf_ref_geometry(va + offset, geo)?;
-            if !entry.is_valid() || !entry.is_leaf() {
-                return Err(NestError::NotMapped);
-            }
-            offset += Self::span(level);
-        }
-        offset = 0;
-        while offset < size {
-            let point = va + offset;
-            let (_, level) = self.leaf_ref_geometry(point, geo)?;
-            let leaf = self.entry_at(point, level, false, geo.levels as usize)?;
-            leaf.set_flags((leaf.flags() - (PteFlags::R | PteFlags::W | PteFlags::X)) | flags);
-            offset += Self::span(level);
-        }
-        Ok(())
     }
 
     pub(crate) fn unmap_keep_tables_geometry(

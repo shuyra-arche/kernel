@@ -1,7 +1,11 @@
 //! Exclusive external access to one private managed page. CPU aliases must be
 //! explicitly detached and settled first; an Arc or an empty PTE is not proof.
 use super::{hold::Hold, source_authorization::SourceAuthorization};
-use crate::core::memory::{cell::Cell, flat::Pages, nest::Access};
+use crate::core::memory::{
+    cell::{Cell, Exposure},
+    flat::Pages,
+    nest::Access,
+};
 use alloc::sync::Arc;
 use kernel_api::{abi::call::pie::PieFail, model::identity::TaskId};
 
@@ -61,6 +65,11 @@ impl ExternalBorrow {
     /// The matching IoSpace binding has settled all hardware responsibilities.
     /// The caller holds the work commit boundary while reopening source access.
     pub(crate) unsafe fn settle(mut self) {
+        assert_eq!(
+            self.cell.exposure(),
+            Exposure::Internal,
+            "external access must settle before reopening CPU access"
+        );
         self.published = false;
     }
 }

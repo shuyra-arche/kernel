@@ -6,9 +6,9 @@
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
-pub struct ViewId(pub(crate) usize);
+pub struct MappingId(pub(crate) usize);
 
-impl ViewId {
+impl MappingId {
     /// 无效哨兵（0）：没有这一段关系。
     pub const NONE: Self = Self(0);
 
@@ -30,7 +30,7 @@ impl ViewId {
         (raw <= isize::MAX as usize).then(|| Self::new(raw))
     }
 
-    /// **交出**：号变回线上的那 8 字节（与 [`ViewId::from_bytes`] 成对）。
+    /// **交出**：号变回线上的那 8 字节（与 [`MappingId::from_bytes`] 成对）。
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         (self.0 as u64).to_le_bytes()
     }
@@ -40,8 +40,8 @@ impl ViewId {
     }
 }
 
-impl From<ViewId> for usize {
-    fn from(view: ViewId) -> Self {
-        view.0
+impl From<MappingId> for usize {
+    fn from(mapping: MappingId) -> Self {
+        mapping.0
     }
 }

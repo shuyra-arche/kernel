@@ -553,37 +553,6 @@ impl SourceAuthorization {
         Ok(())
     }
 
-    /// 这份来源名下未结的独立持有条数（自检读口）。
-    #[cfg(debug_assertions)]
-    pub(crate) fn retention_count(&self) -> usize {
-        self.retentions.lock().len()
-    }
-
-    /// 这份来源名下未结的子段分配数（自检读口）。
-    #[cfg(debug_assertions)]
-    pub(crate) fn derivation_count(&self) -> usize {
-        self.derivations.lock().len()
-    }
-
-    /// 这份来源的子段表里有没有这一份几何（自检读口：两边是不是同一个 `Arc`）。
-    #[cfg(debug_assertions)]
-    pub(crate) fn owns_geometry(&self, geometry: &Arc<Geometry>) -> bool {
-        self.derivations
-            .lock()
-            .iter()
-            .any(|slot| Arc::ptr_eq(slot.geometry(), geometry))
-    }
-
-    /// 这一份几何槽里记的历史分支索引（自检读口）。
-    #[cfg(debug_assertions)]
-    pub(crate) fn derivation_token(&self, geometry: &Arc<Geometry>) -> Option<PieToken> {
-        self.derivations
-            .lock()
-            .iter()
-            .find(|slot| Arc::ptr_eq(slot.geometry(), geometry))
-            .map(Derivation::token)
-    }
-
     /// 未结 CPU 身份的快照；不复制关系或物理持有。
     pub(crate) fn bindings(&self) -> Result<Vec<Arc<MappingBinding>>, PieFail> {
         let held = self.bindings.lock();
@@ -632,12 +601,6 @@ impl SourceAuthorization {
             }
         }
         Ok(spaces)
-    }
-
-    /// 这份来源名下**未结**成员数（自检读口；不另存计数）。
-    #[cfg(debug_assertions)]
-    pub(crate) fn binding_count(&self) -> usize {
-        self.bindings.lock().len()
     }
 
     /// 这份来源名下是否仍有这一份未结绑定。

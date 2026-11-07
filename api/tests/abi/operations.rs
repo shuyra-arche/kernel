@@ -100,7 +100,7 @@ fn compound_field_widths_match_their_actual_register_consumption() {
     }
     let token = kernel_api::model::identity::PieToken::mint(17);
     let team = kernel_api::model::identity::TeamId::new(19);
-    let view = kernel_api::model::memory::ViewId::from_bytes(&23u64.to_le_bytes()).unwrap();
+    let mapping = kernel_api::model::memory::MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
     let reference =
         kernel_api::model::memory::FlatReference::from_bytes(&29u64.to_le_bytes()).unwrap();
     let range = kernel_api::model::memory::ReferenceRange::new(reference, 3, 5).unwrap();
@@ -116,16 +116,16 @@ fn compound_field_widths_match_their_actual_register_consumption() {
         offset: 3,
         count: 5,
     });
-    check(kernel_api::model::memory::AcquireSource::View {
+    check(kernel_api::model::memory::AcquireSource::Mapping {
         team,
-        view,
+        mapping,
         offset: 3,
         count: 5,
     });
     check(kernel_api::model::pie::GrantRange::Inherit);
     check(kernel_api::model::pie::GrantRange::pages(3, 5).unwrap());
-    check(kernel_api::model::memory::ViewSelection::Whole);
-    check(kernel_api::model::memory::ViewSelection::pages(3, 5).unwrap());
+    check(kernel_api::model::memory::MappingSelection::Whole);
+    check(kernel_api::model::memory::MappingSelection::pages(3, 5).unwrap());
     check(kernel_api::model::unit::UnitTarget::Task(
         kernel_api::model::identity::TaskId::new(31),
     ));

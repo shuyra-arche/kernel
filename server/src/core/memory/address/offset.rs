@@ -5,7 +5,7 @@ pub struct PageOffset(usize);
 
 impl PageOffset {
     /// 窗口的第一页；健康用例按它取物化结果。
-    #[allow(dead_code)]
+
     pub const ZERO: Self = Self(0);
 
     #[inline]

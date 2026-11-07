@@ -2,20 +2,20 @@ use alloc::sync::Arc;
 
 use kernel_api::{
     abi::call::pie::PieFail, model::identity::PieToken, model::identity::TaskId,
-    model::memory::ViewControl,
+    model::memory::MappingControl,
 };
 
 use crate::machine::sync::SpinLock;
 
 pub(crate) struct MappingControlRecord {
-    scope: ViewControl,
+    scope: MappingControl,
     control: SpinLock<(TaskId, Option<PieToken>)>,
 }
 
 impl MappingControlRecord {
     pub(crate) fn new(
         controller: TaskId,
-        scope: ViewControl,
+        scope: MappingControl,
         branch: Option<PieToken>,
     ) -> Result<Arc<Self>, PieFail> {
         Arc::try_new(Self {
@@ -25,7 +25,7 @@ impl MappingControlRecord {
         .map_err(|_| PieFail::OoM)
     }
 
-    pub(crate) fn scope(&self) -> ViewControl {
+    pub(crate) fn scope(&self) -> MappingControl {
         self.scope
     }
 

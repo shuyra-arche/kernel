@@ -65,11 +65,6 @@ impl TeamState {
         Ok(())
     }
 
-    #[cfg(debug_assertions)]
-    pub(crate) fn staged_len(&self) -> usize {
-        self.staged.len()
-    }
-
     pub(crate) fn push_staging(&mut self, item: Staging) {
         self.staged.push(item);
     }

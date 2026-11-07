@@ -6,12 +6,12 @@
 use super::pages;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ViewSelection {
+pub enum MappingSelection {
     Whole,
     Pages { offset: usize, count: usize },
 }
 
-impl ViewSelection {
+impl MappingSelection {
     /// 过线的字数：标签 + 偏移 + 页数。
     pub const WORDS: usize = 3;
 

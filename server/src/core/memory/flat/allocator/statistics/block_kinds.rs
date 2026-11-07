@@ -22,8 +22,7 @@ static BLOCK_KINDS: OnceLock<BlockKinds> = OnceLock::new();
 pub(crate) fn install_block_kinds(base: usize, len: usize) -> Result<(), InitError> {
     let slots = len >> BLOCK_KIND_SHIFT;
     let mut v: Vec<Kind> = Vec::new();
-    v.try_reserve(slots)
-        .map_err(|_| InitError::OutOfMemory)?;
+    v.try_reserve(slots).map_err(|_| InitError::OutOfMemory)?;
     v.resize(slots, Kind::Plain);
     let slice: &'static mut [Kind] = Box::leak(v.into_boxed_slice());
     let h = BlockKinds {

@@ -69,16 +69,6 @@ impl HoldTable {
             .cloned()
     }
 
-    #[cfg(debug_assertions)]
-    pub(crate) fn len(&self) -> usize {
-        self.holds.lock().len()
-    }
-
-    #[cfg(debug_assertions)]
-    pub(crate) fn capacity(&self) -> usize {
-        self.holds.lock().capacity()
-    }
-
     /// 解除这一份引用；只从这个表里摘掉它，不动其他引用，也不分配。
     pub(crate) fn remove(&self, id: usize) -> Option<Arc<Hold>> {
         let mut holds = self.holds.lock();

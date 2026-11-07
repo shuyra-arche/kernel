@@ -77,7 +77,7 @@ impl<H: Hardware> IoSpace<H> {
         if self.life != Life::Open {
             return Err(Error::Closed);
         }
-        if self.bindings.len() >= self.hardware.as_ref().expect("live space").capacity() {
+        if self.pending() >= self.hardware.as_ref().expect("live space").capacity() {
             return Err(Error::Capacity);
         }
         let end = iova.checked_add(PAGE_SIZE).ok_or(Error::InvalidRange)?;

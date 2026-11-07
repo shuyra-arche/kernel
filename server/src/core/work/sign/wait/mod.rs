@@ -217,13 +217,6 @@ pub(crate) fn signal(key: WakeKey) -> usize {
     rise(Unchain::new(chain))
 }
 
-#[cfg(debug_assertions)]
-pub(crate) fn site_count() -> usize {
-    (0..SITE_SHARDS)
-        .map(|shard| shard_at(shard).lock().len())
-        .sum()
-}
-
 pub(crate) fn wipe_space(space: Asid) -> usize {
     let _commit = crate::core::work::commit();
     let mut woken = 0usize;

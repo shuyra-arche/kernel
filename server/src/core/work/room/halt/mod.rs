@@ -31,10 +31,7 @@ pub(crate) fn hook(hooks: &'static [Hook], waiting: fn()) {
 
 /// 屏障读数：已到达的核数 / 应有的核数。
 pub(crate) fn barrier() -> (usize, usize) {
-    (
-        HALT_ARRIVED.load(Ordering::Acquire),
-        hart::hart_count(),
-    )
+    (HALT_ARRIVED.load(Ordering::Acquire), hart::hart_count())
 }
 
 /// 本核到达停机屏障，不再返回：交还 ASID，等其余核到齐，由最后一核收尾并复位。

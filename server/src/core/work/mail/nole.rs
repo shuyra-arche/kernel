@@ -21,11 +21,6 @@ pub struct NoleMeta {
 }
 
 impl NoleMeta {
-    #[cfg(debug_assertions)]
-    pub(crate) fn new(owner: TaskId) -> Arc<Self> {
-        Self::try_new(owner).expect("nole allocation failed")
-    }
-
     /// 内核铸的保留授权 Nole：只有经这扇门造出来的对象 `retains()` 为真。
     /// 这是内核的**真铸造厂**（不是调试期的假正面）；初始收货方由引导交付那一处指定，
     /// 普通请求调不到这一格。

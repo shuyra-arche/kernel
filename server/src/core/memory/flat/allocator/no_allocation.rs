@@ -25,7 +25,8 @@ impl Drop for NoAllocation {
 pub(crate) fn assert_allocation_allowed() {
     #[cfg(debug_assertions)]
     assert!(
-        !FORBIDDEN[crate::machine::hart::hart_id().get()].load(core::sync::atomic::Ordering::Relaxed),
+        !FORBIDDEN[crate::machine::hart::hart_id().get()]
+            .load(core::sync::atomic::Ordering::Relaxed),
         "allocation or shootdown in publication commit"
     );
 }

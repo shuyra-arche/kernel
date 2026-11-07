@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use kernel_api::abi::call::memory::MemoryFail;
 use kernel_api::abi::operation::{KernelCall, Operation, RegisterCall};
 use kernel_api::model::identity::{PieToken, TaskId, TeamId};
-use kernel_api::model::memory::{ViewId, ViewSelection};
+use kernel_api::model::memory::{MappingId, MappingSelection};
 use kernel_api::model::wait::Wait;
 use kernel_client::invoke::invoke_with;
 
@@ -66,11 +66,11 @@ fn failures_preserve_the_domain_and_do_not_retry() {
 #[test]
 fn structured_arguments_keep_all_six_registers_and_the_explicit_slot() {
     reply((0, 0, 0));
-    let view = ViewId::from_bytes(&23u64.to_le_bytes()).unwrap();
+    let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
     invoke(kernel_api::abi::call::memory::operations::SetAccess {
         team: TeamId::new(17),
-        view,
-        selection: ViewSelection::Pages {
+        mapping,
+        selection: MappingSelection::Pages {
             offset: 3,
             count: 5,
         },
@@ -83,8 +83,8 @@ fn structured_arguments_keep_all_six_registers_and_the_explicit_slot() {
             .unwrap();
     assert!(
         matches!(decoded, kernel_api::abi::call::EnvCall::Memory(kernel_api::abi::call::memory::MemoryCall::SetAccess {
-        team, view: decoded_view, selection: ViewSelection::Pages { offset: 3, count: 5 }, access: 6,
-    }) if team == TeamId::new(17) && decoded_view == view)
+        team, mapping: decoded_mapping, selection: MappingSelection::Pages { offset: 3, count: 5 }, access: 6,
+    }) if team == TeamId::new(17) && decoded_mapping == mapping)
     );
 }
 

@@ -272,11 +272,6 @@ impl Task {
         found.filter(|team| !team.state.lock().phase.ousted())
     }
 
-    #[cfg(debug_assertions)]
-    pub(crate) fn heir_count(&self) -> usize {
-        self.heir.lock().len()
-    }
-
     pub(crate) fn life(&self) -> Weak<Life> {
         Arc::downgrade(&self.life)
     }
