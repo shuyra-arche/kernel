@@ -76,11 +76,29 @@ a non-reused completion batch. Closing seals admission and preserves failed work
 for retry; an old or foreign completion cannot settle a new attempt. Hardware
 effects are supplied through a trusted unsafe adapter contract that includes
 platform-specific synchronization, not merely a CQ completion flag. No platform
-adapter, device discovery, Unit-exit hook or PQ/CQ/FQ interrupt routing is installed
+adapter, runtime device binding, Unit-exit hook or PQ/CQ/FQ interrupt routing is installed
 yet, and the current user-space IOMMU service has not been migrated. This is the
 External protocol milestone, not protection of currently running DMA. Registration
 also requires the caller to uphold borrowing and Flat residency; the protocol does
 not implement Pend authorization.
+
+Boot device grants are now computed as a complete plan before any device authority
+is created. The planner reserves FDT `riscv,iommu` register pages, including disabled
+nodes, and withholds every ordinary region or PCI aperture whose page-rounded
+mapping overlaps them. It withholds an entire overlapping source rather than
+inventing fragment resource names. Ordinary device regions cannot alias managed
+DRAM; PCI apertures overlapping DRAM are rejected. Controller discovery currently
+supports physical `reg` coordinates at the root or through explicitly identity
+mapped buses. Malformed controller ranges, translated buses and declared unknown
+or PCI IOMMUs fail boot admission. Unlisted PCI devices are not enumerated here.
+
+This intentionally removes System's raw `platform/iommu` register supply. The old
+IOMMU Unit and deployments requiring that supply cannot run unchanged. Nonoverlapping
+ECAM and PCI apertures retain their existing boot resource names for the current
+platform-IOMMU topology; this does not secure the movable BAR/configuration of a PCI
+IOMMU. A trusted hardware adapter, startup integration and consumer migration are
+still required before an IOMMU deployment can run with Kernel-managed DMA. Merely
+withholding register authority neither disables existing DMA nor proves reclamation.
 
 Unit owner assignment/transfer, larger Cells, platform DMA integration and
 registration of externally supplied physical ranges remain in #14.
@@ -147,6 +165,11 @@ completion rejection, independent CPU/device lifetimes and physical return count
 RISC-V command encoding and CQ completion samples are checked separately; these
 samples alone never authorize Cell settlement. The fixture cannot establish that
 an actual hardware adapter meets its unsafe contract.
+
+The boot host suite feeds encoded DTBs through the production parser and admission
+planner. It checks controller aliases, page rounding, PCI windows, malformed and
+unsupported discovery, RAM exclusion and unchanged names for unrelated resources.
+It does not execute boot authority publication or establish hardware isolation.
 
 Generic byte codecs and service-protocol macros are no longer part of Kernel.
 The [API migration notes](api/README.md#source-migration-and-abi-compatibility) list removed

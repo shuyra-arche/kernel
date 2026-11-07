@@ -52,6 +52,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fdt"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "784a4df722dc6267a04af36895398f59d21d07dce47232adf31ec0ff2fa45e67"
+
+[[package]]
 name = "kernel-api"
 version = "0.0.1"
 dependencies = [
@@ -74,6 +80,7 @@ name = "kernel-memory-tests"
 version = "0.0.0"
 dependencies = [
  "fack",
+ "fdt",
  "kernel-api",
 ]
 

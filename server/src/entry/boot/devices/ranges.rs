@@ -1,81 +1,4 @@
-use crate::core::memory::nest::Access;
-use crate::core::work::mail::{self, Mail};
-use crate::core::work::pend::{self, Permission, SourceAuthorization};
-use crate::entry::boot::resources::Registry;
-use crate::machine::board;
-use kernel_api::{
-    abi::call::pie::PieFail, boot::ledger::Name, boot::ledger::Page, model::identity::Mark,
-    model::identity::TaskId,
-};
-
-pub(crate) fn register(registry: &mut Registry) -> Result<(), PieFail> {
-    let dtb = board::info().dtb();
-    let fdt = board::device_tree().ok_or(PieFail::Denied)?;
-    for node in fdt.all_nodes() {
-        if exempt(node.name) {
-            continue;
-        }
-        if let Some(reg) = node.reg() {
-            for r in reg {
-                grant_region(registry, r.starting_address.addr(), r.size)?;
-            }
-        }
-        // PCI 宿主的 MMIO 开口不在 `reg` 里：它在 `ranges`（子空间→父地址）那一条
-        // 属性上。BAR 就落在那几段窗口里，故引导期按 `ranges` 逐个登记，
-        // 让窗口里的页与 FDT 声明的区一样有自己的门闩。
-        grant_pci_windows(registry, &fdt, node)?;
-    }
-    let meta = mail::pole::region(dtb.base, dtb.size, TaskId::new(0))?;
-    let root = pend::Pie::try_new(
-        Mail::Pole(meta),
-        Mark::NONE,
-        Permission::FETCH | Permission::VEST,
-        None,
-    )?;
-    registry
-        .register(Name::Page(Page::Dtb), root)
-        .map_err(|e| e.into_parts().0)?;
-    if let Some(initrd) = board::info().initrd() {
-        let meta = mail::pole::region(initrd.base, initrd.size, TaskId::new(0))?;
-        let root = pend::Pie::try_new(
-            Mail::Pole(meta),
-            Mark::NONE,
-            Permission::FETCH | Permission::VEST,
-            None,
-        )?;
-        registry
-            .register(Name::Page(Page::Initrd), root)
-            .map_err(|e| e.into_parts().0)?;
-    }
-    Ok(())
-}
-
-fn grant_region(registry: &mut Registry, base: usize, size: Option<usize>) -> Result<(), PieFail> {
-    let Some(size) = size else {
-        return Ok(());
-    };
-    if base == 0 || size == 0 {
-        return Ok(());
-    }
-    let meta = mail::pole::region(base, size, TaskId::new(0))?;
-    let source = meta.source();
-    let root = pend::Pie::try_new(
-        Mail::Pole(meta.clone()),
-        Mark::NONE,
-        Permission::FETCH | Permission::STORE | Permission::VEST | Permission::ONLY,
-        None,
-    )?;
-    // 借来的区也算一份来源：把授权记录接上，持有者就能取得**自己那一小段**子窗口
-    // （而不是只能攞整段）。与 `Unseal::Pole` 接手私有根同一套，不另造旁路。
-    // 上限就是 MMIO 的读写两位：设备区不开执行映射。
-    let authorization =
-        SourceAuthorization::new(source, Access::READ | Access::WRITE, TaskId::new(0))?;
-    meta.attach_source(&authorization);
-    authorization.adopt(&meta, root.token(), root.grant().clone())?;
-    registry
-        .register(Name::Page(Page::Region(base as u64)), root)
-        .map_err(|e| e.into_parts().0)
-}
+use kernel_api::abi::call::pie::PieFail;
 
 /// 是不是 PCI 宿主：`device_type` 必须**正好**是 `pci`。
 ///
@@ -85,28 +8,6 @@ pub(crate) fn is_pci_host(node: fdt::node::FdtNode) -> bool {
     node.property("device_type")
         .and_then(|property| property.as_str())
         == Some("pci")
-}
-
-/// PCI 宿主的 MMIO 窗口：可支持的形状就登记，不支持的当场拒。
-fn grant_pci_windows(
-    registry: &mut Registry,
-    fdt: &fdt::Fdt,
-    node: fdt::node::FdtNode,
-) -> Result<(), PieFail> {
-    if !is_pci_host(node) {
-        return Ok(());
-    }
-    let dram = board::info().dram;
-    let dram_edge = dram.base.checked_add(dram.size).ok_or(PieFail::Denied)?;
-    for (base, size) in memory_windows(fdt, node)? {
-        // MMIO 窗口不能压在 DRAM 上：这比“先登记再看”更早地把错形状拦住。
-        let edge = base.checked_add(size).ok_or(PieFail::Denied)?;
-        if base < dram_edge && dram.base < edge {
-            return Err(PieFail::Denied);
-        }
-        grant_region(registry, base, Some(size))?;
-    }
-    Ok(())
 }
 
 fn cells(node: fdt::node::FdtNode, name: &str) -> Option<usize> {
@@ -200,9 +101,4 @@ pub(crate) fn memory_windows(
     let parent = parent_of(fdt, node).ok_or(PieFail::Denied)?;
     let parent = cells(parent, "#address-cells").ok_or(PieFail::Denied)?;
     ranges_windows(ranges.value, child, parent, size)
-}
-
-fn exempt(name: &str) -> bool {
-    let stem = name.split('@').next().unwrap_or(name);
-    matches!(stem, "memory" | "clint")
 }

@@ -11,6 +11,7 @@ autotests = false
 [dependencies]
 kernel-api = { path = "../../api" }
 fack = { version = "0.2.0", default-features = false }
+fdt = { version = "0.1.5", default-features = false }
 
 [[test]]
 name = "memory"
@@ -19,3 +20,7 @@ path = "memory/mod.rs"
 [[test]]
 name = "iommu"
 path = "iommu/mod.rs"
+
+[[test]]
+name = "boot"
+path = "boot/mod.rs"
