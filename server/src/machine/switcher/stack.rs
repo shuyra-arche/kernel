@@ -1,25 +1,27 @@
 use alloc::vec::Vec;
-use riscv::register::{sie, stvec};
+use riscv::register::sie;
+use riscv::register::stvec;
 
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::address::VirtAddr;
-use crate::basis::memory::cell::Cell;
+use crate::basis::cell::page::Page;
 use crate::machine::hart::HartId;
-use crate::machine::layout::{
-    TRAP_STACK_BASE, TRAP_STACK_GUARD, TRAP_STACK_SLOT_SHIFT, TRAP_STACK_SLOT_SIZE,
-};
+use crate::machine::layout::TRAP_STACK_BASE;
+use crate::machine::layout::TRAP_STACK_GUARD;
+use crate::machine::layout::TRAP_STACK_SLOT_SHIFT;
+use crate::machine::layout::TRAP_STACK_SLOT_SIZE;
 use crate::machine::switcher::trampoline::alltraps_va;
 use crate::machine::sync::OnceLock;
+use kernel_api::address::PAGE_SIZE;
+use kernel_api::address::VirtAddr;
 
 pub(crate) const TRAP_STACK_CANARY: usize = 0x5EED_CAFE_51A7_0000;
 
-static BOOT_STACKS: OnceLock<Vec<Cell>> = OnceLock::new();
+static BOOT_STACKS: OnceLock<Vec<Page>> = OnceLock::new();
 
 fn trap_stack_segment(hart: usize) -> (VirtAddr, VirtAddr) {
     let base = TRAP_STACK_BASE.as_usize() + hart * TRAP_STACK_SLOT_SIZE;
     (
-        VirtAddr::from_raw(base + TRAP_STACK_GUARD),
-        VirtAddr::from_raw(base + TRAP_STACK_SLOT_SIZE),
+        crate::machine::mmu::riscv::canonical(base + TRAP_STACK_GUARD),
+        crate::machine::mmu::riscv::canonical(base + TRAP_STACK_SLOT_SIZE),
     )
 }
 
@@ -55,7 +57,7 @@ pub(crate) fn boot_stack(hart: usize) -> usize {
     BOOT_STACKS.get().expect("boot stacks not initialized")[hart].physical_address() + PAGE_SIZE
 }
 
-pub(crate) fn set_boot_stacks(boot_stacks: Vec<Cell>) {
+pub(crate) fn set_boot_stacks(boot_stacks: Vec<Page>) {
     assert!(
         BOOT_STACKS.set(boot_stacks).is_ok(),
         "boot stacks double init"

@@ -2,14 +2,19 @@ mod id;
 mod per_hart;
 
 pub use id::HartId;
-pub use per_hart::{PerHart, per_hart_ptr, set_scheduler};
-pub(crate) use per_hart::{lease_load, lease_store, request_instruction_sync};
+pub use per_hart::PerHart;
+pub(crate) use per_hart::lease_load;
+pub(crate) use per_hart::lease_store;
+pub use per_hart::per_hart_ptr;
+pub(crate) use per_hart::request_instruction_sync;
+pub use per_hart::set_scheduler;
 
-use ::core::sync::atomic::{AtomicUsize, Ordering};
+use ::core::sync::atomic::AtomicUsize;
+use ::core::sync::atomic::Ordering;
 
-use crate::basis::memory::address::VirtAddr;
 use crate::machine::board;
 use crate::machine::layout::MAX_HART_SLOTS;
+use kernel_api::address::VirtAddr;
 
 static ONLINE: AtomicUsize = AtomicUsize::new(0);
 

@@ -1,9 +1,11 @@
 use alloc::sync::Arc;
 
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::address::{PhysAddr, VirtAddr};
-use crate::basis::memory::nest::table::{PteFlags, TableNode};
-use crate::basis::work::unit::space::Space;
+use crate::basis::unit::space::Space;
+use crate::machine::mmu::riscv::table::PteFlags;
+use crate::machine::mmu::riscv::table::TableNode;
+use kernel_api::address::PAGE_SIZE;
+use kernel_api::address::PhysAddr;
+use kernel_api::address::VirtAddr;
 
 #[derive(Clone)]
 pub struct StackReader {
@@ -36,9 +38,11 @@ impl StackReader {
             return Some(base);
         }
         let edge = crate::machine::board::dram_edge().unwrap_or(0x9000_0000);
-        let (base, flags) = TableNode::walk_raw(self.root, VirtAddr::from_raw(page), |pa| {
-            (0x8000_0000..edge).contains(&pa.as_usize())
-        })?;
+        let (base, flags) = TableNode::walk_raw(
+            self.root,
+            crate::machine::mmu::riscv::canonical(page),
+            |pa| (0x8000_0000..edge).contains(&pa.as_usize()),
+        )?;
         if !flags.contains(PteFlags::R) {
             return None;
         }

@@ -1,19 +1,21 @@
 //! Explicit QEMU EDU bootstrap binding. General PCI enumeration and placement
 //! policy belong to Units; this adapter admits only the fixed test endpoint.
-use crate::basis::memory::nest::iommu::riscv::topology::Topology;
-use crate::basis::memory::{
-    address::PhysAddr,
-    flat::{BorrowedRegion, Flat},
-    nest::{Access, Placement, RegionId},
-};
-use crate::basis::work::unit::team::kernel;
-use crate::machine::iommu::pci::{Endpoint, Error};
-use crate::machine::{
-    board,
-    iommu::aperture::{APERTURES, Aperture, Ecam},
-};
+use crate::basis::flat::BorrowedRegion;
+use crate::basis::flat::Flat;
+use crate::basis::nest::Access;
+use crate::basis::nest::Placement;
+use crate::basis::nest::RegionId;
+use crate::basis::unit::team::kernel;
+use crate::machine::board;
+use crate::machine::iommu::riscv::aperture::APERTURES;
+use crate::machine::iommu::riscv::aperture::Aperture;
+use crate::machine::iommu::riscv::aperture::Ecam;
+use crate::machine::iommu::riscv::pci::Endpoint;
+use crate::machine::iommu::riscv::pci::Error;
+use crate::machine::iommu::riscv::topology::Topology;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
+use kernel_api::address::PhysAddr;
 
 pub(super) fn mapped(base: usize, size: usize) -> Result<usize, PendFail> {
     let nest = &kernel().ok_or(PendFail::Denied)?.space.nest;
@@ -98,7 +100,7 @@ pub(super) fn init() -> Result<(), PendFail> {
         let Some((mut cursor, end)) = aperture else {
             continue;
         };
-        if crate::machine::iommu::interrupt::overlaps(cursor, end)
+        if crate::machine::iommu::riscv::interrupt::overlaps(cursor, end)
             || allocated.iter().any(|&(a, b)| cursor < b && a < end)
             || topology
                 .configurations()

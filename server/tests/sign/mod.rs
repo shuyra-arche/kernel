@@ -1,6 +1,8 @@
-#[path = "../../src/basis/work/sign/endpoint/state.rs"]
+#[path = "../../src/basis/sign/endpoint/state.rs"]
 mod state;
-use state::{Event, Rejection, State};
+use state::Event;
+use state::Rejection;
+use state::State;
 
 #[test]
 fn pending_event_survives_observation_and_is_never_overwritten() {

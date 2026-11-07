@@ -1,9 +1,16 @@
-use super::hardware::{Call, Scripted, Trace};
-use super::iommu::retirement::{Owner, Registry};
-use super::iommu::{BatchId, Error, HardwareError};
-use super::{cell::Cell, support::Pool};
-use crate::cell::Owner as CellOwner;
-use std::sync::{Arc, Mutex};
+use super::cell::Page;
+use super::hardware::Call;
+use super::hardware::Scripted;
+use super::hardware::Trace;
+use super::iommu::BatchId;
+use super::iommu::Error;
+use super::iommu::HardwareError;
+use super::iommu::retirement::Owner;
+use super::iommu::retirement::Registry;
+use super::support::Pool;
+use crate::cell::Owner as PageOwner;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 fn latest(trace: &Arc<Mutex<Trace>>) -> BatchId {
     trace
@@ -35,7 +42,7 @@ fn owner_exit_needs_no_record_transfer_and_failed_domain_does_not_block_another(
             .attach(&owner, hardware)
             .map_err(|(e, _)| e)
             .unwrap();
-        let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+        let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
         registry
             .with_space(&owner, domain, |space| {
                 let binding = unsafe { space.register(&cell, 0x400000, true) }?;
@@ -115,7 +122,7 @@ fn owner_and_domain_identity_cannot_be_reused_as_authority() {
         Err(Error::UnknownDomain)
     );
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     registry
         .with_space(&owner, id, |space| unsafe {
             space.register(&cell, 0x400000, false)
@@ -155,7 +162,7 @@ fn publication_admitted_before_concurrent_exit_remains_in_kernel_custody() {
         .map_err(|(e, _)| e)
         .unwrap();
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     let barrier = std::sync::Barrier::new(2);
     std::thread::scope(|scope| {
         scope.spawn(|| {
@@ -202,7 +209,7 @@ fn explicit_close_settles_only_its_receipt_without_requiring_owner_exit() {
         .unwrap();
     let other_receipt = registry.completion(other).unwrap();
     let pool = Pool::new(0);
-    let cell = Arc::new(Cell::from_internal(CellOwner::Kernel, pool.page().unwrap()).unwrap());
+    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     registry
         .with_space(&owner, id, |space| {
             let binding = unsafe { space.register(&cell, 0x400000, true) }?;

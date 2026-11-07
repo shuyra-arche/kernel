@@ -1,4 +1,8 @@
-use kernel_api::boot::capsule::{Capsule, HEADER, MAGIC, PAGE, RECORD};
+use kernel_api::boot::capsule::Capsule;
+use kernel_api::boot::capsule::HEADER;
+use kernel_api::boot::capsule::MAGIC;
+use kernel_api::boot::capsule::PAGE;
+use kernel_api::boot::capsule::RECORD;
 
 fn number(bytes: &mut [u8], at: usize, value: u64, width: usize) {
     bytes[at..at + width].copy_from_slice(&value.to_le_bytes()[..width]);

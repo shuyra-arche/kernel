@@ -3,7 +3,7 @@
 //! 这是授权坐标，不是 CPU 视图或物理引用：`Pages` 的 `offset` 相对底层来源起点，
 //! 不相对父分支。`Inherit` 不带任何载荷；`Pages` 非空且页坐标不溢出。
 
-use crate::model::memory::PAGE_SIZE;
+use crate::model::cell::PAGE_SIZE;
 
 /// 本地派生请求的范围。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

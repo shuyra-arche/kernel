@@ -1,5 +1,11 @@
+use kernel_api::boot::ledger::Entries;
+use kernel_api::boot::ledger::Entry;
+use kernel_api::boot::ledger::Header;
+use kernel_api::boot::ledger::Name;
+use kernel_api::boot::ledger::Page;
 use kernel_api::boot::ledger::ResourceKind;
-use kernel_api::boot::ledger::{Entries, Entry, Header, Name, Page, VERSION, store_entries};
+use kernel_api::boot::ledger::VERSION;
+use kernel_api::boot::ledger::store_entries;
 
 fn entry() -> Entry {
     Entry::new(Name::Page(Page::Dtb), ResourceKind::Share, 19)

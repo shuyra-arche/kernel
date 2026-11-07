@@ -1,5 +1,6 @@
 use crate::iommu::riscv::registers::*;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[derive(Clone)]
 pub struct Device(pub Arc<Mutex<[u64; 512]>>, pub usize);

@@ -1,9 +1,14 @@
 use alloc::vec::Vec;
-use kernel_api::{abi::call::pend::PendFail, boot::ledger::Name};
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::boot::ledger::Name;
 
-use crate::basis::work::pend::PendEntry;
+use crate::basis::pend::PendEntry;
 
-use super::{Failure, FreezeError, Frozen, RegisterError, valid};
+use super::Failure;
+use super::FreezeError;
+use super::Frozen;
+use super::RegisterError;
+use super::valid;
 
 #[derive(Default)]
 pub(crate) struct Registry {

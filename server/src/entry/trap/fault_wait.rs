@@ -1,7 +1,9 @@
 use alloc::sync::Arc;
 
-use crate::basis::memory::address::VirtAddr;
-use crate::basis::memory::nest::{FaultKind, FaultOutcome, Nest};
+use crate::basis::nest::FaultKind;
+use crate::basis::nest::FaultOutcome;
+use crate::basis::nest::Nest;
+use kernel_api::address::VirtAddr;
 
 /// 一次页错误的等待上下文：纯探针重查所需的地址空间、地址、访问种类与
 /// **本次登记的那段关系身份**。

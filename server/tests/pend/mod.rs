@@ -1,7 +1,11 @@
-#[path = "../../src/basis/work/pend/state.rs"]
+#[path = "../../src/basis/pend/state.rs"]
 mod state;
-use kernel_api::model::modifiable::Modifiable::{No, Yes};
-use state::{Event::*, Failure, Phase, State};
+use kernel_api::model::modifiable::Modifiable::No;
+use kernel_api::model::modifiable::Modifiable::Yes;
+use state::Event::*;
+use state::Failure;
+use state::Phase;
+use state::State;
 
 #[test]
 fn mutable_parent_is_suspended_until_every_reader_returns() {

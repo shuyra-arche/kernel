@@ -1,3 +1,4 @@
+use crate::machine::mmu::riscv::Address;
 use ::core::arch::asm;
 
 use alloc::format;
@@ -5,18 +6,32 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
-use riscv::interrupt::{Exception, Interrupt, Trap};
-use riscv::register::{satp, scause, sepc, sscratch, sstatus, stval, stvec};
+use riscv::interrupt::Exception;
+use riscv::interrupt::Interrupt;
+use riscv::interrupt::Trap;
+use riscv::register::satp;
+use riscv::register::scause;
+use riscv::register::sepc;
+use riscv::register::sscratch;
+use riscv::register::sstatus;
+use riscv::register::stval;
+use riscv::register::stvec;
 
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::address::VirtAddr;
-use crate::basis::memory::nest::SpaceKind;
-use crate::basis::work::room::identity::ident;
-use crate::entry::report::backtrace::{self, Backtrace, StackReader, WalkConfig};
+use crate::basis::nest::SpaceKind;
+use crate::basis::room::identity::ident;
+use crate::entry::report::backtrace;
+use crate::entry::report::backtrace::Backtrace;
+use crate::entry::report::backtrace::StackReader;
+use crate::entry::report::backtrace::WalkConfig;
 use crate::entry::report::report::Report;
-use crate::machine::switcher::context::{Gprs, TrapContext};
+use crate::machine::switcher::context::Gprs;
+use crate::machine::switcher::context::TrapContext;
+use kernel_api::address::PAGE_SIZE;
+use kernel_api::address::VirtAddr;
 
-use super::render::{address_label, backtrace_rows, hex};
+use super::render::address_label;
+use super::render::backtrace_rows;
+use super::render::hex;
 
 fn gprs() -> [usize; 32] {
     let mut r = [0usize; 32];
@@ -88,14 +103,14 @@ impl Scene {
         };
         let mut reader = StackReader::new(satp::read().bits() & ((1usize << 44) - 1));
         let cfg = WalkConfig::kernel(ceiling);
-        let code = |w: usize| VirtAddr::from_raw(w).is_kernel();
+        let code = |w: usize| crate::machine::mmu::riscv::canonical(w).is_kernel();
         let backtrace = Backtrace::walk(&mut reader, &cfg, sp, fp, Some(&code));
         Some(Scene {
             hart: crate::machine::hart::hart_id(),
             task: ident().map(|i| i.task_id()),
-            pc: VirtAddr::from_raw(sepc::read()),
-            sp: VirtAddr::from_raw(sp),
-            fp: VirtAddr::from_raw(fp),
+            pc: crate::machine::mmu::riscv::canonical(sepc::read()),
+            sp: crate::machine::mmu::riscv::canonical(sp),
+            fp: crate::machine::mmu::riscv::canonical(fp),
             cause: scause::read().cause().try_into().ok(),
             backtrace,
         })
@@ -119,14 +134,14 @@ impl Scene {
         let fp = frame.gpr.x(Gprs::S0);
         let mut reader = StackReader::new(frame.user_satp.ppn());
         let cfg = WalkConfig::normal(world, sp.saturating_add(backtrace::SPAN));
-        let code = |w: usize| VirtAddr::from_raw(w).is_user();
+        let code = |w: usize| crate::machine::mmu::riscv::canonical(w).is_user();
         let backtrace = Backtrace::walk(&mut reader, &cfg, sp, fp, Some(&code));
         Some(Scene {
             hart: crate::machine::hart::hart_id(),
             task: Some(info.task_id()),
             pc: frame.sepc,
-            sp: VirtAddr::from_raw(sp),
-            fp: VirtAddr::from_raw(fp),
+            sp: crate::machine::mmu::riscv::canonical(sp),
+            fp: crate::machine::mmu::riscv::canonical(fp),
             cause: None,
             backtrace,
         })
@@ -163,7 +178,9 @@ fn csr_rows() -> Vec<Vec<Option<String>>> {
     rows.push(vec![
         Some("sepc".into()),
         Some(hex(sepc::read())),
-        Some(address_label(VirtAddr::from_raw(sepc::read()))),
+        Some(address_label(crate::machine::mmu::riscv::canonical(
+            sepc::read(),
+        ))),
     ]);
     {
         let a = stval::read();
@@ -186,7 +203,9 @@ fn csr_rows() -> Vec<Vec<Option<String>>> {
     rows.push(vec![
         Some("stvec".into()),
         Some(hex(stvec::read().address())),
-        Some(address_label(VirtAddr::from_raw(stvec::read().address()))),
+        Some(address_label(crate::machine::mmu::riscv::canonical(
+            stvec::read().address(),
+        ))),
     ]);
     {
         let scr = sscratch::read();

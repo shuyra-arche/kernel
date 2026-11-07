@@ -1,4 +1,4 @@
-use crate::basis::work::pend::PendEntry;
+use crate::basis::pend::PendEntry;
 use kernel_api::boot::ledger::Name;
 
 mod failure;
@@ -6,7 +6,8 @@ mod frozen;
 pub(crate) mod ledger;
 mod registry;
 mod sign;
-pub(crate) use sign::{ENTRIES as SIGN_ENTRIES, authority as grant_sign};
+pub(crate) use sign::ENTRIES as SIGN_ENTRIES;
+pub(crate) use sign::authority as grant_sign;
 
 use failure::Failure;
 pub(crate) use frozen::Frozen;
@@ -28,4 +29,5 @@ fn valid(name: Name, pend_entry: &PendEntry) -> bool {
 }
 
 mod control;
-pub(crate) use control::{ENTRIES as CONTROL_ENTRIES, authority as grant_controls};
+pub(crate) use control::ENTRIES as CONTROL_ENTRIES;
+pub(crate) use control::authority as grant_controls;

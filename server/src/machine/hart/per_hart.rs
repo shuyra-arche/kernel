@@ -1,10 +1,15 @@
-use ::core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
+use ::core::sync::atomic::AtomicPtr;
+use ::core::sync::atomic::AtomicUsize;
+use ::core::sync::atomic::Ordering;
 
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::address::VirtAddr;
-use crate::machine::layout::{HART_FRAME_BASE, MAX_HART_SLOTS};
+use crate::machine::layout::HART_FRAME_BASE;
+use crate::machine::layout::MAX_HART_SLOTS;
+use kernel_api::address::PAGE_SIZE;
+use kernel_api::address::VirtAddr;
 
-use super::{HartId, hart_count, hart_id};
+use super::HartId;
+use super::hart_count;
+use super::hart_id;
 
 #[repr(C, align(64))]
 pub struct PerHart {
@@ -22,7 +27,7 @@ impl PerHart {
             id,
             frame: VirtAddr::wrap(HART_FRAME_BASE.as_usize() + id * PAGE_SIZE),
             scheduler: AtomicPtr::new(::core::ptr::null_mut()),
-            lease: AtomicUsize::new(crate::basis::memory::nest::identity::vacant()),
+            lease: AtomicUsize::new(crate::machine::mmu::riscv::identity::vacant()),
             instruction_sync: AtomicUsize::new(1),
             _pad: [0; 3],
         }

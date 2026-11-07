@@ -1,7 +1,9 @@
-use riscv::register::{scause, sepc, stval};
+use riscv::register::scause;
+use riscv::register::sepc;
+use riscv::register::stval;
 
-use crate::basis::memory::address::VirtAddr;
-use crate::basis::memory::nest::FaultKind;
+use crate::basis::nest::FaultKind;
+use kernel_api::address::VirtAddr;
 
 #[derive(Debug)]
 pub struct PageFault {
@@ -21,7 +23,7 @@ impl PageFault {
         };
 
         Self {
-            addr: VirtAddr::from_raw(stval::read()),
+            addr: crate::machine::mmu::riscv::canonical(stval::read()),
             pc: sepc::read(),
             kind,
         }

@@ -8,7 +8,10 @@ pub(crate) mod resources;
 mod stack;
 pub(crate) mod unit;
 
-pub use error::{BootError, MapOperation, ResourceOperation, fail};
+pub use error::BootError;
+pub use error::MapOperation;
+pub use error::ResourceOperation;
+pub use error::fail;
 pub use init::init;
 
 use ::core::arch::global_asm;
@@ -17,22 +20,33 @@ use alloc::sync::Arc;
 
 use riscv::register::satp;
 
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::address::{PhysAddr, VirtAddr};
-use crate::basis::memory::flat::{BorrowedRegion, Flat, FlatRange};
-use crate::basis::memory::nest::table::PteFlags;
-use crate::basis::memory::nest::{
-    Access, ActiveRange, Nest, NestError, Placement, RegionId, identity,
-};
-use crate::basis::work::room::{conductor, scheduler};
-use crate::basis::work::unit::team::kernel;
+use crate::basis::flat::BorrowedRegion;
+use crate::basis::flat::Flat;
+use crate::basis::flat::FlatRange;
+use crate::basis::nest::Access;
+use crate::basis::nest::ActiveRange;
+use crate::basis::nest::Nest;
+use crate::basis::nest::NestError;
+use crate::basis::nest::Placement;
+use crate::basis::nest::RegionId;
+use crate::basis::room::conductor;
+use crate::basis::room::scheduler;
+use crate::basis::unit::team::kernel;
 use crate::machine::board;
-use crate::machine::hart::{self, HartId};
-use crate::machine::image::{ROOT_STACK_CANARY, root_stack_base};
-use crate::machine::mode;
+use crate::machine::hart;
+use crate::machine::hart::HartId;
+use crate::machine::image::ROOT_STACK_CANARY;
+use crate::machine::image::root_stack_base;
+use crate::machine::mmu::riscv::identity;
+use crate::machine::mmu::riscv::mode;
+use crate::machine::mmu::riscv::table::PteFlags;
 use crate::machine::switcher::context::TrapContext;
-use crate::machine::switcher::stack::{arm_hart, boot_stack};
+use crate::machine::switcher::stack::arm_hart;
+use crate::machine::switcher::stack::boot_stack;
 use crate::machine::switcher::trampoline::restore;
+use kernel_api::address::PAGE_SIZE;
+use kernel_api::address::PhysAddr;
+use kernel_api::address::VirtAddr;
 
 global_asm!(
     ".section .text.boot",
@@ -56,10 +70,10 @@ pub fn start() -> Result<(), BootError> {
     register_runtime_hooks();
 
     if let Some(entry) = spawn_entry()? {
-        crate::basis::work::room::halt::beacon::arm(&entry);
+        crate::basis::room::halt::beacon::arm(&entry);
     }
 
-    crate::basis::work::unit::tally::rooted();
+    crate::basis::unit::tally::rooted();
 
     boot_harts()?;
 
@@ -76,25 +90,24 @@ pub fn run() -> ! {
 }
 
 pub(crate) fn register_runtime_hooks() {
-    use crate::basis::work::room::halt;
+    use crate::basis::room::halt;
 
-    static EXIT_HOOKS: &[fn(&alloc::sync::Arc<crate::basis::work::unit::task::Task>)] = &[
-        crate::basis::work::unit::lifecycle::doom,
-        crate::basis::work::pend::doom,
+    static EXIT_HOOKS: &[fn(&alloc::sync::Arc<crate::basis::unit::task::Task>)] = &[
+        crate::basis::unit::lifecycle::doom,
+        crate::basis::pend::doom,
     ];
-    crate::basis::work::unit::lifecycle::hook(EXIT_HOOKS);
+    crate::basis::unit::lifecycle::hook(EXIT_HOOKS);
 
     const SHUTDOWN_HOOKS: &[fn()] = &[
         crate::entry::boot::iommu::shutdown,
         crate::entry::report::shutdown::report,
-        crate::basis::work::room::scheduler::rip,
-        crate::basis::memory::flat::allocator::block::flush,
+        crate::basis::room::scheduler::rip,
+        crate::machine::allocator::block::flush,
     ];
     halt::hook(SHUTDOWN_HOOKS, crate::entry::report::shutdown::waiting);
 }
 
-fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::work::unit::task::Task>>, BootError>
-{
+fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Task>>, BootError> {
     let Some(region) = board::info().initrd() else {
         return Ok(None);
     };
@@ -105,12 +118,11 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::work::unit::tas
             base: region.base,
             size: region.size,
         })?;
-    let team = crate::basis::work::unit::capsule::assemble(capsule).map_err(|source| {
-        BootError::Mapping {
+    let team =
+        crate::basis::unit::capsule::assemble(capsule).map_err(|source| BootError::Mapping {
             operation: MapOperation::AssembleCapsule,
             source,
-        }
-    })?;
+        })?;
 
     let mapping_size = region.size.next_multiple_of(PAGE_SIZE);
     let mapping = map_borrowed(
@@ -212,7 +224,7 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::work::unit::tas
             source,
         }
     })?;
-    crate::basis::work::unit::task::Task::release(&bootstrap).map_err(|source| {
+    crate::basis::unit::task::Task::release(&bootstrap).map_err(|source| {
         BootError::BootstrapRelease {
             task: bootstrap.ident.id,
             source,
@@ -305,6 +317,6 @@ pub(crate) extern "C" fn boot_main() -> ! {
         ::core::arch::asm!("sfence.vma", "fence.i");
     }
     arm_hart();
-    identity::occupy(crate::basis::memory::nest::Asid::kernel());
+    identity::occupy(crate::basis::nest::Asid::kernel());
     run()
 }

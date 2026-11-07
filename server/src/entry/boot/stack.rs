@@ -1,22 +1,29 @@
-use crate::basis::memory::cell::Owner;
+use crate::basis::cell::page::Owner;
 use alloc::vec::Vec;
 use riscv::register::satp;
 
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::address::{PageCount, PageIndex, VirtAddr};
-use crate::basis::memory::flat::Flat;
-use crate::basis::memory::nest::table::PteFlags;
-use crate::basis::memory::nest::{Access, NestError};
-use crate::basis::work::room::deadline;
-use crate::basis::work::unit::team::kernel;
+use crate::basis::flat::Flat;
+use crate::basis::nest::Access;
+use crate::basis::nest::NestError;
+use crate::basis::room::deadline;
+use crate::basis::unit::team::kernel;
 use crate::machine::board;
-use crate::machine::hart::{self, HartId};
-use crate::machine::layout::{
-    HART_FRAME_BASE, TRAP_STACK_GUARD, TRAP_STACK_SLOT_SHIFT, TRAP_STACK_SLOT_SIZE,
-};
+use crate::machine::hart;
+use crate::machine::hart::HartId;
+use crate::machine::layout::HART_FRAME_BASE;
+use crate::machine::layout::TRAP_STACK_GUARD;
+use crate::machine::layout::TRAP_STACK_SLOT_SHIFT;
+use crate::machine::layout::TRAP_STACK_SLOT_SIZE;
+use crate::machine::mmu::riscv::table::PteFlags;
 use crate::machine::switcher::context::TrapContext;
-use crate::machine::switcher::stack::{self, TRAP_STACK_CANARY, trap_stack_base, trap_stack_edge};
+use crate::machine::switcher::stack;
+use crate::machine::switcher::stack::TRAP_STACK_CANARY;
+use crate::machine::switcher::stack::trap_stack_base;
+use crate::machine::switcher::stack::trap_stack_edge;
 use crate::machine::switcher::trampoline::check_fits_page;
+use kernel_api::address::PAGE_SIZE;
+use kernel_api::address::PageCount;
+use kernel_api::address::PageIndex;
 
 use super::attach_exact;
 
@@ -47,10 +54,7 @@ pub(super) fn init() -> Result<(), NestError> {
     let flags = PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::A | PteFlags::D;
     let attrs = flags & (PteFlags::U | PteFlags::G | PteFlags::A | PteFlags::D);
     for h in 0..segments {
-        let boot = crate::tag!(
-            TrapStack,
-            crate::basis::memory::flat::allocate_cell(Owner::Kernel)?
-        );
+        let boot = crate::tag!(TrapStack, crate::basis::flat::allocate_cell(Owner::Kernel)?);
         boot_stacks.push(boot);
 
         let mut indexed = Vec::new();
@@ -60,10 +64,7 @@ pub(super) fn init() -> Result<(), NestError> {
         for page in 0..body_pages {
             indexed.push((
                 PageIndex::new(page),
-                crate::tag!(
-                    TrapStack,
-                    crate::basis::memory::flat::allocate_cell(Owner::Kernel)?
-                ),
+                crate::tag!(TrapStack, crate::basis::flat::allocate_cell(Owner::Kernel)?),
             ));
         }
         let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;
@@ -87,8 +88,9 @@ pub(super) fn init() -> Result<(), NestError> {
         let frame = unsafe { &mut *(pa.as_usize() as *mut TrapContext) };
         frame.kernel_satp = ksatp;
         frame.kernel_sp = trap_stack_edge(h);
-        frame.trap_handler =
-            VirtAddr::from_raw(crate::entry::trap::trap_handler as *const () as usize);
+        frame.trap_handler = crate::machine::mmu::riscv::canonical(
+            crate::entry::trap::trap_handler as *const () as usize,
+        );
         frame.trap_stack_corrupt = TRAP_STACK_CANARY;
         frame.user_pa = pa;
         frame.user_satp = ksatp;

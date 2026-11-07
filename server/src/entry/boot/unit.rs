@@ -1,4 +1,4 @@
-use crate::basis::memory::cell::Owner;
+use crate::basis::cell::page::Owner;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -6,22 +6,34 @@ use erra::ResultExt;
 
 use riscv::register::satp;
 
-use crate::basis::memory::PAGE_SIZE;
-use crate::basis::memory::address::{PageCount, PageIndex, PhysAddr, VirtAddr};
-use crate::basis::memory::flat::{BorrowedRegion, Flat, FlatRange};
-use crate::basis::memory::nest::table::PteFlags;
-use crate::basis::memory::nest::{Access, ActiveRange, NestError, Placement, RegionId, identity};
-use crate::basis::work::unit::space::SpaceBuilder;
-use crate::basis::work::unit::team;
+use crate::basis::flat::BorrowedRegion;
+use crate::basis::flat::Flat;
+use crate::basis::flat::FlatRange;
+use crate::basis::nest::Access;
+use crate::basis::nest::ActiveRange;
+use crate::basis::nest::NestError;
+use crate::basis::nest::Placement;
+use crate::basis::nest::RegionId;
+use crate::basis::unit::space::SpaceBuilder;
+use crate::basis::unit::team;
 use crate::machine::board;
 use crate::machine::hart;
 use crate::machine::image::kernel_edge;
-use crate::machine::layout::{HART_FRAME_BASE, TRAMPOLINE, trampoline_pa};
-use crate::machine::mode;
+use crate::machine::layout::HART_FRAME_BASE;
+use crate::machine::layout::TRAMPOLINE;
+use crate::machine::layout::trampoline_pa;
+use crate::machine::mmu::riscv::identity;
+use crate::machine::mmu::riscv::mode;
+use crate::machine::mmu::riscv::table::PteFlags;
+use kernel_api::address::PAGE_SIZE;
+use kernel_api::address::PageCount;
+use kernel_api::address::PageIndex;
+use kernel_api::address::PhysAddr;
+use kernel_api::address::VirtAddr;
 
 use super::attach_exact;
 
-use crate::basis::work::unit::NestResult;
+use crate::basis::unit::NestResult;
 
 unsafe extern "C" {
     static _kernel_base: u8;
@@ -36,7 +48,7 @@ pub fn init() -> NestResult<()> {
         unsafe {
             let m = board::info();
 
-            if VirtAddr::from_raw(m.dram.base + m.dram.size) > mode::upper() {
+            if crate::machine::mmu::riscv::canonical(m.dram.base + m.dram.size) > mode::upper() {
                 return Err(NestError::DramOverlap);
             }
 
@@ -100,7 +112,12 @@ pub fn init() -> NestResult<()> {
                     size,
                     source,
                     attrs: arch(flags),
-                    grid: ActiveRange::new(VirtAddr::from_raw(start), size, access, access)?,
+                    grid: ActiveRange::new(
+                        crate::machine::mmu::riscv::canonical(start),
+                        size,
+                        access,
+                        access,
+                    )?,
                     lower: ActiveRange::new(
                         VirtAddr::wrap(mode::lower().as_usize() + start),
                         size,
@@ -111,7 +128,7 @@ pub fn init() -> NestResult<()> {
             }
 
             // 整段 DRAM 先占，再抬高窗口下界（抬高之后整段就落在窗外了），失败显式交还。
-            let dram = VirtAddr::from_raw(m.dram.base);
+            let dram = crate::machine::mmu::riscv::canonical(m.dram.base);
             if !nest.window_contains(RegionId::Normal, dram, m.dram.size) {
                 return Err(NestError::NoRegion);
             }
@@ -192,10 +209,8 @@ pub fn init() -> NestResult<()> {
 
             let n = hart::hart_count();
             for h in 0..n {
-                let frame = crate::tag!(
-                    HartFrame,
-                    crate::basis::memory::flat::allocate_cell(Owner::Kernel)?
-                );
+                let frame =
+                    crate::tag!(HartFrame, crate::basis::flat::allocate_cell(Owner::Kernel)?);
                 let mut indexed = Vec::new();
                 indexed
                     .try_reserve_exact(1)

@@ -1,4 +1,5 @@
-use kernel_api::boot::initrd::{PREAMBLE, entry_image};
+use kernel_api::boot::initrd::PREAMBLE;
+use kernel_api::boot::initrd::entry_image;
 
 #[test]
 fn preamble_selects_only_the_initial_capsule() {

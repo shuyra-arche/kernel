@@ -1,10 +1,15 @@
 use alloc::vec::Vec;
-use kernel_api::{abi::call::pend::PendFail, boot::ledger::Entry, boot::ledger::Name};
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::boot::ledger::Entry;
+use kernel_api::boot::ledger::Name;
 
-use crate::basis::work::pend::{self, PendEntry};
-use crate::basis::work::unit::task::Task;
+use crate::basis::pend;
+use crate::basis::pend::PendEntry;
+use crate::basis::unit::task::Task;
 
-use super::{DeliveryError, Failure, valid};
+use super::DeliveryError;
+use super::Failure;
+use super::valid;
 
 pub(crate) struct Frozen {
     pub(super) entries: Vec<(Name, PendEntry)>,
@@ -16,7 +21,7 @@ impl Frozen {
     }
     pub(crate) fn authority(self, target: &Task) -> Result<Vec<Entry>, DeliveryError> {
         let closed = target.pend.lock();
-        let commit = crate::basis::work::commit();
+        let commit = crate::basis::commit();
         if !target.held() || self.entries.iter().any(|(n, p)| !valid(*n, p)) {
             return Err(Failure {
                 reason: PendFail::Denied,

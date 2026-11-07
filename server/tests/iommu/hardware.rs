@@ -1,10 +1,14 @@
-//! Only the hardware effect boundary is scripted. Cell, IoSpace, state decisions,
+//! Only the hardware effect boundary is scripted. Page, IoSpace, state decisions,
 //! batch identities, RISC-V encoding and allocator return effects are production code.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use super::iommu::{BatchId, Hardware, HardwareError, Projection};
+use super::iommu::BatchId;
+use super::iommu::Hardware;
+use super::iommu::HardwareError;
+use super::iommu::Projection;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Call {

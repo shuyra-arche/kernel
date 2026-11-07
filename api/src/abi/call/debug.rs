@@ -1,6 +1,6 @@
 //! call::debug — **Debug 域（class 8：借内核那支 DBCN 出口）**：调用表（[`DebugCall`]）与失败词汇（[`DebugFail`]）。
 
-use crate::model::identity::VirtAddr;
+use crate::address::VirtAddr;
 
 /// `DebugFail` 的结果别名。
 pub type DebugResult<T> = Result<T, erra::Error<DebugFail>>;
@@ -52,7 +52,8 @@ pub mod operations {
         pub on: usize,
     }
 }
-pub use operations::{DebugCall, DebugFail};
+pub use operations::DebugCall;
+pub use operations::DebugFail;
 
 /// [`DebugCall`] 那两格一次能搬的字节数上限。
 ///

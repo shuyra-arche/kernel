@@ -1,5 +1,6 @@
 use kernel_api::abi::register::Wire;
-use kernel_api::model::memory::{AcquireSource, Allocation};
+use kernel_api::model::cell::AcquireSource;
+use kernel_api::model::cell::Allocation;
 
 #[test]
 fn allocation_requires_a_page_and_rounds_only_valid_requests() {

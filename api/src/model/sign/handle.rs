@@ -12,7 +12,7 @@ impl SignId {
 }
 
 bitflags::bitflags! {
-    /// Independent control-flow authority; no Cell access or Unit control follows.
+    /// Independent control-flow authority; no Page access or Unit control follows.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct SignRights: u8 {
         const LISTEN = 1;

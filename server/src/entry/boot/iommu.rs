@@ -1,18 +1,21 @@
 //! Initial trusted platform binding. Device translation remains Off: these engines
 //! own CQ/FQ/completion storage until a runtime device binding consumes them.
-use crate::basis::memory::address::PhysAddr;
-use crate::basis::memory::cell::Owner;
-use crate::basis::memory::flat::{BorrowedRegion, Flat, allocator::frame};
-use crate::basis::memory::nest::iommu::riscv::{
-    Engine, Phase, controllers::Controllers, topology::Topology,
-};
-use crate::basis::memory::nest::{Access, Placement, RegionId};
-use crate::basis::work::unit::team::kernel;
-use crate::machine::{
-    board,
-    iommu::{Mmio, controllers::CONTROLLERS},
-};
+use crate::basis::cell::page::Owner;
+use crate::basis::flat::BorrowedRegion;
+use crate::basis::flat::Flat;
+use crate::basis::nest::Access;
+use crate::basis::nest::Placement;
+use crate::basis::nest::RegionId;
+use crate::basis::unit::team::kernel;
+use crate::machine::board;
+use crate::machine::iommu::riscv::Engine;
+use crate::machine::iommu::riscv::Phase;
+use crate::machine::iommu::riscv::controllers::Controllers;
+use crate::machine::iommu::riscv::device::CONTROLLERS;
+use crate::machine::iommu::riscv::mmio::Mmio;
+use crate::machine::iommu::riscv::topology::Topology;
 use kernel_api::abi::call::pend::PendFail;
+use kernel_api::address::PhysAddr;
 
 const STEP_BUDGET: usize = 1_000_000;
 
@@ -65,14 +68,14 @@ pub(super) fn init() -> Result<(), PendFail> {
     if regions.len() != 1 {
         return Err(PendFail::Denied);
     }
-    let route = crate::machine::iommu::interrupt::plan::Plan::discover(
+    let route = crate::machine::iommu::riscv::interrupt::plan::Plan::discover(
         &tree,
         crate::machine::hart::hart_id().get(),
         regions[0].base,
     )
     .map_err(|_| PendFail::Denied)?;
     let plic = super::pci::mapped(route.base, route.size)?;
-    unsafe { crate::machine::iommu::interrupt::install(plic, route) }
+    unsafe { crate::machine::iommu::riscv::interrupt::install(plic, route) }
         .map_err(|_| PendFail::Denied)?;
     let mut storage = CONTROLLERS.lock();
     if storage.is_some() {
@@ -82,7 +85,7 @@ pub(super) fn init() -> Result<(), PendFail> {
     let controllers = storage.as_mut().expect("installed controller registry");
     let nest = &kernel().ok_or(PendFail::Denied)?.space.nest;
     for region in regions {
-        // MMIO remains a borrowed physical range, not an allocator-owned Cell.
+        // MMIO remains a borrowed physical range, not an allocator-owned Page.
         // The mapping stays in the Kernel Nest for the lifetime of the engine.
         let borrowed = unsafe { BorrowedRegion::new(PhysAddr::from_raw(region.base), 4096) }
             .map_err(|_| PendFail::Denied)?;
@@ -97,9 +100,9 @@ pub(super) fn init() -> Result<(), PendFail> {
             .attach(reservation, source, access, access)
             .map_err(|_| PendFail::Denied)?;
         let cells = [
-            frame::cell(Owner::Kernel),
-            frame::cell(Owner::Kernel),
-            frame::cell(Owner::Kernel),
+            crate::basis::cell::allocate(Owner::Kernel),
+            crate::basis::cell::allocate(Owner::Kernel),
+            crate::basis::cell::allocate(Owner::Kernel),
         ];
         let [command, fault, completion] = cells;
         let cells = [
@@ -145,13 +148,13 @@ pub(super) fn init() -> Result<(), PendFail> {
     Ok(())
 }
 
-fn failure(error: crate::basis::memory::nest::iommu::riscv::EngineError) -> PendFail {
+fn failure(error: crate::machine::iommu::riscv::EngineError) -> PendFail {
     log::error!("iommu: command engine failure: {error:?}; hardware pages retained");
     PendFail::Denied
 }
 
 pub(super) fn shutdown() {
-    crate::machine::iommu::interrupt::report();
+    crate::machine::iommu::riscv::interrupt::report();
     let mut storage = CONTROLLERS.lock();
     let Some(controllers) = storage.as_mut() else {
         return;

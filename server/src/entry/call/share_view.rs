@@ -1,19 +1,26 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use kernel_api::{
-    abi::call::pend::PendFail, abi::call::share_view::ShareCall, abi::call::share_view::ShareFail,
-    model::identity::Mark, model::identity::PendId, model::memory::FlatReference,
-    model::view::ViewKind,
-};
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::abi::call::share_view::ShareCall;
+use kernel_api::abi::call::share_view::ShareFail;
+use kernel_api::model::cell::FlatReference;
+use kernel_api::model::identity::Mark;
+use kernel_api::model::identity::PendId;
+use kernel_api::model::view::ViewKind;
 
 use super::gate;
-use super::outcome::{Outcome, answer, answer_pair};
-use crate::basis::memory::nest::Access;
-use crate::basis::work::pend::{self, Modifiable, Need};
-use crate::basis::work::room::conductor::current;
-use crate::basis::work::unit::task::TaskIdent;
-use crate::basis::work::view::{self, View};
+use super::outcome::Outcome;
+use super::outcome::answer;
+use super::outcome::answer_pair;
+use crate::basis::nest::Access;
+use crate::basis::pend;
+use crate::basis::pend::Modifiable;
+use crate::basis::pend::Need;
+use crate::basis::room::conductor::current;
+use crate::basis::unit::task::TaskIdent;
+use crate::basis::view;
+use crate::basis::view::View;
 use crate::machine::switcher::context::TrapContext;
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: ShareCall, ident: Arc<TaskIdent>) -> Outcome {
@@ -56,7 +63,7 @@ fn subset_to_access(subset: Modifiable) -> Result<Access, PendFail> {
 }
 
 pub(crate) fn create_share(
-    task: &Arc<crate::basis::work::unit::task::Task>,
+    task: &Arc<crate::basis::unit::task::Task>,
     reference: FlatReference,
     requested: Modifiable,
 ) -> Result<PendId, PendFail> {
@@ -123,7 +130,7 @@ pub(crate) fn create_share(
             .try_reserve(1)
             .map_err(|_| PendFail::OoM)?;
 
-        let _commit = crate::basis::work::commit();
+        let _commit = crate::basis::commit();
         let _publication = authorization.begin_withdraw()?;
         if !pend::live(task) || !authorization.private_owner(task.ident.id) {
             return Err(PendFail::Denied);

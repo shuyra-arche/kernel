@@ -1,8 +1,9 @@
+use crate::machine::mmu::riscv::Address;
 use ::core::fmt;
 
-use sbi::{DbcnCall, ecall::SArgs, fid::Dbcn};
-
-use crate::basis::memory::address::VirtAddr;
+use sbi::DbcnCall;
+use sbi::ecall::SArgs;
+use sbi::fid::Dbcn;
 
 mod line;
 mod logger;
@@ -57,20 +58,23 @@ fn physical_buffer(va: usize, len: usize) -> Option<usize> {
 }
 
 fn translate_kernel(va: usize, len: usize) -> Option<usize> {
-    if VirtAddr::from_raw(va).is_user() {
+    if crate::machine::mmu::riscv::canonical(va).is_user() {
         return None;
     }
-    let space = &crate::basis::work::unit::team::kernel()?.space;
-    let pa0 = space.nest.physical_at(VirtAddr::from_raw(va))?;
+    let space = &crate::basis::unit::team::kernel()?.space;
+    let pa0 = space
+        .nest
+        .physical_at(crate::machine::mmu::riscv::canonical(va))?;
     let mut va_cur = va;
     let end = va + len;
     while va_cur < end {
-        let pa = space.nest.physical_at(VirtAddr::from_raw(va_cur))?;
+        let pa = space
+            .nest
+            .physical_at(crate::machine::mmu::riscv::canonical(va_cur))?;
         if pa.as_usize() != pa0.as_usize() + (va_cur - va) {
             return None;
         }
-        va_cur =
-            (va_cur & !(crate::basis::memory::PAGE_SIZE - 1)) + crate::basis::memory::PAGE_SIZE;
+        va_cur = (va_cur & !(kernel_api::address::PAGE_SIZE - 1)) + kernel_api::address::PAGE_SIZE;
     }
     Some(pa0.as_usize())
 }

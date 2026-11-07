@@ -124,9 +124,9 @@ impl Wire for crate::model::modifiable::Modifiable {
     }
 }
 
+mod cell;
 mod clone_view;
 mod identity;
-mod memory;
 mod pend;
 mod sign;
 mod unit;

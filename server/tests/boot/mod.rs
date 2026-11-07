@@ -10,27 +10,22 @@ mod region;
 mod reserved;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
-#[path = "../../src/basis/memory/nest/iommu/riscv/topology/mod.rs"]
+#[path = "../../src/machine/iommu/riscv/topology/mod.rs"]
 pub(crate) mod topology;
-
-mod basis {
-    pub(crate) mod memory {
-        pub const PAGE_SIZE: usize = 4096;
-        pub(crate) mod nest {
-            pub(crate) mod iommu {
-                pub(crate) mod riscv {
-                    pub(crate) use crate::topology;
-                }
-            }
-        }
-    }
-}
 
 mod authority;
 mod interrupt;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
-#[path = "../../src/machine/iommu/interrupt/plan.rs"]
+#[path = "../../src/machine/iommu/riscv/interrupt/plan.rs"]
 mod interrupt_plan;
 mod routing;
 mod tree;
+
+mod machine {
+    pub(crate) mod iommu {
+        pub(crate) mod riscv {
+            pub(crate) use crate::topology;
+        }
+    }
+}

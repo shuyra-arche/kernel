@@ -1,8 +1,9 @@
-use crate::basis::memory::PAGE_SIZE;
 use crate::machine::hart::HartId;
 use crate::machine::image::root_stack_edge;
+use kernel_api::address::PAGE_SIZE;
 
-use super::{MachineError, Region};
+use super::MachineError;
+use super::Region;
 
 mod hart_info;
 use hart_info::HartInfo;

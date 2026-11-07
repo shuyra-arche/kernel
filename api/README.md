@@ -8,8 +8,9 @@ code or runtime state. There is no Env package or compatibility facade.
 
 | Path | Responsibility |
 | --- | --- |
-| `model::identity` | TaskId, TeamId, PendId, VirtAddr and Mark |
-| `model::memory` | FlatReference, MappingId, allocation, reference ranges and placement |
+| `address` | PhysAddr, VirtAddr, PageIndex, PageOffset, PageCount and page geometry constants |
+| `model::identity` | TaskId, TeamId, PendId and Mark |
+| `model::cell` | FlatReference, MappingId, allocation, reference ranges, Position and Attachment |
 | `model::modifiable` | Modifiable: shared read or exclusive write access |
 | `model::unit` | ProgramKind, UnitTarget, control authorities, task exit, result and join values |
 | `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
@@ -22,7 +23,7 @@ code or runtime state. There is no Env package or compatibility facade.
 | `abi::error` | Common failure representation and dispatch errors |
 | `boot` | Initial-task arguments, Capsule, resource Ledger and initrd preamble |
 
-The crate root exposes these three domains directly. Import names from their
+The crate root exposes these four domains directly. Import names from their
 owning modules; neither API nor Client flattens the whole vocabulary into a root
 prelude. Model values install no allocator, locks, TLS or task cleanup. Concrete
 descriptor methods remain inherent methods on their types; their implementations
@@ -71,6 +72,22 @@ This is an intentional model/ABI break with no legacy aliases:
 | All boot entries typed as data authority | Ledger version 2, ResourceKind-qualified raw handles |
 | Implicit writable bootstrap handoff | Spawn execution, then explicit Pend Accord before starting the child |
 | Implicit same-Team control | Explicit Task controller; membership does not grant peer control |
+
+Cell operations use `abi::call::cell::CellCall` and `model::cell`; the old
+MemoryCall/model::memory paths are removed. VirtAddr moves from model::identity
+to address. Slot 10 (Transfer) is retired: Push (15) and Pull (16) take a Position
+descriptor and optional change receipt. Begin (17) / End (18) delimit admission
+changes across calls. Memo Pull uses FlatReference::NONE and zero destination
+page; withdrawal does not mint ownership. Receipts are task-local authorization
+objects, not Page IDs or pointers.
+
+Old Attach slot 12 is retired. Slot 19 takes MappingTarget plus a pointer to one
+72-byte Attachment containing ReferenceRange, Placement, access, MappingControl
+and optional change receipt. Nonzero receipts are accepted for I/O publication;
+CPU supply under a change uses Push. Detach (13), Inspect (14), class 2 and their
+error encodings are unchanged. The API codec rejects malformed descriptors;
+server authority checks remain mandatory. Client callers must marshal these
+new descriptors and rebuild with the matching API.
 
 Unchanged operations keep their slot numbers; removed operations are rejected.
 Do not infer compatibility from a matching call class: permission values and

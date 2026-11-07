@@ -1,7 +1,7 @@
-use kernel_api::model::{
-    identity::VirtAddr,
-    memory::{FlatReference, Placement, ReferenceRange},
-};
+use kernel_api::address::VirtAddr;
+use kernel_api::model::cell::FlatReference;
+use kernel_api::model::cell::Placement;
+use kernel_api::model::cell::ReferenceRange;
 
 fn reference() -> FlatReference {
     FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap()

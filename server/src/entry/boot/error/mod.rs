@@ -1,13 +1,14 @@
-use ::core::fmt::{self, Write};
+use ::core::fmt;
+use ::core::fmt::Write;
 
-use crate::basis::memory::flat::allocator::InitError;
-use crate::basis::memory::nest::NestError;
+use crate::basis::nest::NestError;
 use crate::entry::report::halt;
+use crate::machine::allocator::InitError;
 use crate::machine::board::MachineError;
 use crate::machine::clock::ClockError;
 use crate::machine::console::Sink;
 use crate::machine::hart::HartId;
-use crate::machine::mode::SatpError;
+use crate::machine::mmu::riscv::mode::SatpError;
 
 mod map_operation;
 mod resource_operation;

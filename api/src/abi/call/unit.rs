@@ -1,13 +1,17 @@
 //! call::unit — **Unit 域（class 1：装域 / 创建 task / 血缘）**：调用表（[`UnitCall`]）与失败词汇（[`UnitFail`]）。
 
-use crate::model::identity::{TaskId, TeamId, VirtAddr};
-use crate::model::unit::{ControlId, ProgramKind};
+use crate::address::VirtAddr;
+use crate::model::identity::TaskId;
+use crate::model::identity::TeamId;
+use crate::model::unit::ControlId;
+use crate::model::unit::ProgramKind;
 use crate::model::wait::Wait;
 
 /// `UnitFail` 的结果别名。
 pub type UnitResult<T> = Result<T, erra::Error<UnitFail>>;
 
-use crate::model::unit::{JoinReply, UnitTarget};
+use crate::model::unit::JoinReply;
+use crate::model::unit::UnitTarget;
 
 #[kernel_api_macros::envcall(class = 1, call = UnitCall)]
 pub mod operations {
@@ -138,4 +142,5 @@ pub mod operations {
         pub task: super::TaskId,
     }
 }
-pub use operations::{UnitCall, UnitFail};
+pub use operations::UnitCall;
+pub use operations::UnitFail;
