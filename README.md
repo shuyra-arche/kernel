@@ -50,11 +50,23 @@ The current public ABI still names mapping handles `ViewId`, `ViewSelection` and
 Allocator-managed 4 KiB RAM has a `Cell`: it consumes the unique allocation
 receipt and assigns a non-reused instance identity. Flat consumes unique Cells
 when creating slots; each managed slot holds an `Arc<Cell>`. Mapping publication
-and retirement retain that same Cell directly. There is no intermediate Frame
+and retirement retain that same Cell through a non-cloneable hardware obligation.
+There is no intermediate Frame
 resource or separate Custody state. A retained `Arc<Cell>` cannot be imported
 into another Flat; sharing uses ranges of the existing Flat. Moving/Reserved
 slots and the Flat locks govern transfer admission, while Nest governs hardware
 withdrawal and settlement. Transfer does not create a new Cell or change its ID.
+
+Managed CPU mappings register a Cell obligation before publishing PTEs. A
+prepared obligation can be cancelled; after publication it must be retired and
+explicitly settled after successful shootdown. Failed invalidation keeps the
+records for retry, including global scope when a batch changes G entries.
+Dropping an unsettled published obligation permanently retains the Cell and
+allocation and rejects new registrations. This allocation-free fallback is a
+leak, not a recoverable quarantine queue. Cell destruction returns memory only
+when its hardware ledger is clear; ordinary references must also have ended.
+DMA/IOMMU queue processing and External reclamation are not wired into this
+protocol yet.
 
 This is the Internal backing foundation, not the complete Cell protocol. Unit
 owner assignment/transfer, larger Cells, and External registration remain in
@@ -111,8 +123,9 @@ The isolated host harness under `server/tests/` compiles the production Cell
 and slot-admission modules directly, with a bounded test allocator to observe
 physical-address reuse and return counts. It does not load the RV64-only Server
 crate or mock Cell behavior. These checks cover instance identity, allocation
-lifetime, consuming import and reference retention; they do not establish full
-Flat/Nest integration, transfer races, TLB/DMA completion or Unit ownership.
+lifetime, consuming import, hardware-obligation retention and concurrent
+settlement bookkeeping. They do not establish full Flat/Nest integration,
+transfer races, actual TLB/DMA completion or Unit ownership.
 
 Generic byte codecs and service-protocol macros are no longer part of Kernel.
 The [API migration notes](api/README.md#source-migration-and-abi-compatibility) list removed

@@ -1,0 +1,77 @@
+use alloc::sync::Arc;
+use core::ops::Deref;
+
+use super::{Cell, RetainError};
+
+#[derive(Debug, PartialEq, Eq)]
+enum Phase {
+    Prepared,
+    Published,
+    Retiring,
+    Settled,
+}
+
+/// 内核持有的硬件访问责任。不是 Pend，不授予读写权，也不能复制为两个完成凭证。
+#[derive(Debug)]
+pub(crate) struct Retention {
+    cell: Option<Arc<Cell>>,
+    phase: Phase,
+}
+
+impl Retention {
+    pub(super) fn prepare(cell: &Arc<Cell>) -> Result<Self, RetainError> {
+        cell.reclaim.register()?;
+        Ok(Self {
+            cell: Some(cell.clone()),
+            phase: Phase::Prepared,
+        })
+    }
+
+    pub(crate) fn cell(&self) -> &Arc<Cell> {
+        self.cell.as_ref().expect("live retention")
+    }
+
+    /// 必须先于首条硬件可见发布。此后 Drop 不再视为安全取消。
+    pub(crate) fn publish(&mut self) {
+        assert_eq!(self.phase, Phase::Prepared);
+        self.phase = Phase::Published;
+    }
+
+    /// 撤销已提交，但硬件结算尚未完成。
+    pub(crate) fn retire(mut self) -> Self {
+        assert_eq!(self.phase, Phase::Published);
+        self.phase = Phase::Retiring;
+        self
+    }
+
+    /// # Safety
+    /// 调用方必须证明本凭证对应的访问已撤销，相关翻译及在途访问均已结清。
+    /// Unit 退出、通知、请求已提交或用户态 Ack 都不构成这个证明。
+    pub(crate) unsafe fn settle(mut self) {
+        assert_eq!(self.phase, Phase::Retiring);
+        self.cell().reclaim.discharge();
+        self.phase = Phase::Settled;
+    }
+}
+
+impl Deref for Retention {
+    type Target = Cell;
+    fn deref(&self) -> &Cell {
+        self.cell()
+    }
+}
+
+impl Drop for Retention {
+    fn drop(&mut self) {
+        match self.phase {
+            Phase::Prepared => self.cell().reclaim.discharge(),
+            Phase::Settled => {}
+            Phase::Published | Phase::Retiring => {
+                // 非正常遗失责任时永久隔离：保留身份、账目和物理分配，禁止新登记。
+                // 这是无分配的 fail-closed 兜底，不是可枚举/可恢复的隔离队列。
+                self.cell().reclaim.abandon();
+                core::mem::forget(self.cell.take());
+            }
+        }
+    }
+}

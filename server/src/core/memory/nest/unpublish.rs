@@ -101,9 +101,9 @@ impl Nest {
         }
         state.pending_mappings.push(mapping.clone());
         let (_, cell) = inner.published.remove(at);
-        state.retired_cells.push(cell);
+        state.retired_cells.push(cell.retire());
         drop(inner);
-        state.mark_dirty();
+        state.mark_dirty(false);
         drop(state);
         // 退休的承载只在这次确认之后才随 `finish_invalidation` 放掉。
         self.finish_invalidation()?;

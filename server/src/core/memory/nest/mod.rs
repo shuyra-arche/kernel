@@ -12,7 +12,7 @@ use riscv::register::satp;
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageOffset, PhysAddr, VirtAddr};
-use crate::core::memory::cell::Cell;
+use crate::core::memory::cell::Retention;
 use crate::core::memory::flat::Pages;
 use crate::machine::layout::{TEAM_FRAME_BASE, TEAM_FRAME_WINDOW_SIZE, TRAP_STACK_BASE};
 use crate::machine::mode;
@@ -421,7 +421,7 @@ impl Nest {
         }
         // 本关系要发布哪些页：Managed 只取已物化的，缺口留给缺页；
         // Borrowed 的整段都可用，挂载时就全部发布。
-        let mut published: Vec<(usize, Arc<Cell>)> = Vec::new();
+        let mut published: Vec<(usize, Retention)> = Vec::new();
         let mut borrowed: Vec<(VirtAddr, usize, Access)> = Vec::new();
         let mut pages: Option<Pages> = None;
         // 发布窗口的短期驻留：在抓承载快照**之前**取得，覆盖 PTE 写入与发布记录提交，
@@ -449,7 +449,7 @@ impl Nest {
                     let page = offset.get();
                     let address = start + page * PAGE_SIZE;
                     if inner.covers(address.as_usize(), address.as_usize()) {
-                        published.push((page, cell));
+                        published.push((page, cell.prepare_hardware()?));
                     }
                 }
             }
@@ -498,6 +498,9 @@ impl Nest {
         if self.asid.is_kernel() || mapping.is_global() {
             mapping.state.lock().source.mark_untransferable();
         }
+        for (_, retained) in &mut published {
+            retained.publish();
+        }
         state.pending_mappings.push(mapping.clone());
         for run in mapping.state.lock().runs(start, &published) {
             let run = run?;
@@ -531,7 +534,7 @@ impl Nest {
             }
         }
         state.index.insert(node);
-        state.mark_dirty();
+        state.mark_dirty(mapping.is_global());
         drop(state);
         drop(lease);
         self.finish_invalidation()
@@ -586,7 +589,7 @@ impl Nest {
         for (offset, cell) in materialized {
             let page = first + offset.get();
             if !inner.publishes(page) {
-                fresh.push((page, cell));
+                fresh.push((page, cell.prepare_hardware()?));
             }
         }
         if fresh.is_empty() {
@@ -611,6 +614,9 @@ impl Nest {
         if self.asid.is_kernel() || mapping.is_global() {
             inner.source.mark_untransferable();
         }
+        for (_, retained) in &mut fresh {
+            retained.publish();
+        }
         state.pending_mappings.push(mapping.clone());
         for run in inner.runs(mapping.initial_start(), &fresh) {
             let run = run?;
@@ -625,7 +631,7 @@ impl Nest {
         for (page, cell) in fresh {
             inner.publish(page, cell);
         }
-        state.mark_dirty();
+        state.mark_dirty(mapping.is_global());
         drop(inner);
         drop(state);
         drop(lease);
@@ -731,7 +737,7 @@ impl Nest {
         inner.active = transition.active;
         drop(inner);
         state.index.refresh(&mapping);
-        state.mark_dirty();
+        state.mark_dirty(mapping.is_global());
         drop(state);
         self.finish_invalidation()
     }
@@ -911,7 +917,7 @@ impl Nest {
             let page = inner.published[index].0;
             if page >= first_page && page <= last_page {
                 let (_, cell) = inner.published.remove(index);
-                state.retired_cells.push(cell);
+                state.retired_cells.push(cell.retire());
             }
         }
         inner.active = next;
@@ -921,7 +927,7 @@ impl Nest {
             state.index.insert(node);
         }
         state.retirement.extend(tickets.iter().copied());
-        state.mark_dirty();
+        state.mark_dirty(mapping.is_global());
         drop(state);
         drop(occupancy);
         // 三、同步成功之后才结算这一段的票；失败时票、Cell、表页与来源都留着。
@@ -1072,10 +1078,14 @@ impl Nest {
                 }
                 continue;
             }
+            let target = match state.scope {
+                synchronize::Scope::AddressSpace => self.asid,
+                synchronize::Scope::Global => Asid::kernel(),
+            };
             state.fence();
             drop(state);
 
-            let result = identity::shootdown(self.asid).map_err(|_| NestError::Shootdown);
+            let result = identity::shootdown(target).map_err(|_| NestError::Shootdown);
             let retired_tables;
             let retired_cells;
             let pending_mappings;
@@ -1090,10 +1100,15 @@ impl Nest {
                 retired_cells = core::mem::take(&mut state.retired_cells);
                 pending_mappings = core::mem::take(&mut state.pending_mappings);
             }
-            // 退休 Cell / 表页可以随本次失效结清（shootdown 按 ASID 覆盖全部映射），
+            // 退休 Cell / 表页随覆盖本批修改范围的失效结清，包含 G 条目时全局失效。
             // 但占用票不在这里回收：它只由该段的本次撤下或显式 `retry_invalidation` 结算。
             drop(retired_tables);
-            drop(retired_cells);
+            for retained in retired_cells {
+                // SAFETY: these records were removed from PTEs before fencing.
+                // The completed fence covers this ASID, or every online hart and
+                // all ASIDs when the batch includes global mappings.
+                unsafe { retained.settle() };
+            }
             drop(pending_mappings);
             return Ok(());
         }
@@ -1153,16 +1168,17 @@ impl Nest {
             }
             root.reclaim_empty_tables(retired_tables);
         }
+        let global = mappings.iter().any(|mapping| mapping.is_global());
         for mapping in mappings {
             state.pending_mappings.push(mapping.clone());
             let mut inner = mapping.state.lock();
             for (_, cell) in inner.published.drain(..) {
-                state.retired_cells.push(cell);
+                state.retired_cells.push(cell.retire());
             }
             inner.active.clear();
         }
         state.index.clear();
-        state.mark_dirty();
+        state.mark_dirty(global);
         state.begin_close();
         drop(state);
         self.finish_invalidation()?;

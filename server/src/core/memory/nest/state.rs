@@ -1,9 +1,9 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::core::memory::cell::Cell;
+use crate::core::memory::cell::Retention;
 use crate::core::memory::nest::Mapping;
-use crate::core::memory::nest::synchronize::{ClosePhase, Invalidation};
+use crate::core::memory::nest::synchronize::{ClosePhase, Invalidation, Scope};
 use crate::core::memory::nest::table::TableNode;
 
 use super::index::Index;
@@ -13,9 +13,10 @@ use super::index::Index;
 pub(super) struct NestState {
     pub(super) root: TableNode,
     pub(super) index: Index,
-    pub(super) retired_cells: Vec<Arc<Cell>>,
+    pub(super) retired_cells: Vec<Retention>,
     pub(super) retired_tables: Vec<TableNode>,
     pub(super) invalidation: Invalidation,
+    pub(super) scope: Scope,
     pub(super) pending_mappings: Vec<Arc<Mapping>>,
     /// 已退休、尚未结算的占用票：同步失败时留在这里，VA 禁复用。
     pub(super) retirement: Vec<usize>,
@@ -31,6 +32,7 @@ impl NestState {
             retired_cells: Vec::new(),
             retired_tables: Vec::new(),
             invalidation: Invalidation::Clean,
+            scope: Scope::AddressSpace,
             pending_mappings: Vec::new(),
             retirement: Vec::new(),
             phase: ClosePhase::Open,
@@ -38,7 +40,8 @@ impl NestState {
     }
 
     /// PTE 已修改：留待 shootdown。
-    pub(super) fn mark_dirty(&mut self) {
+    pub(super) fn mark_dirty(&mut self, global: bool) {
+        self.scope = self.scope.include(global);
         self.invalidation = self.invalidation.mark_dirty();
     }
 
@@ -56,6 +59,7 @@ impl NestState {
     /// 退休资源仍留在原字段，由 Nest 取出并在锁外释放。
     pub(super) fn settle(&mut self) {
         self.invalidation = self.invalidation.complete();
+        self.scope = Scope::AddressSpace;
         self.phase = self.phase.settle();
     }
 

@@ -1,5 +1,4 @@
-use crate::core::memory::cell::Cell;
-use alloc::sync::Arc;
+use crate::core::memory::cell::Retention;
 use alloc::vec::Vec;
 
 use crate::core::memory::flat::FlatRange;
@@ -11,7 +10,7 @@ use super::runs::CellRuns;
 pub(in crate::core::memory::nest) struct MappingState {
     pub(in crate::core::memory::nest) active: Vec<ActiveRange>,
     pub(in crate::core::memory::nest) source: FlatRange,
-    pub(in crate::core::memory::nest) published: Vec<(usize, Arc<Cell>)>,
+    pub(in crate::core::memory::nest) published: Vec<(usize, Retention)>,
 }
 
 impl MappingState {
@@ -39,7 +38,7 @@ impl MappingState {
     }
 
     /// 按页号顺序插入发布记录。
-    pub(in crate::core::memory::nest) fn publish(&mut self, page: usize, cell: Arc<Cell>) {
+    pub(in crate::core::memory::nest) fn publish(&mut self, page: usize, cell: Retention) {
         let at = self.published.partition_point(|(held, _)| *held < page);
         self.published.insert(at, (page, cell));
     }
@@ -48,7 +47,7 @@ impl MappingState {
     pub(in crate::core::memory::nest) fn runs<'a>(
         &'a self,
         base: crate::core::memory::address::VirtAddr,
-        cells: &'a [(usize, Arc<Cell>)],
+        cells: &'a [(usize, Retention)],
     ) -> CellRuns<'a> {
         CellRuns::new(base, cells, &self.active)
     }

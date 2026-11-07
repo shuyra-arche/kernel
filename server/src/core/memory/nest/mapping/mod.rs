@@ -30,7 +30,8 @@ use super::source_mappings;
 
 /// Flat 来源在一个 Nest 中的地址投影：占用、逻辑权限与已发布页的保留记录。
 ///
-/// 这里的强引用负责让硬件仍可能访问的帧存活，不建立另一份物理所有权。
+/// 发布记录持有 Cell 的硬件责任凭证，只有撤销并完成失效才能结清；
+/// 它不建立另一份物理所有权，丢弃凭证也不能解除回收限制。
 /// 跨 Unit 的交互 View 与它是不同的对象；当前 ABI 的 ViewId 仍指这段映射。
 ///
 /// U/G/A/D 是整段关系共有的架构属性，随挂载政策定下；改权不动它。
@@ -241,7 +242,7 @@ impl Mapping {
                 .published
                 .iter()
                 .filter(|(page, _)| *page >= first && *page < last)
-                .map(|(page, cell)| (page - first, cell.clone())),
+                .map(|(page, cell)| (page - first, cell.cell().clone())),
         );
         Ok(out)
     }

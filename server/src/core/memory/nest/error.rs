@@ -1,5 +1,6 @@
 use fack::prelude::Error;
 
+use crate::core::memory::cell::RetainError;
 use crate::core::memory::flat::FlatError;
 
 /// 地址空间的纯域错误：只讲地址空间自己的失败，不认识线上编码。
@@ -29,6 +30,16 @@ pub enum NestError {
     Missing,
     #[error("the page slot is held by another use")]
     Busy,
+}
+
+impl From<RetainError> for NestError {
+    fn from(error: RetainError) -> Self {
+        match error {
+            RetainError::Quarantined => Self::Pinned,
+            RetainError::Exhausted => Self::OutOfMemory,
+            RetainError::Unbalanced => unreachable!("unbalanced hardware retention"),
+        }
+    }
 }
 
 /// 物理来源失败折入地址空间失败码：`OutOfRange` 对应用户可见的"没有所属区域"。
