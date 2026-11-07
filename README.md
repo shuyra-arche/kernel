@@ -14,8 +14,9 @@ Shuyra's RV64 kernel, public contracts and typed call transport.
 | `server/sbi/` | SBI calls used by the kernel |
 | `.github/workflows/` | Compilation checks and source version releases |
 
-One root Cargo workspace and lockfile cover all packages. Client and Server
-consume the same API; Server does not depend on Client. Language runtime/std support belongs to the separate Toolchain workstream.
+One root Cargo workspace and lockfile cover production packages and the Host
+test package. Standalone RV64 guests keep their own workspace and lockfile.
+Client and Server consume the same API; Server does not depend on Client. Language runtime/std support belongs to the separate Toolchain workstream.
 Platform denotes hardware porting; Kernel defines no Runtime/Execution layer. Cluster is an organizational
 boundary, not a configuration file.
 
@@ -163,18 +164,19 @@ Its manifest is now `server/Cargo.toml`. Build output remains under the root
 `target/`. The optional `semihosting` feature exports crash reports. Normal
 assertions, lock-order checks and crash diagnostics remain available.
 
-Legacy suites, fixtures, test workspaces, boot self-tests and fault-injection
-features have been removed. CI builds RV64 and runs focused host call-boundary
-and byte-layout regressions. Run the host checks explicitly (substitute your host
-target on Windows). Use `cargo +nightly` in place of `cargo` below to select the
-same channel as CI:
+Run all Host suites through Cargo's workspace selection:
 
 ```sh
-cargo test --locked -p kernel-api --tests --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu
-cargo test --locked -p kernel-api-macros --test declaration --target x86_64-unknown-linux-gnu
-cargo test --locked --manifest-path server/tests/Cargo.toml --target x86_64-unknown-linux-gnu
+cargo +nightly test --locked --workspace --target x86_64-unknown-linux-gnu
 ```
+
+The explicit Host target overrides this repository's RV64 build default. Substitute
+your Host triple on other platforms. `server/tests/` is a test-only member of the
+root workspace and shares its lockfile; it does not depend on the RV64 Server
+crate. Targets without Host tests keep their test/doctest harnesses disabled.
+The standalone no_std guests under `server/tests/guest/` remain separate workspaces.
+Adding a case uses `#[test]`; adding a suite uses its owning Cargo manifest, not CI.
+There is no additional verification CLI or orchestration package.
 
 Tests, compile-fail fixtures, expected diagnostics and test support stay under
 each owning package's `tests/` tree, grouped by ABI, boot, call or declaration
@@ -228,16 +230,18 @@ No IRQs, noncoherent hardware or cross-Unit cleanup are tested.
 With QEMU RISC-V supporting `virt,iommu-sys=on` (validated on 10.0.13), run:
 
 ```sh
-cargo +nightly test --locked --manifest-path server/tests/Cargo.toml \
-  --test hardware --target x86_64-unknown-linux-gnu -- --ignored --nocapture
+cargo +nightly test --locked --workspace --target x86_64-unknown-linux-gnu \
+  -- --ignored --nocapture
 ```
 
 `QEMU_RISCV64` can select a local executable. The runner builds the release guest,
 uses no external firmware, imposes a 30-second deadline, and saves QEMU version,
 guest SHA-256, commands and serial evidence under the guest's ignored `target/evidence/`.
-The CI hardware job installs QEMU in Debian trixie and runs all six scenarios;
-ordinary host tests keep it ignored. Firmware-backed production boot and assembled
-Unit/DMA lifecycle acceptance remain distinct from this isolated guest.
+The CI guest job installs QEMU in Debian trixie and runs the ignored workspace
+tests; the current hardware suite executes all six scenarios. Ordinary Host
+tests keep it ignored. CI selects execution environments, not packages or suites,
+and uploads `guest-evidence` from the guest evidence directories. Firmware-backed
+production boot and assembled Unit/DMA lifecycle acceptance remain distinct from this isolated guest.
 
 Generic byte codecs and service-protocol macros are no longer part of Kernel.
 The [API migration notes](api/README.md#source-migration-and-abi-compatibility) list removed

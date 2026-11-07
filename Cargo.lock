@@ -172,6 +172,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernel-memory-tests"
+version = "0.0.1"
+dependencies = [
+ "fack",
+ "fdt",
+ "kernel-api",
+]
+
+[[package]]
 name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
