@@ -6,12 +6,12 @@ use kernel_api::abi::call::pie::PieFail;
 
 use super::Space;
 
-pub(crate) struct ViewBinding {
+pub(crate) struct MappingBinding {
     id: usize,
     space: Weak<Space>,
 }
 
-impl ViewBinding {
+impl MappingBinding {
     pub(crate) fn new(id: usize, space: &Arc<Space>) -> Result<Arc<Self>, PieFail> {
         Arc::try_new(Self {
             id,

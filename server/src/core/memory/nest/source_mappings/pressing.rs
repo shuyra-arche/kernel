@@ -6,13 +6,13 @@
 use alloc::sync::Arc;
 
 use crate::core::memory::address::VirtAddr;
-use crate::core::memory::nest::{Nest, View};
+use crate::core::memory::nest::{Mapping, Nest};
 
 /// 一个压着来源页的活关系。
 ///
 /// `nest` 为 `None` 表示它认住的地址空间已失联：旧 TLB 无从核实，不能当成没事。
 pub(crate) struct Pressing {
     pub(crate) nest: Option<Arc<Nest>>,
-    pub(crate) view: Arc<View>,
+    pub(crate) mapping: Arc<Mapping>,
     pub(crate) address: VirtAddr,
 }

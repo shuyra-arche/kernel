@@ -1,16 +1,16 @@
 use alloc::sync::{Arc, Weak};
 
-use crate::core::memory::nest::{Access, View};
+use crate::core::memory::nest::{Access, Mapping};
 use crate::core::work::unit::space::Space;
 use kernel_api::{model::identity::PieToken, model::identity::TeamId};
 
 use super::relation::Relation;
 
-/// 一项活跃关系：真实 `View` 加上它的放在哪、属于哪个 token。
+/// 一项活跃关系：真实 `Mapping` 加上它的放在哪、属于哪个 token。
 ///
-/// 来源与授权记录都不在这里：`View` 自己强持来源，权限位归 `Grant`。
+/// 来源与授权记录都不在这里：`Mapping` 自己强持来源，权限位归 `Grant`。
 pub(super) struct HeldMap {
-    pub(super) view: Arc<View>,
+    pub(super) mapping: Arc<Mapping>,
     pub(super) token: Option<PieToken>,
     pub(super) placement: Option<Weak<Space>>,
     pub(super) relation: Relation,
@@ -38,7 +38,7 @@ impl HeldMap {
     pub(super) fn writable(&self) -> bool {
         self.placement.is_some()
             && self.live()
-            && self.view.active().map_or(true, |ranges| {
+            && self.mapping.active().map_or(true, |ranges| {
                 ranges
                     .iter()
                     .any(|range| range.current.contains(Access::WRITE))
@@ -46,13 +46,13 @@ impl HeldMap {
     }
 
     pub(super) fn placed(
-        view: Arc<View>,
+        mapping: Arc<Mapping>,
         space: &Arc<Space>,
         token: Option<PieToken>,
         relation: Relation,
     ) -> Self {
         Self {
-            view,
+            mapping,
             token,
             placement: Some(Arc::downgrade(space)),
             relation,
@@ -76,11 +76,11 @@ impl HeldMap {
     }
 
     pub(super) fn mapped(&self) -> bool {
-        self.opened() || self.relation == Relation::View
+        self.opened() || self.relation == Relation::Mapping
     }
 
     pub(super) fn live(&self) -> bool {
-        self.view.is_live()
+        self.mapping.is_live()
     }
 
     pub(super) fn holds(&self, token: PieToken) -> bool {

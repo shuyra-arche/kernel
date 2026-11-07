@@ -4,7 +4,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::core::memory::nest::View;
+use crate::core::memory::nest::Mapping;
 use crate::core::work::pend::SourceAuthorization;
 use crate::machine::sync::SpinLock;
 use kernel_api::{
@@ -12,13 +12,13 @@ use kernel_api::{
     model::memory::ViewControl,
 };
 
-use super::{Space, ViewBinding, ViewControlRecord, ViewEntry};
+use super::{MappingBinding, MappingControlRecord, MappingEntry, Space};
 
-pub(crate) struct ViewRegistry {
-    entries: SpinLock<Vec<ViewEntry>>,
+pub(crate) struct MappingRegistry {
+    entries: SpinLock<Vec<MappingEntry>>,
 }
 
-impl ViewRegistry {
+impl MappingRegistry {
     pub(crate) fn new() -> Self {
         Self {
             entries: SpinLock::new(Vec::new()),
@@ -38,7 +38,7 @@ impl ViewRegistry {
         source: Arc<SourceAuthorization>,
         branch: Option<PieToken>,
     ) -> Result<(), PieFail> {
-        let control = ViewControlRecord::new(controller, scope, branch)?;
+        let control = MappingControlRecord::new(controller, scope, branch)?;
         self.claim_entry(id, space, source, Some(control))
     }
 
@@ -56,10 +56,10 @@ impl ViewRegistry {
         id: usize,
         space: &Arc<Space>,
         source: Arc<SourceAuthorization>,
-        control: Option<Arc<ViewControlRecord>>,
+        control: Option<Arc<MappingControlRecord>>,
     ) -> Result<(), PieFail> {
         let _commit = crate::core::work::commit();
-        let binding = ViewBinding::new(id, space)?;
+        let binding = MappingBinding::new(id, space)?;
         {
             let mut entries = self.entries.lock();
             if entries.iter().any(|entry| entry.binding.id() == id) {
@@ -69,29 +69,29 @@ impl ViewRegistry {
         }
         source.reserve_binding()?;
         source.register_binding(binding.clone());
-        self.entries.lock().push(ViewEntry {
+        self.entries.lock().push(MappingEntry {
             binding,
             control,
-            view: None,
+            mapping: None,
             source,
         });
         Ok(())
     }
 
     /// 提交：只把已备槽填上真实关系，不分配。
-    pub(crate) fn commit(&self, id: usize, view: Arc<View>) {
+    pub(crate) fn commit(&self, id: usize, mapping: Arc<Mapping>) {
         let mut entries = self.entries.lock();
         let entry = entries
             .iter_mut()
             .find(|entry| entry.binding.id() == id)
-            .expect("prepared view registration");
-        entry.view = Some(view);
+            .expect("prepared mapping registration");
+        entry.mapping = Some(mapping);
     }
 
     /// 按号取回任意已登记关系；不以登记的存在代替控制授权。
     ///
     /// 不要拆成 `locate` + `pending` 两次查询：中间一旦提交，两次都会落空。
-    pub(crate) fn registered(&self, id: usize) -> Option<ViewEntry> {
+    pub(crate) fn registered(&self, id: usize) -> Option<MappingEntry> {
         self.entries
             .lock()
             .iter()
@@ -100,21 +100,21 @@ impl ViewRegistry {
     }
 
     /// 按号取回可用控制；在途槽不算可用，号本身不授予任何东西。
-    pub(crate) fn locate(&self, id: usize) -> Option<ViewEntry> {
+    pub(crate) fn locate(&self, id: usize) -> Option<MappingEntry> {
         self.registered(id)
-            .filter(|entry| entry.view.is_some() && entry.control.is_some())
+            .filter(|entry| entry.mapping.is_some() && entry.control.is_some())
     }
 
     /// 还没提交的发布登记：可能仍在发布，也可能把清理责任留在 Nest 等结清。
     ///
     /// 与 `locate` 分开：等在途槽不是可用控制，但它同样持有来源与 controller。
     #[cfg(debug_assertions)]
-    pub(crate) fn pending(&self, id: usize) -> Option<ViewEntry> {
-        self.registered(id).filter(|entry| entry.view.is_none())
+    pub(crate) fn pending(&self, id: usize) -> Option<MappingEntry> {
+        self.registered(id).filter(|entry| entry.mapping.is_none())
     }
 
     /// 取回这一段关系的登记（连同它持有的关系与来源），由调用方在锁外结清。
-    pub(crate) fn retire(&self, id: usize) -> Option<ViewEntry> {
+    pub(crate) fn retire(&self, id: usize) -> Option<MappingEntry> {
         let mut entries = self.entries.lock();
         let at = entries.iter().position(|entry| entry.binding.id() == id)?;
         Some(entries.remove(at))
@@ -123,7 +123,10 @@ impl ViewRegistry {
     /// 取出下一笔 CPU 关系已结清的登记；占用身份与全空间关闭由 Nest 判定。
     ///
     /// 在途槽同样适用：发布失败的清理链走完后，它也要退表并释放 controller。
-    pub(crate) fn take_settled(&self, nest: &crate::core::memory::nest::Nest) -> Option<ViewEntry> {
+    pub(crate) fn take_settled(
+        &self,
+        nest: &crate::core::memory::nest::Nest,
+    ) -> Option<MappingEntry> {
         let mut entries = self.entries.lock();
         let at = entries
             .iter()
@@ -138,11 +141,11 @@ impl ViewRegistry {
             let entries = self.entries.lock();
             entries
                 .iter()
-                .find(|entry| entry.binding.id() == id && entry.view.is_some())
-                .expect("prepared staged view")
+                .find(|entry| entry.binding.id() == id && entry.mapping.is_some())
+                .expect("prepared staged mapping")
                 .control
                 .as_ref()
-                .expect("staged view control")
+                .expect("staged mapping control")
                 .clone()
         };
         control.hand_over(controller);
@@ -172,7 +175,7 @@ impl ViewRegistry {
     pub(crate) fn owned_by(
         &self,
         source: &Arc<SourceAuthorization>,
-    ) -> Result<Vec<ViewEntry>, PieFail> {
+    ) -> Result<Vec<MappingEntry>, PieFail> {
         let entries = self.entries.lock();
         let mut result = Vec::new();
         result
@@ -181,12 +184,12 @@ impl ViewRegistry {
         result.extend(
             entries
                 .iter()
-                .filter(|entry| entry.view.is_some() && Arc::ptr_eq(&entry.source, source))
+                .filter(|entry| entry.mapping.is_some() && Arc::ptr_eq(&entry.source, source))
                 .cloned(),
         );
         Ok(result)
     }
 }
 
-unsafe impl Send for ViewRegistry {}
-unsafe impl Sync for ViewRegistry {}
+unsafe impl Send for MappingRegistry {}
+unsafe impl Sync for MappingRegistry {}

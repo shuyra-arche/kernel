@@ -6,7 +6,7 @@ use crate::core::work::grant::Grant;
 
 /// 一份授权记录：token 与它当前的权限位。
 ///
-/// 记录里不放来源，也不放实际 `View`：来源由 `PoleMeta` 唯一持有，
+/// 记录里不放来源，也不放实际 `Mapping`：来源由 `PoleMeta` 唯一持有，
 /// 该 token 下的活跃关系另存，撤销边由关系自己的 token 承担。
 pub(super) struct Authority {
     token: PieToken,

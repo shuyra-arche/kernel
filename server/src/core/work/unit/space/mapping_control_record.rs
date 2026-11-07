@@ -7,12 +7,12 @@ use kernel_api::{
 
 use crate::machine::sync::SpinLock;
 
-pub(crate) struct ViewControlRecord {
+pub(crate) struct MappingControlRecord {
     scope: ViewControl,
     control: SpinLock<(TaskId, Option<PieToken>)>,
 }
 
-impl ViewControlRecord {
+impl MappingControlRecord {
     pub(crate) fn new(
         controller: TaskId,
         scope: ViewControl,

@@ -4,11 +4,11 @@ use alloc::sync::Arc;
 use crate::core::memory::address::VirtAddr;
 use crate::core::memory::nest::NestError;
 
-use super::super::view::{ActiveRange, View};
+use super::super::mapping::{ActiveRange, Mapping};
 
 /// 关系索引节点：以关系最小区间起点为键的 AVL 节点，缓存高度与最大终点。
 pub(in crate::core::memory::nest) struct IndexNode {
-    pub(super) view: Arc<View>,
+    pub(super) mapping: Arc<Mapping>,
     pub(super) left: Option<Box<IndexNode>>,
     pub(super) right: Option<Box<IndexNode>>,
     pub(super) start: VirtAddr,
@@ -18,18 +18,18 @@ pub(in crate::core::memory::nest) struct IndexNode {
 
 impl IndexNode {
     /// 以关系当前区间建节点。
-    pub(in crate::core::memory::nest) fn new(view: Arc<View>) -> Result<Self, NestError> {
-        let (start, max_end) = Self::span(&view.state.lock().active)?;
-        Ok(Self::cached(view, start, max_end))
+    pub(in crate::core::memory::nest) fn new(mapping: Arc<Mapping>) -> Result<Self, NestError> {
+        let (start, max_end) = Self::span(&mapping.state.lock().active)?;
+        Ok(Self::cached(mapping, start, max_end))
     }
 
     /// 以给定区间建节点。
     pub(in crate::core::memory::nest) fn with_ranges(
-        view: Arc<View>,
+        mapping: Arc<Mapping>,
         active: &[ActiveRange],
     ) -> Result<Self, NestError> {
         let (start, max_end) = Self::span(active)?;
-        Ok(Self::cached(view, start, max_end))
+        Ok(Self::cached(mapping, start, max_end))
     }
 
     /// 键取最小区间起点，缓存终点取最大区间终点；空集合没有键。
@@ -47,9 +47,9 @@ impl IndexNode {
         Ok((start, max_end))
     }
 
-    fn cached(view: Arc<View>, start: VirtAddr, max_end: usize) -> Self {
+    fn cached(mapping: Arc<Mapping>, start: VirtAddr, max_end: usize) -> Self {
         Self {
-            view,
+            mapping,
             left: None,
             right: None,
             start,
@@ -67,7 +67,7 @@ impl IndexNode {
     pub(super) fn update(&mut self) {
         self.height = 1 + Self::height(&self.left).max(Self::height(&self.right));
         {
-            let state = self.view.state.lock();
+            let state = self.mapping.state.lock();
             if let Some(start) = state.active.iter().map(|range| range.start).min() {
                 self.start = start;
             }

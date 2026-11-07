@@ -6,7 +6,7 @@
 //! TLB，最后结算；中途任何一步失败，事务守卫都会按同一笔身份把两端原样还回去。
 //!
 //! 源槽始终 `Moving` 强持那个承载：撤页只是把关系上的一页 PTE 与发布记录转入退休，
-//! 不复制数据、不分配数据帧，也不改 Flat/View 身份、VA 与权限。
+//! 不复制数据、不分配数据帧，也不改 Flat/Mapping 身份、VA 与权限。
 //! 已经确认撤下的 PTE 不因后续失败回填——那一页要回来只能按需重新发布。
 //!
 //! 无论成败，`execute` 都交出同一份“这次动过的关系”清单（`TransferOutcome`）；
@@ -24,7 +24,7 @@ use crate::core::memory::address::{PageIndex, PageOffset};
 use crate::core::memory::flat::FlatRange;
 use crate::core::memory::flat::transaction::Transaction;
 use crate::core::memory::nest::NestError;
-use crate::core::memory::nest::source_views;
+use crate::core::memory::nest::source_mappings;
 
 /// 一次移交：两端各自页号相对各自窗口，不是 Flat 绝对页号。
 pub struct Transfer {
@@ -68,7 +68,7 @@ impl Transfer {
             &self.target,
             self.target_page,
             || {
-                source_views::candidates_over(&self.source, &self.target)
+                source_mappings::candidates_over(&self.source, &self.target)
                     .map_err(|_| TransferError::OutOfMemory)
             },
         );
@@ -84,7 +84,7 @@ impl Transfer {
         };
         // 占槽之后、不持任何 core 锁：候选是完整上界，这里按关系自己的窗口收回
         // 真正动过的那几条。
-        let affected = source_views::affected_over(
+        let affected = source_mappings::affected_over(
             candidates,
             &self.source,
             self.source_page,
@@ -107,7 +107,7 @@ impl Transfer {
     /// “抓承载快照 + 写 PTE”（两个发布路径都先取短期驻留）要么已经登记，
     /// 要么当场被这个在途槽拒掉，不会再给这一页添一条新映射。
     fn withdraw_pressings(&self, transaction: &Transaction) -> Result<(), TransferError> {
-        let pressings = source_views::pressings_over(&self.source, self.source_page)
+        let pressings = source_mappings::pressings_over(&self.source, self.source_page)
             .map_err(|_| TransferError::OutOfMemory)?;
         // 永久拒绝优先于任何撤销：内核映射与全局条目都撤不掉、也确认不了，
         // 失联属主同样无从核实旧 TLB。它们都不能迁，也不该先撤普通页再发现。
@@ -115,7 +115,7 @@ impl Transfer {
             let Some(nest) = &pressing.nest else {
                 return Err(TransferError::NotTransferable);
             };
-            if nest.asid().is_kernel() || pressing.view.is_global() {
+            if nest.asid().is_kernel() || pressing.mapping.is_global() {
                 return Err(TransferError::NotTransferable);
             }
         }
@@ -127,7 +127,7 @@ impl Transfer {
                 .expect("the reachable owners were checked above");
             // 每条关系的这一页都必须正是源槽此刻强持的那一份：撤页原语在取出发布
             // 记录之后、撕下 PTE 之前核它。
-            nest.unpublish_page(&pressing.view, pressing.address, &carrier)
+            nest.unpublish_page(&pressing.mapping, pressing.address, &carrier)
                 .map_err(unpublish)?;
         }
         Ok(())

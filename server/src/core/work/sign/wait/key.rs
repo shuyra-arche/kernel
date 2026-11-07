@@ -7,12 +7,12 @@ use crate::core::memory::nest::Asid;
 
 /// 等待位的键。
 ///
-/// `View` 是内部键：同一段关系上不同页的等待者按整段一起放行，醒后各自重查；
-/// 空间清场按 ASID 一并清掉 `Space` 与 `View`。
+/// `Mapping` 是内部键：同一段关系上不同页的等待者按整段一起放行，醒后各自重查；
+/// 空间清场按 ASID 一并清掉 `Space` 与 `Mapping`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WakeKey {
     Space { space: Asid, slot: usize },
-    View { space: Asid, view: usize },
+    Mapping { space: Asid, mapping: usize },
     Value { space: Asid, address: usize },
     Hole { hole: usize, dir: HoleCondition },
     Nole { id: usize },
@@ -42,8 +42,8 @@ impl WakeKey {
             WakeKey::Value { space, address } => {
                 (space.get() as u64).wrapping_mul(0xA24B_AED4_963E_E407) ^ address as u64
             }
-            WakeKey::View { space, view } => {
-                (space.get() as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93) ^ view as u64
+            WakeKey::Mapping { space, mapping } => {
+                (space.get() as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93) ^ mapping as u64
             }
             WakeKey::Hole { hole, dir } => {
                 (hole as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ dir as u64

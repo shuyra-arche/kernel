@@ -38,7 +38,7 @@ impl FaultWait {
     pub(crate) fn ready(&self) -> bool {
         !matches!(
             self.nest.probe_fault(self.address, self.kind),
-            FaultOutcome::Wait(view) if view == self.expected
+            FaultOutcome::Wait(mapping) if mapping == self.expected
         )
     }
 }

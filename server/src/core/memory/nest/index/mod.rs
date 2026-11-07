@@ -9,9 +9,9 @@ use crate::core::memory::nest::table::{PteFlags, TableNode};
 #[cfg(debug_assertions)]
 use crate::machine::mode;
 
+use super::Mapping;
 #[cfg(debug_assertions)]
 use super::Nest;
-use super::View;
 
 mod node;
 
@@ -41,8 +41,8 @@ impl Index {
     }
 
     /// 按关系身份摘除节点；摘到才减计数。
-    pub(super) fn remove(&mut self, view: &Arc<View>) -> bool {
-        let (root, removed) = remove_view(self.root.take(), view);
+    pub(super) fn remove(&mut self, mapping: &Arc<Mapping>) -> bool {
+        let (root, removed) = remove_mapping(self.root.take(), mapping);
         self.root = root;
         if removed {
             self.len -= 1;
@@ -51,23 +51,23 @@ impl Index {
     }
 
     /// 覆盖 `address` 的关系。
-    pub(super) fn find(&self, address: usize) -> Option<Arc<View>> {
-        find_view(self.root.as_deref(), address)
+    pub(super) fn find(&self, address: usize) -> Option<Arc<Mapping>> {
+        find_mapping(self.root.as_deref(), address)
     }
 
     /// 与 [lo, hi] 相交的第一个关系。
-    pub(super) fn first_overlap(&self, lo: usize, hi: usize) -> Option<Arc<View>> {
+    pub(super) fn first_overlap(&self, lo: usize, hi: usize) -> Option<Arc<Mapping>> {
         first_overlap(self.root.as_deref(), lo, hi)
     }
 
     /// 中序收集全部关系。
-    pub(super) fn collect(&self, views: &mut Vec<Arc<View>>) {
-        collect_views(self.root.as_deref(), views)
+    pub(super) fn collect(&self, mappings: &mut Vec<Arc<Mapping>>) {
+        collect_mappings(self.root.as_deref(), mappings)
     }
 
     /// 关系区间变化后重算其节点缓存。
-    pub(super) fn refresh(&mut self, view: &Arc<View>) -> bool {
-        refresh(&mut self.root, view)
+    pub(super) fn refresh(&mut self, mapping: &Arc<Mapping>) -> bool {
+        refresh(&mut self.root, mapping)
     }
 
     /// 撕销全部索引。
@@ -85,8 +85,8 @@ impl Index {
 
     /// 索引内的关系与地址空间、硬件页表一致。
     #[cfg(debug_assertions)]
-    pub(super) fn audit_views(&self, nest: &Nest, root: &TableNode, geo: mode::Geo) {
-        audit_views(self.root.as_deref(), nest, root, geo);
+    pub(super) fn audit_mappings(&self, nest: &Nest, root: &TableNode, geo: mode::Geo) {
+        audit_mappings(self.root.as_deref(), nest, root, geo);
     }
 }
 
@@ -102,19 +102,22 @@ fn insert(root: Option<Box<IndexNode>>, node: Box<IndexNode>) -> Box<IndexNode> 
 }
 
 /// 按关系身份摘除节点，返回 (新根, 是否摘到)。
-fn remove_view(root: Option<Box<IndexNode>>, view: &Arc<View>) -> (Option<Box<IndexNode>>, bool) {
+fn remove_mapping(
+    root: Option<Box<IndexNode>>,
+    mapping: &Arc<Mapping>,
+) -> (Option<Box<IndexNode>>, bool) {
     let Some(mut node) = root else {
         return (None, false);
     };
-    if Arc::ptr_eq(&node.view, view) {
+    if Arc::ptr_eq(&node.mapping, mapping) {
         return (IndexNode::detach(node), true);
     }
-    let (left, found) = remove_view(node.left.take(), view);
+    let (left, found) = remove_mapping(node.left.take(), mapping);
     node.left = left;
     if found {
         return (Some(IndexNode::balance(node)), true);
     }
-    let (right, found) = remove_view(node.right.take(), view);
+    let (right, found) = remove_mapping(node.right.take(), mapping);
     node.right = right;
     if found {
         (Some(IndexNode::balance(node)), true)
@@ -124,38 +127,38 @@ fn remove_view(root: Option<Box<IndexNode>>, view: &Arc<View>) -> (Option<Box<In
 }
 
 /// 覆盖 `address` 的关系（先左子树，再看本节点，再右子树）。
-fn find_view(root: Option<&IndexNode>, address: usize) -> Option<Arc<View>> {
+fn find_mapping(root: Option<&IndexNode>, address: usize) -> Option<Arc<Mapping>> {
     let node = root?;
     if node
         .left
         .as_ref()
         .is_some_and(|left| left.max_end >= address)
     {
-        if let Some(view) = find_view(node.left.as_deref(), address) {
-            return Some(view);
+        if let Some(mapping) = find_mapping(node.left.as_deref(), address) {
+            return Some(mapping);
         }
     }
-    if node.view.overlaps(address, address) {
-        return Some(node.view.clone());
+    if node.mapping.overlaps(address, address) {
+        return Some(node.mapping.clone());
     }
     (node.start.as_usize() <= address)
-        .then(|| find_view(node.right.as_deref(), address))
+        .then(|| find_mapping(node.right.as_deref(), address))
         .flatten()
 }
 
 /// 与 [lo, hi] 相交的第一个关系。
-fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<View>> {
+fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<Mapping>> {
     let node = root?;
     if node.max_end < lo {
         return None;
     }
     if node.left.as_ref().is_some_and(|left| left.max_end >= lo) {
-        if let Some(view) = first_overlap(node.left.as_deref(), lo, hi) {
-            return Some(view);
+        if let Some(mapping) = first_overlap(node.left.as_deref(), lo, hi) {
+            return Some(mapping);
         }
     }
-    if node.view.overlaps(lo, hi) {
-        return Some(node.view.clone());
+    if node.mapping.overlaps(lo, hi) {
+        return Some(node.mapping.clone());
     }
     if node.start.as_usize() <= hi {
         first_overlap(node.right.as_deref(), lo, hi)
@@ -164,22 +167,22 @@ fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<V
     }
 }
 
-fn collect_views(node: Option<&IndexNode>, views: &mut Vec<Arc<View>>) {
+fn collect_mappings(node: Option<&IndexNode>, mappings: &mut Vec<Arc<Mapping>>) {
     let Some(node) = node else { return };
-    collect_views(node.left.as_deref(), views);
-    views.push(node.view.clone());
-    collect_views(node.right.as_deref(), views);
+    collect_mappings(node.left.as_deref(), mappings);
+    mappings.push(node.mapping.clone());
+    collect_mappings(node.right.as_deref(), mappings);
 }
 
-fn refresh(root: &mut Option<Box<IndexNode>>, view: &Arc<View>) -> bool {
+fn refresh(root: &mut Option<Box<IndexNode>>, mapping: &Arc<Mapping>) -> bool {
     let Some(node) = root.as_deref_mut() else {
         return false;
     };
-    if Arc::ptr_eq(&node.view, view) {
+    if Arc::ptr_eq(&node.mapping, mapping) {
         node.update();
         return true;
     }
-    if refresh(&mut node.left, view) || refresh(&mut node.right, view) {
+    if refresh(&mut node.left, mapping) || refresh(&mut node.right, mapping) {
         node.update();
         true
     } else {
@@ -200,22 +203,22 @@ fn audit_index(
     let (left_height, left_end, left_count) = audit_index(node.left.as_deref(), lower, Some(key));
     let (right_height, right_end, right_count) =
         audit_index(node.right.as_deref(), Some(key), upper);
-    let local = node.view.active_snapshot();
-    assert!(!local.is_empty(), "indexed view has no active ranges");
+    let local = node.mapping.active_snapshot();
+    assert!(!local.is_empty(), "indexed mapping has no active ranges");
     assert!(
         local.windows(2).all(|pair| pair[0].1 < pair[1].0),
-        "view ranges overlap or are unordered"
+        "mapping ranges overlap or are unordered"
     );
     for (lo, hi) in &local {
         assert!(
-            !overlaps_other(node, &node.view, *lo, *hi),
+            !overlaps_other(node, &node.mapping, *lo, *hi),
             "distinct Views overlap in the nest index"
         );
     }
     assert_eq!(
         key,
         local.iter().map(|(start, _)| *start).min().unwrap(),
-        "AVL key differs from active View range"
+        "AVL key differs from active Mapping range"
     );
     let local_end = local.iter().map(|(_, end)| *end).max().unwrap();
     let expected_height = 1 + left_height.max(right_height);
@@ -227,43 +230,46 @@ fn audit_index(
 }
 
 #[cfg(debug_assertions)]
-fn overlaps_other(node: &IndexNode, view: &Arc<View>, lo: usize, hi: usize) -> bool {
+fn overlaps_other(node: &IndexNode, mapping: &Arc<Mapping>, lo: usize, hi: usize) -> bool {
     if node.max_end < lo {
         return false;
     }
     if node
         .left
         .as_ref()
-        .is_some_and(|left| left.max_end >= lo && overlaps_other(left, view, lo, hi))
+        .is_some_and(|left| left.max_end >= lo && overlaps_other(left, mapping, lo, hi))
     {
         return true;
     }
-    if !Arc::ptr_eq(&node.view, view) && node.view.overlaps(lo, hi) {
+    if !Arc::ptr_eq(&node.mapping, mapping) && node.mapping.overlaps(lo, hi) {
         return true;
     }
     node.start.as_usize() <= hi
         && node
             .right
             .as_ref()
-            .is_some_and(|right| overlaps_other(right, view, lo, hi))
+            .is_some_and(|right| overlaps_other(right, mapping, lo, hi))
 }
 
 #[cfg(debug_assertions)]
-fn audit_views(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: mode::Geo) {
+fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: mode::Geo) {
     let Some(node) = node else { return };
-    audit_views(node.left.as_deref(), nest, root, geo);
-    let view = &node.view;
+    audit_mappings(node.left.as_deref(), nest, root, geo);
+    let mapping = &node.mapping;
     assert!(
-        view.reservation.nest().is_some_and(|owner| core::ptr::eq(
-            Arc::as_ptr(&owner) as *const Nest,
-            nest as *const Nest
-        )),
-        "indexed View belongs to another Nest"
+        mapping
+            .reservation
+            .nest()
+            .is_some_and(|owner| core::ptr::eq(
+                Arc::as_ptr(&owner) as *const Nest,
+                nest as *const Nest
+            )),
+        "indexed Mapping belongs to another Nest"
     );
-    let state = view.state.lock();
+    let state = mapping.state.lock();
     assert!(
         !state.source.is_borrowed() || state.published.is_empty(),
-        "borrowed View also holds published Frames"
+        "borrowed Mapping also holds published Frames"
     );
     assert!(
         state.published.windows(2).all(|pair| pair[0].0 < pair[1].0),
@@ -271,14 +277,14 @@ fn audit_views(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: mod
     );
     assert_eq!(
         state.source.page_count().checked_bytes(),
-        Some(view.initial_size()),
-        "View source extent differs from its initial range"
+        Some(mapping.initial_size()),
+        "Mapping source extent differs from its initial range"
     );
     for (page, frame) in &state.published {
-        let address = view.initial_start() + page * PAGE_SIZE;
+        let address = mapping.initial_start() + page * PAGE_SIZE;
         assert!(
             state.covers(address.as_usize(), address.as_usize()),
-            "published Frame lies outside live View ranges"
+            "published Frame lies outside live Mapping ranges"
         );
         let (physical, flags) = root
             .walk_ref_geometry(address, geo)
@@ -288,7 +294,7 @@ fn audit_views(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: mod
             frame.physical_address(),
             "published Frame PTE physical address"
         );
-        let expected = view.leaf_flags(
+        let expected = mapping.leaf_flags(
             state
                 .range_at(address.as_usize())
                 .expect("Frame range exists")
@@ -299,9 +305,9 @@ fn audit_views(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: mod
         assert_eq!(
             (flags & mask).bits(),
             (expected & mask).bits(),
-            "published Frame PTE permissions differ from View state"
+            "published Frame PTE permissions differ from Mapping state"
         );
     }
     drop(state);
-    audit_views(node.right.as_deref(), nest, root, geo);
+    audit_mappings(node.right.as_deref(), nest, root, geo);
 }

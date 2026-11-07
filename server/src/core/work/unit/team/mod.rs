@@ -218,11 +218,11 @@ impl Team {
         let mut staged = StagingLease::hold(self);
         while let Some(item) = staged.items.last() {
             self.space.nest.retry_invalidation()?;
-            let id = item.view.identity();
+            let id = item.mapping.identity();
             if !self.space.nest.settled(id) {
-                self.space.withdraw(item.view.whole())?;
+                self.space.withdraw(item.mapping.whole())?;
             }
-            self.space.retire_view(id);
+            self.space.retire_mapping(id);
             item.meta.detach_staging(item.token, self.id);
             let owner = item.meta.owner();
             let token = item.token;

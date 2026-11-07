@@ -1,5 +1,6 @@
 mod access;
 mod active;
+mod protection;
 mod range;
 mod run;
 mod runs;
@@ -20,38 +21,42 @@ use crate::machine::sync::{Level, SpinLock};
 
 pub use access::Access;
 pub use active::ActiveRange;
-pub(crate) use range::ViewRange;
+pub(in crate::core::memory::nest) use protection::Protection;
+pub(crate) use range::MappingRange;
 
-use state::ViewState;
+use state::MappingState;
 
-use super::source_views;
+use super::source_mappings;
 
-/// 一段虚拟区间的关系：真实占用、强持的平来源与活动库存。
+/// Flat 来源在一个 Nest 中的地址投影：占用、逻辑权限与已发布页的保留记录。
+///
+/// 这里的强引用负责让硬件仍可能访问的帧存活，不建立另一份物理所有权。
+/// 跨 Unit 的交互 View 与它是不同的对象；当前 ABI 的 ViewId 仍指这段映射。
 ///
 /// U/G/A/D 是整段关系共有的架构属性，随挂载政策定下；改权不动它。
-pub struct View {
+pub struct Mapping {
     pub(in crate::core::memory::nest) reservation: Reservation,
     pub(in crate::core::memory::nest) attrs: PteFlags,
-    pub(in crate::core::memory::nest) state: SpinLock<ViewState>,
+    pub(in crate::core::memory::nest) state: SpinLock<MappingState>,
 }
 
-impl core::fmt::Debug for View {
+impl core::fmt::Debug for Mapping {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("View")
+        f.debug_struct("Mapping")
             .field("initial_start", &self.initial_start())
             .field("initial_size", &self.initial_size())
             .finish_non_exhaustive()
     }
 }
 
-impl Drop for View {
+impl Drop for Mapping {
     fn drop(&mut self) {
         // 关系退场：来源↔关系的关联里不留死项；最后一条走了就把容量也交回。
-        source_views::forget();
+        source_mappings::forget();
     }
 }
 
-impl View {
+impl Mapping {
     /// 建立一段关系；活动区间必须落在初始范围内，来源跨度必须等长。
     ///
     /// 构造失败即退回占用：调用方交出的凭证不会随失败一起丢掉。
@@ -95,9 +100,9 @@ impl View {
         match Arc::try_new(Self {
             reservation,
             attrs,
-            state: SpinLock::new_level(Level::View, ViewState::new(active, source)),
+            state: SpinLock::new_level(Level::Mapping, MappingState::new(active, source)),
         }) {
-            Ok(view) => Ok(view),
+            Ok(mapping) => Ok(mapping),
             Err(_) => {
                 if let Some(nest) = nest {
                     nest.give_back_span(start, size, identity);
@@ -119,7 +124,7 @@ impl View {
         (self.initial_start(), self.initial_size())
     }
 
-    /// 这段关系在占用表里的身份（generation）；新 ABI 的 `ViewId` 就是它。
+    /// 这段映射在占用表里的身份（generation）；现有 ABI 的 `ViewId` 就是它。
     pub(crate) fn identity(&self) -> usize {
         self.reservation.id()
     }
@@ -161,8 +166,8 @@ impl View {
     }
 
     /// 整段选择：操作时按当前活动与未结算退休解析。
-    pub fn whole(self: &Arc<Self>) -> ViewRange {
-        ViewRange::Whole(self.clone())
+    pub fn whole(self: &Arc<Self>) -> MappingRange {
+        MappingRange::Whole(self.clone())
     }
 
     /// 初始范围内的固定页坐标选择；越界即拒。
@@ -170,8 +175,8 @@ impl View {
         self: &Arc<Self>,
         offset: PageOffset,
         count: PageCount,
-    ) -> Result<ViewRange, NestError> {
-        ViewRange::pages(self, offset, count)
+    ) -> Result<MappingRange, NestError> {
+        MappingRange::pages(self, offset, count)
     }
 
     pub(crate) fn source(&self) -> FlatRange {

@@ -229,7 +229,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 // 绝不与真实资源失败混同。
                 FaultOutcome::Materialize => resume(frame as *mut TrapContext),
                 // 承载不在（墓碑或在途）：按这段关系整段等一次，醒后重试原指令。
-                FaultOutcome::Wait(view) => page_fault_wait(ident, fault, nest, view, frame),
+                FaultOutcome::Wait(mapping) => page_fault_wait(ident, fault, nest, mapping, frame),
                 FaultOutcome::Invalid => {
                     drop(nest);
                     page_fault_killed(ident, tid, fault)
@@ -278,7 +278,7 @@ fn page_fault_wait(
     ident: Option<Identity>,
     fault: fault::PageFault,
     nest: Arc<Nest>,
-    view: usize,
+    mapping: usize,
     frame: &mut TrapContext,
 ) -> *mut TrapContext {
     // 登记失败要终止任务时，身份已经交出去了：先把这一 id 标量留下来。
@@ -290,11 +290,11 @@ fn page_fault_wait(
             .expect("user page fault without running task");
         (running.team.space.clone(), running.team.space.life())
     };
-    let key = WakeKey::View {
+    let key = WakeKey::Mapping {
         space: nest.asid(),
-        view,
+        mapping,
     };
-    let waiting = fault_wait::FaultWait::new(nest, fault.addr, fault.kind, view);
+    let waiting = fault_wait::FaultWait::new(nest, fault.addr, fault.kind, mapping);
     // 先放掉空间与身份，再进提交边界的 wait_until；等待捕获自己在其内部释放。
     drop(space);
     drop(ident);

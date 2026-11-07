@@ -12,15 +12,15 @@ use crate::core::memory::address::VirtAddr;
 use crate::core::memory::flat::Frame;
 
 use super::state::NestState;
-use super::{Nest, NestError, View};
+use super::{Mapping, Nest, NestError};
 
 impl Nest {
-    /// 撤下 `view` 在 `address` 上的 4KiB 映射，把它那一页的承载交给退休。
+    /// 撤下 `mapping` 在 `address` 上的 4KiB 映射，把它那一页的承载交给退休。
     ///
     /// - 内核空间的物理使用不由撤下本关系结清；全局条目不受 ASID 定向失效覆盖。
     ///   两类都不参与移交，当场 `Pinned`。
     /// - 先结清本 Nest 之前那次失效：旧 TLB 没确认就不再撤新的。
-    /// - 在 `Nest → View` 同一个临界区里认这一页：只有真有一条发布记录才算这条
+    /// - 在 `Nest → Mapping` 同一个临界区里认这一页：只有真有一条发布记录才算这条
     ///   关系握着它；没有记录（活动洞或本来就没发布）就没有可撤的映射，当场
     ///   成功返回。真握着的话，它必须正是 `expected`——不是就在动任何 PTE 之前
     ///   当场断言，不先撤再发现。
@@ -29,11 +29,11 @@ impl Nest {
     ///   留在本 Nest，由 `retry_invalidation` 继续。
     pub(in crate::core::memory) fn unpublish_page(
         self: &Arc<Self>,
-        view: &Arc<View>,
+        mapping: &Arc<Mapping>,
         address: VirtAddr,
         expected: &Arc<Frame>,
     ) -> Result<(), NestError> {
-        if self.asid().is_kernel() || view.is_global() {
+        if self.asid().is_kernel() || mapping.is_global() {
             return Err(NestError::Pinned);
         }
         assert!(
@@ -41,10 +41,11 @@ impl Nest {
             "unpublish_page takes a page-aligned address"
         );
         assert!(
-            view.reservation
+            mapping
+                .reservation
                 .nest()
                 .is_some_and(|owner| core::ptr::eq(Arc::as_ptr(&owner), Arc::as_ptr(self))),
-            "unpublish_page requires the view's own live nest"
+            "unpublish_page requires the mapping's own live nest"
         );
         self.finish_invalidation()?;
 
@@ -52,8 +53,8 @@ impl Nest {
         if !state.invalidation.is_clean() {
             return Err(NestError::Shootdown);
         }
-        let mut inner = view.state.lock();
-        let page = view.page_index(address);
+        let mut inner = mapping.state.lock();
+        let page = mapping.page_index(address);
         let Some(at) = inner.published.iter().position(|(held, _)| *held == page) else {
             return Ok(());
         };
@@ -75,7 +76,7 @@ impl Nest {
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
         state
-            .pending_views
+            .pending_mappings
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
         {
@@ -98,7 +99,7 @@ impl Nest {
             root.unmap_prepared_geometry(address, PAGE_SIZE, self.geometry);
             root.reclaim_empty_tables(retired_tables);
         }
-        state.pending_views.push(view.clone());
+        state.pending_mappings.push(mapping.clone());
         let (_, frame) = inner.published.remove(at);
         state.retired_frames.push(frame);
         drop(inner);

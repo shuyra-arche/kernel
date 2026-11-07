@@ -7,7 +7,7 @@
 use alloc::sync::Weak;
 use alloc::vec::Vec;
 
-use crate::core::memory::nest::View;
+use crate::core::memory::nest::Mapping;
 
 use super::TransferError;
 
@@ -17,5 +17,5 @@ pub struct TransferOutcome {
     /// 本次移交的成败。占槽前的早错也为 `Err`，那时 `affected` 为空。
     pub result: Result<(), TransferError>,
     /// 本次移交动过的活关系：压着源页或目标页的那些。占槽前失败时为空。
-    pub affected: Vec<Weak<View>>,
+    pub affected: Vec<Weak<Mapping>>,
 }
