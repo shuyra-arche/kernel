@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::core::memory::flat::Frame;
-use crate::core::memory::nest::View;
+use crate::core::memory::nest::Mapping;
 use crate::core::memory::nest::synchronize::{ClosePhase, Invalidation};
 use crate::core::memory::nest::table::TableNode;
 
@@ -16,7 +16,7 @@ pub(super) struct NestState {
     pub(super) retired_frames: Vec<Arc<Frame>>,
     pub(super) retired_tables: Vec<TableNode>,
     pub(super) invalidation: Invalidation,
-    pub(super) pending_views: Vec<Arc<View>>,
+    pub(super) pending_mappings: Vec<Arc<Mapping>>,
     /// 已退休、尚未结算的占用票：同步失败时留在这里，VA 禁复用。
     pub(super) retirement: Vec<usize>,
     pub(super) phase: ClosePhase,
@@ -31,7 +31,7 @@ impl NestState {
             retired_frames: Vec::new(),
             retired_tables: Vec::new(),
             invalidation: Invalidation::Clean,
-            pending_views: Vec::new(),
+            pending_mappings: Vec::new(),
             retirement: Vec::new(),
             phase: ClosePhase::Open,
         }

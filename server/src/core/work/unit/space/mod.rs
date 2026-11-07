@@ -1,15 +1,15 @@
 mod builder;
+mod mapping_binding;
+mod mapping_control_record;
+mod mapping_entry;
+mod mappings;
 mod space;
-mod view_binding;
-mod view_control_record;
-mod view_entry;
-mod views;
 
 pub use builder::SpaceBuilder;
+pub(crate) use mapping_binding::MappingBinding;
+pub(crate) use mapping_control_record::MappingControlRecord;
+pub(crate) use mapping_entry::MappingEntry;
+pub(crate) use mappings::MappingRegistry;
 pub use space::Space;
-pub(crate) use view_binding::ViewBinding;
-pub(crate) use view_control_record::ViewControlRecord;
-pub(crate) use view_entry::ViewEntry;
-pub(crate) use views::ViewRegistry;
 
 pub(crate) mod wait;

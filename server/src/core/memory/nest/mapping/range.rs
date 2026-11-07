@@ -5,7 +5,7 @@ use crate::core::memory::address::{PageCount, PageOffset};
 use crate::core::memory::flat::FlatRange;
 use crate::core::memory::nest::NestError;
 
-use super::View;
+use super::Mapping;
 
 /// 一段关系上的选择。
 ///
@@ -14,19 +14,19 @@ use super::View;
 /// 关系的名下（活动或未结算退休），落在已经结算完的洞上就是失败 —— 选择不做
 /// 静默过滤，也就不存在“选到已关闭页却当没事”。
 #[derive(Clone)]
-pub(crate) enum ViewRange {
-    Whole(Arc<View>),
+pub(crate) enum MappingRange {
+    Whole(Arc<Mapping>),
     Pages {
-        view: Arc<View>,
+        mapping: Arc<Mapping>,
         offset: PageOffset,
         count: PageCount,
     },
 }
 
-impl ViewRange {
+impl MappingRange {
     /// 初始范围内的固定页坐标选择；越界或零页即拒。
     pub(super) fn pages(
-        view: &Arc<View>,
+        mapping: &Arc<Mapping>,
         offset: PageOffset,
         count: PageCount,
     ) -> Result<Self, NestError> {
@@ -36,37 +36,37 @@ impl ViewRange {
             .ok_or(NestError::NotAligned)?;
         if end
             .checked_mul(PAGE_SIZE)
-            .is_none_or(|end| end > view.initial_size())
+            .is_none_or(|end| end > mapping.initial_size())
         {
             return Err(NestError::NoRegion);
         }
         Ok(Self::Pages {
-            view: view.clone(),
+            mapping: mapping.clone(),
             offset,
             count,
         })
     }
 
-    pub(crate) fn view(&self) -> &Arc<View> {
+    pub(crate) fn mapping(&self) -> &Arc<Mapping> {
         match self {
-            Self::Whole(view) => view,
-            Self::Pages { view, .. } => view,
+            Self::Whole(mapping) => mapping,
+            Self::Pages { mapping, .. } => mapping,
         }
     }
 
     /// 选择的字节窗口（含尾）。`Whole` 取整个初始范围；含尾表示因此顶页也不溢出。
     pub(crate) fn window(&self) -> (usize, usize) {
         match self {
-            Self::Whole(view) => {
-                let start = view.initial_start().as_usize();
-                (start, start + (view.initial_size() - 1))
+            Self::Whole(mapping) => {
+                let start = mapping.initial_start().as_usize();
+                (start, start + (mapping.initial_size() - 1))
             }
             Self::Pages {
-                view,
+                mapping,
                 offset,
                 count,
             } => {
-                let start = view.initial_start().as_usize() + offset.get() * PAGE_SIZE;
+                let start = mapping.initial_start().as_usize() + offset.get() * PAGE_SIZE;
                 (start, start + (count.get() * PAGE_SIZE - 1))
             }
         }
@@ -74,14 +74,14 @@ impl ViewRange {
 
     /// 源在本选择内的子范围：强持同一来源、不复制数据。
     pub(crate) fn source(&self) -> Result<FlatRange, NestError> {
-        let view = self.view();
+        let mapping = self.mapping();
         let (offset, count) = match self {
             Self::Whole(_) => (
                 PageOffset::ZERO,
-                PageCount::new(view.initial_size() / PAGE_SIZE).ok_or(NestError::NotAligned)?,
+                PageCount::new(mapping.initial_size() / PAGE_SIZE).ok_or(NestError::NotAligned)?,
             ),
             Self::Pages { offset, count, .. } => (*offset, *count),
         };
-        Ok(view.source().range(offset, count)?)
+        Ok(mapping.source().range(offset, count)?)
     }
 }

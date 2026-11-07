@@ -155,13 +155,13 @@ pub(crate) fn create_pole(
         let token = pie.token();
         let mut inputs = Vec::new();
         for space in authorization.spaces()? {
-            let entries = space.views.owned_by(&authorization)?;
+            let entries = space.mappings.owned_by(&authorization)?;
             inputs
                 .try_reserve(entries.len())
                 .map_err(|_| PieFail::OoM)?;
             for entry in entries {
-                if let Some(view) = entry.view() {
-                    inputs.push((space.clone(), view.clone()));
+                if let Some(mapping) = entry.mapping() {
+                    inputs.push((space.clone(), mapping.clone()));
                 }
             }
         }
@@ -180,8 +180,8 @@ pub(crate) fn create_pole(
         meta.attach_source(&authorization);
         authorization.adopt(&meta, token, pie.grant().clone())?;
         let transition = (|| {
-            for (space, view) in inputs {
-                meta.adopt_input(token, &space, view);
+            for (space, mapping) in inputs {
+                meta.adopt_input(token, &space, mapping);
             }
             let mut pies = task.pend.pies.lock();
             assert!(pies.len() < pies.capacity(), "reserved root Pie slot");

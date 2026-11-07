@@ -4,6 +4,6 @@ use kernel_api::model::identity::TeamId;
 pub(super) enum Relation {
     Input,
     Open,
-    View,
+    Mapping,
     Staged(TeamId),
 }

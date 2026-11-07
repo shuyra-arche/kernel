@@ -109,12 +109,12 @@ pub(crate) fn spawn(
             }
             let record = target
                 .space
-                .views
-                .locate(item.view.identity())
+                .mappings
+                .locate(item.mapping.identity())
                 .ok_or(UnitFail::Denied)?;
             if !record
-                .view()
-                .is_some_and(|view| Arc::ptr_eq(view, &item.view))
+                .mapping()
+                .is_some_and(|mapping| Arc::ptr_eq(mapping, &item.mapping))
                 || !Arc::ptr_eq(
                     &record.source,
                     &item.meta.authorization().ok_or(UnitFail::Denied)?,
@@ -126,7 +126,7 @@ pub(crate) fn spawn(
                 control.scope() == kernel_api::model::memory::ViewControl::Caller
             }) {
                 prepared
-                    .track_control(&target.space, item.view.identity())
+                    .track_control(&target.space, item.mapping.identity())
                     .map_err(map_err)?;
             }
         }
@@ -150,8 +150,11 @@ pub(crate) fn spawn(
                         .iter()
                         .position(|p| p.token() == item.token)
                         .expect("staged root");
-                    target.space.views.hand_over(item.view.identity(), receiver);
-                    caller.release_control(item.view.identity());
+                    target
+                        .space
+                        .mappings
+                        .hand_over(item.mapping.identity(), receiver);
+                    caller.release_control(item.mapping.identity());
                     let pie = pies.remove(index);
                     pie.invalidate();
                     caller

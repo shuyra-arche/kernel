@@ -6,7 +6,7 @@ pub enum Level {
     Scheduler = 1,
     Space = 2,
     Nest = 3,
-    View = 4,
+    Mapping = 4,
     Flat = 5,
     TeamTasks = 6,
     L3 = 7,

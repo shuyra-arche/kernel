@@ -4,7 +4,7 @@ use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PhysAddr, VirtAddr};
 use crate::core::memory::flat::Frame;
 use crate::core::memory::nest::NestError;
-use crate::core::memory::nest::view::{Access, ActiveRange};
+use crate::core::memory::nest::mapping::{Access, ActiveRange};
 
 use super::run::FrameRun;
 

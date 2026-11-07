@@ -109,13 +109,16 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::core::work::unit::task
         }
     })?;
 
-    let view_size = region.size.next_multiple_of(PAGE_SIZE);
-    let view = map_borrowed(&team.space.nest, PhysAddr::from_raw(region.base), view_size).map_err(
-        |source| BootError::Mapping {
-            operation: MapOperation::ImageView,
-            source,
-        },
-    )?;
+    let mapping_size = region.size.next_multiple_of(PAGE_SIZE);
+    let mapping = map_borrowed(
+        &team.space.nest,
+        PhysAddr::from_raw(region.base),
+        mapping_size,
+    )
+    .map_err(|source| BootError::Mapping {
+        operation: MapOperation::ImageView,
+        source,
+    })?;
 
     let mut registry = crate::entry::boot::resources::Registry::default();
     crate::entry::boot::devices::register(&mut registry).map_err(|source| {
@@ -161,7 +164,7 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::core::work::unit::task
     })?;
 
     let mut args = [0usize; kernel_api::boot::args::LEN];
-    args[kernel_api::boot::args::VIEW] = view.as_usize();
+    args[kernel_api::boot::args::VIEW] = mapping.as_usize();
     args[kernel_api::boot::args::VIEW_LEN] = region.size;
     args[kernel_api::boot::args::LEDGER] = ledger.as_usize();
     args[kernel_api::boot::args::LEDGER_LEN] = ledger_len;
@@ -239,8 +242,8 @@ fn map_borrowed(nest: &Arc<Nest>, physical: PhysAddr, size: usize) -> Result<Vir
     let borrowed = unsafe { BorrowedRegion::new(physical, size)? };
     let source = Flat::from_region(borrowed)?.whole();
     let reservation = nest.reserve(Placement::lowest(RegionId::Normal, size, PAGE_SIZE)?)?;
-    let view = nest.attach(reservation, source, Access::READ, Access::READ)?;
-    Ok(view.initial_start())
+    let mapping = nest.attach(reservation, source, Access::READ, Access::READ)?;
+    Ok(mapping.initial_start())
 }
 
 /// 启动静态挂载：按 `Exact` 在 `start` 登记真实占用，再把已备好的来源挂上去。

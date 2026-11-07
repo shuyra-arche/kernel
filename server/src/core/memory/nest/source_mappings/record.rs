@@ -4,10 +4,10 @@
 
 use alloc::sync::Weak;
 
-use super::super::View;
+use super::super::Mapping;
 
 pub(super) struct Record {
     pub(super) source_id: usize,
-    pub(super) view: Weak<View>,
+    pub(super) mapping: Weak<Mapping>,
     pub(super) next: Option<alloc::boxed::Box<Record>>,
 }

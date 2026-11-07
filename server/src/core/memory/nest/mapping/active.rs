@@ -3,7 +3,7 @@ use core::num::NonZeroUsize;
 
 use crate::core::memory::address::VirtAddr;
 use crate::core::memory::nest::NestError;
-use crate::core::memory::nest::view::Access;
+use crate::core::memory::nest::mapping::Access;
 
 /// 一段活动关系区间：`ceiling` 是权限上限，`current` 是当前逻辑权限。
 #[derive(Debug, Clone, Copy)]

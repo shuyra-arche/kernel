@@ -95,7 +95,7 @@ pub fn wait<E: WaitFail>(key: WakeKey, life: Weak<Life>, dur: Duration) -> Resul
 
 /// 条件等待：在同一提交边界内只跑一次纯谓词，不满足才入队。
 ///
-/// 谓词与它捕获的上下文（`context` 里强持的 `Nest`/`View`）都在进入
+/// 谓词与它捕获的上下文（`context` 里强持的 `Nest`/`Mapping`）都在进入
 /// `finish_block` 之前消费掉：那一步可能切走或进 idle，不能带着它们；
 /// 谓词本身必须是纯读——它在这个提交边界内跑，不能推进失效或物化。
 /// 醒后不在这里重查：调用方按原样重试那条指令，重查由下一次谓词完成。
@@ -236,7 +236,7 @@ pub(crate) fn wipe_space(space: Asid) -> usize {
                     .find(|k| {
                         matches!(
                             k,
-                            WakeKey::Space { space: s, .. } | WakeKey::View { space: s, .. } | WakeKey::Value { space: s, .. }
+                            WakeKey::Space { space: s, .. } | WakeKey::Mapping { space: s, .. } | WakeKey::Value { space: s, .. }
                                 if *s == space
                         )
                     })

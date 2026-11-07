@@ -10,7 +10,7 @@ use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageOffset, VirtAddr as KVirt};
 use crate::core::memory::flat::{Allocation, Flat, FlatError, FlatRange};
 use crate::core::memory::nest::{
-    Access, Nest, NestError, Placement, PlacementAt, RegionId, Reservation, View, ViewRange,
+    Access, Mapping, MappingRange, Nest, NestError, Placement, PlacementAt, RegionId, Reservation,
     identity,
 };
 use crate::core::memory::transfer::{Transfer, TransferError};
@@ -18,7 +18,7 @@ use crate::core::work::mail::Mail;
 use crate::core::work::mail::pole::PoleOperation;
 use crate::core::work::pend::{self, Geometry, Hold, IndependentHold, SourceAuthorization};
 use crate::core::work::sign::{self, WakeKey};
-use crate::core::work::unit::space::{Space, ViewEntry};
+use crate::core::work::unit::space::{MappingEntry, Space};
 use crate::core::work::unit::task::{Task, TaskIdent};
 use crate::core::work::unit::team::Team;
 use crate::machine::switcher::context::TrapContext;
@@ -43,21 +43,22 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: MemoryCall, ident: &Arc<Ta
     }
 }
 
+// 现有 ABI 的 ViewId / view 字段表示地址映射；在此边界转换为 Mapping 语义。
 fn execute(call: MemoryCall, ident: &Arc<TaskIdent>) -> Result<usize, MemoryFail> {
     match call {
         MemoryCall::Acquire { source, retention } => acquire(source, retention, ident),
         MemoryCall::Release { reference } => release(reference, ident),
         MemoryCall::Detach {
             team,
-            view,
+            view: mapping,
             selection,
-        } => detach(team, view, selection, ident),
+        } => detach(team, mapping, selection, ident),
         MemoryCall::SetAccess {
             team,
-            view,
+            view: mapping,
             selection,
             access,
-        } => set_access(team, view, selection, access, ident),
+        } => set_access(team, mapping, selection, access, ident),
         MemoryCall::Traverse {
             retention,
             range,
@@ -123,26 +124,26 @@ fn nest_placement(
 
 /// 回滚 `Attach`：CPU 关系结清后才撤登记与控制。
 ///
-/// `reservation` 是未发布的预留；否则 `view` 交给 Nest 撤图，
-/// 无 `view` 表示发布失败的责任已留在 Nest 清理链。两种凭证不能同时给出。
+/// `reservation` 是未发布的预留；否则 `mapping` 交给 Nest 撤图，
+/// 无 `mapping` 表示发布失败的责任已留在 Nest 清理链。两种凭证不能同时给出。
 /// 不主动重试或覆盖原始失败；未结责任由后续入口推进。
-/// 结清那一步走 `retire_view` 同一条规则：登记、源侧成员与 controller 一起撤。
+/// 结清那一步走 `retire_mapping` 同一条规则：登记、源侧成员与 controller 一起撤。
 pub(in crate::entry) fn rollback(
     space: &Space,
     id: usize,
     reservation: Option<Reservation>,
-    view: Option<Arc<View>>,
+    mapping: Option<Arc<Mapping>>,
 ) {
     if let Some(reservation) = reservation {
-        debug_assert!(view.is_none(), "one attempt has one side to unwind");
+        debug_assert!(mapping.is_none(), "one attempt has one side to unwind");
         let _ = space.nest.release_reservation(reservation);
-    } else if let Some(view) = view {
-        let _ = space.dispose(view);
+    } else if let Some(mapping) = mapping {
+        let _ = space.dispose(mapping);
     }
     if !space.nest.settled(id) {
         return;
     }
-    space.retire_view(id);
+    space.retire_mapping(id);
 }
 
 /// `Attach`：预留地址并建立翻译关系，返回 `(关系句柄, 视图起点)`。
@@ -305,7 +306,7 @@ fn attach(
     }
     let nest = &space.nest;
     nest.retry_invalidation()?;
-    space.reap_views();
+    space.reap_mappings();
     // 分支下的登记位先备好（只在本域安装时才需要）：提交时只替换，不再可能失败。
     if (own_space || staged)
         && let Some(meta) = &pole
@@ -322,7 +323,7 @@ fn attach(
     // 发布前先占住登记槽、来源成员位与在途号：容量都在这一处备齐，提交只填已备位置。
     if let Err(error) =
         space
-            .views
+            .mappings
             .claim(id, &space, ident.id, control, authorization.clone(), branch)
     {
         rollback(&space, id, Some(reservation), None);
@@ -338,20 +339,20 @@ fn attach(
         rollback(&space, id, Some(reservation), None);
         return Err(source_fail(error));
     }
-    let view = match nest.attach(reservation, source, ceiling, access) {
-        Ok(view) => view,
+    let mapping = match nest.attach(reservation, source, ceiling, access) {
+        Ok(mapping) => mapping,
         Err(error) => {
             authorization.leave_publish(id);
             rollback(&space, id, None, None);
             return Err(error.into());
         }
     };
-    let address = view.initial_start().as_usize();
+    let address = mapping.initial_start().as_usize();
     // 这段关系带执行权：取完指令缓存才算可用。
     if access.contains(Access::EXECUTE)
         && let Err(error) = identity::sync_instructions()
     {
-        rollback(&space, id, None, Some(view));
+        rollback(&space, id, None, Some(mapping));
         authorization.leave_publish(id);
         return Err(error.into());
     }
@@ -373,7 +374,7 @@ fn attach(
                 .record(
                     token,
                     &space,
-                    view.clone(),
+                    mapping.clone(),
                     staged.then_some(target.id),
                     false,
                 )
@@ -385,14 +386,14 @@ fn attach(
             target.push_staging(crate::core::work::unit::team::Staging {
                 token: branch.expect("staged root token"),
                 meta: pole.as_ref().expect("staged Pole").clone(),
-                view: view.clone(),
+                mapping: mapping.clone(),
             });
         }
-        space.views.commit(id, view.clone());
+        space.mappings.commit(id, mapping.clone());
         Ok(())
     })();
     if let Err(error) = committed {
-        rollback(&space, id, None, Some(view));
+        rollback(&space, id, None, Some(mapping));
         authorization.leave_publish(id);
         return Err(error);
     }
@@ -466,11 +467,11 @@ fn traverse(
 }
 
 /// 按目标域与号取回控制登记；号本身不授予任何东西。
-fn with_view<T>(
+fn with_mapping<T>(
     team: kernel_api::model::identity::TeamId,
-    view: kernel_api::model::memory::ViewId,
+    mapping: kernel_api::model::memory::ViewId,
     ident: &Arc<TaskIdent>,
-    action: impl FnOnce(&Arc<Team>, &ViewEntry) -> Result<T, MemoryFail>,
+    action: impl FnOnce(&Arc<Team>, &MappingEntry) -> Result<T, MemoryFail>,
 ) -> Result<T, MemoryFail> {
     let caller_task = caller(ident).ok_or(MemoryFail::Denied)?;
     let target = resolve_team(team, ident, &caller_task)?;
@@ -483,7 +484,10 @@ fn with_view<T>(
         return Err(MemoryFail::Denied);
     }
     let space = target.space.clone();
-    let entry = space.views.locate(view.get()).ok_or(MemoryFail::Denied)?;
+    let entry = space
+        .mappings
+        .locate(mapping.get())
+        .ok_or(MemoryFail::Denied)?;
     let owned = entry
         .binding
         .space()
@@ -510,15 +514,16 @@ fn with_view<T>(
 
 /// 把线外的选择换成这一段关系上的身份选择。
 fn selection(
-    entry: &ViewEntry,
+    entry: &MappingEntry,
     selection: kernel_api::model::memory::ViewSelection,
-) -> Result<ViewRange, MemoryFail> {
-    let view = entry.view().ok_or(MemoryFail::Denied)?;
+) -> Result<MappingRange, MemoryFail> {
+    let mapping = entry.mapping().ok_or(MemoryFail::Denied)?;
     match selection {
-        kernel_api::model::memory::ViewSelection::Whole => Ok(view.whole()),
+        kernel_api::model::memory::ViewSelection::Whole => Ok(mapping.whole()),
         kernel_api::model::memory::ViewSelection::Pages { offset, count } => {
             let count = PageCount::new(count).ok_or(MemoryFail::NotAligned)?;
-            view.range(PageOffset::new(offset), count)
+            mapping
+                .range(PageOffset::new(offset), count)
                 .map_err(|_| MemoryFail::NoRegion)
         }
     }
@@ -526,22 +531,22 @@ fn selection(
 
 fn detach(
     team: kernel_api::model::identity::TeamId,
-    view: kernel_api::model::memory::ViewId,
+    mapping: kernel_api::model::memory::ViewId,
     choice: kernel_api::model::memory::ViewSelection,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, MemoryFail> {
-    with_view(team, view, ident, |target, entry| {
+    with_mapping(team, mapping, ident, |target, entry| {
         let space = &target.space;
-        let staged = target.find_staging(|item| item.view.identity() == view.get());
+        let staged = target.find_staging(|item| item.mapping.identity() == mapping.get());
         if staged.is_some() && !matches!(choice, kernel_api::model::memory::ViewSelection::Whole) {
             return Err(MemoryFail::Busy);
         }
         space.nest.retry_invalidation()?;
-        if !space.nest.settled(view.get()) {
+        if !space.nest.settled(mapping.get()) {
             space.withdraw(selection(entry, choice)?)?;
         }
-        if space.nest.settled(view.get()) {
-            space.retire_view(view.get());
+        if space.nest.settled(mapping.get()) {
+            space.retire_mapping(mapping.get());
             if let Some(at) = staged {
                 let item = target.staged_at(at).ok_or(MemoryFail::Denied)?;
                 item.meta.detach_staging(item.token, target.id);
@@ -555,7 +560,7 @@ fn detach(
 
 fn set_access(
     team: kernel_api::model::identity::TeamId,
-    view: kernel_api::model::memory::ViewId,
+    mapping: kernel_api::model::memory::ViewId,
     choice: kernel_api::model::memory::ViewSelection,
     access: u64,
     ident: &Arc<TaskIdent>,
@@ -564,7 +569,7 @@ fn set_access(
     if !access.is_leaf_set() {
         return Err(MemoryFail::Denied);
     }
-    with_view(team, view, ident, |target, entry| {
+    with_mapping(team, mapping, ident, |target, entry| {
         target.space.nest.retry_invalidation()?;
         target.space.access(selection(entry, choice)?, access)?;
         if access.contains(Access::EXECUTE) {
@@ -770,16 +775,16 @@ fn acquire(
         }
         AcquireSource::View {
             team,
-            view,
+            view: mapping,
             offset,
             count,
-        } => with_view(team, view, ident, |_target, entry| {
+        } => with_mapping(team, mapping, ident, |_target, entry| {
             // 从已授权的关系取得它的来源范围；域、所属关系与来源授权都要核，
             // ViewId 或可读 VA 本身不是凭证。
-            let view = entry.view().ok_or(MemoryFail::Denied)?.clone();
+            let mapping = entry.mapping().ok_or(MemoryFail::Denied)?.clone();
             let authorization = entry.source.clone();
             let count = PageCount::new(count).ok_or(MemoryFail::NotAligned)?;
-            let source = view
+            let source = mapping
                 .source()
                 .range(PageOffset::new(offset), count)
                 .map_err(|_| MemoryFail::NoRegion)?;
@@ -793,7 +798,7 @@ fn acquire(
             );
             let (offset, count) = self::window(&authorization, offset.get(), count.get())?;
             let ceiling = entry
-                .view()
+                .mapping()
                 .map_or(Access::all(), |_| authorization.ceiling());
             let branch = if let Some((meta, root_token, _)) = authorization.root() {
                 let (_, branch) = entry.control.as_ref().ok_or(MemoryFail::Denied)?.control();
@@ -1008,20 +1013,20 @@ fn endpoint(
 
 /// 这次移交动过的关系的**唯一生产消费者**：把每一条变成它自己的等待位放行。
 ///
-/// 顺序是合同的一部分：升级 `Weak` 取到 `(ASID, 关系身份)`，先放掉 View/Nest
+/// 顺序是合同的一部分：升级 `Weak` 取到 `(ASID, 关系身份)`，先放掉 Mapping/Nest
 /// 强引用，再 `signal` 整链——通知不在任何关系强引用下进出。清单里已经消失的
 /// 关系没有等待者，直接跳过；`signal` 非 sticky，没有等待者时就是空放行。
-fn wake(affected: Vec<Weak<View>>) {
+fn wake(affected: Vec<Weak<Mapping>>) {
     for relation in affected {
-        let Some(view) = relation.upgrade() else {
+        let Some(mapping) = relation.upgrade() else {
             continue;
         };
-        let key = view.wake_key();
-        drop(view);
-        let Some((space, view)) = key else {
+        let key = mapping.wake_key();
+        drop(mapping);
+        let Some((space, mapping)) = key else {
             continue;
         };
-        sign::signal(WakeKey::View { space, view });
+        sign::signal(WakeKey::Mapping { space, mapping });
     }
 }
 

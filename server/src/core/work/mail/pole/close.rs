@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use kernel_api::abi::call::pie::PieFail;
 
 use crate::core::work::pend::SourceAuthorization;
-use crate::core::work::unit::space::ViewBinding;
+use crate::core::work::unit::space::MappingBinding;
 
 use super::{PoleMeta, PoleOperation, pie_map_error, seal};
 
@@ -61,20 +61,23 @@ pub(crate) fn close(root: &Arc<PoleMeta>) -> Result<(), PieFail> {
 
 fn close_bindings(
     source: &Arc<SourceAuthorization>,
-    bindings: Vec<Arc<ViewBinding>>,
+    bindings: Vec<Arc<MappingBinding>>,
 ) -> Result<(), PieFail> {
     for binding in bindings {
-        let (space, view) = {
+        let (space, mapping) = {
             let _commit = crate::core::work::commit();
             if !source.owns_binding(&binding) {
                 continue;
             }
             let space = binding.space().upgrade().ok_or(PieFail::Busy)?;
-            let entry = space.views.registered(binding.id()).ok_or(PieFail::Busy)?;
+            let entry = space
+                .mappings
+                .registered(binding.id())
+                .ok_or(PieFail::Busy)?;
             if !Arc::ptr_eq(&entry.source, source) || !Arc::ptr_eq(&entry.binding, &binding) {
                 return Err(PieFail::Busy);
             }
-            (space, entry.view().cloned())
+            (space, entry.mapping().cloned())
         };
         let id = binding.id();
         if !space.nest.settled(id)
@@ -84,8 +87,8 @@ fn close_bindings(
             return Err(pie_map_error(error));
         }
         if !space.nest.settled(id) {
-            let view = view.ok_or(PieFail::Busy)?;
-            if let Err(error) = space.withdraw(view.whole())
+            let mapping = mapping.ok_or(PieFail::Busy)?;
+            if let Err(error) = space.withdraw(mapping.whole())
                 && !space.nest.settled(id)
             {
                 return Err(pie_map_error(error));
@@ -94,7 +97,7 @@ fn close_bindings(
         if !space.nest.settled(id) {
             return Err(PieFail::Busy);
         }
-        space.retire_view(id);
+        space.retire_mapping(id);
     }
     Ok(())
 }

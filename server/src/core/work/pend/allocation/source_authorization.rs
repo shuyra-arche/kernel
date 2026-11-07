@@ -1,7 +1,7 @@
 //! 一份**来源授权**：某个来源下所有普通引用与已建关系共享的唯一记录。
 //!
 //! 它住在工作层（与引用表、创建资格、事务同处），由执行入口与 Pole 创建共同使用；
-//! 核心 `View` 不回指它。私有根 → 根 Grant 的交接只改这里的 `phase` 一处权威，
+//! 核心 `Mapping` 不回指它。私有根 → 根 Grant 的交接只改这里的 `phase` 一处权威，
 //! 不为每份引用复制一份状态再扫表更新。资格只属于这份记录，
 //! 普通引用的有无靠显式语义判断，不数 `Arc` 强引用。
 //!
@@ -17,7 +17,7 @@ use crate::core::memory::flat::FlatRange;
 use crate::core::memory::nest::Access;
 use crate::core::work::grant::Grant;
 use crate::core::work::mail::pole::PoleMeta;
-use crate::core::work::unit::space::{Space, ViewBinding};
+use crate::core::work::unit::space::{MappingBinding, Space};
 use crate::machine::sync::SpinLock;
 use kernel_api::{
     abi::call::pie::PieFail, model::identity::PieToken, model::identity::TaskId,
@@ -49,10 +49,10 @@ pub(crate) struct SourceAuthorization {
     revoked: SpinLock<bool>,
     /// 未结 CPU 关系：包含显式 Attach 控制与资源 Open 映射。
     ///
-    /// 成员与 Registry 项是同一个 `Arc<ViewBinding>`，所以“还欠着谁”只有这一份
-    /// 事实：只有显式结清（`Space::retire_view` / `reap_views`）才撒下成员，
+    /// 成员与 Registry 项是同一个 `Arc<MappingBinding>`，所以“还欠着谁”只有这一份
+    /// 事实：只有显式结清（`Space::retire_mapping` / `reap_mappings`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
-    bindings: SpinLock<Vec<Arc<ViewBinding>>>,
+    bindings: SpinLock<Vec<Arc<MappingBinding>>>,
     /// 这份来源自己分出的子段：几何、历史分支索引与子记录弱引用。
     ///
     /// 子记录丢了也不摘：未知只占它那一段精确范围，不误报空闲，也不封整个父段。
@@ -199,7 +199,7 @@ impl SourceAuthorization {
 
     fn branch_permits(&self, branch: Option<&Grant>, access: Access) -> bool {
         // 先把相位拷出来放锁，再升弱引用：临时 `Arc` 可能是最后一份强持，
-        // 它的析构会走到 `retire_view` / `settle` 再回本文件取锁。同 `manages`。
+        // 它的析构会走到 `retire_mapping` / `settle` 再回本文件取锁。同 `manages`。
         let phase = Phase::clone(&self.phase.lock());
         let alive = match phase {
             Phase::Private => true,
@@ -299,15 +299,15 @@ impl SourceAuthorization {
     }
 
     /// 写入一条成员：容量已在同一提交段备好，这一步只推入。
-    pub(crate) fn register_binding(&self, binding: Arc<ViewBinding>) {
+    pub(crate) fn register_binding(&self, binding: Arc<MappingBinding>) {
         self.bindings.lock().push(binding);
     }
 
-    /// 撒下一条成员：这份绑定已结清（`Space::retire_view` / `reap_views` 的唯一收尾）。
+    /// 撒下一条成员：这份绑定已结清（`Space::retire_mapping` / `reap_mappings` 的唯一收尾）。
     ///
     /// 最后一条成员撤下就是显式的“结清”事件：来源不再占着任何东西时顺带向上收尾，
     /// 不在 `Drop` 里猜。
-    pub(crate) fn release_binding(self: &Arc<Self>, binding: &Arc<ViewBinding>) {
+    pub(crate) fn release_binding(self: &Arc<Self>, binding: &Arc<MappingBinding>) {
         let empty = {
             let mut members = self.bindings.lock();
             members.retain(|held| !Arc::ptr_eq(held, binding));
@@ -473,7 +473,7 @@ impl SourceAuthorization {
     /// 它取提交段，与“新授权 / 新成员 / 新关系发表”互斥：末份判定与摘槽必须原子，
     /// 否则判定读到空、随后又落下一枚新授权或新成员，而父槽已经摘了。析构路径上走它
     /// 也安全：`Pie`/`Hold` 的掉落点要么在顶层，要么本就持着这一把（`pend` 串行锁是
-    /// 豁免级，不参与锁序）；`Space::retire_view` 那条本就已持提交段。
+    /// 豁免级，不参与锁序）；`Space::retire_mapping` 那条本就已持提交段。
     pub(crate) fn settle(self: &Arc<Self>) {
         let _commit = crate::core::work::commit();
         let mut node = self.clone();
@@ -509,7 +509,7 @@ impl SourceAuthorization {
             slot.retarget(forgotten, parent);
         }
         for space in spaces {
-            space.views.retarget_branch(self, forgotten, parent);
+            space.mappings.retarget_branch(self, forgotten, parent);
         }
         Ok(())
     }
@@ -546,7 +546,7 @@ impl SourceAuthorization {
     }
 
     /// 未结 CPU 身份的快照；不复制关系或物理持有。
-    pub(crate) fn bindings(&self) -> Result<Vec<Arc<ViewBinding>>, PieFail> {
+    pub(crate) fn bindings(&self) -> Result<Vec<Arc<MappingBinding>>, PieFail> {
         let held = self.bindings.lock();
         let mut members = Vec::new();
         members.try_reserve(held.len()).map_err(|_| PieFail::OoM)?;
@@ -602,7 +602,7 @@ impl SourceAuthorization {
     }
 
     /// 这份来源名下是否仍有这一份未结绑定。
-    pub(crate) fn owns_binding(&self, binding: &Arc<ViewBinding>) -> bool {
+    pub(crate) fn owns_binding(&self, binding: &Arc<MappingBinding>) -> bool {
         self.bindings
             .lock()
             .iter()
@@ -684,7 +684,7 @@ impl SourceAuthorization {
 
     /// 解除一份普通引用。最后一份普通引用消失时，**未消费的一次性资格显式结束**。
     ///
-    /// 这一定不靠 `Arc` 计数也不再靠授权记录被回收：接上 View 登记后仍有人持着
+    /// 这一定不靠 `Arc` 计数也不再靠授权记录被回收：接上 Mapping 登记后仍有人持着
     /// 这份记录，资格该结束还是结束。
     pub(crate) fn release_hold(&self) {
         if self.holds.fetch_sub(1, Ordering::AcqRel) == 1 {

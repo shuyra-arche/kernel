@@ -34,6 +34,22 @@ This first migration keeps the existing public calls, notification policies and
 source keys. It does not yet implement the new Cell/View/Pend model or public
 Sign objects and reliable-event delivery.
 
+## Memory boundaries
+
+`Flat` organizes backing slots, residency and frame transfer; `Nest::Mapping`
+projects a Flat range into an address space. Mapping references retain frames
+while hardware can still access them; they do not create independent physical
+ownership. Permission changes compute the next logical ranges and PTE update
+intents before Nest prepares and commits hardware effects. Pending invalidation
+and retained resources remain explicit until shootdown succeeds.
+
+The Server mapping types, source index, Space registry and wait keys use
+`Mapping` to distinguish address projection from the planned cross-Unit `View`.
+The current public ABI still names mapping handles `ViewId`, `ViewSelection` and
+`ViewControl`; these are legacy mapping contracts, not the new interaction model.
+Cell identity, unique ownership and Internal/External reclamation remain tracked
+in #14; the existing Frame allocator is not yet a Cell implementation.
+
 ## Build
 
 Kernel uses nightly Rust for `allocator_api`. The repository does not impose a

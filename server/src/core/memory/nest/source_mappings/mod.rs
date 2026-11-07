@@ -15,8 +15,8 @@ use crate::machine::sync::{Level, OnceLock, SpinLock};
 use crate::core::memory::address::{PageIndex, VirtAddr};
 
 use super::super::flat::FlatRange;
+use super::Mapping;
 use super::NestError;
-use super::View;
 
 mod pressing;
 mod record;
@@ -45,7 +45,7 @@ fn rebuild(head: &mut Option<Box<Record>>, mut keep: impl FnMut(&Record)) {
     let mut cursor = head.take();
     while let Some(mut node) = cursor {
         cursor = node.next.take();
-        if node.view.strong_count() == 0 {
+        if node.mapping.strong_count() == 0 {
             continue;
         }
         keep(&node);
@@ -66,7 +66,7 @@ fn reverse(mut chain: Option<Box<Record>>) -> Option<Box<Record>> {
     out
 }
 
-/// 关系退场：它那一条从链上摘下并释放。在 `View::drop` 里调用：
+/// 关系退场：它那一条从链上摘下并释放。在 `Mapping::drop` 里调用：
 /// 那时它的强计数已经归零，重建就会把这一条摘掉。
 pub(crate) fn forget() {
     let mut head = registry().head.lock();
@@ -77,20 +77,20 @@ pub(crate) fn forget() {
 ///
 /// 关系的首条 PTE 之前调用；失败即整次安装失败，不留半条。
 /// 键按**强持的** `FlatRange` 取（调用方持有它），不缓存可回收的裸身份。
-pub(crate) fn register(source: &FlatRange, view: &Arc<View>) -> Result<(), NestError> {
+pub(crate) fn register(source: &FlatRange, mapping: &Arc<Mapping>) -> Result<(), NestError> {
     let source_id = source.source_id();
     // 先备好节点：锁内不分配也不升级任何强引用。
     let record = Box::try_new(Record {
         source_id,
-        view: Arc::downgrade(view),
+        mapping: Arc::downgrade(mapping),
         next: None,
     })
     .map_err(|_| NestError::OutOfMemory)?;
-    let identity = Arc::as_ptr(view);
+    let identity = Arc::as_ptr(mapping);
     let mut head = registry().head.lock();
     let mut duplicate = false;
     rebuild(&mut head, |known| {
-        if known.source_id == source_id && known.view.as_ptr() == identity {
+        if known.source_id == source_id && known.mapping.as_ptr() == identity {
             duplicate = true;
         }
     });
@@ -105,8 +105,8 @@ pub(crate) fn register(source: &FlatRange, view: &Arc<View>) -> Result<(), NestE
 /// 压在这份来源上的活关系快照；页与发布记录的判断留给锁外的调用方。
 ///
 /// 升级出的强引用直接进返回的 Vec，在锁外才交出去：调用方必须在**不持任何 core 锁**
-/// 的区域里放掉这个快照（最后一份 Arc<View> 的退场可能回调索引）。
-pub(crate) fn views_over(source: &FlatRange) -> Result<Vec<Arc<View>>, NestError> {
+/// 的区域里放掉这个快照（最后一份 Arc<Mapping> 的退场可能回调索引）。
+pub(crate) fn mappings_over(source: &FlatRange) -> Result<Vec<Arc<Mapping>>, NestError> {
     let source_id = source.source_id();
     let mut head = registry().head.lock();
     // 第一遍：死项退场、链重建、数出候选。
@@ -117,26 +117,26 @@ pub(crate) fn views_over(source: &FlatRange) -> Result<Vec<Arc<View>>, NestError
         }
     });
     // 链已经归位：之后的可失败步骤不会弄丢任何登记。
-    let mut views = Vec::new();
-    views
+    let mut mappings = Vec::new();
+    mappings
         .try_reserve(matches)
         .map_err(|_| NestError::OutOfMemory)?;
     let mut cursor = head.as_deref();
     while let Some(node) = cursor {
         if node.source_id == source_id
-            && let Some(view) = node.view.upgrade()
+            && let Some(mapping) = node.mapping.upgrade()
         {
-            views.push(view);
+            mappings.push(mapping);
         }
         cursor = node.next.as_deref();
     }
-    Ok(views)
+    Ok(mappings)
 }
 
 /// 枚举压在这份来源 `page` 上的全部活关系。
 ///
 /// 每一条都连同它认住的地址空间与这一页在它窗口里的虚拟页一起交出：
-/// 调用方不必自己推窗口偏移。`views_over` 的强引用纪律同样适用——
+/// 调用方不必自己推窗口偏移。`mappings_over` 的强引用纪律同样适用——
 /// 返回的快照必须在**不持任何 core 锁**的区域里放掉。
 ///
 /// `nest` 为 `None` 的那一条是失联属主：它照样出现在结果里，不在这里被跳过。
@@ -144,18 +144,18 @@ pub(crate) fn pressings_over(
     source: &FlatRange,
     page: PageIndex,
 ) -> Result<Vec<Pressing>, NestError> {
-    let candidates = views_over(source)?;
+    let candidates = mappings_over(source)?;
     let mut pressings = Vec::new();
     pressings
         .try_reserve(candidates.len())
         .map_err(|_| NestError::OutOfMemory)?;
-    for view in candidates {
-        let Some(address) = pressing_page(&view, source, page) else {
+    for mapping in candidates {
+        let Some(address) = pressing_page(&mapping, source, page) else {
             continue;
         };
         pressings.push(Pressing {
-            nest: view.reservation.nest(),
-            view,
+            nest: mapping.reservation.nest(),
+            mapping,
             address,
         });
     }
@@ -164,8 +164,8 @@ pub(crate) fn pressings_over(
 
 /// 两端候选关系的一份弱快照：两份来源窗口上登记过的全部关系。
 ///
-/// 与 `views_over` / `pressings_over` 的强快照不同，这里**只收 `Weak`**：它要在
-/// `Flat` 锁内调用，不能在那里升级强引用（`Flat → View` 是反向锁阶），也拿不到
+/// 与 `mappings_over` / `pressings_over` 的强快照不同，这里**只收 `Weak`**：它要在
+/// `Flat` 锁内调用，不能在那里升级强引用（`Flat → Mapping` 是反向锁阶），也拿不到
 /// 关系自己的锁。于是它交出的是一份**完整上界**——谁真的压着本次两端的那一页，
 /// 留给占槽后的 `affected_over` 按关系自己的不可变窗口筛。
 ///
@@ -175,7 +175,7 @@ pub(crate) fn pressings_over(
 pub(crate) fn candidates_over(
     source: &FlatRange,
     target: &FlatRange,
-) -> Result<Vec<Weak<View>>, NestError> {
+) -> Result<Vec<Weak<Mapping>>, NestError> {
     let source_id = source.source_id();
     let target_id = target.source_id();
     let mut head = registry().head.lock();
@@ -197,10 +197,10 @@ pub(crate) fn candidates_over(
     let mut cursor = head.as_deref();
     while let Some(node) = cursor {
         if node.source_id == source_id {
-            candidates.push(node.view.clone());
+            candidates.push(node.mapping.clone());
         }
         if node.source_id == target_id {
-            candidates.push(node.view.clone());
+            candidates.push(node.mapping.clone());
         }
         cursor = node.next.as_deref();
     }
@@ -213,32 +213,32 @@ pub(crate) fn candidates_over(
 /// 的候选是上界里多收的，不是这次动过的；两端同 Flat 时同一份登记会被收两次，
 /// 按 `Weak` 身份去掉重复的那条。过滤与去重全在原地做，不分配。
 pub(crate) fn affected_over(
-    candidates: Vec<Weak<View>>,
+    candidates: Vec<Weak<Mapping>>,
     source: &FlatRange,
     source_page: PageIndex,
     target: &FlatRange,
     target_page: PageIndex,
-) -> Vec<Weak<View>> {
+) -> Vec<Weak<Mapping>> {
     let mut affected = candidates;
     affected.retain(|candidate| {
-        let Some(view) = candidate.upgrade() else {
+        let Some(mapping) = candidate.upgrade() else {
             return false;
         };
-        pressing_page(&view, source, source_page).is_some()
-            || pressing_page(&view, target, target_page).is_some()
+        pressing_page(&mapping, source, source_page).is_some()
+            || pressing_page(&mapping, target, target_page).is_some()
     });
     distinct(&mut affected);
     affected
 }
 
 /// 同一个关系在清单里只留一条；原地压缩，不分配。
-fn distinct(views: &mut Vec<Weak<View>>) {
+fn distinct(mappings: &mut Vec<Weak<Mapping>>) {
     let mut kept = 0usize;
     let mut read = 0usize;
-    while read < views.len() {
-        let seen = (0..kept).any(|at| Weak::ptr_eq(&views[at], &views[read]));
+    while read < mappings.len() {
+        let seen = (0..kept).any(|at| Weak::ptr_eq(&mappings[at], &mappings[read]));
         if seen {
-            views.swap_remove(read);
+            mappings.swap_remove(read);
         } else {
             kept += 1;
             read += 1;
@@ -247,8 +247,8 @@ fn distinct(views: &mut Vec<Weak<View>>) {
 }
 
 /// 这段关系把来源 `source` 上的 `page` 放在哪个虚拟页上；不是它的窗口就没有。
-fn pressing_page(view: &View, source: &FlatRange, page: PageIndex) -> Option<VirtAddr> {
-    let inner = view.state.lock();
+fn pressing_page(mapping: &Mapping, source: &FlatRange, page: PageIndex) -> Option<VirtAddr> {
+    let inner = mapping.state.lock();
     if inner.source.source_id() != source.source_id() {
         return None;
     }
@@ -256,7 +256,7 @@ fn pressing_page(view: &View, source: &FlatRange, page: PageIndex) -> Option<Vir
     if offset >= inner.source.page_count().get() {
         return None;
     }
-    let address = view
+    let address = mapping
         .initial_start()
         .as_usize()
         .checked_add(offset.checked_mul(crate::core::memory::PAGE_SIZE)?)?;

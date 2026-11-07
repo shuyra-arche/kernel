@@ -49,7 +49,7 @@ impl Task {
                 continue;
             };
             // 一把 registry 锁取任意登记：中间提交的槽不会在两次查询里丢掉。
-            let Some(entry) = space.views.registered(id) else {
+            let Some(entry) = space.mappings.registered(id) else {
                 self.release_control(id);
                 continue;
             };
@@ -65,8 +65,8 @@ impl Task {
             let retry = if space.nest.settled(id) {
                 Ok(())
             } else {
-                if let Some(view) = entry.view() {
-                    let _ = space.dispose(view.clone());
+                if let Some(mapping) = entry.mapping() {
+                    let _ = space.dispose(mapping.clone());
                 }
                 space.nest.retry_invalidation()
             };
@@ -75,10 +75,10 @@ impl Task {
                 at += 1;
             } else {
                 // 结清只有一条规则：Registry 项与源侧成员一起撤，controller 也跟着放。
-                space.retire_view(id);
+                space.retire_mapping(id);
             }
             // 沿原行为释放这个空间里其他已结清的 controller（不在本表锁下）。
-            space.reap_views();
+            space.reap_mappings();
         }
         // 并发删除可能让游标跳过一项；表非空就不能当成已全部结清。
         if self.controls.lock().is_empty() {

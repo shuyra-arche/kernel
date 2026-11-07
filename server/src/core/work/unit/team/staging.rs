@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use kernel_api::model::identity::PieToken;
 
-use crate::core::memory::nest::View;
+use crate::core::memory::nest::Mapping;
 
 use crate::core::work::mail::pole::PoleMeta;
 
@@ -11,5 +11,5 @@ use crate::core::work::mail::pole::PoleMeta;
 pub(crate) struct Staging {
     pub(crate) token: PieToken,
     pub(crate) meta: Arc<PoleMeta>,
-    pub(crate) view: Arc<View>,
+    pub(crate) mapping: Arc<Mapping>,
 }
