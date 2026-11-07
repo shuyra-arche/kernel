@@ -7,7 +7,7 @@ pub struct Device(pub Arc<Mutex<[u64; 16]>>);
 impl Device {
     pub fn new() -> Self {
         let mut words = [0; 16];
-        words[CAP / 8] = 0x10 | (56u64 << 32);
+        words[CAP / 8] = 0x10 | (56u64 << 32) | (1 << 9) | (1 << 22);
         Self(Arc::new(Mutex::new(words)))
     }
 

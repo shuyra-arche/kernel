@@ -112,6 +112,24 @@ yet. Polling steps are bounded, and bootstrap/shutdown use finite step budgets.
 DDTP stays Off, PQ and queue interrupts stay disabled. CQ success is not a device-DMA
 reclamation proof. Other hardware needs an explicit coherence and ordering adapter.
 
+An internal, one-shot `riscv::Domain` now composes that engine with a one-level
+DDT, three Sv39 page-table Cells and one whole payload Cell. It is deliberately
+bounded to one device and one 4 KiB mapping; it is not a new public resource or a
+replacement for IoSpace/View/Pend. Before DDTP publication it retains every page
+and clears old directory/translation caches while Off. Only the chosen device
+context is valid; ATS/PRI/MSI translation remain disabled. Withdrawal clears the
+leaf, invalidates directory and S-stage caches, and waits for the tagged fence.
+Closing additionally returns DDTP to Off, invalidates again and shuts down queues.
+
+`DomainPhase::Closed` is not `SafeToReclaim`: all five table/payload obligations
+remain held until a separate unsafe Kernel-only settlement step is supplied a
+platform quiescence proof. Dropping even a Closed domain without that proof retains
+them. There is no Unit Ack or FQ-based release. Normal Kernel boot still leaves DMA
+Off; Domain is exercised by the isolated guest, and runtime device discovery,
+IoSpace adapter composition, Pend authorization, interrupts and Unit-exit cleanup
+remain future work. This proves a bounded hardware mechanism, not the assembled
+Vanllia DMA service replacement.
+
 Public Memory Allocation requests must be at least 4096 bytes. Smaller requests are
 rejected at decode and Server admission; valid lengths are rounded up with checked
 arithmetic (4097 becomes 8192). An allocation can span multiple noncontiguous Cells.
@@ -191,14 +209,21 @@ planner. It checks controller aliases, page rounding, PCI windows, malformed and
 unsupported discovery, RAM exclusion and unchanged names for unrelated resources.
 It does not execute boot authority publication or establish hardware isolation.
 
-The isolated RV64 hardware guest lives under `server/tests/target/iommu/`. It compiles
+The isolated RV64 hardware guest lives under `server/tests/guest/iommu/`. It compiles
 the production Cell, command engine and MMIO adapter, using its own bounded allocator,
 M-mode entry and failure reporter. It executes 300 real CQ batches (including ring
 wrap), checks no premature return, closes both queues, and reuses a page with a new
 Cell identity and zero contents. A second run abandons an active engine and verifies
-that all three allocations remain retained; a missing-IOMMU run must fail. It does
-not install device translation or perform endpoint DMA, and does not test IRQs,
-noncoherent hardware or cross-Unit cleanup.
+that all three allocations remain retained; a missing-IOMMU run must fail. These
+command-engine scenarios do not by themselves test endpoint DMA. Three additional
+guest scenarios use two QEMU EDU PCI functions: authorized bidirectional DMA and revoke/reuse, read-only
+protection on cold and cached translations, and active-domain abandonment.
+They reject a foreign device ID and a physical-address alias; after withdrawal,
+old IOVA writes cannot alter the new Cell at the reused physical address. The
+fixture performs synchronous PCI reads after teardown as its platform drain;
+EDU has no ATS and QEMU completes its emulated DMA calls synchronously. This
+platform-specific proof is test-owned, not a production device recovery path.
+No IRQs, noncoherent hardware or cross-Unit cleanup are tested.
 
 With QEMU RISC-V supporting `virt,iommu-sys=on` (validated on 10.0.13), run:
 
@@ -210,7 +235,7 @@ cargo +nightly test --locked --manifest-path server/tests/Cargo.toml \
 `QEMU_RISCV64` can select a local executable. The runner builds the release guest,
 uses no external firmware, imposes a 30-second deadline, and saves QEMU version,
 guest SHA-256, commands and serial evidence under the guest's ignored `target/evidence/`.
-The CI hardware job installs QEMU in Debian trixie and runs this explicit check;
+The CI hardware job installs QEMU in Debian trixie and runs all six scenarios;
 ordinary host tests keep it ignored. Firmware-backed production boot and assembled
 Unit/DMA lifecycle acceptance remain distinct from this isolated guest.
 

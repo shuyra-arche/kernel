@@ -1,3 +1,4 @@
+mod domain;
 mod registers;
 
 use crate::iommu::riscv::registers::{BUSY, CQCSR, DDTP, ENABLE, FQCSR, ON, Registers};
@@ -20,7 +21,7 @@ fn start(engine: &mut Engine<Device>) {
 
 #[test]
 fn incomplete_fence_and_busy_shutdown_cannot_return_hardware_pages() {
-    let (mut engine, device, pools) = engine();
+    let (mut engine, mut device, pools) = engine();
     start(&mut engine);
     let batch = engine.invalidate().unwrap();
     assert_eq!(engine.stop(), Err(EngineError::State));
@@ -38,6 +39,10 @@ fn incomplete_fence_and_busy_shutdown_cannot_return_hardware_pages() {
     assert_eq!(engine.step(), Ok(Phase::StoppingFaults));
     assert!(pools.iter().all(|p| p.gives() == 0));
     device.set32(FQCSR, 0);
+    device.write64(DDTP, 16);
+    assert_eq!(engine.step(), Ok(Phase::StoppingFaults));
+    assert!(pools.iter().all(|p| p.gives() == 0));
+    device.write64(DDTP, 0);
     assert_eq!(engine.step(), Ok(Phase::Closed));
     assert!(pools.iter().all(|p| p.gives() == 1));
     drop(engine);

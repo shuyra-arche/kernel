@@ -32,7 +32,8 @@ unsafe impl GlobalAlloc for Bump {
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
 }
 
-static PAGES: Storage<12288> = Storage(UnsafeCell::new([0; 12288]));
+static PAGES: Storage<32768> = Storage(UnsafeCell::new([0; 32768]));
+pub static LIMIT: AtomicUsize = AtomicUsize::new(3);
 static USED: AtomicUsize = AtomicUsize::new(0);
 pub static RETURNS: AtomicUsize = AtomicUsize::new(0);
 pub struct Pool;
@@ -53,8 +54,9 @@ unsafe impl Allocator for Pool {
         }
         let mut used = USED.load(Ordering::Relaxed);
         loop {
-            let slot = (!used & 7).trailing_zeros() as usize;
-            if slot >= 3 {
+            let limit = LIMIT.load(Ordering::Relaxed);
+            let slot = (!used & ((1 << limit) - 1)).trailing_zeros() as usize;
+            if slot >= limit {
                 return Err(AllocError);
             }
             match USED.compare_exchange_weak(
@@ -77,7 +79,7 @@ unsafe impl Allocator for Pool {
     }
     unsafe fn deallocate(&self, pointer: NonNull<u8>, _: Layout) {
         let offset = pointer.as_ptr().addr() - PAGES.0.get().addr();
-        assert!(offset < 12288 && offset.is_multiple_of(4096));
+        assert!(offset < 32768 && offset.is_multiple_of(4096));
         let mask = 1 << (offset / 4096);
         assert_ne!(USED.fetch_and(!mask, Ordering::AcqRel) & mask, 0);
         RETURNS.fetch_add(1, Ordering::SeqCst);
