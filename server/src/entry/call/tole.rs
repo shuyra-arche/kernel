@@ -4,9 +4,10 @@ use crate::core::work::mail::{
     tole::{self, AwaitWait, Cell, Watch, codec},
 };
 use crate::core::work::pend::{self, Need};
+use crate::core::work::room::Handoff;
 use crate::core::work::room::conductor::current;
-use crate::core::work::room::messenger::{self, Handoff, WakeKey};
 use crate::core::work::room::scheduler::roster::muster;
+use crate::core::work::sign::WakeKey;
 use crate::core::work::unit::task::{Task, TaskIdent};
 use crate::machine::switcher::context::TrapContext;
 use alloc::sync::Arc;
@@ -90,7 +91,7 @@ fn await_group(frame: &mut TrapContext, token: PieToken, millis: Wait) -> Outcom
     let result = with_group(token, Need::Fetch, |task, group| {
         Ok(AwaitWait::new(group.clone(), token, task, millis))
     })
-    .and_then(messenger::mail_await);
+    .and_then(crate::core::work::mail::tole::wait::wait);
     match result {
         Ok(Handoff::Resume(reply)) => AwaitWait::write_result(frame, Ok(reply)),
         Ok(Handoff::Switch(pa)) => return Outcome::Switch(pa as *mut TrapContext),

@@ -1,10 +1,11 @@
 mod await_wait;
 mod cell;
 pub(crate) mod codec;
+pub(crate) mod wait;
 mod watch;
 
 use super::Liveness;
-use crate::core::work::room::messenger::{self, WakeKey};
+use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::{life::Life, task::Task};
 use crate::machine::sync::{Level, SpinLock};
 use alloc::sync::{Arc, Weak};
@@ -125,17 +126,17 @@ pub(crate) fn attach(meta: &ToleMeta, cell: Cell) -> Result<(), ToleFail> {
         }
     }
     for (at, (key, life)) in cell.keys.iter().enumerate() {
-        if !shared[at] && messenger::forward(*key, life.clone(), meta.id, meta.life()).is_err() {
+        if !shared[at] && sign::forward(*key, life.clone(), meta.id, meta.life()).is_err() {
             for (index, (key, _)) in cell.keys.iter().take(at).enumerate() {
                 if !shared[index] {
-                    messenger::unforward(*key, meta.id);
+                    sign::unforward(*key, meta.id);
                 }
             }
             return Err(ToleFail::OoM);
         }
     }
     meta.cells.lock().push(cell);
-    messenger::knock(key(meta), &meta.life());
+    sign::knock(key(meta), &meta.life());
     Ok(())
 }
 pub(crate) fn detach(
@@ -166,11 +167,11 @@ fn detach_where(
         for (key, _) in cell.keys.iter() {
             let shared = meta.cells.lock().iter().any(|c| c.covers(*key));
             if !shared {
-                messenger::unforward(*key, meta.id);
+                sign::unforward(*key, meta.id);
             }
         }
     }
-    messenger::knock(key(meta), &meta.life());
+    sign::knock(key(meta), &meta.life());
     Ok(())
 }
 pub(crate) fn seal(meta: &ToleMeta) {
@@ -179,17 +180,17 @@ pub(crate) fn seal(meta: &ToleMeta) {
 }
 fn clear(meta: &ToleMeta) {
     *meta.state.lock() = Liveness::Dead;
-    messenger::wipe(WakeKey::seal(
+    sign::wipe(WakeKey::seal(
         kernel_api::model::pie::PieKind::Tole,
         meta.id,
     ));
     let cells = core::mem::take(&mut *meta.cells.lock());
     for cell in cells {
         for (key, _) in cell.keys.iter() {
-            messenger::unforward(*key, meta.id);
+            sign::unforward(*key, meta.id);
         }
     }
-    messenger::wipe(key(meta));
+    sign::wipe(key(meta));
 }
 impl Drop for ToleMeta {
     fn drop(&mut self) {

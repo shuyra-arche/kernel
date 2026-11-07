@@ -4,9 +4,10 @@ use alloc::sync::Arc;
 
 use kernel_api::{abi::call::room::RoomCall, abi::call::room::RoomFail};
 
+use crate::core::work::room::Handoff;
 use crate::core::work::room::conductor::current;
-use crate::core::work::room::messenger::{self, Handoff, WakeKey, park, park_until, wait, wake};
 use crate::core::work::room::scheduler::roster::muster;
+use crate::core::work::sign::{self, WakeKey, park, park_until, wait, wake};
 use crate::core::work::unit::task::TaskIdent;
 use crate::machine::switcher::context::{Gprs, TrapContext};
 
@@ -19,8 +20,8 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             Outcome::Switch(current().starve() as *mut TrapContext)
         }
         RoomCall::Reap { reason, note, len } => {
-            crate::core::work::room::messenger::set_exit_note(note.get(), len);
-            crate::core::work::room::messenger::set_exit_reason(reason);
+            crate::core::work::unit::lifecycle::set_exit_note(note.get(), len);
+            crate::core::work::unit::lifecycle::set_exit_reason(reason);
             drop(ident);
             Outcome::Exit
         }
@@ -48,7 +49,10 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             }
             drop(target);
             drop(ident);
-            messenger::cull(&[team], messenger::EXIT_DOOM);
+            crate::core::work::unit::lifecycle::cull(
+                &[team],
+                crate::core::work::unit::lifecycle::EXIT_DOOM,
+            );
             frame.gpr.set_x(Gprs::A0, 0);
             Outcome::Resume
         }
@@ -78,7 +82,12 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             }
             let space = ident.team.space.clone();
             drop(ident);
-            match messenger::wait_value(space, at, expected, millis.into_duration()) {
+            match crate::core::work::unit::space::wait::wait_value(
+                space,
+                at,
+                expected,
+                millis.into_duration(),
+            ) {
                 Ok(Handoff::Resume(value)) => {
                     frame.gpr.set_x(Gprs::A0, value as usize);
                     Outcome::Resume
@@ -96,7 +105,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
                 space: ident.team.space.nest.asid(),
                 address: address.get(),
             };
-            frame.gpr.set_x(Gprs::A0, messenger::wake_value(key, all));
+            frame.gpr.set_x(Gprs::A0, sign::wake_counted(key, all));
             Outcome::Resume
         }
         RoomCall::Wait { key, millis } => {

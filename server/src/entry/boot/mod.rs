@@ -75,13 +75,12 @@ pub fn run() -> ! {
 
 pub(crate) fn register_runtime_hooks() {
     use crate::core::work::room::halt;
-    use crate::core::work::room::messenger;
 
     static EXIT_HOOKS: &[fn(&alloc::sync::Arc<crate::core::work::unit::task::Task>)] = &[
-        crate::core::work::room::messenger::doom,
+        crate::core::work::unit::lifecycle::doom,
         crate::core::work::pend::doom,
     ];
-    messenger::hook(EXIT_HOOKS);
+    crate::core::work::unit::lifecycle::hook(EXIT_HOOKS);
 
     const SHUTDOWN_HOOKS: &[fn()] = &[
         crate::entry::report::shutdown::report,

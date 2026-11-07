@@ -7,7 +7,7 @@ use kernel_api::{
 };
 
 use crate::core::work::pend;
-use crate::core::work::room::messenger::WakeKey;
+use crate::core::work::sign::WakeKey;
 use crate::core::work::unit::join::{JoinTarget, JoinWait};
 use crate::core::work::unit::life::Life;
 use crate::core::work::unit::task::Task;

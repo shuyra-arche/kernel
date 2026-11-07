@@ -5,18 +5,21 @@ use kernel_api::{abi::call::unit::UnitFail, model::identity::TeamId};
 
 use crate::core::work::commit;
 use crate::core::work::pend::Pend;
-use crate::core::work::room::messenger::{Ticket, WaitCall, WakeKey};
 use crate::core::work::room::scheduler;
+use crate::core::work::sign::{Ticket, WakeKey};
 use crate::core::work::unit::life::Life;
 use crate::core::work::unit::tally;
 use crate::core::work::unit::team::{Team, TeamPhase};
 use crate::machine::hart::HartId;
 use crate::machine::sync::SpinLock;
 
-use state::Step;
+use crate::core::work::unit::control::Request;
+use state::control::Effect;
 
 mod builder;
+mod continuation;
 mod control;
+pub(crate) use continuation::{Resumption, WaitCall};
 mod ident;
 pub(super) mod life;
 mod prepared;
@@ -134,22 +137,28 @@ impl Task {
 
     pub(crate) fn debark(task: &Arc<Task>) -> Result<(), UnitFail> {
         let _commit = commit();
-        let step = task.state.lock().debark()?;
-        match step {
-            Step::Done => Ok(()),
-            Step::LeaveReady => {
+        let transition = task.state.lock().control().transition(Request::Pause)?;
+        match transition.effect {
+            Effect::None => {
+                task.state.lock().apply_control(transition);
+                Ok(())
+            }
+            Effect::Dequeue => {
+                // Do not publish the paused state if queue removal fails.
                 if !scheduler::remove_from_starved(task) {
                     return Err(UnitFail::Busy);
                 }
-                task.state.lock().pause();
+                task.state.lock().apply_control(transition);
                 task.ident.team.park(task.clone());
                 Ok(())
             }
-            Step::Nudge(hart) => {
+            Effect::Interrupt => {
+                let hart = task.on_hart().expect("running control target");
+                task.state.lock().apply_control(transition);
                 scheduler::idle::nudge(hart);
                 Err(UnitFail::Busy)
             }
-            other => unreachable!("debark: {other:?}"),
+            other => unreachable!("pause effect: {other:?}"),
         }
     }
 
@@ -158,15 +167,17 @@ impl Task {
         if task.held() {
             return Self::release(task);
         }
-        match task.state.lock().embark()? {
-            Step::Done => Ok(()),
-            Step::Held => Self::release(task),
-            Step::Ready => {
+        let transition = task.state.lock().control().transition(Request::Resume)?;
+        task.state.lock().apply_control(transition);
+        match transition.effect {
+            Effect::None => Ok(()),
+            Effect::Release => Self::release(task),
+            Effect::Enqueue => {
                 task.ident.team.release_held(task);
                 scheduler::launch(task.clone());
                 Ok(())
             }
-            other => unreachable!("embark: {other:?}"),
+            other => unreachable!("resume effect: {other:?}"),
         }
     }
 

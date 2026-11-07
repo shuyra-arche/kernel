@@ -4,8 +4,8 @@ use riscv::register::{sie, sip};
 
 use crate::core::work::room::deadline;
 use crate::core::work::room::halt::{self, beacon};
-use crate::core::work::room::messenger;
 use crate::core::work::room::scheduler;
+use crate::core::work::sign;
 use crate::core::work::unit::tally;
 use crate::machine::hart;
 
@@ -75,7 +75,7 @@ fn wait() -> Option<usize> {
         unsafe {
             core::arch::asm!("wfi");
         }
-        if messenger::redeem() {
+        if sign::redeem() {
             break;
         }
         if let Some(pa) = dispatch() {

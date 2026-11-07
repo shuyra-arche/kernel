@@ -19,6 +19,21 @@ consume the same API; Server does not depend on Client. Language runtime/std sup
 Platform denotes hardware porting; Kernel defines no Runtime/Execution layer. Cluster is an organizational
 boundary, not a configuration file.
 
+## Control-flow boundaries
+
+Kernel rebuild work is tracked in [#14](https://github.com/shuyra-arche/kernel/issues/14).
+The model starts with data and control flows crossing isolation boundaries.
+Under Server's `core/work`, `unit` owns execution control, lifecycle and results;
+`sign` owns notification sources, wait registration and routing; `room` owns
+scheduling and execution handoff. A suspended operation stays with its Task;
+Join results and memory conditions are interpreted by their owning domains.
+Team/Task pause and resume decisions use explicit state transitions before
+applying scheduling effects under the commit boundary.
+
+This first migration keeps the existing public calls, notification policies and
+source keys. It does not yet implement the new Cell/View/Pend model or public
+Sign objects and reliable-event delivery.
+
 ## Build
 
 Kernel uses nightly Rust for `allocator_api`. The repository does not impose a

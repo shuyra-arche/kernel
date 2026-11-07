@@ -2,8 +2,8 @@ use alloc::sync::{Arc, Weak};
 
 use crate::core::memory::address::VirtAddr;
 use crate::core::memory::nest::{Access, Nest, NestError, SpaceKind, View, ViewRange};
-use crate::core::work::room::messenger::{self, WakeKey};
 use crate::core::work::room::scheduler::roster;
+use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::life::Life;
 
 use super::{ViewEntry, ViewRegistry};
@@ -28,7 +28,7 @@ impl Space {
             return Ok(());
         }
         self.nest.close()?;
-        messenger::wipe_space(self.nest.asid());
+        sign::wipe_space(self.nest.asid());
         self.reap_views();
         self.nest.retire()?;
         self.reap_views();
@@ -77,7 +77,7 @@ impl Space {
     pub(crate) fn withdraw(&self, selection: ViewRange) -> Result<(), NestError> {
         let key = self.view_key(selection.view());
         let result = self.nest.detach(selection);
-        messenger::signal(key);
+        sign::signal(key);
         result
     }
 
@@ -85,7 +85,7 @@ impl Space {
     pub(crate) fn dispose(&self, view: Arc<View>) -> Result<(), NestError> {
         let key = self.view_key(&view);
         let result = self.nest.dispose(view);
-        messenger::signal(key);
+        sign::signal(key);
         result
     }
 
@@ -93,7 +93,7 @@ impl Space {
     pub(crate) fn access(&self, selection: ViewRange, access: Access) -> Result<(), NestError> {
         let key = self.view_key(selection.view());
         let result = self.nest.set_access(selection, access);
-        messenger::signal(key);
+        sign::signal(key);
         result
     }
 
@@ -101,7 +101,7 @@ impl Space {
     pub(crate) fn narrow(&self, selection: ViewRange, ceiling: Access) -> Result<(), NestError> {
         let key = self.view_key(selection.view());
         let result = self.nest.narrow(selection, ceiling);
-        messenger::signal(key);
+        sign::signal(key);
         result
     }
 
@@ -158,7 +158,7 @@ unsafe impl Sync for Space {}
 impl Drop for Space {
     fn drop(&mut self) {
         if !self.nest.retired() {
-            messenger::wipe_space(self.nest.asid());
+            sign::wipe_space(self.nest.asid());
         }
     }
 }

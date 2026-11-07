@@ -17,7 +17,7 @@ use crate::core::memory::transfer::{Transfer, TransferError};
 use crate::core::work::mail::Mail;
 use crate::core::work::mail::pole::PoleOperation;
 use crate::core::work::pend::{self, Geometry, Hold, IndependentHold, SourceAuthorization};
-use crate::core::work::room::messenger::{self, WakeKey};
+use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::space::{Space, ViewEntry};
 use crate::core::work::unit::task::{Task, TaskIdent};
 use crate::core::work::unit::team::Team;
@@ -1021,7 +1021,7 @@ fn wake(affected: Vec<Weak<View>>) {
         let Some((space, view)) = key else {
             continue;
         };
-        messenger::signal(WakeKey::View { space, view });
+        sign::signal(WakeKey::View { space, view });
     }
 }
 

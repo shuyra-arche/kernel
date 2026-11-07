@@ -18,7 +18,8 @@ use kernel_api::{
 };
 
 use crate::core::work::pend::Need;
-use crate::core::work::room::messenger::{self, Handoff, WakeKey};
+use crate::core::work::room::Handoff;
+use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::life::Life;
 
 use pending::Pending;
@@ -128,7 +129,7 @@ pub(crate) fn wait(
     if dur == Duration::ZERO {
         return Ok(Handoff::Resume(false));
     }
-    let out = messenger::wait(key(meta, dir), meta.life(), dur)?;
+    let out = sign::wait(key(meta, dir), meta.life(), dur)?;
     if dir == HoleCondition::Empty
         && let Some((from, len, ms)) = hand_age(meta)
     {
@@ -280,12 +281,12 @@ pub(crate) fn seal(meta: &HoleMeta) {
         );
     }
     drop(pending);
-    messenger::wipe(WakeKey::seal(
+    sign::wipe(WakeKey::seal(
         kernel_api::model::pie::PieKind::Hole,
         meta.id,
     ));
-    messenger::wipe(key(meta, HoleCondition::Pull));
-    messenger::wipe(key(meta, HoleCondition::Empty));
-    messenger::wipe(key(meta, HoleCondition::Push));
-    messenger::wipe(key(meta, HoleCondition::Signal));
+    sign::wipe(key(meta, HoleCondition::Pull));
+    sign::wipe(key(meta, HoleCondition::Empty));
+    sign::wipe(key(meta, HoleCondition::Push));
+    sign::wipe(key(meta, HoleCondition::Signal));
 }

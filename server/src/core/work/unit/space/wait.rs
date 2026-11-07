@@ -1,6 +1,12 @@
-use super::*;
+//! The memory condition belongs to Space; Sign owns only its wait registration.
+use super::Space;
 use crate::core::memory::{address::VirtAddr, nest::NestError};
-use crate::core::work::unit::space::Space;
+use crate::core::work::room::Handoff;
+use crate::core::work::sign::{self, WakeKey, block_with_call, finish_block};
+use crate::core::work::unit::task::WaitCall;
+use crate::machine::clock;
+use alloc::sync::Arc;
+use core::time::Duration;
 use kernel_api::abi::call::room::RoomFail;
 
 pub(crate) fn wait_value(
@@ -38,7 +44,7 @@ pub(crate) fn wait_value(
             Err(error) => {
                 // A timer/holder allocation may fail after creating the site.
                 // Keep failed waits from accumulating empty address keys.
-                prune(&mut sites(key).lock(), key);
+                sign::prune_empty(key);
                 return Err(error);
             }
         }
@@ -47,26 +53,4 @@ pub(crate) fn wait_value(
         Handoff::Resume(()) => Handoff::Resume(true),
         Handoff::Switch(pa) => Handoff::Switch(pa),
     })
-}
-
-pub(crate) fn wake_value(key: WakeKey, all: bool) -> usize {
-    let _commit = crate::core::work::commit();
-    let chain = {
-        let mut table = sites(key).lock();
-        let chain = table.get_mut(&key).and_then(|site| {
-            if all {
-                site.chain.take()
-            } else {
-                site.chain.pop()
-            }
-        });
-        prune(&mut table, key);
-        chain
-    };
-    let mut count = 0;
-    for task in Unchain::new(chain) {
-        count += 1;
-        rise(core::iter::once(task));
-    }
-    count
 }

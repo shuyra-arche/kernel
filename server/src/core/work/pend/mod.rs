@@ -163,10 +163,8 @@ pub(crate) fn insert(task: &Task, pie: Pie) -> Result<(), PieFail> {
 }
 
 pub(crate) fn notify(task: kernel_api::model::identity::TaskId, token: PieToken) {
-    let _ = crate::core::work::room::messenger::signal(
-        crate::core::work::room::messenger::WakeKey::Inspect {
-            task,
-            token: token.get(),
-        },
-    );
+    let _ = crate::core::work::sign::signal(crate::core::work::sign::WakeKey::Inspect {
+        task,
+        token: token.get(),
+    });
 }

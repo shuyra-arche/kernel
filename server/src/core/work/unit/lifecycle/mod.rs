@@ -1,13 +1,12 @@
+//! Unit termination, retained results and resource retirement.
+//! Event transport is provided by Sign; notifications do not own exit state.
+
 mod doom;
-mod handoff;
 mod reap;
-mod wait;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use reap::HUSKS;
-use wait::holder::{holders, void};
-use wait::site::{SITE_SHARDS, prune, shard_at};
 
 struct ExitNote {
     reason: AtomicUsize,
@@ -63,33 +62,14 @@ pub(crate) const EXIT_DOOM: usize = 0xFFFF_FFFE;
 pub(crate) const EXIT_CASCADE: usize = 0xFFFF_FFFD;
 
 pub(crate) use doom::{branch_stats, cull, doom, slay, take_doomed};
-pub(crate) use handoff::Handoff;
 pub(crate) use reap::{bury, hook, quit};
-pub(crate) use wait::holder::Ticket;
-pub(crate) use wait::key::WakeKey;
-pub(crate) use wait::{
-    fall, forward, knock, park, park_until, redeem, signal, unforward, wait, wait_until, wake,
-    wipe, wipe_space,
-};
 
 pub(crate) fn rip() {
-    for shard in 0..SITE_SHARDS {
-        let sites_out = core::mem::take(&mut *shard_at(shard).lock());
-        drop(sites_out);
-    }
-    let husks_out = HUSKS.lock().take();
-    drop(husks_out);
-    holders().lock().clear();
+    let retired = HUSKS.lock().take();
+    drop(retired);
 }
 
 #[cfg(debug_assertions)]
-pub(crate) fn probe_bookkeeping() -> (usize, usize) {
-    let holders_n = holders().lock().len();
-    let husks_n = HUSKS.lock().len();
-    (holders_n, husks_n)
+pub(crate) fn retained_count() -> usize {
+    HUSKS.lock().len()
 }
-
-pub(crate) use wait::{unit_join, wait_value, wake_value};
-
-pub(crate) use wait::call::WaitCall;
-pub(crate) use wait::mail_await;

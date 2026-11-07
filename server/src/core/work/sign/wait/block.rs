@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn block_with_call<E: WaitFail>(
+pub(crate) fn block_with_call<E: WaitFail>(
     key: WakeKey,
     life: Weak<Life>,
     dur: Duration,
@@ -13,7 +13,7 @@ pub(super) fn block_with_call<E: WaitFail>(
         return Err(E::busy());
     };
     let _commit = crate::core::work::commit();
-    if let Some(reason) = super::super::take_doomed(me.ident.id) {
+    if let Some(reason) = crate::core::work::unit::lifecycle::take_doomed(me.ident.id) {
         drop(me);
         return Ok(Blocked::Quit(reason));
     }
@@ -22,10 +22,10 @@ pub(super) fn block_with_call<E: WaitFail>(
         Site::ensure(&mut sites, key, &life).map_err(|()| E::oom())?;
     }
     let ticket = Ticket::next_id();
-    let at = match &wait {
-        Some(WaitCall::Value { deadline }) => *deadline,
-        _ => (dur != Duration::MAX).then(|| clock::now().add(dur).as_ticks()),
-    };
+    let at = wait.as_ref().map_or_else(
+        || (dur != Duration::MAX).then(|| clock::now().add(dur).as_ticks()),
+        |call| call.deadline(dur),
+    );
     if let Some(at) = at {
         hold(ticket, key, &me).map_err(|()| E::oom())?;
         if deadline::tock(ticket.raw(), at).is_err() {

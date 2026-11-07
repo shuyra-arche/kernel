@@ -10,7 +10,7 @@ use super::hand::Hand;
 use super::pending::Pending;
 use super::slot::Slot;
 use super::{HANDS_LIVE, HoleMeta, key};
-use crate::core::work::room::messenger;
+use crate::core::work::sign;
 
 pub(crate) struct Reservation<'a> {
     meta: &'a HoleMeta,
@@ -52,7 +52,7 @@ impl Reservation<'_> {
             HANDS_LIVE.fetch_add(1, Ordering::Relaxed);
             self.id = None;
         }
-        let _ = messenger::wake(key(self.meta, HoleCondition::Pull), &self.meta.life());
+        let _ = sign::wake(key(self.meta, HoleCondition::Pull), &self.meta.life());
         Ok(())
     }
 }
@@ -81,9 +81,9 @@ impl Drop for Reservation<'_> {
             }
         };
         if removed {
-            let _ = messenger::wake(key(self.meta, HoleCondition::Pull), &self.meta.life());
-            let _ = messenger::wake(key(self.meta, HoleCondition::Empty), &self.meta.life());
-            let _ = messenger::wake(key(self.meta, HoleCondition::Push), &self.meta.life());
+            let _ = sign::wake(key(self.meta, HoleCondition::Pull), &self.meta.life());
+            let _ = sign::wake(key(self.meta, HoleCondition::Empty), &self.meta.life());
+            let _ = sign::wake(key(self.meta, HoleCondition::Push), &self.meta.life());
         }
     }
 }

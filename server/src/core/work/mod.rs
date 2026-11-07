@@ -4,6 +4,7 @@ pub mod mail;
 pub mod pend;
 pub(crate) mod record;
 pub mod room;
+pub(crate) mod sign;
 pub mod unit;
 
 pub(crate) use commit::commit;

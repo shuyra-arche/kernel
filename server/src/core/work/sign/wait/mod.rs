@@ -1,15 +1,14 @@
-pub(super) mod call;
 pub(super) mod fwd;
 pub(super) mod holder;
 pub(super) mod key;
 pub(super) mod site;
 
-mod block;
-mod blocked;
+pub(super) mod block;
+pub(super) mod blocked;
+mod counted;
 mod fail;
 mod unchain;
-mod value;
-pub(crate) use value::{wait_value, wake_value};
+pub(crate) use counted::wake_counted;
 
 use alloc::sync::{Arc, Weak};
 use core::time::Duration;
@@ -20,19 +19,19 @@ use crate::core::work::room::conductor::run::run;
 use crate::core::work::room::deadline;
 use crate::core::work::room::scheduler::launch;
 use crate::core::work::unit::life::{Life, TaskLife};
-use crate::core::work::unit::task::Task;
+use crate::core::work::unit::task::{Resumption, Task};
 use crate::machine::clock;
 
 use self::block::block_with_call;
 use self::blocked::{Blocked, finish_block};
-use self::call::WaitCall;
 use self::fail::WaitFail;
 use self::fwd::Fwd;
 use self::holder::{Ticket, hold, void};
 use self::key::WakeKey;
 use self::site::{SITE_SHARDS, Site, prune, shard_at, sites, take_beacon};
 use self::unchain::Unchain;
-use super::handoff::Handoff;
+use crate::core::work::room::Handoff;
+use crate::core::work::unit::task::WaitCall;
 
 fn fan_out(fwd: &Fwd) {
     for (id, life) in fwd.entries() {
@@ -46,18 +45,8 @@ fn rise<I: IntoIterator<Item = Arc<Task>>>(tasks: I) -> usize {
         let _commit = crate::core::work::commit();
         let t = task;
         if let Some(join) = t.take_wait() {
-            let resumed = match join {
-                WaitCall::Value { deadline } => {
-                    use crate::machine::switcher::context::{Gprs, TrapContext};
-                    let timely = deadline.is_none_or(|at| clock::now().as_ticks() < at);
-                    let frame = unsafe { &mut *(t.ident.frame_pa.as_usize() as *mut TrapContext) };
-                    frame.gpr.set_x(Gprs::A0, timely as usize);
-                    true
-                }
-                WaitCall::Join(join) => resume_join(&t, join),
-                WaitCall::Mail(wait) => resume_await(&t, wait),
-            };
-            if !resumed {
+            let resumed = join.resume(&t);
+            if resumed == Resumption::Waiting {
                 continue;
             }
         }
@@ -333,55 +322,7 @@ pub fn redeem() -> bool {
     rise(tasks.iter_mut().filter_map(Option::take)) > 0
 }
 
-pub(crate) fn unit_join(
-    join: crate::core::work::unit::join::JoinWait,
-) -> Result<Handoff<kernel_api::model::unit::JoinReply>, kernel_api::abi::call::unit::UnitFail> {
-    loop {
-        let _commit = crate::core::work::commit();
-        let reply = join.poll()?;
-        if reply != kernel_api::model::unit::JoinReply::Pending
-            || join.remaining() == Duration::ZERO
-        {
-            return Ok(Handoff::Resume(reply));
-        }
-        let blocked = block_with_call::<kernel_api::abi::call::unit::UnitFail>(
-            join.target.key(),
-            join.target.life(),
-            join.remaining(),
-            Some(WaitCall::Join(join.clone())),
-        )?;
-        drop(_commit);
-        match finish_block(blocked) {
-            Handoff::Resume(()) => continue,
-            Handoff::Switch(pa) => return Ok(Handoff::Switch(pa)),
-        }
-    }
-}
-fn resume_join(task: &Arc<Task>, join: crate::core::work::unit::join::JoinWait) -> bool {
-    use crate::machine::switcher::context::TrapContext;
-    use kernel_api::model::unit::JoinReply;
-    let _commit = crate::core::work::commit();
-    let result = join.poll();
-    let result = if matches!(result, Ok(JoinReply::Pending)) && join.remaining() != Duration::ZERO {
-        match requeue(
-            task,
-            join.target.key(),
-            join.target.life(),
-            join.remaining(),
-            WaitCall::Join(join.clone()),
-            kernel_api::abi::call::unit::UnitFail::OoM,
-        ) {
-            Ok(()) => return false,
-            Err(error) => Err(error),
-        }
-    } else {
-        result
-    };
-    let frame = unsafe { &mut *(task.ident.frame_pa.as_usize() as *mut TrapContext) };
-    crate::core::work::unit::join::JoinWait::write(frame, result);
-    true
-}
-fn requeue<E: Copy>(
+pub(crate) fn requeue<E: Copy>(
     task: &Arc<Task>,
     key: WakeKey,
     life: Weak<Life>,
@@ -409,70 +350,34 @@ fn requeue<E: Copy>(
     Ok(())
 }
 
-pub(crate) fn mail_await(
-    wait: crate::core::work::mail::tole::AwaitWait,
-) -> Result<Handoff<kernel_api::abi::reply::ToleAwaitReply>, kernel_api::abi::call::tole::ToleFail>
-{
-    loop {
-        let commit = crate::core::work::commit();
-        let reply = match wait.poll() {
-            Ok(reply) => reply,
-            Err(e) => {
-                wait.unwatch();
-                return Err(e);
+pub(crate) fn detach(task: &Arc<Task>) -> bool {
+    for shard in 0..SITE_SHARDS {
+        let mut sites = shard_at(shard).lock();
+        let mut hit: Option<(WakeKey, Ticket)> = None;
+        for (key, site) in sites.iter_mut() {
+            if let Some(ticket) = site
+                .chain
+                .remove_if(&mut |t| Arc::ptr_eq(t, task))
+                .map(|node| node.wait_ticket())
+            {
+                hit = Some((*key, ticket));
+                break;
             }
-        };
-        if reply != kernel_api::abi::reply::ToleAwaitReply::Pending
-            || wait.remaining() == Duration::ZERO
-        {
-            wait.unwatch();
-            return Ok(Handoff::Resume(reply));
         }
-        wait.watch()?;
-        let blocked = match block_with_call::<kernel_api::abi::call::tole::ToleFail>(
-            wait.key(),
-            wait.life(),
-            wait.remaining(),
-            Some(WaitCall::Mail(wait.clone())),
-        ) {
-            Ok(blocked) => blocked,
-            Err(e) => {
-                wait.unwatch();
-                return Err(e);
-            }
-        };
-        drop(commit);
-        match finish_block(blocked) {
-            Handoff::Resume(()) => continue,
-            Handoff::Switch(pa) => return Ok(Handoff::Switch(pa)),
+        let out = hit.map(|(key, ticket)| {
+            prune(&mut sites, key);
+            ticket
+        });
+        drop(sites);
+        if let Some(ticket) = out {
+            void(ticket);
+            return true;
         }
     }
+    false
 }
-fn resume_await(task: &Arc<Task>, wait: crate::core::work::mail::tole::AwaitWait) -> bool {
-    let _commit = crate::core::work::commit();
-    let result = wait.poll();
-    let result = if matches!(result, Ok(kernel_api::abi::reply::ToleAwaitReply::Pending))
-        && wait.remaining() != Duration::ZERO
-    {
-        match requeue(
-            task,
-            wait.key(),
-            wait.life(),
-            wait.remaining(),
-            WaitCall::Mail(wait.clone()),
-            kernel_api::abi::call::tole::ToleFail::OoM,
-        ) {
-            Ok(()) => return false,
-            Err(e) => Err(e),
-        }
-    } else {
-        result
-    };
-    let frame = unsafe {
-        &mut *(task.ident.frame_pa.as_usize()
-            as *mut crate::machine::switcher::context::TrapContext)
-    };
-    wait.unwatch();
-    wait.write(frame, result);
-    true
+
+/// Remove an empty source left by a failed wait preparation.
+pub(crate) fn prune_empty(key: WakeKey) {
+    prune(&mut sites(key).lock(), key);
 }

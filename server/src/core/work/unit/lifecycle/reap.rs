@@ -11,7 +11,7 @@ use crate::core::work::unit::tally;
 use crate::core::work::unit::task::{Task, TaskExitCause, TaskState};
 use crate::machine::sync::{Level, OnceLock, SpinLock};
 
-use super::{WakeKey, wipe};
+use crate::core::work::sign::{self, WakeKey, wipe};
 
 pub(super) static HUSKS: SpinLock<Husks> = SpinLock::new_level(Level::L3, Husks::new());
 
@@ -65,7 +65,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
         let _commit = crate::core::work::commit();
         task.transform_checked(TaskState::reaped(cause, reason));
     }
-    super::signal(WakeKey::Task { id: task.ident.id });
+    sign::signal(WakeKey::Task { id: task.ident.id });
     task.ident.team.life.notify();
     HUSKS.lock().push(task);
 }

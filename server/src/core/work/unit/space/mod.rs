@@ -11,3 +11,5 @@ pub(crate) use view_binding::ViewBinding;
 pub(crate) use view_control_record::ViewControlRecord;
 pub(crate) use view_entry::ViewEntry;
 pub(crate) use views::ViewRegistry;
+
+pub(crate) mod wait;

@@ -5,8 +5,9 @@ use kernel_api::{abi::call::unit::UnitCall, abi::call::unit::UnitFail, model::un
 
 use crate::core::memory::address::VirtAddr as KVirt;
 use crate::core::memory::nest::{NestError, SpaceKind};
-use crate::core::work::room::messenger::{self, Handoff};
+use crate::core::work::room::Handoff;
 use crate::core::work::room::scheduler::roster::muster;
+use crate::core::work::sign::{self};
 use crate::core::work::unit::copies::Origin;
 use crate::core::work::unit::join::JoinWait;
 use crate::core::work::unit::life::TaskLife;
@@ -174,7 +175,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             let caller = ident.id;
             drop(me);
             drop(ident);
-            match messenger::unit_join(join) {
+            match crate::core::work::unit::join::wait::wait(join) {
                 Ok(Handoff::Resume(reply)) => JoinWait::write(frame, Ok(reply)),
                 Ok(Handoff::Switch(pa)) => return Outcome::Switch(pa as *mut TrapContext),
                 Err(error) => return Outcome::fail(frame, error),
@@ -203,7 +204,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             };
             drop(me);
             drop(ident);
-            match messenger::fall::<UnitFail>(mine, millis.into_duration()) {
+            match sign::fall::<UnitFail>(mine, millis.into_duration()) {
                 Ok(Handoff::Resume(landed)) => frame.gpr.set_x(Gprs::A0, landed as usize),
                 Ok(Handoff::Switch(pa)) => return Outcome::Switch(pa as *mut TrapContext),
                 Err(error) => return Outcome::fail(frame, error),
@@ -235,12 +236,14 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                             result
                         }
                         UnitCall::Slay { .. } => {
-                            messenger::slay(&task);
+                            crate::core::work::unit::lifecycle::slay(&task);
                             if id == ident.id {
                                 drop(task);
                                 drop(me);
                                 drop(ident);
-                                return Outcome::Switch(messenger::quit() as *mut TrapContext);
+                                return Outcome::Switch(
+                                    crate::core::work::unit::lifecycle::quit() as *mut TrapContext
+                                );
                             }
                             Ok(())
                         }
@@ -255,7 +258,10 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                         UnitCall::Embark { .. } => team.embark(),
                         UnitCall::Debark { .. } => team.debark(),
                         UnitCall::Slay { .. } => {
-                            messenger::cull(::core::slice::from_ref(&team), messenger::EXIT_DOOM);
+                            crate::core::work::unit::lifecycle::cull(
+                                ::core::slice::from_ref(&team),
+                                crate::core::work::unit::lifecycle::EXIT_DOOM,
+                            );
                             Ok(())
                         }
                         _ => unreachable!(),

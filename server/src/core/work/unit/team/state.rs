@@ -2,6 +2,8 @@ use alloc::vec::Vec;
 
 use kernel_api::abi::call::unit::UnitFail;
 
+use crate::core::work::unit::control::Request;
+
 use super::Staging;
 use super::TeamPhase;
 use super::TeamStage;
@@ -53,21 +55,13 @@ impl TeamState {
 
     /// 收下：活着就转暂停，已经暂停则无操作；注定要死或已撤离不允许。
     pub(crate) fn debark(&mut self) -> Result<(), UnitFail> {
-        match self.phase {
-            TeamPhase::Live => self.phase = TeamPhase::Paused,
-            TeamPhase::Paused => {}
-            TeamPhase::Doomed | TeamPhase::Ousted => return Err(UnitFail::Denied),
-        }
+        self.phase = self.phase.transition(Request::Pause)?;
         Ok(())
     }
 
     /// 换回：暂停就恢复活着，活着则无操作；注定要死或已撤离不允许。
     pub(crate) fn embark(&mut self) -> Result<(), UnitFail> {
-        match self.phase {
-            TeamPhase::Paused => self.phase = TeamPhase::Live,
-            TeamPhase::Live => {}
-            TeamPhase::Doomed | TeamPhase::Ousted => return Err(UnitFail::Denied),
-        }
+        self.phase = self.phase.transition(Request::Resume)?;
         Ok(())
     }
 

@@ -136,9 +136,7 @@ impl TeamLife {
     pub fn notify(&self) {
         let mut node = Some(self);
         while let Some(here) = node {
-            crate::core::work::room::messenger::signal(
-                crate::core::work::room::messenger::WakeKey::Team { id: here.id },
-            );
+            crate::core::work::sign::signal(crate::core::work::sign::WakeKey::Team { id: here.id });
             node = here.parent.as_deref();
         }
     }
