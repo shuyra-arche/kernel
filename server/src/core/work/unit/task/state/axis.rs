@@ -3,8 +3,9 @@ use core::fmt;
 
 use kernel_api::model::unit::ExitCause as TaskExitCause;
 
-use crate::core::work::room::messenger::{Ticket, WaitCall, WakeKey};
+use crate::core::work::sign::{Ticket, WakeKey};
 use crate::core::work::unit::task::Task;
+use crate::core::work::unit::task::WaitCall;
 use crate::machine::hart::HartId;
 
 /// 任务状态机的轴：任一时刻只在一根轴上。`next` 是入链载荷，只挂在就绪 / 等待 /

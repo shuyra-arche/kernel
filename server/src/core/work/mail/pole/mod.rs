@@ -15,7 +15,8 @@ use crate::core::memory::flat::{BorrowedRegion, Flat, FlatError, FlatRange};
 use crate::core::memory::nest::{Access, NestError, Placement, RegionId, View};
 use crate::core::work::grant::Grant;
 use crate::core::work::pend::SourceAuthorization;
-use crate::core::work::room::messenger::{self, Handoff, WakeKey};
+use crate::core::work::room::Handoff;
+use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::life::Life;
 use crate::core::work::unit::space::Space;
 use crate::machine::sync::{Level, SpinLock};
@@ -589,12 +590,12 @@ pub(crate) fn key(meta: &PoleMeta, bit: Bit) -> WakeKey {
     WakeKey::Pole { id: meta.id, bit }
 }
 fn wipe(meta: &PoleMeta) {
-    messenger::wipe(WakeKey::seal(
+    sign::wipe(WakeKey::seal(
         kernel_api::model::pie::PieKind::Pole,
         meta.id,
     ));
     for index in 0..usize::BITS as usize {
-        messenger::wipe(key(meta, Bit::wrap(index)));
+        sign::wipe(key(meta, Bit::wrap(index)));
     }
 }
 pub(crate) fn ring(meta: &PoleMeta, bit: Bit) -> Result<(), PoleFail> {
@@ -608,7 +609,7 @@ pub(crate) fn ring(meta: &PoleMeta, bit: Bit) -> Result<(), PoleFail> {
         changed
     };
     if changed {
-        messenger::knock(key(meta, bit), &meta.life());
+        sign::knock(key(meta, bit), &meta.life());
     }
     Ok(())
 }
@@ -629,7 +630,7 @@ pub(crate) fn wait(meta: &PoleMeta, bit: Bit, dur: Duration) -> Result<Handoff<b
     if dur == Duration::ZERO {
         return Ok(Handoff::Resume(false));
     }
-    Ok(match messenger::wait(key(meta, bit), meta.life(), dur)? {
+    Ok(match sign::wait(key(meta, bit), meta.life(), dur)? {
         Handoff::Resume(()) => Handoff::Resume(meta.alive() && meta.ready(bit)),
         Handoff::Switch(pa) => Handoff::Switch(pa),
     })

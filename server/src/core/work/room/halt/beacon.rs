@@ -69,7 +69,8 @@ pub(crate) fn idle(hart: crate::machine::hart::HartId) {
     BEACON_FIRED.store(true, Ordering::Relaxed);
     #[cfg(debug_assertions)]
     {
-        let (holders, husks) = crate::core::work::room::messenger::probe_bookkeeping();
+        let holders = crate::core::work::sign::timed_wait_count();
+        let husks = crate::core::work::unit::lifecycle::retained_count();
         let (more, ids) = super::super::scheduler::roster::roster_live_ids();
         let live = {
             let mut n = 0usize;

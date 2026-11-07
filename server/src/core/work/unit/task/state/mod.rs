@@ -1,9 +1,10 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use kernel_api::{abi::call::unit::UnitFail, model::unit::ExitCause as TaskExitCause};
+use kernel_api::model::unit::ExitCause as TaskExitCause;
 
-use crate::core::work::room::messenger::{Ticket, WaitCall, WakeKey};
+use crate::core::work::sign::{Ticket, WakeKey};
+use crate::core::work::unit::task::WaitCall;
 use crate::machine::hart::HartId;
 
 use axis::TaskAxis;
@@ -11,9 +12,9 @@ use axis::TaskAxis;
 use super::Task;
 
 mod axis;
-mod step;
+pub(crate) mod control;
 
-pub(crate) use step::Step;
+use control::{Control, Phase, Transition};
 
 /// 一个任务的状态机：一根轴（`TaskAxis`）加一条「暂停」标记。轴上的每个问题与
 /// 每次迁移都住在这里；`Task` 只负责加锁与轴外的效果（发射、停泊、唤醒）。
@@ -71,14 +72,6 @@ impl TaskState {
             next: None,
             wait,
         };
-    }
-
-    pub(crate) fn pause(&mut self) {
-        self.paused = true;
-    }
-
-    pub(crate) fn resume(&mut self) {
-        self.paused = false;
     }
 
     pub(crate) fn paused(&self) -> bool {
@@ -203,53 +196,36 @@ impl TaskState {
         *self = next;
     }
 
-    /// 换下：把任务从核上/就绪/泊位收下来，回答「接下来做什么」。
-    pub(crate) fn debark(&mut self) -> Result<Step, UnitFail> {
-        match &self.axis {
-            TaskAxis::Doomed { .. } | TaskAxis::Reaped { .. } => Err(UnitFail::Denied),
-            TaskAxis::OnHart { .. } if self.paused => Err(UnitFail::Busy),
-            _ if self.paused => Ok(Step::Done),
-            TaskAxis::OnHart { hart, .. } => {
-                let hart = *hart;
-                self.pause();
-                Ok(Step::Nudge(hart))
-            }
-            TaskAxis::Ready { .. } => Ok(Step::LeaveReady),
-            TaskAxis::Parked => {
-                self.pause();
-                self.axis = TaskAxis::Ready { next: None };
-                Ok(Step::Done)
-            }
-            TaskAxis::Held | TaskAxis::Waiting { .. } => {
-                self.pause();
-                Ok(Step::Done)
-            }
+    pub(crate) fn control(&self) -> Control {
+        let phase = match self.axis {
+            TaskAxis::Held => Phase::Held,
+            TaskAxis::Ready { .. } => Phase::Ready,
+            TaskAxis::OnHart { .. } => Phase::Running,
+            TaskAxis::Waiting { .. } => Phase::Waiting,
+            TaskAxis::Parked => Phase::Parked,
+            TaskAxis::Doomed { .. } => Phase::Terminating,
+            TaskAxis::Reaped { .. } => Phase::Finished,
+        };
+        Control {
+            phase,
+            paused: self.paused,
         }
     }
 
-    /// 换回：把暂停收掉，回答「接下来做什么」；`Step::Held`/`Step::Ready` 时轴已
-    /// 按释放/发射路径摆好。
-    pub(crate) fn embark(&mut self) -> Result<Step, UnitFail> {
-        if !self.paused {
-            return Err(UnitFail::Busy);
+    /// Publish a decision only against the state from which it was computed.
+    /// The caller holds the commit boundary through the external effect.
+    pub(crate) fn apply_control(&mut self, transition: Transition) {
+        assert_eq!(
+            self.control(),
+            transition.before,
+            "stale control transition"
+        );
+        if transition.after.phase != transition.before.phase {
+            assert_eq!(transition.before.phase, Phase::Parked);
+            assert_eq!(transition.after.phase, Phase::Ready);
+            self.axis = TaskAxis::Ready { next: None };
         }
-        match &self.axis {
-            TaskAxis::Doomed { .. } | TaskAxis::Reaped { .. } => Err(UnitFail::Denied),
-            TaskAxis::Waiting { .. } => {
-                self.resume();
-                Ok(Step::Done)
-            }
-            TaskAxis::Held => {
-                *self = TaskState::held();
-                Ok(Step::Held)
-            }
-            TaskAxis::Ready { .. } => {
-                self.axis = TaskAxis::Ready { next: None };
-                self.paused = false;
-                Ok(Step::Ready)
-            }
-            TaskAxis::OnHart { .. } | TaskAxis::Parked => Err(UnitFail::Busy),
-        }
+        self.paused = transition.after.paused;
     }
 
     /// 停泊：暂停中的任务摆成就绪（等人把它捞走），否则进泊位。

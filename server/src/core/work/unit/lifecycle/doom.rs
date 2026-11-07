@@ -1,10 +1,7 @@
 use super::reap::reap;
-use super::wait::holder::Ticket;
-use super::wait::key::WakeKey;
-use super::wait::site::{SITE_SHARDS, shard_at};
-use super::{prune, void};
 use crate::core::work::room::counter::Counter;
 use crate::core::work::room::scheduler::roster::muster;
+use crate::core::work::sign;
 use crate::core::work::unit::life::TeamLife;
 use crate::core::work::unit::task::{Task, TaskExitCause};
 use crate::core::work::unit::team::Team;
@@ -40,45 +37,18 @@ fn suspend(task: &Arc<Task>, cause: TaskExitCause, reason: usize) -> bool {
         ));
         CULL_STARVED.bump();
     } else if task.waiting() {
-        let ticket = pop_waiter(task).expect("published blocked waiter");
-        void(ticket);
+        assert!(sign::detach(task), "published blocked waiter");
         CULL_BLOCKED.bump();
     } else {
         assert!(task.ident.team.release_held(task));
         CULL_HELD.bump();
     }
-    if let Some(super::WaitCall::Mail(wait)) = task.take_wait() {
-        wait.unwatch();
+    if let Some(wait) = task.take_wait() {
+        wait.cancel();
     }
     task.state.lock().doom(None, cause, reason);
     true
 }
-fn pop_waiter(task: &Arc<Task>) -> Option<Ticket> {
-    for shard in 0..SITE_SHARDS {
-        let mut sites = shard_at(shard).lock();
-        let mut hit: Option<(WakeKey, Ticket)> = None;
-        for (key, site) in sites.iter_mut() {
-            if let Some(ticket) = site
-                .chain
-                .remove_if(&mut |t| Arc::ptr_eq(t, task))
-                .map(|node| node.wait_ticket())
-            {
-                hit = Some((*key, ticket));
-                break;
-            }
-        }
-        let out = hit.map(|(key, ticket)| {
-            prune(&mut sites, key);
-            ticket
-        });
-        drop(sites);
-        if out.is_some() {
-            return out;
-        }
-    }
-    None
-}
-
 fn cull_life(root: &TeamLife, cause: TaskExitCause, reason: usize) {
     root.doom();
     root.visit(&mut |node| {

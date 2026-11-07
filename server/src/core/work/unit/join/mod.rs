@@ -1,3 +1,4 @@
+pub(crate) mod wait;
 use crate::machine::clock;
 use crate::machine::switcher::context::{Gprs, TrapContext};
 use alloc::sync::Arc;

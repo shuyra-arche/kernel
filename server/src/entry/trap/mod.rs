@@ -8,10 +8,11 @@ use riscv::register::{scause, sepc, sie, sip, stval};
 use crate::core::memory::address::VirtAddr as KVirt;
 use crate::core::memory::nest::identity::{self as asid, Asid};
 use crate::core::memory::nest::{FaultOutcome, Nest};
+use crate::core::work::room::Handoff;
 use crate::core::work::room::conductor::run::run;
 use crate::core::work::room::deadline;
 use crate::core::work::room::identity::{Identity, ident};
-use crate::core::work::room::messenger::{self, Handoff, WakeKey, redeem};
+use crate::core::work::sign::{self, WakeKey, redeem};
 use crate::core::work::unit::space::Space;
 use crate::core::work::unit::task::TaskIdent;
 use crate::machine::hart::{self, HartId};
@@ -131,7 +132,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
             deadline::beat_until(deadline::blind_ceiling());
             redeem();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
-                && let Some(reason) = crate::core::work::room::messenger::take_doomed(running.id)
+                && let Some(reason) = crate::core::work::unit::lifecycle::take_doomed(running.id)
             {
                 return quit(ident, reason);
             }
@@ -149,7 +150,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 sip::clear_ssoft();
             }
             if let Some(running) = ident.as_ref().and_then(Identity::live)
-                && let Some(reason) = crate::core::work::room::messenger::take_doomed(running.id)
+                && let Some(reason) = crate::core::work::unit::lifecycle::take_doomed(running.id)
             {
                 return quit(ident, reason);
             }
@@ -180,7 +181,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
             }
             match envcall(frame, ident) {
                 Some(next) => next,
-                None => crate::core::work::room::messenger::quit() as *mut TrapContext,
+                None => crate::core::work::unit::lifecycle::quit() as *mut TrapContext,
             }
         }
         Trap::Exception(
@@ -297,7 +298,7 @@ fn page_fault_wait(
     // 先放掉空间与身份，再进提交边界的 wait_until；等待捕获自己在其内部释放。
     drop(space);
     drop(ident);
-    match messenger::wait_until::<kernel_api::abi::call::room::RoomFail, _>(
+    match sign::wait_until::<kernel_api::abi::call::room::RoomFail, _>(
         key,
         life,
         waiting,
@@ -331,9 +332,9 @@ fn page_fault_killed(
 }
 
 fn quit(ident: Option<Identity>, reason: usize) -> *mut TrapContext {
-    messenger::set_exit_reason(reason);
+    crate::core::work::unit::lifecycle::set_exit_reason(reason);
     drop(ident);
-    resume(messenger::quit() as *mut TrapContext)
+    resume(crate::core::work::unit::lifecycle::quit() as *mut TrapContext)
 }
 
 fn kill_fault(ident: Option<Identity>) -> *mut TrapContext {
@@ -344,9 +345,9 @@ fn kill_fault(ident: Option<Identity>) -> *mut TrapContext {
     doom(
         live,
         kernel_api::model::unit::ExitCause::Fault,
-        messenger::EXIT_FAULT,
+        crate::core::work::unit::lifecycle::EXIT_FAULT,
     );
-    quit(ident, messenger::EXIT_FAULT)
+    quit(ident, crate::core::work::unit::lifecycle::EXIT_FAULT)
 }
 
 /// 环境调用那一支：先结清这张表上待结算的失效、再按真实长度把 `sepc` 推过那条
@@ -370,7 +371,7 @@ pub(crate) fn envcall(
         doom(
             Some(&ident),
             kernel_api::model::unit::ExitCause::Fault,
-            messenger::EXIT_FAULT,
+            crate::core::work::unit::lifecycle::EXIT_FAULT,
         );
         return None;
     }
@@ -382,7 +383,7 @@ pub(crate) fn envcall(
         doom(
             Some(&ident),
             kernel_api::model::unit::ExitCause::Fault,
-            messenger::EXIT_FAULT,
+            crate::core::work::unit::lifecycle::EXIT_FAULT,
         );
         return None;
     };
@@ -394,7 +395,7 @@ pub(crate) fn envcall(
         doom(
             Some(&ident),
             kernel_api::model::unit::ExitCause::Fault,
-            messenger::EXIT_FAULT,
+            crate::core::work::unit::lifecycle::EXIT_FAULT,
         );
         return None;
     };

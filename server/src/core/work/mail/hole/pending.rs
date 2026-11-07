@@ -5,7 +5,7 @@ use kernel_api::{abi::call::hole::HoleFail, model::hole::HoleCondition};
 use super::queue::Queue;
 use super::slot::Slot;
 use super::{HoleMeta, key};
-use crate::core::work::room::messenger;
+use crate::core::work::sign;
 
 pub(super) enum Pending {
     Queue(Queue),
@@ -34,8 +34,8 @@ pub(crate) fn ring(meta: &HoleMeta) -> Result<(), HoleFail> {
             _ => return Err(HoleFail::Busy),
         }
     };
-    let _ = messenger::wake(key(meta, HoleCondition::Pull), &meta.life());
-    let _ = messenger::wake(key(meta, HoleCondition::Signal), &meta.life());
+    let _ = sign::wake(key(meta, HoleCondition::Pull), &meta.life());
+    let _ = sign::wake(key(meta, HoleCondition::Signal), &meta.life());
     Ok(())
 }
 
@@ -53,7 +53,7 @@ pub(crate) fn hush(meta: &HoleMeta) -> Result<(), HoleFail> {
         _ => return Err(HoleFail::Busy),
     }
     drop(pending);
-    let _ = messenger::wake(key(meta, HoleCondition::Push), &meta.life());
-    let _ = messenger::wake(key(meta, HoleCondition::Empty), &meta.life());
+    let _ = sign::wake(key(meta, HoleCondition::Push), &meta.life());
+    let _ = sign::wake(key(meta, HoleCondition::Empty), &meta.life());
     Ok(())
 }

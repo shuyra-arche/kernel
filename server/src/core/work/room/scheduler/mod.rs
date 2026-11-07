@@ -13,7 +13,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::core::memory::nest::NestError;
 use crate::core::work::room::conductor::Conductor;
 use crate::core::work::room::counter::Counter;
-use crate::core::work::room::messenger;
+use crate::core::work::sign;
 use crate::core::work::unit::task::Task;
 use crate::machine::hart::{self, HartId};
 use crate::machine::sync::OnceLock;
@@ -130,7 +130,9 @@ pub(crate) fn rip() {
     for task in roster().into_iter().filter_map(|w| w.upgrade()) {
         task.ident.team.release_held(&task);
     }
-    messenger::rip();
+    sign::clear_sources();
+    crate::core::work::unit::lifecycle::rip();
+    sign::clear_timers();
     if let Some(r) = roster::ROSTER.get() {
         r.lock().clear();
     }

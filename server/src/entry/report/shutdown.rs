@@ -1,4 +1,4 @@
-use crate::core::work::room::{deadline, halt, interrupt, messenger, scheduler};
+use crate::core::work::room::{deadline, halt, interrupt, scheduler};
 use crate::core::work::unit::tally;
 use crate::machine::clock;
 use crate::putln;
@@ -26,7 +26,7 @@ pub(crate) fn report() {
         "timer: late_n={late_n} late_max_ms={max_ms} late_avg_ms={avg_ms} late_max_tick={late_max} traps={} tocks={tocks} mutes={mutes}",
         deadline::ticks()
     );
-    let (held, starved, blocked, nudged) = messenger::branch_stats();
+    let (held, starved, blocked, nudged) = crate::core::work::unit::lifecycle::branch_stats();
     putln!("doom: held={held} starved={starved} blocked={blocked} nudged={nudged}");
     let (kicks, fallback) = scheduler::kick_stats();
     putln!("sched: kicks={kicks} fallback={fallback}");

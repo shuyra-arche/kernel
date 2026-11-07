@@ -172,7 +172,7 @@ impl Conductor {
         let _commit = crate::core::work::commit();
         if self.running_task().is_some_and(|t| t.doomed()) {
             drop(_commit);
-            return crate::core::work::room::messenger::quit();
+            return crate::core::work::unit::lifecycle::quit();
         }
         if self
             .running_task()

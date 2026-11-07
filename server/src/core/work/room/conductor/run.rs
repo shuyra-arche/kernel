@@ -1,6 +1,5 @@
 //! 本核的运行环：trap 返回之后，这一步决定接下来跑谁。
 
-use crate::core::work::room::messenger;
 use crate::machine::stop::hush;
 
 use super::current;
@@ -9,14 +8,13 @@ use super::fetch::fetch;
 /// trap 返回时的下一步：返回下一个任务的帧地址。
 pub(crate) fn run() -> usize {
     hush();
-    messenger::bury();
+    crate::core::work::unit::lifecycle::bury();
     let commit = crate::core::work::commit();
-    if current()
-        .running_task()
-        .is_some_and(|task| messenger::take_doomed(task.ident.id).is_some())
-    {
+    if current().running_task().is_some_and(|task| {
+        crate::core::work::unit::lifecycle::take_doomed(task.ident.id).is_some()
+    }) {
         drop(commit);
-        return messenger::quit();
+        return crate::core::work::unit::lifecycle::quit();
     }
     let next = current().advance();
     drop(commit);

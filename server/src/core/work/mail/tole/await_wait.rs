@@ -6,7 +6,7 @@ use kernel_api::{
 };
 
 use crate::core::work::pend;
-use crate::core::work::room::messenger::{self, WakeKey};
+use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::life::Life;
 use crate::core::work::unit::task::Task;
 
@@ -51,7 +51,7 @@ impl AwaitWait {
 
     pub fn watch(&self) -> Result<(), ToleFail> {
         let actor = self.actor.upgrade().ok_or(ToleFail::Denied)?;
-        messenger::forward(
+        sign::forward(
             inspect_key(&actor, self.token),
             actor.life(),
             self.group.id,
@@ -62,7 +62,7 @@ impl AwaitWait {
 
     pub fn unwatch(&self) {
         if let Some(actor) = self.actor.upgrade() {
-            messenger::unforward(inspect_key(&actor, self.token), self.group.id);
+            sign::unforward(inspect_key(&actor, self.token), self.group.id);
         }
     }
 

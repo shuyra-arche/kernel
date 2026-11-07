@@ -7,7 +7,7 @@ use kernel_api::{abi::call::hole::HoleFail, model::hole::HoleCondition, model::i
 use super::pending::Pending;
 use super::slot::Slot;
 use super::{HANDS_LIVE, HoleMeta, key, note_hand_off};
-use crate::core::work::room::messenger;
+use crate::core::work::sign;
 
 pub(crate) struct Reading<'a> {
     meta: &'a HoleMeta,
@@ -95,9 +95,9 @@ pub(super) fn taken(meta: &HoleMeta) {
         HANDS_LIVE.fetch_sub(1, Ordering::Relaxed);
         note_hand_off(meta, hand.from, len, hand.at);
     }
-    let _ = messenger::wake(key(meta, HoleCondition::Empty), &meta.life());
-    let _ = messenger::wake(key(meta, HoleCondition::Push), &meta.life());
-    let _ = messenger::wake(key(meta, HoleCondition::Pull), &meta.life());
+    let _ = sign::wake(key(meta, HoleCondition::Empty), &meta.life());
+    let _ = sign::wake(key(meta, HoleCondition::Push), &meta.life());
+    let _ = sign::wake(key(meta, HoleCondition::Pull), &meta.life());
 }
 
 pub(super) fn back(meta: &HoleMeta) {
@@ -107,5 +107,5 @@ pub(super) fn back(meta: &HoleMeta) {
             q.taking = false;
         }
     }
-    let _ = messenger::wake(key(meta, HoleCondition::Pull), &meta.life());
+    let _ = sign::wake(key(meta, HoleCondition::Pull), &meta.life());
 }

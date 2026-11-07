@@ -7,7 +7,8 @@ use super::Liveness;
 use super::nole_role::NoleRole;
 use crate::machine::sync::{Level, SpinLock};
 
-use crate::core::work::room::messenger::{self, Handoff, WakeKey};
+use crate::core::work::room::Handoff;
+use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::life::Life;
 
 pub struct NoleMeta {
@@ -109,7 +110,7 @@ pub(crate) fn ring(meta: &NoleMeta) -> Result<(), NoleFail> {
         }
         *ring = true;
     }
-    let _ = messenger::wake(key(meta), &meta.life());
+    let _ = sign::wake(key(meta), &meta.life());
     Ok(())
 }
 
@@ -132,7 +133,7 @@ pub(crate) fn wait(meta: &NoleMeta, dur: Duration) -> Result<Handoff<bool>, Nole
     if dur == Duration::ZERO {
         return Ok(Handoff::Resume(false));
     }
-    Ok(match messenger::wait(key(meta), meta.life(), dur)? {
+    Ok(match sign::wait(key(meta), meta.life(), dur)? {
         Handoff::Resume(()) => Handoff::Resume(meta.alive() && meta.ready()),
         Handoff::Switch(pa) => Handoff::Switch(pa),
     })
@@ -140,9 +141,9 @@ pub(crate) fn wait(meta: &NoleMeta, dur: Duration) -> Result<Handoff<bool>, Nole
 
 pub(crate) fn seal(meta: &NoleMeta) {
     *meta.state.lock() = Liveness::Dead;
-    messenger::wipe(WakeKey::seal(
+    sign::wipe(WakeKey::seal(
         kernel_api::model::pie::PieKind::Nole,
         meta.id,
     ));
-    messenger::wipe(key(meta));
+    sign::wipe(key(meta));
 }

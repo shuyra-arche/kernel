@@ -7,7 +7,7 @@ use kernel_api::{
 
 use crate::core::work::mail::{hole, nole, pole};
 use crate::core::work::pend::{Need, PieSnapshot};
-use crate::core::work::room::messenger::WakeKey;
+use crate::core::work::sign::WakeKey;
 use crate::core::work::unit::life::Life;
 
 /// 权柄轴的失败折成组这一域的操作词汇。

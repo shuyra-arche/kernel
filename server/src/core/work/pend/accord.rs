@@ -7,7 +7,7 @@ use super::pie::{Heir, Permission, PieSnapshot};
 use crate::core::memory::address::{PageCount, PageOffset};
 use crate::core::work::grant::narrows;
 use crate::core::work::mail::pole::PoleOperation;
-use crate::core::work::room::messenger::{self, WakeKey};
+use crate::core::work::sign::{self, WakeKey};
 use crate::core::work::unit::task::Task;
 
 /// 这一枚子分支的有效窗口。
@@ -147,7 +147,7 @@ fn publish(
         }
         Ok(token)
     })?;
-    let _ = messenger::wake(
+    let _ = sign::wake(
         WakeKey::Pies {
             task: target.ident.id,
         },

@@ -1,6 +1,6 @@
 use alloc::sync::{Arc, Weak};
 
-use crate::core::work::room::messenger::WakeKey;
+use crate::core::work::sign::WakeKey;
 use crate::core::work::unit::life::{Life, TeamLife};
 use crate::core::work::unit::team::Member;
 
