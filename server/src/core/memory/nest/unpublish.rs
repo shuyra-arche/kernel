@@ -9,7 +9,7 @@ use alloc::sync::Arc;
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::VirtAddr;
-use crate::core::memory::flat::Frame;
+use crate::core::memory::cell::Cell;
 
 use super::state::NestState;
 use super::{Mapping, Nest, NestError};
@@ -31,7 +31,7 @@ impl Nest {
         self: &Arc<Self>,
         mapping: &Arc<Mapping>,
         address: VirtAddr,
-        expected: &Arc<Frame>,
+        expected: &Arc<Cell>,
     ) -> Result<(), NestError> {
         if self.asid().is_kernel() || mapping.is_global() {
             return Err(NestError::Pinned);
@@ -63,7 +63,7 @@ impl Nest {
         }
         // 核对物理 Cell 实例，不能只比较 PA 或逻辑槽；检查先于任何 PTE 撤销。
         assert!(
-            inner.published[at].1.cell_id() == expected.cell_id(),
+            inner.published[at].1.id() == expected.id(),
             "the published page holds the Cell this transfer handed over"
         );
         debug_assert!(
@@ -72,7 +72,7 @@ impl Nest {
         );
         // 提前备容量与几何：这一页可能只是大叶里的一格，先拆成 4KiB 再撤。
         state
-            .retired_frames
+            .retired_cells
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
         state
@@ -100,8 +100,8 @@ impl Nest {
             root.reclaim_empty_tables(retired_tables);
         }
         state.pending_mappings.push(mapping.clone());
-        let (_, frame) = inner.published.remove(at);
-        state.retired_frames.push(frame);
+        let (_, cell) = inner.published.remove(at);
+        state.retired_cells.push(cell);
         drop(inner);
         state.mark_dirty();
         drop(state);

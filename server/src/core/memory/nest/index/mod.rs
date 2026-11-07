@@ -269,35 +269,35 @@ fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: 
     let state = mapping.state.lock();
     assert!(
         !state.source.is_borrowed() || state.published.is_empty(),
-        "borrowed Mapping also holds published Frames"
+        "borrowed Mapping also holds published Cells"
     );
     assert!(
         state.published.windows(2).all(|pair| pair[0].0 < pair[1].0),
-        "published Frame indexes are not strictly ordered"
+        "published Cell indexes are not strictly ordered"
     );
     assert_eq!(
         state.source.page_count().checked_bytes(),
         Some(mapping.initial_size()),
         "Mapping source extent differs from its initial range"
     );
-    for (page, frame) in &state.published {
+    for (page, cell) in &state.published {
         let address = mapping.initial_start() + page * PAGE_SIZE;
         assert!(
             state.covers(address.as_usize(), address.as_usize()),
-            "published Frame lies outside live Mapping ranges"
+            "published Cell lies outside live Mapping ranges"
         );
         let (physical, flags) = root
             .walk_ref_geometry(address, geo)
-            .expect("published Frame has no hardware PTE");
+            .expect("published Cell has no hardware PTE");
         assert_eq!(
             physical.as_usize(),
-            frame.physical_address(),
-            "published Frame PTE physical address"
+            cell.physical_address(),
+            "published Cell PTE physical address"
         );
         let expected = mapping.leaf_flags(
             state
                 .range_at(address.as_usize())
-                .expect("Frame range exists")
+                .expect("Cell range exists")
                 .current,
         );
         let mask =
@@ -305,7 +305,7 @@ fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: 
         assert_eq!(
             (flags & mask).bits(),
             (expected & mask).bits(),
-            "published Frame PTE permissions differ from Mapping state"
+            "published Cell PTE permissions differ from Mapping state"
         );
     }
     drop(state);

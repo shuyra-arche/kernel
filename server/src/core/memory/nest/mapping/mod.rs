@@ -11,9 +11,9 @@ use alloc::vec::Vec;
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageOffset, VirtAddr};
-use crate::core::memory::flat::FlatRange;
 #[cfg(debug_assertions)]
-use crate::core::memory::flat::Frame;
+use crate::core::memory::cell::Cell;
+use crate::core::memory::flat::FlatRange;
 use crate::core::memory::nest::NestError;
 use crate::core::memory::nest::reservation::Reservation;
 use crate::core::memory::nest::table::PteFlags;
@@ -157,7 +157,7 @@ impl Mapping {
     }
 
     /// 已发布 PTE 的页数。
-    pub fn frame_count(&self) -> usize {
+    pub fn cell_count(&self) -> usize {
         self.state.lock().published.len()
     }
 
@@ -202,11 +202,11 @@ impl Mapping {
     }
 
     #[cfg(debug_assertions)]
-    pub fn frames_in(
+    pub fn cells_in(
         &self,
         start: VirtAddr,
         size: usize,
-    ) -> Result<Vec<(usize, Arc<Frame>)>, NestError> {
+    ) -> Result<Vec<(usize, Arc<Cell>)>, NestError> {
         if size == 0 || start.offset() != 0 || size & (PAGE_SIZE - 1) != 0 {
             return Err(NestError::NotAligned);
         }
@@ -241,7 +241,7 @@ impl Mapping {
                 .published
                 .iter()
                 .filter(|(page, _)| *page >= first && *page < last)
-                .map(|(page, frame)| (page - first, frame.clone())),
+                .map(|(page, cell)| (page - first, cell.clone())),
         );
         Ok(out)
     }

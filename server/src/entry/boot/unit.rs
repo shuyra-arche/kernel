@@ -7,7 +7,7 @@ use riscv::register::satp;
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageIndex, PhysAddr, VirtAddr};
-use crate::core::memory::flat::{BorrowedRegion, Flat, FlatRange, Frame};
+use crate::core::memory::flat::{BorrowedRegion, Flat, FlatRange};
 use crate::core::memory::nest::table::PteFlags;
 use crate::core::memory::nest::{Access, ActiveRange, NestError, Placement, RegionId, identity};
 use crate::core::work::unit::space::SpaceBuilder;
@@ -191,14 +191,14 @@ pub fn init() -> NestResult<()> {
 
             let n = hart::hart_count();
             for h in 0..n {
-                let frame = crate::tag!(HartFrame, Frame::allocate()?);
+                let frame = crate::tag!(HartFrame, crate::core::memory::flat::allocate_cell()?);
                 let mut indexed = Vec::new();
                 indexed
                     .try_reserve_exact(1)
                     .map_err(|_| NestError::OutOfMemory)?;
                 indexed.push((PageIndex::ZERO, frame));
                 let source =
-                    Flat::from_frames(PageCount::new(1).expect("one frame"), &indexed)?.whole();
+                    Flat::from_cells(PageCount::new(1).expect("one frame"), indexed)?.whole();
                 let flags = PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::A | PteFlags::D;
                 attach_exact(
                     nest,

@@ -4,7 +4,7 @@ use core::mem::MaybeUninit;
 
 use crate::core::memory::PAGE_SIZE;
 use crate::core::memory::address::{PageCount, PageIndex, PhysAddr, VirtAddr};
-use crate::core::memory::flat::{Flat, Frame};
+use crate::core::memory::flat::Flat;
 use crate::core::memory::nest::{Access, NestError, Placement, RegionId};
 use crate::core::work::unit::life::Life;
 use crate::core::work::unit::space::Space;
@@ -108,10 +108,13 @@ impl TaskBuilder {
             .try_reserve_exact(stack_size / PAGE_SIZE)
             .map_err(|_| NestError::OutOfMemory)?;
         for page in 0..stack_size / PAGE_SIZE {
-            indexed.push((PageIndex::new(page), Frame::allocate()?));
+            indexed.push((
+                PageIndex::new(page),
+                crate::core::memory::flat::allocate_cell()?,
+            ));
         }
         let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;
-        let source = Flat::from_frames(count, &indexed)?.whole();
+        let source = Flat::from_cells(count, indexed)?.whole();
         let slot = nest.reserve(Placement::highest(
             RegionId::Normal,
             stack_size + crate::machine::layout::TASK_STACK_GUARD,
@@ -123,14 +126,14 @@ impl TaskBuilder {
         let rw = Access::READ | Access::WRITE;
         memory.stack = Some(nest.attach(body, source, rw, rw)?);
 
-        let frame = Frame::allocate()?;
+        let frame = crate::core::memory::flat::allocate_cell()?;
         let frame_pa = PhysAddr::from_raw(frame.physical_address());
         let mut indexed = Vec::new();
         indexed
             .try_reserve_exact(1)
             .map_err(|_| NestError::OutOfMemory)?;
         indexed.push((PageIndex::ZERO, frame));
-        let source = Flat::from_frames(PageCount::new(1).expect("one frame"), &indexed)?.whole();
+        let source = Flat::from_cells(PageCount::new(1).expect("one frame"), indexed)?.whole();
         let reservation =
             nest.reserve(Placement::lowest(RegionId::Kernel, PAGE_SIZE, PAGE_SIZE)?)?;
         let frame_va = reservation.start();
