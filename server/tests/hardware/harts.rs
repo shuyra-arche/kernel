@@ -112,3 +112,29 @@ pub(super) fn vector_fixture(qemu: &OsStr, path: &Path, cpu: &str) {
     }
     std::fs::write(path, bytes).unwrap();
 }
+
+/// Deliberately advertise V on a V-disabled CPU. The bounded boot probe must
+/// recover its illegal CSR read and publish no vector capability.
+pub(super) fn absent_vector_fixture(qemu: &OsStr, path: &Path, harts: usize) {
+    let output = Command::new(qemu)
+        .args([
+            "-M",
+            &format!("virt,dumpdtb={}", path.display()),
+            "-cpu",
+            "rv64,v=true,vlen=128,elen=64",
+            "-m",
+            "128M",
+            "-smp",
+            &harts.to_string(),
+            "-bios",
+            "none",
+            "-nographic",
+            "-monitor",
+            "none",
+            "-nic",
+            "none",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}

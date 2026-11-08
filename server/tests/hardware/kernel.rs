@@ -142,6 +142,7 @@ fn run(mode: &str) {
                 (1, "-v256", "rv64,v=true,vlen=256,elen=64"),
                 (4, "-v256", "rv64,v=true,vlen=256,elen=64"),
                 (1, "-no-v", "rv64,v=false"),
+                (1, "-absent-v", "rv64,v=false"),
             ]
         } else {
             cases.map(|(h, s)| (h, s, "rv64")).collect()
@@ -176,6 +177,11 @@ fn run(mode: &str) {
             } else {
                 Vec::new()
             };
+            if suffix == "-absent-v" {
+                let dtb = evidence.join("absent-vector.dtb");
+                super::harts::absent_vector_fixture(&qemu, &dtb, harts);
+                command.arg("-dtb").arg(dtb);
+            }
             if mixed {
                 let dtb = evidence.join("mixed-vector.dtb");
                 super::harts::vector_fixture(&qemu, &dtb, cpu);

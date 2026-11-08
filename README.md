@@ -150,8 +150,11 @@ Vector floating instructions also acquire an F/D image when necessary.
 
 An active vector image can move only to an exactly matching vector geometry;
 QEMU covers VLEN 128/256 and absent V on one/four Harts in debug and release.
-Firmware declarations must describe implemented V 1.0 instructions; this is not
-an emulator for dishonest firmware or pre-ratification vector hardware.
+A bounded local illegal-instruction recovery protects this early probe. A false
+V declaration or a trap-based unsupported-`vtype` implementation disables that
+Hart's vector capability instead of crashing boot. The supported profile uses
+`vill` for unsupported configurations; pre-ratification vector emulation and
+trap-based configuration emulation are not provided.
 
 Compatibility is checked at placement, dequeue/steal and final return. Rejected
 destinations rotate over compatible idle Harts, so gaps in the capability set do
