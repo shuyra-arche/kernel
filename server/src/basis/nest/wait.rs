@@ -7,7 +7,7 @@ use crate::basis::sign::WakeKey;
 use crate::basis::sign::block_with_call;
 use crate::basis::sign::finish_block;
 use crate::basis::unit::task::WaitCall;
-use crate::machine::clock;
+use crate::metal::clock;
 use alloc::sync::Arc;
 use core::time::Duration;
 use kernel_api::abi::call::room::RoomFail;

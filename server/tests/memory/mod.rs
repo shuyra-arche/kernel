@@ -16,8 +16,9 @@ pub(crate) mod index {
 use error::FlatError;
 use state::slot;
 
-#[path = "../../src/machine/mmu/riscv/synchronize/scope.rs"]
+#[path = "../../src/metal/mmu/fence.rs"]
 mod scope;
+mod translation;
 
 // Resolve production module paths using the real types, without loading the
 // RV64-specific address-space machinery into the host harness.

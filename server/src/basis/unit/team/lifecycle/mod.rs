@@ -4,7 +4,7 @@ use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
 
 use crate::basis::unit::anchor::Anchor;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 
 pub(crate) mod exit;
 mod state;

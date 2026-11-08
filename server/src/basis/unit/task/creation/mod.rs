@@ -12,12 +12,12 @@ use crate::basis::nest::RegionKind;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::team::Team;
 use crate::basis::unit::team::kernel;
-use crate::machine::layout::HART_FRAME_BASE;
-use crate::machine::layout::IMAGE_BASE;
-use crate::machine::layout::TASK_STACK_SIZE;
-use crate::machine::switcher::context::TrapContext;
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
+use crate::metal::layout::HART_FRAME_BASE;
+use crate::metal::layout::IMAGE_BASE;
+use crate::metal::layout::TASK_STACK_SIZE;
+use crate::metal::switcher::context::TrapContext;
+use crate::metal::sync::Level;
+use crate::metal::sync::SpinLock;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -65,7 +65,7 @@ impl TaskBuilder {
     pub fn new(team: Arc<Team>) -> TaskBuilder {
         let entry = match team.default_entry() {
             0 => IMAGE_BASE,
-            e => crate::machine::mmu::riscv::canonical(e),
+            e => crate::metal::mmu::canonical(e),
         };
         TaskBuilder {
             controller: team.creator,
@@ -110,7 +110,7 @@ impl TaskBuilder {
             .max(1)
             .checked_next_multiple_of(PAGE_SIZE)
             .filter(|size| {
-                size.checked_add(crate::machine::layout::TASK_STACK_GUARD)
+                size.checked_add(crate::metal::layout::TASK_STACK_GUARD)
                     .is_some()
             })
             .ok_or(NestError::NoRegion)?;
@@ -138,10 +138,9 @@ impl TaskBuilder {
         let source = Flat::from_cells(self.team.cells.clone(), count, indexed)?.whole();
         let slot = nest.reserve(Placement::highest(
             RegionKind::Normal,
-            stack_size + crate::machine::layout::TASK_STACK_GUARD,
+            stack_size + crate::metal::layout::TASK_STACK_GUARD,
         )?)?;
-        let (guard, body) =
-            nest.split_reservation(slot, crate::machine::layout::TASK_STACK_GUARD)?;
+        let (guard, body) = nest.split_reservation(slot, crate::metal::layout::TASK_STACK_GUARD)?;
         memory.guard = Some(guard);
         let stack_body_top = body.start().as_usize() + body.size();
         let rw = Access::READ | Access::WRITE;
@@ -170,14 +169,14 @@ impl TaskBuilder {
         if count > 0 {
             write_args(
                 &self.team.nest,
-                crate::machine::mmu::riscv::canonical(args_at),
+                crate::metal::mmu::canonical(args_at),
                 &self.args,
             );
         }
         let sp = VirtAddr::wrap(args_at & !0xF);
 
-        let satp = self.team.nest.satp();
-        let spp = self.team.nest.kind().spp();
+        let root = self.team.nest.root();
+        let supervisor = self.team.nest.kind().is_supervisor();
         let frame = unsafe { &mut *(frame_pa.as_usize() as *mut TrapContext) };
         unsafe {
             let ktc = kernel()
@@ -188,8 +187,8 @@ impl TaskBuilder {
                 .as_usize() as *const TrapContext;
             frame.init(
                 &*ktc,
-                satp,
-                spp,
+                root,
+                supervisor,
                 self.entry,
                 sp,
                 (VirtAddr::wrap(args_at), count),
@@ -198,7 +197,7 @@ impl TaskBuilder {
             );
         }
 
-        let alloc = crate::machine::allocator::hybrid::allocator();
+        let alloc = crate::metal::allocator::hybrid::allocator();
         let ident: Arc<TaskIdent> = unsafe {
             let ident = crate::tag!(
                 Task,

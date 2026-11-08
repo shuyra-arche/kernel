@@ -4,7 +4,7 @@
 use core::arch::global_asm;
 use kernel::entry::boot::{self, PciConfig, PciRoute, QuiescenceStatus};
 
-global_asm!(include_str!("../../../src/entry/boot/start.S"));
+global_asm!(include_str!("../../../src/metal/riscv/boot/start.S"));
 
 const EDU: u32 = 0x11e8_1234;
 

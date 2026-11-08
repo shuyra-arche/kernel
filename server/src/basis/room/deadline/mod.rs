@@ -1,17 +1,17 @@
 mod queue;
-use crate::machine::sync::OnceLock;
+use crate::metal::sync::OnceLock;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 use core::time::Duration;
 use queue::Queue;
 
-use crate::machine::clock;
-use crate::machine::clock::Instant;
-use crate::machine::clock::timer;
-use crate::machine::hart::{self, HartId};
-use crate::machine::layout::MAX_HART_SLOTS;
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
+use crate::metal::clock;
+use crate::metal::clock::Instant;
+use crate::metal::clock::timer;
+use crate::metal::hart::{self, HartId};
+use crate::metal::layout::MAX_HART_SLOTS;
+use crate::metal::sync::Level;
+use crate::metal::sync::SpinLock;
 
 // The boot Hart remains online until all Tasks exit. Only it arms and
 // drains the global heap; other comparators serve local scheduling.
@@ -82,7 +82,7 @@ fn head_changed(changed: bool) {
         if is_owner() {
             refresh();
         } else {
-            super::scheduler::idle::try_nudge(OWNER).expect("deadline owner IPI");
+            crate::metal::interrupt::ipi::send(OWNER).expect("deadline owner IPI");
             REMOTE_REARMS.fetch_add(1, Ordering::Relaxed);
         }
     }

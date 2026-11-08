@@ -6,10 +6,9 @@ use crate::basis::room::halt::beacon;
 use crate::basis::room::scheduler;
 use crate::basis::sign;
 use crate::basis::unit::lifecycle::tally;
-use crate::machine::hart;
-use crate::machine::stop::hush;
-use riscv::register::sie;
-use riscv::register::sip;
+use crate::metal::hart;
+use crate::metal::interrupt::{self, ipi};
+use crate::metal::stop::hush;
 
 use super::current;
 
@@ -56,19 +55,9 @@ pub(super) fn fetch() -> usize {
     #[cfg(debug_assertions)]
     {
         crate::basis::assert_unlocked();
-        let sp: usize;
-        unsafe { core::arch::asm!("mv {}, sp", out(reg) sp, options(nomem, nostack)) };
-        let me = hart::hart_id();
-        let base = crate::machine::switcher::stack::trap_stack_base(me).get();
-        let edge = crate::machine::switcher::stack::trap_stack_edge(me).get();
-        assert!(
-            sp > base && sp <= edge,
-            "idle must use the guarded hart stack"
-        );
+        crate::metal::switcher::stack::assert_active();
     }
-    unsafe {
-        sie::set_sext();
-    }
+    interrupt::enable_external();
     if let Some(pa) = dispatch(true) {
         return pa;
     }
@@ -88,32 +77,30 @@ fn wait() -> usize {
     }
     loop {
         if tally::done() {
-            unsafe { sip::clear_ssoft() };
+            ipi::acknowledge();
             scheduler::idle::wake(me);
             halt::halt();
         }
         // Clear first, then inspect work and deadlines. An IPI racing this
         // clear is either observed through the queue or stays pending for WFI.
-        scheduler::idle::acknowledge();
+        ipi::acknowledge();
         let redeemed = deadline::elapsed() && sign::redeem();
         beacon::idle(me);
 
         let external_pending = crate::basis::cell::projection::maintain();
         let fallback = if beacon::shutting_down() || external_pending {
-            crate::machine::clock::now()
+            crate::metal::clock::now()
                 .as_ticks()
                 .saturating_add(BEACON_TICK)
         } else {
-            crate::machine::clock::timer::DISARMED
+            crate::metal::clock::timer::DISARMED
         };
         deadline::arm(fallback);
-        unsafe {
-            sie::set_sext();
-        }
-        if sip::read().sext() && !crate::machine::iommu::riscv::interrupt::handle() {
-            let resources = crate::basis::room::interrupt::get();
-            let result = crate::basis::sign::endpoint::trigger(&resources.supervisor_external);
-            crate::basis::room::interrupt::note_external(result.is_err(), true);
+        interrupt::enable_external();
+        if interrupt::external_pending()
+            && !interrupt::external().is_some_and(|route| route.handle())
+        {
+            crate::basis::room::interrupt::deliver_external(true);
         }
         // Let notified remote Harts receive the Tasks just placed there
         // before the deadline owner tries to steal them back.
@@ -121,8 +108,6 @@ fn wait() -> usize {
             scheduler::idle::wake(me);
             return pa;
         }
-        unsafe {
-            core::arch::asm!("wfi");
-        }
+        hart::wait();
     }
 }

@@ -1,4 +1,4 @@
-use crate::machine::board::tree::{self, mmio};
+use crate::metal::board::tree::{self, mmio};
 use kernel_api::abi::call::pend::PendFail;
 
 /// 是不是 PCI 宿主：`device_type` 必须**正好**是 `pci`。

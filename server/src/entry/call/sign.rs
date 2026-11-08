@@ -12,7 +12,7 @@ use crate::basis::sign::endpoint::Watch;
 use crate::basis::sign::endpoint::codec;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::switcher::context::TrapContext;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;

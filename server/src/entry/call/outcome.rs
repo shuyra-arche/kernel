@@ -1,4 +1,4 @@
-use crate::machine::switcher::context::{Gprs, TrapContext};
+use crate::metal::switcher::context::{Gprs, TrapContext};
 
 pub(super) enum Outcome {
     Resume,

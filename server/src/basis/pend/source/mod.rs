@@ -22,7 +22,7 @@ use crate::basis::nest::Nest;
 use crate::basis::nest::mapping::MappingBinding;
 use crate::basis::pend::Pend;
 use crate::basis::view::share::ShareView;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -317,7 +317,7 @@ impl SourceAuthorization {
 
     pub(crate) fn begin_withdraw(
         &self,
-    ) -> Result<crate::machine::sync::spin::SpinLockGuard<'_, bool>, PendFail> {
+    ) -> Result<crate::metal::sync::spin::SpinLockGuard<'_, bool>, PendFail> {
         let gate = self.revoked.lock();
         if !self.inflight.lock().is_empty() {
             return Err(PendFail::Busy);

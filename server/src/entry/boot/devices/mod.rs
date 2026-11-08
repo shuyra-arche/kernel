@@ -15,7 +15,7 @@ use crate::basis::pend::SourceAuthorization;
 use crate::basis::view;
 use crate::basis::view::View;
 use crate::entry::boot::resources::Registry;
-use crate::machine::board;
+use crate::metal::board;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::boot::ledger::Name;
 use kernel_api::boot::ledger::Page;
@@ -33,7 +33,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
         grant_region(registry, *region)?;
     }
     // Export each validated BAR through the ordinary View/Pend boot ledger.
-    let apertures = crate::machine::iommu::riscv::pci::aperture::APERTURES.lock();
+    let apertures = crate::metal::iommu::aperture::APERTURES.lock();
     for aperture in apertures.iter() {
         let source = aperture.source.clone();
         let size = source
@@ -50,7 +50,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
         authorization.consume();
         meta.commit_source();
         registry
-            .register(Name::Page(Page::Region(aperture.port.base() as u64)), root)
+            .register(Name::Page(Page::Region(aperture.base as u64)), root)
             .map_err(|e| e.into_parts().0)?;
     }
     drop(apertures);

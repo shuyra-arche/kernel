@@ -6,9 +6,9 @@ use crate::basis::room::deadline;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskWeak;
-use crate::machine::sync::Level;
-use crate::machine::sync::OnceLock;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::Level;
+use crate::metal::sync::OnceLock;
+use crate::metal::sync::SpinLock;
 
 use super::key::WakeKey;
 

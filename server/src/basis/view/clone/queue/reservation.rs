@@ -2,7 +2,7 @@ use super::super::payload::Payload;
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
-use crate::machine::clock;
+use crate::metal::clock;
 
 use kernel_api::abi::call::clone_view::CloneFail;
 use kernel_api::model::clone_view::CloneCondition;

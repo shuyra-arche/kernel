@@ -7,13 +7,13 @@ use crate::basis::nest::Access;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
 use crate::basis::unit::team::kernel;
-use crate::machine::board;
-use crate::machine::iommu::riscv::Engine;
-use crate::machine::iommu::riscv::Phase;
-use crate::machine::iommu::riscv::controllers::CONTROLLERS;
-use crate::machine::iommu::riscv::controllers::Controllers;
-use crate::machine::iommu::riscv::mmio::Mmio;
-use crate::machine::iommu::riscv::topology::Topology;
+use crate::metal::board;
+use crate::metal::riscv::iommu::Engine;
+use crate::metal::riscv::iommu::Phase;
+use crate::metal::riscv::iommu::controllers::CONTROLLERS;
+use crate::metal::riscv::iommu::controllers::Controllers;
+use crate::metal::riscv::iommu::mmio::Mmio;
+use crate::metal::riscv::iommu::topology::Topology;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PhysAddr;
 
@@ -60,15 +60,15 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     if regions.len() != 1 {
         return Err(PendFail::Denied);
     }
-    let route = crate::machine::iommu::riscv::interrupt::plan::Plan::discover(
+    let route = crate::metal::riscv::iommu::interrupt::plan::Plan::discover(
         &tree,
         board::info().hart,
-        crate::machine::hart::hart_id(),
+        crate::metal::hart::hart_id(),
         regions[0].base,
     )
     .map_err(|_| PendFail::Denied)?;
     let plic = super::pci::mapped(route.base, route.size)?;
-    unsafe { crate::machine::iommu::riscv::interrupt::install(plic, route) }
+    unsafe { crate::metal::riscv::iommu::interrupt::install(plic, route) }
         .map_err(|_| PendFail::Denied)?;
     let mut storage = CONTROLLERS.lock();
     if storage.is_some() {
@@ -133,7 +133,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
         if !completed {
             return Err(PendFail::Denied);
         }
-        crate::machine::console::_write(format_args!(
+        crate::metal::console::_write(format_args!(
             "iommu: command engine ready at {:#x}; device DMA remains Off\n",
             region.base
         ));
@@ -141,13 +141,13 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     Ok(())
 }
 
-fn failure(error: crate::machine::iommu::riscv::EngineError) -> PendFail {
+fn failure(error: crate::metal::riscv::iommu::EngineError) -> PendFail {
     log::error!("iommu: command engine failure: {error:?}; hardware pages retained");
     PendFail::Denied
 }
 
 pub(in super::super) fn shutdown() {
-    crate::machine::iommu::riscv::interrupt::report();
+    crate::metal::riscv::iommu::interrupt::report();
     let mut storage = CONTROLLERS.lock();
     let Some(controllers) = storage.as_mut() else {
         return;
@@ -168,7 +168,7 @@ pub(in super::super) fn shutdown() {
         if engine.phase() != Phase::Closed {
             log::error!("iommu: shutdown unsettled; hardware pages retained");
         } else {
-            crate::machine::console::_write(format_args!("iommu: command engine closed\n"));
+            crate::metal::console::_write(format_args!("iommu: command engine closed\n"));
         }
     }
 }

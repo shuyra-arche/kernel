@@ -1,5 +1,5 @@
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::Level;
+use crate::metal::sync::SpinLock;
 use kernel_api::abi::call::unit::UnitFail;
 use kernel_api::model::identity::TaskId;
 

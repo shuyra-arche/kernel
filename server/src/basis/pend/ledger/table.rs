@@ -4,7 +4,7 @@ use crate::basis::{
     name::{Key, Registry},
     unit::task::Task,
 };
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicUsize;
@@ -32,7 +32,7 @@ impl Table {
         }
     }
 
-    pub(crate) fn lock(&self) -> crate::machine::sync::spin::SpinLockGuard<'_, ()> {
+    pub(crate) fn lock(&self) -> crate::metal::sync::spin::SpinLockGuard<'_, ()> {
         self.serial.lock()
     }
 

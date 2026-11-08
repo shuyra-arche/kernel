@@ -11,9 +11,9 @@ use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
 
-use crate::machine::sync::Level;
-use crate::machine::sync::OnceLock;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::Level;
+use crate::metal::sync::OnceLock;
+use crate::metal::sync::SpinLock;
 
 use kernel_api::address::PageIndex;
 use kernel_api::address::VirtAddr;
@@ -208,7 +208,7 @@ fn pressing_page(mapping: &Mapping, source: &FlatRange, page: PageIndex) -> Opti
         .initial_start()
         .as_usize()
         .checked_add(offset.checked_mul(kernel_api::address::PAGE_SIZE)?)?;
-    Some(crate::machine::mmu::riscv::canonical(address))
+    Some(crate::metal::mmu::canonical(address))
 }
 
 /// Allocation-free wake after Page admission reopens. Pointer order is used only

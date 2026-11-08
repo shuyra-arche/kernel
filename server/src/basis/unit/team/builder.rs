@@ -9,10 +9,10 @@ use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::team::TeamNode;
-use crate::machine::mmu::riscv::table::PteFlags;
-use crate::machine::sync::Level;
-use crate::machine::sync::OnceLock;
-use crate::machine::sync::SpinLock;
+use crate::metal::mmu::Attributes;
+use crate::metal::sync::Level;
+use crate::metal::sync::OnceLock;
+use crate::metal::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
@@ -208,12 +208,13 @@ pub fn kernel() -> Option<&'static Arc<Team>> {
 ///
 /// 来源先备齐再登记占用；挂载失败的责任按 `Nest` 的划分走。
 fn seed_trampoline(target: &Arc<Nest>, source: &Nest) -> Result<(), NestError> {
-    const TRAMPOLINE: VirtAddr = crate::machine::layout::TRAMPOLINE;
+    const TRAMPOLINE: VirtAddr = crate::metal::layout::TRAMPOLINE;
     let (physical, flags) = source.translate(TRAMPOLINE).ok_or(NestError::NoRegion)?;
     let region = unsafe { BorrowedRegion::new(physical, PAGE_SIZE)? };
     let source_range = Flat::from_region(region)?.whole();
-    let access = Access::from_pte(flags);
-    let attrs = flags & (PteFlags::U | PteFlags::G | PteFlags::A | PteFlags::D);
+    let access = Access::from_attributes(flags);
+    let attrs =
+        flags & (Attributes::USER | Attributes::GLOBAL | Attributes::ACCESSED | Attributes::DIRTY);
     // 活动形状与来源都在登记占用之前备好：准备失败不放下一笔无人持有的占用。
     let active = ActiveRange::new(TRAMPOLINE, PAGE_SIZE, access, access)?;
     let reservation = target.reserve(Placement::fixed(TRAMPOLINE, PAGE_SIZE)?)?;

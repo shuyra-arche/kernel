@@ -1,23 +1,23 @@
 extern crate alloc;
 
-#[path = "../../src/machine/board/region.rs"]
+#[path = "../../src/metal/board/region.rs"]
 mod region;
 use region::Region;
 #[allow(dead_code)]
-#[path = "../../src/machine/allocator/error.rs"]
+#[path = "../../src/metal/allocator/error.rs"]
 mod error;
-#[path = "../../src/machine/allocator/frame/inner.rs"]
+#[path = "../../src/metal/allocator/frame/inner.rs"]
 mod frame;
-#[path = "../../src/machine/allocator/link.rs"]
+#[path = "../../src/metal/allocator/link.rs"]
 mod link;
 #[allow(dead_code)]
-#[path = "../../src/machine/board/memory/mod.rs"]
+#[path = "../../src/metal/board/memory/mod.rs"]
 mod memory;
 #[allow(dead_code)]
 #[path = "../boot/tree.rs"]
 mod tree;
 
-mod machine {
+mod metal {
     pub mod board {
         pub struct Machine {
             pub memory: crate::memory::Memory,
@@ -77,15 +77,15 @@ fn frame_split_and_merge_never_publish_reserved_pages_or_bank_holes() {
         )
         .encode();
     let memory = memory::Memory::parse(&bytes, base + 0x20000, Region::new(base, 0x10000)).unwrap();
-    machine::board::FACTS
-        .set(machine::board::Machine { memory })
+    metal::board::FACTS
+        .set(metal::board::Machine { memory })
         .unwrap_or_else(|_| panic!("once"));
-    let m = &machine::board::info().memory;
+    let m = &metal::board::info().memory;
     let usable = |addr: usize| {
         m.free()
             .iter()
             .any(|r| r.base <= addr && addr + 4096 <= r.range().end)
-            && !(m.bootstrap().base <= addr && addr < machine::allocator::bump::frontier())
+            && !(m.bootstrap().base <= addr && addr < metal::allocator::bump::frontier())
     };
     let expected = (0..layout.size())
         .step_by(4096)

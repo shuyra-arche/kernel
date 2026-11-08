@@ -13,9 +13,9 @@ use alloc::vec::Vec;
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Reservation;
-use crate::machine::mmu::riscv::table::PteFlags;
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
+use crate::metal::mmu::Attributes;
+use crate::metal::sync::Level;
+use crate::metal::sync::SpinLock;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
@@ -36,7 +36,7 @@ use state::MappingState;
 /// U/G/A/D 是整段关系共有的架构属性，随挂载政策定下；改权不动它。
 pub struct Mapping {
     pub(crate) reservation: Reservation,
-    pub(crate) attrs: PteFlags,
+    pub(crate) attrs: Attributes,
     pub(crate) state: SpinLock<MappingState>,
     operation: core::sync::atomic::AtomicBool,
 }
@@ -63,7 +63,7 @@ impl Mapping {
     /// 构造失败即退回占用：调用方交出的凭证不会随失败一起丢掉。
     pub(crate) fn new(
         reservation: Reservation,
-        attrs: PteFlags,
+        attrs: Attributes,
         active: Vec<ActiveRange>,
         source: FlatRange,
     ) -> Result<Arc<Self>, NestError> {
@@ -195,13 +195,13 @@ impl Mapping {
     }
 
     /// 一段当前权限对应的叶子 PTE 位：V、RWX 与整段关系的 U/G/A/D。
-    pub(crate) fn leaf_flags(&self, current: Access) -> PteFlags {
-        PteFlags::V | current.to_pte() | self.attrs
+    pub(crate) fn leaf_attributes(&self, current: Access) -> Attributes {
+        current.to_attributes() | self.attrs
     }
 
     /// 架构属性只含 U/G/A/D；给出其它位就拒。
-    pub(crate) fn attrs_are_architectural(attrs: PteFlags) -> bool {
-        !attrs.intersects(PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::X)
+    pub(crate) fn attrs_are_architectural(attrs: Attributes) -> bool {
+        !attrs.intersects(Attributes::READ | Attributes::WRITE | Attributes::EXECUTE)
     }
 
     /// 这段关系的叶子是不是全局条目。
@@ -209,7 +209,7 @@ impl Mapping {
     /// 全局条目对 ASID 定向的 `sfence.vma` 免疫，所以“按本关系自己的 ASID 兑失效”
     /// 不能作为它已经不再压着某个物理页的证据。
     pub(crate) fn is_global(&self) -> bool {
-        self.attrs.contains(PteFlags::G)
+        self.attrs.contains(Attributes::GLOBAL)
     }
 
     /// `address` 相对初始范围的页号；调用方保证它在初始范围内。

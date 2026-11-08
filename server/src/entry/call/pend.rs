@@ -15,7 +15,7 @@ use crate::basis::pend::PendEntry;
 use crate::basis::room::conductor::current;
 use crate::basis::room::scheduler::roster::muster;
 use crate::basis::unit::task::TaskIdent;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::VirtAddr as KVirt;
 
 use super::outcome::answer;

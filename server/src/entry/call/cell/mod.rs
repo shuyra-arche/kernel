@@ -33,8 +33,8 @@ use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::unit::team::Team;
 use crate::basis::view::share::ShareOperation;
-use crate::machine::mmu::riscv::identity;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::riscv::mmu::identity;
+use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
@@ -47,7 +47,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: CellCall, ident: &Arc<Task
     if let CellCall::Create { request } = call {
         match object::create(request, ident) {
             Ok((kind, id, address)) => {
-                use crate::machine::switcher::context::Gprs;
+                use crate::metal::switcher::context::Gprs;
                 frame.gpr.set_x(Gprs::A0, kind);
                 frame.gpr.set_x(Gprs::A1, id);
                 frame.gpr.set_x(Gprs::A2, address);

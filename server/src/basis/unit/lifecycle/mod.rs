@@ -28,13 +28,13 @@ impl ExitNote {
     }
 }
 
-static EXIT: [ExitNote; crate::machine::layout::MAX_HART_SLOTS] =
-    [const { ExitNote::new() }; crate::machine::layout::MAX_HART_SLOTS];
+static EXIT: [ExitNote; crate::metal::layout::MAX_HART_SLOTS] =
+    [const { ExitNote::new() }; crate::metal::layout::MAX_HART_SLOTS];
 
 fn slot() -> usize {
-    crate::machine::hart::hart_id()
+    crate::metal::hart::hart_id()
         .get()
-        .min(crate::machine::layout::MAX_HART_SLOTS - 1)
+        .min(crate::metal::layout::MAX_HART_SLOTS - 1)
 }
 
 pub(crate) fn set_exit_reason(reason: usize) {

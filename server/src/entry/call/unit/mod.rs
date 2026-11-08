@@ -14,8 +14,8 @@ use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::unit::task::TaskWeak;
-use crate::machine::switcher::context::Gprs;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::switcher::context::Gprs;
+use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::VirtAddr as KVirt;
 
 use super::outcome::Outcome;

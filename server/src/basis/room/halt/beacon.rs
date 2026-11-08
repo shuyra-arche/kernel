@@ -12,7 +12,7 @@ use kernel_api::model::identity::TaskId;
 
 use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::task::Task;
-use crate::machine::clock;
+use crate::metal::clock;
 
 const STALL_MS: u64 = 2_000;
 
@@ -54,7 +54,7 @@ fn stalled(pushed: usize, reaped: usize) -> bool {
     past >= clock::duration_to_ticks(core::time::Duration::from_millis(STALL_MS))
 }
 
-pub(crate) fn idle(hart: crate::machine::hart::HartId) {
+pub(crate) fn idle(hart: crate::metal::hart::HartId) {
     if BEACON_FIRED.load(Ordering::Relaxed) {
         return;
     }

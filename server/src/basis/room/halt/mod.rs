@@ -7,11 +7,8 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
-use sbi;
-use sbi::fid;
-
-use crate::machine::hart;
-use crate::machine::sync::OnceLock;
+use crate::metal::hart;
+use crate::metal::sync::OnceLock;
 
 use super::scheduler;
 
@@ -39,7 +36,7 @@ pub(crate) fn barrier() -> (usize, usize) {
 
 /// 本核到达停机屏障，不再返回：交还 ASID，等其余核到齐，由最后一核收尾并复位。
 pub(super) fn halt() -> ! {
-    crate::machine::mmu::riscv::identity::vacate();
+    crate::metal::mmu::identity::vacate();
     HALT_ARRIVED.fetch_add(1, Ordering::AcqRel);
     if !HALTING.swap(true, Ordering::AcqRel) {
         scheduler::idle::yell();
@@ -56,10 +53,10 @@ pub(super) fn halt() -> ! {
             core::hint::spin_loop();
         }
         hooked();
-        let _ = sbi::SystemResetCall::new(fid::SystemReset::SystemReset).call();
+        crate::metal::stop::reset();
     }
     loop {
-        unsafe { core::arch::asm!("wfi") };
+        hart::wait();
     }
 }
 

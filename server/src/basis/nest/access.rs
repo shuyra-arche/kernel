@@ -1,11 +1,12 @@
-use super::{Access, Nest, NestError, PteFlags};
+use super::{Access, Attributes, Nest, NestError};
+use crate::metal::mmu::PageTable;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
 
 impl Nest {
     /// 一段字节窗口是否整段落在用户可达的半边之内。
     pub(crate) fn user_range(at: VirtAddr, size: usize) -> bool {
-        let ceiling = crate::machine::mmu::riscv::mode::upper().as_usize();
+        let ceiling = crate::metal::mmu::upper().as_usize();
         at.as_usize() < ceiling
             && at
                 .as_usize()
@@ -57,9 +58,9 @@ impl Nest {
         let page = address.page_align();
         let (physical, flags) = state.root.walk_ref_geometry(page, self.geometry)?;
         if !range.current.contains(Access::READ)
-            || !flags.contains(PteFlags::R | PteFlags::V)
-            || flags.contains(PteFlags::G)
-            || (!self.kind.is_supervisor() && !flags.contains(PteFlags::U))
+            || !flags.contains(Attributes::READ)
+            || flags.contains(Attributes::GLOBAL)
+            || (!self.kind.is_supervisor() && !flags.contains(Attributes::USER))
         {
             return Err(NestError::NoRegion);
         }
@@ -105,17 +106,17 @@ impl Nest {
             let Some(range) = inner.range_at(at) else {
                 return false;
             };
-            let page = crate::machine::mmu::riscv::canonical(at & !(PAGE_SIZE - 1));
+            let page = crate::metal::mmu::canonical(at & !(PAGE_SIZE - 1));
             let Ok((_, hardware)) = state.root.walk_ref_geometry(page, self.geometry) else {
                 return false;
             };
             if !range.current.contains(need)
-                || !hardware.contains(need.to_pte() | PteFlags::V)
-                || hardware.contains(PteFlags::G)
+                || !hardware.contains(need.to_attributes())
+                || hardware.contains(Attributes::GLOBAL)
             {
                 return false;
             }
-            if user && !hardware.contains(PteFlags::U) {
+            if user && !hardware.contains(Attributes::USER) {
                 return false;
             }
             let count = (PAGE_SIZE - (at & (PAGE_SIZE - 1))).min(size - offset);
@@ -131,7 +132,7 @@ impl Nest {
                 unreachable!("Nest held across access validation and copy")
             };
             let _inner = mapping.state.lock();
-            let page = crate::machine::mmu::riscv::canonical(at & !(PAGE_SIZE - 1));
+            let page = crate::metal::mmu::canonical(at & !(PAGE_SIZE - 1));
             let (physical, _) = state
                 .root
                 .walk_ref_geometry(page, self.geometry)

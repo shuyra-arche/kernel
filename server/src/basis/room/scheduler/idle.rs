@@ -3,12 +3,8 @@
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
-use sbi;
-use sbi::ecall::SArgs;
-use sbi::fid;
-
-use crate::machine::hart;
-use crate::machine::hart::HartId;
+use crate::metal::hart;
+use crate::metal::hart::HartId;
 
 /// 每颗 hart 一位：置着 = 它正睡在空闲环里。
 static WAITING: [AtomicUsize; WAITING_WORDS] = [const { AtomicUsize::new(0) }; WAITING_WORDS];
@@ -16,11 +12,11 @@ static WAITING: [AtomicUsize; WAITING_WORDS] = [const { AtomicUsize::new(0) }; W
 /// 挑核时转着圈从不同的位起，免得总挑到同一颗。
 static PICK_CURSOR: AtomicUsize = AtomicUsize::new(0);
 
-const WAITING_WORDS: usize = crate::machine::layout::MAX_HART_SLOTS / usize::BITS as usize;
+const WAITING_WORDS: usize = crate::metal::layout::MAX_HART_SLOTS / usize::BITS as usize;
 
 pub(crate) fn sleep(hart: HartId) {
     debug_assert!(
-        hart.get() < crate::machine::layout::MAX_HART_SLOTS,
+        hart.get() < crate::metal::layout::MAX_HART_SLOTS,
         "sleep hart {hart} beyond MAX_HART_SLOTS"
     );
     let (word, bit) = hart.bit();
@@ -29,7 +25,7 @@ pub(crate) fn sleep(hart: HartId) {
 
 pub(crate) fn wake(hart: HartId) {
     debug_assert!(
-        hart.get() < crate::machine::layout::MAX_HART_SLOTS,
+        hart.get() < crate::metal::layout::MAX_HART_SLOTS,
         "wake hart {hart} beyond MAX_HART_SLOTS"
     );
     let (word, bit) = hart.bit();
@@ -38,7 +34,7 @@ pub(crate) fn wake(hart: HartId) {
 
 pub(super) fn waiting(hart: HartId) -> bool {
     debug_assert!(
-        hart.get() < crate::machine::layout::MAX_HART_SLOTS,
+        hart.get() < crate::metal::layout::MAX_HART_SLOTS,
         "waiting hart {hart} beyond MAX_HART_SLOTS"
     );
     let (word, bit) = hart.bit();
@@ -90,24 +86,5 @@ pub(crate) fn yell() {
 
 /// 叫醒指定的那一核：它得重新看一眼自己手上的活。
 pub(crate) fn nudge(hart: HartId) {
-    let _ = try_nudge(hart);
-}
-
-pub(crate) fn acknowledge() {
-    // Order the clear before the queue snapshot, including at the CSR/device
-    // boundary. A producer that publishes after the snapshot leaves an IPI.
-    unsafe { core::arch::asm!("csrci sip, 2", "fence o, rw", options(nostack)) };
-}
-
-pub(crate) fn try_nudge(hart: HartId) -> sbi::ecall::SResult<usize> {
-    // Publish shared work before requesting an interrupt from the SEE.
-    unsafe { core::arch::asm!("fence rw, ow", options(nostack)) };
-    let (mask, base) = crate::machine::hart::firmware(hart).target();
-    sbi::IpiCall::new(fid::Ipi::SendIpi)
-        .args(SArgs {
-            a0: mask,
-            a1: base,
-            ..Default::default()
-        })
-        .call()
+    let _ = crate::metal::interrupt::ipi::send(hart);
 }

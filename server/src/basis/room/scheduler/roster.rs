@@ -13,9 +13,9 @@ use kernel_api::model::identity::TaskId;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskWeak;
-use crate::machine::sync::Level;
-use crate::machine::sync::OnceLock;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::Level;
+use crate::metal::sync::OnceLock;
+use crate::metal::sync::SpinLock;
 
 pub(super) static ROSTER: OnceLock<SpinLock<HashMap<TaskId, TaskWeak>>> = OnceLock::new();
 
@@ -35,7 +35,7 @@ pub(crate) fn publish<T>(commit: impl FnOnce() -> (Arc<Task>, T)) -> Result<(Arc
         return Err(());
     }
     #[cfg(debug_assertions)]
-    let _commit = crate::machine::allocator::NoAllocation::enter();
+    let _commit = crate::metal::allocator::NoAllocation::enter();
     let (task, value) = commit();
     let id = task.ident.id;
     let previous = roster.insert(id, TaskWeak::stored(Arc::downgrade(&task), Origin::Roster));

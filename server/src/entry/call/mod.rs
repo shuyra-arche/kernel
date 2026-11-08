@@ -4,8 +4,8 @@ use kernel_api::abi::call::EnvCall;
 use kernel_api::abi::call::debug::DebugCall;
 
 use crate::basis::unit::task::TaskIdent;
-use crate::machine::switcher::context::Gprs;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::switcher::context::Gprs;
+use crate::metal::switcher::context::TrapContext;
 
 mod authority;
 pub(in crate::entry) mod cell;

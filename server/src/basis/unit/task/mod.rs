@@ -17,8 +17,8 @@ use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::team::Team;
 use crate::basis::unit::team::TeamPhase;
-use crate::machine::hart::HartId;
-use crate::machine::sync::SpinLock;
+use crate::metal::hart::HartId;
+use crate::metal::sync::SpinLock;
 
 use crate::basis::unit::control::Request;
 use execution::Effect;
@@ -49,7 +49,7 @@ pub struct Task {
     pub(crate) signs: crate::basis::sign::Table,
     pub(crate) administration: crate::basis::unit::control::Table,
     pub(crate) heir: SpinLock<Vec<Arc<Team>>>,
-    extensions: SpinLock<crate::machine::switcher::context::extension::ExtendedContext>,
+    extensions: SpinLock<crate::metal::switcher::context::extension::ExtendedContext>,
     controls: SpinLock<Vec<(Weak<crate::basis::nest::Nest>, usize)>>,
 }
 
@@ -63,8 +63,8 @@ unsafe impl Sync for Task {}
 impl Task {
     pub(crate) fn execution_capability(
         hart: HartId,
-    ) -> crate::machine::switcher::context::extension::Capability {
-        crate::machine::switcher::context::extension::hardware::capability(hart)
+    ) -> crate::metal::switcher::context::extension::Capability {
+        crate::metal::switcher::context::extension::hardware::capability(hart)
     }
 
     pub(crate) fn can_run_on(&self, hart: HartId) -> bool {
@@ -77,7 +77,7 @@ impl Task {
     pub(crate) unsafe fn capture_extensions(&self, status: usize) {
         assert_eq!(
             self.on_hart(),
-            Some(crate::machine::hart::hart_id()),
+            Some(crate::metal::hart::hart_id()),
             "capture without execution ownership"
         );
         unsafe { self.extensions.lock().capture(status) };
@@ -86,11 +86,11 @@ impl Task {
     pub(crate) unsafe fn restore_extensions(&self, status: &mut usize) {
         assert_eq!(
             self.on_hart(),
-            Some(crate::machine::hart::hart_id()),
+            Some(crate::metal::hart::hart_id()),
             "restore without execution ownership"
         );
         assert!(
-            self.can_run_on(crate::machine::hart::hart_id()),
+            self.can_run_on(crate::metal::hart::hart_id()),
             "incompatible execution Hart"
         );
         unsafe { self.extensions.lock().restore(status) };
@@ -119,7 +119,7 @@ impl Task {
         self.extensions.lock().enable(
             instruction,
             status,
-            Self::execution_capability(crate::machine::hart::hart_id()),
+            Self::execution_capability(crate::metal::hart::hart_id()),
         )
     }
 

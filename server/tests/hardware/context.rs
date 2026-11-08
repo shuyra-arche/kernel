@@ -51,9 +51,10 @@ pub(super) fn trace_checkpoints(
         .arg(output);
     found
 }
-pub(super) fn verify(path: &Path, symbols: &[(String, usize)], mixed: bool) {
+fn observed_harts(path: &Path, symbols: &[(String, usize)]) -> Vec<BTreeSet<usize>> {
     let trace = std::fs::read_to_string(path).unwrap();
     let mut evidence = String::new();
+    let mut observed = Vec::new();
     for (name, address) in symbols {
         let mut harts = BTreeSet::new();
         for line in trace.lines() {
@@ -73,6 +74,15 @@ pub(super) fn verify(path: &Path, symbols: &[(String, usize)], mixed: bool) {
                 harts.insert(cpu.parse::<usize>().unwrap());
             }
         }
+        evidence.push_str(&format!("{name} pc={address:#x} Harts={harts:?}\n"));
+        observed.push(harts);
+    }
+    std::fs::write(path.with_extension("summary.txt"), evidence).unwrap();
+    observed
+}
+
+pub(super) fn verify(path: &Path, symbols: &[(String, usize)], mixed: bool) {
+    for ((name, _), harts) in symbols.iter().zip(observed_harts(path, symbols)) {
         assert!(
             harts.len() >= 2,
             "{name} did not migrate: {harts:?}; {}",
@@ -85,7 +95,17 @@ pub(super) fn verify(path: &Path, symbols: &[(String, usize)], mixed: bool) {
                 "vector ran on undeclared Hart"
             );
         }
-        evidence.push_str(&format!("{name} pc={address:#x} Harts={harts:?}\n"));
     }
-    std::fs::write(path.with_extension("summary.txt"), evidence).unwrap();
+}
+
+pub(super) fn verify_handoff(path: &Path, symbols: &[(String, usize)]) {
+    let observed = observed_harts(path, symbols);
+    let [send, receive] = observed.as_slice() else {
+        panic!("expected two clock handoff checkpoints");
+    };
+    assert!(
+        send.len() == 1 && receive.len() == 1 && send != receive,
+        "clock handoff must use separate Harts: send={send:?}, receive={receive:?}; {}",
+        path.display()
+    );
 }

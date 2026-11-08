@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use super::Mapping;
 use crate::basis::pend::SourceAuthorization;
 use crate::basis::room::scheduler::roster;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::cell::MappingControl;
 use kernel_api::model::identity::PendId;

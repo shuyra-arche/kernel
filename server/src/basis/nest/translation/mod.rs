@@ -1,26 +1,31 @@
 //! Locked CPU translation and the obligations it retains until a fence.
 
 mod fault;
+mod invalidation;
+mod phase;
 mod retirement;
+mod tickets;
+pub(super) use invalidation::Invalidation;
 
 pub use fault::{FaultKind, FaultOutcome};
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use super::NestError;
 use super::mapping::Protection;
 use super::mapping::publication::Publication;
 use super::{Access, Mapping};
+use super::{Asid, NestError};
 use crate::basis::cell::page::{Change, Page};
-use crate::machine::mmu::riscv::mode::Geo;
+use crate::metal::mmu::{Geometry, PageTable};
 use kernel_api::address::VirtAddr;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
 #[cfg(debug_assertions)]
-use {super::Nest, crate::machine::mmu::riscv::table::PteFlags, kernel_api::address::PageOffset};
+use {super::Nest, crate::metal::mmu::Attributes, kernel_api::address::PageOffset};
 
-use crate::machine::mmu::riscv::synchronize::ClosePhase;
-use crate::machine::mmu::riscv::table::TableNode;
+use crate::metal::mmu::Table;
+use crate::metal::mmu::fence::Completed;
+use phase::ClosePhase;
 
 use self::retirement::{Fenced, Retirement};
 use super::index::Index;
@@ -28,33 +33,26 @@ use super::index::Index;
 /// 地址空间里除每关系库存外的全部状态：根页表、关系索引、
 /// 待失效标记、退休中的资源与尚未结算的占用票。
 pub(super) struct NestState {
-    pub(super) root: TableNode,
+    pub(super) root: Table,
     pub(super) index: Index,
     pub(super) retirement: Retirement,
-    /// 已退休、尚未结算的占用票：同步失败时留在这里，VA 禁复用。
-    pub(super) tickets: Vec<usize>,
     pub(super) phase: ClosePhase,
 }
 
 impl NestState {
     /// 新地址空间：根页表已建，无关系、无待失效资源。
-    pub(super) fn new(root: TableNode) -> Self {
+    pub(super) fn new(root: Table) -> Self {
         Self {
             root,
             index: Index::new(),
             retirement: Retirement::new(),
-            tickets: Vec::new(),
             phase: ClosePhase::Open,
         }
     }
 
     /// Complete the current fence and close the address space if needed.
-    ///
-    /// # Safety
-    /// The fence selected by Retirement::begin must have completed successfully.
-    pub(super) unsafe fn settle(&mut self) -> Fenced {
-        // SAFETY: The caller completed the fence for this batch.
-        let fenced = unsafe { self.retirement.complete() };
+    pub(super) fn settle(&mut self, asid: Asid, proof: Completed<Asid>) -> Fenced {
+        let fenced = self.retirement.complete(asid, proof);
         self.phase = self.phase.settle();
         fenced
     }
@@ -63,7 +61,7 @@ impl NestState {
         &mut self,
         start: VirtAddr,
         size: usize,
-        geometry: Geo,
+        geometry: Geometry,
     ) -> Result<(), NestError> {
         self.root.prepare_geometry(start, size, geometry)?;
         self.root
@@ -71,14 +69,14 @@ impl NestState {
         Ok(())
     }
 
-    pub(super) fn withdraw_prepared(&mut self, start: VirtAddr, size: usize, geometry: Geo) {
+    pub(super) fn withdraw_prepared(&mut self, start: VirtAddr, size: usize, geometry: Geometry) {
         self.root.unmap_prepared_geometry(start, size, geometry);
         self.root.reclaim_empty_tables(&mut self.retirement.tables);
     }
 
     /// Withdraw the indexed mappings in one locked transition and retain
     /// their obligations until the covering fence succeeds.
-    pub(super) fn close_mappings(&mut self, geometry: Geo) -> Result<(), NestError> {
+    pub(super) fn close_mappings(&mut self, geometry: Geometry) -> Result<(), NestError> {
         let mut mappings = Vec::new();
         mappings
             .try_reserve(self.index.len())
@@ -107,11 +105,8 @@ impl NestState {
                 .reserve_retired_tables(&mut self.retirement.tables)?;
             for mapping in &mappings {
                 for range in &mapping.state.lock().active {
-                    self.root.unmap_keep_tables_geometry(
-                        range.start,
-                        range.size.get(),
-                        geometry,
-                    )?;
+                    self.root
+                        .unmap_prepared_geometry(range.start, range.size.get(), geometry);
                 }
             }
             self.root.reclaim_empty_tables(&mut self.retirement.tables);
@@ -132,14 +127,11 @@ impl NestState {
     }
 
     #[cfg(debug_assertions)]
-    pub(super) fn audit(&self, owner: &Nest, geometry: Geo) {
+    pub(super) fn audit(&self, owner: &Nest, geometry: Geometry) {
         self.index.audit();
         self.index.audit_mappings(owner, &self.root, geometry);
-        self.root.visit_leaves(
-            (geometry.levels - 1) as usize,
-            0,
-            geometry,
-            &mut |start, physical, flags, size| {
+        self.root
+            .visit_leaves(geometry, &mut |start, physical, flags, size| {
                 let end = start
                     .as_usize()
                     .checked_add(size - 1)
@@ -161,13 +153,13 @@ impl NestState {
                     inner.covers(start.as_usize(), end),
                     "hardware leaf crosses an unmapped Mapping range"
                 );
-                let mut expected: Option<PteFlags> = None;
+                let mut expected: Option<Attributes> = None;
                 for range in inner
                     .active
                     .iter()
                     .filter(|range| range.overlaps(start.as_usize(), end))
                 {
-                    let leaf = mapping.leaf_flags(range.current);
+                    let leaf = mapping.leaf_attributes(range.current);
                     if let Some(expected) = expected {
                         assert_eq!(
                             leaf.bits(),
@@ -179,12 +171,11 @@ impl NestState {
                     }
                 }
                 let expected = expected.expect("hardware leaf belongs to a live range");
-                let mask = PteFlags::V
-                    | PteFlags::R
-                    | PteFlags::W
-                    | PteFlags::X
-                    | PteFlags::U
-                    | PteFlags::G;
+                let mask = Attributes::READ
+                    | Attributes::WRITE
+                    | Attributes::EXECUTE
+                    | Attributes::USER
+                    | Attributes::GLOBAL;
                 assert_eq!(
                     (flags & mask).bits(),
                     (expected & mask).bits(),
@@ -234,13 +225,12 @@ impl NestState {
                         );
                     }
                 }
-            },
-        );
+            });
     }
 
     pub(super) fn publish_page(
         &mut self,
-        geometry: Geo,
+        geometry: Geometry,
         mapping: &Arc<Mapping>,
         address: VirtAddr,
         page: &Arc<Page>,
@@ -256,7 +246,7 @@ impl NestState {
             .iter()
             .find(|range| range.contains(address.as_usize()))
             .ok_or(NestError::NoRegion)?;
-        let flags = mapping.leaf_flags(range.current);
+        let flags = mapping.leaf_attributes(range.current);
         let mut memo =
             Publication::prepare(page, range.ceiling.contains(Access::WRITE), Some(change))?;
         inner
@@ -282,7 +272,7 @@ impl NestState {
     /// Returns true when a published page was withdrawn and needs a fence.
     pub(super) fn unpublish_page(
         &mut self,
-        geometry: Geo,
+        geometry: Geometry,
         mapping: &Arc<Mapping>,
         address: VirtAddr,
         expected: &Arc<Page>,
@@ -329,7 +319,7 @@ impl NestState {
 
     pub(super) fn protect(
         &mut self,
-        geometry: Geo,
+        geometry: Geometry,
         mapping: &Arc<Mapping>,
         window: (usize, usize),
         request: Protection,
@@ -353,7 +343,7 @@ impl NestState {
         for update in transition.updates {
             self.root.set_permissions_prepared_geometry(
                 update.address,
-                mapping.leaf_flags(update.access),
+                mapping.leaf_attributes(update.access),
                 geometry,
             );
         }

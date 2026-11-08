@@ -17,25 +17,23 @@ use core::mem::ManuallyDrop;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 
-use riscv::register::satp;
-
 use crate::basis::cell::page::{Change, Page};
 use crate::basis::flat::Pages;
 use crate::basis::sign::{self, WakeKey};
 use crate::basis::unit::anchor::Anchor;
-use crate::machine::layout::TEAM_FRAME_BASE;
-use crate::machine::layout::TEAM_FRAME_WINDOW_SIZE;
-use crate::machine::layout::TRAP_STACK_BASE;
-use crate::machine::mmu::riscv::synchronize::Invalidation;
-use crate::machine::mmu::riscv::{identity, mode, table};
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
-use crate::machine::sync::SpinLockGuard;
+use crate::metal::layout::TEAM_FRAME_BASE;
+use crate::metal::layout::TEAM_FRAME_WINDOW_SIZE;
+use crate::metal::layout::TRAP_STACK_BASE;
+use crate::metal::mmu::{self, Attributes, Geometry, PageTable, Root, Table, identity};
+use crate::metal::sync::Level;
+use crate::metal::sync::SpinLock;
+use crate::metal::sync::SpinLockGuard;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
+use translation::Invalidation;
 
 pub use address::Reservation;
 pub use error::NestError;
@@ -49,8 +47,7 @@ pub(crate) use mapping::MappingRange;
 
 use index::IndexNode;
 use mapping::{publication::Publication, source};
-use table::PteFlags;
-use table::TableNode;
+
 use translation::NestState;
 
 /// 待清理链条上的一环：一笔已经消费、但还没收尾的关系。
@@ -91,7 +88,7 @@ pub struct Nest {
     id: NestId,
     asid: Asid,
     kind: SpaceKind,
-    geometry: mode::Geo,
+    geometry: Geometry,
     life: Arc<Anchor>,
     pub(crate) mappings: mapping::MappingRegistry,
     layout: SpinLock<Layout>,
@@ -113,12 +110,12 @@ impl Nest {
     }
 
     fn build(kind: SpaceKind, kernel: bool) -> Result<Arc<Self>, NestError> {
-        let root = TableNode::root()?;
+        let root = Table::root()?;
         let mut layout = Layout::new();
         layout.register_window(
             RegionKind::Normal,
-            crate::machine::layout::IMAGE_BASE.as_usize(),
-            mode::upper().as_usize() - 1,
+            crate::metal::layout::IMAGE_BASE.as_usize(),
+            mmu::upper().as_usize() - 1,
         )?;
         layout.register_window(
             RegionKind::Kernel,
@@ -126,8 +123,8 @@ impl Nest {
             TEAM_FRAME_BASE.as_usize() + TEAM_FRAME_WINDOW_SIZE - 1,
         )?;
         if kernel {
-            let dram = crate::machine::board::info().memory.envelope();
-            let base = mode::lower()
+            let dram = crate::metal::board::info().memory.envelope();
+            let base = mmu::lower()
                 .as_usize()
                 .checked_add(dram.base)
                 .and_then(|base| base.checked_add(dram.size))
@@ -145,7 +142,7 @@ impl Nest {
             id,
             asid,
             kind,
-            geometry: mode::geometry(mode::mode()),
+            geometry: mmu::geometry(),
             life,
             mappings: mapping::MappingRegistry::new(),
             layout: SpinLock::new_level(Level::Address, layout),
@@ -195,14 +192,11 @@ impl Nest {
         self.asid
     }
 
-    pub(crate) fn root_ppn(&self) -> usize {
-        self.state.lock().root.ppn()
-    }
-
-    pub(crate) fn satp(&self) -> satp::Satp {
-        satp::Satp::from_bits(
-            (mode::mode().into_usize() << 60) | (self.asid.get() << 44) | self.root_ppn(),
-        )
+    pub(crate) fn root(&self) -> Root {
+        Root {
+            frame: self.state.lock().root.frame(),
+            asid: self.asid,
+        }
     }
 
     /// 是否有活关系与 `[start, start + size)` 相交。
@@ -232,10 +226,10 @@ impl Nest {
     }
 
     /// 普通挂载的架构属性：用户空间只对 `Normal` 区开 U，A/D 由内核自维护。
-    pub(crate) fn attrs(&self, region: Option<RegionKind>) -> PteFlags {
-        let mut attrs = PteFlags::A | PteFlags::D;
+    pub(crate) fn attrs(&self, region: Option<RegionKind>) -> Attributes {
+        let mut attrs = Attributes::ACCESSED | Attributes::DIRTY;
         if !self.kind.is_supervisor() && region == Some(RegionKind::Normal) {
-            attrs |= PteFlags::U;
+            attrs |= Attributes::USER;
         }
         attrs
     }
@@ -264,7 +258,7 @@ impl Nest {
         Ok(Reservation::new(
             Arc::downgrade(self),
             placement.region(),
-            crate::machine::mmu::riscv::canonical(start),
+            crate::metal::mmu::canonical(start),
             placement.size(),
             id,
         ))
@@ -335,7 +329,7 @@ impl Nest {
         self: &Arc<Self>,
         reservation: Reservation,
         source: crate::basis::flat::FlatRange,
-        attrs: PteFlags,
+        attrs: Attributes,
         active: &[ActiveRange],
     ) -> Result<Arc<Mapping>, NestError> {
         if let Err(error) = self.check_owner(&reservation) {
@@ -519,7 +513,7 @@ impl Nest {
                 run.start,
                 run.physical,
                 run.size,
-                mapping.leaf_flags(run.current),
+                mapping.leaf_attributes(run.current),
                 self.geometry,
             );
         }
@@ -534,7 +528,7 @@ impl Nest {
                 *at,
                 pa,
                 *len,
-                mapping.leaf_flags(*current),
+                mapping.leaf_attributes(*current),
                 self.geometry,
             );
         }
@@ -645,7 +639,7 @@ impl Nest {
                 run.start,
                 run.physical,
                 run.size,
-                mapping.leaf_flags(run.current),
+                mapping.leaf_attributes(run.current),
                 self.geometry,
             );
         }
@@ -753,7 +747,7 @@ impl Nest {
         );
         self.finish_invalidation()?;
 
-        let mut state = self.state.lock();
+        let mut state = self.ready_state()?;
         if !state.unpublish_page(self.geometry, mapping, address, expected)? {
             return Ok(());
         }
@@ -800,10 +794,7 @@ impl Nest {
             .map_err(|_| NestError::OutOfMemory)?;
         for range in &inner.active {
             if let Some((start, last)) = range.intersection(lo, hi) {
-                spans.push((
-                    crate::machine::mmu::riscv::canonical(start),
-                    last - start + 1,
-                ));
+                spans.push((crate::metal::mmu::canonical(start), last - start + 1));
             }
         }
         Ok(spans)
@@ -928,10 +919,7 @@ impl Nest {
                 }
                 floor = start;
             }
-            spans.push((
-                crate::machine::mmu::riscv::canonical(floor),
-                last - floor + 1,
-            ));
+            spans.push((crate::metal::mmu::canonical(floor), last - floor + 1));
             if last >= hi {
                 covered = true;
                 break;
@@ -984,7 +972,7 @@ impl Nest {
         let mut inner = mapping.state.lock();
         let next = ActiveRange::split(&inner.active, start.as_usize(), last, None)?;
         let first_page = mapping.page_index(start);
-        let last_page = mapping.page_index(crate::machine::mmu::riscv::canonical(last));
+        let last_page = mapping.page_index(crate::metal::mmu::canonical(last));
         let mut removed = 0;
         for (page, _) in &inner.published {
             if *page >= first_page && *page <= last_page {
@@ -1010,8 +998,9 @@ impl Nest {
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
         state
+            .retirement
             .tickets
-            .try_reserve(pieces.len())
+            .reserve(pieces.len())
             .map_err(|_| NestError::OutOfMemory)?;
         state.prepare_withdrawal(start, len, self.geometry)?;
 
@@ -1038,20 +1027,21 @@ impl Nest {
         if let Some(node) = next_node {
             state.index.insert(node);
         }
-        state.tickets.extend(tickets.iter().copied());
+        for &ticket in &tickets {
+            state.retirement.tickets.retire(ticket);
+        }
         state.retirement.mark_dirty(mapping.is_global());
         drop(state);
         drop(layout);
         // 三、同步成功之后才结算这一段的票；失败时票、Page、表页与来源都留着。
         self.finish_invalidation()?;
-        {
-            let mut state = self.state.lock();
-            state.tickets.retain(|ticket| !tickets.contains(ticket));
-        }
         if !tickets.is_empty() {
             let mut layout = self.layout.lock();
+            let mut state = self.state.lock();
             for ticket in tickets {
-                layout.occupancy.reclaim(ticket);
+                if state.retirement.tickets.claim(ticket) {
+                    layout.occupancy.reclaim(ticket);
+                }
             }
         }
         Ok(())
@@ -1108,7 +1098,7 @@ impl Nest {
             Reservation::new(
                 nest,
                 region,
-                crate::machine::mmu::riscv::canonical(right_start),
+                crate::metal::mmu::canonical(right_start),
                 size - left_size,
                 right_id,
             ),
@@ -1155,13 +1145,10 @@ impl Nest {
             self.drain_closed();
             return Ok(());
         }
-        let tickets = {
-            let mut state = self.state.lock();
-            core::mem::take(&mut state.tickets)
-        };
-        if !tickets.is_empty() {
+        if self.state.lock().retirement.tickets.has_settled() {
             let mut layout = self.layout.lock();
-            for ticket in tickets {
+            let mut state = self.state.lock();
+            for ticket in state.retirement.tickets.drain() {
                 layout.occupancy.reclaim(ticket);
             }
         }
@@ -1198,15 +1185,16 @@ impl Nest {
             let target = state.retirement.begin(self.asid);
             drop(state);
 
-            let result = identity::shootdown(target).map_err(|_| NestError::Shootdown);
+            let result = mmu::fence::invalidate(&identity::Cpu, target);
             let fenced = {
                 let mut state = self.state.lock();
-                if let Err(error) = result {
-                    state.retirement.fail();
-                    return Err(error.into());
+                match result {
+                    Ok(proof) => state.settle(self.asid, proof),
+                    Err(_) => {
+                        state.retirement.fail();
+                        return Err(NestError::Shootdown);
+                    }
                 }
-                // SAFETY: the covering fence just completed successfully.
-                unsafe { state.settle() }
             };
             // Retired Page and table resources can leave the lock. Address
             // tickets are reclaimed by detach or explicit retry_invalidation.
@@ -1332,7 +1320,7 @@ impl Nest {
         self.translate(address).map(|(physical, _)| physical)
     }
 
-    pub(crate) fn translate(&self, address: VirtAddr) -> Option<(PhysAddr, PteFlags)> {
+    pub(crate) fn translate(&self, address: VirtAddr) -> Option<(PhysAddr, Attributes)> {
         let state = self.ready_state().ok()?;
         state.index.find(address.as_usize())?;
         let (pa, flags) = state.root.walk_ref_geometry(address, self.geometry).ok()?;
@@ -1428,14 +1416,6 @@ pub enum SpaceKind {
 impl SpaceKind {
     pub fn is_supervisor(self) -> bool {
         matches!(self, SpaceKind::Supervisor)
-    }
-
-    pub(crate) fn spp(self) -> riscv::register::sstatus::SPP {
-        if self.is_supervisor() {
-            riscv::register::sstatus::SPP::Supervisor
-        } else {
-            riscv::register::sstatus::SPP::User
-        }
     }
 }
 

@@ -196,7 +196,7 @@ fn run(mode: &str) {
                     &mut command,
                     &elf,
                     &trace_path,
-                    &["clock_migration_checkpoint"],
+                    &["clock_handoff_send", "clock_handoff_receive"],
                 )
             } else if context && harts == 4 {
                 super::context::trace(&mut command, &elf, &trace_path, vector || mixed, mixed)
@@ -248,8 +248,14 @@ fn run(mode: &str) {
                 let fast = usize::from(suffix != "-fallback");
                 let expected = format!("PASS clock monotonic=1 fast={fast}");
                 assert!(log.contains(&expected), "{name}: {log}");
+                let handoffs = if fast == 0 {
+                    "handoffs=0"
+                } else {
+                    "handoffs=64"
+                };
+                assert!(log.contains(handoffs), "{name}: {log}");
                 if !symbols.is_empty() {
-                    super::context::verify(&trace_path, &symbols, false);
+                    super::context::verify_handoff(&trace_path, &symbols);
                 }
             }
             if suffix == "-sparse-harts" {

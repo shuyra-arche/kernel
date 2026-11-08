@@ -29,12 +29,12 @@ use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
-use crate::machine::iommu::BindingId;
-use crate::machine::iommu::Error;
-use crate::machine::iommu::Phase;
-use crate::machine::iommu::riscv::pci::aperture;
-use crate::machine::iommu::riscv::retirement;
-use crate::machine::sync::SpinLock;
+use crate::metal::iommu::BindingId;
+use crate::metal::iommu::Error;
+use crate::metal::iommu::Phase;
+use crate::metal::iommu::aperture;
+use crate::metal::iommu::runtime as retirement;
+use crate::metal::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
@@ -427,13 +427,16 @@ fn advance(record: &mut Projection) -> [Option<(TaskId, PendId)>; 2] {
                 },
             );
             match ready {
-                Ok(true) => match aperture::activate(record.platform.as_ref().unwrap().port) {
-                    Ok(()) => {
-                        record.info.state = MappingState::Active;
-                        record.freeze = None;
+                // SAFETY: the matching retained domain has just reached Active.
+                Ok(true) => {
+                    match unsafe { aperture::activate(record.platform.as_ref().unwrap().port) } {
+                        Ok(()) => {
+                            record.info.state = MappingState::Active;
+                            record.freeze = None;
+                        }
+                        Err(_) => close(record),
                     }
-                    Err(_) => close(record),
-                },
+                }
                 Ok(false) => {}
                 Err(_) => close(record),
             }
@@ -492,6 +495,8 @@ pub(crate) fn maintain() -> bool {
             sign::signal(WakeKey::ExternalMapping { id });
         }
     }
-    crate::machine::iommu::riscv::interrupt::rearm();
+    if let Some(route) = crate::metal::interrupt::external() {
+        route.rearm();
+    }
     pending
 }

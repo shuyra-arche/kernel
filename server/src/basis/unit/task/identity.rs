@@ -7,7 +7,7 @@ use kernel_api::model::identity::TaskId;
 
 use crate::basis::nest::NestError;
 use crate::basis::unit::team::Team;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 use kernel_api::address::PhysAddr;
 
 static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, isize::MAX as usize);

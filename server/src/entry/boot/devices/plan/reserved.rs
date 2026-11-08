@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use fdt::node::FdtNode;
 use kernel_api::abi::call::pend::PendFail;
 
-use crate::machine::board::tree::{self, mmio};
+use crate::metal::board::tree::{self, mmio};
 use mmio::Region;
 
 /// Platform IOMMU control pages never become externally grantable boot resources.

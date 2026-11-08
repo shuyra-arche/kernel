@@ -15,13 +15,13 @@ use crate::basis::room::chain::Chain;
 use crate::basis::room::deadline;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskState;
-use crate::machine::clock;
-use crate::machine::hart::HartId;
-use crate::machine::switcher::context::Gprs;
-use crate::machine::switcher::context::TrapContext;
-use crate::machine::switcher::stack::trap_stack_edge;
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
+use crate::metal::clock;
+use crate::metal::hart::HartId;
+use crate::metal::switcher::context::Gprs;
+use crate::metal::switcher::context::TrapContext;
+use crate::metal::switcher::stack::trap_stack_edge;
+use crate::metal::sync::Level;
+use crate::metal::sync::SpinLock;
 
 use self::badge::Badge;
 
@@ -150,7 +150,7 @@ impl Conductor {
             if t.ident.team.nest.asid().is_kernel() {
                 frame
                     .gpr
-                    .set_x(Gprs::TP, crate::machine::hart::per_hart_ptr(self.hart));
+                    .set_x(Gprs::TP, crate::metal::hart::per_hart_ptr(self.hart));
             }
         }
         deadline::arm(ceiling);
@@ -262,5 +262,5 @@ impl Conductor {
 
 /// 本核的运行槽。
 pub(crate) fn current() -> &'static Conductor {
-    unsafe { &*(crate::machine::hart::scheduler() as *const Conductor) }
+    unsafe { &*(crate::metal::hart::scheduler() as *const Conductor) }
 }

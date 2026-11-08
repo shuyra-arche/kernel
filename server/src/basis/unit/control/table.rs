@@ -1,6 +1,6 @@
 use crate::basis::name::{Registry, Serial};
 use crate::basis::unit::task::Task;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 use alloc::sync::Arc;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;

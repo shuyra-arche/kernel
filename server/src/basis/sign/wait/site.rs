@@ -8,9 +8,9 @@ use hashbrown::HashMap;
 use crate::basis::room::chain::Chain;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
-use crate::machine::sync::Level;
-use crate::machine::sync::OnceLock;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::Level;
+use crate::metal::sync::OnceLock;
+use crate::metal::sync::SpinLock;
 
 use super::key::WakeKey;
 

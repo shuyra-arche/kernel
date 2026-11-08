@@ -1,8 +1,8 @@
 use alloc::{string::String, vec::Vec};
 use serde::Serialize;
 
-use crate::machine::clock;
-use crate::machine::hart;
+use crate::metal::clock;
+use crate::metal::hart;
 
 mod paragraph;
 pub use paragraph::Paragraph;

@@ -1,8 +1,8 @@
 use fack::prelude::Error;
 use kernel_api::address::{PageOffset, VirtAddr};
 
-use crate::machine::mmu::riscv::mode::Geo;
-use crate::machine::mmu::riscv::table::PteFlags;
+use crate::metal::mmu::Attributes;
+use crate::metal::mmu::{Geometry, PageTable};
 
 use super::super::Access;
 use super::NestState;
@@ -18,13 +18,13 @@ pub enum FaultKind {
 }
 
 impl FaultKind {
-    fn satisfies(self, flags: PteFlags) -> bool {
+    fn satisfies(self, flags: Attributes) -> bool {
         let need = match self {
-            FaultKind::Instruction => PteFlags::X,
-            FaultKind::Load => PteFlags::R,
-            FaultKind::Store => PteFlags::W,
+            FaultKind::Instruction => Attributes::EXECUTE,
+            FaultKind::Load => Attributes::READ,
+            FaultKind::Store => Attributes::WRITE,
         };
-        flags.contains(PteFlags::V | need)
+        flags.contains(need)
     }
 
     fn allows(self, access: Access) -> bool {
@@ -59,7 +59,7 @@ pub enum FaultOutcome {
 impl FaultOutcome {
     pub(in crate::basis::nest) fn probe(
         state: &NestState,
-        geometry: Geo,
+        geometry: Geometry,
         address: VirtAddr,
         kind: FaultKind,
     ) -> Self {
