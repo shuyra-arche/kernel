@@ -25,3 +25,6 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+[patch."https://github.com/shuyra-arche/kernel.git"]
+kernel-api = { path = "api" }

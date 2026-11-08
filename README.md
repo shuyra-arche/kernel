@@ -280,8 +280,9 @@ The EDU image and PCI tests live in
 [Vanllia tests/platform/qemu](https://github.com/shuyra-arche/vanllia/tree/main/tests/platform/qemu),
 using the same production platform package. Its proof leaves Bus Master enabled
 and returns bounded Pending before the QEMU ordering check. The low-level hardware
-fixture lives in Vanllia `tests/platform/hardware`; only the standalone Kernel test
-guest depends on it. Production Kernel has no dependency on Vanllia or a fixture.
+fixture lives in Vanllia `tests/platform/hardware`; the standalone Kernel test
+guest and Host hardware harness depend on it. Host DTB construction belongs to
+that same external fixture. Production Kernel has no dependency on Vanllia or a fixture.
 
 `KERNEL_BOOT_MANIFEST` selects the normal image and `KERNEL_PLATFORM_MANIFEST`
 selects the EDU image. CI checks out a pinned consumer, patches both image manifests

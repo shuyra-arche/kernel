@@ -1,13 +1,12 @@
+use crate::Edu;
 use crate::Uart;
-use crate::edu::Edu;
 use crate::finish;
-use crate::iommu::HardwareError;
-use crate::iommu::contract::{Quiescence, Retirement};
 use crate::iommu::Engine;
+use crate::iommu::HardwareError;
 use crate::iommu::Phase;
 use crate::iommu::adapter::Adapter;
+use crate::iommu::contract::{Quiescence, Retirement};
 use crate::iommu::controllers::Controllers;
-use crate::iommu::topology::Topology;
 use crate::mmio;
 use crate::pool::LIMIT;
 use crate::pool::POOL;
@@ -45,20 +44,8 @@ unsafe impl Quiescence for Platform<'_> {
 
 type Space<'a> = Target<Adapter<mmio::Mmio, Platform<'a>>>;
 
-pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
-    let topology = Topology::discover(fdt).unwrap();
-    // Exercise the production boot authority planner against QEMU's actual DTB,
-    // including its zero-length tuple and PCI apertures, before touching devices.
-    let plan = crate::plan::Plan::discover(fdt, 0x8000_0000, 128 << 20).unwrap();
-    for authority in plan.authorities() {
-        assert!(!authority.overlaps(crate::description::mmio::Region::new(base, 4096).unwrap()));
-        for (ecam, size) in topology.configurations() {
-            assert!(
-                !authority.overlaps(crate::description::mmio::Region::new(ecam, size).unwrap())
-            );
-        }
-    }
-    let mut controllers = Controllers::new(topology).unwrap();
+pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
+    let mut controllers = Controllers::new([base]).unwrap();
     LIMIT.store(8, Ordering::Relaxed);
     let payload = Arc::new(POOL.cell().unwrap());
     let pa = payload.physical_address();
@@ -82,12 +69,10 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
         .map_err(|(error, _)| error)
         .unwrap();
     if scenario == "route-reject" {
-        let result = unsafe { controllers.bind(0x3000_1000, 8, tables, platform) };
+        let result = unsafe { controllers.bind(base + 4096, requester, tables, platform) };
         assert!(matches!(
             result,
-            Err(crate::iommu::controllers::BindError::Route(
-                crate::iommu::topology::RouteError::Unmapped
-            ))
+            Err(crate::iommu::controllers::BindError::UnknownController)
         ));
         assert_eq!(RETURNS.load(Ordering::SeqCst), 4); // unused tables returned
         let engine = controllers.engine(base).unwrap();
@@ -101,7 +86,7 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
         let _ = writeln!(Uart, "PASS iommu-binding rejected=1 returned=8");
         finish(true);
     }
-    let adapter = unsafe { controllers.bind(0x3000_0000, 8, tables, platform) }.unwrap();
+    let adapter = unsafe { controllers.bind(base, requester, tables, platform) }.unwrap();
     let mut target = Target::new(adapter);
     let change = (scenario == "dma-change").then(|| payload.begin().unwrap());
     let freeze = change

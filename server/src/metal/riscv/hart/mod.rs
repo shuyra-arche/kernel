@@ -1,7 +1,6 @@
-mod id;
 mod per_hart;
 
-pub use id::{FirmwareId, HartId};
+pub use kernel_api::boot::platform::{FirmwareId, HartId};
 pub use per_hart::PerHart;
 pub(crate) use per_hart::lease_load;
 pub(crate) use per_hart::lease_store;
@@ -35,7 +34,7 @@ pub fn hart_count() -> usize {
     let n = facts::info().hart.count();
     assert!(
         n <= MAX_HART_SLOTS,
-        "DTB reports {n} harts, at most {MAX_HART_SLOTS} VA slots"
+        "platform reports {n} harts, at most {MAX_HART_SLOTS} VA slots"
     );
     n
 }
@@ -83,7 +82,7 @@ pub fn hart_frame() -> VirtAddr {
     VirtAddr::wrap(f)
 }
 
-/// Current hardware identity is available even before board facts are installed.
+/// Current hardware identity is available even before boot facts are admitted.
 #[inline]
 pub fn firmware_id() -> FirmwareId {
     let id: usize;
