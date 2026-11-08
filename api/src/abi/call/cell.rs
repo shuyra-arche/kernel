@@ -1,11 +1,4 @@
 use crate::address::VirtAddr;
-use crate::model::cell::AcquireSource;
-use crate::model::cell::FlatReference;
-use crate::model::cell::MappingId;
-use crate::model::cell::MappingInfo;
-use crate::model::cell::MappingSelection;
-use crate::model::cell::MappingTarget;
-use crate::model::identity::TeamId;
 
 #[kernel_api_macros::envcall(class = 2, call = CellCall)]
 pub mod operations {
@@ -34,100 +27,56 @@ pub mod operations {
         /// 这一页永久不可移交：来源不是普通来源，或它的旧映射无从核实。
         NotTransferable = -10,
     }
-    /// 登记一份经过授权的来源持有；返回它在本任务资源表里的句柄。
-    /// `retention=NONE` 是普通取得；否则它是一枚内核认可的独立保留授权。
-    #[operation(slot = 5, output = super::FlatReference, error = CellFail)]
+    /// Create a Slot collection or vacant Memo collection from a CellCreate snapshot.
+    #[operation(slot = 0, output = crate::model::cell::CreatedCell, error = CellFail, reply = 3)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Acquire {
-        pub source: super::AcquireSource,
-        pub retention: crate::model::unit::ControlId,
-    }
-    /// 解除这一份持有；不隐式 Detach，不等待其他引用，不收回其他映射。
-    #[operation(slot = 6, output = (), error = CellFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Release {
-        pub reference: super::FlatReference,
-    }
-    /// Attach an authorized range from one immutable Attachment snapshot.
-    /// I/O supports one 4 KiB page, Exact IOVA, Caller control and READ/READ|WRITE.
-    /// Wait for Inspect::Active before DMA. Slots 7/8/10/12 are retired.
-    #[operation(slot = 19, output = (super::MappingId, super::VirtAddr), error = CellFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Attach {
-        pub target: super::MappingTarget,
+    pub struct Create {
         pub request: super::VirtAddr,
     }
-    /// Withdraw the selected mapping. I/O supports Whole; success closes
-    /// admission but reclamation requires Inspect::Settled or MappingRetired.
-    #[operation(slot = 13, output = (), error = CellFail)]
+    /// Delete a CellObject. A published Memo must first be retracted and settled.
+    #[operation(slot = 1, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Detach {
-        pub target: super::MappingTarget,
-        pub mapping: super::MappingId,
-        pub selection: super::MappingSelection,
+    pub struct Delete {
+        pub object: super::VirtAddr,
     }
-    /// 修改选定区间的逻辑权限。
-    #[operation(slot = 9, output = (), error = CellFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct SetAccess {
-        pub team: super::TeamId,
-        pub mapping: super::MappingId,
-        pub selection: super::MappingSelection,
-        pub access: u64,
-    }
-    /// 遍历本 Task 的驻留引用窗口，输出每页一个小端 u64 PA。
-    /// `range` 指向定长 ReferenceRange；`out` 须提供 count * 8 个可写字节。
-    /// 当场验证活保留授权；Fresh 可物化，Missing 不得清零恢复。
-    /// PA 只在驻留持有有效期间使用，不构成设备访问授权。
-    #[operation(slot = 11, output = (), error = CellFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Traverse {
-        pub retention: crate::model::unit::ControlId,
-        pub range: super::VirtAddr,
-        pub out: super::VirtAddr,
-    }
-    /// Give a Page to a Slot (move) or Memo (publish). `target` points to Position.
-    /// A zero change starts a short change; otherwise the caller owns that receipt.
-    #[operation(slot = 15, output = (), error = CellFail)]
+    /// Give a Page according to one CellHandoff snapshot; never publish implicitly.
+    #[operation(slot = 2, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Push {
-        pub source: super::FlatReference,
-        pub page: usize,
-        pub target: super::VirtAddr,
-        pub change: usize,
+        pub request: super::VirtAddr,
     }
-    /// Take from a Slot into the destination Slot, or withdraw one Memo.
-    /// Memo Pull requires destination NONE and page zero, and grants no ownership.
-    #[operation(slot = 16, output = (), error = CellFail)]
+    /// Take a Page according to one CellHandoff snapshot; never retract implicitly.
+    #[operation(slot = 3, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Pull {
-        pub source: super::VirtAddr,
-        pub destination: super::FlatReference,
-        pub page: usize,
-        pub change: usize,
+        pub request: super::VirtAddr,
     }
-    /// Close Page admission across calls. This does not stop existing access.
-    #[operation(slot = 17, output = usize, error = CellFail)]
+    /// Publish the generation-qualified associated Page in CellPosition.
+    #[operation(slot = 4, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Begin {
-        pub source: super::FlatReference,
-        pub page: usize,
+    pub struct Publish {
+        pub position: super::VirtAddr,
     }
-    /// Release this caller's change receipt; outstanding hardware obligations remain.
-    #[operation(slot = 18, output = (), error = CellFail)]
+    /// Close admission and retract this generation. Inspect observes completion.
+    #[operation(slot = 5, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct End {
-        pub change: usize,
+    pub struct Retract {
+        pub position: super::VirtAddr,
     }
-    /// Observe retained external mapping state; the target Pend is revalidated.
-    #[operation(slot = 14, output = super::MappingInfo, error = CellFail, reply = 3)]
+    #[operation(slot = 6, output = (), error = CellFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Protect {
+        pub position: super::VirtAddr,
+        pub access: u64,
+    }
+    /// Copy a CellInfo snapshot to out; position.generation is ignored for observation.
+    #[operation(slot = 7, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Inspect {
-        pub target: super::MappingTarget,
-        pub mapping: super::MappingId,
+        pub position: super::VirtAddr,
+        pub out: super::VirtAddr,
     }
 }
 pub use operations::CellCall;
 pub use operations::CellFail;
-/// `CellFail` 的结果别名。
 pub type CellResult<T> = Result<T, erra::Error<CellFail>>;

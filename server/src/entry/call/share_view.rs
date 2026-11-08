@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::abi::call::share_view::ShareCall;
 use kernel_api::abi::call::share_view::ShareFail;
-use kernel_api::model::cell::FlatReference;
+use kernel_api::model::cell::SlotId;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::view::ViewKind;
@@ -64,7 +64,7 @@ fn subset_to_access(subset: Modifiable) -> Result<Access, PendFail> {
 
 pub(crate) fn create_share(
     task: &Arc<crate::basis::unit::task::Task>,
-    reference: FlatReference,
+    reference: SlotId,
     requested: Modifiable,
 ) -> Result<PendId, PendFail> {
     if !pend::live(task) {
@@ -78,9 +78,6 @@ pub(crate) fn create_share(
     let authorization = hold.source().clone();
     // 已交给根 Pend 的来源没有私有阶段：只能按**子段引用**派生一枚独立子资源。
     let Some(source) = authorization.own_range() else {
-        if hold.retains() {
-            return Err(PendFail::Denied);
-        }
         let (parent, _) = hold.branch().ok_or(PendFail::Denied)?;
         let (offset, count) = hold.window();
         return pend::accord(
@@ -97,7 +94,6 @@ pub(crate) fn create_share(
     // 只能从**私有根**铸新根：子 PendEntry / Share 派生 / 借用都不产生新根资格。
     let (offset, count) = hold.window();
     if !authorization.private_owner(task.ident.id)
-        || hold.retains()
         || hold.branch().is_some()
         || offset.get() != 0
         || count != source.page_count()

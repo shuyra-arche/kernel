@@ -24,3 +24,5 @@ pub(crate) fn fetch_words<const N: usize>(bytes: &[u8]) -> Option<[usize; N]> {
 }
 
 mod unit;
+
+mod object;

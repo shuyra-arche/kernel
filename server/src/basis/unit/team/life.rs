@@ -22,6 +22,9 @@ pub(crate) struct TeamLife {
 }
 
 impl TeamLife {
+    pub(crate) fn protected(&self) -> bool {
+        self.exit.protected() || self.parent.as_ref().is_some_and(|p| p.protected())
+    }
     pub fn paused(&self) -> bool {
         let local = matches!(self.state.lock().phase, TeamPhase::Paused);
         local || self.parent.as_ref().is_some_and(|p| p.paused())

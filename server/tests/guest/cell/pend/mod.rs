@@ -8,7 +8,7 @@ use kernel_api::{
         unit::UnitTarget,
     },
 };
-use kernel_client::call::{cell, pend, share_view, unit};
+use kernel_client::call::{pend, share_view, unit};
 
 fn accord(
     src: PendId,
@@ -120,6 +120,40 @@ pub(super) fn run() {
     let (address, len) = share_view::open(leaf).unwrap();
     assert_eq!(len, 4096);
     assert_eq!(super::read(address, 0), 0x13579);
+    {
+        use kernel_api::model::{cell::*, identity::TeamId};
+        use kernel_client::call::cell;
+        let spec = CellCreate::Memo {
+            target: MappingTarget::Cpu(TeamId::new(0)),
+            source: CellSource::Pend {
+                token: leaf,
+                offset: 0,
+                count: 1,
+            },
+            placement: Placement::lowest(4096).unwrap(),
+            access: 2,
+            control: MappingControl::Caller,
+        }
+        .to_bytes();
+        let made = cell::create(super::ptr(&spec)).unwrap();
+        let mapping = MappingId::from_bytes(&made.id.to_le_bytes()).unwrap();
+        assert_eq!(
+            super::info(super::raw_memo(mapping, 0)).state,
+            CellState::Ready
+        );
+        let empty = super::allocate(1);
+        let spec = CellHandoff {
+            source: super::memo(mapping, 0),
+            target: super::slot(empty, 0),
+        }
+        .to_bytes();
+        assert!(cell::pull(super::ptr(&spec)).is_err());
+        super::publish(mapping, 0);
+        assert_eq!(super::read(made.address, 0), 0x13579);
+        super::retract(mapping, 0);
+        super::delete(super::raw_memo(mapping, 0).object);
+        super::delete(CellObject::Slot(empty));
+    }
     // Keep this mapping open: Return must withdraw the descendant mapping too.
     let mut words = [0; PendInfo::WORDS];
     let mut after = PendId::NONE;
@@ -177,5 +211,5 @@ pub(super) fn run() {
     super::write(address, 3 * 4096, 0x24680);
     assert_eq!(super::read(address, 3 * 4096), 0x24680);
     pend::return_(root).unwrap();
-    cell::release(reference).unwrap();
+    super::delete(kernel_api::model::cell::CellObject::Slot(reference));
 }

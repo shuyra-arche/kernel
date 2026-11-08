@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::basis::nest::Mapping;
-use crate::basis::nest::memo::Memo;
+use crate::basis::nest::publication::Publication;
 use crate::machine::mmu::riscv::synchronize::ClosePhase;
 use crate::machine::mmu::riscv::synchronize::Invalidation;
 use crate::machine::mmu::riscv::synchronize::Scope;
@@ -15,7 +15,7 @@ use super::index::Index;
 pub(super) struct NestState {
     pub(super) root: TableNode,
     pub(super) index: Index,
-    pub(super) retired_cells: Vec<Memo>,
+    pub(super) retired_cells: Vec<Publication>,
     pub(super) retired_tables: Vec<TableNode>,
     pub(super) invalidation: Invalidation,
     pub(super) scope: Scope,

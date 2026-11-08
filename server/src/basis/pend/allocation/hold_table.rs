@@ -15,7 +15,6 @@ use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
 
 use super::hold::Hold;
-use super::independent::IndependentHold;
 use super::source_authorization::SourceAuthorization;
 
 pub(crate) struct HoldTable {
@@ -42,7 +41,6 @@ impl HoldTable {
         offset: PageOffset,
         count: PageCount,
         ceiling: Access,
-        retained: Option<IndependentHold>,
         branch: Option<(
             kernel_api::model::identity::PendId,
             Arc<crate::basis::pend::authority::Pend>,
@@ -51,13 +49,9 @@ impl HoldTable {
         let mut holds = self.holds.lock();
         holds.try_reserve(1).map_err(|_| PendFail::OoM)?;
         let id = next_id()?;
-        let hold = Arc::try_new(Hold::new(
-            id, source, offset, count, ceiling, retained, branch,
-        ))
-        .map_err(|_| PendFail::OoM)?;
-        if !hold.retains() {
-            hold.source().claim_hold();
-        }
+        let hold = Arc::try_new(Hold::new(id, source, offset, count, ceiling, branch))
+            .map_err(|_| PendFail::OoM)?;
+        hold.source().claim_hold();
         holds.push(hold);
         Ok(id)
     }
@@ -76,9 +70,7 @@ impl HoldTable {
         let at = holds.iter().position(|hold| hold.id() == id)?;
         let hold = holds.remove(at);
         drop(holds);
-        if !hold.retains() {
-            hold.source().release_hold();
-        }
+        hold.source().release_hold();
         Some(hold)
     }
 
@@ -88,9 +80,7 @@ impl HoldTable {
         let drained = core::mem::take(&mut *holds);
         drop(holds);
         for hold in &drained {
-            if !hold.retains() {
-                hold.source().release_hold();
-            }
+            hold.source().release_hold();
         }
     }
 }

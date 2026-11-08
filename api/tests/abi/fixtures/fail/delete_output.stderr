@@ -1,0 +1,11 @@
+error[E0271]: type mismatch resolving `<Delete as Operation>::Output == usize`
+ --> tests/abi/fixtures/fail/delete_output.rs:5:22
+  |
+5 |     returns_number::<Delete>();
+  |                      ^^^^^^ expected `usize`, found `()`
+  |
+note: required by a bound in `returns_number`
+ --> tests/abi/fixtures/fail/delete_output.rs:3:32
+  |
+3 | fn returns_number<C: Operation<Output = usize>>() {}
+  |                                ^^^^^^^^^^^^^^ required by this bound in `returns_number`

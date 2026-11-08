@@ -1,6 +1,6 @@
 //! 目标地址空间里一段关系的句柄（0 = 无效哨兵）。
 //!
-//! 与 [`FlatReference`](super::FlatReference) 同族，但定位还多一层约束：号只在
+//! 与 [`SlotId`](super::SlotId) 同族，但定位还多一层约束：号只在
 //! **目标地址空间那张表**里解析得动，所以每次定位都必须同时给出目标域。
 //! 数字身份可跨线程传递；它本身不授予控制权。
 
@@ -12,7 +12,7 @@ impl MappingId {
     /// 无效哨兵（0）：没有这一段关系。
     pub const NONE: Self = Self(0);
 
-    /// 号在**线上**的宽度（8 字节 LE）——与 [`FlatReference`](super::FlatReference)
+    /// 号在**线上**的宽度（8 字节 LE）——与 [`SlotId`](super::SlotId)
     /// 同形：一个号在账上占多宽是该号自己的事实。
     pub const WIDTH: usize = 8;
 

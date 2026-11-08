@@ -1,35 +1,31 @@
 //! Memory identities, ranges and placement descriptors.
 
-mod acquire_source;
 mod allocation;
-mod flat_reference;
 mod mapping_control;
 mod mapping_id;
-mod mapping_selection;
 mod page_owner;
 mod placement;
 mod placement_at;
 mod placement_error;
 mod reference_range;
+mod slot_id;
 
-pub use acquire_source::AcquireSource;
 pub use allocation::Allocation;
-pub use flat_reference::FlatReference;
 pub use mapping_control::MappingControl;
 pub use mapping_id::MappingId;
-pub use mapping_selection::MappingSelection;
 pub use page_owner::PageOwner;
 pub use placement::Placement;
 pub use placement_at::PlacementAt;
 pub use placement_error::PlacementError;
 pub use reference_range::ReferenceRange;
+pub use slot_id::SlotId;
 
 /// 环境内存调用与装载格式使用的页粒度。
 pub use crate::address::PAGE_SIZE;
 
 /// 范围坐标的唯一 checked 口径：`count` 非零，且偏移、页数与字节跨度都不溢出。
 ///
-/// 页窗口的两处用家（[`ReferenceRange`] 与 [`MappingSelection`]）共用它，
+/// Descriptors share this checked range geometry,
 /// 线外不接受靠溢出缩短范围的输入。
 pub(crate) fn pages(offset: usize, count: usize) -> Option<()> {
     if count == 0 {
@@ -41,14 +37,10 @@ pub(crate) fn pages(offset: usize, count: usize) -> Option<()> {
     Some(())
 }
 
-mod mapping_info;
 mod mapping_target;
-pub use mapping_info::MappingInfo;
-pub use mapping_info::MappingState;
 pub use mapping_target::MappingTarget;
 
-mod position;
-pub use position::Position;
-
-mod attachment;
-pub use attachment::Attachment;
+mod object;
+pub use object::{
+    CellCreate, CellHandoff, CellInfo, CellObject, CellPosition, CellSource, CellState, CreatedCell,
+};

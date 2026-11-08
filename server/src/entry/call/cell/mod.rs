@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use kernel_api::abi::call::cell::CellCall;
 use kernel_api::abi::call::cell::CellFail;
-use kernel_api::model::cell::AcquireSource;
+
 use kernel_api::model::modifiable::Modifiable;
 
 use crate::basis::cell::operation::Transfer;
@@ -25,7 +25,6 @@ use crate::basis::nest::Reservation;
 use crate::basis::pend;
 use crate::basis::pend::Geometry;
 use crate::basis::pend::Hold;
-use crate::basis::pend::IndependentHold;
 use crate::basis::pend::SourceAuthorization;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
@@ -43,89 +42,21 @@ use kernel_api::address::PageOffset;
 use kernel_api::address::VirtAddr as KVirt;
 
 use super::outcome::answer;
-use super::outcome::answer_pair;
 
+mod object;
 pub(super) fn dispatch(frame: &mut TrapContext, call: CellCall, ident: &Arc<TaskIdent>) {
-    match call {
-        CellCall::Attach { target, request } => {
-            answer_pair(frame, attach_target(target, request, ident));
-        }
-        CellCall::Inspect { target, mapping } => {
-            let result = (|| {
-                let actor = caller(ident).ok_or(CellFail::Denied)?;
-                let _serial = actor.pend.lock();
-                let _commit = crate::basis::commit();
-                let kernel_api::model::cell::MappingTarget::Io(token) = target else {
-                    return Err(CellFail::Denied);
-                };
-                crate::basis::unit::space::external::inspect(&actor, token, mapping)
-            })();
-            match result {
-                Ok(info) => {
-                    use crate::machine::switcher::context::Gprs;
-                    frame.gpr.set_x(Gprs::A0, info.state as usize);
-                    frame.gpr.set_x(Gprs::A1, info.fault_cause);
-                    frame.gpr.set_x(Gprs::A2, info.fault_address);
-                }
-                Err(e) => super::outcome::ret_err(frame, e),
+    if let CellCall::Create { request } = call {
+        match object::create(request, ident) {
+            Ok((kind, id, address)) => {
+                use crate::machine::switcher::context::Gprs;
+                frame.gpr.set_x(Gprs::A0, kind);
+                frame.gpr.set_x(Gprs::A1, id);
+                frame.gpr.set_x(Gprs::A2, address);
             }
+            Err(error) => super::outcome::ret_err(frame, error),
         }
-        _ => answer(frame, execute(call, ident)),
-    }
-}
-
-// MappingId locates an address projection; access and control are checked separately.
-fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, CellFail> {
-    match call {
-        CellCall::Acquire { source, retention } => acquire(source, retention, ident),
-        CellCall::Release { reference } => release(reference, ident),
-        CellCall::Detach {
-            target,
-            mapping,
-            selection,
-        } => match target {
-            kernel_api::model::cell::MappingTarget::Cpu(team) => {
-                detach(team, mapping, selection, ident)
-            }
-            kernel_api::model::cell::MappingTarget::Io(token) => {
-                if selection != kernel_api::model::cell::MappingSelection::Whole {
-                    return Err(CellFail::Denied);
-                }
-                let actor = caller(ident).ok_or(CellFail::Denied)?;
-                let _serial = actor.pend.lock();
-                let _commit = crate::basis::commit();
-                crate::basis::unit::space::external::detach(&actor, token, mapping)?;
-                Ok(0)
-            }
-        },
-        CellCall::SetAccess {
-            team,
-            mapping,
-            selection,
-            access,
-        } => set_access(team, mapping, selection, access, ident),
-        CellCall::Traverse {
-            retention,
-            range,
-            out,
-        } => traverse(retention, range, out, ident),
-        CellCall::Push {
-            source,
-            page,
-            target,
-            change,
-        } => push(source, page, target, change, ident),
-        CellCall::Pull {
-            source,
-            destination,
-            page,
-            change,
-        } => pull(source, destination, page, change, ident),
-        CellCall::Begin { source, page } => begin(source, page, ident),
-        CellCall::End { change } => end(change, ident),
-        CellCall::Attach { .. } | CellCall::Inspect { .. } => {
-            unreachable!("Attach answers a pair")
-        }
+    } else {
+        answer(frame, object::execute(call, ident));
     }
 }
 
@@ -206,7 +137,7 @@ pub(in crate::entry) fn rollback(
 ///
 /// 发布与撤销共取来源授权上那一把闸门：发布前确认没被撤销，发布后再复查一次；
 /// 撤销方在同一把门下置位。于是撤销要么看见这次发布、要么发布自己发现已被撤销。
-fn attach(
+fn create_memo(
     range: kernel_api::model::cell::ReferenceRange,
     team: kernel_api::model::identity::TeamId,
     placement: kernel_api::model::cell::Placement,
@@ -258,9 +189,7 @@ fn attach(
             .checked_add(range.offset)
             .ok_or(CellFail::NotAligned)?,
     );
-    // 持有人自己那条独立持有上的映射不算对父段的新使用（它就靠这条引用拿帧）；
-    // 豁免按**这一份登记的身份**认，不按任务。
-    let own = hold.retention();
+
     let source = hold
         .resolve()
         .ok_or(CellFail::Denied)?
@@ -356,7 +285,7 @@ fn attach(
         rollback(&space, id, Some(reservation), None);
         return Err(source_fail(error));
     }
-    let mapping = match nest.attach(reservation, source, ceiling, access) {
+    let mapping = match nest.create_memo(reservation, source, ceiling, access) {
         Ok(mapping) => mapping,
         Err(error) => {
             authorization.leave_publish(id);
@@ -383,7 +312,7 @@ fn attach(
         }
         // 旧引用照旧得过高一道发表准入：已分出的子段不被隐式重映射。
         authorization
-            .check_publish(used, count, own)
+            .check_publish(used, count)
             .map_err(source_fail)?;
         if let (Some(meta), Some(token)) = (&share_view, branch)
             && meta.record(token, &space, mapping.clone(), false).is_err()
@@ -400,68 +329,6 @@ fn attach(
     }
     authorization.leave_publish(id);
     Ok((id, address))
-}
-
-/// Traverse requires both current authority and a live residency.
-///
-/// 凭据是**当场拿得出的那枚真保留授权**：只看这份引用“是怎么来的”不够——
-/// provenance 只说明存活，不自动赋物理坐标。两层都要过：
-/// 活保留 cap（`require_retention`）＋ 这份引用本身就是 cap 登记出来的 retained 引用。
-/// 整张表先物化齐了才写出去——失败不在调用者缓冲里留半张。
-fn traverse(
-    retention: kernel_api::model::unit::ControlId,
-    range_at: kernel_api::address::VirtAddr,
-    out: kernel_api::address::VirtAddr,
-    ident: &Arc<TaskIdent>,
-) -> Result<usize, CellFail> {
-    let task = caller(ident).ok_or(CellFail::Denied)?;
-    require_retention(&task, retention)?;
-    let space = ident.team.space.clone();
-    let bytes = read_snapshot::<{ kernel_api::model::cell::ReferenceRange::WIDTH }>(
-        &space,
-        KVirt::wrap(range_at.get()),
-    )?;
-    let range =
-        kernel_api::model::cell::ReferenceRange::fetch(&bytes).ok_or(CellFail::NotAligned)?;
-    // 引用表下只取一份合法持有快照，随后立刻放锁：物化与写缓冲都不带着资源表锁做。
-    let hold = {
-        let _serial = task.pend.lock();
-        task.pend
-            .references
-            .get(range.reference.get())
-            .ok_or(CellFail::Denied)?
-    };
-    if !hold.retains() {
-        return Err(CellFail::Denied);
-    }
-    let count = PageCount::new(range.count).ok_or(CellFail::NotAligned)?;
-    let source = hold
-        .resolve()
-        .ok_or(CellFail::Denied)?
-        .range(PageOffset::new(range.offset), count)
-        .map_err(|_| CellFail::NoRegion)?;
-    let pages = source.materialize().map_err(CellFail::from)?;
-    let mut list = alloc::vec::Vec::new();
-    list.try_reserve_exact(count.get())
-        .map_err(|_| CellFail::OoM)?;
-    for index in 0..count.get() {
-        let address = pages
-            .physical(PageOffset::new(index))
-            .map_err(CellFail::from)?;
-        list.push(address.as_usize() as u64);
-    }
-    let mut bytes = alloc::vec::Vec::new();
-    bytes
-        .try_reserve_exact(count.get() * 8)
-        .map_err(|_| CellFail::OoM)?;
-    for address in list {
-        bytes.extend_from_slice(&address.to_le_bytes());
-    }
-    // 整张表都备好了才提出口：此处失败不碰调用者缓冲，保留仍在。
-    if !space.copy_out(&bytes, KVirt::wrap(out.get())) {
-        return Err(CellFail::Denied);
-    }
-    Ok(0)
 }
 
 /// 按目标域与号取回控制登记；号本身不授予任何东西。
@@ -507,61 +374,24 @@ fn with_mapping<T>(
     if !allowed {
         return Err(CellFail::Denied);
     }
+    let mapping = entry.mapping().ok_or(CellFail::Denied)?;
+    let _operation = mapping.operation().ok_or(CellFail::Busy)?;
     action(&target, &entry)
 }
 
-/// 把线外的选择换成这一段关系上的身份选择。
-fn selection(
-    entry: &MappingEntry,
-    selection: kernel_api::model::cell::MappingSelection,
-) -> Result<MappingRange, CellFail> {
-    let mapping = entry.mapping().ok_or(CellFail::Denied)?;
-    match selection {
-        kernel_api::model::cell::MappingSelection::Whole => Ok(mapping.whole()),
-        kernel_api::model::cell::MappingSelection::Pages { offset, count } => {
-            let count = PageCount::new(count).ok_or(CellFail::NotAligned)?;
-            mapping
-                .range(PageOffset::new(offset), count)
-                .map_err(|_| CellFail::NoRegion)
-        }
-    }
-}
-
-fn detach(
+fn delete_mapping(
     team: kernel_api::model::identity::TeamId,
     mapping: kernel_api::model::cell::MappingId,
-    choice: kernel_api::model::cell::MappingSelection,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, CellFail> {
     with_mapping(team, mapping, ident, |target, entry| {
         let space = &target.space;
         space.nest.retry_invalidation()?;
         if !space.nest.settled(mapping.get()) {
-            space.withdraw(selection(entry, choice)?)?;
+            space.withdraw(entry.mapping().ok_or(CellFail::Denied)?.whole())?;
         }
         if space.nest.settled(mapping.get()) {
             space.retire_mapping(mapping.get());
-        }
-        Ok(0)
-    })
-}
-
-fn set_access(
-    team: kernel_api::model::identity::TeamId,
-    mapping: kernel_api::model::cell::MappingId,
-    choice: kernel_api::model::cell::MappingSelection,
-    access: u64,
-    ident: &Arc<TaskIdent>,
-) -> Result<usize, CellFail> {
-    let access = Access::from_wire(access).ok_or(CellFail::Denied)?;
-    if !access.is_leaf_set() {
-        return Err(CellFail::Denied);
-    }
-    with_mapping(team, mapping, ident, |target, entry| {
-        target.space.nest.retry_invalidation()?;
-        target.space.access(selection(entry, choice)?, access)?;
-        if access.contains(Access::EXECUTE) {
-            identity::sync_instructions()?;
         }
         Ok(0)
     })
@@ -586,53 +416,29 @@ fn source_fail(error: kernel_api::abi::call::pend::PendFail) -> CellFail {
     }
 }
 
-/// 核验调用者表内活的 Retain 控制授权及内核铸造的保留对象身份。
-fn require_retention(
-    task: &Arc<Task>,
-    token: kernel_api::model::unit::ControlId,
-) -> Result<(), CellFail> {
-    if task
-        .administration
-        .matches(token, kernel_api::model::unit::ControlKind::Retain)
-    {
-        Ok(())
-    } else {
-        Err(CellFail::Denied)
-    }
+enum SourceSpec {
+    Allocation(kernel_api::model::cell::Allocation),
+    Source {
+        token: kernel_api::model::identity::PendId,
+        offset: usize,
+        count: usize,
+    },
+    Mapping {
+        team: kernel_api::model::identity::TeamId,
+        mapping: kernel_api::model::cell::MappingId,
+        offset: usize,
+        count: usize,
+    },
 }
-
-/// 登记一份来源持有，返回它在**调用任务**引用表里的句柄。
-///
-/// 新的 `Allocation` 建立来源持有与一份一次性创建资格；已有引用的子范围与它
-/// **共享**同一份来源授权（同一来源、同一上限、同一撤销依赖），不复制资格，
-/// 也不因 VA 可读就授权。
-///
-/// # 窗口守在哪几条路上
-///
-/// **有效窗口属于那一枚分支，不属于任务**：同一任务手里可以有同源的几枚 token，
-/// 每一枚各自有自己那一段（权限与窗口都是各自那份，不是并成一张"本任务的图"）。
-/// 故取值要按**那一枚**分支算：
-/// - `AcquireSource::Source` 解析出源坐标后当场核窗口（越窗 `Denied`）；
-/// - `AcquireSource::Reference` **不另核**：引用是早先经 `Source` 那条路建的，
-///   它的范围建立时就已落在**建它的那一枚**分支的窗口里，且 `hold.branch()` 就是
-///   那一枚（子段只在这个既有范围里取）。同任务另一枚更宽的 token 换不掉这个边界。
-///   将来若添直接建引用的入口，它必须同样从一枚按窗口筛过的分支上建，这条不变量才继续成立。
-fn acquire(
-    source: AcquireSource,
-    retention: kernel_api::model::unit::ControlId,
-    ident: &Arc<TaskIdent>,
-) -> Result<usize, CellFail> {
+/// Internal authority resolution. The public lifecycle is Cell Create/Delete.
+fn resolve_source(source: SourceSpec, ident: &Arc<TaskIdent>) -> Result<usize, CellFail> {
     let task = caller(ident).ok_or(CellFail::Denied)?;
     let _serial = task.pend.lock();
-    // 登记、准入复核与写入同在一个 `commit` 段：独立持有的登记位与物理保留一起备好，
-    // 这一段之后不再有可失败的准备，也不会在判完之后被人插进一条新占用。
+    // Authority resolution and handle registration share the commit boundary.
     let _commit = crate::basis::commit();
-    let (authorization, offset, count, ceiling, retained, branch) = match source {
-        AcquireSource::Allocation(allocation) => {
-            // 新建来源本身就没有旧授权可挂，独立保留授权对它无意义。
-            if retention != kernel_api::model::unit::ControlId::NONE
-                || allocation.align != PAGE_SIZE
-            {
+    let (authorization, offset, count, ceiling, branch) = match source {
+        SourceSpec::Allocation(allocation) => {
+            if allocation.align != PAGE_SIZE {
                 return Err(CellFail::NotAligned);
             }
             let size = allocation.bytes().ok_or(CellFail::Denied)?;
@@ -644,58 +450,9 @@ fn acquire(
             let authorization =
                 SourceAuthorization::new(range, Access::all(), ident.id).map_err(source_fail)?;
             let ceiling = authorization.ceiling();
-            (authorization, PageOffset::ZERO, count, ceiling, None, None)
+            (authorization, PageOffset::ZERO, count, ceiling, None)
         }
-        AcquireSource::Reference(window) => {
-            let hold = task
-                .pend
-                .references
-                .get(window.reference.get())
-                .ok_or(CellFail::Denied)?;
-            let count = PageCount::new(window.count).ok_or(CellFail::NotAligned)?;
-            let range = hold
-                .resolve()
-                .ok_or(CellFail::Denied)?
-                .range(PageOffset::new(window.offset), count)
-                .map_err(|_| CellFail::NoRegion)?;
-            let (parent, _) = hold.window();
-            let offset = PageOffset::new(
-                parent
-                    .get()
-                    .checked_add(window.offset)
-                    .ok_or(CellFail::NotAligned)?,
-            );
-            // 独立持有：此刻把这段范围从当前授权上解下来自己强持，
-            // 于是它跨 Pend 撤销继续持同一批帧；不带保留的仍随授权生死。
-            // 从持有人自己那条引用上取的，不再把这一段当别人的占用；这一条只核子段
-            // （见 `check_use` 的说明：取得又一份持有不是发表）。
-            hold.source().ensure_internal().map_err(source_fail)?;
-            // 它在来源记录上的登记与物理保留一起生：登记位先备、写入不再失败。
-            let retained = if retention == kernel_api::model::unit::ControlId::NONE {
-                None
-            } else {
-                require_retention(&task, retention)?;
-                let source = hold.source();
-                source.reserve_retention().map_err(source_fail)?;
-                let window = Geometry::new(offset, count).map_err(source_fail)?;
-                Some(IndependentHold::new(
-                    source,
-                    window,
-                    range.reside()?,
-                    ident.id,
-                ))
-            };
-            (
-                hold.source().clone(),
-                offset,
-                count,
-                hold.ceiling(),
-                retained,
-                hold.branch()
-                    .map(|(token, authority)| (token, authority.clone())),
-            )
-        }
-        AcquireSource::Source {
+        SourceSpec::Source {
             token,
             offset,
             count,
@@ -732,34 +489,16 @@ fn acquire(
             }
             // 从分支取引用不是发表：只核子段，不再落一份独立持有也不交出这一段。
             authorization.ensure_internal().map_err(source_fail)?;
-            let retained = if retention == kernel_api::model::unit::ControlId::NONE {
-                None
-            } else {
-                require_retention(&task, retention)?;
-                authorization.reserve_retention().map_err(source_fail)?;
-                let window = Geometry::new(offset, count).map_err(source_fail)?;
-                let residency = meta
-                    .source()
-                    .range(offset, count)
-                    .map_err(|_| CellFail::NoRegion)?
-                    .reside()?;
-                Some(IndependentHold::new(
-                    &authorization,
-                    window,
-                    residency,
-                    ident.id,
-                ))
-            };
+
             (
                 authorization,
                 offset,
                 count,
                 ceiling,
-                retained,
                 Some((token, authority)),
             )
         }
-        AcquireSource::Mapping {
+        SourceSpec::Mapping {
             team,
             mapping,
             offset,
@@ -806,25 +545,13 @@ fn acquire(
             };
             // 从已授权关系取引用也不是发表：只核子段。
             authorization.ensure_internal().map_err(source_fail)?;
-            let retained = if retention == kernel_api::model::unit::ControlId::NONE {
-                None
-            } else {
-                require_retention(&task, retention)?;
-                authorization.reserve_retention().map_err(source_fail)?;
-                let window = Geometry::new(offset, count).map_err(source_fail)?;
-                Some(IndependentHold::new(
-                    &authorization,
-                    window,
-                    source.reside()?,
-                    ident.id,
-                ))
-            };
-            Ok((authorization, offset, count, ceiling, retained, branch))
+
+            Ok((authorization, offset, count, ceiling, branch))
         })?,
     };
     task.pend
         .references
-        .insert(authorization, offset, count, ceiling, retained, branch)
+        .insert(authorization, offset, count, ceiling, branch)
         .map_err(source_fail)
 }
 
@@ -845,13 +572,9 @@ fn window(
     Ok((offset, count))
 }
 
-/// 解除这一份引用：只摘掉本表里这一格，不 Detach、不等其他引用、不分配。
-/// 授权已经失效也不妨碍清掉自己的句柄。
-///
-/// 独立保留随这一份引用结束：那是一个显式的“不再物理持有这一段”事件，
-/// 所以在这里重试父侧已可证明结束的分配槽；不可证明的照旧占着。
+/// Remove only this Task's owning Slot handle; associations and hardware survive.
 fn release(
-    reference: kernel_api::model::cell::FlatReference,
+    reference: kernel_api::model::cell::SlotId,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, CellFail> {
     let task = caller(ident).ok_or(CellFail::Denied)?;
@@ -885,7 +608,7 @@ fn next_flight_key() -> Result<usize, CellFail> {
 ///
 /// 两端的**管理授权**都在同一个 `caller.pend` 下核，且这个 pend 一直持到
 /// 执行结算或回退完毕：授权失效的每一处写点（doom 先清引用再关控制、
-/// cull/release/revoke、accord、Pend 收窄、入口 Seal）都要同一把 pend 串行，
+/// cull/release/revoke、accord、Pend 收窄、View Delete）都要同一把 pend 串行，
 /// 所以迁移期间来源不会在脚下被撤走。这里不取另一个 Task 的 pend。
 ///
 /// **提交段只盖准入与在途登记**：两端各自那一页在同一 `commit` 段里核完新使用
@@ -893,16 +616,16 @@ fn next_flight_key() -> Result<usize, CellFail> {
 /// 段一放就走执行——执行里有等别的 hart 的窗口（撤页、确认旧 TLB、夹具的在途探针），
 /// 不能把全局提交锁带进去；执行期靠那两条在途登记守住已核的移动范围，
 /// 结算后按同一笔键一次撤完（两域同号互不干涉，见 `next_flight_key`）。
-/// 旧引用因此不能把已分出的子段或别人的独立持有移来移去，也不会把对端饿死在锁上。
+/// 旧引用因此不能把已分出的子段移来移去，也不会把对端饿死在锁上。
 ///
 /// `ShareOperation` 不是授权，这里不取它：槽的独占与逐页撤销的串行由事务与各
 /// Nest 自己的临界区负责，另取一把 Share 租约只会把“同根两端”变成第二个失败面。
 fn transfer(
-    from: kernel_api::model::cell::FlatReference,
+    from: kernel_api::model::cell::SlotId,
     from_page: usize,
-    to: kernel_api::model::cell::FlatReference,
+    to: kernel_api::model::cell::SlotId,
     to_page: usize,
-    change: usize,
+    expected: Option<&Arc<crate::basis::cell::page::Page>>,
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, CellFail> {
     let caller = caller(ident).ok_or(CellFail::Denied)?;
@@ -920,11 +643,13 @@ fn transfer(
     )
     .map_err(CellFail::from)?;
     // 两端各自的引用与这一页在它窗口里的相对位置：可失败的准备全在提交段之前。
-    let permit = if change == 0 {
-        None
-    } else {
-        Some(crate::basis::cell::changes::get(ident.id, change)?)
-    };
+    let source_page = crate::basis::cell::Cell::Flat(endpoint(&caller, from)?)
+        .page(from_page)
+        .map_err(CellFail::from)?;
+    if expected.is_some_and(|page| !Arc::ptr_eq(page, &source_page)) {
+        return Err(CellFail::NotTransferable);
+    }
+    let permit = crate::basis::cell::changes::find(&source_page);
     let flight = next_flight_key()?;
     let mut ends: Vec<(Arc<Hold>, Arc<Geometry>)> = Vec::new();
     ends.try_reserve_exact(2).map_err(|_| CellFail::OoM)?;
@@ -953,7 +678,7 @@ fn transfer(
         for (hold, window) in &ends {
             let (offset, count) = window.window();
             hold.source()
-                .check_publish(offset, count, hold.retention())
+                .check_publish(offset, count)
                 .map_err(source_fail)?;
         }
         let mut at = 0;
@@ -985,7 +710,7 @@ fn transfer(
 /// 解析不出窗口（来源已被根 Pend 接管并撤销）也是 `Denied`。
 fn endpoint(
     caller: &Arc<Task>,
-    reference: kernel_api::model::cell::FlatReference,
+    reference: kernel_api::model::cell::SlotId,
 ) -> Result<FlatRange, CellFail> {
     let hold = caller
         .pend
@@ -1055,286 +780,6 @@ impl From<TransferError> for CellFail {
             TransferError::DestinationOccupied => CellFail::DestinationOccupied,
             TransferError::NotTransferable => CellFail::NotTransferable,
             TransferError::Busy => CellFail::Busy,
-        }
-    }
-}
-
-fn attach_target(
-    target: kernel_api::model::cell::MappingTarget,
-    request: kernel_api::address::VirtAddr,
-    ident: &Arc<TaskIdent>,
-) -> Result<(usize, usize), CellFail> {
-    use kernel_api::model::cell::{Attachment, MappingControl, MappingTarget, PlacementAt};
-    let spec = Attachment::from_bytes(&read_snapshot::<{ Attachment::WIDTH }>(
-        &ident.team.space,
-        request,
-    )?)
-    .ok_or(CellFail::NotAligned)?;
-    let token = match target {
-        MappingTarget::Cpu(team) => {
-            if spec.change != 0 {
-                return Err(CellFail::Denied);
-            }
-            return attach(
-                spec.range,
-                team,
-                spec.placement,
-                spec.access,
-                spec.control,
-                ident,
-            );
-        }
-        MappingTarget::Io(token) => token,
-    };
-    if spec.control != MappingControl::Caller
-        || !matches!(spec.access, 2 | 6)
-        || spec.range.offset != 0
-        || spec.range.count != 1
-    {
-        return Err(CellFail::Denied);
-    }
-    let PlacementAt::Exact(address) = spec.placement.at() else {
-        return Err(CellFail::Denied);
-    };
-    let range = spec.range;
-    let actor = caller(ident).ok_or(CellFail::Denied)?;
-    let _serial = actor.pend.lock();
-    let _commit = crate::basis::commit();
-    if !pend::live(&actor) {
-        return Err(CellFail::Denied);
-    }
-    let hold = actor
-        .pend
-        .references
-        .get(range.reference.get())
-        .ok_or(CellFail::Denied)?;
-    let id = crate::basis::unit::space::external::attach(
-        &actor,
-        token,
-        &hold,
-        address.get(),
-        spec.access == 6,
-        if spec.change == 0 {
-            None
-        } else {
-            Some(crate::basis::cell::changes::get(ident.id, spec.change)?)
-        }
-        .as_ref(),
-    )?;
-    Ok((id, address.get()))
-}
-
-fn begin(
-    source: kernel_api::model::cell::FlatReference,
-    page: usize,
-    ident: &Arc<TaskIdent>,
-) -> Result<usize, CellFail> {
-    let actor = caller(ident).ok_or(CellFail::Denied)?;
-    let _serial = actor.pend.lock();
-    if !pend::live(&actor) {
-        return Err(CellFail::Denied);
-    }
-    let cell = crate::basis::cell::Cell::Flat(endpoint(&actor, source)?);
-    let page = cell.page(page).map_err(|e| {
-        if e == NestError::Missing {
-            CellFail::SourceEmpty
-        } else {
-            e.into()
-        }
-    })?;
-    crate::basis::cell::changes::begin(ident.id, &page)
-}
-
-fn end(change: usize, ident: &Arc<TaskIdent>) -> Result<usize, CellFail> {
-    let actor = caller(ident).ok_or(CellFail::Denied)?;
-    let serial = actor.pend.lock();
-    if !pend::live(&actor) {
-        return Err(CellFail::Denied);
-    }
-    crate::basis::cell::changes::end(ident.id, change)?;
-    drop(serial);
-    // Faults waiting on a changed source re-evaluate their retained predicates.
-    crate::basis::cell::changes::maintain();
-    Ok(0)
-}
-
-fn push(
-    source: kernel_api::model::cell::FlatReference,
-    page: usize,
-    at: kernel_api::address::VirtAddr,
-    change: usize,
-    ident: &Arc<TaskIdent>,
-) -> Result<usize, CellFail> {
-    use kernel_api::model::cell::Position;
-    let destination = Position::from_bytes(&read_snapshot::<{ Position::WIDTH }>(
-        &ident.team.space,
-        at,
-    )?)
-    .ok_or(CellFail::NotAligned)?;
-    match destination {
-        Position::Slot {
-            reference,
-            page: target_page,
-        } => transfer(source, page, reference, target_page, change, ident),
-        Position::Memo {
-            team,
-            mapping,
-            page: target_page,
-        } => {
-            with_mapping(team, mapping, ident, |target, entry| {
-                let actor = caller(ident).ok_or(CellFail::Denied)?;
-                let source_range = endpoint(&actor, source)?
-                    .range(PageOffset::new(page), PageCount::new(1).unwrap())
-                    .map_err(NestError::from)?;
-                let selection = selection(
-                    entry,
-                    kernel_api::model::cell::MappingSelection::Pages {
-                        offset: target_page,
-                        count: 1,
-                    },
-                )?;
-                // Preserve the source authority attached to this Mapping. Changing
-                // its provider requires a new authorized binding, not a Page ID.
-                if !selection.source()?.same_range(&source_range) {
-                    return Err(CellFail::Denied);
-                }
-                let page = crate::basis::cell::Cell::Flat(source_range)
-                    .page(0)
-                    .map_err(|e| {
-                        if e == NestError::Missing {
-                            CellFail::SourceEmpty
-                        } else {
-                            e.into()
-                        }
-                    })?;
-                let permit = if change == 0 {
-                    page.begin().map_err(NestError::from)?
-                } else {
-                    crate::basis::cell::changes::get(ident.id, change)?
-                };
-                if !Arc::ptr_eq(permit.page(), &page) {
-                    return Err(CellFail::Denied);
-                }
-                let source = &entry.source;
-                let root = source.root();
-                let meta = root.as_ref().map(|(meta, _, _)| meta);
-                let _operation = meta
-                    .map(|meta| ShareOperation::acquire(meta).ok_or(CellFail::Busy))
-                    .transpose()?;
-                let branch = entry
-                    .control
-                    .as_ref()
-                    .and_then(|control| control.control().1);
-                let authority = meta
-                    .zip(branch)
-                    .and_then(|(meta, branch)| meta.authority(branch));
-                if branch.is_some() && authority.is_none() {
-                    return Err(CellFail::Denied);
-                }
-                let need = selection
-                    .mapping()
-                    .state
-                    .lock()
-                    .range_at(selection.window().0)
-                    .ok_or(CellFail::NoRegion)?
-                    .ceiling;
-                let flight = next_flight_key()?;
-                source
-                    .enter_publish(flight, authority.as_deref(), need)
-                    .map_err(source_fail)?;
-                let result = target.space.nest.push_page(
-                    selection.mapping(),
-                    KVirt::new(selection.window().0),
-                    &page,
-                    &permit,
-                );
-                let valid = source.branch_check(authority.as_deref(), need) && pend::live(&actor);
-                let rollback = if !valid {
-                    target.space.nest.unpublish_page(
-                        selection.mapping(),
-                        KVirt::new(selection.window().0),
-                        &page,
-                    )
-                } else {
-                    Ok(())
-                };
-                source.leave_publish(flight);
-                rollback?;
-                if !valid {
-                    return Err(CellFail::Denied);
-                }
-                result?;
-                if need.contains(Access::EXECUTE) {
-                    identity::sync_instructions()?;
-                }
-                if let Some((space, mapping)) = selection.mapping().wake_key() {
-                    sign::signal(WakeKey::Mapping { space, mapping });
-                }
-                Ok(0)
-            })
-        }
-    }
-}
-
-fn pull(
-    at: kernel_api::address::VirtAddr,
-    destination: kernel_api::model::cell::FlatReference,
-    page: usize,
-    change: usize,
-    ident: &Arc<TaskIdent>,
-) -> Result<usize, CellFail> {
-    use kernel_api::model::cell::Position;
-    let source = Position::from_bytes(&read_snapshot::<{ Position::WIDTH }>(
-        &ident.team.space,
-        at,
-    )?)
-    .ok_or(CellFail::NotAligned)?;
-    match source {
-        Position::Slot {
-            reference,
-            page: source_page,
-        } => transfer(reference, source_page, destination, page, change, ident),
-        Position::Memo {
-            team,
-            mapping,
-            page: source_page,
-        } => {
-            if destination != kernel_api::model::cell::FlatReference::NONE || page != 0 {
-                return Err(CellFail::Denied);
-            }
-            with_mapping(team, mapping, ident, |target, entry| {
-                let selection = selection(
-                    entry,
-                    kernel_api::model::cell::MappingSelection::Pages {
-                        offset: source_page,
-                        count: 1,
-                    },
-                )?;
-                target.space.nest.retry_invalidation()?;
-                let page = crate::basis::cell::Cell::Nest(selection.clone())
-                    .page(0)
-                    .map_err(|e| {
-                        if e == NestError::Missing {
-                            CellFail::SourceEmpty
-                        } else {
-                            e.into()
-                        }
-                    })?;
-                let permit = if change == 0 {
-                    page.begin().map_err(NestError::from)?
-                } else {
-                    crate::basis::cell::changes::get(ident.id, change)?
-                };
-                if !Arc::ptr_eq(permit.page(), &page) {
-                    return Err(CellFail::Denied);
-                }
-                target.space.nest.unpublish_page(
-                    selection.mapping(),
-                    KVirt::new(selection.window().0),
-                    &page,
-                )?;
-                Ok(0)
-            })
         }
     }
 }

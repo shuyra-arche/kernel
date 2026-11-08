@@ -19,7 +19,6 @@ pub(crate) use allocation::ExternalBorrow;
 pub(crate) use allocation::Geometry;
 pub(crate) use allocation::Hold;
 pub(crate) use allocation::HoldTable;
-pub(crate) use allocation::IndependentHold;
 pub(crate) use allocation::SourceAuthorization;
 pub(crate) use ledger::Table;
 pub(crate) use need::Need;

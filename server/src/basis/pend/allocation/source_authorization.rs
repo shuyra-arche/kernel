@@ -58,12 +58,6 @@ pub(crate) struct SourceAuthorization {
     /// 事实：只有显式结清（`Space::retire_mapping` / `reap_mappings`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
     bindings: SpinLock<Vec<Arc<MappingBinding>>>,
-    /// 仍压着这一段的**独立持有**：窗口与持有人。
-    ///
-    /// 这是“这一段不空闲”的显式事实：由 `IndependentHold` 在同一 `commit` 段里登记，
-    /// 随物理保留结束而撤。不看 `is_pinned`、不数 `Arc`、也不靠 `Weak` 生存。
-    /// 持有人只用于自检读口，不参与判据：豁免按**这一份登记的身份**认，不按任务。
-    retentions: SpinLock<Vec<(Arc<Geometry>, TaskId)>>,
     phase: SpinLock<Phase>,
 }
 
@@ -94,7 +88,6 @@ impl SourceAuthorization {
             inflight: SpinLock::new(Vec::new()),
             revoked: SpinLock::new(false),
             bindings: SpinLock::new(Vec::new()),
-            retentions: SpinLock::new(Vec::new()),
             phase: SpinLock::new(Phase::Private),
         })
         .map_err(|_| PendFail::OoM)
@@ -110,9 +103,17 @@ impl SourceAuthorization {
         }
         let gate = self.revoked.lock();
         if *gate
-            || !self.bindings.lock().is_empty()
+            || self.bindings.lock().iter().any(|binding| {
+                binding.space().upgrade().is_none_or(|space| {
+                    space.nest.has_pending_invalidation()
+                        || space.mappings.registered(binding.id()).is_none_or(|entry| {
+                            entry
+                                .mapping()
+                                .is_none_or(|mapping| !mapping.state.lock().published.is_empty())
+                        })
+                })
+            })
             || !self.inflight.lock().is_empty()
-            || !self.retentions.lock().is_empty()
         {
             return Err(PendFail::Busy);
         }
@@ -290,29 +291,6 @@ impl SourceAuthorization {
             .retain(|held| !Arc::ptr_eq(held, binding));
     }
 
-    /// 备下一条独立持有登记的位置（可失败的准备；与物理保留同在一个提交段）。
-    pub(crate) fn reserve_retention(&self) -> Result<(), PendFail> {
-        self.retentions
-            .lock()
-            .try_reserve(1)
-            .map_err(|_| PendFail::OoM)
-    }
-
-    /// 写入一条独立持有登记：容量已在同一提交段备好，这一步只推入。
-    pub(crate) fn register_retention(&self, window: Arc<Geometry>, holder: TaskId) {
-        self.retentions.lock().push((window, holder));
-    }
-
-    /// 撤下一条独立持有登记：按窗口身份认这一条，不当授权、也不动别的条。
-    ///
-    /// 这是显式的“这一段不再被独立持有”事件：这一份来源自己不再占着任何东西时，
-    /// 顺带从父分配槽里向上收尾（否则父侧那一槽要等到子记录消失才无主可依）。
-    pub(crate) fn release_retention(self: &Arc<Self>, window: &Arc<Geometry>) {
-        self.retentions
-            .lock()
-            .retain(|(held, _)| !Arc::ptr_eq(held, window));
-    }
-
     /// External access blocks private CPU publication until trusted settlement.
     pub(crate) fn ensure_internal(&self) -> Result<(), PendFail> {
         if self.external.load(Ordering::Acquire) {
@@ -322,28 +300,19 @@ impl SourceAuthorization {
         }
     }
 
-    /// 发表准入：在子段占用之外，**别人的**独立持有与**在途已占的那一段**也挡。
-    ///
-    /// 派生 / Open / Accord 是新授权，Attach / Transfer 是新映射，两者都算发表；
-    /// `own` 是这次发表自己那条独立持有的窗口——只有它自己那一份登记不挡
-    /// （持有人就靠这条引用拿帧）。带窗口的在途登记是别人已经核过的移动范围，
-    /// 一律不得插进去（持有人自己那份不含在内，它不占范围）。
+    /// External responsibility and overlapping in-flight ownership changes block publication.
     pub(crate) fn check_publish(
         &self,
         offset: PageOffset,
         count: PageCount,
-        own: Option<&Arc<Geometry>>,
     ) -> Result<(), PendFail> {
         self.ensure_internal()?;
-        let held = self.retentions.lock().iter().any(|(window, _)| {
-            !own.is_some_and(|own| Arc::ptr_eq(own, window)) && window.overlaps(offset, count)
-        });
         let claimed = self.inflight.lock().iter().any(|(_, window)| {
             window
                 .as_ref()
                 .is_some_and(|window| window.overlaps(offset, count))
         });
-        if held || claimed {
+        if claimed {
             return Err(PendFail::Busy);
         }
         Ok(())

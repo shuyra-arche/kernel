@@ -1,10 +1,10 @@
 use kernel_api::address::VirtAddr;
-use kernel_api::model::cell::FlatReference;
 use kernel_api::model::cell::Placement;
 use kernel_api::model::cell::ReferenceRange;
+use kernel_api::model::cell::SlotId;
 
-fn reference() -> FlatReference {
-    FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap()
+fn reference() -> SlotId {
+    SlotId::from_bytes(&17u64.to_le_bytes()).unwrap()
 }
 
 #[test]

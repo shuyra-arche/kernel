@@ -1,7 +1,7 @@
 use crate::basis::nest::NestError;
 use crate::basis::nest::mapping::Access;
 use crate::basis::nest::mapping::ActiveRange;
-use crate::basis::nest::memo::Memo;
+use crate::basis::nest::publication::Publication;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
@@ -14,7 +14,7 @@ use super::run::CellRun;
 /// 段起点虚拟地址为 `base + 帧页号 * PAGE_SIZE`；任一帧不在任何区间内 ⇒ NoRegion。
 pub(crate) struct CellRuns<'a> {
     base: VirtAddr,
-    cells: &'a [(usize, Memo)],
+    cells: &'a [(usize, Publication)],
     active: &'a [ActiveRange],
     at: usize,
 }
@@ -22,7 +22,7 @@ pub(crate) struct CellRuns<'a> {
 impl<'a> CellRuns<'a> {
     pub(crate) fn new(
         base: VirtAddr,
-        cells: &'a [(usize, Memo)],
+        cells: &'a [(usize, Publication)],
         active: &'a [ActiveRange],
     ) -> Self {
         Self {

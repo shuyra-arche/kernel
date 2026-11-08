@@ -22,7 +22,7 @@ fn preparation_is_external_before_publication_and_cancellation_has_no_effects() 
     let mut space = IoSpace::new(hardware);
     assert_eq!(cell.exposure(), Exposure::Internal);
     // SAFETY: no hardware, concurrent payload accesses or carrier migration exist.
-    let id = unsafe { space.register(&cell, 0x1000, true) }.unwrap();
+    let id = unsafe { space.register_during(&cell, 0x1000, true, None) }.unwrap();
     assert_eq!(cell.exposure(), Exposure::External);
     assert!(!cell.allows_return());
     assert!(trace.lock().unwrap().calls.is_empty());
@@ -41,14 +41,14 @@ fn closing_retains_external_memory_until_its_batch_actually_completes() {
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     // SAFETY: no actual hardware or other payload access.
-    let id = unsafe { space.register(&cell, 0x4000, true) }.unwrap();
+    let id = unsafe { space.register_during(&cell, 0x4000, true, None) }.unwrap();
     space.publish(id).unwrap();
     space.close().unwrap();
     assert_eq!(space.life(), Life::Closing);
     assert_eq!(space.publish(id), Err(Error::Closed));
     // SAFETY: only attempts admission, with no actual hardware.
     assert_eq!(
-        unsafe { space.register(&cell, 0x8000, false) },
+        unsafe { space.register_during(&cell, 0x8000, false, None) },
         Err(Error::Closed)
     );
     let Phase::Waiting(batch) = space.phase(id).unwrap() else {
@@ -88,8 +88,8 @@ fn external_settlement_neither_discharges_another_device_nor_cpu_access() {
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     // SAFETY: no actual hardware or payload access; read-only aliases are modeled.
-    let a = unsafe { space.register(&cell, 0x1000, false) }.unwrap();
-    let b = unsafe { space.register(&cell, 0x2000, false) }.unwrap();
+    let a = unsafe { space.register_during(&cell, 0x1000, false, None) }.unwrap();
+    let b = unsafe { space.register_during(&cell, 0x2000, false, None) }.unwrap();
     space.publish(a).unwrap();
     space.publish(b).unwrap();
     let first = space.revoke(a).unwrap().unwrap();
@@ -115,7 +115,7 @@ fn partial_publication_failure_requires_revocation_and_cannot_be_cancelled() {
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     // SAFETY: no actual hardware or payload access.
-    let id = unsafe { space.register(&cell, 0, true) }.unwrap();
+    let id = unsafe { space.register_during(&cell, 0, true, None) }.unwrap();
     trace.lock().unwrap().fail_publish = Some(HardwareError::Fault);
     assert_eq!(
         space.publish(id),
@@ -146,7 +146,7 @@ fn close_rejects_new_work_but_advances_other_bindings_when_one_revoke_fails() {
         .enumerate()
         .map(|(i, cell)| {
             // SAFETY: separate cells with no actual hardware or payload access.
-            let id = unsafe { space.register(cell, i * 4096, true) }.unwrap();
+            let id = unsafe { space.register_during(cell, i * 4096, true, None) }.unwrap();
             space.publish(id).unwrap();
             id
         })
@@ -185,7 +185,7 @@ fn abandoned_space_retains_hardware_and_cell_but_unpublished_space_can_cancel() 
         let (hardware, trace) = Scripted::new();
         let mut space = IoSpace::new(hardware);
         // SAFETY: no actual hardware or payload access.
-        let id = unsafe { space.register(&cell, 0, false) }.unwrap();
+        let id = unsafe { space.register_during(&cell, 0, false, None) }.unwrap();
         if published {
             space.publish(id).unwrap();
         }
@@ -256,13 +256,13 @@ fn writable_dma_rejects_cpu_aliases_until_the_exact_retirement_completes() {
     let mut space = IoSpace::new(hardware);
     // No hardware accesses exist; exercise admission using the real registry.
     assert_eq!(
-        unsafe { space.register(&cell, 0x1000, true) },
+        unsafe { space.register_during(&cell, 0x1000, true, None) },
         Err(Error::Retain(RetainError::Borrowed))
     );
     assert_eq!(space.pending(), 0);
     assert!(trace.lock().unwrap().calls.is_empty());
     drop(cpu);
-    let id = unsafe { space.register(&cell, 0x1000, true) }.unwrap();
+    let id = unsafe { space.register_during(&cell, 0x1000, true, None) }.unwrap();
     space.publish(id).unwrap();
     let batch = space.revoke(id).unwrap().unwrap();
     assert!(!space.poll(id).unwrap());
@@ -290,10 +290,11 @@ fn changed_admission_binds_exact_page_and_survives_the_receipt() {
     let other =
         Arc::new(Page::from_internal(PageOwner::Kernel, other_pool.page().unwrap()).unwrap());
     let change = page.begin().unwrap();
+    let freeze = super::cell::Freeze::new(change.clone());
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     assert_eq!(
-        unsafe { space.register(&page, 0x1000, true) },
+        unsafe { space.register_during(&page, 0x1000, true, None) },
         Err(Error::Retain(RetainError::Busy))
     );
     assert_eq!(
@@ -304,6 +305,7 @@ fn changed_admission_binds_exact_page_and_survives_the_receipt() {
     assert!(trace.lock().unwrap().calls.is_empty());
     let id = unsafe { space.register_during(&page, 0x1000, true, Some(&change)) }.unwrap();
     space.publish(id).unwrap();
+    drop(freeze);
     drop(change);
     assert_eq!(page.exposure(), Exposure::External);
     assert_eq!(

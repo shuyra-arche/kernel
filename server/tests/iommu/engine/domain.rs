@@ -85,7 +85,7 @@ fn complete(device: &Device) {
 }
 
 fn publish(space: &mut Space, cell: &Arc<Page>) -> BindingId {
-    let id = unsafe { space.register(cell, 0x400000, true) }.unwrap();
+    let id = unsafe { space.register_during(cell, 0x400000, true, None) }.unwrap();
     space.publish(id).unwrap();
     assert_eq!(space.phase(id), Ok(Phase::Publishing));
     // Domain never adds a second data retention.
@@ -212,7 +212,7 @@ fn domain_failure_keeps_both_payload_and_hardware_tables() {
 fn invalid_geometry_and_extra_binding_fail_before_publication() {
     for (device_id, iova) in [(8, 1), (8, 1usize << 38)] {
         let (mut space, device, pools, cell, _) = space(device_id);
-        assert!(unsafe { space.register(&cell, iova, true) }.is_err());
+        assert!(unsafe { space.register_during(&cell, iova, true, None) }.is_err());
         assert_eq!(space.pending(), 0);
         assert_eq!(cell.exposure(), Exposure::Internal);
         assert_eq!(Arc::strong_count(&cell), 1);
@@ -227,9 +227,9 @@ fn invalid_geometry_and_extra_binding_fail_before_publication() {
         assert!(pools.iter().all(|p| p.gives() == 1));
     }
     let (mut space, device, pools, cell, _) = space(8);
-    unsafe { space.register(&cell, 0x400000, true) }.unwrap();
+    unsafe { space.register_during(&cell, 0x400000, true, None) }.unwrap();
     assert_eq!(
-        unsafe { space.register(&cell, 0x500000, true) },
+        unsafe { space.register_during(&cell, 0x500000, true, None) },
         Err(Error::Capacity)
     );
     drop(cell);

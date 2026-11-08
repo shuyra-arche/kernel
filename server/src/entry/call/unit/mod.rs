@@ -293,7 +293,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
             }
             if guard != ControlId::NONE
                 && (!me.administration.matches(guard, ControlKind::Guard)
-                    || me.ident.team.life.exit.protected())
+                    || me.ident.team.life.protected())
             {
                 return Err(UnitFail::Denied);
             }

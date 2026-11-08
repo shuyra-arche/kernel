@@ -109,18 +109,22 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
         .map_err(|(e, _)| e)
         .unwrap();
     let change = (scenario == "dma-change").then(|| payload.begin().unwrap());
+    let freeze = change
+        .as_ref()
+        .map(|change| crate::cell::Freeze::new(change.clone()));
     let binding = registry
         .with_space(owner.as_ref().unwrap(), domain, |space| {
             let id = if let Some(change) = &change {
-                assert!(unsafe { space.register(&payload, IOVA, true) }.is_err());
+                assert!(unsafe { space.register_during(&payload, IOVA, true, None) }.is_err());
                 unsafe { space.register_during(&payload, IOVA, true, Some(change)) }?
             } else {
-                unsafe { space.register(&payload, IOVA, scenario != "readonly") }?
+                unsafe { space.register_during(&payload, IOVA, scenario != "readonly", None) }?
             };
             space.publish(id)?;
             Ok(id)
         })
         .unwrap();
+    drop(freeze);
     drop(change);
     assert_eq!(Arc::strong_count(&payload), 2); // exactly one data obligation
     drop(payload);

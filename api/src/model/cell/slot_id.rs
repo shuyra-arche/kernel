@@ -7,9 +7,9 @@ use core::marker::PhantomData;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
-pub struct FlatReference(pub(crate) usize, PhantomData<*const ()>);
+pub struct SlotId(pub(crate) usize, PhantomData<*const ()>);
 
-impl FlatReference {
+impl SlotId {
     /// 无效哨兵（0）：没有这一份持有。
     pub const NONE: Self = Self(0, PhantomData);
 
@@ -30,7 +30,7 @@ impl FlatReference {
         (raw <= isize::MAX as usize).then(|| Self::new(raw))
     }
 
-    /// **交出**：号变回线上的那 8 字节（与 [`FlatReference::from_bytes`] 成对）。
+    /// **交出**：号变回线上的那 8 字节（与 [`SlotId::from_bytes`] 成对）。
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         (self.0 as u64).to_le_bytes()
     }
@@ -40,8 +40,8 @@ impl FlatReference {
     }
 }
 
-impl From<FlatReference> for usize {
-    fn from(reference: FlatReference) -> Self {
+impl From<SlotId> for usize {
+    fn from(reference: SlotId) -> Self {
         reference.0
     }
 }

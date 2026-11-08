@@ -16,9 +16,6 @@ pub enum Trap {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Call {
     Build,
-    Doom,
-    /// Authorizes the independently retained form of CellCall::Acquire.
-    Retain,
     /// Boot-minted authority for the kernel execution-domain guard.
     Guard,
 }
@@ -54,8 +51,6 @@ impl Name {
             Self::Trap(Trap::SupervisorExternal) => (0, 0, 0),
             Self::Trap(Trap::PageFault) => (0, 1, 0),
             Self::Call(Call::Build) => (1, 0, 0),
-            Self::Call(Call::Doom) => (1, 1, 0),
-            Self::Call(Call::Retain) => (1, 2, 0),
             Self::Call(Call::Guard) => (1, 3, 0),
             Self::Page(Page::Dtb) => (2, 0, 0),
             Self::Page(Page::Initrd) => (2, 1, 0),
@@ -76,8 +71,6 @@ impl Name {
             (0, 0, 0) => Some(Self::Trap(Trap::SupervisorExternal)),
             (0, 1, 0) => Some(Self::Trap(Trap::PageFault)),
             (1, 0, 0) => Some(Self::Call(Call::Build)),
-            (1, 1, 0) => Some(Self::Call(Call::Doom)),
-            (1, 2, 0) => Some(Self::Call(Call::Retain)),
             (1, 3, 0) => Some(Self::Call(Call::Guard)),
             (2, 0, 0) => Some(Self::Page(Page::Dtb)),
             (2, 1, 0) => Some(Self::Page(Page::Initrd)),

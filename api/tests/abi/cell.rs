@@ -1,57 +1,115 @@
 use kernel_api::{
     address::VirtAddr,
-    model::cell::{
-        Attachment, FlatReference, MappingControl, MappingId, Placement, Position, ReferenceRange,
+    model::{
+        cell::*,
+        identity::{PendId, TeamId},
     },
-    model::identity::TeamId,
 };
-
 #[test]
-fn position_rejects_zero_identity_unknown_kind_and_nonzero_reserved_word() {
-    let reference = FlatReference::from_bytes(&1u64.to_le_bytes()).unwrap();
+fn positions_reject_bad_identity_reserved_words_and_stale_slot_tags() {
+    let slot = SlotId::from_bytes(&1u64.to_le_bytes()).unwrap();
     let mapping = MappingId::from_bytes(&7u64.to_le_bytes()).unwrap();
-    for position in [
-        Position::Slot { reference, page: 3 },
-        Position::Memo {
-            team: TeamId::new(0),
+    for object in [
+        CellObject::Slot(slot),
+        CellObject::Memo {
+            target: MappingTarget::Cpu(TeamId::new(0)),
             mapping,
-            page: 5,
+        },
+        CellObject::Memo {
+            target: MappingTarget::Io(PendId::mint(2)),
+            mapping,
         },
     ] {
-        assert_eq!(Position::from_bytes(&position.to_bytes()), Some(position));
+        let p = CellPosition {
+            object,
+            page: 3,
+            generation: if matches!(object, CellObject::Slot(_)) {
+                0
+            } else {
+                u64::MAX
+            },
+        };
+        assert_eq!(CellPosition::from_bytes(&p.to_bytes()), Some(p));
+        assert_eq!(CellObject::from_bytes(&object.to_bytes()), Some(object));
     }
-    let mut bytes = Position::Slot { reference, page: 3 }.to_bytes();
-    bytes[24] = 1;
-    assert!(Position::from_bytes(&bytes).is_none());
-    bytes[24] = 0;
-    bytes[8] = 0;
-    assert!(Position::from_bytes(&bytes).is_none());
-    bytes[0] = 2;
-    assert!(Position::from_bytes(&bytes).is_none());
-    assert!(Position::from_bytes(&[0; 31]).is_none());
+    let p = CellPosition {
+        object: CellObject::Slot(slot),
+        page: 0,
+        generation: 0,
+    };
+    let mut bad = p.to_bytes();
+    bad[40] = 1;
+    assert!(CellPosition::from_bytes(&bad).is_none());
+    let mut bad = p.to_bytes();
+    bad[16] = 1;
+    assert!(CellPosition::from_bytes(&bad).is_none());
+    let mut bad = p.to_bytes();
+    bad[8] = 0;
+    assert!(CellPosition::from_bytes(&bad).is_none());
+    let mut bad = p.to_bytes();
+    bad[32..40].fill(255);
+    assert!(CellPosition::from_bytes(&bad).is_none());
+    assert!(CellPosition::from_bytes(&[0; 47]).is_none());
+    let request = CellHandoff {
+        source: p,
+        target: p,
+    };
+    assert_eq!(CellHandoff::from_bytes(&request.to_bytes()), Some(request));
+    assert!(CellHandoff::from_bytes(&request.to_bytes()[..95]).is_none());
 }
-
 #[test]
-fn attachment_has_one_checked_snapshot_for_geometry_authority_and_receipt() {
-    let reference = FlatReference::from_bytes(&3u64.to_le_bytes()).unwrap();
-    let spec = Attachment {
-        range: ReferenceRange {
-            reference,
+fn creation_is_one_canonical_snapshot_for_geometry_and_authority() {
+    for source in [
+        CellSource::Slot(ReferenceRange {
+            reference: SlotId::from_bytes(&3u64.to_le_bytes()).unwrap(),
             offset: 0,
             count: 1,
+        }),
+        CellSource::Pend {
+            token: PendId::mint(4),
+            offset: 2,
+            count: 1,
         },
-        placement: Placement::exact(VirtAddr::new(0x8000), 4096).unwrap(),
-        access: 6,
-        control: MappingControl::Caller,
-        change: 29,
+    ] {
+        let spec = CellCreate::Memo {
+            target: MappingTarget::Cpu(TeamId::new(0)),
+            source,
+            placement: Placement::exact(VirtAddr::new(0x8000), 4096).unwrap(),
+            access: 6,
+            control: MappingControl::Caller,
+        };
+        let bytes = spec.to_bytes();
+        assert_eq!(CellCreate::from_bytes(&bytes), Some(spec));
+        for (offset, value) in [(16, 1), (24, 2), (48, 0), (88, 2)] {
+            let mut bad = bytes;
+            bad[offset] = value;
+            assert!(CellCreate::from_bytes(&bad).is_none());
+        }
+        assert!(CellCreate::from_bytes(&bytes[..95]).is_none());
+    }
+    let spec = CellCreate::Slot(Allocation::new(4096, 4096).unwrap());
+    let mut bytes = spec.to_bytes();
+    assert_eq!(CellCreate::from_bytes(&bytes), Some(spec));
+    bytes[95] = 1;
+    assert!(CellCreate::from_bytes(&bytes).is_none());
+}
+#[test]
+fn observation_preserves_generation_and_full_width_faults() {
+    let info = CellInfo {
+        generation: u64::MAX,
+        state: CellState::Retracting,
+        page: 7,
+        frozen: false,
+        external: true,
+        address: VirtAddr::new(0x8000),
+        fault_cause: u64::MAX,
+        fault_address: u64::MAX,
     };
-    let bytes = spec.to_bytes();
-    assert_eq!(Attachment::from_bytes(&bytes), Some(spec));
-    let mut bad = bytes;
-    bad[56] = 2;
-    assert!(Attachment::from_bytes(&bad).is_none());
-    let mut bad = bytes;
-    bad[16..24].fill(0);
-    assert!(Attachment::from_bytes(&bad).is_none());
-    assert!(Attachment::from_bytes(&bytes[..71]).is_none());
+    let bytes = info.to_bytes();
+    assert_eq!(CellInfo::from_bytes(&bytes), Some(info));
+    for (offset, value) in [(8, 9), (24, 4), (56, 1)] {
+        let mut bad = bytes;
+        bad[offset] = value;
+        assert!(CellInfo::from_bytes(&bad).is_none());
+    }
 }

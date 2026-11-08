@@ -27,6 +27,7 @@ fn reused_physical_page_gets_new_identity_and_zeroed_contents() {
     let first = Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap();
     let address = first.physical_address();
     let id = first.id();
+    assert!(id.get() > 0);
     // SAFETY: this test holds the sole allocation, no other access exists.
     unsafe { first.as_mut_ptr().write(0x7F) };
     let moved = first;

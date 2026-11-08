@@ -9,6 +9,9 @@ pub(crate) struct PageId(NonZeroUsize);
 static NEXT: AtomicUsize = AtomicUsize::new(1);
 
 impl PageId {
+    pub(crate) fn get(self) -> usize {
+        self.0.get()
+    }
     pub(super) fn allocate() -> Option<Self> {
         // 只分配身份，不发布 Page 内容；可见性由外层持有/提交同步提供。
         // 耗尽后拒绝，绝不 wrap 回旧实例。失败构造消耗的号也不再使用。

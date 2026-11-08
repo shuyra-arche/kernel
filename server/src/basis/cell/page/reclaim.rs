@@ -165,6 +165,10 @@ impl Reclaim {
     pub(super) fn end(&self) {
         self.apply(Event::End).expect("live change");
     }
+    pub(super) fn frozen(&self) -> bool {
+        let state = State::decode(self.0.load(Ordering::Acquire));
+        state.changing && !state.modifiable && !state.quarantined
+    }
     pub(super) fn is_changing(&self) -> bool {
         State::decode(self.0.load(Ordering::Acquire)).changing
     }

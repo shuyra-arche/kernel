@@ -21,24 +21,18 @@ fn domain_decoders_reject_foreign_classes_and_unknown_slots() {
 
 #[test]
 fn typed_and_dispatch_requests_share_encoding_and_validation() {
-    use kernel_api::abi::call::cell::operations::SetAccess;
-    let words = [17, 23, 1, 3, 5, 6];
-    let request = SetAccess::from_registers(&words).unwrap();
+    use kernel_api::abi::call::room::operations::WaitValue;
+    let words = [0x4000, 23, 1, 1234, 0, 0];
+    let request = WaitValue::from_registers(&words).unwrap();
     assert_eq!(request.pack(), words);
-    let aggregate: kernel_api::abi::call::cell::CellCall = request.into();
+    let aggregate: kernel_api::abi::call::room::RoomCall = request.into();
     assert_eq!(
-        kernel_api::abi::call::cell::CellCall::from_wire(SetAccess::SLOT, &words).unwrap(),
+        kernel_api::abi::call::room::RoomCall::from_wire(WaitValue::SLOT, &words).unwrap(),
         aggregate
     );
-    let malformed = [17, 23, 9, 3, 5, 6];
-    assert_eq!(
-        SetAccess::from_registers(&malformed),
-        Err(kernel_api::abi::register::Decode::Invalid)
-    );
-    assert_eq!(
-        kernel_api::abi::call::cell::CellCall::from_wire(SetAccess::SLOT, &malformed),
-        Err(kernel_api::abi::register::Decode::Invalid)
-    );
+    let malformed = [0x4000, 23, 3, 1234, 0, 0];
+    assert!(WaitValue::from_registers(&malformed).is_err());
+    assert!(kernel_api::abi::call::room::RoomCall::from_wire(WaitValue::SLOT, &malformed).is_err());
 }
 
 #[test]
@@ -66,9 +60,9 @@ fn terminal_operations_keep_their_request_abi_without_a_return_decoder() {
 
 #[test]
 fn unknown_failure_codes_remain_abi_violations() {
-    use kernel_api::abi::call::cell::operations::Release;
+    use kernel_api::abi::call::cell::operations::Delete;
     assert!(
-        std::panic::catch_unwind(|| Release::decode_return(((-100isize) as usize, 0, 0))).is_err()
+        std::panic::catch_unwind(|| Delete::decode_return(((-100isize) as usize, 0, 0))).is_err()
     );
 }
 
@@ -103,32 +97,13 @@ fn compound_field_widths_match_their_actual_register_consumption() {
     }
     let token = kernel_api::model::identity::PendId::mint(17);
     let team = kernel_api::model::identity::TeamId::new(19);
-    let mapping = kernel_api::model::cell::MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
-    let reference =
-        kernel_api::model::cell::FlatReference::from_bytes(&29u64.to_le_bytes()).unwrap();
+    let reference = kernel_api::model::cell::SlotId::from_bytes(&29u64.to_le_bytes()).unwrap();
     let range = kernel_api::model::cell::ReferenceRange::new(reference, 3, 5).unwrap();
     let allocation = kernel_api::model::cell::Allocation::new(4096, 4096).unwrap();
     check(allocation);
     check(range);
-    check(kernel_api::model::cell::AcquireSource::Allocation(
-        allocation,
-    ));
-    check(kernel_api::model::cell::AcquireSource::Reference(range));
-    check(kernel_api::model::cell::AcquireSource::Source {
-        token,
-        offset: 3,
-        count: 5,
-    });
-    check(kernel_api::model::cell::AcquireSource::Mapping {
-        team,
-        mapping,
-        offset: 3,
-        count: 5,
-    });
     check(kernel_api::model::pend::PendRange::Inherit);
     check(kernel_api::model::pend::PendRange::pages(3, 5).unwrap());
-    check(kernel_api::model::cell::MappingSelection::Whole);
-    check(kernel_api::model::cell::MappingSelection::pages(3, 5).unwrap());
     check(kernel_api::model::unit::UnitTarget::Task(
         kernel_api::model::identity::TaskId::new(31),
     ));
@@ -147,19 +122,21 @@ fn compound_field_widths_match_their_actual_register_consumption() {
 #[test]
 fn external_mapping_requires_a_target_pend_and_retired_device_abi_is_rejected() {
     use kernel_api::{
-        abi::call::{EnvCall, cell::operations::Attach},
+        abi::call::{EnvCall, cell::operations::Create},
         model::{
             cell::{MappingId, MappingTarget},
             identity::{PendId, TeamId},
             sign::SignSource,
         },
     };
-    assert_eq!(Attach::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 19);
+    assert_eq!(Create::SLOT, kernel_api::abi::PREFIX | (2usize << 32));
     for slot in 0..10 {
         assert!(EnvCall::from_wire((13usize << 32) | slot, &[1; 6]).is_err());
     }
-    for slot in [7, 8, 10, 12] {
-        assert!(EnvCall::from_wire((2usize << 32) | slot, &[1; 6]).is_err());
+    for slot in 8..20 {
+        assert!(
+            EnvCall::from_wire(kernel_api::abi::PREFIX | (2usize << 32) | slot, &[1; 6]).is_err()
+        );
     }
     let token = PendId::mint(17);
     let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();

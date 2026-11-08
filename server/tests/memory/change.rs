@@ -1,6 +1,6 @@
 use super::{
     cell::{Exposure, Owner, Page, RetainError},
-    memo::Memo,
+    memo::Publication,
     support::Pool,
 };
 use std::sync::{Arc, Barrier};
@@ -10,7 +10,6 @@ fn receipt_closes_admission_until_the_last_inflight_holder_finishes() {
     let pool = Pool::new(0);
     let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let receipt = page.begin().unwrap();
-    let old = receipt.id();
     assert!(page.changing());
     assert_eq!(page.begin().unwrap_err(), RetainError::Busy);
     assert_eq!(page.prepare_hardware(false).unwrap_err(), RetainError::Busy);
@@ -22,7 +21,7 @@ fn receipt_closes_admission_until_the_last_inflight_holder_finishes() {
     assert!(!page.changing());
     assert!(super::cell::change::take_completion());
     let next = page.begin().unwrap();
-    assert_ne!(old, next.id());
+    assert!(Arc::ptr_eq(next.page(), &page));
     drop(next);
     drop(page);
     assert_eq!(pool.gives(), 1);
@@ -33,14 +32,14 @@ fn a_change_preserves_memos_but_cannot_reuse_the_page_until_all_are_withdrawn() 
     let pool = Pool::new(0);
     let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let id = page.id();
-    let mut left = Memo::prepare(&page, false, None).unwrap();
-    let mut right = Memo::prepare(&page, false, None).unwrap();
+    let mut left = Publication::prepare(&page, false, None).unwrap();
+    let mut right = Publication::prepare(&page, false, None).unwrap();
     left.publish();
     right.publish();
     left.complete();
     right.complete();
     let change = page.begin().unwrap();
-    assert!(matches!(left, Memo::Mapped(_)));
+    assert!(matches!(left, Publication::Mapped(_)));
     assert_eq!(left.id(), id);
     assert_eq!(change.external(true).unwrap_err(), RetainError::Borrowed);
     // SAFETY: host tests publish no hardware; this tests bookkeeping only.
@@ -67,18 +66,18 @@ fn fault_supply_uses_the_same_receipt_and_preserves_page_identity() {
     let pool = Pool::new(0);
     let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let change = page.begin().unwrap();
-    let mut memo = Memo::prepare(&page, true, Some(&change)).unwrap();
+    let mut memo = Publication::prepare(&page, true, Some(&change)).unwrap();
     let id = page.id();
     memo.publish();
-    assert!(matches!(memo, Memo::Publishing(_)));
+    assert!(matches!(memo, Publication::Publishing(_)));
     memo.complete();
-    assert!(matches!(memo, Memo::Mapped(_)));
+    assert!(matches!(memo, Publication::Mapped(_)));
     assert_eq!(memo.id(), id);
     drop(change);
     drop(page);
     assert_eq!(pool.gives(), 0);
     let memo = memo.retire();
-    assert!(matches!(memo, Memo::Withdrawing(_)));
+    assert!(matches!(memo, Publication::Withdrawing(_)));
     unsafe { memo.settle() };
     assert_eq!(pool.gives(), 1);
 }
@@ -89,7 +88,7 @@ fn swap_out_and_in_preserve_bytes_while_reused_frames_receive_new_identity() {
     let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let old = page.id();
     let pa = page.physical_address();
-    let mut memo = Memo::prepare(&page, true, None).unwrap();
+    let mut memo = Publication::prepare(&page, true, None).unwrap();
     memo.publish();
     memo.complete();
     // Simulate payload writes with exclusive CPU responsibility, no real PTE.
@@ -120,7 +119,7 @@ fn swap_out_and_in_preserve_bytes_while_reused_frames_receive_new_identity() {
             .copy_from_nonoverlapping(backing.as_ptr(), 4096)
     };
     unsafe { io.retire().settle() };
-    let mut memo = Memo::prepare(&restored, true, Some(&change)).unwrap();
+    let mut memo = Publication::prepare(&restored, true, Some(&change)).unwrap();
     memo.publish();
     memo.complete();
     drop(change);
@@ -157,4 +156,28 @@ fn registration_racing_begin_cannot_cross_the_closed_gate() {
         drop(page);
         assert_eq!(pool.gives(), 1);
     }
+}
+
+#[test]
+fn persistent_freezes_block_publication_through_another_logical_position() {
+    use super::cell::Freeze;
+    let pool = Pool::new(0);
+    let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let change = page.begin().unwrap();
+    let original = Freeze::new(change.clone());
+    assert!(page.frozen());
+    let other = Freeze::new(change.clone());
+    assert_eq!(change.hardware(true).unwrap_err(), RetainError::Busy);
+    assert_eq!(change.external(true).unwrap_err(), RetainError::Busy);
+    drop(original);
+    let mut writer = change.hardware(true).unwrap();
+    writer.publish();
+    assert!(!page.frozen());
+    unsafe { writer.retire().settle() };
+    assert!(page.frozen());
+    drop(other);
+    drop(change);
+    assert!(!page.frozen());
+    drop(page);
+    assert_eq!(pool.gives(), 1);
 }

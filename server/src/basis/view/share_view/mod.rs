@@ -397,7 +397,7 @@ pub(crate) fn open(
         let (offset, count) = authority
             .window()
             .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-        authorization.check_publish(offset, count, None)?;
+        authorization.check_publish(offset, count)?;
     }
     let reusable = {
         let maps = meta.maps.lock();

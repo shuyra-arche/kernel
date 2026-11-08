@@ -35,6 +35,12 @@ relative to the parent window. `call::pend::return_(token)` relinquishes the
 holder's branch through Kernel retirement; Busy means cleanup is still pending.
 The old `derive`, `same`, `release` and ReleaseMode interfaces are removed.
 
+Cell calls take fixed descriptors from `model::cell`: Create uses CellCreate,
+Push/Pull use CellHandoff, Publish/Retract/Protect use CellPosition, Delete uses
+CellObject, and Inspect writes CellInfo. Use their explicit byte codecs. Inspect
+supplies the generation for the next transition; preserve the absolute deadline
+when retrying Busy. Native calls do not hide retries, publication or ownership.
+
 ```sh
 cargo check --locked -p kernel-client --target riscv64gc-unknown-none-elf
 cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu
@@ -42,6 +48,6 @@ cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-g
 
 Tests exercise public `invoke_with` with a recording transport. They do not
 execute the named native-trap wrappers; RV64 compilation checks those wrappers.
-The Kernel guest suite also executes real traps for Pend, Sign, Unit and Room. See the API
+The Kernel guest suite also executes real traps for Cell, Pend, Sign, Unit and Room. See the API
 [compatibility notes](../api/README.md#source-migration-and-abi-compatibility)
 before updating a consumer's Kernel pin.

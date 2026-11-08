@@ -45,7 +45,7 @@ fn owner_exit_needs_no_record_transfer_and_failed_domain_does_not_block_another(
         let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
         registry
             .with_space(&owner, domain, |space| {
-                let binding = unsafe { space.register(&cell, 0x400000, true) }?;
+                let binding = unsafe { space.register_during(&cell, 0x400000, true, None) }?;
                 space.publish(binding)
             })
             .unwrap();
@@ -125,7 +125,7 @@ fn owner_and_domain_identity_cannot_be_reused_as_authority() {
     let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     registry
         .with_space(&owner, id, |space| unsafe {
-            space.register(&cell, 0x400000, false)
+            space.register_during(&cell, 0x400000, false, None)
         })
         .unwrap();
     drop(cell);
@@ -174,7 +174,7 @@ fn publication_admitted_before_concurrent_exit_remains_in_kernel_custody() {
             .with_space(&owner, id, |space| {
                 barrier.wait();
                 barrier.wait(); // exit precedes the actual hardware publication
-                let binding = unsafe { space.register(&cell, 0x400000, true) }?;
+                let binding = unsafe { space.register_during(&cell, 0x400000, true, None) }?;
                 space.publish(binding)
             })
             .unwrap();
@@ -212,7 +212,7 @@ fn explicit_close_settles_only_its_receipt_without_requiring_owner_exit() {
     let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
     registry
         .with_space(&owner, id, |space| {
-            let binding = unsafe { space.register(&cell, 0x400000, true) }?;
+            let binding = unsafe { space.register_during(&cell, 0x400000, true, None) }?;
             space.publish(binding)?;
             space.close()
         })

@@ -29,35 +29,15 @@ typed_calls! {
         fallible fn peek(token: PendId) -> Result<(usize, TaskId, usize), erra::Error<CloneFail>> =
             op::Peek { token };
     }
-    cell [
-        model::cell::AcquireSource,
-        model::cell::FlatReference,
-        abi::call::cell::CellFail,
-
-        model::identity::TeamId,
-        model::cell::MappingTarget,
-        model::cell::MappingInfo,
-        model::cell::MappingId,
-        model::cell::MappingSelection,
-        address::VirtAddr,
-    ] {
-        fallible fn acquire(source: AcquireSource, retention: kernel_api::model::unit::ControlId) -> Result<FlatReference, erra::Error<CellFail>> =
-            op::Acquire { source, retention };
-        fallible fn inspect(target: MappingTarget, mapping: MappingId) -> Result<MappingInfo, erra::Error<CellFail>> = op::Inspect { target, mapping };
-        fallible fn release(reference: FlatReference) -> Result<(), erra::Error<CellFail>> =
-            op::Release { reference };
-        fallible fn attach(target: MappingTarget, request: VirtAddr) -> Result<(MappingId, VirtAddr), erra::Error<CellFail>> =
-            op::Attach { target, request };
-        fallible fn detach(target: MappingTarget, mapping: MappingId, selection: MappingSelection) -> Result<(), erra::Error<CellFail>> =
-            op::Detach { target, mapping, selection };
-        fallible fn set_access(team: TeamId, mapping: MappingId, selection: MappingSelection, access: u64) -> Result<(), erra::Error<CellFail>> =
-            op::SetAccess { team, mapping, selection, access };
-        fallible fn traverse(retention: kernel_api::model::unit::ControlId, range: VirtAddr, out: VirtAddr) -> Result<(), erra::Error<CellFail>> =
-            op::Traverse { retention, range, out };
-        fallible fn push(source: FlatReference, page: usize, target: VirtAddr, change: usize) -> Result<(), erra::Error<CellFail>> = op::Push { source, page, target, change };
-        fallible fn pull(source: VirtAddr, destination: FlatReference, page: usize, change: usize) -> Result<(), erra::Error<CellFail>> = op::Pull { source, destination, page, change };
-        fallible fn begin(source: FlatReference, page: usize) -> Result<usize, erra::Error<CellFail>> = op::Begin { source, page };
-        fallible fn end(change: usize) -> Result<(), erra::Error<CellFail>> = op::End { change };
+    cell [abi::call::cell::CellFail, model::cell::CreatedCell, address::VirtAddr] {
+        fallible fn create(request: VirtAddr) -> Result<CreatedCell, erra::Error<CellFail>> = op::Create { request };
+        fallible fn delete(object: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Delete { object };
+        fallible fn push(request: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Push { request };
+        fallible fn pull(request: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Pull { request };
+        fallible fn publish(position: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Publish { position };
+        fallible fn retract(position: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Retract { position };
+        fallible fn protect(position: VirtAddr, access: u64) -> Result<(), erra::Error<CellFail>> = op::Protect { position, access };
+        fallible fn inspect(position: VirtAddr, out: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Inspect { position, out };
     }
     pend [
         model::modifiable::Modifiable,
@@ -81,12 +61,12 @@ typed_calls! {
     }
     share_view [
         model::modifiable::Modifiable,
-        model::cell::FlatReference,
+        model::cell::SlotId,
         model::identity::PendId,
         abi::call::share_view::ShareFail,
         address::VirtAddr,
     ] {
-        fallible fn create(reference: FlatReference, modifiable: Modifiable) -> Result<PendId, erra::Error<ShareFail>> =
+        fallible fn create(reference: SlotId, modifiable: Modifiable) -> Result<PendId, erra::Error<ShareFail>> =
             op::Create { reference, modifiable };
         fallible fn delete(token: PendId) -> Result<(), erra::Error<ShareFail>> =
             op::Delete { token };

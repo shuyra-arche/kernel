@@ -84,7 +84,7 @@ pub(crate) fn accord(
             {
                 let (offset, count) =
                     window.unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-                authorization.check_publish(offset, count, None)?;
+                authorization.check_publish(offset, count)?;
             }
             if share_view.is_some() {
                 pend_entry.authority().can_borrow(subset)?;
