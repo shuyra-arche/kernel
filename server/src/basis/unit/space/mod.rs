@@ -17,7 +17,7 @@ mod mapping;
 pub use builder::SpaceBuilder;
 pub(crate) use mapping::MappingBinding;
 pub(crate) use mapping::MappingEntry;
-pub(crate) use mapping::MappingRegistry;
+use mapping::MappingRegistry;
 
 pub(crate) mod wait;
 

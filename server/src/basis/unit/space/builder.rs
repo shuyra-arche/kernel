@@ -15,8 +15,8 @@ use crate::machine::mmu::riscv::table::PteFlags;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
 
-use super::MappingRegistry;
 use super::Space;
+use super::mapping::MappingRegistry;
 
 /// 建一个空间。
 pub struct SpaceBuilder {

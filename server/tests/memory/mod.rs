@@ -48,8 +48,6 @@ mod state;
 #[path = "../../src/basis/flat/region.rs"]
 mod region;
 
-#[path = "../../src/basis/flat/movement.rs"]
-mod movement;
 mod transaction;
 #[allow(dead_code)]
 #[path = "../../src/basis/cell/transfer/error.rs"]

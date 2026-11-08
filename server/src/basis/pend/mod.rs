@@ -1,20 +1,5 @@
-mod state;
-use crate::basis::unit::task::Task;
-use crate::machine::sync::SpinLock;
-use alloc::sync::Arc;
-use alloc::sync::Weak;
-use alloc::vec::Vec;
-use core::sync::atomic::AtomicBool;
-use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::Ordering;
-use kernel_api::abi::call::pend::PendFail;
-use kernel_api::address::PageCount;
-use kernel_api::address::PageOffset;
-use kernel_api::model::identity::PendId;
-use state::Event;
-use state::Failure;
-use state::Phase;
-use state::State;
+//! Authority over View ranges and the records that bind it to a Task.
+
 mod accord;
 mod cleanup;
 mod entry;
@@ -25,29 +10,33 @@ mod ledger;
 mod narrow;
 mod need;
 mod source;
+mod state;
+mod window;
 
-pub(crate) use external::ExternalBorrow;
-pub(crate) use geometry::Geometry;
-pub(crate) use hold::Hold;
-pub(crate) use hold::HoldTable;
-pub(crate) use ledger::Table;
-pub(crate) use need::Need;
-pub(crate) use source::SourceAuthorization;
+use alloc::sync::{Arc, Weak};
+use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-pub(crate) use entry::Modifiable;
-pub(crate) use entry::PendEntry;
-pub(crate) use entry::PendSnapshot;
-pub(crate) use entry::accede;
-pub(crate) use entry::locate;
-pub(crate) use entry::vestor;
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::address::{PageCount, PageOffset};
+use kernel_api::model::identity::PendId;
+pub(crate) use kernel_api::model::modifiable::Modifiable;
+
+use crate::basis::unit::task::Task;
+use crate::machine::sync::SpinLock;
+
+use state::{Event, Failure, Phase, State};
 
 pub(crate) use accord::accord;
-mod window;
-pub(crate) use cleanup::doom;
-pub(crate) use cleanup::retire;
-pub(crate) use cleanup::return_;
-pub(crate) use cleanup::revoke;
+pub(crate) use cleanup::{doom, retire, return_, revoke};
+pub(crate) use entry::{PendEntry, PendSnapshot, accede, locate, vestor};
+pub(crate) use external::ExternalBorrow;
+pub(crate) use geometry::Geometry;
+pub(crate) use hold::{Hold, HoldTable};
+pub(crate) use ledger::Table;
 pub(crate) use narrow::reduce;
+pub(crate) use need::Need;
+pub(crate) use source::SourceAuthorization;
 pub(crate) use window::Window;
 
 pub(crate) fn narrows(from: Modifiable, to: Modifiable) -> bool {
@@ -63,13 +52,7 @@ pub(crate) struct Pend {
     external: AtomicUsize,
     routing: AtomicBool,
 }
-fn fail(error: Failure) -> PendFail {
-    match error {
-        Failure::Denied => PendFail::Denied,
-        Failure::Busy => PendFail::Busy,
-        Failure::Dead => PendFail::Dead,
-    }
-}
+
 impl Pend {
     pub(crate) fn try_new_window(
         access: Modifiable,
@@ -211,6 +194,14 @@ impl Pend {
                 .expect("registered child borrow");
         }
         Ok(())
+    }
+}
+
+fn fail(error: Failure) -> PendFail {
+    match error {
+        Failure::Denied => PendFail::Denied,
+        Failure::Busy => PendFail::Busy,
+        Failure::Dead => PendFail::Dead,
     }
 }
 

@@ -5,7 +5,6 @@
 
 mod allocation;
 mod error;
-mod movement;
 mod pages;
 mod range;
 mod region;

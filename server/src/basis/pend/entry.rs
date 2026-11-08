@@ -14,7 +14,7 @@ use crate::basis::pend::narrows;
 use crate::basis::unit::task::Task;
 use crate::basis::view::View;
 
-use super::Need;
+use super::{Modifiable, Need};
 
 #[derive(Clone)]
 pub(crate) struct PendSnapshot {
@@ -174,8 +174,6 @@ impl Drop for PendEntry {
 }
 
 unsafe impl Send for PendEntry {}
-
-pub use kernel_api::model::modifiable::Modifiable;
 
 fn next_id() -> PendId {
     static NEXT: AtomicUsize = AtomicUsize::new(1);

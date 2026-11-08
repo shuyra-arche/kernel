@@ -5,7 +5,7 @@ use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 
-use super::entry::Modifiable;
+use super::Modifiable;
 use super::entry::PendSnapshot;
 use crate::basis::pend::narrows;
 use crate::basis::sign;

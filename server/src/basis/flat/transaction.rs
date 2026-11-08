@@ -33,7 +33,6 @@ enum Phase {
     Claimed,
     Committed,
 }
-use super::movement::*;
 
 /// 一次移交：两端各自的页已经换成本来源上的绝对页号。
 pub(crate) struct Transaction {
@@ -78,23 +77,23 @@ impl Transaction {
         let target = target.flat().clone();
         let carried = if same {
             let mut state = source.state.lock();
-            source_ready(&state, source_page)?;
-            let was_missing = target_ready(&state, target_page)?;
-            reserve(&mut state, target_page)?;
+            state.source_ready(source_page)?;
+            let was_missing = state.target_ready(target_page)?;
+            state.reserve(target_page)?;
             let carried = prepare()?;
             let gate = claim_page(&state, source_page, change)?;
-            claim_source(&mut state, source_page, id);
-            claim_target(&mut state, target_page, id, was_missing);
+            state.claim_source(source_page, id);
+            state.claim_target(target_page, id, was_missing);
             (carried, gate)
         } else {
             with_pair(&source.state, &target.state, |from, to| {
-                source_ready(from, source_page)?;
-                let was_missing = target_ready(to, target_page)?;
-                reserve(to, target_page)?;
+                from.source_ready(source_page)?;
+                let was_missing = to.target_ready(target_page)?;
+                to.reserve(target_page)?;
                 let carried = prepare()?;
                 let gate = claim_page(from, source_page, change)?;
-                claim_source(from, source_page, id);
-                claim_target(to, target_page, id, was_missing);
+                from.claim_source(source_page, id);
+                to.claim_target(target_page, id, was_missing);
                 Ok((carried, gate))
             })?
         };
@@ -121,12 +120,12 @@ impl Transaction {
         debug_assert!(self.change.page().changing());
         if Arc::ptr_eq(&self.source, &self.target) {
             let mut state = self.source.state.lock();
-            let cell = settle_source(&mut state, self.source_page, self.id);
-            settle_target(&mut state, self.target_page, self.id, cell);
+            let cell = state.settle_source(self.source_page, self.id);
+            state.settle_target(self.target_page, self.id, cell);
         } else {
             with_pair(&self.source.state, &self.target.state, |from, to| {
-                let cell = settle_source(from, self.source_page, self.id);
-                settle_target(to, self.target_page, self.id, cell);
+                let cell = from.settle_source(self.source_page, self.id);
+                to.settle_target(self.target_page, self.id, cell);
             });
         }
     }
@@ -140,12 +139,12 @@ impl Drop for Transaction {
         }
         if Arc::ptr_eq(&self.source, &self.target) {
             let mut state = self.source.state.lock();
-            rollback_source(&mut state, self.source_page, self.id);
-            rollback_target(&mut state, self.target_page, self.id);
+            state.rollback_source(self.source_page, self.id);
+            state.rollback_target(self.target_page, self.id);
         } else {
             with_pair(&self.source.state, &self.target.state, |from, to| {
-                rollback_source(from, self.source_page, self.id);
-                rollback_target(to, self.target_page, self.id);
+                from.rollback_source(self.source_page, self.id);
+                to.rollback_target(self.target_page, self.id);
             });
         }
     }
