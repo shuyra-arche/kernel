@@ -57,3 +57,13 @@ path = "room/mod.rs"
 [[test]]
 name = "allocator"
 path = "allocator/mod.rs"
+
+[[test]]
+name = "registration"
+path = "registration/mod.rs"
+
+# Opt-in exploration; excluded from both the normal and ignored test runs.
+[[bench]]
+name = "ticket-storage"
+path = "name/cost.rs"
+harness = false

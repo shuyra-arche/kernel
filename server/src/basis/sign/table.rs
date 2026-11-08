@@ -2,6 +2,7 @@
 use super::WakeKey;
 use super::endpoint;
 use super::endpoint::Endpoint;
+use crate::basis::name::Registry;
 use crate::basis::unit::task::Task;
 use crate::machine::sync::SpinLock;
 use alloc::sync::Arc;
@@ -40,7 +41,7 @@ struct Handle {
 }
 #[derive(Default)]
 struct Entries {
-    handles: Vec<Handle>,
+    handles: Registry<SignId, Handle>,
     owned: Vec<Arc<Endpoint>>,
 }
 pub(crate) struct Table(SpinLock<Entries>);
@@ -81,33 +82,33 @@ impl Table {
             .map(SignId::new)
             .ok_or(SignFail::OutOfMemory)?;
         let mut entries = self.0.lock();
-        entries
-            .handles
-            .try_reserve(1)
-            .map_err(|_| SignFail::OutOfMemory)?;
         if own {
             entries
                 .owned
                 .try_reserve(1)
                 .map_err(|_| SignFail::OutOfMemory)?;
-            entries.owned.push(endpoint.clone());
         }
-        entries.handles.push(Handle {
-            id,
-            endpoint,
-            rights,
-            authority,
-        });
+        entries
+            .handles
+            .insert(
+                id,
+                Handle {
+                    id,
+                    endpoint: endpoint.clone(),
+                    rights,
+                    authority,
+                },
+            )
+            .map_err(|_| SignFail::OutOfMemory)?;
+        if own {
+            entries.owned.push(endpoint);
+        }
         Ok(id)
     }
     pub(crate) fn get(&self, id: SignId, need: SignRights) -> Result<Arc<Endpoint>, SignFail> {
         let endpoint = {
             let entries = self.0.lock();
-            let handle = entries
-                .handles
-                .iter()
-                .find(|handle| handle.id == id)
-                .ok_or(SignFail::Denied)?;
+            let handle = entries.handles.get(id).ok_or(SignFail::Denied)?;
             if !handle.authority.alive() {
                 return Err(SignFail::Dead);
             }
@@ -130,11 +131,7 @@ impl Table {
         let authority = self.authority(id)?;
         let endpoint = {
             let entries = target.0.lock();
-            let handle = entries
-                .handles
-                .iter()
-                .find(|handle| handle.id == branch)
-                .ok_or(SignFail::Denied)?;
+            let handle = entries.handles.get(branch).ok_or(SignFail::Denied)?;
             if !handle
                 .authority
                 .parent
@@ -151,11 +148,7 @@ impl Table {
     }
     fn authority(&self, id: SignId) -> Result<Arc<Authority>, SignFail> {
         let entries = self.0.lock();
-        let handle = entries
-            .handles
-            .iter()
-            .find(|handle| handle.id == id)
-            .ok_or(SignFail::Denied)?;
+        let handle = entries.handles.get(id).ok_or(SignFail::Denied)?;
         if !handle.authority.alive() {
             return Err(SignFail::Dead);
         }
@@ -176,13 +169,15 @@ impl Table {
     pub(crate) fn release(&self, actor: TaskId, id: SignId) -> Result<(), SignFail> {
         let (handle, last) = {
             let mut entries = self.0.lock();
-            let at = entries
+            // Close authority before releasing registration storage.
+            entries
                 .handles
-                .iter()
-                .position(|handle| handle.id == id)
-                .ok_or(SignFail::Denied)?;
-            let handle = entries.handles.remove(at);
-            handle.authority.active.store(false, Ordering::Release);
+                .get(id)
+                .ok_or(SignFail::Denied)?
+                .authority
+                .active
+                .store(false, Ordering::Release);
+            let handle = entries.handles.remove(id).expect("registered Sign");
             let last = !entries.handles.iter().any(|other| {
                 other.authority.alive() && Arc::ptr_eq(&handle.endpoint, &other.endpoint)
             });
@@ -204,7 +199,7 @@ impl Table {
         for endpoint in entries.owned {
             endpoint::seal(&endpoint);
         }
-        for handle in entries.handles {
+        for handle in entries.handles.into_values() {
             handle.authority.active.store(false, Ordering::Release);
             endpoint::authority_changed(&handle.endpoint);
             endpoint::release_actor(&handle.endpoint, actor);

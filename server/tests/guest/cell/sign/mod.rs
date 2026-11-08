@@ -71,11 +71,20 @@ pub(super) fn run() {
     let child = sign::accord(root, super::lifecycle::self_id(), SignRights::all()).unwrap();
     let leaf = sign::accord(child, super::lifecycle::self_id(), SignRights::LISTEN).unwrap();
     sign::return_(child).unwrap();
+    // Reusing the intermediate registration slot cannot revive its descendants.
+    let replacement = sign::accord(root, super::lifecycle::self_id(), SignRights::all()).unwrap();
+    assert_ne!(replacement, child);
+    assert_eq!(
+        sign::listen(child, Wait::Poll).unwrap_err().source,
+        SignFail::Denied
+    );
+    sign::trigger(replacement).unwrap();
     assert_eq!(
         sign::listen(leaf, Wait::Poll).unwrap_err().source,
         SignFail::Dead
     );
     sign::return_(leaf).unwrap();
+    sign::return_(replacement).unwrap();
     sign::delete(root).unwrap();
     sign::return_(root).unwrap();
 }

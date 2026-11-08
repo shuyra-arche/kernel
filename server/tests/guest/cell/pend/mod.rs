@@ -213,6 +213,24 @@ pub(super) fn run() {
         PendFail::Denied
     );
     pend::return_(child).unwrap();
+    // Repeated registrations reuse internal slots while every returned public
+    // identity stays invalid, including through Collect's sorted pagination.
+    let mut previous = child;
+    for _ in 0..32 {
+        let next = accord(
+            root,
+            AccordTarget::Caller,
+            Modifiable::No,
+            PendRange::Inherit,
+        )
+        .unwrap();
+        assert_ne!(next, previous);
+        assert!(pend::inspect(previous, VirtAddr::new(words.as_mut_ptr() as usize)).is_err());
+        assert!(share_view::open(previous).is_err());
+        assert_eq!(inspect(next).status, PendStatus::Active);
+        pend::return_(next).unwrap();
+        previous = next;
+    }
     assert!(pend::inspect(leaf, VirtAddr::new(words.as_mut_ptr() as usize)).is_err());
     assert_eq!(inspect(root).status, PendStatus::Active);
     let (address, _) = share_view::open(root).unwrap();

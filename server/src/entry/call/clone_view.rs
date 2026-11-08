@@ -105,11 +105,7 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
     };
     {
         let _serial = task.pend.lock();
-        task.pend
-            .entries
-            .lock()
-            .try_reserve(1)
-            .map_err(|_| CloneFail::OutOfMemory)?;
+        let registration = task.pend.prepare(delivered).map_err(fail)?;
         let _commit = crate::basis::commit();
         if !pend::live(&task) {
             return Err(CloneFail::Dead);
@@ -118,10 +114,11 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
         if !current.view().same(observed.view()) || !current.allows(Need::Read) {
             return Err(CloneFail::Denied);
         }
-        let mut entries = task.pend.entries.lock();
-        reading.commit(|| {
-            entries.push(delivered);
-            pend::changed(&task);
+        registration.commit(|publish| {
+            reading.commit(|| {
+                publish();
+                pend::changed(&task);
+            })
         })?;
     }
     // Reading wakes queue observers after all publication locks are released.

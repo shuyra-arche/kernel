@@ -109,6 +109,13 @@ source authority rechecks. A pending trigger remains until consumed; another
 trigger returns Busy instead of overwriting it. Source readiness is retained,
 including registration after completion. View-local signal bits are removed.
 
+Pend, Sign and Control keep stable public IDs while `basis/name` stores their
+registrations in reusable, table-qualified generational slots. Indexes contain
+keys, not copied authority records. Unpublished Pend reservations roll back on
+failure; retiring records remain registered until hardware withdrawal succeeds.
+Slot reuse does not restore authority or close an owned Sign endpoint. Wait
+Tickets retain their non-reusing serial IDs and existing holder map.
+
 Task control follows its explicit controller or the controlling Team ancestry;
 ordinary membership does not permit controlling or reading peer Task results.
 Unit Create makes an empty Team or dormant Task; Resume admits execution.
