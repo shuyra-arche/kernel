@@ -108,7 +108,7 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
             .entries
             .lock()
             .try_reserve(1)
-            .map_err(|_| CloneFail::OoM)?;
+            .map_err(|_| CloneFail::OutOfMemory)?;
         let _commit = crate::basis::commit();
         if !pend::live(&task) {
             return Err(CloneFail::Dead);
@@ -158,7 +158,7 @@ pub(crate) fn create(mark: Mark, limits: CloneLimits) -> Result<usize, PendFail>
         return Err(PendFail::Denied);
     }
     let meta = view::clone::CloneView::try_new_with_limits(task.ident.id, limits)
-        .map_err(|_| PendFail::OoM)?;
+        .map_err(|_| PendFail::OutOfMemory)?;
     let pend = pend::PendEntry::try_new(View::Clone(meta), mark, Modifiable::Yes, None)?;
     let token = pend.token();
     pend::insert(&task, pend)?;
@@ -169,7 +169,7 @@ fn fail(error: PendFail) -> CloneFail {
     match error {
         PendFail::Denied | PendFail::NotAligned | PendFail::Invalid => CloneFail::Denied,
         PendFail::Dead => CloneFail::Dead,
-        PendFail::OoM => CloneFail::OoM,
+        PendFail::OutOfMemory => CloneFail::OutOfMemory,
         PendFail::HandedOver => CloneFail::HandedOver,
         PendFail::Busy => CloneFail::Busy,
     }

@@ -56,9 +56,11 @@ impl ExternalBorrow {
         let pages = if let Some(change) = change {
             Pages::new(range.reside_during(change).map_err(|_| PendFail::Busy)?)
         } else {
-            range.materialize().map_err(|_| PendFail::OoM)?
+            range.materialize().map_err(|_| PendFail::OutOfMemory)?
         };
-        let cells = range.materialized_cells().map_err(|_| PendFail::OoM)?;
+        let cells = range
+            .materialized_cells()
+            .map_err(|_| PendFail::OutOfMemory)?;
         let [(_, cell)] = cells.as_slice() else {
             return Err(PendFail::Denied);
         };

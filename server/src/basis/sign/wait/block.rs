@@ -96,7 +96,7 @@ impl WaitFail for kernel_api::abi::call::room::RoomFail {
         kernel_api::abi::call::room::RoomFail::Busy
     }
     fn oom() -> Self {
-        kernel_api::abi::call::room::RoomFail::OoM
+        kernel_api::abi::call::room::RoomFail::OutOfMemory
     }
 }
 
@@ -105,7 +105,7 @@ impl WaitFail for kernel_api::abi::call::unit::UnitFail {
         kernel_api::abi::call::unit::UnitFail::Busy
     }
     fn oom() -> Self {
-        kernel_api::abi::call::unit::UnitFail::OoM
+        kernel_api::abi::call::unit::UnitFail::OutOfMemory
     }
 }
 
@@ -114,7 +114,7 @@ impl WaitFail for kernel_api::abi::call::clone_view::CloneFail {
         kernel_api::abi::call::clone_view::CloneFail::Busy
     }
     fn oom() -> Self {
-        kernel_api::abi::call::clone_view::CloneFail::OoM
+        kernel_api::abi::call::clone_view::CloneFail::OutOfMemory
     }
 }
 
@@ -123,7 +123,7 @@ impl WaitFail for kernel_api::abi::call::sign::SignFail {
         kernel_api::abi::call::sign::SignFail::Busy
     }
     fn oom() -> Self {
-        kernel_api::abi::call::sign::SignFail::OoM
+        kernel_api::abi::call::sign::SignFail::OutOfMemory
     }
 }
 
@@ -132,6 +132,6 @@ impl WaitFail for kernel_api::abi::call::share_view::ShareFail {
         kernel_api::abi::call::share_view::ShareFail::Busy
     }
     fn oom() -> Self {
-        kernel_api::abi::call::share_view::ShareFail::OoM
+        kernel_api::abi::call::share_view::ShareFail::OutOfMemory
     }
 }

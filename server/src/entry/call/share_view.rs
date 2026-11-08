@@ -120,7 +120,7 @@ pub(crate) fn create_share(
             let entries = space.mappings.owned_by(&authorization)?;
             inputs
                 .try_reserve(entries.len())
-                .map_err(|_| PendFail::OoM)?;
+                .map_err(|_| PendFail::OutOfMemory)?;
             for entry in entries {
                 if let Some(mapping) = entry.mapping() {
                     inputs.push((space.clone(), mapping.clone()));
@@ -132,7 +132,7 @@ pub(crate) fn create_share(
             .entries
             .lock()
             .try_reserve(1)
-            .map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
 
         let _commit = crate::basis::commit();
         let _publication = authorization.begin_withdraw()?;
@@ -194,7 +194,7 @@ fn fail(error: PendFail) -> ShareFail {
         PendFail::Denied | PendFail::Invalid => ShareFail::Denied,
         PendFail::NotAligned => ShareFail::NotAligned,
         PendFail::Dead => ShareFail::Dead,
-        PendFail::OoM => ShareFail::OoM,
+        PendFail::OutOfMemory => ShareFail::OutOfMemory,
         PendFail::HandedOver => ShareFail::HandedOver,
         PendFail::Busy => ShareFail::Busy,
     }

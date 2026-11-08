@@ -18,7 +18,7 @@ pub mod operations {
         /// 资源已封印。
         Dead = -2,
         /// 门闩表备不下。
-        OoM = -3,
+        OutOfMemory = -3,
         /// Share 的 `size` / 区间非法（未页对齐）。
         NotAligned = -4,
         /// 这一枚已交出去（交回即复原）。

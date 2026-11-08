@@ -109,7 +109,7 @@ pub(crate) struct HoldTable {
 /// 铸一个全局唯一的引用号；耗尽（或超出符号上界）即明确失败，不回收旧号。
 fn next_id() -> Result<usize, PendFail> {
     static NEXT: AtomicUsize = AtomicUsize::new(1);
-    crate::machine::sync::next_id(&NEXT).ok_or(PendFail::OoM)
+    crate::machine::sync::next_id(&NEXT).ok_or(PendFail::OutOfMemory)
 }
 
 impl HoldTable {
@@ -132,10 +132,10 @@ impl HoldTable {
         )>,
     ) -> Result<usize, PendFail> {
         let mut holds = self.holds.lock();
-        holds.try_reserve(1).map_err(|_| PendFail::OoM)?;
+        holds.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
         let id = next_id()?;
         let hold = Arc::try_new(Hold::new(id, source, offset, count, ceiling, branch))
-            .map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
         hold.source().claim_hold();
         holds.push(hold);
         Ok(id)

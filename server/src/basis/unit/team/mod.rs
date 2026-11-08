@@ -246,7 +246,7 @@ pub(crate) fn spawn(
 ) -> Result<Arc<Task>, UnitFail> {
     fn map_err(error: NestError) -> UnitFail {
         if error == NestError::OutOfMemory {
-            UnitFail::OoM
+            UnitFail::OutOfMemory
         } else {
             UnitFail::Denied
         }

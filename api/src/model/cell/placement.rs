@@ -4,6 +4,8 @@
 //! 描述里只有选址数据：没有来源、授权、清理，也没有第二份长度（长度只来自
 //! `ReferenceRange`）。区域固定为普通用户窗口（旧 `Mmap` 同口径）。
 
+use crate::abi::layout::{WORD_BYTES, fetch_words, store_words};
+
 use crate::address::VirtAddr;
 
 use super::PAGE_SIZE;
@@ -51,6 +53,47 @@ impl Placement {
 
     pub fn align(self) -> usize {
         self.align
+    }
+
+    /// 描述在用户内存里的定长字数；`encode` / `decode` 的数组长度从这里取。
+    pub const WORDS: usize = 3;
+
+    /// 把自身编码成描述的那几个字（写入方在栈上备好，再交给内核快照）。
+    pub fn encode(self) -> [usize; Self::WORDS] {
+        let (kind, address) = match self.at() {
+            PlacementAt::Lowest => (0, 0),
+            PlacementAt::Highest => (1, 0),
+            PlacementAt::Exact(address) => (2, address.get()),
+        };
+        [kind, address, self.align()]
+    }
+
+    /// 由描述字解码；方式越界 → [`PlacementError::Tag`]，
+    /// 方式认得而对齐/定点非法 → [`PlacementError::Align`]。
+    pub fn decode(words: [usize; Self::WORDS]) -> Result<Self, PlacementError> {
+        let [kind, address, align] = words;
+        let at = match kind {
+            0 if address == 0 => PlacementAt::Lowest,
+            1 if address == 0 => PlacementAt::Highest,
+            2 => PlacementAt::Exact(VirtAddr::new(address)),
+            _ => return Err(PlacementError::Tag),
+        };
+        Self::checked(at, align).ok_or(PlacementError::Align)
+    }
+
+    pub fn decode_bytes(bytes: &[u8]) -> Result<Self, PlacementError> {
+        Self::decode(fetch_words(bytes).ok_or(PlacementError::Tag)?)
+    }
+
+    pub const WIDTH: usize = Self::WORDS * WORD_BYTES;
+
+    /// Write the fixed ABI descriptor. `out` must have exactly `WIDTH` bytes.
+    pub fn store(&self, out: &mut [u8]) {
+        store_words(self.encode(), out);
+    }
+
+    pub fn fetch(bytes: &[u8]) -> Option<Self> {
+        Self::decode_bytes(bytes).ok()
     }
 }
 

@@ -20,7 +20,7 @@ impl Plan {
         if reserved.iter().any(|region| region.overlaps(dram)) {
             return Err(PendFail::Denied);
         }
-        reserved.try_reserve(1).map_err(|_| PendFail::OoM)?;
+        reserved.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
         reserved.push(dram);
         if fdt.all_nodes().any(|node| {
             node.property("iommu-map").is_some()
@@ -39,7 +39,7 @@ impl Plan {
                     if region.overlaps(dram) {
                         return Err(PendFail::Denied);
                     }
-                    reserved.try_reserve(1).map_err(|_| PendFail::OoM)?;
+                    reserved.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
                     reserved.push(region);
                 }
             }
@@ -55,7 +55,7 @@ impl Plan {
                     if region.overlaps(dram) {
                         return Err(PendFail::Denied);
                     }
-                    reserved.try_reserve(1).map_err(|_| PendFail::OoM)?;
+                    reserved.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
                     reserved.push(region);
                 }
             }
@@ -64,7 +64,7 @@ impl Plan {
                 if region.overlaps(dram) {
                     return Err(PendFail::Denied);
                 }
-                reserved.try_reserve(1).map_err(|_| PendFail::OoM)?;
+                reserved.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
                 reserved.push(region);
             }
         }
@@ -115,7 +115,9 @@ impl Plan {
         if self.authorities.iter().any(|prior| prior.base == base) {
             return Err(PendFail::Denied);
         }
-        self.authorities.try_reserve(1).map_err(|_| PendFail::OoM)?;
+        self.authorities
+            .try_reserve(1)
+            .map_err(|_| PendFail::OutOfMemory)?;
         self.authorities.push(region);
         Ok(())
     }

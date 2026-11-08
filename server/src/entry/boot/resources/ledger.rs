@@ -16,9 +16,9 @@ pub(crate) fn size(count: usize) -> Result<usize, PendFail> {
     let len = count
         .checked_mul(kernel_api::boot::ledger::ENTRY_LEN)
         .and_then(|n| n.checked_add(Header::LEN))
-        .ok_or(PendFail::OoM)?;
+        .ok_or(PendFail::OutOfMemory)?;
     if len > BLOCK_BYTES {
-        return Err(PendFail::OoM);
+        return Err(PendFail::OutOfMemory);
     }
     Ok(len)
 }

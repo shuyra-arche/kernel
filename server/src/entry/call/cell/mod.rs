@@ -263,7 +263,7 @@ fn create_memo(
     // 号必须在符号上界内：过界就当场交还这笔占用，不拿它去写 PTE。
     if id > isize::MAX as usize {
         rollback(&space, id, Some(reservation), None);
-        return Err(CellFail::OoM);
+        return Err(CellFail::OutOfMemory);
     }
     // 发布前先占住登记槽、来源成员位与在途号：容量都在这一处备齐，提交只填已备位置。
     if let Err(error) =
@@ -408,7 +408,7 @@ fn caller(ident: &Arc<TaskIdent>) -> Option<Arc<Task>> {
 /// 来源侧的失败码折成地址空间同轴的那一条。
 fn source_fail(error: kernel_api::abi::call::pend::PendFail) -> CellFail {
     match error {
-        kernel_api::abi::call::pend::PendFail::OoM => CellFail::OoM,
+        kernel_api::abi::call::pend::PendFail::OutOfMemory => CellFail::OutOfMemory,
         kernel_api::abi::call::pend::PendFail::Busy => CellFail::Busy,
         kernel_api::abi::call::pend::PendFail::NotAligned => CellFail::NotAligned,
         _ => CellFail::Denied,
@@ -597,7 +597,7 @@ fn next_flight_key() -> Result<usize, CellFail> {
     static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(1);
     crate::machine::sync::next_id(&NEXT)
         .map(|id| FLIGHT_DOMAIN | id)
-        .ok_or(CellFail::OoM)
+        .ok_or(CellFail::OutOfMemory)
 }
 
 /// `Transfer`：把源窗口里的一页承载交进目标窗口的空槽。
@@ -651,7 +651,8 @@ fn transfer(
     let permit = crate::basis::cell::change::find(&source_page);
     let flight = next_flight_key()?;
     let mut ends: Vec<(Arc<Hold>, Arc<Geometry>)> = Vec::new();
-    ends.try_reserve_exact(2).map_err(|_| CellFail::OoM)?;
+    ends.try_reserve_exact(2)
+        .map_err(|_| CellFail::OutOfMemory)?;
     for (reference, page) in [(from, from_page), (to, to_page)] {
         let hold = caller
             .pend
@@ -745,7 +746,7 @@ fn wake(affected: Vec<Weak<Mapping>>) {
 impl From<NestError> for CellFail {
     fn from(error: NestError) -> Self {
         match error {
-            NestError::OutOfMemory => CellFail::OoM,
+            NestError::OutOfMemory => CellFail::OutOfMemory,
             NestError::NotAligned => CellFail::NotAligned,
             NestError::NoRegion => CellFail::NoRegion,
             NestError::AlreadyMapped => CellFail::AlreadyMapped,
@@ -773,7 +774,7 @@ impl From<FlatError> for CellFail {
 impl From<TransferError> for CellFail {
     fn from(error: TransferError) -> Self {
         match error {
-            TransferError::OutOfMemory => CellFail::OoM,
+            TransferError::OutOfMemory => CellFail::OutOfMemory,
             TransferError::OutOfRange => CellFail::NoRegion,
             TransferError::SourceEmpty => CellFail::SourceEmpty,
             TransferError::DestinationOccupied => CellFail::DestinationOccupied,

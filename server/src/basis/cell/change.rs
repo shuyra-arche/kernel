@@ -17,7 +17,7 @@ pub(crate) fn acquire(page: &Arc<Page>) -> Result<Arc<Change>, CellFail> {
     {
         return Ok(change);
     }
-    live.try_reserve(1).map_err(|_| CellFail::OoM)?;
+    live.try_reserve(1).map_err(|_| CellFail::OutOfMemory)?;
     let change = page
         .begin()
         .map_err(|e| CellFail::from(crate::basis::nest::NestError::from(e)))?;

@@ -34,10 +34,11 @@ impl Payload {
         let mut cells = Vec::new();
         cells
             .try_reserve_exact(count.get())
-            .map_err(|_| CloneFail::OoM)?;
+            .map_err(|_| CloneFail::OutOfMemory)?;
         for index in 0..count.get() {
             // The frame allocator zeroes the whole page, including visible tail padding.
-            let cell = crate::basis::cell::allocate(Owner::Kernel).map_err(|_| CloneFail::OoM)?;
+            let cell =
+                crate::basis::cell::allocate(Owner::Kernel).map_err(|_| CloneFail::OutOfMemory)?;
             let offset = index * PAGE_SIZE;
             let size = (len - offset).min(PAGE_SIZE);
             // SAFETY: unpublished Page, no aliases or hardware mappings.
@@ -48,9 +49,9 @@ impl Payload {
             cells.push((PageIndex::new(index), cell));
         }
         let source = Flat::from_cells(Owner::Kernel, count, cells)
-            .map_err(|_| CloneFail::OoM)?
+            .map_err(|_| CloneFail::OutOfMemory)?
             .whole();
-        Arc::try_new(Self { source, len }).map_err(|_| CloneFail::OoM)
+        Arc::try_new(Self { source, len }).map_err(|_| CloneFail::OutOfMemory)
     }
     pub(crate) fn len(&self) -> usize {
         self.len

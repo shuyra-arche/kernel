@@ -29,7 +29,7 @@ impl MappingBinding {
             id,
             nest: Arc::downgrade(nest),
         })
-        .map_err(|_| PendFail::OoM)
+        .map_err(|_| PendFail::OutOfMemory)
     }
 
     pub(crate) fn id(&self) -> usize {
@@ -56,7 +56,7 @@ impl MappingControlRecord {
             scope,
             control: SpinLock::new((controller, branch)),
         })
-        .map_err(|_| PendFail::OoM)
+        .map_err(|_| PendFail::OutOfMemory)
     }
 
     pub(crate) fn scope(&self) -> MappingControl {
@@ -135,7 +135,7 @@ impl MappingRegistry {
             if entries.iter().any(|entry| entry.binding.id() == id) {
                 return Err(PendFail::Busy);
             }
-            entries.try_reserve(1).map_err(|_| PendFail::OoM)?;
+            entries.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
         }
         source.reserve_binding()?;
         source.register_binding(binding.clone());
@@ -202,7 +202,7 @@ impl MappingRegistry {
         let mut result = Vec::new();
         result
             .try_reserve(entries.len())
-            .map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
         result.extend(
             entries
                 .iter()

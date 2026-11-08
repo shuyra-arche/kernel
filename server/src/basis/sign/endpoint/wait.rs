@@ -56,7 +56,7 @@ impl AwaitWait {
             self.group.id,
             self.group.life(),
         )
-        .map_err(|_| SignFail::OoM)
+        .map_err(|_| SignFail::OutOfMemory)
     }
 
     pub fn unwatch(&self) {
@@ -164,7 +164,7 @@ pub(crate) fn resume(
             wait.life(),
             wait.remaining(),
             WaitCall::Sign(wait.clone()),
-            kernel_api::abi::call::sign::SignFail::OoM,
+            kernel_api::abi::call::sign::SignFail::OutOfMemory,
         ) {
             Ok(()) => return Resumption::Waiting,
             Err(e) => Err(e),

@@ -17,7 +17,7 @@ pub(crate) fn pend_fail(error: PendFail) -> SignFail {
     match error {
         PendFail::Denied | PendFail::NotAligned | PendFail::Invalid => SignFail::Denied,
         PendFail::Dead => SignFail::Dead,
-        PendFail::OoM => SignFail::OoM,
+        PendFail::OutOfMemory => SignFail::OutOfMemory,
         PendFail::HandedOver => SignFail::HandedOver,
         PendFail::Busy => SignFail::Busy,
     }
@@ -28,7 +28,7 @@ pub(crate) fn event_fail(error: PendFail) -> SignEventFail {
     match error {
         PendFail::Denied | PendFail::NotAligned | PendFail::Invalid => SignEventFail::Denied,
         PendFail::Dead => SignEventFail::Dead,
-        PendFail::OoM => SignEventFail::OoM,
+        PendFail::OutOfMemory => SignEventFail::OutOfMemory,
         PendFail::HandedOver => SignEventFail::HandedOver,
         PendFail::Busy => SignEventFail::Busy,
     }

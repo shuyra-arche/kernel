@@ -1,16 +1,19 @@
 //! 语义句柄——envcall 载荷里的**类型化身份**。
 //!
 //! 每个句柄都是 `usize` 的 newtype（`#[repr(transparent)]`），并且：
-//!   - `abi::register::Wire` impl 负责与寄存器宽度往返（见 `abi::register`）；
+//!   - `abi::register::Wire` impl 负责与寄存器宽度往返（实现与身份类型放在一起）；
 //!   - `From<_> for usize` 供内核侧直接取裸值。
 //!
 //! 与裸 `usize` 的区别只在类型层：把「第几个参数是什么 id」从注释约定变成
 //! 编译期义务（拿 TaskId 当 TeamId 用在编译期即被拦）。
 //!
-//! **那一格是 `pub(crate)`，不是 `pub`**：这五枚类型各自只该有**有名字的门**
+//! **那一格是 `pub(crate)`，不是 `pub`**：这些类型各自只该有**有名字的门**
 //! （`new` / `mint` / `from_bytes` / `get`），而 `pub` 的元组字段等于给每一枚都开了
 //! 一扇无名门（`TaskId(0)` 与 `TaskId::new(0)` 就分不出哪一种才是本仓的口径）。
 //! `PendId` 另有第二格（`PhantomData`）挡着，但那是**机制**（`!Send`），不是口径。
+
+use crate::abi::register::{Decode, Wire};
+use crate::abi::reply::FromPair;
 
 use core::marker::PhantomData;
 
@@ -101,6 +104,25 @@ impl From<PendId> for usize {
     }
 }
 
+impl Wire for PendId {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        s[*i] = self.get();
+        *i += 1;
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let v = *s.get(*i).ok_or(Decode::Overflow)?;
+        *i += 1;
+        Ok(PendId::new(v))
+    }
+}
+
+impl FromPair for PendId {
+    fn from_pair(v0: usize, _v1: usize) -> Self {
+        PendId::new(v0)
+    }
+}
+
 /// 任务句柄（全局唯一 id；0 = 无上下文）。
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
@@ -118,6 +140,25 @@ impl TaskId {
 impl From<TaskId> for usize {
     fn from(t: TaskId) -> Self {
         t.0
+    }
+}
+
+impl Wire for TaskId {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        s[*i] = self.get();
+        *i += 1;
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let v = *s.get(*i).ok_or(Decode::Overflow)?;
+        *i += 1;
+        Ok(TaskId(v))
+    }
+}
+
+impl FromPair for TaskId {
+    fn from_pair(v0: usize, _v1: usize) -> Self {
+        TaskId(v0)
     }
 }
 
@@ -179,6 +220,19 @@ impl Mark {
     }
 }
 
+impl Wire for Mark {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        s[*i] = self.get() as usize;
+        *i += 1;
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let v = *s.get(*i).ok_or(Decode::Overflow)?;
+        *i += 1;
+        Ok(Mark::new(v as u64))
+    }
+}
+
 /// 团队句柄（域标识；0 = 无效哨兵）。
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
@@ -196,5 +250,24 @@ impl TeamId {
 impl From<TeamId> for usize {
     fn from(t: TeamId) -> Self {
         t.0
+    }
+}
+
+impl Wire for TeamId {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        s[*i] = self.get();
+        *i += 1;
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let v = *s.get(*i).ok_or(Decode::Overflow)?;
+        *i += 1;
+        Ok(TeamId(v))
+    }
+}
+
+impl FromPair for TeamId {
+    fn from_pair(v0: usize, _v1: usize) -> Self {
+        TeamId(v0)
     }
 }

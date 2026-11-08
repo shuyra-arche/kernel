@@ -108,10 +108,10 @@ pub(crate) fn reserve_len(meta: &CloneView, len: usize) -> Result<Reservation<'_
     {
         return Err(CloneFail::Busy);
     }
-    q.hands.try_reserve(1).map_err(|_| CloneFail::OoM)?;
+    q.hands.try_reserve(1).map_err(|_| CloneFail::OutOfMemory)?;
     let id = NEXT
         .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-        .map_err(|_| CloneFail::OoM)?;
+        .map_err(|_| CloneFail::OutOfMemory)?;
     q.hands.push_back(Slot::Reserved(id, len));
     q.bytes += len;
     Ok(Reservation { meta, id: Some(id) })

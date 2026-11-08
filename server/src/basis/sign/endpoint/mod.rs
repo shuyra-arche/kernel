@@ -112,9 +112,9 @@ pub(crate) fn attach(meta: &Endpoint, route: Route) -> Result<(), SignFail> {
             return Ok(());
         }
         if routes.len() >= MAX {
-            return Err(SignFail::OoM);
+            return Err(SignFail::OutOfMemory);
         }
-        routes.try_reserve(1).map_err(|_| SignFail::OoM)?;
+        routes.try_reserve(1).map_err(|_| SignFail::OutOfMemory)?;
         for (at, (key, _)) in route.keys.iter().enumerate() {
             shared[at] = routes.iter().any(|old| old.covers(*key));
         }
@@ -126,7 +126,7 @@ pub(crate) fn attach(meta: &Endpoint, route: Route) -> Result<(), SignFail> {
                     sign::unforward(*key, meta.id);
                 }
             }
-            return Err(SignFail::OoM);
+            return Err(SignFail::OutOfMemory);
         }
     }
     meta.routes.lock().push(route);
@@ -212,7 +212,7 @@ fn apply(meta: &Endpoint, event: Event) -> Result<(), SignFail> {
     *state = state.transition(event).map_err(|error| match error {
         Rejection::Closed => SignFail::Dead,
         Rejection::Busy => SignFail::Busy,
-        Rejection::Exhausted => SignFail::OoM,
+        Rejection::Exhausted => SignFail::OutOfMemory,
     })?;
     Ok(())
 }

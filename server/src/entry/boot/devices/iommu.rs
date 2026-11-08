@@ -81,7 +81,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     if storage.is_some() {
         return Err(PendFail::Denied);
     }
-    *storage = Some(Controllers::new(topology).map_err(|_| PendFail::OoM)?);
+    *storage = Some(Controllers::new(topology).map_err(|_| PendFail::OutOfMemory)?);
     let controllers = storage.as_mut().expect("installed controller registry");
     let nest = &kernel().ok_or(PendFail::Denied)?.nest;
     for region in regions {
@@ -90,11 +90,11 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
         let borrowed = unsafe { BorrowedRegion::new(PhysAddr::from_raw(region.base), 4096) }
             .map_err(|_| PendFail::Denied)?;
         let source = Flat::from_region(borrowed)
-            .map_err(|_| PendFail::OoM)?
+            .map_err(|_| PendFail::OutOfMemory)?
             .whole();
         let placement =
             Placement::lowest(RegionKind::Normal, 4096, 4096).map_err(|_| PendFail::Denied)?;
-        let reservation = nest.reserve(placement).map_err(|_| PendFail::OoM)?;
+        let reservation = nest.reserve(placement).map_err(|_| PendFail::OutOfMemory)?;
         let access = Access::READ | Access::WRITE;
         let mapping = nest
             .attach(reservation, source, access, access)
@@ -106,14 +106,14 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
         ];
         let [command, fault, completion] = cells;
         let cells = [
-            command.map_err(|_| PendFail::OoM)?,
-            fault.map_err(|_| PendFail::OoM)?,
-            completion.map_err(|_| PendFail::OoM)?,
+            command.map_err(|_| PendFail::OutOfMemory)?,
+            fault.map_err(|_| PendFail::OutOfMemory)?,
+            completion.map_err(|_| PendFail::OutOfMemory)?,
         ];
         // SAFETY: trusted QEMU platform discovery; Kernel-only MMIO mapping and
         // all overlapping boot authorities are withheld. No other MMIO owner exists.
         let registers = unsafe { Mmio::new(mapping.initial_start().as_usize(), region.base) };
-        let mut engine = Engine::new(registers, cells).map_err(|_| PendFail::OoM)?;
+        let mut engine = Engine::new(registers, cells).map_err(|_| PendFail::OutOfMemory)?;
         engine.enable_interrupts().map_err(failure)?;
         controllers.install(engine).map_err(|_| PendFail::Denied)?;
         let engine = controllers

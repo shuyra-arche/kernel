@@ -52,7 +52,7 @@ pub(super) fn collect(
 ) -> Result<(Vec<(Arc<Task>, usize)>, Vec<(Arc<Task>, PendId)>), PendFail> {
     let mut tasks = Vec::new();
     let mut nodes = Vec::new();
-    nodes.try_reserve(1).map_err(|_| PendFail::OoM)?;
+    nodes.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
     nodes.push((task.clone(), token));
     let mut cursor = 0;
     while cursor < nodes.len() {
@@ -74,7 +74,7 @@ pub(super) fn collect(
                     .take_while(|(source, _, _)| *source == token)
                 {
                     if let Some(child) = child.upgrade() {
-                        nodes.try_reserve(1).map_err(|_| PendFail::OoM)?;
+                        nodes.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
                         nodes.push((child, *child_token));
                     }
                 }
@@ -194,10 +194,10 @@ pub(super) fn cull(
         let mut changed = Vec::new();
         removed
             .try_reserve(nodes.len())
-            .map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
         changed
             .try_reserve(tasks.len())
-            .map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
         let root = super::locate(task, token).ok_or(PendFail::Denied)?;
         let share_view = root.view().share_view();
         let _operation = match &share_view {

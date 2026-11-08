@@ -7,7 +7,7 @@ pub mod operations {
     #[error_domain]
     pub enum RoomFail {
         Dead = -1,
-        OoM = -2,
+        OutOfMemory = -2,
         #[busy]
         Busy = -3,
         Denied = -4,

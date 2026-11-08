@@ -110,7 +110,7 @@ pub(crate) fn create() -> Result<usize, SignFail> {
     if !pend::live(&task) {
         return Err(SignFail::Dead);
     }
-    let endpoint = endpoint::Endpoint::try_new(task.ident.id).map_err(|_| SignFail::OoM)?;
+    let endpoint = endpoint::Endpoint::try_new(task.ident.id).map_err(|_| SignFail::OutOfMemory)?;
     task.signs
         .install(endpoint, SignRights::all(), true)
         .map(SignId::get)
@@ -155,7 +155,7 @@ fn await_group(frame: &mut TrapContext, token: SignId, millis: Wait) -> Outcome 
 
 pub(crate) fn typed_cell(actor: &Arc<Task>, source: SignSource) -> Result<Route, SignFail> {
     let mut keys = Vec::new();
-    keys.try_reserve(4).map_err(|_| SignFail::OoM)?;
+    keys.try_reserve(4).map_err(|_| SignFail::OutOfMemory)?;
     let watch = match source {
         SignSource::MappingRetired { token, mapping }
         | SignSource::MappingFault { token, mapping } => {
@@ -251,7 +251,7 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: SignSource) -> Result<Route,
     };
     Ok(Route {
         actor: actor.ident.id,
-        keys: Arc::try_new(keys).map_err(|_| SignFail::OoM)?,
+        keys: Arc::try_new(keys).map_err(|_| SignFail::OutOfMemory)?,
         watch,
     })
 }

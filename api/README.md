@@ -18,16 +18,14 @@ code or runtime state. There is no Env package or compatibility facade.
 | `abi::call` | Operation declarations, domain failures and aggregate dispatch |
 | `abi::operation` | Operation, RegisterCall, KernelCall and TerminalCall traits |
 | `abi::register` | Checked request packing and unpacking, including Wire and Decode |
-| `abi::reply` | Success register decoding and the Sign reply contract |
-| `abi::layout` | Concrete caller-memory descriptor codecs |
+| `abi::reply` | Shared success-register decoding traits |
+| `abi::layout` | Shared little-endian framing for caller-memory descriptors |
 | `abi::error` | Common failure representation and dispatch errors |
 | `boot` | Initial-task arguments, Capsule, resource Ledger and initrd preamble |
 
 The crate root exposes these four domains directly. Import names from their
-owning modules; neither API nor Client flattens the whole vocabulary into a root
-prelude. Model values install no allocator, locks, TLS or task cleanup. Concrete
-descriptor methods remain inherent methods on their types; their implementations
-live in `abi::layout`.
+owning modules. Each model type owns its checked register and byte codecs.
+The Sign operation module owns its success reply and register encoding.
 
 ## Operations and generation
 
@@ -61,6 +59,9 @@ manifest parser and packer have been removed.
 
 This is a breaking provider redesign of Cell, View, Pend, Sign, Unit and Room.
 There are no compatibility aliases for retired operations.
+
+Rust callers now match `OutOfMemory` for allocation failures. Each domain uses
+its existing numeric ABI code for this variant.
 
 Call numbers are `(version << 48) | (domain << 32) | operation`; version is 1.
 Version zero and unknown versions are rejected before domain dispatch. All byte

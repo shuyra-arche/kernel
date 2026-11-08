@@ -14,7 +14,7 @@ pub mod operations {
         Denied = -1,
         #[busy]
         Busy = -2,
-        OoM = -3,
+        OutOfMemory = -3,
         BadImage = -4,
         BadEntry = -5,
     }

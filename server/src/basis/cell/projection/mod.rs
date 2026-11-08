@@ -68,7 +68,7 @@ static PROJECTIONS: SpinLock<Vec<Projection>> = SpinLock::new(Vec::new());
 static NEXT: AtomicUsize = AtomicUsize::new(1);
 fn failure(error: Error) -> CellFail {
     match error {
-        Error::OutOfMemory | Error::Capacity => CellFail::OoM,
+        Error::OutOfMemory | Error::Capacity => CellFail::OutOfMemory,
         Error::Overlap => CellFail::AlreadyMapped,
         Error::InvalidRange => CellFail::NotAligned,
         _ => CellFail::Denied,
@@ -121,14 +121,14 @@ pub(crate) fn create(
         return Err(CellFail::Denied);
     }
     let source = target.view().share_view().ok_or(CellFail::Denied)?.source();
-    let events = Life::try_new().map_err(|_| CellFail::OoM)?;
+    let events = Life::try_new().map_err(|_| CellFail::OutOfMemory)?;
     let mut records = PROJECTIONS.lock();
-    records.try_reserve(1).map_err(|_| CellFail::OoM)?;
+    records.try_reserve(1).map_err(|_| CellFail::OutOfMemory)?;
     let id = NEXT
         .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
             id.checked_add(1).filter(|id| *id <= isize::MAX as usize)
         })
-        .map_err(|_| CellFail::OoM)?;
+        .map_err(|_| CellFail::OutOfMemory)?;
     records.push(Projection {
         id,
         actor: Arc::downgrade(actor),
@@ -170,7 +170,10 @@ pub(crate) fn associate(
     if record.generation != expected || record.info.state != MappingState::Settled {
         return Err(CellFail::Busy);
     }
-    let next = record.generation.checked_add(1).ok_or(CellFail::OoM)?;
+    let next = record
+        .generation
+        .checked_add(1)
+        .ok_or(CellFail::OutOfMemory)?;
     record.page = Some(page);
     record.freeze = None;
     record.generation = next;
@@ -266,12 +269,12 @@ pub(crate) fn publish(
         return Err(CellFail::NotTransferable);
     }
     let page = r.page.as_ref().ok_or(CellFail::SourceEmpty)?;
-    let next = r.generation.checked_add(1).ok_or(CellFail::OoM)?;
+    let next = r.generation.checked_add(1).ok_or(CellFail::OutOfMemory)?;
     let change = crate::basis::cell::change::acquire(page)?;
     let borrow = ExternalBorrow::prepare(&r.hold, actor, r.modifiable, Some(&change)).map_err(
         |e| match e {
             kernel_api::abi::call::pend::PendFail::Busy => CellFail::Busy,
-            kernel_api::abi::call::pend::PendFail::OoM => CellFail::OoM,
+            kernel_api::abi::call::pend::PendFail::OutOfMemory => CellFail::OutOfMemory,
             _ => CellFail::Denied,
         },
     )?;
@@ -330,7 +333,7 @@ pub(crate) fn retract(
     ) {
         return Err(CellFail::Busy);
     }
-    let next = r.generation.checked_add(1).ok_or(CellFail::OoM)?;
+    let next = r.generation.checked_add(1).ok_or(CellFail::OutOfMemory)?;
     r.freeze = Some(crate::basis::cell::page::Freeze::new(
         crate::basis::cell::change::acquire(r.page.as_ref().ok_or(CellFail::SourceEmpty)?)?,
     ));

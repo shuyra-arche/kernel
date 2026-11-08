@@ -28,11 +28,11 @@ pub(super) fn mapped(base: usize, size: usize) -> Result<usize, PendFail> {
     let borrowed = unsafe { BorrowedRegion::new(PhysAddr::from_raw(base), size) }
         .map_err(|_| PendFail::Denied)?;
     let source = Flat::from_region(borrowed)
-        .map_err(|_| PendFail::OoM)?
+        .map_err(|_| PendFail::OutOfMemory)?
         .whole();
     let placement =
         Placement::lowest(RegionKind::Normal, size, 4096).map_err(|_| PendFail::Denied)?;
-    let reserve = nest.reserve(placement).map_err(|_| PendFail::OoM)?;
+    let reserve = nest.reserve(placement).map_err(|_| PendFail::OutOfMemory)?;
     let access = Access::READ | Access::WRITE;
     let mapping = nest
         .attach(reserve, source, access, access)
@@ -75,11 +75,13 @@ pub(in super::super) fn init(route: PciRoute) -> Result<(), PendFail> {
     {
         return Err(PendFail::Denied);
     }
-    apertures.try_reserve(1).map_err(|_| PendFail::OoM)?;
+    apertures
+        .try_reserve(1)
+        .map_err(|_| PendFail::OutOfMemory)?;
     let borrowed = unsafe { BorrowedRegion::new(PhysAddr::from_raw(route.bar), size) }
         .map_err(|_| PendFail::Denied)?;
     let source = Flat::from_region(borrowed)
-        .map_err(|_| PendFail::OoM)?
+        .map_err(|_| PendFail::OutOfMemory)?
         .whole();
     // Only the validated BAR is exported. Config and IOMMU registers stay private.
     unsafe { endpoint.place(route.bar) }.map_err(|_| PendFail::Denied)?;

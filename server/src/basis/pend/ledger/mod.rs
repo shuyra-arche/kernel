@@ -84,7 +84,7 @@ fn remember(
             Err(PendFail::Busy)
         };
     }
-    tasks.try_reserve(1).map_err(|_| PendFail::OoM)?;
+    tasks.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
     tasks.push((task.clone(), version));
     Ok(())
 }
@@ -112,14 +112,16 @@ pub(super) fn with_tasks_checked<T>(
     validate: impl FnOnce() -> bool,
     run: impl FnOnce() -> T,
 ) -> Result<T, PendFail> {
-    crate::machine::sync::reserve_depend(tasks.len() + 8).map_err(|_| PendFail::OoM)?;
+    crate::machine::sync::reserve_depend(tasks.len() + 8).map_err(|_| PendFail::OutOfMemory)?;
     debug_assert!(
         tasks
             .windows(2)
             .all(|pair| pair[0].0.ident.id.get() < pair[1].0.ident.id.get())
     );
     let mut guards = Vec::new();
-    guards.try_reserve(tasks.len()).map_err(|_| PendFail::OoM)?;
+    guards
+        .try_reserve(tasks.len())
+        .map_err(|_| PendFail::OutOfMemory)?;
     for (task, _) in tasks {
         guards.push(task.pend.lock());
     }
@@ -163,7 +165,7 @@ pub(crate) fn insert(task: &Task, pend_entry: PendEntry) -> Result<(), PendFail>
         return Err(PendFail::Dead);
     }
     let mut entries = task.pend.entries.lock();
-    entries.try_reserve(1).map_err(|_| PendFail::OoM)?;
+    entries.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
     entries.push(pend_entry);
     changed(task);
     Ok(())

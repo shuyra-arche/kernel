@@ -98,13 +98,13 @@ pub(crate) fn accord(
                 .heirs
                 .lock()
                 .try_reserve(1)
-                .map_err(|_| PendFail::OoM)?;
+                .map_err(|_| PendFail::OutOfMemory)?;
             target
                 .pend
                 .entries
                 .lock()
                 .try_reserve(1)
-                .map_err(|_| PendFail::OoM)?;
+                .map_err(|_| PendFail::OutOfMemory)?;
             (pend_entry, granted)
         };
         // Prepared metadata and table capacity cannot fail after withdrawal. The
