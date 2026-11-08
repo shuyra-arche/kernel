@@ -12,7 +12,7 @@ use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
 use crate::basis::nest::ActiveRange;
 use crate::basis::nest::Placement;
-use crate::basis::nest::RegionId;
+use crate::basis::nest::RegionKind;
 use crate::basis::nest::{Nest, NestError};
 use crate::basis::unit::team;
 use crate::machine::board;
@@ -130,11 +130,12 @@ pub fn init() -> NestResult<()> {
 
             // 整段 DRAM 先占，再抬高窗口下界（抬高之后整段就落在窗外了），失败显式交还。
             let dram = crate::machine::mmu::riscv::canonical(m.dram.base);
-            if !nest.window_contains(RegionId::Normal, dram, m.dram.size) {
+            if !nest.window_contains(RegionKind::Normal, dram, m.dram.size) {
                 return Err(NestError::NoRegion);
             }
-            let identity = nest.reserve(Placement::exact(RegionId::Normal, dram, m.dram.size)?)?;
-            if let Err(error) = nest.advance_region(RegionId::Normal, image_end) {
+            let identity =
+                nest.reserve(Placement::exact(RegionKind::Normal, dram, m.dram.size)?)?;
+            if let Err(error) = nest.advance_window(RegionKind::Normal, image_end) {
                 let _ = nest.release_reservation(identity);
                 return Err(error);
             }
@@ -171,7 +172,7 @@ pub fn init() -> NestResult<()> {
                     break;
                 }
                 let lower = nest.reserve(Placement::exact(
-                    RegionId::Static,
+                    RegionKind::Static,
                     segment.lower.start,
                     segment.size,
                 )?);
@@ -267,7 +268,7 @@ fn attach_exact(
         .checked_bytes()
         .ok_or(NestError::NotAligned)?;
     let active = ActiveRange::new(start, size, access, access)?;
-    let reservation = nest.reserve(Placement::exact(RegionId::Static, start, size)?)?;
+    let reservation = nest.reserve(Placement::exact(RegionKind::Static, start, size)?)?;
     nest.attach_shaped(reservation, source, attrs, &[active])?;
     Ok(())
 }

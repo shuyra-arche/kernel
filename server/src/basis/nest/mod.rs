@@ -43,8 +43,8 @@ pub use identity::Asid;
 pub use mapping::{Access, ActiveRange, Mapping};
 pub use translation::{FaultKind, FaultOutcome};
 
-use address::Occupancy;
-pub(crate) use address::{Placement, PlacementAt, RegionId};
+use address::Layout;
+pub(crate) use address::{Placement, PlacementAt, RegionKind};
 pub(crate) use mapping::MappingRange;
 
 use index::IndexNode;
@@ -81,7 +81,7 @@ pub struct Nest {
     geometry: mode::Geo,
     life: Arc<Life>,
     pub(crate) mappings: mapping::MappingRegistry,
-    occupancy: SpinLock<Occupancy>,
+    layout: SpinLock<Layout>,
     pending_cleanup: SpinLock<Option<Box<CleanupNode>>>,
     state: ManuallyDrop<SpinLock<NestState>>,
     asid_released: AtomicBool,
@@ -101,14 +101,14 @@ impl Nest {
 
     fn build(kind: SpaceKind, kernel: bool) -> Result<Arc<Self>, NestError> {
         let root = TableNode::root()?;
-        let mut occupancy = Occupancy::new();
-        occupancy.attach(
-            RegionId::Normal,
+        let mut layout = Layout::new();
+        layout.register_window(
+            RegionKind::Normal,
             crate::machine::layout::IMAGE_BASE.as_usize(),
             mode::upper().as_usize() - 1,
         )?;
-        occupancy.attach(
-            RegionId::Kernel,
+        layout.register_window(
+            RegionKind::Kernel,
             TEAM_FRAME_BASE.as_usize(),
             TEAM_FRAME_BASE.as_usize() + TEAM_FRAME_WINDOW_SIZE - 1,
         )?;
@@ -119,7 +119,7 @@ impl Nest {
                 .checked_add(dram.base)
                 .and_then(|base| base.checked_add(dram.size))
                 .ok_or(NestError::DramOverlap)?;
-            occupancy.attach(RegionId::Resource, base, TRAP_STACK_BASE.as_usize() - 1)?;
+            layout.register_window(RegionKind::Resource, base, TRAP_STACK_BASE.as_usize() - 1)?;
         }
         let life = Life::try_new()?;
         let asid = if kernel {
@@ -133,7 +133,7 @@ impl Nest {
             geometry: mode::geometry(mode::mode()),
             life,
             mappings: mapping::MappingRegistry::new(),
-            occupancy: SpinLock::new_level(Level::Address, occupancy),
+            layout: SpinLock::new_level(Level::Address, layout),
             pending_cleanup: SpinLock::new_level(Level::Address, None),
             state: ManuallyDrop::new(SpinLock::new_level(Level::Nest, NestState::new(root))),
             asid_released: AtomicBool::new(kernel),
@@ -204,7 +204,7 @@ impl Nest {
     }
 
     pub(crate) fn contains_reservation(&self, id: usize) -> bool {
-        self.occupancy.lock().has_id(id)
+        self.layout.lock().occupancy.has_id(id)
     }
 
     /// 原身份的占用票已撤下，或全空间关闭的失效同步已完成。
@@ -213,27 +213,27 @@ impl Nest {
     }
 
     /// 普通挂载的架构属性：用户空间只对 `Normal` 区开 U，A/D 由内核自维护。
-    pub(crate) fn attrs(&self, region: RegionId) -> PteFlags {
+    pub(crate) fn attrs(&self, region: RegionKind) -> PteFlags {
         let mut attrs = PteFlags::A | PteFlags::D;
-        if !self.kind.is_supervisor() && region == RegionId::Normal {
+        if !self.kind.is_supervisor() && region == RegionKind::Normal {
             attrs |= PteFlags::U;
         }
         attrs
     }
 
     /// 抬高窗口的选址下界；已登记的占用不动。
-    pub(crate) fn advance_region(&self, region: RegionId, base: usize) -> Result<(), NestError> {
-        Ok(self.occupancy.lock().advance(region, base)?)
+    pub(crate) fn advance_window(&self, region: RegionKind, base: usize) -> Result<(), NestError> {
+        Ok(self.layout.lock().advance_window(region, base)?)
     }
 
     /// 该区域的动态窗口是否含住 `[start, start + size)`。
-    pub(crate) fn window_contains(&self, region: RegionId, start: VirtAddr, size: usize) -> bool {
+    pub(crate) fn window_contains(&self, region: RegionKind, start: VirtAddr, size: usize) -> bool {
         let Some(last) = start.as_usize().checked_add(size - 1) else {
             return false;
         };
-        self.occupancy
+        self.layout
             .lock()
-            .contains(region, start.as_usize(), last)
+            .window_contains(region, start.as_usize(), last)
     }
 
     /// 选一段跨度并登记占用；不动页表、不物化来源。
@@ -241,7 +241,7 @@ impl Nest {
         self: &Arc<Self>,
         placement: Placement,
     ) -> Result<Reservation, NestError> {
-        let (start, id) = self.occupancy.lock().reserve(placement)?;
+        let (start, id) = self.layout.lock().reserve(placement)?;
         Ok(Reservation::new(
             Arc::downgrade(self),
             placement.region(),
@@ -387,8 +387,8 @@ impl Nest {
         let start = reservation.start();
         let end = reservation.last();
         {
-            let occupancy = self.occupancy.lock();
-            if !occupancy.has_id(reservation.id()) {
+            let layout = self.layout.lock();
+            if !layout.occupancy.has_id(reservation.id()) {
                 return Err(NestError::NoRegion);
             }
             mapping.prepare_cleanup()?;
@@ -883,8 +883,8 @@ impl Nest {
             }
         }
         {
-            let occupancy = self.occupancy.lock();
-            for (start, last, _) in occupancy.retired_of(mapping.reservation.id())? {
+            let layout = self.layout.lock();
+            for (start, last, _) in layout.occupancy.retired_of(mapping.reservation.id())? {
                 let at = start.max(lo);
                 let last = last.min(hi);
                 if at <= last {
@@ -942,10 +942,14 @@ impl Nest {
         drop(self.ready_state()?);
 
         // 地址 → Nest → Mapping：准备与提交共享临界区，不暴露无人接管的退休票。
-        let mut occupancy = self.occupancy.lock();
-        let pieces = occupancy.pieces(start.as_usize(), last, mapping.reservation.id())?;
+        let mut layout = self.layout.lock();
+        let pieces = layout
+            .occupancy
+            .pieces(start.as_usize(), last, mapping.reservation.id())?;
         let fresh_count = pieces.iter().filter(|(_, _, ticket)| *ticket == 0).count();
-        occupancy.reserve_cuts(fresh_count.checked_mul(2).ok_or(NestError::OutOfMemory)?)?;
+        layout
+            .occupancy
+            .reserve_cuts(fresh_count.checked_mul(2).ok_or(NestError::OutOfMemory)?)?;
         let mut tickets: Vec<usize> = Vec::new();
         tickets
             .try_reserve(pieces.len())
@@ -995,7 +999,7 @@ impl Nest {
         // 开票之后没有可失败准备：票、PTE 与关系在同一提交内转入退休责任。
         for (lo, hi, ticket) in pieces {
             tickets.push(if ticket == 0 {
-                occupancy.retire(lo, hi, mapping.reservation.id())
+                layout.occupancy.retire(lo, hi, mapping.reservation.id())
             } else {
                 ticket
             });
@@ -1018,7 +1022,7 @@ impl Nest {
         state.tickets.extend(tickets.iter().copied());
         state.retirement.mark_dirty(mapping.is_global());
         drop(state);
-        drop(occupancy);
+        drop(layout);
         // 三、同步成功之后才结算这一段的票；失败时票、Page、表页与来源都留着。
         self.finish_invalidation()?;
         {
@@ -1026,9 +1030,9 @@ impl Nest {
             state.tickets.retain(|ticket| !tickets.contains(ticket));
         }
         if !tickets.is_empty() {
-            let mut occupancy = self.occupancy.lock();
+            let mut layout = self.layout.lock();
             for ticket in tickets {
-                occupancy.reclaim(ticket);
+                layout.occupancy.reclaim(ticket);
             }
         }
         Ok(())
@@ -1063,7 +1067,7 @@ impl Nest {
         left_size: usize,
     ) -> Result<(Reservation, Reservation), NestError> {
         self.check_reservation(&reservation)?;
-        let split = self.occupancy.lock().split(
+        let split = self.layout.lock().occupancy.split(
             reservation.start().as_usize(),
             reservation.last(),
             reservation.id(),
@@ -1115,9 +1119,11 @@ impl Nest {
 
     /// 按占用身份交还一段尚未落地的跨度（凭证已经不在手里时用）。
     fn give_back_span(&self, start: VirtAddr, size: usize, identity: usize) -> bool {
-        self.occupancy
-            .lock()
-            .release(start.as_usize(), start.as_usize() + (size - 1), identity)
+        self.layout.lock().occupancy.release(
+            start.as_usize(),
+            start.as_usize() + (size - 1),
+            identity,
+        )
     }
 
     /// 结算待失效与退休，再收尾清理链上已经消费的关系。
@@ -1135,9 +1141,9 @@ impl Nest {
             core::mem::take(&mut state.tickets)
         };
         if !tickets.is_empty() {
-            let mut occupancy = self.occupancy.lock();
+            let mut layout = self.layout.lock();
             for ticket in tickets {
-                occupancy.reclaim(ticket);
+                layout.occupancy.reclaim(ticket);
             }
         }
         while let Some(node) = self.take_cleanup() {
@@ -1292,7 +1298,7 @@ impl Nest {
 
     fn check_reservation(&self, reservation: &Reservation) -> Result<(), NestError> {
         self.check_owner(reservation)?;
-        if !self.occupancy.lock().has_id(reservation.id()) {
+        if !self.layout.lock().occupancy.has_id(reservation.id()) {
             return Err(NestError::NoRegion);
         }
         Ok(())

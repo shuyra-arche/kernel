@@ -5,7 +5,7 @@ use crate::basis::flat::BorrowedRegion;
 use crate::basis::flat::Flat;
 use crate::basis::nest::Access;
 use crate::basis::nest::Placement;
-use crate::basis::nest::RegionId;
+use crate::basis::nest::RegionKind;
 use crate::basis::unit::team::kernel;
 use crate::machine::board;
 use crate::machine::iommu::riscv::Engine;
@@ -93,7 +93,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
             .map_err(|_| PendFail::OoM)?
             .whole();
         let placement =
-            Placement::lowest(RegionId::Normal, 4096, 4096).map_err(|_| PendFail::Denied)?;
+            Placement::lowest(RegionKind::Normal, 4096, 4096).map_err(|_| PendFail::Denied)?;
         let reservation = nest.reserve(placement).map_err(|_| PendFail::OoM)?;
         let access = Access::READ | Access::WRITE;
         let mapping = nest

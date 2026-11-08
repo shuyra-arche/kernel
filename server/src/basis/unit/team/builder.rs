@@ -4,7 +4,7 @@ use super::lifecycle::{ExitPolicy, TeamStage, TeamState};
 use super::membership::Tasks;
 use crate::basis::commit;
 use crate::basis::flat::{BorrowedRegion, Flat};
-use crate::basis::nest::{Access, ActiveRange, Placement, RegionId};
+use crate::basis::nest::{Access, ActiveRange, Placement, RegionKind};
 use crate::basis::unit::life::Life;
 use crate::basis::unit::life::TeamLife;
 use crate::basis::unit::task::Origin;
@@ -225,7 +225,8 @@ fn seed_trampoline(target: &Arc<Nest>, source: &Nest) -> Result<(), NestError> {
     let attrs = flags & (PteFlags::U | PteFlags::G | PteFlags::A | PteFlags::D);
     // 活动形状与来源都在登记占用之前备好：准备失败不放下一笔无人持有的占用。
     let active = ActiveRange::new(TRAMPOLINE, PAGE_SIZE, access, access)?;
-    let reservation = target.reserve(Placement::exact(RegionId::Static, TRAMPOLINE, PAGE_SIZE)?)?;
+    let reservation =
+        target.reserve(Placement::exact(RegionKind::Static, TRAMPOLINE, PAGE_SIZE)?)?;
     target.attach_shaped(reservation, source_range, attrs, &[active])?;
     Ok(())
 }

@@ -20,7 +20,7 @@ use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::PlacementAt;
-use crate::basis::nest::RegionId;
+use crate::basis::nest::RegionKind;
 use crate::basis::nest::Reservation;
 use crate::basis::nest::mapping::MappingEntry;
 use crate::basis::pend;
@@ -98,13 +98,13 @@ fn nest_placement(
             if !Nest::user_range(address, size) {
                 return Err(CellFail::NotAligned);
             }
-            if !nest.window_contains(RegionId::Normal, address, size) {
+            if !nest.window_contains(RegionKind::Normal, address, size) {
                 return Err(CellFail::NoRegion);
             }
             PlacementAt::Exact(address)
         }
     };
-    Placement::new(RegionId::Normal, size, placement.align(), at)
+    Placement::new(RegionKind::Normal, size, placement.align(), at)
         .map_err(|e| CellFail::from(NestError::from(e)))
 }
 
