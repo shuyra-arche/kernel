@@ -42,6 +42,25 @@ jobs:
           sh /tmp/rustup.sh -y --profile minimal --default-toolchain nightly --target riscv64gc-unknown-none-elf
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Fetch external QEMU fixture
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: shuyra-arche/vanllia
+          ref: 2eb7e854ffb894cef0c135f0d746e7b1206083a3
+          path: .integration/vanllia
+          sparse-checkout: tests/platform/qemu
+          persist-credentials: false
+      - name: Bind fixture to the Kernel under test
+        run: |
+          manifest="$GITHUB_WORKSPACE/.integration/vanllia/tests/platform/qemu/Cargo.toml"
+          cat >> "$manifest" <<EOF
+
+          [patch."https://github.com/shuyra-arche/kernel.git"]
+          kernel = { path = "$GITHUB_WORKSPACE/server" }
+          kernel-api = { path = "$GITHUB_WORKSPACE/api" }
+          EOF
+          cargo update --manifest-path "$manifest" -p kernel -p kernel-api
+          echo "KERNEL_PLATFORM_MANIFEST=$manifest" >> "$GITHUB_ENV"
       - name: Run environment-dependent tests
         run: cargo test --locked --workspace --target x86_64-unknown-linux-gnu -- --ignored --nocapture
       - name: Preserve hardware evidence

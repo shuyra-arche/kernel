@@ -264,6 +264,10 @@ The image leaves Bus Master enabled through retirement and supplies bounded
 Pending followed by the QEMU-specific ordering check. The hardware suite receives
 its manifest through `KERNEL_PLATFORM_MANIFEST`; use the matching Kernel provider
 revision. Kernel has no production dependency on Vanllia or a PCI implementation.
+The guest CI gate checks out a fixed external fixture revision and applies a
+temporary Cargo patch to this checkout's Kernel/API, updating only the fixture
+lockfile before the locked test run. This tests the candidate Kernel rather than
+silently running the fixture's previously pinned provider.
 This replaces the source-only `PciRoute` / `PciConfig` / `init_with_pci` boot
 interface; Cell ABI v1 is unchanged. Rebuild external images against the new
 provider. PCI topology parsing and the existing controller admission policy remain
