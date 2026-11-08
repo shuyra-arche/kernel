@@ -32,12 +32,26 @@ impl BatchId {
     }
 }
 
+/// I/O address: no CPU sign extension, user window, execution or A/D semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IoAddress(usize);
+impl IoAddress {
+    pub(crate) fn page(raw: usize) -> Option<Self> {
+        (raw.is_multiple_of(kernel_api::address::PAGE_SIZE)
+            && raw.checked_add(kernel_api::address::PAGE_SIZE).is_some())
+        .then_some(Self(raw))
+    }
+    pub(crate) fn get(self) -> usize {
+        self.0
+    }
+}
+
 /// 一整个托管 Page 的设备地址投影；身份不从 IOVA 或 PA 推导。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Projection<P> {
     pub(crate) id: BindingId,
     pub(crate) cell: P,
-    pub(crate) iova: usize,
+    pub(crate) iova: IoAddress,
     pub(crate) physical: usize,
     pub(crate) size: usize,
     pub(crate) modifiable: bool,

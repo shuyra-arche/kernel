@@ -1,4 +1,4 @@
-//! Only the hardware effect boundary is scripted. Page, IoSpace, state decisions,
+//! Only the hardware effect boundary is scripted. Page, Memo publication, state decisions,
 //! batch identities, RISC-V encoding and allocator return effects are production code.
 
 use std::collections::VecDeque;
@@ -26,6 +26,7 @@ pub struct Trace {
     pub fail_revoke: Option<HardwareError>,
     pub fail_fence: Option<HardwareError>,
     pub drops: usize,
+    pub shutdown: VecDeque<Result<bool, HardwareError>>,
 }
 
 pub struct Scripted(pub Arc<Mutex<Trace>>);
@@ -55,6 +56,14 @@ unsafe impl Hardware<crate::cell::PageId> for Scripted {
         let mut trace = self.0.lock().unwrap();
         trace.calls.push(Call::Fence(projection, batch));
         trace.fail_fence.take().map_or(Ok(()), Err)
+    }
+    fn shutdown(&mut self) -> Result<bool, HardwareError> {
+        self.0
+            .lock()
+            .unwrap()
+            .shutdown
+            .pop_front()
+            .unwrap_or(Ok(true))
     }
     fn observe(&mut self, batch: BatchId) -> Result<Option<BatchId>, HardwareError> {
         let mut trace = self.0.lock().unwrap();

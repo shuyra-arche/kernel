@@ -129,7 +129,7 @@ impl ExternalBorrow {
             })
     }
     /// # Safety
-    /// Matching IoSpace completion has settled this exact device relationship;
+    /// Matching Nest completion has settled this exact device relationship;
     /// caller holds work commit. Other read-only device relationships may remain.
     pub(crate) unsafe fn settle(
         mut self,

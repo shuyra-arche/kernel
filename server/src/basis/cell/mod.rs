@@ -1,5 +1,4 @@
 pub(crate) mod page;
-pub(crate) mod projection;
 pub(crate) mod transfer;
 
 use self::page::{InternalPage, Owner, Page, PageError};
@@ -25,7 +24,7 @@ pub(crate) fn allocate(owner: Owner) -> Result<Page, FlatError> {
 /// A resource collection; its organization determines the meaning of a position.
 pub(crate) enum Cell {
     Flat(crate::basis::flat::FlatRange),
-    Nest(crate::basis::nest::MappingRange),
+    Nest(crate::basis::nest::NestRange),
 }
 
 impl Cell {

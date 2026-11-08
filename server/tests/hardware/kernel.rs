@@ -49,16 +49,16 @@ fn run(mode: &str) {
         .unwrap();
     let guest = workspace.join("server/tests/guest/cell");
     let target = guest.join("target");
-    let fixture = io.then(|| {
-        std::env::var_os("KERNEL_PLATFORM_MANIFEST")
-            .map(std::path::PathBuf::from)
-            .expect("I/O boot needs KERNEL_PLATFORM_MANIFEST pointing to the matching external platform image (Vanllia tests/platform/qemu/Cargo.toml)")
-    });
-    let (kernel_target, binary) = if io {
-        (target.join("platform"), "shuyra-qemu")
+    let variable = if io {
+        "KERNEL_PLATFORM_MANIFEST"
     } else {
-        (workspace.join("target"), "shuyra")
+        "KERNEL_BOOT_MANIFEST"
     };
+    let fixture = std::env::var_os(variable)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| panic!("{variable} must point to the matching external image manifest"));
+    let kernel_target = target.join(if io { "platform" } else { "boot" });
+    let binary = if io { "shuyra-qemu" } else { "shuyra" };
     let evidence = target.join("evidence").join(mode);
     if evidence.exists() {
         std::fs::remove_dir_all(&evidence).unwrap();
@@ -108,11 +108,7 @@ fn run(mode: &str) {
             "riscv64gc-unknown-none-elf",
         ]);
         build.env("CARGO_TARGET_DIR", &kernel_target);
-        if io {
-            build.arg("--manifest-path").arg(fixture.as_ref().unwrap());
-        } else {
-            build.args(["-p", "kernel"]);
-        }
+        build.arg("--manifest-path").arg(&fixture);
         if let Some(extra) = extra {
             build.arg(extra);
         }

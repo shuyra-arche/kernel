@@ -84,8 +84,8 @@ pub(crate) fn frontier() -> usize {
 }
 
 pub fn init() -> InitResult<()> {
-    let free = crate::metal::board::info().memory.bootstrap();
-    // SAFETY: board::info().memory.bootstrap() 是内核实际拥有的 free DRAM 区间；它在整个分配器
+    let free = crate::entry::boot::facts::info().memory.bootstrap();
+    // SAFETY: facts::info().memory.bootstrap() 是内核实际拥有的 free DRAM 区间；它在整个分配器
     // 生存期内独占有效，Bump 与随后派生的 Frame 都只从这一实例取前沿。
     unsafe { BUMP_ALLOCATOR.init(Region::new(free.base, free.size)) }
         .annotate("initializing bump allocator")

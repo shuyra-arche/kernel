@@ -14,15 +14,15 @@ use crate::basis::flat::Flat;
 use crate::basis::flat::FlatError;
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
-use crate::basis::nest::Mapping;
-use crate::basis::nest::MappingRange;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
+use crate::basis::nest::NestRange;
 use crate::basis::nest::Placement;
 use crate::basis::nest::PlacementAt;
 use crate::basis::nest::RegionKind;
 use crate::basis::nest::Reservation;
-use crate::basis::nest::mapping::MappingEntry;
+use crate::basis::nest::Span;
+use crate::basis::nest::authority::RangeEntry;
 use crate::basis::pend;
 use crate::basis::pend::Geometry;
 use crate::basis::pend::Hold;
@@ -118,7 +118,7 @@ pub(in crate::entry) fn rollback(
     space: &Arc<Nest>,
     id: usize,
     reservation: Option<Reservation>,
-    mapping: Option<Arc<Mapping>>,
+    mapping: Option<Arc<Span>>,
 ) {
     if let Some(reservation) = reservation {
         debug_assert!(mapping.is_none(), "one attempt has one side to unwind");
@@ -335,7 +335,7 @@ fn with_mapping<T>(
     team: kernel_api::model::identity::TeamId,
     mapping: kernel_api::model::cell::MappingId,
     ident: &Arc<TaskIdent>,
-    action: impl FnOnce(&Arc<Team>, &MappingEntry) -> Result<T, CellFail>,
+    action: impl FnOnce(&Arc<Team>, &RangeEntry) -> Result<T, CellFail>,
 ) -> Result<T, CellFail> {
     let caller_task = caller(ident).ok_or(CellFail::Denied)?;
     let target = resolve_team(team, ident, &caller_task)?;
@@ -726,10 +726,10 @@ fn endpoint(
 
 /// 这次移交动过的关系的**唯一生产消费者**：把每一条变成它自己的等待位放行。
 ///
-/// 顺序是合同的一部分：升级 `Weak` 取到 `(ASID, 关系身份)`，先放掉 Mapping/Nest
+/// 顺序是合同的一部分：升级 `Weak` 取到 `(ASID, 关系身份)`，先放掉 Span/Nest
 /// 强引用，再 `signal` 整链——通知不在任何关系强引用下进出。清单里已经消失的
 /// 关系没有等待者，直接跳过；`signal` 非 sticky，没有等待者时就是空放行。
-fn wake(affected: Vec<Weak<Mapping>>) {
+fn wake(affected: Vec<Weak<Span>>) {
     for relation in affected {
         let Some(mapping) = relation.upgrade() else {
             continue;

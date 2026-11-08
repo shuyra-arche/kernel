@@ -1,21 +1,18 @@
+use crate::Edu;
 use crate::Uart;
-use crate::admission::Admission;
-use crate::edu::Edu;
 use crate::finish;
+use crate::iommu::Engine;
 use crate::iommu::HardwareError;
-use crate::iommu::IoSpace;
-use crate::iommu::retirement::Registry;
-use crate::iommu::riscv::Engine;
-use crate::iommu::riscv::Phase;
-use crate::iommu::riscv::adapter::Adapter;
+use crate::iommu::Phase;
+use crate::iommu::adapter::Adapter;
 use crate::iommu::contract::{Quiescence, Retirement};
-use crate::iommu::riscv::controllers::Controllers;
-use crate::iommu::riscv::topology::Topology;
+use crate::iommu::controllers::Controllers;
 use crate::mmio;
 use crate::pool::LIMIT;
 use crate::pool::POOL;
 use crate::pool::RETURNS;
 use crate::progress;
+use crate::target::Target;
 use alloc::sync::Arc;
 use core::fmt::Write;
 use core::sync::atomic::AtomicBool;
@@ -45,20 +42,10 @@ unsafe impl Quiescence for Platform<'_> {
     }
 }
 
-type Space<'a> = IoSpace<Adapter<mmio::Mmio, Platform<'a>>>;
+type Space<'a> = Target<Adapter<mmio::Mmio, Platform<'a>>>;
 
-pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
-    let topology = Topology::discover(fdt).unwrap();
-    // Exercise the production boot authority planner against QEMU's actual DTB,
-    // including its zero-length tuple and PCI apertures, before touching devices.
-    let plan = crate::plan::Plan::discover(fdt, 0x8000_0000, 128 << 20).unwrap();
-    for authority in plan.authorities() {
-        assert!(!authority.overlaps(crate::description::mmio::Region::new(base, 4096).unwrap()));
-        for (ecam, size) in topology.configurations() {
-            assert!(!authority.overlaps(crate::description::mmio::Region::new(ecam, size).unwrap()));
-        }
-    }
-    let mut controllers = Controllers::new(topology).unwrap();
+pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
+    let mut controllers = Controllers::new([base]).unwrap();
     LIMIT.store(8, Ordering::Relaxed);
     let payload = Arc::new(POOL.cell().unwrap());
     let pa = payload.physical_address();
@@ -82,12 +69,10 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
         .map_err(|(error, _)| error)
         .unwrap();
     if scenario == "route-reject" {
-        let result = unsafe { controllers.bind(0x3000_1000, 8, tables, platform) };
+        let result = unsafe { controllers.bind(base + 4096, requester, tables, platform) };
         assert!(matches!(
             result,
-            Err(crate::iommu::riscv::controllers::BindError::Route(
-                crate::iommu::riscv::topology::RouteError::Unmapped
-            ))
+            Err(crate::iommu::controllers::BindError::UnknownController)
         ));
         assert_eq!(RETURNS.load(Ordering::SeqCst), 4); // unused tables returned
         let engine = controllers.engine(base).unwrap();
@@ -101,29 +86,21 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
         let _ = writeln!(Uart, "PASS iommu-binding rejected=1 returned=8");
         finish(true);
     }
-    let adapter = unsafe { controllers.bind(0x3000_0000, 8, tables, platform) }.unwrap();
-    let mut registry = Registry::new();
-    let mut owner = Some(Admission::new().unwrap());
-    let domain = registry
-        .attach(owner.as_ref().unwrap(), adapter)
-        .map_err(|(e, _)| e)
-        .unwrap();
+    let adapter = unsafe { controllers.bind(base, requester, tables, platform) }.unwrap();
+    let mut target = Target::new(adapter);
     let change = (scenario == "dma-change").then(|| payload.begin().unwrap());
     let freeze = change
         .as_ref()
         .map(|change| crate::cell::Freeze::new(change.clone()));
-    let binding = registry
-        .with_space(owner.as_ref().unwrap(), domain, |space| {
-            let id = if let Some(change) = &change {
-                assert!(unsafe { space.register_during(&payload, IOVA, true, None) }.is_err());
-                unsafe { space.register_during(&payload, IOVA, true, Some(change)) }?
-            } else {
-                unsafe { space.register_during(&payload, IOVA, scenario != "readonly", None) }?
-            };
-            space.publish(id)?;
-            Ok(id)
-        })
-        .unwrap();
+    if let Some(change) = &change {
+        assert!(target.prepare(&payload, IOVA, true, None).is_err());
+        target.prepare(&payload, IOVA, true, Some(change)).unwrap();
+    } else {
+        target
+            .prepare(&payload, IOVA, scenario != "readonly", None)
+            .unwrap();
+    }
+    target.publish().unwrap();
     drop(freeze);
     drop(change);
     assert_eq!(Arc::strong_count(&payload), 2); // exactly one data obligation
@@ -131,10 +108,7 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
     if scenario != "activation-exit" {
         let mut active = false;
         for _ in 0..1_000_000 {
-            if registry
-                .with_space(owner.as_ref().unwrap(), domain, |s| s.ready(binding))
-                .unwrap()
-            {
+            if target.ready().unwrap() {
                 active = true;
                 break;
             }
@@ -144,24 +118,13 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
         outsider.enable(2);
         if scenario == "readonly" {
             edu.transfer(IOVA, true);
-            registry
-                .with_space(owner.as_ref().unwrap(), domain, |s| {
-                    fault(s, 8, 15, IOVA);
-                    Ok(())
-                })
-                .unwrap();
+            fault(&mut target, 8, 15, IOVA);
             check(bytes, 0x5a);
         }
         edu.transfer(IOVA, false);
-        registry
-            .with_space(owner.as_ref().unwrap(), domain, |s| {
-                assert!(s.fault()?.is_none(), "read translation failed");
-                Ok(())
-            })
-            .unwrap();
+        assert!(target.fault().unwrap().is_none(), "read translation failed");
         if scenario == "dma-abandon" {
-            drop(registry);
-            drop(owner);
+            drop(target);
             assert_eq!(RETURNS.load(Ordering::SeqCst), 0);
             assert!(POOL.cell().is_none());
             let _ = writeln!(Uart, "PASS iommu-dma abandoned=8 returns=0");
@@ -169,29 +132,24 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
         }
         unsafe { bytes.write_bytes(0xa5, 64) };
         edu.transfer(IOVA, true);
-        registry
-            .with_space(owner.as_ref().unwrap(), domain, |s| {
-                if scenario == "readonly" {
-                    // A cached RO denial need not produce another FQ record in QEMU.
-                    for _ in 0..128 {
-                        let Some(f) = s.fault()? else {
-                            break;
-                        };
-                        assert_eq!((f.device, f.cause, f.transaction), (8, 15, 3));
-                        assert!((IOVA as u64..IOVA as u64 + 64).contains(&f.address));
-                    }
-                    check(bytes, 0xa5);
-                } else {
-                    assert!(s.fault()?.is_none());
-                    check(bytes, 0x5a);
-                }
-                outsider.transfer(IOVA, true);
-                fault(s, 16, 258, IOVA);
-                edu.transfer(pa, true);
-                fault(s, 8, 15, pa);
-                Ok(())
-            })
-            .unwrap();
+        if scenario == "readonly" {
+            // A cached RO denial need not produce another FQ record in QEMU.
+            for _ in 0..128 {
+                let Some(f) = target.fault().unwrap() else {
+                    break;
+                };
+                assert_eq!((f.device, f.cause, f.transaction), (8, 15, 3));
+                assert!((IOVA as u64..IOVA as u64 + 64).contains(&f.address));
+            }
+            check(bytes, 0xa5);
+        } else {
+            assert!(target.fault().unwrap().is_none());
+            check(bytes, 0x5a);
+        }
+        outsider.transfer(IOVA, true);
+        fault(&mut target, 16, 258, IOVA);
+        edu.transfer(pa, true);
+        fault(&mut target, 8, 15, pa);
     }
     let exiting = matches!(scenario, "owner-exit" | "activation-exit");
     if exiting {
@@ -199,24 +157,14 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
             edu.start(IOVA, true); // delayed DMA; requester disappears before it finishes
             assert_ne!(edu.read(0x98) & 1, 0, "DMA was not pending at exit");
         }
-        drop(owner.take()); // no hardware work and no transfer of records
-    } else {
-        registry
-            .with_space(owner.as_ref().unwrap(), domain, |s| s.revoke(binding))
-            .unwrap();
+        // Low-level fixture closes a target after delayed DMA; real Task death
+        // is covered separately by the Cell io-exit guest through the Kernel.
     }
+    target.revoke().unwrap();
     assert_eq!(RETURNS.load(Ordering::SeqCst), 0);
     assert!(POOL.cell().is_none());
     for _ in 0..1_000_000 {
-        if exiting {
-            registry.step(1);
-        } else {
-            assert!(
-                !registry
-                    .with_space(owner.as_ref().unwrap(), domain, |s| s.poll(binding))
-                    .unwrap()
-            );
-        }
+        assert!(!target.advance_close().unwrap());
         if RETURNS.load(Ordering::SeqCst) == 3 {
             break;
         }
@@ -226,33 +174,17 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
     assert!(POOL.cell().is_none());
     // Many more complete queue observations cannot replace platform evidence.
     for _ in 0..32 {
-        if exiting {
-            registry.step(1);
-        } else {
-            assert!(
-                !registry
-                    .with_space(owner.as_ref().unwrap(), domain, |s| s.poll(binding))
-                    .unwrap()
-            );
-        }
+        assert!(!target.advance_close().unwrap());
     }
-    assert_eq!(registry.pending(), 1);
+    assert!(!target.settled());
     assert_eq!(RETURNS.load(Ordering::SeqCst), 3);
     allow.store(true, Ordering::Release);
-    if let Some(owner) = owner.take() {
-        drop(owner);
-    }
     for _ in 0..1_000_000 {
-        registry.step(1);
-        if registry.pending() == 0 {
+        if target.advance_close().unwrap() {
             break;
         }
     }
-    assert_eq!(registry.pending(), 0);
-    assert_eq!(
-        registry.error(domain),
-        Err(crate::iommu::Error::UnknownDomain)
-    );
+    assert!(target.settled());
     assert_eq!(RETURNS.load(Ordering::SeqCst), 8);
     let reused = POOL.cell().unwrap();
     assert_eq!(reused.physical_address(), pa);

@@ -74,7 +74,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
                 // A comparator update can take time to clear a pending STIP.
                 return resume(frame as *mut TrapContext);
             }
-            crate::basis::cell::projection::maintain();
+            crate::basis::nest::authority::external::maintain();
             interrupt::enable_external();
             redeem();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
@@ -108,8 +108,8 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
             }
         }
         TrapEvent::External => {
-            if interrupt::external().is_some_and(|route| route.handle()) {
-                crate::basis::cell::projection::maintain();
+            if crate::basis::room::interrupt::external().is_some_and(|route| route.handle()) {
+                crate::basis::nest::authority::external::maintain();
             } else if crate::basis::room::interrupt::deliver_external(false) {
                 interrupt::disable_external();
             }

@@ -11,6 +11,16 @@ impl Scope {
     }
 }
 
+/// Exact software address-domain instance, attempt, hardware identity and coverage.
+/// The full address space is the minimum CPU scope; global leaves require Global.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Request<I> {
+    pub(crate) domain: usize,
+    pub(crate) attempt: u64,
+    pub(crate) identifier: I,
+    pub(crate) scope: Scope,
+}
+
 /// # Safety
 /// Success must cover local and remote CPUs that may still use the old
 /// translations. Order the page-table edits and CPU address-space leases
@@ -28,9 +38,9 @@ pub(crate) struct Completed<T> {
     target: T,
 }
 
-impl<T> Completed<T> {
-    pub(crate) fn target(self) -> T {
-        self.target
+impl<T: PartialEq> Completed<T> {
+    pub(crate) fn confirms(self, expected: T) -> bool {
+        self.target == expected
     }
 }
 

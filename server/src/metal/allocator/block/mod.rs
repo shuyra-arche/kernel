@@ -43,7 +43,7 @@ impl BlockAllocator {
     pub fn new() -> Result<Self, InitError> {
         let nodes = crate::metal::hart::hart_count();
         assert!(nodes > 0, "block init: no harts");
-        let m = crate::metal::board::info().memory.allocation_bounds();
+        let m = crate::entry::boot::facts::info().memory.allocation_bounds();
 
         let tally = {
             let meta_len = m.size.div_ceil(PAGE_SIZE);

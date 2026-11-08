@@ -58,7 +58,7 @@ impl TrapContext {
         self.trap_handler = template.trap_handler;
         self.trap_stack_corrupt = template.trap_stack_corrupt;
         self.user_pa = pa;
-        self.user_satp = crate::metal::mmu::riscv::encode_root(root);
+        self.user_satp = crate::metal::mmu::encode_root(root);
         self.self_va = self_va;
         self.sepc = entry;
         self.gpr.set_x(Gprs::SP, stack_top.as_usize());

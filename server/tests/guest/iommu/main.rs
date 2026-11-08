@@ -8,19 +8,13 @@ extern crate alloc;
 #[path = "../../../src/basis/cell/page/mod.rs"]
 mod cell;
 mod dma;
-mod edu;
+use kernel_hardware_fixture::{Edu, Uart, finish};
 #[allow(dead_code)]
 #[path = "../../support/iommu/mod.rs"]
 pub(crate) mod iommu;
-#[path = "../../../src/metal/iommu/riscv/mmio.rs"]
+#[path = "../../../src/metal/riscv/iommu/mmio.rs"]
 mod mmio;
-#[allow(dead_code)] // This M-mode fixture uses only ordinary authority admission.
-#[path = "../../../src/entry/boot/devices/plan/mod.rs"]
-mod plan;
 mod pool;
-
-#[path = "../../../src/basis/cell/projection/admission.rs"]
-pub(crate) mod admission;
 
 // This hardware-only harness needs serial identities, not registration tables.
 #[path = "../../../src/basis/name/serial.rs"]
@@ -29,56 +23,35 @@ mod name {
     pub(crate) use crate::serial::Serial;
 }
 
+#[allow(dead_code)]
+#[path = "../../../src/basis/nest/translation/external/state.rs"]
+pub(crate) mod external;
+#[allow(dead_code)]
+#[path = "../../../src/basis/nest/memo/publication/receipt.rs"]
+pub(crate) mod publication;
+#[allow(dead_code)]
+#[path = "../../support/iommu/target.rs"]
+pub(crate) mod target;
+
 mod basis {
     pub(crate) use crate::name;
+    pub(crate) mod nest {
+        pub(crate) use crate::iommu::Error as PublicationError;
+        pub(crate) mod memo {
+            pub(crate) use crate::publication;
+        }
+    }
     pub(crate) mod cell {
         pub(crate) use crate::cell as page;
-        pub(crate) mod projection {
-            pub(crate) use crate::admission;
-        }
     }
 }
 
-use ::core::fmt;
 use ::core::fmt::Write;
 use ::core::sync::atomic::Ordering;
-use iommu::riscv::Engine;
-use iommu::riscv::Phase;
+use iommu::Engine;
+use iommu::Phase;
 use pool::POOL;
 use pool::RETURNS;
-
-::core::arch::global_asm!(
-    ".section .text.entry",
-    ".global _start",
-    "_start:",
-    "csrw mie, zero",
-    ".option push",
-    ".option norelax",
-    "la gp, __global_pointer$",
-    ".option pop",
-    "la sp, _stack_top",
-    "la t0, trap",
-    "csrw mtvec, t0",
-    "mv a0, a1",
-    "tail guest",
-);
-
-struct Uart;
-impl Write for Uart {
-    fn write_str(&mut self, value: &str) -> fmt::Result {
-        for byte in value.bytes() {
-            unsafe { (0x1000_0000 as *mut u8).write_volatile(byte) };
-        }
-        Ok(())
-    }
-}
-
-fn finish(pass: bool) -> ! {
-    unsafe { (0x10_0000 as *mut u32).write_volatile(if pass { 0x5555 } else { 0x13333 }) };
-    loop {
-        unsafe { ::core::arch::asm!("wfi") }
-    }
-}
 
 #[unsafe(no_mangle)]
 extern "C" fn trap() -> ! {
@@ -104,30 +77,19 @@ fn allocation(_: ::core::alloc::Layout) -> ! {
 
 #[unsafe(no_mangle)]
 extern "C" fn guest(dtb: usize) -> ! {
-    let fdt = unsafe { fdt::Fdt::from_ptr(dtb as *const u8) }.expect("DTB");
-    let controller = fdt
-        .all_nodes()
-        .find(|node| {
-            node.compatible()
-                .is_some_and(|c| c.all().any(|s| s == "riscv,iommu"))
-        })
-        .expect("IOMMU missing");
-    let region = controller.reg().unwrap().next().unwrap();
-    assert_eq!(region.size, Some(4096));
-    let base = region.starting_address.addr();
+    let environment = unsafe { kernel_hardware_fixture::discover(dtb) };
+    let base = environment.controller;
     if matches!(
-        fdt.chosen().bootargs(),
-        Some(
-            "dma"
-                | "dma-change"
-                | "readonly"
-                | "dma-abandon"
-                | "owner-exit"
-                | "activation-exit"
-                | "route-reject"
-        )
+        environment.scenario,
+        "dma"
+            | "dma-change"
+            | "readonly"
+            | "dma-abandon"
+            | "owner-exit"
+            | "activation-exit"
+            | "route-reject"
     ) {
-        dma::run(base, fdt.chosen().bootargs().unwrap(), &fdt);
+        dma::run(base, environment.scenario, environment.requester);
     }
     let _ = writeln!(Uart, "BEGIN iommu-command-engine base={base:#x}");
     let cells = [
@@ -142,7 +104,7 @@ extern "C" fn guest(dtb: usize) -> ! {
     let mut engine = Engine::new(unsafe { mmio::Mmio::new(base, base) }, cells).unwrap();
     progress(&mut engine, Phase::Ready);
     assert!(POOL.cell().is_none());
-    if fdt.chosen().bootargs() == Some("abandon") {
+    if environment.scenario == "abandon" {
         let _batch = engine.invalidate().unwrap();
         drop(engine);
         assert_eq!(RETURNS.load(Ordering::SeqCst), 0);
@@ -191,13 +153,9 @@ fn progress(engine: &mut Engine<mmio::Mmio>, target: Phase) {
     panic!("engine deadline: {:?}", engine.phase());
 }
 
-#[allow(dead_code)]
-#[path = "../../../src/metal/board/tree/mod.rs"]
-pub(crate) mod description;
 mod metal {
     pub(crate) mod generic {
         pub(crate) use crate::iommu::contract as iommu;
     }
-    pub(crate) mod board { pub(crate) use crate::description as tree; }
     pub(crate) use crate::iommu;
 }

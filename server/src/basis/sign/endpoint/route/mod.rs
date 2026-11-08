@@ -47,7 +47,9 @@ impl Route {
                 token,
                 mapping,
                 fault,
-            } => match crate::basis::cell::projection::event(actor, *token, *mapping, *fault) {
+            } => match crate::basis::nest::authority::external::event(
+                actor, *token, *mapping, *fault,
+            ) {
                 Ok((_, Some(true))) => Some(None),
                 Ok((_, Some(false))) => Some(Some(SignEventFail::Busy)),
                 Ok(_) => None,

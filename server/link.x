@@ -3,7 +3,8 @@ ENTRY(_start)
 
 SECTIONS
 {
-  . = 0x80200000;
+  ASSERT(DEFINED(KERNEL_LOAD_ADDRESS), "image must provide KERNEL_LOAD_ADDRESS")
+  . = KERNEL_LOAD_ADDRESS;
 
   _kernel_base = .;
 

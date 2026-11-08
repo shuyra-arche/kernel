@@ -76,7 +76,7 @@ pub(crate) fn member_dying(task: &Task, reason: usize) {
     let mut node = Some(&*task.ident.team.node);
     while let Some(team) = node {
         if team.exit.trip() {
-            crate::entry::report::halt::protected_stop(reason);
+            crate::metal::stop::protected_stop(reason);
         }
         node = team.parent.as_deref();
     }

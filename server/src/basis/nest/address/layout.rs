@@ -2,7 +2,14 @@
 
 use alloc::vec::Vec;
 
-use super::AddressError;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AddressError {
+    OutOfMemory,
+    NotAligned,
+    NoRegion,
+    Occupied,
+}
+
 use super::occupancy::Occupancy;
 use super::placement::{Placement, PlacementAt};
 

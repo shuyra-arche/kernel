@@ -1,8 +1,8 @@
 //! Per-Hart discovery precedes online publication. Never probe V on an
 //! undeclared CPU; a missing/unsupported profile cannot receive a vector Task.
 use super::{Capability, Shape};
+use crate::entry::boot::facts;
 use crate::metal::{
-    board,
     hart::{self, HartId},
     layout::MAX_HART_SLOTS,
     sync::OnceLock,
@@ -12,7 +12,7 @@ static PROFILES: [OnceLock<Capability>; MAX_HART_SLOTS] =
 
 pub(crate) fn initialize() {
     let me = hart::hart_id();
-    let facts = &board::info().hart;
+    let facts = &facts::info().hart;
     let vector = if facts.vector(me) {
         // The firmware declaration grants permission to execute V 1.0 probes.
         // VLEN is read from hardware; vsetvl establishes the supported SEWs.

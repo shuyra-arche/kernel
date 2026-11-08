@@ -1,6 +1,6 @@
-use crate::basis::nest::Mapping;
 use crate::basis::nest::Nest;
 use crate::basis::nest::Reservation;
+use crate::basis::nest::Span;
 use alloc::sync::Arc;
 
 use kernel_api::model::identity::TaskId;
@@ -22,8 +22,8 @@ pub(crate) fn next_id() -> Result<TaskId, NestError> {
 /// `TaskBuilder::prepare` 按申请—映射—回滚的次序装配。
 pub(crate) struct TaskMemory {
     pub(crate) nest: Arc<Nest>,
-    pub(crate) stack: Option<Arc<Mapping>>,
-    pub(crate) frame: Option<Arc<Mapping>>,
+    pub(crate) stack: Option<Arc<Span>>,
+    pub(crate) frame: Option<Arc<Span>>,
     pub(crate) guard: Option<Reservation>,
 }
 

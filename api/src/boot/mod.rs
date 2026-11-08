@@ -5,3 +5,5 @@ pub mod args;
 pub mod capsule;
 pub mod initrd;
 pub mod ledger;
+
+pub mod platform;

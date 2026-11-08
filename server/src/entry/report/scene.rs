@@ -1,4 +1,4 @@
-use crate::metal::mmu::riscv::Address;
+use crate::metal::mmu::Address;
 use ::core::arch::asm;
 
 use alloc::format;
@@ -84,7 +84,7 @@ pub struct Scene {
 
 impl Scene {
     fn capture_kernel() -> Option<Scene> {
-        let (sp, fp) = match crate::entry::report::halt::scene() {
+        let (sp, fp) = match crate::metal::stop::scene() {
             (0, 0) => {
                 let (sp, fp): (usize, usize);
                 unsafe {

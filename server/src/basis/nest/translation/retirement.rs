@@ -4,21 +4,23 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use super::{Invalidation, tickets::Tickets};
-use crate::metal::generic::mmu::fence::{Completed, Scope};
+use crate::metal::generic::mmu::fence::{Completed, Request, Scope};
 use crate::metal::mmu::Table;
 
-use super::super::{Asid, Mapping};
-use crate::basis::nest::mapping::publication::Publication;
+use super::super::{Asid, Span};
+use crate::basis::nest::memo::publication::Publication;
 
 /// PTE edits and their obligations stay together until the covering fence completes.
 /// Address tickets become claimable in the same transition as the covering fence.
 pub(in crate::basis::nest) struct Retirement {
     invalidation: Invalidation,
     scope: Scope,
+    sequence: crate::basis::name::Generation,
+    pending: Option<Request<Asid>>,
     pub(in crate::basis::nest) tickets: Tickets,
     pub(in crate::basis::nest) tables: Vec<Table>,
     pub(in crate::basis::nest) cells: Vec<Publication>,
-    pub(in crate::basis::nest) mappings: Vec<Arc<Mapping>>,
+    pub(in crate::basis::nest) mappings: Vec<Arc<Span>>,
 }
 
 impl Retirement {
@@ -26,6 +28,8 @@ impl Retirement {
         Self {
             invalidation: Invalidation::Clean,
             scope: Scope::AddressSpace,
+            sequence: crate::basis::name::Generation::first(),
+            pending: None,
             tickets: Tickets::new(),
             tables: Vec::new(),
             cells: Vec::new(),
@@ -47,16 +51,25 @@ impl Retirement {
     }
 
     /// Select the covering fence before releasing the Nest lock to run it.
-    pub(in crate::basis::nest) fn begin(&mut self, asid: Asid) -> Asid {
+    pub(in crate::basis::nest) fn begin(
+        &mut self,
+        domain: usize,
+        asid: Asid,
+    ) -> Result<Request<Asid>, super::super::NestError> {
+        let next = self
+            .sequence
+            .next()
+            .ok_or(super::super::NestError::OutOfMemory)?;
+        let request = Request {
+            domain,
+            attempt: next.get(),
+            identifier: asid,
+            scope: self.scope,
+        };
+        self.sequence = next;
+        self.pending = Some(request);
         self.invalidation = self.invalidation.begin();
-        self.target(asid)
-    }
-
-    fn target(&self, asid: Asid) -> Asid {
-        match self.scope {
-            Scope::AddressSpace => asid,
-            Scope::Global => Asid::kernel(),
-        }
+        Ok(request)
     }
 
     /// Keep all obligations available for the retry.
@@ -67,24 +80,29 @@ impl Retirement {
     /// Acknowledge publications while holding the Nest lock.
     pub(in crate::basis::nest) fn complete(
         &mut self,
-        asid: Asid,
-        proof: Completed<Asid>,
-    ) -> Fenced {
-        assert!(self.invalidation.is_fencing());
-        assert_eq!(proof.target(), self.target(asid));
+        proof: Completed<Request<Asid>>,
+        memos: &mut super::super::memo::Memos,
+    ) -> Result<Fenced, super::super::NestError> {
+        if !self.invalidation.is_fencing()
+            || self
+                .pending
+                .is_none_or(|expected| !proof.confirms(expected))
+        {
+            self.fail();
+            return Err(super::super::NestError::Shootdown);
+        }
+        self.pending = None;
         for mapping in &self.mappings {
-            for (_, publication) in &mut mapping.state.lock().published {
-                publication.complete();
-            }
+            memos.complete(mapping);
         }
         self.tickets.settle();
         self.invalidation = self.invalidation.complete();
         self.scope = Scope::AddressSpace;
-        Fenced {
+        Ok(Fenced {
             tables: core::mem::take(&mut self.tables),
             cells: core::mem::take(&mut self.cells),
             mappings: core::mem::take(&mut self.mappings),
-        }
+        })
     }
 }
 
@@ -92,11 +110,11 @@ impl Retirement {
 pub(in crate::basis::nest) struct Fenced {
     tables: Vec<Table>,
     cells: Vec<Publication>,
-    mappings: Vec<Arc<Mapping>>,
+    mappings: Vec<Arc<Span>>,
 }
 
 impl Fenced {
-    pub(in crate::basis::nest) fn release(self) {
+    pub(in crate::basis::nest) fn release(self, nest: &super::super::Nest) {
         drop(self.tables);
         for retained in self.cells {
             // SAFETY: Retirement constructed this batch only after the fence
@@ -104,10 +122,13 @@ impl Fenced {
             unsafe { retained.settle() };
         }
         for mapping in &self.mappings {
-            mapping
-                .state
-                .lock()
-                .settle_deleted_memos(mapping.initial_start().get());
+            loop {
+                let memo = nest.state.lock().memos.take_deleted(mapping);
+                if memo.is_none() {
+                    break;
+                }
+                drop(memo);
+            }
         }
         drop(self.mappings);
     }

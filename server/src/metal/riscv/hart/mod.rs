@@ -1,7 +1,6 @@
-mod id;
 mod per_hart;
 
-pub use id::{FirmwareId, HartId};
+pub use kernel_api::boot::platform::{FirmwareId, HartId};
 pub use per_hart::PerHart;
 pub(crate) use per_hart::lease_load;
 pub(crate) use per_hart::lease_store;
@@ -13,7 +12,7 @@ pub use per_hart::set_scheduler;
 use ::core::sync::atomic::AtomicUsize;
 use ::core::sync::atomic::Ordering;
 
-use crate::metal::board;
+use crate::entry::boot::facts;
 use crate::metal::layout::MAX_HART_SLOTS;
 use kernel_api::address::VirtAddr;
 
@@ -32,10 +31,10 @@ pub(crate) fn online(hart: HartId) -> bool {
 }
 
 pub fn hart_count() -> usize {
-    let n = board::info().hart.count;
+    let n = facts::info().hart.count();
     assert!(
         n <= MAX_HART_SLOTS,
-        "DTB reports {n} harts, at most {MAX_HART_SLOTS} VA slots"
+        "platform reports {n} harts, at most {MAX_HART_SLOTS} VA slots"
     );
     n
 }
@@ -83,7 +82,7 @@ pub fn hart_frame() -> VirtAddr {
     VirtAddr::wrap(f)
 }
 
-/// Current hardware identity is available even before board facts are installed.
+/// Current hardware identity is available even before boot facts are admitted.
 #[inline]
 pub fn firmware_id() -> FirmwareId {
     let id: usize;
@@ -94,5 +93,5 @@ pub fn firmware_id() -> FirmwareId {
 }
 
 pub fn firmware(slot: HartId) -> FirmwareId {
-    board::info().hart.firmware(slot)
+    facts::info().hart.firmware(slot)
 }

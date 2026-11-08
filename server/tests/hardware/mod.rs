@@ -197,9 +197,6 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str) -> Output {
 mod image;
 mod kernel;
 
-mod memory;
-
-mod harts;
-
-mod clock;
 mod context;
+
+use kernel_hardware_fixture::host::{clock, harts, memory};

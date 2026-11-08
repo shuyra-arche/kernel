@@ -4,12 +4,12 @@ use alloc::sync::Arc;
 use crate::basis::nest::NestError;
 use kernel_api::address::VirtAddr;
 
-use super::super::mapping::ActiveRange;
-use super::super::mapping::Mapping;
+use super::super::ActiveRange;
+use super::super::Span;
 
 /// 关系索引节点：以关系最小区间起点为键的 AVL 节点，缓存高度与最大终点。
 pub(crate) struct IndexNode {
-    pub(super) mapping: Arc<Mapping>,
+    pub(super) mapping: Arc<Span>,
     pub(super) left: Option<Box<IndexNode>>,
     pub(super) right: Option<Box<IndexNode>>,
     pub(super) start: VirtAddr,
@@ -19,14 +19,14 @@ pub(crate) struct IndexNode {
 
 impl IndexNode {
     /// 以关系当前区间建节点。
-    pub(crate) fn new(mapping: Arc<Mapping>) -> Result<Self, NestError> {
+    pub(crate) fn new(mapping: Arc<Span>) -> Result<Self, NestError> {
         let (start, max_end) = Self::span(&mapping.state.lock().active)?;
         Ok(Self::cached(mapping, start, max_end))
     }
 
     /// 以给定区间建节点。
     pub(crate) fn with_ranges(
-        mapping: Arc<Mapping>,
+        mapping: Arc<Span>,
         active: &[ActiveRange],
     ) -> Result<Self, NestError> {
         let (start, max_end) = Self::span(active)?;
@@ -48,7 +48,7 @@ impl IndexNode {
         Ok((start, max_end))
     }
 
-    fn cached(mapping: Arc<Mapping>, start: VirtAddr, max_end: usize) -> Self {
+    fn cached(mapping: Arc<Span>, start: VirtAddr, max_end: usize) -> Self {
         Self {
             mapping,
             left: None,

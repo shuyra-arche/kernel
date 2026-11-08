@@ -1,4 +1,4 @@
-#[path = "../../src/metal/clock/timer/local.rs"]
+#[path = "../../src/metal/riscv/clock/timer/local.rs"]
 mod local;
 
 use crate::metal::generic::clock::{Comparator, Compare};

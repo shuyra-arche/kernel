@@ -56,15 +56,15 @@ impl Nest {
         let inner = mapping.state.lock();
         let range = inner.range_at(at).ok_or(NestError::NoRegion)?;
         let page = address.page_align();
-        let (physical, flags) = state.root.walk_ref_geometry(page, self.geometry)?;
+        let (physical, flags) = state.root.cpu()?.walk_ref_geometry(page, self.geometry())?;
         if !range.current.contains(Access::READ)
             || !flags.contains(Attributes::READ)
             || flags.contains(Attributes::GLOBAL)
-            || (!self.kind.is_supervisor() && !flags.contains(Attributes::USER))
+            || (!self.kind().is_supervisor() && !flags.contains(Attributes::USER))
         {
             return Err(NestError::NoRegion);
         }
-        // Nest and Mapping guards keep this resident cell mapped during the read.
+        // Nest and Span guards keep this resident cell mapped during the read.
         let ptr = (physical.as_usize() + (at & (PAGE_SIZE - 1))) as *mut u32;
         Ok(unsafe { AtomicU32::from_ptr(ptr) }.load(Ordering::Relaxed))
     }
@@ -95,7 +95,10 @@ impl Nest {
         let Ok(state) = self.ready_state() else {
             return false;
         };
-        let user = !self.kind.is_supervisor();
+        let Ok(root) = state.root.cpu() else {
+            return false;
+        };
+        let user = !self.kind().is_supervisor();
         let mut offset = 0;
         while offset < size {
             let at = start.as_usize() + offset;
@@ -107,7 +110,7 @@ impl Nest {
                 return false;
             };
             let page = crate::metal::mmu::canonical(at & !(PAGE_SIZE - 1));
-            let Ok((_, hardware)) = state.root.walk_ref_geometry(page, self.geometry) else {
+            let Ok((_, hardware)) = root.walk_ref_geometry(page, self.geometry()) else {
                 return false;
             };
             if !range.current.contains(need)
@@ -133,9 +136,8 @@ impl Nest {
             };
             let _inner = mapping.state.lock();
             let page = crate::metal::mmu::canonical(at & !(PAGE_SIZE - 1));
-            let (physical, _) = state
-                .root
-                .walk_ref_geometry(page, self.geometry)
+            let (physical, _) = root
+                .walk_ref_geometry(page, self.geometry())
                 .expect("validated page table leaf");
             let within = at & (PAGE_SIZE - 1);
             let count = (PAGE_SIZE - within).min(size - offset);

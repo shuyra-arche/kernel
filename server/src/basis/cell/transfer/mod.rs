@@ -4,13 +4,13 @@ mod error;
 
 pub use error::TransferError;
 
-use crate::basis::nest::Mapping;
+use crate::basis::nest::Span;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
 
 use crate::basis::flat::FlatRange;
 use crate::basis::flat::transaction::Transaction;
-use crate::basis::nest::mapping::source;
+use crate::basis::nest::index::source;
 use kernel_api::address::PageIndex;
 use kernel_api::address::PageOffset;
 
@@ -26,7 +26,7 @@ pub struct TransferOutcome {
     /// 本次移交的成败。占槽前的早错也为 `Err`，那时 `affected` 为空。
     pub result: Result<(), TransferError>,
     /// 本次移交动过的活关系：压着源页或目标页的那些。占槽前失败时为空。
-    pub affected: Vec<Weak<Mapping>>,
+    pub affected: Vec<Weak<Span>>,
 }
 
 /// 一次移交：两端各自页号相对各自窗口，不是 Flat 绝对页号。

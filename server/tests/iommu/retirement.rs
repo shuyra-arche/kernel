@@ -1,235 +1,135 @@
-use super::cell::Page;
-use super::hardware::Call;
-use super::hardware::Scripted;
-use super::hardware::Trace;
-use super::iommu::BatchId;
-use super::iommu::Error;
-use super::iommu::HardwareError;
-use super::iommu::retirement::Registry;
-use super::support::Pool;
-use crate::admission::Admission;
-use crate::cell::Owner as PageOwner;
+//! Exercise bounded production progress independently from a Task's lifetime.
+use crate::cell::{Exposure, Owner, Page, RetainError};
+use crate::hardware::{Call, Scripted};
+use crate::iommu::{Error, HardwareError};
+use crate::publication::Phase;
+use crate::support::Pool;
+use crate::target::Target;
 use std::sync::Arc;
-use std::sync::Mutex;
-
-fn latest(trace: &Arc<Mutex<Trace>>) -> BatchId {
-    trace
-        .lock()
-        .unwrap()
-        .calls
-        .iter()
-        .rev()
-        .find_map(|call| {
-            if let Call::Fence(_, batch) = call {
-                Some(*batch)
-            } else {
-                None
-            }
-        })
-        .unwrap()
-}
 
 #[test]
-fn owner_exit_needs_no_record_transfer_and_failed_domain_does_not_block_another() {
-    let mut registry = Registry::new();
-    let owner = Admission::new().unwrap();
+fn one_failed_target_does_not_discharge_or_block_another() {
     let pools = [Pool::new(0), Pool::new(0)];
+    let mut targets = Vec::new();
     let mut traces = Vec::new();
-    let mut ids = Vec::new();
     for pool in pools {
         let (hardware, trace) = Scripted::new();
-        let domain = registry
-            .attach(&owner, hardware)
-            .map_err(|(e, _)| e)
-            .unwrap();
-        let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
-        registry
-            .with_space(&owner, domain, |space| {
-                let binding = unsafe { space.register_during(&cell, 0x400000, true, None) }?;
-                space.publish(binding)
-            })
-            .unwrap();
-        drop(cell);
-        ids.push(domain);
+        let mut target = Target::new(hardware);
+        let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+        target.prepare(&page, 4096, true, None).unwrap();
+        target.publish().unwrap();
+        drop(page); // no requester-owned Page reference remains
+        targets.push(target);
         traces.push(trace);
     }
-    assert_eq!(registry.step(0).visited, 0);
-    owner.close();
+    traces[0].lock().unwrap().fail_revoke = Some(HardwareError::Timeout);
     assert_eq!(
-        registry.with_space(&owner, ids[0], |_| Ok(())),
-        Err(Error::Closed)
+        targets[0].advance_close(),
+        Err(Error::Hardware(HardwareError::Timeout))
     );
-    std::thread::spawn(move || drop(owner)).join().unwrap();
-    assert_eq!(registry.pending(), 2);
-    assert!(traces.iter().all(|t| t.lock().unwrap().drops == 0));
-    // A one-entry budget visits both domains over successive ticks.
-    assert_eq!(registry.step(1).visited, 1);
-    assert_eq!(registry.step(1).visited, 1);
-    let old = latest(&traces[0]);
-    let second = latest(&traces[1]);
-    traces[0]
-        .lock()
-        .unwrap()
-        .completion
-        .push_back(Err(HardwareError::Timeout));
+    assert!(!targets[1].advance_close().unwrap());
+    let Some(Phase::Waiting(second)) = targets[1].phase() else {
+        panic!("batch")
+    };
     traces[1]
         .lock()
         .unwrap()
         .completion
         .push_back(Ok(Some(second)));
-    assert_eq!(registry.step(1).failed, 1);
-    assert_eq!(
-        registry.error(ids[0]),
-        Ok(Some(Error::Hardware(HardwareError::Timeout)))
-    );
-    assert_eq!(registry.step(1).reclaimed, 1);
+    assert!(targets[1].advance_close().unwrap());
+    assert!(targets[1].advance_close().unwrap());
     assert_eq!((pools[0].gives(), pools[1].gives()), (0, 1));
-    assert_eq!(registry.pending(), 1);
-    registry.step(1); // retry allocates a fresh revocation batch
-    let fresh = latest(&traces[0]);
-    assert_ne!(old, fresh);
+    assert!(!targets[0].advance_close().unwrap());
+    let Some(Phase::Waiting(first)) = targets[0].phase() else {
+        panic!("batch")
+    };
     traces[0]
         .lock()
         .unwrap()
         .completion
-        .push_back(Ok(Some(old)));
-    assert_eq!(registry.step(1).failed, 1);
-    assert_eq!(registry.error(ids[0]), Ok(Some(Error::WrongBatch)));
+        .push_back(Ok(Some(second)));
+    assert_eq!(targets[0].advance_close(), Err(Error::WrongBatch));
     assert_eq!(pools[0].gives(), 0);
     traces[0]
         .lock()
         .unwrap()
         .completion
-        .push_back(Ok(Some(fresh)));
-    assert_eq!(registry.step(4).reclaimed, 1);
-    assert_eq!(registry.pending(), 0);
+        .push_back(Ok(Some(first)));
+    assert!(targets[0].advance_close().unwrap());
+    drop(targets);
     assert!(pools.iter().all(|p| p.gives() == 1));
     assert!(traces.iter().all(|t| t.lock().unwrap().drops == 1));
 }
 
 #[test]
-fn owner_and_domain_identity_cannot_be_reused_as_authority() {
-    let mut registry = Registry::new();
-    let owner = Admission::new().unwrap();
-    let other = Admission::new().unwrap();
-    let (hardware, trace) = Scripted::new();
-    let id = registry
-        .attach(&owner, hardware)
-        .map_err(|(e, _)| e)
-        .unwrap();
-    assert_eq!(
-        registry.with_space(&other, id, |_| Ok(())),
-        Err(Error::UnknownDomain)
-    );
+fn close_cancels_preparation_and_rejects_new_publication() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
-    registry
-        .with_space(&owner, id, |space| unsafe {
-            space.register_during(&cell, 0x400000, false, None)
-        })
-        .unwrap();
-    drop(cell);
-    owner.close();
-    registry.step(1);
-    assert_eq!(registry.pending(), 0);
+    let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let (hardware, trace) = Scripted::new();
+    let mut target = Target::new(hardware);
+    target.prepare(&page, 4096, true, None).unwrap();
+    assert!(target.advance_close().unwrap());
+    assert_eq!(target.publish(), Err(Error::Closed));
+    assert_eq!(target.prepare(&page, 8192, true, None), Err(Error::Closed));
+    assert!(target.advance_close().unwrap());
+    assert!(trace.lock().unwrap().calls.is_empty());
+    assert!(page.allows_return());
+    drop((target, page));
     assert_eq!(pool.gives(), 1);
-    assert!(trace.lock().unwrap().calls.is_empty()); // unpublished cancellation
-    let (hardware, _) = Scripted::new();
-    let (_, hardware) = registry
-        .attach(&owner, hardware)
-        .err()
-        .expect("closed owner");
-    let replacement = registry
-        .attach(&other, hardware)
-        .map_err(|(e, _)| e)
-        .unwrap();
-    assert_ne!(replacement, id);
-    assert_eq!(
-        registry.with_space(&other, id, |_| Ok(())),
-        Err(Error::UnknownDomain)
-    );
-    drop(other);
-    assert_eq!(registry.step(1).reclaimed, 1);
+    assert_eq!(trace.lock().unwrap().drops, 1);
 }
 
 #[test]
-fn publication_admitted_before_concurrent_exit_remains_in_kernel_custody() {
-    let mut registry = Registry::new();
-    let owner = Admission::new().unwrap();
-    let (hardware, trace) = Scripted::new();
-    let id = registry
-        .attach(&owner, hardware)
-        .map_err(|(e, _)| e)
-        .unwrap();
+fn lost_target_quarantines_published_payload_and_retains_backend_storage() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
-    let barrier = std::sync::Barrier::new(2);
-    std::thread::scope(|scope| {
-        scope.spawn(|| {
-            barrier.wait(); // operation has passed the registry admission check
-            owner.close();
-            barrier.wait();
-        });
-        registry
-            .with_space(&owner, id, |space| {
-                barrier.wait();
-                barrier.wait(); // exit precedes the actual hardware publication
-                let binding = unsafe { space.register_during(&cell, 0x400000, true, None) }?;
-                space.publish(binding)
-            })
-            .unwrap();
-    });
-    drop(cell);
+    let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let (hardware, trace) = Scripted::new();
+    let mut target = Target::new(hardware);
+    target.prepare(&page, 4096, false, None).unwrap();
+    target.publish().unwrap();
+    drop(target);
+    assert_eq!(page.exposure(), Exposure::External);
+    assert!(matches!(
+        page.prepare_external(false),
+        Err(RetainError::Quarantined)
+    ));
+    assert_eq!(trace.lock().unwrap().drops, 0);
+    drop(page);
     assert_eq!(pool.gives(), 0);
-    assert_eq!(
-        registry.with_space(&owner, id, |_| Ok(())),
-        Err(Error::Closed)
-    );
-    registry.step(1);
-    let batch = latest(&trace);
-    trace.lock().unwrap().completion.push_back(Ok(Some(batch)));
-    assert_eq!(registry.step(1).reclaimed, 1);
-    assert_eq!(pool.gives(), 1);
 }
 
 #[test]
-fn explicit_close_settles_only_its_receipt_without_requiring_owner_exit() {
-    let mut registry = Registry::new();
-    let owner = Admission::new().unwrap();
-    let (hardware, trace) = Scripted::new();
-    let id = registry
-        .attach(&owner, hardware)
-        .map_err(|(e, _)| e)
-        .unwrap();
-    let receipt = registry.completion(id).unwrap();
-    let (other_hardware, _) = Scripted::new();
-    let other = registry
-        .attach(&owner, other_hardware)
-        .map_err(|(e, _)| e)
-        .unwrap();
-    let other_receipt = registry.completion(other).unwrap();
+fn shutdown_failure_retains_backend_after_payload_is_already_safe() {
     let pool = Pool::new(0);
-    let cell = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
-    registry
-        .with_space(&owner, id, |space| {
-            let binding = unsafe { space.register_during(&cell, 0x400000, true, None) }?;
-            space.publish(binding)?;
-            space.close()
-        })
-        .unwrap();
-    drop(cell);
-    registry.step(4);
-    assert!(!receipt.settled());
-    assert_eq!(pool.gives(), 0);
-    let batch = latest(&trace);
+    let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let (hardware, trace) = Scripted::new();
+    let mut target = Target::new(hardware);
+    target.prepare(&page, 4096, true, None).unwrap();
+    target.publish().unwrap();
+    let batch = target.revoke().unwrap().unwrap();
+    trace
+        .lock()
+        .unwrap()
+        .shutdown
+        .push_back(Err(HardwareError::Timeout));
     trace.lock().unwrap().completion.push_back(Ok(Some(batch)));
-    assert_eq!(registry.step(4).reclaimed, 1);
-    assert!(receipt.settled());
-    assert!(!other_receipt.settled());
-    assert!(registry.completion(id).is_none());
+    assert_eq!(target.poll(), Err(Error::Hardware(HardwareError::Timeout)));
+    // Payload proof does not remove Memo's publication before backend shutdown.
+    assert_eq!(target.phase(), Some(Phase::Settled));
+    assert!(!target.settled());
+    drop(page);
     assert_eq!(pool.gives(), 1);
-    assert!(!owner.closed());
-    owner.close();
-    registry.step(4);
-    assert!(other_receipt.settled());
+    trace.lock().unwrap().shutdown.push_back(Ok(false));
+    assert!(!target.advance_close().unwrap());
+    assert_eq!(target.phase(), Some(Phase::Settled));
+    assert!(target.advance_close().unwrap());
+    assert_eq!(target.phase(), None);
+    drop(target);
+    assert_eq!(trace.lock().unwrap().drops, 1);
+    // All publication/withdrawal calls named exactly the same Page and address.
+    let trace = trace.lock().unwrap();
+    assert!(
+        matches!(trace.calls.as_slice(), [Call::Publish(p), Call::Revoke(r), Call::Fence(f, b), Call::Observe(seen)]
+        if p == r && r == f && p.iova.get() == 4096 && *b == batch && *seen == batch)
+    );
 }

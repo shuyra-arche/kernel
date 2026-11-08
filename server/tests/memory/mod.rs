@@ -28,6 +28,9 @@ mod name;
 
 mod basis {
     pub(crate) use crate::name;
+    pub(crate) mod nest {
+        pub(crate) use crate::external_error::Error as PublicationError;
+    }
     pub(crate) mod cell {
         pub(crate) use crate::cell as page;
         pub(crate) mod transfer {
@@ -42,7 +45,8 @@ mod retention;
 mod support;
 
 mod change;
-#[path = "../../src/basis/nest/mapping/publication/receipt.rs"]
+#[allow(dead_code)]
+#[path = "../../src/basis/nest/memo/publication/receipt.rs"]
 mod memo;
 
 #[allow(dead_code)]
@@ -53,3 +57,19 @@ mod transaction;
 #[allow(dead_code)]
 #[path = "../../src/basis/cell/transfer/error.rs"]
 mod transfer_error;
+
+#[allow(dead_code)]
+#[path = "../../src/metal/generic/iommu.rs"]
+mod contract;
+#[allow(dead_code)]
+#[path = "../../src/basis/nest/memo/publication/error.rs"]
+mod external_error;
+#[allow(dead_code)]
+#[path = "../../src/basis/nest/memo/publication/identity.rs"]
+mod external_identity;
+use external_error::Error;
+mod metal {
+    pub(crate) mod generic {
+        pub(crate) use crate::contract as iommu;
+    }
+}

@@ -9,11 +9,12 @@ use crate::metal::mmu::{Geometry, Table};
 #[cfg(debug_assertions)]
 use kernel_api::address::PAGE_SIZE;
 
-use super::Mapping;
 #[cfg(debug_assertions)]
 use super::Nest;
+use super::Span;
 
 mod node;
+pub(crate) mod source;
 
 pub(super) use node::IndexNode;
 
@@ -41,7 +42,7 @@ impl Index {
     }
 
     /// 按关系身份摘除节点；摘到才减计数。
-    pub(super) fn remove(&mut self, mapping: &Arc<Mapping>) -> bool {
+    pub(super) fn remove(&mut self, mapping: &Arc<Span>) -> bool {
         let (root, removed) = remove_mapping(self.root.take(), mapping);
         self.root = root;
         if removed {
@@ -51,22 +52,22 @@ impl Index {
     }
 
     /// 覆盖 `address` 的关系。
-    pub(super) fn find(&self, address: usize) -> Option<Arc<Mapping>> {
+    pub(super) fn find(&self, address: usize) -> Option<Arc<Span>> {
         find_mapping(self.root.as_deref(), address)
     }
 
     /// 与 [lo, hi] 相交的第一个关系。
-    pub(super) fn first_overlap(&self, lo: usize, hi: usize) -> Option<Arc<Mapping>> {
+    pub(super) fn first_overlap(&self, lo: usize, hi: usize) -> Option<Arc<Span>> {
         first_overlap(self.root.as_deref(), lo, hi)
     }
 
     /// 中序收集全部关系。
-    pub(super) fn collect(&self, mappings: &mut Vec<Arc<Mapping>>) {
+    pub(super) fn collect(&self, mappings: &mut Vec<Arc<Span>>) {
         collect_mappings(self.root.as_deref(), mappings)
     }
 
     /// 关系区间变化后重算其节点缓存。
-    pub(super) fn refresh(&mut self, mapping: &Arc<Mapping>) -> bool {
+    pub(super) fn refresh(&mut self, mapping: &Arc<Span>) -> bool {
         refresh(&mut self.root, mapping)
     }
 
@@ -85,8 +86,14 @@ impl Index {
 
     /// 索引内的关系与地址空间、硬件页表一致。
     #[cfg(debug_assertions)]
-    pub(super) fn audit_mappings(&self, nest: &Nest, root: &Table, geo: Geometry) {
-        audit_mappings(self.root.as_deref(), nest, root, geo);
+    pub(super) fn audit_mappings(
+        &self,
+        nest: &Nest,
+        root: &Table,
+        geo: Geometry,
+        memos: &super::memo::Memos,
+    ) {
+        audit_mappings(self.root.as_deref(), nest, root, geo, memos);
     }
 }
 
@@ -104,7 +111,7 @@ fn insert(root: Option<Box<IndexNode>>, node: Box<IndexNode>) -> Box<IndexNode> 
 /// 按关系身份摘除节点，返回 (新根, 是否摘到)。
 fn remove_mapping(
     root: Option<Box<IndexNode>>,
-    mapping: &Arc<Mapping>,
+    mapping: &Arc<Span>,
 ) -> (Option<Box<IndexNode>>, bool) {
     let Some(mut node) = root else {
         return (None, false);
@@ -127,7 +134,7 @@ fn remove_mapping(
 }
 
 /// 覆盖 `address` 的关系（先左子树，再看本节点，再右子树）。
-fn find_mapping(root: Option<&IndexNode>, address: usize) -> Option<Arc<Mapping>> {
+fn find_mapping(root: Option<&IndexNode>, address: usize) -> Option<Arc<Span>> {
     let node = root?;
     if node
         .left
@@ -147,7 +154,7 @@ fn find_mapping(root: Option<&IndexNode>, address: usize) -> Option<Arc<Mapping>
 }
 
 /// 与 [lo, hi] 相交的第一个关系。
-fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<Mapping>> {
+fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<Span>> {
     let node = root?;
     if node.max_end < lo {
         return None;
@@ -167,14 +174,14 @@ fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<M
     }
 }
 
-fn collect_mappings(node: Option<&IndexNode>, mappings: &mut Vec<Arc<Mapping>>) {
+fn collect_mappings(node: Option<&IndexNode>, mappings: &mut Vec<Arc<Span>>) {
     let Some(node) = node else { return };
     collect_mappings(node.left.as_deref(), mappings);
     mappings.push(node.mapping.clone());
     collect_mappings(node.right.as_deref(), mappings);
 }
 
-fn refresh(root: &mut Option<Box<IndexNode>>, mapping: &Arc<Mapping>) -> bool {
+fn refresh(root: &mut Option<Box<IndexNode>>, mapping: &Arc<Span>) -> bool {
     let Some(node) = root.as_deref_mut() else {
         return false;
     };
@@ -218,7 +225,7 @@ fn audit_index(
     assert_eq!(
         key,
         local.iter().map(|(start, _)| *start).min().unwrap(),
-        "AVL key differs from active Mapping range"
+        "AVL key differs from active Span range"
     );
     let local_end = local.iter().map(|(_, end)| *end).max().unwrap();
     let expected_height = 1 + left_height.max(right_height);
@@ -230,7 +237,7 @@ fn audit_index(
 }
 
 #[cfg(debug_assertions)]
-fn overlaps_other(node: &IndexNode, mapping: &Arc<Mapping>, lo: usize, hi: usize) -> bool {
+fn overlaps_other(node: &IndexNode, mapping: &Arc<Span>, lo: usize, hi: usize) -> bool {
     if node.max_end < lo {
         return false;
     }
@@ -252,9 +259,15 @@ fn overlaps_other(node: &IndexNode, mapping: &Arc<Mapping>, lo: usize, hi: usize
 }
 
 #[cfg(debug_assertions)]
-fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &Table, geo: Geometry) {
+fn audit_mappings(
+    node: Option<&IndexNode>,
+    nest: &Nest,
+    root: &Table,
+    geo: Geometry,
+    memos: &super::memo::Memos,
+) {
     let Some(node) = node else { return };
-    audit_mappings(node.left.as_deref(), nest, root, geo);
+    audit_mappings(node.left.as_deref(), nest, root, geo, memos);
     let mapping = &node.mapping;
     assert!(
         mapping
@@ -264,27 +277,23 @@ fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &Table, geo: Geom
                 Arc::as_ptr(&owner) as *const Nest,
                 nest as *const Nest
             )),
-        "indexed Mapping belongs to another Nest"
+        "indexed Span belongs to another Nest"
     );
     let state = mapping.state.lock();
     assert!(
-        !state.source.is_borrowed() || state.published.is_empty(),
-        "borrowed Mapping also holds published Cells"
-    );
-    assert!(
-        state.published.windows(2).all(|pair| pair[0].0 < pair[1].0),
-        "published Page indexes are not strictly ordered"
+        !state.source.is_borrowed() || memos.published(mapping).next().is_none(),
+        "borrowed Span also holds published Cells"
     );
     assert_eq!(
         state.source.page_count().checked_bytes(),
         Some(mapping.initial_size()),
-        "Mapping source extent differs from its initial range"
+        "Span source extent differs from its initial range"
     );
-    for (page, cell) in &state.published {
+    for (page, cell) in memos.published(mapping) {
         let address = mapping.initial_start() + page * PAGE_SIZE;
         assert!(
             state.covers(address.as_usize(), address.as_usize()),
-            "published Page lies outside live Mapping ranges"
+            "published Page lies outside live Span ranges"
         );
         let (physical, flags) = root
             .walk_ref_geometry(address, geo)
@@ -308,9 +317,9 @@ fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &Table, geo: Geom
         assert_eq!(
             (flags & mask).bits(),
             (expected & mask).bits(),
-            "published Page PTE modifiability differ from Mapping state"
+            "published Page PTE modifiability differ from Span state"
         );
     }
     drop(state);
-    audit_mappings(node.right.as_deref(), nest, root, geo);
+    audit_mappings(node.right.as_deref(), nest, root, geo, memos);
 }

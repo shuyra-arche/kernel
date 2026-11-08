@@ -160,8 +160,9 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: SignSource) -> Result<Route,
         SignSource::MappingRetired { token, mapping }
         | SignSource::MappingFault { token, mapping } => {
             let fault = matches!(source, SignSource::MappingFault { .. });
-            let (life, _) = crate::basis::cell::projection::event(actor, token, mapping, fault)
-                .map_err(|_| SignFail::Denied)?;
+            let (life, _) =
+                crate::basis::nest::authority::external::event(actor, token, mapping, fault)
+                    .map_err(|_| SignFail::Denied)?;
             keys.push((WakeKey::ExternalMapping { id: mapping.get() }, life));
             Watch::ExternalMapping {
                 token,

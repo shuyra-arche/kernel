@@ -4,6 +4,7 @@ links = "shuyra_kernel"
 version.workspace = true
 edition.workspace = true
 publish = false
+autobins = false
 
 [features]
 default = []
@@ -15,15 +16,7 @@ test = false
 bench = false
 doctest = false
 
-[[bin]]
-name = "shuyra"
-path = "src/main.rs"
-test = false
-bench = false
-doctest = false
-
 [dependencies]
-fdt = { version = "0.1.5", default-features = false }
 hashbrown = { version = "0.17.1", default-features = false, features = [
   "alloc",
   "default-hasher",

@@ -1,49 +1,25 @@
 use super::BootError;
+use super::ExternalRoute;
 use super::ResourceOperation;
-use super::{ExternalRoute, MapMmio};
 use crate::basis::room::interrupt;
-use crate::metal::board;
+use crate::entry::boot::facts;
 use crate::metal::clock;
 use crate::metal::console;
 use kernel_api::abi::call::pend::PendFail;
 
-pub fn init(dtp: usize) -> Result<(), BootError> {
-    initialize(dtp, None)
-}
-
-/// Prepare an external route using trusted code after Kernel MMIO and IOMMU setup.
-/// No route is published to Units until preparation and validation both succeed.
-///
+/// Initialize allocation and CPU translation from immutable admitted facts.
 /// # Safety
-/// The platform exclusively owns the requester, resource window and controller.
-/// All requests traverse the selected IOMMU without bypass, ATS/PRI or mutable
-/// routing. The provider satisfies Quiescence for every requester of this
-/// one-shot controller. It may enable the endpoint while DDTP is Off: Kernel
-/// never uses device business controls as a prerequisite for withdrawal.
-/// The supplied mapper may only be used for exclusively owned MMIO; mappings
-/// remain valid for the boot lifetime. Preparation failure must leave access
-/// blocked by the IOMMU and must not install an independently usable route.
-/// Physical hardware needs its own verified ordering/coherence contract.
-/// This is a trusted Rust boot interface, not a syscall or driver callback.
-pub unsafe fn init_with_external(
-    dtp: usize,
-    prepare: fn(usize, MapMmio) -> Result<ExternalRoute, PendFail>,
-) -> Result<(), BootError> {
-    initialize(dtp, Some(prepare))
-}
-
-fn initialize(
-    dtp: usize,
-    prepare: Option<fn(usize, MapMmio) -> Result<ExternalRoute, PendFail>>,
-) -> Result<(), BootError> {
+/// Descriptions reflect the actual machine. Firmware has granted exclusive
+/// ownership of free RAM and the executing image; referenced storage is immutable.
+pub unsafe fn init(platform: kernel_api::boot::platform::Platform) -> Result<(), BootError> {
     console::init();
-    board::init(dtp).map_err(|source| BootError::Machine { dtp, source })?;
-    crate::metal::mmu::riscv::mode::init().map_err(BootError::PagingMode)?;
+    facts::init(platform)?;
+    crate::metal::mmu::mode::init().map_err(BootError::PagingMode)?;
     console::_write(format_args!(
         "cpu: admitted={} boot={} paging={:?}\n",
-        board::info().hart.count,
+        facts::info().hart.count(),
         crate::metal::hart::firmware_id().get(),
-        crate::metal::mmu::riscv::mode::mode(),
+        crate::metal::mmu::mode::mode(),
     ));
     crate::metal::allocator::init().map_err(BootError::Allocator)?;
     // 锁序检测要在任何被验证的调用之前启用：分配器就绪即可建池，
@@ -56,26 +32,48 @@ fn initialize(
     }
     super::space::init().map_err(BootError::KernelSpace)?;
     clock::init().map_err(BootError::Clock)?;
-    super::devices::init_iommu().map_err(|source| BootError::Resources {
+    Ok(())
+}
+
+/// Configure protected controls before publishing any Unit authority.
+/// # Safety
+/// Descriptions reflect actual immutable routes and exclusive MMIO custody.
+/// Queue RAM and register accesses satisfy the selected backend's coherence and
+/// ordering contract. The caller excludes bypass, ATS/PRI and mutable routing.
+pub unsafe fn configure(
+    description: kernel_api::boot::platform::devices::Devices<'_>,
+) -> Result<(), BootError> {
+    super::devices::admit(description).map_err(|source| BootError::Resources {
+        operation: ResourceOperation::Devices,
+        source,
+    })?;
+    super::devices::init_iommu(description).map_err(|source| BootError::Resources {
         operation: ResourceOperation::InitializeIommu,
         source,
     })?;
-    if let Some(prepare) = prepare {
-        let route = prepare(dtp, super::devices::external::mapped).map_err(|source| {
-            BootError::Resources {
-                operation: ResourceOperation::Devices,
-                source,
-            }
-        })?;
-        super::devices::init_external(route).map_err(|source| BootError::Resources {
-            operation: ResourceOperation::Devices,
-            source,
-        })?;
-    }
     interrupt::init().map_err(|source| BootError::Resources {
         operation: ResourceOperation::InitializeTraps,
         source,
     })?;
     super::space::init_stacks().map_err(BootError::TrapStacks)?;
+    super::devices::configured();
     Ok(())
+}
+
+/// Bind an exclusively held resource to its admitted translation controller.
+/// # Safety
+/// The platform owns this source and the whole one-shot controller. All its
+/// requests traverse that controller without bypass/ATS/PRI. Quiescence covers
+/// every requester and retains the platform evidence for the entire binding.
+pub unsafe fn bind_external(route: ExternalRoute) -> Result<(), BootError> {
+    super::devices::init_external(route).map_err(|source| BootError::Resources {
+        operation: ResourceOperation::Devices,
+        source,
+    })
+}
+/// Map exclusively held MMIO for trusted platform preparation.
+/// # Safety
+/// Physical interval is MMIO owned by this image, never allocator-owned RAM.
+pub unsafe fn map_mmio(base: usize, size: usize) -> Result<usize, PendFail> {
+    super::devices::external::mapped(base, size)
 }

@@ -9,17 +9,17 @@ Shuyra's RV64 kernel, public contracts and typed call transport.
 | `api/` | One `kernel-api` package: semantic model, call ABI and boot contracts |
 | `client/` | Typed calls and RV64 trap transport |
 | `tools/abi-macros/` | Compile-time Kernel operation and ABI generation |
-| `server/` | Kernel implementation, build script and linker script |
+| `server/` | Kernel library and image-layout linker contract |
 | `server/src/basis/` | Memory and execution mechanisms, separate from Rust `core` |
 | `server/src/entry/` | Boot assembly of providers, normalized trap dispatch, calls and diagnostics |
 | `server/src/metal/` | Hardware mechanisms and the selected providers |
 | `server/src/metal/generic/` | Shared clock, interrupt, translation, platform ordering and trap contracts |
 | `server/src/metal/allocator/` | Allocation algorithms, platform facts and allocator instances |
 | `server/src/metal/riscv/` | RV64 boot handoffs, Hart state, traps and context switching |
-| `server/src/metal/clock/` | Counter state, per-Hart timers and the RV64 implementation |
-| `server/src/metal/interrupt/` | CPU-local interrupt operations, controller claims and installed routes |
-| `server/src/metal/mmu/` | CPU page tables, ASIDs and TLB synchronization |
-| `server/src/metal/iommu/` | Device translation, command queues and trusted completion |
+| `server/src/metal/riscv/clock/` | Counter state and per-Hart timers |
+| `server/src/metal/riscv/interrupt/` | CPU-local interrupt operations and controller claims |
+| `server/src/metal/riscv/mmu/` | CPU page tables, ASIDs and TLB synchronization |
+| `server/src/metal/riscv/iommu/` | Device translation, command queues and trusted completion |
 | `server/sbi/` | SBI calls used by the kernel |
 | `.github/workflows/` | Compilation checks and source version releases |
 
@@ -30,9 +30,9 @@ Platform denotes hardware porting; Kernel defines no Runtime/Execution layer. Cl
 boundary, not a configuration file.
 
 `basis` owns scheduling, authorization and retirement records. The local timer
-owns its confirmed comparator setting. CPU retirement accepts a covering fence
+owns its confirmed comparator setting. CPU retirement accepts an exact domain-instance, attempt and coverage fence
 receipt before settling Pages, tables and address tickets. External access
-uses the Kernel's I/O registry and a boot-selected port. IRQ delivery only
+uses authorized Nest roots and a boot-selected port. IRQ delivery only
 requests work, while the installed backend supplies retirement evidence.
 
 ## Model boundaries
@@ -45,7 +45,7 @@ The reconstruction is tracked in [#14](https://github.com/shuyra-arche/kernel/is
 | Cell | A range of Slots (Flat) or Memos (Nest), with position-based Page operations |
 | Page | Unique physical identity, ownership epoch and CPU and external access obligations |
 | Flat | Logical backing slots, residency and movement of existing Pages |
-| Nest / Mapping / Memo | CPU address relations and explicit per-position publication state |
+| Nest / Memo | Address organization and one authoritative per-position association/publication record |
 | View | Clone payload delivery or Share access to whole Cells |
 | Pend | Access authority, Modifiable and the explicit borrow tree |
 | Sign | Retained events, source observation, routing and waiting |
@@ -225,26 +225,37 @@ reads or writes.
 Cell Memo creation selects MappingTarget::Cpu(TeamId) or Io(PendId). The I/O
 Pend identifies a platform-bound MMIO View; a numeric address or ordinary RAM
 View cannot mint a route. Source Cells use the existing Pend borrow tree and
-Flat residency. The IOMMU backend retains translation and fence obligations. Inspect
+Flat residency. The IOMMU backend owns its hardware domain, page tables and command queues;
+Memo owns the payload publication obligation. Inspect
 returns mapping state and the first fault; Sign routes MappingRetired and
 MappingFault for that exact MappingId, rechecking target authority. Parent
 holders may observe while lending, but cannot use a suspended Pend to publish.
 
-Cell projection records join Pend obligations to trusted backend completion.
-They survive execution exit. Source or target revocation, explicit Retract and
-creator exit all close admission. A live I/O projection retains a routing obligation on its target Pend: ordinary BAR access remains
+The same Nest Memo owns the associated Page, generation, freeze, publication
+and fault for CPU and external targets. Address spans own only reservations and
+range policy; the ABI MappingId still names that reservation. External authority
+roots retain a Nest and its Pend borrowing until hardware settlement, independently
+of the creating Task. There is no separate Projection/IoSpace lifecycle. Source or target revocation, explicit Retract and
+creator exit all close admission. A live external Nest retains a routing obligation on its target Pend: ordinary resource access remains
 available, while reborrowing or narrowing waits for hardware settlement. Cells remain External
 until the matching trusted completion settles. Notifications run after commit
 and registry locks are released. An interrupt or business completion is never a
 reclamation receipt. Failed synchronization retains the obligation.
 
-Trusted boot images call `init_with_external` with a preparation function. Kernel
-initializes MMIO and IOMMU control first, then invokes trusted preparation with a
-boot-lifetime MMIO mapper. The image owns PCI configuration and supplies an
-`ExternalRoute` containing the immutable firmware route, a configured resource
-window, and a `Quiescence` implementation. Kernel resolves the requester through
-firmware topology and rejects overlapping RAM, ordinary grants and protected
-controls before publishing a Pend. The default boot image supplies no route.
+Trusted boot images supply `kernel_api::boot::platform::Platform`, call unsafe
+`boot::init`, then `boot::configure` with normalized physical authorities and
+controller routes. `Memory::new` and `Harts::new` admit bounded facts without an
+allocator; Kernel checks the executing image/ROOT reservation and current boot
+hart, page-overlap rules, control ownership, source limits and hardware capabilities.
+No Unit can call this Rust interface or manufacture a trusted completion provider.
+
+The integration owner resolves firmware topology and configures the endpoint.
+After protected controller setup it may call `boot::map_mmio` and
+`boot::bind_external(ExternalRoute { controller, requester, base, size, proof })`.
+An external resource must fit a withheld external window and must not expose RAM,
+ordinary grants or protected controls. `requester` is the normalized IOMMU device
+identity, not a PCI RID. `boot::start` rejects incomplete setup. Boot failure is
+terminal; it does not publish partial authorities or start secondary harts.
 
 Kernel never enables or disables PCI Bus Master, reads ECAM, sizes BARs, or uses
 a device stop register during retirement. Translation withdrawal closes memory
@@ -258,20 +269,28 @@ cannot be rebound after settlement. No ordinary Unit can install a proof provide
 See the `Quiescence` safety contract and its pinned IOMMU specification reference;
 IOFENCE PR/PW completion alone is not the platform proof.
 
-The coherent QEMU virt image and PCI regression tests live in
-[Vanllia tests/platform/qemu](https://github.com/shuyra-arche/vanllia/tree/main/tests/platform/qemu).
-The image leaves Bus Master enabled through retirement and supplies bounded
-Pending followed by the QEMU-specific ordering check. The hardware suite receives
-its manifest through `KERNEL_PLATFORM_MANIFEST`; use the matching Kernel provider
-revision. Kernel has no production dependency on Vanllia or a PCI implementation.
-The guest CI gate checks out a fixed external fixture revision and applies a
-temporary Cargo patch to this checkout's Kernel/API, updating only the fixture
-lockfile before the locked test run. This tests the candidate Kernel rather than
-silently running the fixture's previously pinned provider.
-This replaces the source-only `PciRoute` / `PciConfig` / `init_with_pci` boot
-interface; Cell ABI v1 is unchanged. Rebuild external images against the new
-provider. PCI topology parsing and the existing controller admission policy remain
-for the separate #79 architecture work.
+Production board parsing and the normal `shuyra` image live in
+[Vanllia platform/riscv](https://github.com/shuyra-arche/vanllia/tree/main/platform/riscv).
+DTB structure, RAM/ISA strings, PLIC wiring, PCI topology, virt compatibility and
+the load address all belong there. Kernel contains no Board or PCI implementation.
+`server/link.x` specifies image layout and requires the image to supply
+`KERNEL_LOAD_ADDRESS`; Server is a library and no longer provides a `shuyra` binary.
+
+The EDU image and PCI tests live in
+[Vanllia tests/platform/qemu](https://github.com/shuyra-arche/vanllia/tree/main/tests/platform/qemu),
+using the same production platform package. Its proof leaves Bus Master enabled
+and returns bounded Pending before the QEMU ordering check. The low-level hardware
+fixture lives in Vanllia `tests/platform/hardware`; the standalone Kernel test
+guest and Host hardware harness depend on it. Host DTB construction belongs to
+that same external fixture. Production Kernel has no dependency on Vanllia or a fixture.
+
+`KERNEL_BOOT_MANIFEST` selects the normal image and `KERNEL_PLATFORM_MANIFEST`
+selects the EDU image. CI checks out a pinned consumer, patches both image manifests
+to this candidate Kernel/API, updates their locks and runs locked tests. This
+prevents silently testing a consumer's older provider. The source-only boot
+interface replaces `init(dtp)` and `init_with_external`; images must rebuild and
+supply the new descriptors. Cell ABI v1, MappingId encoding and syscall operation
+numbers are unchanged; the new boot types are Rust contracts, not wire records.
 
 ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough remain unsupported.
 PQ is disabled.
@@ -287,84 +306,30 @@ must rebuild and migrate separately; this provider change does not update them.
 
 ## Build and verification
 
-Boot validates all enabled root RAM nodes and `reg` tuples before initializing
-either heap. It subtracts the kernel/ROOT stack, DTB, initrd, FDT reservation
-map and static `/reserved-memory` regions. Bump uses the largest remaining
-interval; Frame admits every remaining interval after excluding Bump's consumed
-prefix. Identity mappings omit bank holes and `no-map` pages. MMIO exclusion
-continues to conservatively protect the whole RAM envelope.
+Kernel's bounded memory constructor subtracts image/ROOT, firmware reservations,
+DTB and initrd before either allocator starts. Identity mappings omit holes and
+no-map pages. The DTB is an opaque resource for the initial Unit; Kernel never
+parses it. Firmware pointer validity and completeness of supplied reservations are
+trusted image preconditions. Separate frozen memory and CPU facts preserve the
+64 KiB ROOT stack. CPU slots remain distinct from firmware IDs, with boot in slot
+zero; SBI starts and remote fences use exact firmware identities.
 
-Early parsing uses fixed storage: at most 16 disjoint RAM ranges, 64 merged
-reservations (including boot objects) and 32 tree levels. Exhaustion, conflicting
-boot objects, overflowing or malformed descriptions fail boot before allocation.
-RAM and DTB addresses must be page aligned; partial reserved pages are withheld.
-Dynamic reserved-memory requests and nonempty/missing reserved-memory `ranges`
-are rejected. Allocator metadata still indexes the physical envelope, so widely
-separated banks can exhaust the bootstrap interval; this reports allocation
-failure rather than admitting holes. The firmware must supply a readable FDT
-blob; structural validation cannot establish the validity of a raw pointer.
-
-Ordinary MMIO resources are decoded using their immediate parent's cell widths
-and translated through every ancestor's `ranges` before boot authority is
-published. Empty `ranges` means identity; missing, malformed, ambiguous or
-uncovered translations reject the whole plan. A resource must fit one window
-at each hop, and its final CPU page coverage must fit the intersection of those
-windows. Distinct boot authorities cannot overlap even partially within a page.
-Disabled nodes and descendants, CPU identifiers, reserved-memory descriptions
-and PCI child registers do not become ordinary MMIO authorities.
-
-Interrupt/timer and IOMMU register pages remain protected, including aliases
-and disabled controllers. Their existing hardware backends still require
-identity-translated paths. PCI retains its dedicated window and routing rules;
-its parent-side windows now also pass through the CPU address conversion.
-Boot ledger region names use the resulting CPU physical addresses.
-
-CPU admission keeps firmware Hart IDs separate from dense Kernel slots. The boot
-hart always owns slot zero; enabled CPUs receive the remaining slots. SBI HSM,
-IPI and remote fences use exact firmware targets, and PLIC selection uses the
-hardware ID. Disabled CPUs are not started or included in the capability set.
-Duplicate IDs, malformed CPU properties, a missing/disabled boot hart and SBI's
-reserved all-harts ID fail boot before allocation. Early CPU storage is bounded
-to 256 CPU nodes (including disabled ones), independent of ID magnitude. CPU and
-memory facts are each frozen once in separate initialization steps; Machine holds
-references to both, preserving the 64 KiB ROOT stack budget.
-
-Each enabled CPU must declare `mmu-type` as Sv39, Sv48 or Sv57 and provide the
-RV64GC, CSR, instruction-fence and counter baseline used by the Kernel. The
-complete `riscv,isa-base` / `riscv,isa-extensions` pair takes precedence; an
-incomplete pair fails. Legacy `riscv,isa` supports the unversioned canonical
-single-letter sequence with underscore-separated multi-letter extensions, with
-I implying CSR/fence/counters as specified by the deprecated DT binding.
-Unknown well-formed extensions do not enable Kernel features. Missing or
-unsupported MMU/ISA facts fail explicitly; no capability is guessed from QEMU.
-The current policy selects the largest mode common to all admitted CPUs, relying
-on Sv57 implying Sv48 and Sv48 implying Sv39. Normal boot no longer probes modes
-by writing `satp`. The validated, nonzero `/cpus/timebase-frequency` feeds the
-existing clock consumer; SBI runtime capabilities remain SBI's responsibility.
-
-The shared `metal/board/tree` decoder owns checked properties, ancestor status,
-phandle identity and MMIO byte/page geometry used by boot grants, IOMMU topology,
-PLIC routing and PCI host lookup. Controller backends still require explicit
-identity bus paths and one register span; sharing the decoder does not broaden
-hardware support. The phandle index rejects duplicate or conflicting identities
-across the whole DTB and accepts consistent `linux,phandle` aliases.
-
-PLIC resolves CPU-local interrupt controllers through that identity index and
-uses the admitted CPU-node membership retained by HartInfo, instead of rebuilding
-CPU admission during routing. Matching node text in another DTB does not identify
-an admitted CPU. Supervisor contexts belonging to disabled CPUs remain masked and
-cannot become the selected route. Existing QEMU IRQ-pair compatibility and the
-firmware routing restrictions remain explicit backend constraints; PCI BAR
-placement belongs to the external image.
+Normalized authority validation compares page footprints while preserving original
+resource names and byte sizes. It rejects ordinary grants overlapping protected
+controls or external windows. PLIC contexts, interrupt lines and IOMMU register
+regions are checked before MMIO effects. Firmware-specific malformed-description
+regressions follow their parser to Vanllia; Kernel tests the provider admission
+invariants, allocator and actual hardware lifecycle.
 
 Use nightly Rust with `riscv64gc-unknown-none-elf`; the repository does not set a
-local toolchain override. The Server package is `kernel`, its executable `shuyra`.
+local toolchain override. The Server package is the `kernel` library. Build `shuyra` through Vanllia's production platform manifest.
 
 ```sh
 cargo +nightly fmt --all -- --check
 cargo +nightly build --locked --workspace --target riscv64gc-unknown-none-elf
 cargo +nightly build --locked --workspace --release --all-features --target riscv64gc-unknown-none-elf
 cargo +nightly test --locked --workspace --target x86_64-unknown-linux-gnu
+KERNEL_BOOT_MANIFEST=/path/to/vanllia/platform/riscv/Cargo.toml \
 KERNEL_PLATFORM_MANIFEST=/path/to/vanllia/tests/platform/qemu/Cargo.toml \
 cargo +nightly test --locked -p kernel-memory-tests --test hardware --target x86_64-unknown-linux-gnu -- --ignored --nocapture
 ```

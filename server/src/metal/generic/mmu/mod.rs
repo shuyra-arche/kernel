@@ -84,3 +84,19 @@ pub(crate) unsafe trait PageTable: Sized {
         visit: &mut impl FnMut(VirtAddr, PhysAddr, Attributes, usize),
     );
 }
+
+/// CPU execution identity and geometry are owned by the hardware backend.
+/// PageTable prepares/commits edits; Shootdown certifies their exact covering request.
+/// Both are selected together by metal. No general Nest path reads SATP or PTE encoding.
+pub(crate) trait Domain: fence::Shootdown + Sized {
+    type Identifier: Copy;
+    type Geometry: Copy;
+    type CreateError;
+    fn create(instance: usize, kernel: bool) -> Result<Self, Self::CreateError>;
+    fn identifier(&self) -> Self::Identifier;
+    fn geometry(&self) -> Self::Geometry;
+    fn publish(&self);
+    fn published(&self) -> bool;
+    fn released(&self) -> bool;
+    fn release(&self) -> Result<(), Self::CreateError>;
+}

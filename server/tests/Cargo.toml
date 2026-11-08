@@ -12,7 +12,7 @@ erra.workspace = true
 hashbrown = { version = "0.17.1", default-features = false, features = ["alloc", "default-hasher"] }
 kernel-api = { path = "../../api" }
 fack = { version = "0.2.0", default-features = false }
-fdt = { version = "0.1.5", default-features = false }
+kernel-hardware-fixture = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "4531bcd2e73a945a67333cf2f614f0e01edeaaed" }
 
 [[test]]
 name = "memory"
@@ -21,10 +21,6 @@ path = "memory/mod.rs"
 [[test]]
 name = "iommu"
 path = "iommu/mod.rs"
-
-[[test]]
-name = "boot"
-path = "boot/mod.rs"
 
 [[test]]
 name = "hardware"
