@@ -35,18 +35,21 @@ pub(crate) fn run() -> usize {
 
 // 本核的空闲环：先在自己槽里找，找不到就偷、就睡，醒来再看。
 
-/// 没在停机路上时可以一觉睡到天亮的时限。
-const WFI_FAR: u64 = 1 << 60;
 /// 停机路上改按这个时限回来看一眼。
 const BEACON_TICK: u64 = 250_000;
 
-fn dispatch() -> Option<usize> {
+fn dispatch(allow_steal: bool) -> Option<usize> {
     // Ready tasks must not escape every scheduler container between commits.
     let _commit = crate::basis::commit();
     let s = current();
-    s.pull()
-        .or_else(scheduler::steal)
-        .and_then(|task| s.seat(task))
+    let task = s.pull().or_else(|| {
+        if allow_steal {
+            scheduler::steal()
+        } else {
+            None
+        }
+    });
+    task.and_then(|task| s.seat(task))
 }
 
 pub(super) fn fetch() -> usize {
@@ -63,29 +66,22 @@ pub(super) fn fetch() -> usize {
             "idle must use the guarded hart stack"
         );
     }
-    loop {
-        unsafe {
-            sie::set_sext();
-        }
-        if let Some(pa) = dispatch() {
-            return pa;
-        }
-        if tally::done() {
-            halt::halt();
-        }
-        if let Some(pa) = wait() {
-            return pa;
-        }
+    unsafe {
+        sie::set_sext();
     }
+    if let Some(pa) = dispatch(true) {
+        return pa;
+    }
+    wait()
 }
 
-fn wait() -> Option<usize> {
+fn wait() -> usize {
     let me = hart::hart_id();
     scheduler::idle::sleep(me);
-    let found = dispatch();
+    let found = dispatch(true);
     if let Some(pa) = found {
         scheduler::idle::wake(me);
-        return Some(pa);
+        return pa;
     }
     if tally::done() {
         halt::halt();
@@ -96,15 +92,21 @@ fn wait() -> Option<usize> {
             scheduler::idle::wake(me);
             halt::halt();
         }
+        // Clear first, then inspect work and deadlines. An IPI racing this
+        // clear is either observed through the queue or stays pending for WFI.
+        scheduler::idle::acknowledge();
+        let redeemed = deadline::elapsed() && sign::redeem();
         beacon::idle(me);
 
         let external_pending = crate::basis::cell::projection::maintain();
         let fallback = if beacon::shutting_down() || external_pending {
-            BEACON_TICK
+            crate::machine::clock::now()
+                .as_ticks()
+                .saturating_add(BEACON_TICK)
         } else {
-            WFI_FAR
+            crate::machine::clock::timer::DISARMED
         };
-        deadline::beat_until(fallback);
+        deadline::arm(fallback);
         unsafe {
             sie::set_sext();
         }
@@ -113,23 +115,14 @@ fn wait() -> Option<usize> {
             let result = crate::basis::sign::endpoint::trigger(&resources.supervisor_external);
             crate::basis::room::interrupt::note_external(result.is_err(), true);
         }
-        if let Some(pa) = dispatch() {
+        // Let notified remote Harts receive the Tasks just placed there
+        // before the deadline owner tries to steal them back.
+        if let Some(pa) = dispatch(!redeemed) {
             scheduler::idle::wake(me);
-            return Some(pa);
+            return pa;
         }
         unsafe {
             core::arch::asm!("wfi");
         }
-        if sign::redeem() {
-            break;
-        }
-        if let Some(pa) = dispatch() {
-            scheduler::idle::wake(me);
-            return Some(pa);
-        }
-        unsafe { sip::clear_ssoft() };
     }
-    unsafe { sip::clear_ssoft() };
-    scheduler::idle::wake(me);
-    None
 }

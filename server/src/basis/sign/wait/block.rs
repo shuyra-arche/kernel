@@ -79,7 +79,7 @@ pub(crate) fn block_with_call<E: WaitFail>(
         drop(task);
     } else {
         void(ticket);
-        rise(core::iter::once(task));
+        rise(core::iter::once(task), launch);
     }
     #[cfg(debug_assertions)]
     crate::basis::unit::task::check_block_heldout();

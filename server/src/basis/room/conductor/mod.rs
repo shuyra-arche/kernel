@@ -1,7 +1,7 @@
 //! 运行槽：每核一张。
 //!
 //! 槽里装着此刻在座的那一枚任务、它的饥饿队列（FIFO），以及队列起等的时刻 ——
-//! 队列等久了就压低本核的时限（`ready_ceiling`），把核让给别的活。
+//! 队列等久了就压低本核的时限（`ready_deadline`），把核让给别的活。
 //! 跨核的事不在这里：往哪放、怎么叫醒，都归 `scheduler`。
 
 mod badge;
@@ -38,11 +38,11 @@ pub(super) struct Inner {
 
 impl Inner {
     /// 本核这一段能跑多久：队列空着按盲上限，等着了按起等时刻折算出余量。
-    pub(super) fn ready_ceiling(&self) -> u64 {
-        self.ready_since.map_or(deadline::blind_ceiling(), |since| {
-            let budget = clock::duration_to_ticks(Duration::from_millis(READY_MS));
-            budget.saturating_sub(clock::now().as_ticks().saturating_sub(since))
-        })
+    pub(super) fn ready_deadline(&self) -> u64 {
+        self.ready_since
+            .map_or_else(deadline::blind_deadline, |since| {
+                since.saturating_add(clock::duration_to_ticks(Duration::from_millis(READY_MS)))
+            })
     }
 
     pub(super) fn starved_is_empty(&self) -> bool {
@@ -153,7 +153,7 @@ impl Conductor {
                     .set_x(Gprs::TP, crate::machine::hart::per_hart_ptr(self.hart));
             }
         }
-        deadline::beat_until(ceiling);
+        deadline::arm(ceiling);
     }
 
     fn seat(&self, mut task: Arc<Task>) -> Option<usize> {
@@ -164,7 +164,7 @@ impl Conductor {
             return None;
         }
         assert!(task.can_run_on(self.hart), "incompatible Task placement");
-        self.prepare(&mut task, i.ready_ceiling());
+        self.prepare(&mut task, i.ready_deadline());
         let pa = task.ident.frame_pa.as_usize();
         self.badge.seat(&task.ident);
         debug_assert!(task.on_hart().is_some(), "running 容器只装在核上的任务");
@@ -242,14 +242,14 @@ impl Conductor {
             return next.and_then(|next| self.seat(next));
         }
         let ticks_left = cur.ticks_left();
-        let ceiling = i.ready_ceiling();
-        if i.starved_is_empty() || (ticks_left > 1 && ceiling != 0) {
+        let ceiling = i.ready_deadline();
+        if i.starved_is_empty() || (ticks_left > 1 && clock::now().as_ticks() < ceiling) {
             if ticks_left > 1 {
                 cur.dec_ticks_left();
             }
             let pa = cur.ident.frame_pa.as_usize();
             i.running = Some(cur);
-            deadline::beat_until(ceiling);
+            deadline::arm(ceiling);
             return Some(pa);
         }
         self.badge.shed(&cur.ident);

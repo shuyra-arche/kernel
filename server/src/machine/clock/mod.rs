@@ -39,12 +39,11 @@ pub fn now() -> Instant {
 }
 
 pub(crate) fn uptime_ticks() -> u64 {
-    (time::read() as u64).wrapping_sub(CYCLE.load(Ordering::Relaxed))
+    (time::read() as u64).saturating_sub(CYCLE.load(Ordering::Relaxed))
 }
 
 pub fn uptime() -> Duration {
-    let boot = CYCLE.load(Ordering::Relaxed);
-    ticks_to_duration((time::read() as u64).wrapping_sub(boot))
+    ticks_to_duration(uptime_ticks())
 }
 
 pub(crate) fn ticks_to_duration(ticks: u64) -> Duration {

@@ -24,9 +24,9 @@ pub(crate) fn report() {
     } else {
         clock::ticks_to_duration(late_sum / late_n).as_millis()
     };
-    let (tocks, mutes) = deadline::tock_stats();
+    let (tocks, mutes, remote_rearms) = deadline::tock_stats();
     putln!(
-        "timer: late_n={late_n} late_max_ms={max_ms} late_avg_ms={avg_ms} late_max_tick={late_max} traps={} tocks={tocks} mutes={mutes}",
+        "timer: late_n={late_n} late_max_ms={max_ms} late_avg_ms={avg_ms} late_max_tick={late_max} traps={} tocks={tocks} mutes={mutes} remote_rearms={remote_rearms}",
         deadline::ticks()
     );
     let (held, starved, blocked, nudged) = crate::basis::unit::lifecycle::branch_stats();

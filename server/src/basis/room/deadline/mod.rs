@@ -7,15 +7,22 @@ use queue::Queue;
 
 use crate::machine::clock;
 use crate::machine::clock::Instant;
+use crate::machine::clock::timer;
+use crate::machine::hart::{self, HartId};
+use crate::machine::layout::MAX_HART_SLOTS;
 use crate::machine::sync::Level;
 use crate::machine::sync::SpinLock;
 
-const NONE: u64 = u64::MAX;
+// The boot Hart remains online until all Tasks exit. Only it arms and
+// drains the global heap; other comparators serve local scheduling.
+const OWNER: HartId = HartId::new(0);
+static LOCAL: [AtomicU64; MAX_HART_SLOTS] =
+    [const { AtomicU64::new(timer::DISARMED) }; MAX_HART_SLOTS];
 
 pub const BLIND_MS: u64 = 100;
 
-pub fn blind_ceiling() -> u64 {
-    clock::duration_to_ticks(Duration::from_millis(BLIND_MS))
+pub fn blind_deadline() -> u64 {
+    clock::now().add(Duration::from_millis(BLIND_MS)).as_ticks()
 }
 
 static LATE_N: AtomicU64 = AtomicU64::new(0);
@@ -26,74 +33,88 @@ static TOCK_N: AtomicU64 = AtomicU64::new(0);
 static MUTE_N: AtomicU64 = AtomicU64::new(0);
 
 static TICKS: AtomicU64 = AtomicU64::new(0);
+static REMOTE_REARMS: AtomicU64 = AtomicU64::new(0);
 
-struct TimerHeap {
-    inner: SpinLock<Queue>,
-    nearest: AtomicU64,
+fn timers() -> &'static SpinLock<Queue> {
+    static TIMERS: OnceLock<SpinLock<Queue>> = OnceLock::new();
+    TIMERS.get_or_init(|| SpinLock::new_level(Level::L3, Queue::new()))
 }
 
-static TIMERS: OnceLock<TimerHeap> = OnceLock::new();
-fn timers() -> &'static TimerHeap {
-    TIMERS.get_or_init(|| TimerHeap {
-        inner: SpinLock::new_level(Level::L3, Queue::new()),
-        nearest: AtomicU64::new(NONE),
-    })
-}
-
-impl TimerHeap {
-    fn peek_nearest(&self) -> u64 {
-        self.nearest.load(Ordering::Acquire)
+pub fn elapsed() -> bool {
+    if !timer::elapsed() {
+        return false;
     }
-
-    fn recompute_nearest(&self, i: &Queue) {
-        let t = i.nearest().unwrap_or(NONE);
-        self.nearest.store(t, Ordering::Release);
-    }
-}
-
-pub fn tick() -> u64 {
-    TICKS.fetch_add(1, Ordering::Relaxed) + 1
+    TICKS.fetch_add(1, Ordering::Relaxed);
+    true
 }
 
 pub fn ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
 }
 
-pub fn beat_until(ceil: u64) {
-    let delta = match due() {
-        Some(t) => t
-            .as_ticks()
-            .saturating_sub(clock::now().as_ticks())
-            .min(ceil),
-        None => ceil,
+pub fn is_owner() -> bool {
+    hart::hart_id() == OWNER
+}
+
+pub fn arm(local: u64) {
+    LOCAL[hart::hart_id().get()].store(local, Ordering::Relaxed);
+    refresh();
+}
+
+/// Acknowledge the software interrupt before calling this on the owner.
+/// A later heap mutation then either appears in this snapshot or leaves an IPI.
+pub fn refresh() {
+    let me = hart::hart_id();
+    let local = LOCAL[me.get()].load(Ordering::Relaxed);
+    let next = if me == OWNER {
+        timers()
+            .lock()
+            .nearest()
+            .map_or(local, |head| head.min(local))
+    } else {
+        local
     };
-    clock::timer::beat(delta);
+    timer::set_timer(next);
+}
+
+fn head_changed(changed: bool) {
+    if changed {
+        if is_owner() {
+            refresh();
+        } else {
+            super::scheduler::idle::try_nudge(OWNER).expect("deadline owner IPI");
+            REMOTE_REARMS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 pub fn tock(handle: u64, wake_at: u64) -> Result<(), ()> {
-    let mut i = timers().inner.lock();
-    i.insert(handle, wake_at)?;
-    timers().recompute_nearest(&i);
+    let mut queue = timers().lock();
+    let before = queue.nearest();
+    queue.insert(handle, wake_at)?;
+    let changed = queue.nearest() != before;
+    drop(queue);
+    head_changed(changed);
     TOCK_N.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 
 pub fn mute(handle: u64) {
-    let mut i = timers().inner.lock();
-    if i.remove(handle) {
-        MUTE_N.fetch_add(1, Ordering::Relaxed);
+    let mut queue = timers().lock();
+    let before = queue.nearest();
+    if !queue.remove(handle) {
+        return;
     }
-    timers().recompute_nearest(&i);
-}
-
-pub fn due() -> Option<Instant> {
-    let t = timers().peek_nearest();
-    (t != NONE).then_some(Instant::from_ticks(t))
+    MUTE_N.fetch_add(1, Ordering::Relaxed);
+    let changed = queue.nearest() != before;
+    drop(queue);
+    head_changed(changed);
 }
 
 pub fn drain(now: Instant, out: &mut [u64]) -> usize {
+    debug_assert!(is_owner());
     let mut n = 0usize;
-    let mut i = timers().inner.lock();
+    let mut i = timers().lock();
     let now = now.as_ticks();
     while n < out.len() {
         let Some((wake_at, handle)) = i.pop_due(now) else {
@@ -106,7 +127,6 @@ pub fn drain(now: Instant, out: &mut [u64]) -> usize {
         LATE_SUM.fetch_add(late, Ordering::Relaxed);
         LATE_MAX.fetch_max(late, Ordering::Relaxed);
     }
-    timers().recompute_nearest(&i);
     n
 }
 
@@ -118,9 +138,10 @@ pub fn late_stats() -> (u64, u64, u64) {
     )
 }
 
-pub fn tock_stats() -> (u64, u64) {
+pub fn tock_stats() -> (u64, u64, u64) {
     (
         TOCK_N.load(Ordering::Relaxed),
         MUTE_N.load(Ordering::Relaxed),
+        REMOTE_REARMS.load(Ordering::Relaxed),
     )
 }
