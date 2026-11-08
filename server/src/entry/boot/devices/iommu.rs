@@ -67,7 +67,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
         regions[0].base,
     )
     .map_err(|_| PendFail::Denied)?;
-    let plic = super::pci::mapped(route.base, route.size)?;
+    let plic = super::external::mapped(route.base, route.size)?;
     unsafe { crate::metal::iommu::riscv::interrupt::install(plic, route) }
         .map_err(|_| PendFail::Denied)?;
     let mut storage = CONTROLLERS.lock();

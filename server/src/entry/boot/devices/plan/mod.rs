@@ -97,6 +97,23 @@ impl Plan {
         &self.authorities
     }
 
+    /// An externally prepared resource must not duplicate ordinary authority or
+    /// expose any interrupt/IOMMU control, including disabled controller aliases.
+    pub fn external(&self, fdt: &fdt::Fdt, region: Region) -> Result<(), PendFail> {
+        if region.base == 0 || self.authorities.iter().any(|r| r.overlaps(region)) {
+            return Err(PendFail::Denied);
+        }
+        for r in reserved::discover(fdt)?
+            .into_iter()
+            .chain(reserved::interrupts(fdt)?)
+        {
+            if r.overlaps(region) {
+                return Err(PendFail::Denied);
+            }
+        }
+        Ok(())
+    }
+
     fn offer(&mut self, base: usize, size: usize, reserved: &[Region]) -> Result<(), PendFail> {
         if base == 0 || size == 0 {
             return Ok(());

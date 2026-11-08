@@ -10,9 +10,9 @@ use crate::iommu::HardwareError;
 use crate::iommu::IoSpace;
 use crate::iommu::Life;
 use crate::iommu::Phase;
+use crate::iommu::contract::{Quiescence, Retirement};
 use crate::iommu::riscv::EngineError;
 use crate::iommu::riscv::adapter::Adapter;
-use crate::iommu::riscv::adapter::Quiescence;
 use crate::iommu::riscv::controllers::BindError;
 use crate::iommu::riscv::controllers::Controllers;
 use crate::iommu::riscv::registers::*;
@@ -26,16 +26,25 @@ type Space = IoSpace<Adapter<Device, Proof>>;
 #[derive(Default)]
 struct Evidence {
     polls: usize,
+    requests: Vec<Retirement>,
+    receipts: VecDeque<Retirement>,
     outcomes: VecDeque<Result<bool, HardwareError>>,
 }
 struct Proof(Arc<Mutex<Evidence>>);
 // No hardware DMA exists in the host fixture. The script only models the
 // independent platform evidence boundary, never replaces production decisions.
 unsafe impl Quiescence for Proof {
-    fn poll(&mut self) -> Result<bool, HardwareError> {
+    fn poll(&mut self, ticket: Retirement) -> Result<Option<Retirement>, HardwareError> {
         let mut e = self.0.lock().unwrap();
         e.polls += 1;
-        e.outcomes.pop_front().unwrap_or(Ok(false))
+        e.requests.push(ticket);
+        if let Some(receipt) = e.receipts.pop_front() {
+            return Ok(Some(receipt));
+        }
+        e.outcomes
+            .pop_front()
+            .unwrap_or(Ok(false))
+            .map(|done| done.then_some(ticket))
     }
 }
 
@@ -387,4 +396,59 @@ fn fault_queue_wrap_copies_evidence_and_overflow_never_means_completion() {
     assert_eq!(engine.fault(), Err(EngineError::Hardware));
     drop(engine);
     assert!(pools.iter().all(|p| p.gives() == 0));
+}
+
+#[test]
+fn platform_receipt_is_bound_to_the_binding_and_retry_batch() {
+    let (mut space, device, pools, cell, proof) = space(8);
+    let id = publish(&mut space, &cell);
+    active(&mut space, &device, id);
+    space.revoke(id).unwrap();
+    drain_to_platform(&mut space, &device, &proof, id);
+    let old = *proof.lock().unwrap().requests.last().unwrap();
+    assert_eq!(old.controller(), routing_fixture::CONTROLLER);
+    assert_eq!(old.requester(), 8);
+    proof
+        .lock()
+        .unwrap()
+        .outcomes
+        .push_back(Err(HardwareError::Timeout));
+    assert!(space.poll(id).is_err());
+    space.revoke(id).unwrap();
+    proof.lock().unwrap().receipts.push_back(old);
+    assert_eq!(space.poll(id), Err(Error::Hardware(HardwareError::Fault)));
+    assert_eq!(cell.exposure(), Exposure::External);
+    assert!(pools[3..].iter().all(|p| p.gives() == 0));
+    space.revoke(id).unwrap();
+    proof.lock().unwrap().outcomes.push_back(Ok(true));
+    assert!(space.poll(id).unwrap());
+    assert_eq!(space.poll(id), Err(Error::UnknownBinding));
+    drop(cell);
+    assert!(pools.iter().all(|p| p.gives() == 1));
+}
+
+#[test]
+fn another_requesters_platform_receipt_cannot_settle_a_domain() {
+    let (mut first, d1, p1, c1, q1) = space(8);
+    let (mut second, d2, p2, c2, q2) = space(9);
+    let a = publish(&mut first, &c1);
+    let b = publish(&mut second, &c2);
+    active(&mut first, &d1, a);
+    active(&mut second, &d2, b);
+    first.revoke(a).unwrap();
+    second.revoke(b).unwrap();
+    drain_to_platform(&mut first, &d1, &q1, a);
+    drain_to_platform(&mut second, &d2, &q2, b);
+    let foreign = *q1.lock().unwrap().requests.last().unwrap();
+    q2.lock().unwrap().receipts.push_back(foreign);
+    assert_eq!(second.poll(b), Err(Error::Hardware(HardwareError::Fault)));
+    assert_eq!(c2.exposure(), Exposure::External);
+    assert!(p2[3..].iter().all(|p| p.gives() == 0));
+    second.revoke(b).unwrap();
+    for (space, id, proof) in [(&mut first, a, q1), (&mut second, b, q2)] {
+        proof.lock().unwrap().outcomes.push_back(Ok(true));
+        assert!(space.poll(id).unwrap());
+    }
+    drop((c1, c2));
+    assert!(p1.iter().chain(&p2).all(|p| p.gives() == 1));
 }

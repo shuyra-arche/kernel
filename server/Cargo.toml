@@ -1,5 +1,6 @@
 [package]
 name = "kernel"
+links = "shuyra_kernel"
 version.workspace = true
 edition.workspace = true
 publish = false

@@ -4,11 +4,11 @@
 use super::super::Engine;
 use super::super::EngineError;
 use super::super::adapter::Adapter;
-use super::super::adapter::Quiescence;
 use super::super::registers::Registers;
 use super::super::topology::RouteError;
 use super::super::topology::Topology;
 use crate::basis::cell::page::Page;
+use crate::metal::generic::iommu::Quiescence;
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
