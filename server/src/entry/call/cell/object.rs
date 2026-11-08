@@ -446,7 +446,7 @@ fn publication(
                 return Err(CellFail::Busy);
             }
             let page = crate::basis::cell::Cell::Nest(selected.clone()).page(0)?;
-            let permit = crate::basis::cell::changes::acquire(&page)?;
+            let permit = crate::basis::cell::change::acquire(&page)?;
             let root = entry.source.root();
             let _operation = root
                 .as_ref()

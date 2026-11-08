@@ -1,6 +1,10 @@
-use super::super::{slot, slot::Slot, source::FlatSource, state::FlatState};
-use crate::basis::cell::operation::TransferError;
+use super::{
+    slot,
+    slot::Slot,
+    state::{FlatSource, FlatState},
+};
 use crate::basis::cell::page::Page;
+use crate::basis::cell::transfer::TransferError;
 use alloc::sync::Arc;
 use kernel_api::address::{PageCount, PageIndex};
 /// 两端共同的来源资格：这一份来源还允许迁移。

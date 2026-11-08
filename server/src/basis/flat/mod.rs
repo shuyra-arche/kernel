@@ -5,13 +5,12 @@
 
 mod allocation;
 mod error;
+mod movement;
 mod pages;
 mod range;
 mod region;
 mod residency;
-mod residency_entry;
 mod slot;
-mod source;
 mod state;
 pub(crate) mod transaction;
 
@@ -36,10 +35,10 @@ pub use range::FlatRange;
 pub use region::BorrowedRegion;
 pub use residency::Residency;
 
-use residency_entry::ResidencyEntry;
 use slot::Slot;
-use source::FlatSource;
+use state::FlatSource;
 use state::FlatState;
+use state::ResidencyEntry;
 
 /// 线性逻辑页来源。
 ///

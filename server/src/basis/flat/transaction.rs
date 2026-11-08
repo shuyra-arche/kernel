@@ -17,7 +17,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::AtomicUsize;
 
-use crate::basis::cell::operation::TransferError;
+use crate::basis::cell::transfer::TransferError;
 use crate::machine::sync::with_pair;
 use kernel_api::address::PageIndex;
 
@@ -25,7 +25,7 @@ use super::Flat;
 use super::FlatRange;
 use super::slot;
 use super::slot::Slot;
-use super::source::FlatSource;
+use super::state::FlatSource;
 use super::state::FlatState;
 
 #[derive(PartialEq, Eq)]
@@ -33,8 +33,7 @@ enum Phase {
     Claimed,
     Committed,
 }
-mod slots;
-use slots::*;
+use super::movement::*;
 
 /// 一次移交：两端各自的页已经换成本来源上的绝对页号。
 pub(crate) struct Transaction {

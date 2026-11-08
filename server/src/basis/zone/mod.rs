@@ -1,13 +1,7 @@
 //! 地址选择与占用：窗口只是选址范围，占用是全局单一事实。
 
 mod placement;
-mod placement_at;
-mod region_id;
-mod slot;
-mod window;
-pub(crate) use placement::Placement;
-pub(crate) use placement_at::PlacementAt;
-pub(crate) use region_id::RegionId;
+pub(crate) use placement::{Placement, PlacementAt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ZoneError {
@@ -22,8 +16,33 @@ use core::sync::atomic::Ordering;
 
 use kernel_api::address::PAGE_SIZE;
 
-use slot::Slot;
-use window::Window;
+/// 地址区域：`Normal` / `Kernel` / `Resource` 各有一个动态选址窗口；
+/// `Static` 只是地址记账政策：它没有动态窗口，跨度只按 `Exact` 登记。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RegionId {
+    Normal,
+    Kernel,
+    Resource,
+    Static,
+}
+
+/// 一段占用；`last` 是最后一个字节（含），generation 是 `id`。
+#[derive(Clone, Copy)]
+struct Slot {
+    start: usize,
+    last: usize,
+    ticket: usize,
+    id: usize,
+    region: RegionId,
+}
+
+/// 一个动态选址窗口；`last` 是最后一个可用地址（含）。
+#[derive(Clone, Copy)]
+struct Window {
+    id: RegionId,
+    base: usize,
+    last: usize,
+}
 
 /// 全局 VA 占用。
 ///

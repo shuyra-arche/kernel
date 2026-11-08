@@ -264,7 +264,7 @@ pub(crate) fn publish(
     }
     let page = r.page.as_ref().ok_or(CellFail::SourceEmpty)?;
     let next = r.generation.checked_add(1).ok_or(CellFail::OoM)?;
-    let change = crate::basis::cell::changes::acquire(page)?;
+    let change = crate::basis::cell::change::acquire(page)?;
     let borrow = ExternalBorrow::prepare(&r.hold, actor, r.modifiable, Some(&change)).map_err(
         |e| match e {
             kernel_api::abi::call::pend::PendFail::Busy => CellFail::Busy,
@@ -329,7 +329,7 @@ pub(crate) fn retract(
     }
     let next = r.generation.checked_add(1).ok_or(CellFail::OoM)?;
     r.freeze = Some(crate::basis::cell::page::Freeze::new(
-        crate::basis::cell::changes::acquire(r.page.as_ref().ok_or(CellFail::SourceEmpty)?)?,
+        crate::basis::cell::change::acquire(r.page.as_ref().ok_or(CellFail::SourceEmpty)?)?,
     ));
     r.generation = next;
     close(r);
@@ -460,7 +460,7 @@ fn advance(record: &mut Projection) -> [Option<(TaskId, PendId)>; 2] {
     [None, None]
 }
 pub(crate) fn maintain() -> bool {
-    crate::basis::cell::changes::maintain();
+    crate::basis::cell::change::maintain();
     let mut pending = retirement::progress();
     static CURSOR: AtomicUsize = AtomicUsize::new(0);
     for _ in 0..4 {

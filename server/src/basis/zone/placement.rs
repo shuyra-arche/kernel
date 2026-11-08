@@ -1,8 +1,17 @@
 use super::ZoneError;
-use crate::basis::zone::PlacementAt;
 use crate::basis::zone::RegionId;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
+
+/// 选址方式。三者共用同一份占用检查：
+/// `Lowest` / `Highest` 在窗口内选空档，`Exact` 直接给出固定跨度，
+/// 即使它落在所有窗口之外，也按同一全局占用登记。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PlacementAt {
+    Lowest,
+    Highest,
+    Exact(VirtAddr),
+}
 
 /// 一次地址选择：选址窗口、跨度、起始对齐与选址方式。
 /// 跨度非零且按页；`Exact` 的起点必须按页且满足对齐。

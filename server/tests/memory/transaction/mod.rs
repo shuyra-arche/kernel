@@ -1,10 +1,9 @@
-#[path = "../../../src/basis/flat/transaction/slots.rs"]
-mod slots;
+use super::movement as slots;
 use crate::{
     cell::{Owner, Page},
     index::PageIndex,
     slot::Slot,
-    source::FlatSource,
+    state::FlatSource,
     state::FlatState,
     support::Pool,
     transfer_error::TransferError,
