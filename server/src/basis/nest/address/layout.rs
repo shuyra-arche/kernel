@@ -6,14 +6,12 @@ use super::AddressError;
 use super::occupancy::Occupancy;
 use super::placement::{Placement, PlacementAt};
 
-/// 地址区域：`Normal` / `Kernel` / `Resource` 各有一个动态选址窗口；
-/// `Static` 只是地址记账政策：它没有动态窗口，跨度只按 `Exact` 登记。
+/// Dynamic address-selection windows. Fixed placements need no window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RegionKind {
     Normal,
     Kernel,
     Resource,
-    Static,
 }
 
 /// 一个动态选址窗口；`last` 是最后一个可用地址（含）。
@@ -38,18 +36,13 @@ impl Layout {
     }
 
     /// 登记动态窗口 `[base, last]`（含端点）。
-    ///
-    /// `Static` 只是地址记账政策，没有动态窗口：给这类区域建窗就是 NoRegion。
     pub(crate) fn register_window(
         &mut self,
         kind: RegionKind,
         base: usize,
         last: usize,
     ) -> Result<(), AddressError> {
-        if base > last
-            || kind == RegionKind::Static
-            || self.windows.iter().any(|window| window.kind == kind)
-        {
+        if base > last || self.windows.iter().any(|window| window.kind == kind) {
             return Err(AddressError::NoRegion);
         }
         self.windows
@@ -85,7 +78,7 @@ impl Layout {
         let start = match placement.at() {
             PlacementAt::Exact(start) => start.as_usize(),
             PlacementAt::Lowest => {
-                let window = self.window(region)?;
+                let window = self.window(region.ok_or(AddressError::NoRegion)?)?;
                 let align = placement.align();
                 self.occupancy
                     .free_spans(window.base, window.last)?
@@ -99,7 +92,7 @@ impl Layout {
                     .ok_or(AddressError::OutOfMemory)?
             }
             PlacementAt::Highest => {
-                let window = self.window(region)?;
+                let window = self.window(region.ok_or(AddressError::NoRegion)?)?;
                 self.occupancy
                     .free_spans(window.base, window.last)?
                     .into_iter()

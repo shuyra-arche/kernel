@@ -22,7 +22,7 @@ use riscv::register::satp;
 use crate::basis::cell::page::{Change, Page};
 use crate::basis::flat::Pages;
 use crate::basis::sign::{self, WakeKey};
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::machine::layout::TEAM_FRAME_BASE;
 use crate::machine::layout::TEAM_FRAME_WINDOW_SIZE;
 use crate::machine::layout::TRAP_STACK_BASE;
@@ -75,11 +75,24 @@ impl CleanupNode {
 ///
 /// 关系（`Mapping`）自己持有来源与活动库存；这里只保存它们的索引、
 /// 待失效标记和退休中的资源。占用表只登记跨度，不物化、不发布。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct NestId(usize);
+impl NestId {
+    pub(crate) fn get(self) -> usize {
+        self.0
+    }
+    fn allocate() -> Result<Self, NestError> {
+        static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, usize::MAX);
+        NEXT.allocate().map(Self).ok_or(NestError::OutOfMemory)
+    }
+}
+
 pub struct Nest {
+    id: NestId,
     asid: Asid,
     kind: SpaceKind,
     geometry: mode::Geo,
-    life: Arc<Life>,
+    life: Arc<Anchor>,
     pub(crate) mappings: mapping::MappingRegistry,
     layout: SpinLock<Layout>,
     pending_cleanup: SpinLock<Option<Box<CleanupNode>>>,
@@ -121,13 +134,15 @@ impl Nest {
                 .ok_or(NestError::DramOverlap)?;
             layout.register_window(RegionKind::Resource, base, TRAP_STACK_BASE.as_usize() - 1)?;
         }
-        let life = Life::try_new()?;
+        let life = Anchor::try_new()?;
+        let id = NestId::allocate()?;
         let asid = if kernel {
             Asid::kernel()
         } else {
             Asid::try_allocate().ok_or(NestError::OutOfMemory)?
         };
         let mut nest = Arc::try_new(Self {
+            id,
             asid,
             kind,
             geometry: mode::geometry(mode::mode()),
@@ -168,8 +183,12 @@ impl Nest {
         self.kind
     }
 
-    pub(crate) fn life(&self) -> Weak<Life> {
+    pub(crate) fn life(&self) -> Weak<Anchor> {
         Arc::downgrade(&self.life)
+    }
+
+    pub(crate) fn id(&self) -> NestId {
+        self.id
     }
 
     pub(crate) fn asid(&self) -> Asid {
@@ -213,9 +232,9 @@ impl Nest {
     }
 
     /// 普通挂载的架构属性：用户空间只对 `Normal` 区开 U，A/D 由内核自维护。
-    pub(crate) fn attrs(&self, region: RegionKind) -> PteFlags {
+    pub(crate) fn attrs(&self, region: Option<RegionKind>) -> PteFlags {
         let mut attrs = PteFlags::A | PteFlags::D;
-        if !self.kind.is_supervisor() && region == RegionKind::Normal {
+        if !self.kind.is_supervisor() && region == Some(RegionKind::Normal) {
             attrs |= PteFlags::U;
         }
         attrs
@@ -830,7 +849,7 @@ impl Nest {
 
     fn mapping_key(&self, mapping: &Mapping) -> WakeKey {
         WakeKey::Mapping {
-            space: self.asid,
+            space: self.id,
             mapping: mapping.identity(),
         }
     }
@@ -999,7 +1018,7 @@ impl Nest {
         // 开票之后没有可失败准备：票、PTE 与关系在同一提交内转入退休责任。
         for (lo, hi, ticket) in pieces {
             tickets.push(if ticket == 0 {
-                layout.occupancy.retire(lo, hi, mapping.reservation.id())
+                layout.occupancy.retire(lo, hi, mapping.reservation.id())?
             } else {
                 ticket
             });
@@ -1226,7 +1245,7 @@ impl Nest {
     pub(crate) fn retire(&self) -> Result<(), NestError> {
         if !self.asid_released.load(Ordering::Acquire) {
             self.close()?;
-            sign::wipe_space(self.asid);
+            sign::wipe_space(self.id);
             self.reap_mappings();
             self.release_asid()?;
         }
@@ -1391,7 +1410,7 @@ impl Drop for Nest {
         } else if self.asid.is_kernel() {
             return;
         } else if !self.asid_released.load(Ordering::Acquire) {
-            sign::wipe_space(self.asid);
+            sign::wipe_space(self.id);
             if self.close().and_then(|()| self.release_asid()).is_err() {
                 return;
             }

@@ -33,7 +33,7 @@ pub(crate) fn wait_value(
             return Ok(Handoff::Resume(false));
         }
         let key = WakeKey::Value {
-            space: space.asid(),
+            space: space.id(),
             address: address.as_usize(),
         };
         let life = space.life();

@@ -52,12 +52,10 @@ pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize,
             0,
         )),
         CellCreate::Memo {
-            target,
             source,
-            placement,
-            access,
-            control,
+            destination,
         } => {
+            let target = destination.target();
             let mut temporary = None;
             let range = match source {
                 CellSource::Slot(range) => range,
@@ -90,22 +88,21 @@ pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize,
                     }
                 }
             };
-            let result = match target {
-                MappingTarget::Cpu(team) => {
-                    create_memo(range, team, placement, access, control, ident)
-                }
-                MappingTarget::Io(token) => (|| {
-                    if control != MappingControl::Caller
-                        || !matches!(access, 2 | 6)
-                        || range.offset != 0
-                        || range.count != 1
-                    {
+            let result = match destination {
+                MemoDestination::Internal {
+                    team,
+                    placement,
+                    access,
+                    control,
+                } => create_memo(range, team, placement, access, control, ident),
+                MemoDestination::External {
+                    authority: token,
+                    address,
+                    access,
+                } => (|| {
+                    if range.offset != 0 || range.count != 1 {
                         return Err(CellFail::Denied);
                     }
-                    let kernel_api::model::cell::PlacementAt::Exact(address) = placement.at()
-                    else {
-                        return Err(CellFail::Denied);
-                    };
                     let actor = caller(ident).ok_or(CellFail::Denied)?;
                     let _serial = actor.pend.lock();
                     let _commit = crate::basis::commit();
@@ -115,7 +112,13 @@ pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize,
                         .get(range.reference.get())
                         .ok_or(CellFail::Denied)?;
                     Ok((
-                        projection::create(&actor, token, hold, address.get(), access == 6)?,
+                        projection::create(
+                            &actor,
+                            token,
+                            hold,
+                            address.get(),
+                            access == kernel_api::model::modifiable::Modifiable::Yes,
+                        )?,
                         address.get(),
                     ))
                 })(),

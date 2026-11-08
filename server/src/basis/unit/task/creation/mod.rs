@@ -9,7 +9,7 @@ use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::team::Team;
 use crate::basis::unit::team::kernel;
 use crate::machine::layout::HART_FRAME_BASE;
@@ -211,7 +211,7 @@ impl TaskBuilder {
             let (ptr, _alloc) = Arc::into_raw_with_allocator(ident);
             Arc::from_raw(ptr)
         };
-        let life = Life::try_new().map_err(|_| NestError::OutOfMemory)?;
+        let life = Anchor::try_new().map_err(|_| NestError::OutOfMemory)?;
         let state = Arc::try_new(SpinLock::new_level(Level::UnitState, TaskState::held()))
             .map_err(|_| NestError::OutOfMemory)?;
         let slot: Arc<MaybeUninit<Task>> = unsafe {

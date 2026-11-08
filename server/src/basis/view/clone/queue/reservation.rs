@@ -1,6 +1,5 @@
 use super::super::payload::Payload;
 use alloc::sync::Arc;
-use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
 use crate::machine::clock;
@@ -94,7 +93,8 @@ impl Drop for Reservation<'_> {
 }
 
 pub(crate) fn reserve_len(meta: &CloneView, len: usize) -> Result<Reservation<'_>, CloneFail> {
-    static NEXT: AtomicUsize = AtomicUsize::new(1);
+    static NEXT: crate::basis::name::Serial =
+        crate::basis::name::Serial::new(1, isize::MAX as usize);
     let mut pending = meta.pending.lock();
     let q = match &mut *pending {
         Pending::Queue(q) => q,
@@ -109,9 +109,7 @@ pub(crate) fn reserve_len(meta: &CloneView, len: usize) -> Result<Reservation<'_
         return Err(CloneFail::Busy);
     }
     q.hands.try_reserve(1).map_err(|_| CloneFail::OutOfMemory)?;
-    let id = NEXT
-        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-        .map_err(|_| CloneFail::OutOfMemory)?;
+    let id = NEXT.allocate().ok_or(CloneFail::OutOfMemory)?;
     q.hands.push_back(Slot::Reserved(id, len));
     q.bytes += len;
     Ok(Reservation { meta, id: Some(id) })

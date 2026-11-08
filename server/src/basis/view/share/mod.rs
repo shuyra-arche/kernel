@@ -22,7 +22,7 @@ use crate::basis::pend::Pend;
 use crate::basis::pend::SourceAuthorization;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::machine::sync::Level;
 use crate::machine::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
@@ -59,7 +59,7 @@ pub struct ShareView {
     operating: AtomicBool,
     owner: TaskId,
     pub(crate) id: usize,
-    life: Arc<Life>,
+    life: Arc<Anchor>,
 }
 
 unsafe impl Send for ShareView {}
@@ -87,7 +87,7 @@ impl ShareView {
             operating: AtomicBool::new(false),
             owner,
             id: super::next_id()?,
-            life: Life::try_new().map_err(|_| PendFail::OutOfMemory)?,
+            life: Anchor::try_new().map_err(|_| PendFail::OutOfMemory)?,
         })
         .map_err(|_| PendFail::OutOfMemory)
     }
@@ -126,7 +126,7 @@ impl ShareView {
     pub(crate) fn attach_source(&self, authorization: &Arc<SourceAuthorization>) {
         *self.authorization.lock() = Some(authorization.clone());
     }
-    pub(crate) fn life(&self) -> Weak<Life> {
+    pub(crate) fn life(&self) -> Weak<Anchor> {
         Arc::downgrade(&self.life)
     }
     pub(crate) fn alive(&self) -> bool {

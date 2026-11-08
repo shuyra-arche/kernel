@@ -17,7 +17,7 @@ pub struct SpinLock<T: ?Sized> {
     data: UnsafeCell<T>,
 }
 
-unsafe impl<T: ?Sized> Sync for SpinLock<T> {}
+unsafe impl<T: ?Sized + Send> Sync for SpinLock<T> {}
 
 impl<T> SpinLock<T> {
     pub const fn new(val: T) -> Self {
@@ -40,6 +40,22 @@ impl<T> SpinLock<T> {
 }
 
 impl<T: ?Sized> SpinLock<T> {
+    fn acquire(&self) {
+        loop {
+            while self.locked.load(Ordering::Relaxed) {
+                crate::machine::stop::hush();
+                ::core::hint::spin_loop();
+            }
+            if self
+                .locked
+                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                return;
+            }
+            crate::machine::stop::hush();
+        }
+    }
     #[inline(never)]
     pub fn lock(&self) -> SpinLockGuard<'_, T> {
         #[cfg(debug_assertions)]
@@ -47,10 +63,7 @@ impl<T: ?Sized> SpinLock<T> {
         let trap = unsafe { TrapGuard::save() };
         crate::machine::sync::depend_check!(self, caller);
 
-        while self.locked.swap(true, Ordering::Acquire) {
-            crate::machine::stop::hush();
-            ::core::hint::spin_loop();
-        }
+        self.acquire();
         crate::machine::sync::depend_acquire!(self, caller);
 
         SpinLockGuard::new(self, trap)
@@ -67,10 +80,7 @@ impl<T: ?Sized> SpinLock<T> {
         let trap = unsafe { TrapGuard::save() };
         crate::machine::sync::depend_check_peer!(self, _lower, caller);
 
-        while self.locked.swap(true, Ordering::Acquire) {
-            crate::machine::stop::hush();
-            ::core::hint::spin_loop();
-        }
+        self.acquire();
         crate::machine::sync::depend_acquire!(self, caller);
 
         SpinLockGuard::new(self, trap)
@@ -82,7 +92,11 @@ impl<T: ?Sized> SpinLock<T> {
         let caller = crate::machine::sync::depend_enter!(self);
         let trap = unsafe { TrapGuard::save() };
 
-        if self.locked.swap(true, Ordering::Acquire) {
+        if self
+            .locked
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
             return None;
         }
         crate::machine::sync::depend_acquire!(self, caller);

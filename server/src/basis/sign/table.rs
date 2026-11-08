@@ -6,8 +6,8 @@ use crate::basis::unit::task::Task;
 use crate::machine::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
-use core::sync::atomic::{AtomicBool, AtomicUsize};
 use kernel_api::abi::call::sign::SignFail;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::sign::SignId;
@@ -74,13 +74,12 @@ impl Table {
             depth,
         })
         .map_err(|_| SignFail::OutOfMemory)?;
-        static NEXT: AtomicUsize = AtomicUsize::new(1);
+        static NEXT: crate::basis::name::Serial =
+            crate::basis::name::Serial::new(1, isize::MAX as usize);
         let id = NEXT
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
-                (id < isize::MAX as usize).then_some(id + 1)
-            })
+            .allocate()
             .map(SignId::new)
-            .map_err(|_| SignFail::OutOfMemory)?;
+            .ok_or(SignFail::OutOfMemory)?;
         let mut entries = self.0.lock();
         entries
             .handles

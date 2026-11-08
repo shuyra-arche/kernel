@@ -8,6 +8,7 @@ autotests = false
 # A test-only workspace member; it does not depend on the RV64 Server crate.
 
 [dependencies]
+hashbrown = { version = "0.17.1", default-features = false, features = ["alloc", "default-hasher"] }
 kernel-api = { path = "../../api" }
 fack = { version = "0.2.0", default-features = false }
 fdt = { version = "0.1.5", default-features = false }
@@ -39,3 +40,15 @@ path = "pend/mod.rs"
 [[test]]
 name = "address"
 path = "address/mod.rs"
+
+[[test]]
+name = "name"
+path = "name/mod.rs"
+
+[[test]]
+name = "unit"
+path = "unit/mod.rs"
+
+[[test]]
+name = "room"
+path = "room/mod.rs"

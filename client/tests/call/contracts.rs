@@ -251,7 +251,10 @@ fn cell_inspection_uses_an_output_snapshot_and_create_returns_identity() {
         request: VirtAddr::new(0x4000),
     })
     .unwrap();
-    assert_eq!((made.kind, made.id, made.address.get()), (1, 23, 0x6000));
+    assert_eq!(
+        made,
+        kernel_api::model::cell::CreatedCell::decode(1, 23, 0x6000).unwrap()
+    );
     called(2usize << 32, [0x4000, 0, 0, 0, 0, 0]);
 }
 

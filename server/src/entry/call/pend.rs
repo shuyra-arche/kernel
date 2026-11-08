@@ -11,7 +11,7 @@ use kernel_api::model::pend::{AccordRequest, AccordTarget};
 use crate::basis::nest::Access;
 use crate::basis::pend;
 use crate::basis::pend::Modifiable;
-use crate::basis::pend::PendSnapshot;
+use crate::basis::pend::PendEntry;
 use crate::basis::room::conductor::current;
 use crate::basis::room::scheduler::roster::muster;
 use crate::basis::unit::task::TaskIdent;
@@ -87,7 +87,7 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
     answer(frame, r);
 }
 
-fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendSnapshot) -> PendInfo {
+fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendEntry) -> PendInfo {
     PendInfo {
         range: pend
             .view()
@@ -170,24 +170,24 @@ fn collect(
             return Err(PendFail::Denied);
         }
         let capacity = capacity.min(16);
-        let mut snapshots: [Option<PendSnapshot>; 16] = ::core::array::from_fn(|_| None);
+        let mut records: [Option<Arc<PendEntry>>; 16] = ::core::array::from_fn(|_| None);
         let mut count = 0;
         {
             let table = task.pend.entries.lock();
             for pend in table.iter().filter(|p| p.token().get() > after.get()) {
-                let at = snapshots[..count]
+                let at = records[..count]
                     .partition_point(|p| p.as_ref().unwrap().token().get() < pend.token().get());
                 if at < capacity {
                     let next = (count + 1).min(capacity);
                     for i in (at + 1..next).rev() {
-                        snapshots[i] = snapshots[i - 1].take();
+                        records[i] = records[i - 1].take();
                     }
-                    snapshots[at] = Some(pend.snapshot());
+                    records[at] = Some(pend.clone());
                     count = next;
                 }
             }
         }
-        for (i, pend) in snapshots[..count].iter().enumerate() {
+        for (i, pend) in records[..count].iter().enumerate() {
             write_info(
                 ident,
                 buf.get() + i * PendInfo::SIZE,

@@ -4,14 +4,13 @@ use alloc::vec::Vec;
 use kernel_api::model::identity::{TaskId, TeamId};
 use kernel_api::model::unit::TaskExit;
 
-use crate::basis::unit::life::{Life, TeamLife};
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::{Task, TaskState, TaskWeak};
+use crate::basis::unit::team::TeamNode;
 use crate::machine::sync::SpinLock;
 
-/// 一个团队的成员表：全量成员（发布时登记）与「暂扣」表（已装配但有任务
-/// 还没被释放出去）。
+/// Executions retained while held or parked. Persistent membership belongs to TeamNode.
 pub(crate) struct Tasks {
-    pub(crate) members: Arc<SpinLock<Vec<Arc<Member>>>>,
     pub(crate) held: SpinLock<Vec<Arc<Task>>>,
 }
 
@@ -57,9 +56,9 @@ pub(crate) struct Member {
     pub sire: TaskId,
     pub reclaimed: core::sync::atomic::AtomicBool,
     pub task: TaskWeak,
-    pub node: alloc::sync::Weak<TeamLife>,
+    pub node: alloc::sync::Weak<TeamNode>,
     pub state: Arc<SpinLock<TaskState>>,
-    pub life: Arc<Life>,
+    pub life: Arc<Anchor>,
     pub receipts: SpinLock<Vec<Receipt>>,
     /// Explicitly returned value, retained with the completion receipts.
     pub result: SpinLock<Option<usize>>,

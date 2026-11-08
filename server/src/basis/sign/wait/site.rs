@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use crate::basis::room::chain::Chain;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
 use crate::machine::sync::Level;
 use crate::machine::sync::OnceLock;
@@ -17,12 +17,12 @@ use super::key::WakeKey;
 pub(in super::super) struct Site {
     pub(super) pend: bool,
     pub(in super::super) chain: Chain,
-    pub(super) life: Weak<Life>,
+    pub(super) life: Weak<Anchor>,
     pub(super) fwd: Fwd,
 }
 
 impl Site {
-    fn new(life: &Weak<Life>) -> Self {
+    fn new(life: &Weak<Anchor>) -> Self {
         Self {
             pend: false,
             chain: Chain::new(),
@@ -34,7 +34,7 @@ impl Site {
     pub(super) fn ensure<'a>(
         sites: &'a mut HashMap<WakeKey, Site>,
         key: WakeKey,
-        life: &Weak<Life>,
+        life: &Weak<Anchor>,
     ) -> Result<&'a mut Site, ()> {
         if !sites.contains_key(&key) {
             sites.try_reserve(1).map_err(|_| ())?;
@@ -97,7 +97,7 @@ pub(super) fn take_beacon(key: WakeKey) -> bool {
 pub(in super::super) fn prune(sites: &mut HashMap<WakeKey, Site>, key: WakeKey) {
     if let Some(site) = sites.get(&key)
         && site.chain.is_empty()
-        && (Life::dead(&site.life) || (!site.pend && site.fwd.is_empty()))
+        && (Anchor::dead(&site.life) || (!site.pend && site.fwd.is_empty()))
     {
         sites.remove(&key);
     }
@@ -108,7 +108,7 @@ const FWD_MAX: usize = 8;
 #[derive(Clone)]
 pub(super) struct Fwd {
     ids: [usize; FWD_MAX],
-    lives: [Weak<Life>; FWD_MAX],
+    lives: [Weak<Anchor>; FWD_MAX],
     len: usize,
 }
 
@@ -121,7 +121,7 @@ impl Fwd {
         }
     }
 
-    pub(super) fn attach(&mut self, endpoint: usize, life: Weak<Life>) -> Result<(), ()> {
+    pub(super) fn attach(&mut self, endpoint: usize, life: Weak<Anchor>) -> Result<(), ()> {
         if self.ids[..self.len].contains(&endpoint) {
             return Ok(());
         }
@@ -149,7 +149,7 @@ impl Fwd {
         self.len == 0
     }
 
-    pub(super) fn entries(&self) -> impl Iterator<Item = (usize, &Weak<Life>)> {
+    pub(super) fn entries(&self) -> impl Iterator<Item = (usize, &Weak<Anchor>)> {
         self.ids[..self.len]
             .iter()
             .copied()

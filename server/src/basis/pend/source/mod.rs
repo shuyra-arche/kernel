@@ -44,10 +44,9 @@ pub(crate) use hold::{Hold, HoldTable};
 // 两个集合分得很清楚：私有阶段已建的关系记在自己这边；交给 Share 之后
 // 关系由那个 token 下的登记管，撤销随之关闭。
 
-#[derive(Clone)]
 enum Phase {
     /// 还没有 Share 接手。
-    Private,
+    Private(FlatRange),
     /// 已由根 Pend 接手：撤销依赖那枚 Pend，后续关系交给 Share 管。
     Root {
         meta: Weak<ShareView>,
@@ -94,9 +93,7 @@ impl Creation {
 }
 
 pub(crate) struct SourceAuthorization {
-    /// 私有阶段由它自己强持整段来源；交给根 Pend 之后这里变空，
-    /// 真实范围改由 Share 持有——普通引用因此不会在撤销后继续 pin 住帧。
-    range: SpinLock<Option<FlatRange>>,
+    /// Maximum access admitted when this source was created.
     ceiling: Access,
     owner: TaskId,
     qualification: Creation,
@@ -138,7 +135,6 @@ impl SourceAuthorization {
         owner: TaskId,
     ) -> Result<Arc<Self>, PendFail> {
         Arc::try_new(Self {
-            range: SpinLock::new(Some(range)),
             ceiling,
             owner,
             qualification: Creation::new(),
@@ -147,7 +143,7 @@ impl SourceAuthorization {
             inflight: SpinLock::new(Vec::new()),
             revoked: SpinLock::new(false),
             bindings: SpinLock::new(Vec::new()),
-            phase: SpinLock::new(Phase::Private),
+            phase: SpinLock::new(Phase::Private(range)),
         })
         .map_err(|_| PendFail::OutOfMemory)
     }
@@ -189,7 +185,10 @@ impl SourceAuthorization {
 
     /// 整段来源范围；已交给根 Pend 就是 `None`（真实范围在 Share 手里）。
     pub(crate) fn own_range(&self) -> Option<FlatRange> {
-        self.range.lock().clone()
+        match &*self.phase.lock() {
+            Phase::Private(range) => Some(range.clone()),
+            Phase::Root { .. } => None,
+        }
     }
 
     pub(crate) fn ceiling(&self) -> Access {
@@ -199,7 +198,7 @@ impl SourceAuthorization {
     pub(crate) fn private_owner(&self, task: TaskId) -> bool {
         !self.external.load(Ordering::Acquire)
             && self.owner == task
-            && matches!(&*self.phase.lock(), Phase::Private)
+            && matches!(&*self.phase.lock(), Phase::Private(_))
     }
 
     /// 相对整段来源的页窗口解析成可用范围。
@@ -240,7 +239,7 @@ impl SourceAuthorization {
     /// 闸门已持有时读当前权限幅面（不再回取闸门）。
     fn permission_ungated(&self) -> Option<Modifiable> {
         match &*self.phase.lock() {
-            Phase::Private => Some(private_access()),
+            Phase::Private(_) => Some(private_access()),
             Phase::Root { authority, .. } => authority.modifiable(),
         }
     }
@@ -260,12 +259,14 @@ impl SourceAuthorization {
         }
         // 先把相位拷出来放锁，再升弱引用：临时 `Arc` 可能是最后一份强持，
         // 它的析构会走到 `retire_mapping` / `settle` 再回本文件取锁。同 `manages`。
-        let phase = Phase::clone(&self.phase.lock());
-        let alive = match phase {
-            Phase::Private => true,
-            Phase::Root { meta, .. } => meta.upgrade().is_some_and(|meta| meta.alive()),
+        let meta = {
+            let phase = self.phase.lock();
+            match &*phase {
+                Phase::Private(_) => None,
+                Phase::Root { meta, .. } => Some(meta.clone()),
+            }
         };
-        if !alive {
+        if meta.is_some_and(|meta| meta.upgrade().is_none_or(|meta| !meta.alive())) {
             return false;
         }
         let modifiable = match branch {
@@ -454,32 +455,20 @@ impl SourceAuthorization {
         }
         // 短锁里克隆相位再判：放锁之后才取 pend_entry 表与 Pend 各自的锁，不与
         // “先 Pend 后相位”的读法（`Hold::resolve`）撞成逆序。
-        let phase = Phase::clone(&self.phase.lock());
-        match phase {
-            Phase::Private => self.owner == task.ident.id,
-            Phase::Root {
-                meta,
-                token,
-                authority,
-            } => {
-                // 表里没有那一枚：调用者不持 root token，当场不是管理者。
-                let Some(pend_entry) = super::locate(task, token) else {
-                    return false;
-                };
-                pend_entry.sire().is_none()
-                    && pend_entry.authority().modifiable().is_some()
-                    // `pend_entry.alive()` 含这份 View（Share）自己活着；它与下面“同 Arc”
-                    // 合起来就是“同一枚 Share 且活”，不只是 Pend 还在答话。
-                    && pend_entry.alive()
-                    && Arc::ptr_eq(pend_entry.authority(), &authority)
-                    // 那一下克隆出的临时强引用不会是最后一份：表里这一枚 `pend_entry` 自己
-                    // 就持着它，而这张表在调用者的 pend 之下不会变。
-                    && pend_entry
-                        .view()
-                        .share_view()
-                        .is_some_and(|held| Weak::as_ptr(&meta) == Arc::as_ptr(&held))
-            }
-        }
+        let Some((meta, token, authority)) = self.root() else {
+            return self.private_owner(task.ident.id);
+        };
+        let Some(entry) = super::locate(task, token) else {
+            return false;
+        };
+        entry.sire().is_none()
+            && entry.alive()
+            && entry.authority().modifiable().is_some()
+            && Arc::ptr_eq(entry.authority(), &authority)
+            && entry
+                .view()
+                .share_view()
+                .is_some_and(|view| Arc::ptr_eq(&view, &meta))
     }
 
     /// 已接手的根 Pend、它的 token 与**根 Pend 自己的**那枚 `Pend`。
@@ -491,7 +480,7 @@ impl SourceAuthorization {
                 token,
                 authority,
             } => Some((meta.upgrade()?, *token, authority.clone())),
-            Phase::Private => None,
+            Phase::Private(_) => None,
         }
     }
 
@@ -538,7 +527,6 @@ impl SourceAuthorization {
             return Err(PendFail::Denied);
         }
         // 真实范围先交给 Share，再改相位：交接期间授权记录不再强持来源。
-        *self.range.lock() = None;
         *phase = Phase::Root {
             meta: Arc::downgrade(meta),
             token,
@@ -550,8 +538,7 @@ impl SourceAuthorization {
     /// 事务中途失败：把刚交出去的范围放回私有阶段。
     pub(crate) fn restore_private(&self, range: FlatRange) {
         let mut phase = self.phase.lock();
-        *self.range.lock() = Some(range);
-        *phase = Phase::Private;
+        *phase = Phase::Private(range);
     }
 }
 

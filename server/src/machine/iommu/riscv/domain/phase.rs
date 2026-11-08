@@ -26,12 +26,15 @@ pub(super) enum Event {
     Close,
     Detached(BatchId),
     Stopped,
+    Fail,
 }
 
 impl DomainPhase {
     pub(super) fn next(self, event: Event) -> Option<Self> {
         use Event::*;
         Some(match (self, event) {
+            (Self::Closed, Fail) => Self::Closed,
+            (_, Fail) => Self::Failed,
             (Self::Prepared, Start(batch)) => Self::Purging(batch),
             (Self::Purging(expected), Complete(actual)) if expected == actual => Self::Installing,
             (Self::Installing, Installed(batch)) => Self::Starting(batch),

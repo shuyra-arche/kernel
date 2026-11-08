@@ -1,4 +1,4 @@
-use crate::machine::allocator::bitmap::BitmapAllocator;
+use crate::basis::name::Recycle;
 use crate::machine::sync::Level;
 use crate::machine::sync::SpinLock;
 
@@ -11,8 +11,7 @@ pub(crate) const fn vacant() -> usize {
     VACANT
 }
 
-static ASID_ALLOCATOR: SpinLock<BitmapAllocator> =
-    SpinLock::new_level(Level::Asid, BitmapAllocator::new(1, 65536, 1));
+static ASID_ALLOCATOR: SpinLock<Recycle> = SpinLock::new_level(Level::Asid, Recycle::new(1, 65536));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Asid(usize);
@@ -27,28 +26,24 @@ impl Asid {
     }
 
     pub(crate) fn try_allocate() -> Option<Self> {
-        ASID_ALLOCATOR
-            .lock()
-            .allocate(1)
-            .ok()
-            .map(|(asid, _)| Self(asid))
+        ASID_ALLOCATOR.lock().allocate().map(Self)
     }
 
     /// 归还一个尚未发布的 ASID 号。
     pub(crate) fn release_unpublished(asid: Self) {
         debug_assert!(!asid.is_kernel());
-        ASID_ALLOCATOR
-            .lock()
-            .deallocate(asid.get(), 1)
-            .expect("asid: unpublished allocation must be owned");
+        assert!(
+            ASID_ALLOCATOR.lock().release(asid.get()),
+            "asid: unpublished allocation must be owned"
+        );
     }
 
     /// 归还一个已经失效完成的 ASID 号。
     pub(crate) fn release(asid: Self) {
-        ASID_ALLOCATOR
-            .lock()
-            .deallocate(asid.get(), 1)
-            .expect("asid: double-free or never-allocated");
+        assert!(
+            ASID_ALLOCATOR.lock().release(asid.get()),
+            "asid: double-free or never-allocated"
+        );
     }
 
     pub fn get(self) -> usize {

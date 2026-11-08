@@ -9,7 +9,7 @@ use kernel_api::model::sign::SignSource;
 
 use crate::basis::pend;
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
 
 pub(crate) mod codec;
@@ -20,7 +20,7 @@ pub(crate) use watch::Watch;
 #[derive(Clone)]
 pub(crate) struct Route {
     pub actor: TaskId,
-    pub keys: Arc<Vec<(WakeKey, Weak<Life>)>>,
+    pub keys: Arc<Vec<(WakeKey, Weak<Anchor>)>>,
     pub watch: Watch,
 }
 

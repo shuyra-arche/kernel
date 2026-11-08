@@ -27,7 +27,7 @@ use crate::basis::pend::Hold;
 use crate::basis::pend::Need;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
 use crate::machine::iommu::BindingId;
 use crate::machine::iommu::Error;
@@ -51,21 +51,21 @@ struct Projection {
     actor: Weak<Task>,
     task: TaskId,
     source: FlatRange,
-    target: Option<pend::PendSnapshot>,
+    target: Option<Arc<pend::PendEntry>>,
     platform: Option<aperture::Binding>,
     hold: Arc<Hold>,
     page: Option<Arc<crate::basis::cell::page::Page>>,
-    generation: u64,
+    generation: crate::basis::name::Generation,
     freeze: Option<crate::basis::cell::page::Freeze>,
     iova: usize,
     modifiable: bool,
     binding: Option<BindingId>,
     borrow: Option<ExternalBorrow>,
     info: MappingInfo,
-    events: Arc<Life>,
+    events: Arc<Anchor>,
 }
 static PROJECTIONS: SpinLock<Vec<Projection>> = SpinLock::new(Vec::new());
-static NEXT: AtomicUsize = AtomicUsize::new(1);
+static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, isize::MAX as usize);
 fn failure(error: Error) -> CellFail {
     match error {
         Error::OutOfMemory | Error::Capacity => CellFail::OutOfMemory,
@@ -74,7 +74,7 @@ fn failure(error: Error) -> CellFail {
         _ => CellFail::Denied,
     }
 }
-fn target(actor: &Task, token: PendId, write: bool) -> Result<pend::PendSnapshot, CellFail> {
+fn target(actor: &Task, token: PendId, write: bool) -> Result<Arc<pend::PendEntry>, CellFail> {
     let entry = pend::locate(actor, token).ok_or(CellFail::Denied)?;
     if !entry.alive() || (write && !entry.allows(Need::Write)) {
         return Err(CellFail::Denied);
@@ -121,14 +121,10 @@ pub(crate) fn create(
         return Err(CellFail::Denied);
     }
     let source = target.view().share_view().ok_or(CellFail::Denied)?.source();
-    let events = Life::try_new().map_err(|_| CellFail::OutOfMemory)?;
+    let events = Anchor::try_new().map_err(|_| CellFail::OutOfMemory)?;
     let mut records = PROJECTIONS.lock();
     records.try_reserve(1).map_err(|_| CellFail::OutOfMemory)?;
-    let id = NEXT
-        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
-            id.checked_add(1).filter(|id| *id <= isize::MAX as usize)
-        })
-        .map_err(|_| CellFail::OutOfMemory)?;
+    let id = NEXT.allocate().ok_or(CellFail::OutOfMemory)?;
     records.push(Projection {
         id,
         actor: Arc::downgrade(actor),
@@ -146,7 +142,7 @@ pub(crate) fn create(
         events,
         hold,
         page: None,
-        generation: 1,
+        generation: crate::basis::name::Generation::first(),
         freeze: None,
         iova,
         modifiable,
@@ -167,13 +163,10 @@ pub(crate) fn associate(
     {
         return Err(CellFail::Denied);
     }
-    if record.generation != expected || record.info.state != MappingState::Settled {
+    if record.generation.get() != expected || record.info.state != MappingState::Settled {
         return Err(CellFail::Busy);
     }
-    let next = record
-        .generation
-        .checked_add(1)
-        .ok_or(CellFail::OutOfMemory)?;
+    let next = record.generation.next().ok_or(CellFail::OutOfMemory)?;
     record.page = Some(page);
     record.freeze = None;
     record.generation = next;
@@ -188,7 +181,7 @@ pub(crate) fn snapshot(
     let mut records = PROJECTIONS.lock();
     let r = authorized(&mut records, actor, token, id)?;
     Ok(CellInfo {
-        generation: r.generation,
+        generation: r.generation.get(),
         state: match r.info.state {
             MappingState::Publishing => CellState::Publishing,
             MappingState::Active => CellState::Published,
@@ -221,7 +214,7 @@ pub(crate) fn page(
 ) -> Result<(FlatRange, Arc<crate::basis::cell::page::Page>), CellFail> {
     let mut records = PROJECTIONS.lock();
     let r = authorized(&mut records, actor, token, id)?;
-    if r.generation != expected {
+    if r.generation.get() != expected {
         return Err(CellFail::Busy);
     }
     Ok((
@@ -241,7 +234,7 @@ pub(crate) fn owning_hold(
     if r.task != actor.ident.id || !r.hold.source().manages(actor) {
         return Err(CellFail::NotTransferable);
     }
-    if r.generation != expected || r.info.state != MappingState::Settled {
+    if r.generation.get() != expected || r.info.state != MappingState::Settled {
         return Err(CellFail::Busy);
     }
     Ok((r.hold.clone(), r.page.clone().ok_or(CellFail::SourceEmpty)?))
@@ -261,7 +254,7 @@ pub(crate) fn publish(
     if r.task != actor.ident.id {
         return Err(CellFail::Denied);
     }
-    if r.generation != expected || r.info.state != MappingState::Settled {
+    if r.generation.get() != expected || r.info.state != MappingState::Settled {
         return Err(CellFail::Busy);
     }
     // This platform route is one-shot. Never claim a new hardware publication on a closed domain.
@@ -269,7 +262,7 @@ pub(crate) fn publish(
         return Err(CellFail::NotTransferable);
     }
     let page = r.page.as_ref().ok_or(CellFail::SourceEmpty)?;
-    let next = r.generation.checked_add(1).ok_or(CellFail::OutOfMemory)?;
+    let next = r.generation.next().ok_or(CellFail::OutOfMemory)?;
     let change = crate::basis::cell::change::acquire(page)?;
     let borrow = ExternalBorrow::prepare(&r.hold, actor, r.modifiable, Some(&change)).map_err(
         |e| match e {
@@ -324,7 +317,7 @@ pub(crate) fn retract(
     if r.task != actor.ident.id {
         target(actor, token, true)?;
     }
-    if r.generation != expected {
+    if r.generation.get() != expected {
         return Err(CellFail::Busy);
     }
     if !matches!(
@@ -333,7 +326,7 @@ pub(crate) fn retract(
     ) {
         return Err(CellFail::Busy);
     }
-    let next = r.generation.checked_add(1).ok_or(CellFail::OutOfMemory)?;
+    let next = r.generation.next().ok_or(CellFail::OutOfMemory)?;
     r.freeze = Some(crate::basis::cell::page::Freeze::new(
         crate::basis::cell::change::acquire(r.page.as_ref().ok_or(CellFail::SourceEmpty)?)?,
     ));
@@ -374,7 +367,7 @@ pub(crate) fn event(
     token: PendId,
     id: MappingId,
     fault: bool,
-) -> Result<(Weak<Life>, Option<bool>), CellFail> {
+) -> Result<(Weak<Anchor>, Option<bool>), CellFail> {
     let mut records = PROJECTIONS.lock();
     let record = authorized(&mut records, actor, token, id)?;
     let ready = if record.info.state == MappingState::Failed {

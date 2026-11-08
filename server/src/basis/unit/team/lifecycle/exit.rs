@@ -5,7 +5,7 @@ use kernel_api::model::identity::TaskId;
 
 use crate::basis::unit::task::Task;
 
-use super::TeamLife;
+use super::TeamNode;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -73,7 +73,7 @@ impl ExitPolicy {
 }
 
 pub(crate) fn member_dying(task: &Task, reason: usize) {
-    let mut node = Some(&*task.ident.team.life);
+    let mut node = Some(&*task.ident.team.node);
     while let Some(team) = node {
         if team.exit.trip() {
             crate::entry::report::halt::protected_stop(reason);
@@ -82,6 +82,6 @@ pub(crate) fn member_dying(task: &Task, reason: usize) {
     }
 }
 
-pub(crate) fn arm(team: &TeamLife, owner: TaskId) -> Result<(), UnitFail> {
+pub(crate) fn arm(team: &TeamNode, owner: TaskId) -> Result<(), UnitFail> {
     team.exit.arm(owner)
 }

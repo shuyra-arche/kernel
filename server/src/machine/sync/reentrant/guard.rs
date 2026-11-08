@@ -1,5 +1,5 @@
 use ::core::marker::PhantomData;
-use ::core::ops::{Deref, DerefMut};
+use ::core::ops::Deref;
 use ::core::sync::atomic::Ordering;
 
 use crate::machine::sync::trap::TrapGuard;
@@ -28,12 +28,6 @@ impl<T: ?Sized> Deref for RelLockGuard<'_, T> {
 
     fn deref(&self) -> &T {
         unsafe { &*self.lock.data.get() }
-    }
-}
-
-impl<T: ?Sized> DerefMut for RelLockGuard<'_, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.lock.data.get() }
     }
 }
 

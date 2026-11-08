@@ -55,7 +55,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
                 return Outcome::fail(frame, RoomFail::Invalid);
             }
             let key = WakeKey::Value {
-                space: ident.team.nest.asid(),
+                space: ident.team.nest.id(),
                 address: address.get(),
             };
             frame.gpr.set_x(Gprs::A0, sign::wake_counted(key, all));

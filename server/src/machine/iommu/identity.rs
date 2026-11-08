@@ -1,13 +1,11 @@
 use core::num::NonZeroU32;
 use core::num::NonZeroUsize;
-use core::sync::atomic::AtomicU32;
-use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::Ordering;
 
 use super::Error;
 
-static NEXT_BINDING: AtomicUsize = AtomicUsize::new(1);
-static NEXT_BATCH: AtomicU32 = AtomicU32::new(1);
+static NEXT_BINDING: crate::basis::name::Serial = crate::basis::name::Serial::new(1, usize::MAX);
+static NEXT_BATCH: crate::basis::name::Serial =
+    crate::basis::name::Serial::new(1, u32::MAX as usize);
 
 /// 跨 IoSpace 不复用，错误地址空间上的句柄不会误中同号记录。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -15,23 +13,11 @@ pub(crate) struct BindingId(NonZeroUsize);
 
 impl BindingId {
     pub(super) fn allocate() -> Result<Self, Error> {
-        let mut before = NEXT_BINDING.load(Ordering::Relaxed);
-        loop {
-            let after = before.checked_add(1).ok_or(Error::Exhausted)?;
-            match NEXT_BINDING.compare_exchange_weak(
-                before,
-                after,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => {
-                    return Ok(Self(
-                        NonZeroUsize::new(before).expect("identities start at one"),
-                    ));
-                }
-                Err(current) => before = current,
-            }
-        }
+        NEXT_BINDING
+            .allocate()
+            .and_then(NonZeroUsize::new)
+            .map(Self)
+            .ok_or(Error::Exhausted)
     }
 }
 
@@ -41,19 +27,11 @@ pub(crate) struct BatchId(NonZeroU32);
 
 impl BatchId {
     pub(super) fn allocate() -> Result<Self, Error> {
-        let mut before = NEXT_BATCH.load(Ordering::Relaxed);
-        loop {
-            let after = before.checked_add(1).ok_or(Error::Exhausted)?;
-            match NEXT_BATCH.compare_exchange_weak(
-                before,
-                after,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return Ok(Self(NonZeroU32::new(before).expect("batches start at one"))),
-                Err(current) => before = current,
-            }
-        }
+        NEXT_BATCH
+            .allocate()
+            .and_then(|n| NonZeroU32::new(n as u32))
+            .map(Self)
+            .ok_or(Error::Exhausted)
     }
 
     pub(crate) fn value(self) -> u32 {

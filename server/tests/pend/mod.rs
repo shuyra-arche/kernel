@@ -56,3 +56,15 @@ fn retirement_never_resumes_access_and_waits_for_children() {
     assert_eq!(dead.transition(Retire), Ok(dead));
     assert!(!dead.usable());
 }
+
+#[test]
+fn cancellation_and_settlement_require_different_proofs() {
+    let active = State::new(Yes);
+    assert_eq!(active.transition(Settle), Err(Failure::Denied));
+    assert_eq!(active.transition(Cancel).unwrap().phase, Phase::Dead);
+    let borrowed = active.transition(Borrow(No)).unwrap();
+    assert_eq!(borrowed.transition(Cancel), Err(Failure::Busy));
+    let retiring = active.transition(Retire).unwrap();
+    assert_eq!(retiring.transition(Cancel), Err(Failure::Denied));
+    assert_eq!(retiring.transition(Settle).unwrap().phase, Phase::Dead);
+}

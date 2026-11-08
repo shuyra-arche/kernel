@@ -1,8 +1,9 @@
-use alloc::collections::binary_heap::BinaryHeap;
-use core::cmp::Reverse;
+mod queue;
+use crate::machine::sync::OnceLock;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 use core::time::Duration;
+use queue::Queue;
 
 use crate::machine::clock;
 use crate::machine::clock::Instant;
@@ -27,22 +28,25 @@ static MUTE_N: AtomicU64 = AtomicU64::new(0);
 static TICKS: AtomicU64 = AtomicU64::new(0);
 
 struct TimerHeap {
-    inner: SpinLock<BinaryHeap<Reverse<(u64, u64)>>>,
+    inner: SpinLock<Queue>,
     nearest: AtomicU64,
 }
 
-static TIMER_HEAP: TimerHeap = TimerHeap {
-    inner: SpinLock::new_level(Level::L3, BinaryHeap::new()),
-    nearest: AtomicU64::new(NONE),
-};
+static TIMERS: OnceLock<TimerHeap> = OnceLock::new();
+fn timers() -> &'static TimerHeap {
+    TIMERS.get_or_init(|| TimerHeap {
+        inner: SpinLock::new_level(Level::L3, Queue::new()),
+        nearest: AtomicU64::new(NONE),
+    })
+}
 
 impl TimerHeap {
     fn peek_nearest(&self) -> u64 {
         self.nearest.load(Ordering::Acquire)
     }
 
-    fn recompute_nearest(&self, i: &BinaryHeap<Reverse<(u64, u64)>>) {
-        let t = i.iter().map(|e| e.0.0).min().unwrap_or(NONE);
+    fn recompute_nearest(&self, i: &Queue) {
+        let t = i.nearest().unwrap_or(NONE);
         self.nearest.store(t, Ordering::Release);
     }
 }
@@ -67,38 +71,34 @@ pub fn beat_until(ceil: u64) {
 }
 
 pub fn tock(handle: u64, wake_at: u64) -> Result<(), ()> {
-    let mut i = TIMER_HEAP.inner.lock();
-    i.try_reserve(1).map_err(|_| ())?;
-    i.push(Reverse((wake_at, handle)));
-    TIMER_HEAP.recompute_nearest(&i);
+    let mut i = timers().inner.lock();
+    i.insert(handle, wake_at)?;
+    timers().recompute_nearest(&i);
     TOCK_N.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 
 pub fn mute(handle: u64) {
-    let mut i = TIMER_HEAP.inner.lock();
-    let before = i.len();
-    i.retain(|Reverse((_, h))| *h != handle);
-    if i.len() != before {
+    let mut i = timers().inner.lock();
+    if i.remove(handle) {
         MUTE_N.fetch_add(1, Ordering::Relaxed);
     }
-    TIMER_HEAP.recompute_nearest(&i);
+    timers().recompute_nearest(&i);
 }
 
 pub fn due() -> Option<Instant> {
-    let t = TIMER_HEAP.peek_nearest();
+    let t = timers().peek_nearest();
     (t != NONE).then_some(Instant::from_ticks(t))
 }
 
 pub fn drain(now: Instant, out: &mut [u64]) -> usize {
     let mut n = 0usize;
-    let mut i = TIMER_HEAP.inner.lock();
+    let mut i = timers().inner.lock();
     let now = now.as_ticks();
-    while let Some(Reverse((t, _))) = i.peek() {
-        if *t > now || n >= out.len() {
+    while n < out.len() {
+        let Some((wake_at, handle)) = i.pop_due(now) else {
             break;
-        }
-        let Reverse((wake_at, handle)) = i.pop().expect("peeked non-empty heap entry");
+        };
         out[n] = handle;
         n += 1;
         let late = now.saturating_sub(wake_at);
@@ -106,7 +106,7 @@ pub fn drain(now: Instant, out: &mut [u64]) -> usize {
         LATE_SUM.fetch_add(late, Ordering::Relaxed);
         LATE_MAX.fetch_max(late, Ordering::Relaxed);
     }
-    TIMER_HEAP.recompute_nearest(&i);
+    timers().recompute_nearest(&i);
     n
 }
 

@@ -5,7 +5,7 @@ use core::mem::MaybeUninit;
 use crate::basis::nest::NestError;
 use crate::basis::pend::Table;
 use crate::basis::room::scheduler;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::team::MAX_MEMBERS;
@@ -20,7 +20,7 @@ use super::super::TaskWeak;
 /// 已装配好、尚未公开的任务：身份、生命周期线、状态机，与那块等着写入的外壳内存。
 pub(crate) struct PreparedTask {
     ident: Arc<TaskIdent>,
-    life: Arc<Life>,
+    life: Arc<Anchor>,
     state: Arc<SpinLock<TaskState>>,
     slot: Option<Arc<MaybeUninit<Task>>>,
 }
@@ -28,7 +28,7 @@ pub(crate) struct PreparedTask {
 impl PreparedTask {
     pub(crate) fn new(
         ident: Arc<TaskIdent>,
-        life: Arc<Life>,
+        life: Arc<Anchor>,
         state: Arc<SpinLock<TaskState>>,
         slot: Arc<MaybeUninit<Task>>,
     ) -> PreparedTask {
@@ -68,7 +68,7 @@ impl PreparedTask {
                 .unwrap_or(kernel_api::model::identity::TaskId::new(0)),
             reclaimed: core::sync::atomic::AtomicBool::new(false),
             task: TaskWeak::empty(),
-            node: Arc::downgrade(&team.life),
+            node: Arc::downgrade(&team.node),
             state: self.state.clone(),
             life: self.life.clone(),
             receipts: SpinLock::new(receipts),
@@ -81,7 +81,7 @@ impl PreparedTask {
         // 余量」先在这里备好：提交段里惰性扩容就是一次分配，回调再取锁就只剩溢出。
         crate::machine::sync::reserve_depend(8).map_err(|_| NestError::OutOfMemory)?;
         {
-            let mut tasks = team.tasks.members.lock();
+            let mut tasks = team.node.tasks.lock();
             if tasks.len() >= MAX_MEMBERS {
                 return Err(NestError::OutOfMemory);
             }
@@ -92,10 +92,10 @@ impl PreparedTask {
                 .map_err(|_| NestError::OutOfMemory)?;
         }
         let _commit = crate::basis::commit();
-        if !team.life.admitting() {
+        if !team.node.admitting() {
             return Err(NestError::NoRegion);
         }
-        let mut tasks = team.tasks.members.lock();
+        let mut tasks = team.node.tasks.lock();
         let mut held = team.tasks.held.lock();
         if tasks.len() >= MAX_MEMBERS
             || tasks.len() == tasks.capacity()
@@ -123,7 +123,8 @@ impl PreparedTask {
             let mut member = member;
             Arc::get_mut(&mut member).expect("private member").task =
                 TaskWeak::stored(Arc::downgrade(&task), Origin::TeamTasks);
-            tasks.push(member);
+            let at = tasks.partition_point(|other| other.id.get() < member.id.get());
+            tasks.insert(at, member);
             held.push(task.clone());
             tally::push();
             (task, ())

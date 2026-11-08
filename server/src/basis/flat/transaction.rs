@@ -15,7 +15,6 @@
 //! 因此 Moving / Reserved 与来源锁就是槽迁移的唯一状态；映射引用不构成第二个槽。
 
 use alloc::sync::Arc;
-use core::sync::atomic::AtomicUsize;
 
 use crate::basis::cell::transfer::TransferError;
 use crate::machine::sync::with_pair;
@@ -159,8 +158,9 @@ fn owns(range: &FlatRange, page: PageIndex) -> bool {
 ///
 /// 号耗尽（或超出符号上界）就当场失败，不回收旧号。
 fn next_transaction() -> Result<usize, TransferError> {
-    static NEXT: AtomicUsize = AtomicUsize::new(1);
-    crate::machine::sync::next_id(&NEXT).ok_or(TransferError::OutOfMemory)
+    static NEXT: crate::basis::name::Serial =
+        crate::basis::name::Serial::new(1, isize::MAX as usize);
+    NEXT.allocate().ok_or(TransferError::OutOfMemory)
 }
 
 fn claim_page(

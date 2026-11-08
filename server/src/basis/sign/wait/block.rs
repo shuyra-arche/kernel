@@ -23,7 +23,7 @@ pub(crate) fn finish_block(blocked: Blocked) -> Handoff<()> {
 
 pub(crate) fn block_with_call<E: WaitFail>(
     key: WakeKey,
-    life: Weak<Life>,
+    life: Weak<Anchor>,
     dur: Duration,
     wait: Option<WaitCall>,
 ) -> Result<Blocked, E> {
@@ -42,7 +42,7 @@ pub(crate) fn block_with_call<E: WaitFail>(
         let mut sites = sites(key).lock();
         Site::ensure(&mut sites, key, &life).map_err(|()| E::oom())?;
     }
-    let ticket = Ticket::next_id();
+    let ticket = Ticket::next_id().ok_or_else(E::oom)?;
     let at = wait.as_ref().map_or_else(
         || (dur != Duration::MAX).then(|| clock::now().add(dur).as_ticks()),
         |call| call.deadline(dur),
@@ -61,7 +61,7 @@ pub(crate) fn block_with_call<E: WaitFail>(
         let mut sites = sites(key).lock();
         let queued = match sites.get_mut(&key) {
             None => false,
-            Some(site) if Life::dead(&site.life) => false,
+            Some(site) if Anchor::dead(&site.life) => false,
             Some(site) if site.pend => {
                 site.pend = false;
                 false

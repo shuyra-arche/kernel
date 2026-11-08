@@ -19,7 +19,7 @@ pub(super) fn query(me: &Arc<Task>, query: UnitQuery) -> Result<Option<UnitInfo>
         UnitQuery::Members { team, after } => {
             let team = team_for(me, team)?;
             let next = team
-                .life
+                .node
                 .tasks
                 .lock()
                 .iter()
@@ -35,7 +35,7 @@ pub(super) fn query(me: &Arc<Task>, query: UnitQuery) -> Result<Option<UnitInfo>
         UnitTarget::Team(id) => Ok(Some(team_info(&team_for(me, id)?))),
         UnitTarget::Task(id) => {
             let member = if id == me.ident.id {
-                me.ident.team.life.member(id).ok_or(UnitFail::Denied)?
+                me.ident.team.node.member(id).ok_or(UnitFail::Denied)?
             } else {
                 let crate::basis::unit::lifecycle::join::JoinTarget::Task(member) =
                     crate::basis::unit::lifecycle::join::observe(me, target)?
@@ -56,10 +56,10 @@ fn team_for(me: &Arc<Task>, id: TeamId) -> Result<Arc<Team>, UnitFail> {
     }
 }
 fn team_info(team: &Arc<Team>) -> UnitInfo {
-    let admitting = team.life.admitting();
+    let admitting = team.node.admitting();
     let state = if !admitting && team.all_reaped() {
         UnitState::Exited
-    } else if team.life.closed() {
+    } else if team.node.closed() {
         UnitState::Stopping
     } else if team.paused() {
         UnitState::Frozen

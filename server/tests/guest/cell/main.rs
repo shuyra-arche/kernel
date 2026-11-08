@@ -44,20 +44,24 @@ fn ptr(bytes: &[u8]) -> VirtAddr {
 fn allocate(count: usize) -> SlotId {
     let spec = CellCreate::Slot(Allocation::new(count * 4096, 4096).unwrap()).to_bytes();
     let made = cell::create(ptr(&spec)).unwrap();
-    assert_eq!(made.kind, 0);
-    SlotId::from_bytes(&made.id.to_le_bytes()).unwrap()
+    let CreatedCell::Slot(slot) = made else {
+        panic!("expected Slot")
+    };
+    slot
 }
 fn reserve(reference: SlotId, count: usize) -> (MappingId, VirtAddr) {
     let spec = CellCreate::Memo {
-        target: MappingTarget::Cpu(TeamId::new(0)),
         source: CellSource::Slot(ReferenceRange {
             reference,
             offset: 0,
             count,
         }),
-        placement: Placement::lowest(4096).unwrap(),
-        access: 6,
-        control: MappingControl::Caller,
+        destination: MemoDestination::Internal {
+            team: TeamId::new(0),
+            placement: Placement::lowest(4096).unwrap(),
+            access: 6,
+            control: MappingControl::Caller,
+        },
     }
     .to_bytes();
     let made = cell::create(ptr(&spec)).unwrap_or_else(|e| {
@@ -67,11 +71,10 @@ fn reserve(reference: SlotId, count: usize) -> (MappingId, VirtAddr) {
             count
         )
     });
-    assert_eq!(made.kind, 1);
-    (
-        MappingId::from_bytes(&made.id.to_le_bytes()).unwrap(),
-        made.address,
-    )
+    let CreatedCell::Memo { mapping, address } = made else {
+        panic!("expected Memo")
+    };
+    (mapping, address)
 }
 fn slot(reference: SlotId, page: usize) -> CellPosition {
     CellPosition {

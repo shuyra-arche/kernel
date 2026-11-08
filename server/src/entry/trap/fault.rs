@@ -85,7 +85,7 @@ pub(super) fn wait(
     let tid = ident.as_ref().map_or(0, Identity::task_id);
     let life = nest.life();
     let key = WakeKey::Mapping {
-        space: nest.asid(),
+        space: nest.id(),
         mapping,
     };
     let waiting = FaultWait::new(nest, fault.addr, fault.kind, mapping);

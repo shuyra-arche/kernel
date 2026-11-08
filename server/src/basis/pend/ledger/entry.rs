@@ -1,7 +1,4 @@
 use crate::basis::pend::Pend;
-use core::ops::Deref;
-use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::Ordering;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -16,8 +13,8 @@ use crate::basis::view::View;
 
 use crate::basis::pend::{Modifiable, Need};
 
-#[derive(Clone)]
-pub(crate) struct PendSnapshot {
+pub(crate) struct PendEntry {
+    released: core::sync::atomic::AtomicBool,
     token: PendId,
     authority: Arc<Pend>,
     mark: Mark,
@@ -26,7 +23,7 @@ pub(crate) struct PendSnapshot {
     meta: View,
 }
 
-impl PendSnapshot {
+impl PendEntry {
     /// 这一枚 PendEntry 的 Pend：持有它的调用方据此知道自己的分支在哪条撤销边上。
     pub(crate) fn authority(&self) -> &Arc<Pend> {
         &self.authority
@@ -90,10 +87,6 @@ impl PendSnapshot {
     }
 }
 
-pub(crate) struct PendEntry {
-    core: PendSnapshot,
-}
-
 impl PendEntry {
     pub(crate) fn try_new(
         meta: View,
@@ -115,80 +108,76 @@ impl PendEntry {
             kernel_api::address::PageCount,
         )>,
     ) -> Result<PendEntry, kernel_api::abi::call::pend::PendFail> {
-        let token = next_id();
+        let token = next_id()?;
         Ok(PendEntry {
-            core: PendSnapshot {
-                token,
-                authority: meta.new_pend(modifiable, token, window)?,
-                mark,
-                sire,
-                lord: Weak::new(),
-                meta,
-            },
+            released: core::sync::atomic::AtomicBool::new(false),
+            token,
+            authority: meta.new_pend(modifiable, token, window)?,
+            mark,
+            sire,
+            lord: Weak::new(),
+            meta,
         })
     }
 
-    pub(crate) fn snapshot(&self) -> PendSnapshot {
-        self.core.clone()
+    pub(super) fn release(&self) {
+        if !self
+            .released
+            .swap(true, core::sync::atomic::Ordering::AcqRel)
+        {
+            self.meta.release_pend(self.token);
+        }
     }
 
     pub(crate) fn invalidate(&self) {
-        self.core.authority.invalidate();
+        self.authority.invalidate();
     }
 
     pub(crate) fn parent(&mut self, token: PendId, task: Weak<Task>) {
-        self.core.sire = Some(token);
-        self.core.lord = task;
+        self.sire = Some(token);
+        self.lord = task;
     }
 
     pub(crate) fn narrow(
-        &mut self,
+        &self,
         subset: Modifiable,
         window: Option<(
             kernel_api::address::PageOffset,
             kernel_api::address::PageCount,
         )>,
     ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
-        if !self.core.alive() {
+        if !self.alive() {
             return Err(kernel_api::abi::call::pend::PendFail::Dead);
         }
-        if !narrows(self.core.modifiable(), subset) {
+        if !narrows(self.modifiable(), subset) {
             return Err(kernel_api::abi::call::pend::PendFail::Denied);
         }
-        self.core.authority.narrow(subset, window)
-    }
-}
-
-impl Deref for PendEntry {
-    type Target = PendSnapshot;
-    fn deref(&self) -> &PendSnapshot {
-        &self.core
+        self.authority.narrow(subset, window)
     }
 }
 
 impl Drop for PendEntry {
     fn drop(&mut self) {
-        self.core.authority.invalidate();
-        self.core.meta.release_pend(self.core.token);
+        self.authority.invalidate();
+        self.release();
     }
 }
 
+// SAFETY: identity fields are immutable once shared; authority and View state
+// use their own locks/atomics. PendId's !Send marker protects API ownership, not
+// this kernel registration, which is always accessed under ledger/COMMIT rules.
 unsafe impl Send for PendEntry {}
-
-fn next_id() -> PendId {
-    static NEXT: AtomicUsize = AtomicUsize::new(1);
-    PendId::mint(
-        NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .expect("PendEntry token identity exhausted"),
-    )
+unsafe impl Sync for PendEntry {}
+fn next_id() -> Result<PendId, kernel_api::abi::call::pend::PendFail> {
+    static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, usize::MAX);
+    NEXT.allocate()
+        .map(PendId::mint)
+        .ok_or(kernel_api::abi::call::pend::PendFail::OutOfMemory)
 }
 
-pub(crate) fn locate(task: &Task, token: PendId) -> Option<PendSnapshot> {
+pub(crate) fn locate(task: &Task, token: PendId) -> Option<Arc<PendEntry>> {
     let entries = task.pend.entries.lock();
-    entries
-        .iter()
-        .find(|p| p.token() == token)
-        .map(|p| p.snapshot())
+    entries.iter().find(|p| p.token() == token).cloned()
 }
 
 pub(crate) fn vestor(task: &Arc<Task>, token: PendId) -> Option<TaskId> {
@@ -219,7 +208,7 @@ pub(crate) fn accede(
     task: &Arc<Task>,
     token: PendId,
     need: Need,
-) -> Result<PendSnapshot, kernel_api::abi::call::pend::PendFail> {
+) -> Result<Arc<PendEntry>, kernel_api::abi::call::pend::PendFail> {
     let pend_entry = locate(task, token).ok_or(kernel_api::abi::call::pend::PendFail::Denied)?;
     if !pend_entry.alive() {
         return Err(kernel_api::abi::call::pend::PendFail::Dead);

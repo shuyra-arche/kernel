@@ -3,7 +3,7 @@ mod state;
 pub(crate) mod wait;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
 use crate::machine::sync::Level;
 use crate::machine::sync::SpinLock;
@@ -26,7 +26,7 @@ const MAX: usize = 1024;
 pub struct Endpoint {
     state: SpinLock<State>,
     pub(crate) id: usize,
-    life: Arc<Life>,
+    life: Arc<Anchor>,
     routes: SpinLock<Vec<Route>>,
     owner: TaskId,
     cursor: AtomicUsize,
@@ -39,14 +39,12 @@ impl Endpoint {
         Arc::try_new(Self {
             state: SpinLock::new_level(Level::L3, State::new()),
             id: {
-                static NEXT: AtomicUsize = AtomicUsize::new(1);
-                NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
-                    id.checked_add(1)
-                        .filter(|next| *next <= isize::MAX as usize)
-                })
-                .map_err(|_| crate::basis::nest::NestError::OutOfMemory)?
+                static NEXT: crate::basis::name::Serial =
+                    crate::basis::name::Serial::new(1, isize::MAX as usize);
+                NEXT.allocate()
+                    .ok_or(crate::basis::nest::NestError::OutOfMemory)?
             },
-            life: Life::try_new()?,
+            life: Anchor::try_new()?,
             routes: SpinLock::new_level(Level::L3, Vec::new()),
             owner,
             cursor: AtomicUsize::new(0),
@@ -54,7 +52,7 @@ impl Endpoint {
         .map_err(|_| crate::basis::nest::NestError::OutOfMemory)
     }
 
-    pub(crate) fn life(&self) -> Weak<Life> {
+    pub(crate) fn life(&self) -> Weak<Anchor> {
         Arc::downgrade(&self.life)
     }
     pub(crate) fn owner(&self) -> TaskId {

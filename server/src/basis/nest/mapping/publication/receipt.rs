@@ -6,6 +6,7 @@ use core::ops::Deref;
 
 pub(crate) enum Publication {
     Unmapped,
+    Prepared(Retention),
     Publishing(Retention),
     Mapped(Retention),
     Withdrawing(Retention),
@@ -21,17 +22,26 @@ impl Publication {
             Some(_) => return Err(RetainError::Busy),
             None => page.prepare_hardware(writable)?,
         };
-        Ok(Self::Publishing(retention))
+        Ok(Self::Prepared(retention))
     }
     /// Before the first hardware write; a dropped published obligation is quarantined.
     pub(crate) fn publish(&mut self) {
-        let Self::Publishing(retention) = self else {
-            panic!("publish requires Publishing")
+        assert!(
+            matches!(self, Self::Prepared(_)),
+            "publish requires Prepared"
+        );
+        let Self::Prepared(mut retention) = core::mem::replace(self, Self::Unmapped) else {
+            unreachable!()
         };
         retention.publish();
+        *self = Self::Publishing(retention);
     }
     /// Hardware publication and synchronization have both completed.
     pub(crate) fn complete(&mut self) {
+        assert!(
+            matches!(self, Self::Publishing(_) | Self::Mapped(_)),
+            "complete requires published responsibility"
+        );
         let old = core::mem::replace(self, Self::Unmapped);
         *self = match old {
             Self::Publishing(retention) => Self::Mapped(retention),
@@ -59,7 +69,7 @@ impl Deref for Publication {
     type Target = Retention;
     fn deref(&self) -> &Retention {
         match self {
-            Self::Publishing(r) | Self::Mapped(r) | Self::Withdrawing(r) => r,
+            Self::Prepared(r) | Self::Publishing(r) | Self::Mapped(r) | Self::Withdrawing(r) => r,
             Self::Unmapped => panic!("unmapped position has no Page"),
         }
     }
