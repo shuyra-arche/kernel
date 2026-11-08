@@ -35,8 +35,6 @@ pub(crate) fn run() -> usize {
 
 // 本核的空闲环：先在自己槽里找，找不到就偷、就睡，醒来再看。
 
-/// 没在停机路上时可以一觉睡到天亮的时限。
-const WFI_FAR: u64 = 1 << 60;
 /// 停机路上改按这个时限回来看一眼。
 const BEACON_TICK: u64 = 250_000;
 
@@ -96,15 +94,23 @@ fn wait() -> Option<usize> {
             scheduler::idle::wake(me);
             halt::halt();
         }
+        // Clear first, then inspect work and deadlines. An IPI racing this
+        // clear is either observed through the queue or stays pending for WFI.
+        scheduler::idle::acknowledge();
+        if deadline::elapsed() && sign::redeem() {
+            break;
+        }
         beacon::idle(me);
 
         let external_pending = crate::basis::cell::projection::maintain();
         let fallback = if beacon::shutting_down() || external_pending {
-            BEACON_TICK
+            crate::machine::clock::now()
+                .as_ticks()
+                .saturating_add(BEACON_TICK)
         } else {
-            WFI_FAR
+            crate::machine::clock::timer::DISARMED
         };
-        deadline::beat_until(fallback);
+        deadline::arm(fallback);
         unsafe {
             sie::set_sext();
         }
@@ -120,16 +126,7 @@ fn wait() -> Option<usize> {
         unsafe {
             core::arch::asm!("wfi");
         }
-        if sign::redeem() {
-            break;
-        }
-        if let Some(pa) = dispatch() {
-            scheduler::idle::wake(me);
-            return Some(pa);
-        }
-        unsafe { sip::clear_ssoft() };
     }
-    unsafe { sip::clear_ssoft() };
     scheduler::idle::wake(me);
     None
 }

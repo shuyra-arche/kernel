@@ -103,7 +103,7 @@ pub(in super::super) fn init() -> Result<(), NestError> {
         frame.self_va = HART_FRAME_BASE + h.get() * PAGE_SIZE;
     }
 
-    deadline::beat_until(deadline::blind_ceiling());
+    deadline::arm(deadline::blind_deadline());
     stack::arm_hart();
     Ok(())
 }

@@ -13,6 +13,6 @@ impl Instant {
     }
 
     pub fn add(&self, d: Duration) -> Instant {
-        Instant(self.0.wrapping_add(super::duration_to_ticks(d)))
+        Instant(self.0.saturating_add(super::duration_to_ticks(d)))
     }
 }

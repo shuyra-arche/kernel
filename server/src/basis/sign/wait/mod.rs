@@ -319,6 +319,9 @@ pub fn wake(key: WakeKey, life: &Weak<Anchor>) -> bool {
 }
 
 pub fn redeem() -> bool {
+    if !deadline::is_owner() {
+        return false;
+    }
     let _commit = crate::basis::commit();
     const MAX_DUE: usize = 64;
     let mut due = [0u64; MAX_DUE];

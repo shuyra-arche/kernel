@@ -8,7 +8,6 @@ use riscv::interrupt::Trap;
 use riscv::register::scause;
 use riscv::register::sepc;
 use riscv::register::sie;
-use riscv::register::sip;
 use riscv::register::stval;
 
 use crate::basis::nest::FaultOutcome;
@@ -140,12 +139,14 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
     });
     let next: *mut TrapContext = match trap {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
-            deadline::tick();
+            if !deadline::elapsed() {
+                // A comparator update can take time to clear a pending STIP.
+                return resume(frame as *mut TrapContext);
+            }
             crate::basis::cell::projection::maintain();
             unsafe {
                 sie::set_sext();
             }
-            deadline::beat_until(deadline::blind_ceiling());
             redeem();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
                 && let Some(reason) = crate::basis::unit::lifecycle::take_doomed(running.id)
@@ -158,13 +159,13 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
             } else if persist(frame) {
                 run() as *mut TrapContext
             } else {
+                deadline::arm(deadline::blind_deadline());
                 frame as *mut TrapContext
             }
         }
         Trap::Interrupt(Interrupt::SupervisorSoft) => {
-            unsafe {
-                sip::clear_ssoft();
-            }
+            crate::basis::room::scheduler::idle::acknowledge();
+            deadline::refresh();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
                 && let Some(reason) = crate::basis::unit::lifecycle::take_doomed(running.id)
             {
