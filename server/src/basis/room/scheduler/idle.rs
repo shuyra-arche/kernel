@@ -45,38 +45,36 @@ pub(super) fn waiting(hart: HartId) -> bool {
     WAITING[word].load(Ordering::Acquire) & bit != 0
 }
 
-/// 挑一颗睡着的核；一颗睡的也没有就轮着挑（不挑自己，除非只有自己）。
-pub(super) fn pick() -> HartId {
-    let seat = PICK_CURSOR.fetch_add(1, Ordering::Relaxed);
+/// Rotate within eligible Harts, preferring idle destinations. A sparse
+/// capability set must not inherit the gaps or bias of the physical bitmap.
+pub(super) fn pick(compatible: impl Fn(HartId) -> bool) -> HartId {
+    let cursor = PICK_CURSOR.fetch_add(1, Ordering::Relaxed);
     let n = hart::hart_count();
-    debug_assert!(n > 0, "pick with no hart");
-    let sm = seat % (usize::BITS as usize);
-    let mut best_rel = usize::MAX;
-    let mut best_bit = 0usize;
-    for (w, word) in WAITING.iter().enumerate() {
-        let bits = word.load(Ordering::Acquire);
-        if bits == 0 {
-            continue;
+    let me = hart::hart_id();
+    let eligible = || {
+        (0..n)
+            .map(HartId::new)
+            .filter(|candidate| compatible(*candidate))
+    };
+    let idle_count = eligible().filter(|candidate| waiting(*candidate)).count();
+    if idle_count != 0 {
+        if let Some(hart) = eligible()
+            .filter(|candidate| waiting(*candidate))
+            .nth(cursor % idle_count)
+        {
+            return hart;
         }
-        let rot = bits.rotate_right(sm as u32);
-        let rel = rot.trailing_zeros() as usize;
-        let bit = w * (usize::BITS as usize) + (sm + rel) % (usize::BITS as usize);
-        if rel < best_rel {
-            best_rel = rel;
-            best_bit = bit;
-        }
+        // Idle flags can change between passes; compatibility is stable while
+        // the Task is off-Hart. Continue with the complete eligible set.
     }
-
-    if best_rel != usize::MAX {
-        HartId::new(best_bit)
-    } else {
-        let me = hart::hart_id();
-        let mut to = seat % n;
-        if n > 1 && to == me.get() {
-            to = (to + 1) % n;
-        }
-        HartId::new(to)
+    let others = eligible().filter(|candidate| *candidate != me).count();
+    if others != 0 {
+        return eligible()
+            .filter(|candidate| *candidate != me)
+            .nth(cursor % others)
+            .unwrap();
     }
+    eligible().next().expect("Task has no compatible Hart")
 }
 
 /// 把所有睡着的核都叫一遍（停机之前用）。

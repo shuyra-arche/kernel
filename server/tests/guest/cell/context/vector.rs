@@ -15,6 +15,15 @@ static STARTED: AtomicUsize = AtomicUsize::new(0);
 #[cfg(feature = "migration")]
 static MIGRATION_ENTERED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
+#[cfg(feature = "migration")]
+static LOAD_STOP: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+#[cfg(feature = "migration")]
+extern "C" fn load_worker() -> ! {
+    while !LOAD_STOP.load(Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
 #[cfg(not(feature = "migration"))]
 extern "C" fn probe() -> ! {
     let bytes: usize;
@@ -58,7 +67,7 @@ fn worker(id: usize, barrier: bool) -> ! {
             assert!(now - start < 30_000_000, "no vector timer preemption");
         }
     }
-    for _ in 0..64 {
+    for _ in 0..if barrier { 64 } else { 16 } {
         unsafe {
             if id == 1 {
                 context_vector_one();
@@ -181,6 +190,14 @@ extern "C" fn migrant() -> ! {
 }
 #[cfg(feature = "migration")]
 pub(super) fn migration() {
+    // Keep every Hart runnable during the handoffs. Otherwise an idle Hart can
+    // redeem a timer and steal the same Task back before the destination wakes,
+    // which preserves state but does not exercise migration.
+    let load = core::array::from_fn::<_, 4, _>(|_| {
+        let task = lifecycle::spawn(load_worker as *const () as usize);
+        unit::resume(UnitTarget::Task(task)).unwrap();
+        task
+    });
     for _ in 0..32 {
         MIGRATION_ENTERED.store(false, Ordering::Release);
         let task = lifecycle::spawn(migrant as *const () as usize);
@@ -196,6 +213,12 @@ pub(super) fn migration() {
             continue;
         }
         assert_eq!(info.result, Some(0));
+        LOAD_STOP.store(true, Ordering::Release);
+        for task in load {
+            assert!(lifecycle::wait_task(task));
+            assert_eq!(lifecycle::result(task), (1, 0));
+            lifecycle::delete(task);
+        }
         Console
             .write_str("PASS context migration-state=1 incompatible-harts=2\n")
             .unwrap();
