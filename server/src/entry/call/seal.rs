@@ -9,7 +9,7 @@ use kernel_api::model::view::ViewKind;
 
 use crate::basis::pend;
 use crate::basis::room::conductor::current;
-use crate::basis::view::share_view::ShareOperation;
+use crate::basis::view::share::ShareOperation;
 
 /// 失活资源并关闭其关系；派生子图或在途发表未结时保留补关身份。
 ///
@@ -33,7 +33,7 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         if !pend.alive()
             && !share_view
                 .as_ref()
-                .is_some_and(|meta| crate::basis::view::share_view::pending_close(meta))
+                .is_some_and(|meta| crate::basis::view::share::pending_close(meta))
         {
             return Err(PendFail::Dead);
         }
@@ -55,7 +55,7 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         (share_view, operation)
     };
     if let Some(share_view) = share_view {
-        crate::basis::view::share_view::close(&share_view)?;
+        crate::basis::view::share::close(&share_view)?;
     }
     Ok(0)
 }

@@ -11,7 +11,7 @@ use wait::site::SITE_SHARDS;
 use wait::site::shard_at;
 
 pub(crate) use wait::block::block_with_call;
-pub(crate) use wait::blocked::finish_block;
+pub(crate) use wait::block::finish_block;
 pub(crate) use wait::detach;
 pub(crate) use wait::forward;
 pub(crate) use wait::holder::Ticket;

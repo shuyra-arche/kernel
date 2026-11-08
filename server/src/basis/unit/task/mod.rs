@@ -1,6 +1,9 @@
+use crate::basis::nest::NestError;
+use crate::basis::unit::space::Space;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
+use kernel_api::model::cell::MappingControl;
 
 use kernel_api::abi::call::unit::UnitFail;
 use kernel_api::model::identity::TeamId;
@@ -18,20 +21,19 @@ use crate::machine::hart::HartId;
 use crate::machine::sync::SpinLock;
 
 use crate::basis::unit::control::Request;
-use state::control::Effect;
+use state::Effect;
 
 mod builder;
 mod continuation;
-mod control;
 pub(crate) use continuation::Resumption;
 pub(crate) use continuation::WaitCall;
-mod ident;
+mod identity;
 pub(super) mod prepared;
 mod state;
 mod weak;
 
 pub(crate) use builder::TaskBuilder;
-pub(crate) use ident::TaskIdent;
+pub(crate) use identity::TaskIdent;
 pub(crate) use state::TaskState;
 pub(crate) use weak::TaskWeak;
 
@@ -224,6 +226,82 @@ impl Task {
         }
         root.prune();
         Some(child)
+    }
+
+    pub(crate) fn track_control(&self, space: &Arc<Space>, id: usize) -> Result<(), NestError> {
+        let mut controls = self.controls.lock();
+        controls
+            .try_reserve(1)
+            .map_err(|_| NestError::OutOfMemory)?;
+        controls.push((Arc::downgrade(space), id));
+        Ok(())
+    }
+
+    /// 所有 Nest 共用单调、不复用的关系号；id 唯一标识这一笔控制。
+    pub(crate) fn release_control(&self, id: usize) {
+        self.controls.lock().retain(|(_, held)| *held != id);
+    }
+
+    /// 任务退场时收掉它控制的每一段关系；未结的登记原地留在本表里等既有重试。
+    ///
+    /// 返回 `Err` 时表里仍有未结的控制：调用方（`Task::retire` / HUSKS）必须保留
+    /// 这个 Task 并再次调用，不能把仍有作用的控制当成已经结清。
+    /// `Space` 已消失的那一档是 raw last-drop 的既有边界：没有 Nest 可重试，也不能
+    /// 声称结清；它与“已证明结清”分开，只撤掉无法再走的控制记录。
+    pub(crate) fn close_controls(&self) -> Result<(), NestError> {
+        let mut at = 0;
+        let mut failure: Option<NestError> = None;
+        loop {
+            let Some((space, id)) = self
+                .controls
+                .lock()
+                .get(at)
+                .map(|(space, id)| (space.clone(), *id))
+            else {
+                break;
+            };
+            let Some(space) = space.upgrade() else {
+                self.release_control(id);
+                continue;
+            };
+            // 一把 registry 锁取任意登记：中间提交的槽不会在两次查询里丢掉。
+            let Some(entry) = space.mappings.registered(id) else {
+                self.release_control(id);
+                continue;
+            };
+            let Some(control) = entry.control.as_ref() else {
+                self.release_control(id);
+                continue;
+            };
+            let (controller, _) = control.control();
+            if controller != self.ident.id || control.scope() != MappingControl::Caller {
+                self.release_control(id);
+                continue;
+            }
+            let retry = if space.nest.settled(id) {
+                Ok(())
+            } else {
+                if let Some(mapping) = entry.mapping() {
+                    let _ = space.dispose(mapping.clone());
+                }
+                space.nest.retry_invalidation()
+            };
+            if !space.nest.settled(id) {
+                failure = failure.or(retry.err()).or(Some(NestError::Busy));
+                at += 1;
+            } else {
+                // 结清只有一条规则：Registry 项与源侧成员一起撤，controller 也跟着放。
+                space.retire_mapping(id);
+            }
+            // 沿原行为释放这个空间里其他已结清的 controller（不在本表锁下）。
+            space.reap_mappings();
+        }
+        // 并发删除可能让游标跳过一项；表非空就不能当成已全部结清。
+        if self.controls.lock().is_empty() {
+            Ok(())
+        } else {
+            Err(failure.unwrap_or(NestError::Busy))
+        }
     }
 
     pub(crate) fn retire(self: &Arc<Self>) -> Result<(), crate::basis::nest::NestError> {

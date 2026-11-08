@@ -37,7 +37,7 @@ pub(crate) fn report() {
     putln!(
         "supervisor_external: ring={ring} busy={busy} idle_ring={idle_ring} idle_busy={idle_busy}"
     );
-    crate::basis::view::clone_view::hold_line();
+    crate::basis::view::clone::hold_line();
     use crate::machine::allocator::statistics;
     putln!(
         "memory: frames={} pools={}",

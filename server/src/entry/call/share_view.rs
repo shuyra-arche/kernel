@@ -107,7 +107,7 @@ pub(crate) fn create_share(
             .page_count()
             .checked_bytes()
             .ok_or(PendFail::NotAligned)?;
-        let meta = view::share_view::ShareView::from_source(source.clone(), size, task.ident.id)?;
+        let meta = view::share::ShareView::from_source(source.clone(), size, task.ident.id)?;
         let modifiable = requested;
         if modifiable == Modifiable::Yes && !hold.ceiling().contains(Access::WRITE) {
             return Err(PendFail::Denied);
@@ -175,7 +175,7 @@ fn open_resource(ident: Arc<TaskIdent>, token: PendId) -> Result<(usize, usize),
     gate::usable(&pend)?;
     let p = pend.view().share_view().ok_or(PendFail::Denied)?;
     let access = subset_to_access(pend.modifiable())?;
-    view::share_view::open(&p, token, &ident.team.space, access)
+    view::share::open(&p, token, &ident.team.space, access)
 }
 
 fn shut_resource(token: PendId) -> Result<usize, PendFail> {
@@ -186,7 +186,7 @@ fn shut_resource(token: PendId) -> Result<usize, PendFail> {
     }
     gate::usable(&pend)?;
     let p = pend.view().share_view().ok_or(PendFail::Denied)?;
-    view::share_view::shut(&p, token).map(|()| 0)
+    view::share::shut(&p, token).map(|()| 0)
 }
 
 fn fail(error: PendFail) -> ShareFail {

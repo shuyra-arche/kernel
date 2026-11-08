@@ -7,8 +7,8 @@ use kernel_api::abi::call::cell::CellFail;
 
 use kernel_api::model::modifiable::Modifiable;
 
-use crate::basis::cell::operation::Transfer;
-use crate::basis::cell::operation::TransferError;
+use crate::basis::cell::transfer::Transfer;
+use crate::basis::cell::transfer::TransferError;
 use crate::basis::flat::Allocation;
 use crate::basis::flat::Flat;
 use crate::basis::flat::FlatError;
@@ -33,7 +33,7 @@ use crate::basis::unit::space::Space;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::unit::team::Team;
-use crate::basis::view::share_view::ShareOperation;
+use crate::basis::view::share::ShareOperation;
 use crate::machine::mmu::riscv::identity;
 use crate::machine::switcher::context::TrapContext;
 use kernel_api::address::PAGE_SIZE;
@@ -649,7 +649,7 @@ fn transfer(
     if expected.is_some_and(|page| !Arc::ptr_eq(page, &source_page)) {
         return Err(CellFail::NotTransferable);
     }
-    let permit = crate::basis::cell::changes::find(&source_page);
+    let permit = crate::basis::cell::change::find(&source_page);
     let flight = next_flight_key()?;
     let mut ends: Vec<(Arc<Hold>, Arc<Geometry>)> = Vec::new();
     ends.try_reserve_exact(2).map_err(|_| CellFail::OoM)?;

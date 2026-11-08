@@ -65,8 +65,8 @@ fn push(
         {
             return Err(CloneFail::Denied);
         }
-        let reservation = view::clone_view::reserve_len(meta, len)?;
-        let bytes = view::clone_view::payload::Payload::capture(&ident.team.space, msg, len)?;
+        let reservation = view::clone::reserve_len(meta, len)?;
+        let bytes = view::clone::payload::Payload::capture(&ident.team.space, msg, len)?;
         reservation.commit(bytes, me)
     });
     answer(frame, r.map(|()| 0));
@@ -91,7 +91,7 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
     let observed = gate::accede(token, Need::Read).map_err(fail)?;
     gate::usable(&observed).map_err(fail)?;
     let meta = observed.view().clone_view().ok_or(CloneFail::Denied)?;
-    let mut reading = view::clone_view::read(&meta)?;
+    let mut reading = view::clone::read(&meta)?;
     let len = reading.bytes.len();
     if len > max_len {
         return Err(CloneFail::Denied);
@@ -128,7 +128,7 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
 }
 
 fn peek(frame: &mut TrapContext, token: PendId) -> Outcome {
-    let r = with_clone(token, Need::Read, |meta| view::clone_view::peek(meta));
+    let r = with_clone(token, Need::Read, |meta| view::clone::peek(meta));
     match r {
         Ok((n, from, depth)) => {
             frame.gpr.set_x(Gprs::A0, n);
@@ -144,7 +144,7 @@ fn peek(frame: &mut TrapContext, token: PendId) -> Outcome {
 fn with_clone<T>(
     token: PendId,
     need: Need,
-    operation: impl FnOnce(&Arc<view::clone_view::CloneView>) -> Result<T, CloneFail>,
+    operation: impl FnOnce(&Arc<view::clone::CloneView>) -> Result<T, CloneFail>,
 ) -> Result<T, CloneFail> {
     let pend = gate::accede(token, need).map_err(fail)?;
     gate::usable(&pend).map_err(fail)?;
@@ -157,7 +157,7 @@ pub(crate) fn create(mark: Mark, limits: CloneLimits) -> Result<usize, PendFail>
     if !limits.valid() {
         return Err(PendFail::Denied);
     }
-    let meta = view::clone_view::CloneView::try_new_with_limits(task.ident.id, limits)
+    let meta = view::clone::CloneView::try_new_with_limits(task.ident.id, limits)
         .map_err(|_| PendFail::OoM)?;
     let pend = pend::PendEntry::try_new(View::Clone(meta), mark, Modifiable::Yes, None)?;
     let token = pend.token();

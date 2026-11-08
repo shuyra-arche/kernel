@@ -1,10 +1,8 @@
-#[path = "../../../src/basis/flat/transaction/slots.rs"]
-mod slots;
 use crate::{
     cell::{Owner, Page},
     index::PageIndex,
     slot::Slot,
-    source::FlatSource,
+    state::FlatSource,
     state::FlatState,
     support::Pool,
     transfer_error::TransferError,
@@ -24,20 +22,17 @@ fn moving_the_unique_slot_preserves_existing_mapping_responsibility() {
     let at = PageIndex::ZERO;
     let mut source = state(vec![(at, Slot::Resident(page))]);
     let mut target = state(vec![(at, Slot::Missing)]);
-    slots::source_ready(&source, at).unwrap();
-    assert!(slots::target_ready(&target, at).unwrap());
-    slots::reserve(&mut target, at).unwrap();
-    slots::claim_source(&mut source, at, 7);
-    slots::claim_target(&mut target, at, 7, true);
-    assert_eq!(slots::source_ready(&source, at), Err(TransferError::Busy));
-    let page = slots::settle_source(&mut source, at, 7);
-    slots::settle_target(&mut target, at, 7, page);
+    source.source_ready(at).unwrap();
+    assert!(target.target_ready(at).unwrap());
+    target.reserve(at).unwrap();
+    source.claim_source(at, 7);
+    target.claim_target(at, 7, true);
+    assert_eq!(source.source_ready(at), Err(TransferError::Busy));
+    let page = source.settle_source(at, 7);
+    target.settle_target(at, 7, page);
+    assert_eq!(source.source_ready(at), Err(TransferError::SourceEmpty));
     assert_eq!(
-        slots::source_ready(&source, at),
-        Err(TransferError::SourceEmpty)
-    );
-    assert_eq!(
-        slots::target_ready(&target, at),
+        target.target_ready(at),
         Err(TransferError::DestinationOccupied)
     );
     assert_eq!(memo.id(), identity);
@@ -60,14 +55,14 @@ fn failed_movement_restores_fresh_and_missing_destinations_distinctly() {
         } else {
             vec![]
         });
-        assert_eq!(slots::target_ready(&target, at).unwrap(), was_missing);
-        slots::reserve(&mut target, at).unwrap();
-        slots::claim_source(&mut source, at, 9);
-        slots::claim_target(&mut target, at, 9, was_missing);
-        slots::rollback_source(&mut source, at, 9);
-        slots::rollback_target(&mut target, at, 9);
-        assert_eq!(slots::source_ready(&source, at), Ok(()));
-        assert_eq!(slots::target_ready(&target, at), Ok(was_missing));
+        assert_eq!(target.target_ready(at).unwrap(), was_missing);
+        target.reserve(at).unwrap();
+        source.claim_source(at, 9);
+        target.claim_target(at, 9, was_missing);
+        source.rollback_source(at, 9);
+        target.rollback_target(at, 9);
+        assert_eq!(source.source_ready(at), Ok(()));
+        assert_eq!(target.target_ready(at), Ok(was_missing));
         drop(source);
         drop(target);
         assert_eq!(pool.gives(), 1);

@@ -193,10 +193,10 @@ fn source(pos: CellPosition, ident: &Arc<TaskIdent>) -> Result<(FlatRange, Arc<P
         CellObject::Memo {
             target: MappingTarget::Cpu(team),
             mapping,
-        } => with_mapping(team, mapping, ident, |target, entry| {
+        } => with_mapping(team, mapping, ident, |_, entry| {
             check(entry, &actor)?;
             let range = index(entry, pos.page)?;
-            let info = target.space.nest.inspect_memo(range.mapping(), pos.page)?;
+            let info = range.mapping().inspect_memo(pos.page)?;
             if info.generation != pos.generation {
                 return Err(CellFail::Busy);
             }
@@ -253,7 +253,7 @@ fn inspect(pos: CellPosition, ident: &Arc<TaskIdent>) -> Result<CellInfo, CellFa
             // Observation remains available while a remote hart has yet to fence.
             let _ = target.space.nest.retry_invalidation();
             target.space.nest.finish_memo(range.mapping(), pos.page);
-            Ok(target.space.nest.inspect_memo(range.mapping(), pos.page)?)
+            Ok(range.mapping().inspect_memo(pos.page)?)
         }),
         CellObject::Memo {
             target: MappingTarget::Io(token),
@@ -274,15 +274,10 @@ fn handoff(spec: CellHandoff, ident: &Arc<TaskIdent>) -> Result<usize, CellFail>
         } = spec.source.object
     {
         let actor = caller(ident).ok_or(CellFail::Denied)?;
-        return with_mapping(team, mapping, ident, |target, entry| {
+        return with_mapping(team, mapping, ident, |_, entry| {
             check(entry, &actor)?;
             let range = index(entry, spec.source.page)?;
-            if target
-                .space
-                .nest
-                .inspect_memo(range.mapping(), spec.source.page)?
-                .generation
-                != spec.source.generation
+            if range.mapping().inspect_memo(spec.source.page)?.generation != spec.source.generation
             {
                 return Err(CellFail::Busy);
             }
@@ -318,16 +313,15 @@ fn handoff_prepared(
                     ident,
                 )?;
                 let r = reference(id);
-                let result = with_mapping(team, mapping, ident, |target, entry| {
+                let result = with_mapping(team, mapping, ident, |_, entry| {
                     if !entry.source.manages(&actor) {
                         return Err(CellFail::NotTransferable);
                     }
                     check(entry, &actor)?;
                     let selected = index(entry, spec.source.page)?;
-                    if target
-                        .space
-                        .nest
-                        .inspect_memo(selected.mapping(), spec.source.page)?
+                    if selected
+                        .mapping()
+                        .inspect_memo(spec.source.page)?
                         .generation
                         != spec.source.generation
                     {
@@ -432,10 +426,7 @@ fn publication(
             let selected = index(entry, pos.page)?;
             target.space.nest.retry_invalidation()?;
             target.space.nest.finish_memo(selected.mapping(), pos.page);
-            let info = target
-                .space
-                .nest
-                .inspect_memo(selected.mapping(), pos.page)?;
+            let info = selected.mapping().inspect_memo(pos.page)?;
             if info.generation != pos.generation {
                 return Err(CellFail::Busy);
             }
@@ -446,7 +437,7 @@ fn publication(
                 return Err(CellFail::Busy);
             }
             let page = crate::basis::cell::Cell::Nest(selected.clone()).page(0)?;
-            let permit = crate::basis::cell::changes::acquire(&page)?;
+            let permit = crate::basis::cell::change::acquire(&page)?;
             let root = entry.source.root();
             let _operation = root
                 .as_ref()
@@ -578,14 +569,7 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
                 let selected = index(entry, pos.page)?;
                 let mapping = selected.mapping();
                 target.space.nest.finish_memo(mapping, pos.page);
-                {
-                    let mut inner = mapping.state.lock();
-                    let memo = inner.memo_mut(pos.page)?;
-                    if memo.generation != pos.generation || memo.flight.is_some() {
-                        return Err(CellFail::Busy);
-                    }
-                    memo.generation = memo.generation.checked_add(1).ok_or(CellFail::OoM)?;
-                }
+                mapping.advance_memo(pos.page, pos.generation)?;
                 target.space.access(selected, access)?;
                 if access.contains(Access::EXECUTE) {
                     identity::sync_instructions()?;

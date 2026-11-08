@@ -5,13 +5,13 @@ use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 
-use super::pend_entry::Modifiable;
-use super::pend_entry::PendSnapshot;
-use crate::basis::pend::authority::narrows;
+use super::Modifiable;
+use super::entry::PendSnapshot;
+use crate::basis::pend::narrows;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::task::Task;
-use crate::basis::view::share_view::ShareOperation;
+use crate::basis::view::share::ShareOperation;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
 

@@ -1,4 +1,3 @@
-mod await_wait;
 pub(crate) mod codec;
 mod route;
 pub(crate) mod wait;
@@ -24,8 +23,8 @@ use state::Event;
 use state::Rejection;
 use state::State;
 
-pub(crate) use await_wait::AwaitWait;
 pub(crate) use route::Route;
+pub(crate) use wait::AwaitWait;
 pub(crate) use watch::Watch;
 
 const MAX: usize = 1024;

@@ -17,18 +17,11 @@ use crate::basis::unit::task::TaskWeak;
 use crate::machine::sync::SpinLock;
 use crate::machine::sync::SpinLockGuard;
 
-mod admission;
 mod builder;
-mod construct;
 pub(crate) mod exit;
 mod kernel;
 pub(super) mod life;
 mod member;
-mod oust;
-mod phase;
-mod receipt;
-mod spawn;
-mod stage;
 mod state;
 mod tasks;
 
@@ -36,11 +29,8 @@ pub(crate) use builder::TeamBuilder;
 pub(crate) use kernel::init_kernel;
 pub(crate) use kernel::kernel;
 pub(crate) use member::Member;
-pub(crate) use oust::oust;
-pub(crate) use phase::TeamPhase;
-pub(crate) use receipt::Receipt;
-pub(crate) use spawn::spawn;
-pub(crate) use stage::TeamStage;
+pub(crate) use member::Receipt;
+pub(crate) use state::TeamPhase;
 pub(crate) use state::TeamState;
 pub(crate) use tasks::Tasks;
 
@@ -249,4 +239,78 @@ impl Drop for Team {
             parent.prune();
         }
     }
+}
+
+/// Publish execution after entry/stack preparation. Data access is delegated separately through Pend.
+pub(crate) fn spawn(
+    target: &Arc<Team>,
+    caller: Option<&Arc<Task>>,
+    entry: usize,
+    words: Vec<usize>,
+    stack: usize,
+) -> Result<Arc<Task>, UnitFail> {
+    fn map_err(error: NestError) -> UnitFail {
+        if error == NestError::OutOfMemory {
+            UnitFail::OoM
+        } else {
+            UnitFail::Denied
+        }
+    }
+    let _construction = target.operation().ok_or(UnitFail::Busy)?;
+    let first = !target.ready();
+    let entry_va = if entry == 0 {
+        target.default_entry()
+    } else {
+        entry
+    };
+    // 入口的前两个字节都要取得到：取不到就拒收。
+    let entry = crate::machine::mmu::riscv::canonical(entry_va);
+    if !entry_va.is_multiple_of(2)
+        || target.space.instruction_byte(entry).is_none()
+        || target.space.instruction_byte(entry + 1).is_none()
+    {
+        return Err(UnitFail::BadEntry);
+    }
+    let mut builder = target
+        .task()
+        .entry(crate::machine::mmu::riscv::canonical(entry_va))
+        .args(words);
+    if let Some(caller) = caller {
+        builder = builder.controller(caller.ident.id);
+    }
+    if stack > 0 {
+        builder = builder.stack(stack);
+    }
+    let mut prepared = builder.prepare().map_err(map_err)?;
+    prepared
+        .publish(|| {
+            if first {
+                target.set_default_entry(entry_va);
+            }
+        })
+        .map_err(map_err)
+}
+
+pub(crate) fn oust(me: &Arc<Task>, id: TeamId) -> Result<(), UnitFail> {
+    let child = me.clan(id).ok_or(UnitFail::Denied)?;
+    child.retire().map_err(|_| UnitFail::Busy)?;
+    let operation = child.operation().ok_or(UnitFail::Busy)?;
+    {
+        let _commit = commit();
+        if !child.all_reaped() {
+            return Err(UnitFail::Busy);
+        }
+    }
+    let retired = {
+        let _commit = commit();
+        child.state.lock().phase = TeamPhase::Ousted;
+        child.life.clear(me.ident.id, None);
+        let sire = child.sire.upgrade();
+        let detached = sire.as_ref().and_then(|sire| sire.oust(id));
+        child.life.prune();
+        (sire, detached)
+    };
+    drop(operation);
+    drop(retired);
+    Ok(())
 }

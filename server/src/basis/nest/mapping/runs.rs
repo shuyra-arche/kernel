@@ -6,12 +6,19 @@ use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
 
-use super::run::CellRun;
-
 /// 帧分段迭代器：把 `cells` 切成一串连续段，不再分配。
 ///
 /// 续段条件同时成立：页号相邻、物理地址相邻、所在区间 current 相同。
 /// 段起点虚拟地址为 `base + 帧页号 * PAGE_SIZE`；任一帧不在任何区间内 ⇒ NoRegion。
+/// 一段连续帧：虚拟连续、物理连续，且落在同一个当前权限相同的区间内。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CellRun {
+    pub(crate) start: VirtAddr,
+    pub(crate) physical: PhysAddr,
+    pub(crate) size: usize,
+    pub(crate) current: Access,
+}
+
 pub(crate) struct CellRuns<'a> {
     base: VirtAddr,
     cells: &'a [(usize, Publication)],

@@ -1,11 +1,11 @@
-pub(crate) mod operation;
 pub(crate) mod page;
+pub(crate) mod transfer;
 
 use self::page::{InternalPage, Owner, Page, PageError};
 use crate::basis::flat::FlatError;
 use alloc::alloc::Allocator;
 use alloc::boxed::Box;
-pub(crate) mod changes;
+pub(crate) mod change;
 /// 分配器一侧分配并清零 RAM，再将唯一归还凭证交给 Page。
 pub(crate) fn allocate(owner: Owner) -> Result<Page, FlatError> {
     let allocator: &'static (dyn Allocator + Sync) = crate::machine::allocator::frame::instance();

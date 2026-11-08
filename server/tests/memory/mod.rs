@@ -25,7 +25,7 @@ mod scope;
 mod basis {
     pub(crate) mod cell {
         pub(crate) use crate::cell as page;
-        pub(crate) mod operation {
+        pub(crate) mod transfer {
             pub(crate) use crate::transfer_error::TransferError;
         }
     }
@@ -41,10 +41,6 @@ mod change;
 mod memo;
 
 #[allow(dead_code)]
-#[path = "../../src/basis/flat/source.rs"]
-mod source;
-
-#[allow(dead_code)]
 #[path = "../../src/basis/flat/state.rs"]
 mod state;
 
@@ -52,11 +48,7 @@ mod state;
 #[path = "../../src/basis/flat/region.rs"]
 mod region;
 
-#[allow(dead_code)]
-#[path = "../../src/basis/flat/residency_entry.rs"]
-mod residency_entry;
-
 mod transaction;
 #[allow(dead_code)]
-#[path = "../../src/basis/cell/operation/error.rs"]
+#[path = "../../src/basis/cell/transfer/error.rs"]
 mod transfer_error;

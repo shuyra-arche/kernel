@@ -51,13 +51,13 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
             .map_err(|e| e.into_parts().0)?;
     }
     drop(apertures);
-    let meta = view::share_view::region(dtb.base, dtb.size, TaskId::new(0))?;
+    let meta = view::share::region(dtb.base, dtb.size, TaskId::new(0))?;
     let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
     registry
         .register(Name::Page(Page::Dtb), root)
         .map_err(|e| e.into_parts().0)?;
     if let Some(initrd) = board::info().initrd() {
-        let meta = view::share_view::region(initrd.base, initrd.size, TaskId::new(0))?;
+        let meta = view::share::region(initrd.base, initrd.size, TaskId::new(0))?;
         let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
         registry
             .register(Name::Page(Page::Initrd), root)
@@ -68,7 +68,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
 
 fn grant_region(registry: &mut Registry, region: region::Region) -> Result<(), PendFail> {
     let (base, size) = (region.base, region.size);
-    let meta = view::share_view::region(base, size, TaskId::new(0))?;
+    let meta = view::share::region(base, size, TaskId::new(0))?;
     let source = meta.source();
     let root =
         pend::PendEntry::try_new(View::Share(meta.clone()), Mark::NONE, Modifiable::Yes, None)?;

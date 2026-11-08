@@ -4,11 +4,7 @@ pub(super) mod key;
 pub(super) mod site;
 
 pub(super) mod block;
-pub(super) mod blocked;
-mod counted;
 mod fail;
-mod unchain;
-pub(crate) use counted::wake_counted;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -25,8 +21,7 @@ use crate::basis::unit::task::Task;
 use crate::machine::clock;
 
 use self::block::block_with_call;
-use self::blocked::Blocked;
-use self::blocked::finish_block;
+use self::block::finish_block;
 use self::fail::WaitFail;
 use self::fwd::Fwd;
 use self::holder::Ticket;
@@ -39,13 +34,33 @@ use self::site::prune;
 use self::site::shard_at;
 use self::site::sites;
 use self::site::take_beacon;
-use self::unchain::Unchain;
 use crate::basis::room::Handoff;
 use crate::basis::unit::task::WaitCall;
 
 fn fan_out(fwd: &Fwd) {
     for (id, life) in fwd.entries() {
         knock(WakeKey::Sign { id }, life);
+    }
+}
+
+struct Unchain {
+    cur: Option<Arc<Task>>,
+}
+
+impl Unchain {
+    fn new(cur: Option<Arc<Task>>) -> Self {
+        Self { cur }
+    }
+}
+
+impl Iterator for Unchain {
+    type Item = Arc<Task>;
+
+    fn next(&mut self) -> Option<Arc<Task>> {
+        let task = self.cur.take()?;
+        void(task.wait_ticket());
+        self.cur = task.take_next();
+        Some(task)
     }
 }
 
@@ -236,6 +251,30 @@ pub(crate) fn wipe_space(space: Asid) -> usize {
         }
     }
     woken
+}
+
+// Wake current listeners without retaining a notification for later listeners.
+
+pub(crate) fn wake_counted(key: WakeKey, all: bool) -> usize {
+    let _commit = crate::basis::commit();
+    let chain = {
+        let mut table = sites(key).lock();
+        let chain = table.get_mut(&key).and_then(|site| {
+            if all {
+                site.chain.take()
+            } else {
+                site.chain.pop()
+            }
+        });
+        prune(&mut table, key);
+        chain
+    };
+    let mut count = 0;
+    for task in Unchain::new(chain) {
+        count += 1;
+        rise(core::iter::once(task));
+    }
+    count
 }
 
 pub fn wake(key: WakeKey, life: &Weak<Life>) -> bool {

@@ -3,7 +3,6 @@
 //! 本批只接入分配器管理的 4 KiB RAM。外部物理区间仍使用 BorrowedRegion；
 //! 托管 Page 在分配时归属于 Kernel 或 Team；裸物理别名不创建新的物理身份。
 
-mod exposure;
 mod identity;
 mod owner;
 pub(crate) use owner::Owner;
@@ -21,7 +20,6 @@ use core::mem::ManuallyDrop;
 use kernel_api::model::cell::PAGE_SIZE;
 use kernel_api::model::cell::PageOwner;
 
-pub(crate) use exposure::Exposure;
 pub(crate) use identity::PageId;
 pub(crate) use reclaim::RetainError;
 pub(crate) use retention::Retention;
@@ -34,6 +32,13 @@ pub(crate) enum PageError {
     InvalidRange,
     InvalidOwner,
     IdentityExhausted,
+}
+
+/// Page 的外部访问风险；Internal 不表示普通持有或 CPU 访问已经结束。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Exposure {
+    Internal,
+    External,
 }
 
 /// 一个托管 RAM Page；自身不可 Clone，建立槽后由 Arc<Page> 保留同一实例。
