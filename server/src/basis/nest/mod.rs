@@ -34,13 +34,14 @@ mod index;
 mod kind;
 pub(crate) mod publication;
 mod reservation;
+mod retirement;
 pub(crate) mod source;
 mod state;
 
 use crate::machine::mmu::riscv::identity;
 
 pub(crate) mod mapping;
-use crate::machine::mmu::riscv::synchronize;
+use crate::machine::mmu::riscv::synchronize::Invalidation;
 use crate::machine::mmu::riscv::table;
 
 pub use error::NestError;
@@ -61,7 +62,6 @@ use crate::basis::zone::Zone;
 use cleanup::CleanupNode;
 use index::IndexNode;
 use state::NestState;
-use synchronize::Invalidation;
 use table::PteFlags;
 use table::TableNode;
 
@@ -152,7 +152,7 @@ impl Nest {
             if state.phase.is_closed() {
                 return Err(NestError::NoRegion);
             }
-            match state.invalidation {
+            match state.retirement.invalidation() {
                 Invalidation::Clean => return Ok(state),
                 Invalidation::Failed => return Err(NestError::Shootdown),
                 Invalidation::Dirty | Invalidation::Fencing => {}
@@ -194,7 +194,7 @@ impl Nest {
     }
 
     pub(crate) fn has_pending_invalidation(&self) -> bool {
-        !self.state.lock().invalidation.is_clean()
+        !self.state.lock().retirement.invalidation().is_clean()
     }
 
     pub(crate) fn contains_reservation(&self, id: usize) -> bool {
@@ -459,7 +459,8 @@ impl Nest {
             return Err(NestError::AlreadyMapped);
         }
         state
-            .pending_mappings
+            .retirement
+            .mappings
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
         // 首条 PTE 之前登记来源↔关系：撤页要按来源枚举全部关系，不能只看用户注册表。
@@ -490,7 +491,7 @@ impl Nest {
         for (_, retained) in &mut published {
             retained.publish();
         }
-        state.pending_mappings.push(mapping.clone());
+        state.retirement.mappings.push(mapping.clone());
         for run in mapping.state.lock().runs(start, &published) {
             let run = run?;
             state.root.map_range_prepared_geometry(
@@ -523,7 +524,7 @@ impl Nest {
             }
         }
         state.index.insert(node);
-        state.mark_dirty(mapping.is_global());
+        state.retirement.mark_dirty(mapping.is_global());
         drop(state);
         drop(lease);
         self.finish_invalidation()
@@ -598,7 +599,8 @@ impl Nest {
             .try_reserve(fresh.len())
             .map_err(|_| NestError::OutOfMemory)?;
         state
-            .pending_mappings
+            .retirement
+            .mappings
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
         for run in inner.runs(mapping.initial_start(), &fresh) {
@@ -615,7 +617,7 @@ impl Nest {
         for (_, retained) in &mut fresh {
             retained.publish();
         }
-        state.pending_mappings.push(mapping.clone());
+        state.retirement.mappings.push(mapping.clone());
         for run in inner.runs(mapping.initial_start(), &fresh) {
             let run = run?;
             state.root.map_range_prepared_geometry(
@@ -629,7 +631,7 @@ impl Nest {
         for (page, cell) in fresh {
             inner.publish(page, cell);
         }
-        state.mark_dirty(mapping.is_global());
+        state.retirement.mark_dirty(mapping.is_global());
         drop(inner);
         drop(state);
         drop(lease);
@@ -645,53 +647,6 @@ impl Nest {
         self.ensure_owned(mapping, &state)?;
         let inner = mapping.state.lock();
         Ok(inner.memo_page(page))
-    }
-
-    pub(crate) fn push_page(
-        self: &Arc<Self>,
-        mapping: &Arc<Mapping>,
-        address: VirtAddr,
-        page: &Arc<Page>,
-        change: &Change,
-    ) -> Result<(), NestError> {
-        self.finish_invalidation()?;
-        let mut state = self.ready_state()?;
-        self.ensure_owned(mapping, &state)?;
-        let mut inner = mapping.state.lock();
-        let index = mapping.page_index(address);
-        if inner.publishes(index) {
-            return Err(NestError::AlreadyMapped);
-        }
-        let range = inner
-            .active
-            .iter()
-            .find(|range| range.contains(address.as_usize()))
-            .ok_or(NestError::NoRegion)?;
-        let flags = mapping.leaf_flags(range.current);
-        let mut memo =
-            Publication::prepare(page, range.ceiling.contains(Access::WRITE), Some(change))?;
-        inner
-            .published
-            .try_reserve(1)
-            .map_err(|_| NestError::OutOfMemory)?;
-        state
-            .pending_mappings
-            .try_reserve(1)
-            .map_err(|_| NestError::OutOfMemory)?;
-        let physical = kernel_api::address::PhysAddr::from_raw(page.physical_address());
-        state
-            .root
-            .prepare_range_geometry(address, physical, PAGE_SIZE, self.geometry)?;
-        memo.publish();
-        state
-            .root
-            .map_range_prepared_geometry(address, physical, PAGE_SIZE, flags, self.geometry);
-        inner.publish(index, memo);
-        state.pending_mappings.push(mapping.clone());
-        state.mark_dirty(mapping.is_global());
-        drop(inner);
-        drop(state);
-        self.finish_invalidation()
     }
 
     pub(crate) fn associate(
@@ -726,6 +681,65 @@ impl Nest {
             return;
         }
         mapping.state.lock().finish_memo(index);
+    }
+
+    pub(crate) fn push_page(
+        self: &Arc<Self>,
+        mapping: &Arc<Mapping>,
+        address: VirtAddr,
+        page: &Arc<Page>,
+        change: &Change,
+    ) -> Result<(), NestError> {
+        self.finish_invalidation()?;
+        let mut state = self.ready_state()?;
+        self.ensure_owned(mapping, &state)?;
+        state.publish_page(self.geometry, mapping, address, page, change)?;
+        drop(state);
+        self.finish_invalidation()
+    }
+
+    /// 撤下 `mapping` 在 `address` 上的 4KiB 映射，把它那一页的承载交给退休。
+    ///
+    /// - 内核空间的物理使用不由撤下本关系结清；全局条目不受 ASID 定向失效覆盖。
+    ///   两类都不参与移交，当场 `Pinned`。
+    /// - 先结清本 Nest 之前那次失效：旧 TLB 没确认就不再撤新的。
+    /// - 在 `Nest → Mapping` 同一个临界区里认这一页：只有真有一条发布记录才算这条
+    ///   关系握着它；没有记录（活动洞或本来就没发布）就没有可撤的映射，当场
+    ///   成功返回。真握着的话，它必须正是 `expected`——不是就在动任何 PTE 之前
+    ///   当场断言，不先撤再发现。
+    /// - 容量与大叶拆分都在撤下之前备齐，之后不再有可失败步骤。
+    /// - 承载只在 shootdown 成功之后随退休一起放掉；失败时这一页的退休责任
+    ///   留在本 Nest，由 `retry_invalidation` 继续。
+    pub(crate) fn unpublish_page(
+        self: &Arc<Self>,
+        mapping: &Arc<Mapping>,
+        address: VirtAddr,
+        expected: &Arc<Page>,
+    ) -> Result<(), NestError> {
+        if self.asid().is_kernel() || mapping.is_global() {
+            return Err(NestError::Pinned);
+        }
+        assert!(
+            address.offset() == 0,
+            "unpublish_page takes a page-aligned address"
+        );
+        assert!(
+            mapping
+                .reservation
+                .nest()
+                .is_some_and(|owner| core::ptr::eq(Arc::as_ptr(&owner), Arc::as_ptr(self))),
+            "unpublish_page requires the mapping's own live nest"
+        );
+        self.finish_invalidation()?;
+
+        let mut state = self.state.lock();
+        if !state.unpublish_page(self.geometry, mapping, address, expected)? {
+            return Ok(());
+        }
+        drop(state);
+        // 退休的承载只在这次确认之后才随 `finish_invalidation` 放掉。
+        self.finish_invalidation()?;
+        Ok(())
     }
 
     /// 让 `Flat` 物化该窗口的活动页，再在本关系发布。
@@ -800,37 +814,7 @@ impl Nest {
         let mapping = selection.mapping().clone();
         let mut state = self.ready_state()?;
         self.ensure_owned(&mapping, &state)?;
-        let mut inner = mapping.state.lock();
-        let transition =
-            inner.protection_transition(mapping.initial_start(), selection.window(), request)?;
-
-        // 所有可失败的页表准备先完成；此阶段不提交新的逻辑权限或叶子权限。
-        for update in &transition.updates {
-            state
-                .root
-                .prepare_geometry(update.address, PAGE_SIZE, self.geometry)?;
-            state
-                .root
-                .walk_ref_geometry(update.address, self.geometry)?;
-        }
-        state
-            .pending_mappings
-            .try_reserve(1)
-            .map_err(|_| NestError::OutOfMemory)?;
-
-        // 从此处开始提交不再分配：即使 shootdown 失败，保留映射与 Dirty/Failed 状态。
-        state.pending_mappings.push(mapping.clone());
-        for update in transition.updates {
-            state.root.set_permissions_prepared_geometry(
-                update.address,
-                mapping.leaf_flags(update.access),
-                self.geometry,
-            );
-        }
-        inner.active = transition.active;
-        drop(inner);
-        state.index.refresh(&mapping);
-        state.mark_dirty(mapping.is_global());
+        state.protect(self.geometry, &mapping, selection.window(), request)?;
         drop(state);
         self.finish_invalidation()
     }
@@ -947,7 +931,7 @@ impl Nest {
         if state.phase.is_closed() {
             return Err(NestError::NoRegion);
         }
-        if !state.invalidation.is_clean() {
+        if !state.retirement.invalidation().is_clean() {
             return Err(NestError::Shootdown);
         }
         self.ensure_owned(mapping, &state)?;
@@ -970,26 +954,20 @@ impl Nest {
             )
         };
         state
-            .retired_cells
+            .retirement
+            .cells
             .try_reserve(removed)
             .map_err(|_| NestError::OutOfMemory)?;
         state
-            .pending_mappings
+            .retirement
+            .mappings
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
         state
-            .retirement
+            .tickets
             .try_reserve(pieces.len())
             .map_err(|_| NestError::OutOfMemory)?;
-        {
-            let NestState {
-                root,
-                retired_tables,
-                ..
-            } = &mut *state;
-            root.prepare_geometry(start, len, self.geometry)?;
-            root.reserve_retired_tables(retired_tables)?;
-        }
+        state.prepare_withdrawal(start, len, self.geometry)?;
 
         // 开票之后没有可失败准备：票、PTE 与关系在同一提交内转入退休责任。
         for (lo, hi, ticket) in pieces {
@@ -999,21 +977,13 @@ impl Nest {
                 ticket
             });
         }
-        {
-            let NestState {
-                root,
-                retired_tables,
-                ..
-            } = &mut *state;
-            root.unmap_prepared_geometry(start, len, self.geometry);
-            root.reclaim_empty_tables(retired_tables);
-        }
-        state.pending_mappings.push(mapping.clone());
+        state.withdraw_prepared(start, len, self.geometry);
+        state.retirement.mappings.push(mapping.clone());
         for index in (0..inner.published.len()).rev() {
             let page = inner.published[index].0;
             if page >= first_page && page <= last_page {
                 let (_, cell) = inner.published.remove(index);
-                state.retired_cells.push(cell.retire());
+                state.retirement.cells.push(cell.retire());
             }
         }
         inner.active = next;
@@ -1022,15 +992,15 @@ impl Nest {
         if let Some(node) = next_node {
             state.index.insert(node);
         }
-        state.retirement.extend(tickets.iter().copied());
-        state.mark_dirty(mapping.is_global());
+        state.tickets.extend(tickets.iter().copied());
+        state.retirement.mark_dirty(mapping.is_global());
         drop(state);
         drop(occupancy);
         // 三、同步成功之后才结算这一段的票；失败时票、Page、表页与来源都留着。
         self.finish_invalidation()?;
         {
             let mut state = self.state.lock();
-            state.retirement.retain(|ticket| !tickets.contains(ticket));
+            state.tickets.retain(|ticket| !tickets.contains(ticket));
         }
         if !tickets.is_empty() {
             let mut occupancy = self.occupancy.lock();
@@ -1038,100 +1008,6 @@ impl Nest {
                 occupancy.reclaim(ticket);
             }
         }
-        Ok(())
-    }
-
-    /// 撤下 `mapping` 在 `address` 上的 4KiB 映射，把它那一页的承载交给退休。
-    ///
-    /// - 内核空间的物理使用不由撤下本关系结清；全局条目不受 ASID 定向失效覆盖。
-    ///   两类都不参与移交，当场 `Pinned`。
-    /// - 先结清本 Nest 之前那次失效：旧 TLB 没确认就不再撤新的。
-    /// - 在 `Nest → Mapping` 同一个临界区里认这一页：只有真有一条发布记录才算这条
-    ///   关系握着它；没有记录（活动洞或本来就没发布）就没有可撤的映射，当场
-    ///   成功返回。真握着的话，它必须正是 `expected`——不是就在动任何 PTE 之前
-    ///   当场断言，不先撤再发现。
-    /// - 容量与大叶拆分都在撤下之前备齐，之后不再有可失败步骤。
-    /// - 承载只在 shootdown 成功之后随退休一起放掉；失败时这一页的退休责任
-    ///   留在本 Nest，由 `retry_invalidation` 继续。
-    pub(crate) fn unpublish_page(
-        self: &Arc<Self>,
-        mapping: &Arc<Mapping>,
-        address: VirtAddr,
-        expected: &Arc<Page>,
-    ) -> Result<(), NestError> {
-        if self.asid().is_kernel() || mapping.is_global() {
-            return Err(NestError::Pinned);
-        }
-        assert!(
-            address.offset() == 0,
-            "unpublish_page takes a page-aligned address"
-        );
-        assert!(
-            mapping
-                .reservation
-                .nest()
-                .is_some_and(|owner| core::ptr::eq(Arc::as_ptr(&owner), Arc::as_ptr(self))),
-            "unpublish_page requires the mapping's own live nest"
-        );
-        self.finish_invalidation()?;
-
-        let mut state = self.state.lock();
-        if !state.invalidation.is_clean() {
-            return Err(NestError::Shootdown);
-        }
-        let mut inner = mapping.state.lock();
-        let page = mapping.page_index(address);
-        let Some(at) = inner.published.iter().position(|(held, _)| *held == page) else {
-            return Ok(());
-        };
-        if state.phase.is_closed() {
-            return Err(NestError::Pinned);
-        }
-        // 核对物理 Page 实例，不能只比较 PA 或逻辑槽；检查先于任何 PTE 撤销。
-        if !Arc::ptr_eq(inner.published[at].1.cell(), expected) {
-            return Err(NestError::Busy);
-        }
-        debug_assert!(
-            inner.covers(address.as_usize(), address.as_usize()),
-            "a published mapping lies inside a live range"
-        );
-        // 提前备容量与几何：这一页可能只是大叶里的一格，先拆成 4KiB 再撤。
-        state
-            .retired_cells
-            .try_reserve(1)
-            .map_err(|_| NestError::OutOfMemory)?;
-        state
-            .pending_mappings
-            .try_reserve(1)
-            .map_err(|_| NestError::OutOfMemory)?;
-        {
-            let NestState {
-                root,
-                retired_tables,
-                ..
-            } = &mut *state;
-            root.prepare_geometry(address, PAGE_SIZE, self.geometry)?;
-            root.reserve_retired_tables(retired_tables)?;
-        }
-
-        // 过了这里只剩下已经定好的状态转移：PTE、发布记录与承载一起转入退休责任。
-        {
-            let NestState {
-                root,
-                retired_tables,
-                ..
-            } = &mut *state;
-            root.unmap_prepared_geometry(address, PAGE_SIZE, self.geometry);
-            root.reclaim_empty_tables(retired_tables);
-        }
-        state.pending_mappings.push(mapping.clone());
-        let (_, cell) = inner.published.remove(at);
-        state.retired_cells.push(cell.retire());
-        drop(inner);
-        state.mark_dirty(false);
-        drop(state);
-        // 退休的承载只在这次确认之后才随 `finish_invalidation` 放掉。
-        self.finish_invalidation()?;
         Ok(())
     }
 
@@ -1230,7 +1106,7 @@ impl Nest {
         }
         let tickets = {
             let mut state = self.state.lock();
-            core::mem::take(&mut state.retirement)
+            core::mem::take(&mut state.tickets)
         };
         if !tickets.is_empty() {
             let mut occupancy = self.occupancy.lock();
@@ -1258,59 +1134,32 @@ impl Nest {
     fn finish_invalidation(&self) -> Result<(), NestError> {
         loop {
             let mut state = self.state.lock();
-            if state.invalidation.is_clean() {
+            if state.retirement.invalidation().is_clean() {
                 return Ok(());
             }
-            if state.invalidation.is_fencing() {
+            if state.retirement.invalidation().is_fencing() {
                 drop(state);
-                while self.state.lock().invalidation.is_fencing() {
+                while self.state.lock().retirement.invalidation().is_fencing() {
                     core::hint::spin_loop();
                 }
                 continue;
             }
-            let target = match state.scope {
-                synchronize::Scope::AddressSpace => self.asid,
-                synchronize::Scope::Global => Asid::kernel(),
-            };
-            state.fence();
+            let target = state.retirement.begin(self.asid);
             drop(state);
 
             let result = identity::shootdown(target).map_err(|_| NestError::Shootdown);
-            let retired_tables;
-            let retired_cells;
-            let pending_mappings;
-            {
+            let fenced = {
                 let mut state = self.state.lock();
                 if let Err(error) = result {
-                    state.fail();
+                    state.retirement.fail();
                     return Err(error.into());
                 }
-                for mapping in &state.pending_mappings {
-                    for (_, memo) in &mut mapping.state.lock().published {
-                        memo.complete();
-                    }
-                }
-                state.settle();
-                retired_tables = core::mem::take(&mut state.retired_tables);
-                retired_cells = core::mem::take(&mut state.retired_cells);
-                pending_mappings = core::mem::take(&mut state.pending_mappings);
-            }
-            // 退休 Page / 表页随覆盖本批修改范围的失效结清，包含 G 条目时全局失效。
-            // 但占用票不在这里回收：它只由该段的本次撤下或显式 `retry_invalidation` 结算。
-            drop(retired_tables);
-            for retained in retired_cells {
-                // SAFETY: these records were removed from PTEs before fencing.
-                // The completed fence covers this ASID, or every online hart and
-                // all ASIDs when the batch includes global mappings.
-                unsafe { retained.settle() };
-            }
-            for mapping in &pending_mappings {
-                mapping
-                    .state
-                    .lock()
-                    .settle_deleted_memos(mapping.initial_start().get());
-            }
-            drop(pending_mappings);
+                // SAFETY: the covering fence just completed successfully.
+                unsafe { state.settle() }
+            };
+            // Retired Page and table resources can leave the lock. Address
+            // tickets are reclaimed by detach or explicit retry_invalidation.
+            fenced.release();
             return Ok(());
         }
     }
@@ -1327,60 +1176,13 @@ impl Nest {
                 self.drain_closed();
                 return Ok(());
             }
-            if state.invalidation.is_clean() {
+            if state.retirement.invalidation().is_clean() {
                 break state;
             }
             drop(state);
             self.finish_invalidation()?;
         };
-        let mut mappings = Vec::new();
-        mappings
-            .try_reserve(state.index.len())
-            .map_err(|_| NestError::OutOfMemory)?;
-        state.index.collect(&mut mappings);
-        let cell_count = mappings
-            .iter()
-            .map(|mapping| mapping.state.lock().published.len())
-            .sum();
-        state
-            .retired_cells
-            .try_reserve(cell_count)
-            .map_err(|_| NestError::OutOfMemory)?;
-        state
-            .pending_mappings
-            .try_reserve(mappings.len())
-            .map_err(|_| NestError::OutOfMemory)?;
-        {
-            let NestState {
-                root,
-                retired_tables,
-                ..
-            } = &mut *state;
-            for mapping in &mappings {
-                for range in &mapping.state.lock().active {
-                    root.prepare_geometry(range.start, range.size.get(), self.geometry)?;
-                }
-            }
-            root.reserve_retired_tables(retired_tables)?;
-            for mapping in &mappings {
-                for range in &mapping.state.lock().active {
-                    root.unmap_keep_tables_geometry(range.start, range.size.get(), self.geometry)?;
-                }
-            }
-            root.reclaim_empty_tables(retired_tables);
-        }
-        let global = mappings.iter().any(|mapping| mapping.is_global());
-        for mapping in mappings {
-            state.pending_mappings.push(mapping.clone());
-            let mut inner = mapping.state.lock();
-            for (_, cell) in inner.published.drain(..) {
-                state.retired_cells.push(cell.retire());
-            }
-            inner.active.clear();
-        }
-        state.index.clear();
-        state.mark_dirty(global);
-        state.begin_close();
+        state.close_mappings(self.geometry)?;
         drop(state);
         self.finish_invalidation()?;
         self.drain_closed();
@@ -1483,7 +1285,7 @@ impl Nest {
             return Err(NestError::NotAligned);
         }
         let state = self.state.lock();
-        if !state.invalidation.is_clean() {
+        if !state.retirement.invalidation().is_clean() {
             return Err(NestError::Busy);
         }
         if state.phase.is_closed() {
@@ -1606,37 +1408,7 @@ impl Nest {
     /// `Missing`/`Moving`/`Reserved` 一律 `Wait`，不因旧 PTE 还在就绕过等待；
     /// 身份消失或活动权限不容纳这次访问是 `Invalid`。
     pub(crate) fn probe_fault(&self, address: VirtAddr, kind: FaultKind) -> FaultOutcome {
-        let state = self.state.lock();
-        if !state.invalidation.is_clean() {
-            return FaultOutcome::Materialize;
-        }
-        let Some(mapping) = state.index.find(address.as_usize()) else {
-            return FaultOutcome::Invalid;
-        };
-        let inner = mapping.state.lock();
-        let Some(range) = inner.range_at(address.as_usize()) else {
-            return FaultOutcome::Invalid;
-        };
-        if !satisfies_access(range.current, kind) {
-            return FaultOutcome::Invalid;
-        }
-        let page = address.page_align();
-        let offset = PageOffset::new(mapping.page_index(page));
-        if let Ok((_, flags)) = state.root.walk_ref_geometry(page, self.geometry)
-            && satisfies(flags, kind)
-        {
-            return FaultOutcome::Resolved;
-        }
-        if inner.explicit || inner.memo(offset.get()).is_some() {
-            return FaultOutcome::Wait(mapping.identity());
-        }
-        match inner.source.can_materialize(offset) {
-            Ok(true) => {}
-            // 承载已移走，或正被一次移交持有/预留：只能等。
-            Ok(false) => return FaultOutcome::Wait(mapping.identity()),
-            Err(_) => return FaultOutcome::Invalid,
-        }
-        FaultOutcome::Materialize
+        FaultOutcome::probe(&self.state.lock(), self.geometry, address, kind)
     }
 
     /// 用户页错误的完整解析：先结清待办失效，再按纯探针的结论物化并发布，
@@ -1684,129 +1456,8 @@ impl Nest {
 
     #[cfg(debug_assertions)]
     pub(crate) fn audit(&self) {
-        let state = self.state.lock();
-        state.index.audit();
-        state.index.audit_mappings(self, &state.root, self.geometry);
-        state.root.visit_leaves(
-            (self.geometry.levels - 1) as usize,
-            0,
-            self.geometry,
-            &mut |start, physical, flags, size| {
-                let end = start
-                    .as_usize()
-                    .checked_add(size - 1)
-                    .expect("leaf virtual interval is representable");
-                let mapping = state
-                    .index
-                    .find(start.as_usize())
-                    .expect("hardware leaf is absent from the nest index");
-                let end_mapping = state
-                    .index
-                    .find(end)
-                    .expect("hardware leaf extends beyond the nest index");
-                assert!(
-                    Arc::ptr_eq(&mapping, &end_mapping),
-                    "hardware leaf crosses Mapping identity"
-                );
-                let inner = mapping.state.lock();
-                assert!(
-                    inner.covers(start.as_usize(), end),
-                    "hardware leaf crosses an unmapped Mapping range"
-                );
-                let mut expected: Option<PteFlags> = None;
-                for range in inner
-                    .active
-                    .iter()
-                    .filter(|range| range.overlaps(start.as_usize(), end))
-                {
-                    let leaf = mapping.leaf_flags(range.current);
-                    if let Some(expected) = expected {
-                        assert_eq!(
-                            leaf.bits(),
-                            expected.bits(),
-                            "hardware leaf crosses modifiable state"
-                        );
-                    } else {
-                        expected = Some(leaf);
-                    }
-                }
-                let expected = expected.expect("hardware leaf belongs to a live range");
-                let mask = PteFlags::V
-                    | PteFlags::R
-                    | PteFlags::W
-                    | PteFlags::X
-                    | PteFlags::U
-                    | PteFlags::G;
-                assert_eq!(
-                    (flags & mask).bits(),
-                    (expected & mask).bits(),
-                    "hardware PTE modifiability differ from Mapping state at {start:?}"
-                );
-                if inner.source.is_borrowed() {
-                    let offset = start
-                        .as_usize()
-                        .checked_sub(mapping.initial_start().as_usize())
-                        .expect("borrowed leaf precedes Mapping start");
-                    let page = inner
-                        .source
-                        .materialize()
-                        .expect("borrowed source materializes")
-                        .physical(PageOffset::new(offset / PAGE_SIZE))
-                        .expect("borrowed leaf lies inside the source range");
-                    assert_eq!(
-                        physical.as_usize(),
-                        page.as_usize(),
-                        "borrowed PTE physical address differs"
-                    );
-                } else {
-                    let first_page = mapping.page_index(start);
-                    let pages = size / PAGE_SIZE;
-                    let first = inner
-                        .published
-                        .partition_point(|(page, _)| *page < first_page);
-                    let last_page = first_page + pages;
-                    let last = inner
-                        .published
-                        .partition_point(|(page, _)| *page < last_page);
-                    assert_eq!(
-                        last - first,
-                        pages,
-                        "hardware leaf has pages without published Cells"
-                    );
-                    for (offset, (page, cell)) in inner.published[first..last].iter().enumerate() {
-                        assert_eq!(
-                            *page,
-                            first_page + offset,
-                            "published Page index gap under hardware leaf"
-                        );
-                        assert_eq!(
-                            cell.physical_address(),
-                            physical.as_usize() + offset * PAGE_SIZE,
-                            "published Page physical address differs from hardware PTE"
-                        );
-                    }
-                }
-            },
-        );
+        self.state.lock().audit(self, self.geometry);
     }
-}
-
-fn satisfies(flags: PteFlags, kind: FaultKind) -> bool {
-    let need = match kind {
-        FaultKind::Instruction => PteFlags::X,
-        FaultKind::Load => PteFlags::R,
-        FaultKind::Store => PteFlags::W,
-    };
-    flags.contains(PteFlags::V | need)
-}
-
-fn satisfies_access(access: Access, kind: FaultKind) -> bool {
-    let need = match kind {
-        FaultKind::Instruction => Access::EXECUTE,
-        FaultKind::Load => Access::READ,
-        FaultKind::Store => Access::WRITE,
-    };
-    access.contains(need)
 }
 
 impl Drop for Nest {

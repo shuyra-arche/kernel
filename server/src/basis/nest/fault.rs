@@ -1,4 +1,11 @@
 use fack::prelude::Error;
+use kernel_api::address::{PageOffset, VirtAddr};
+
+use crate::machine::mmu::riscv::mode::Geo;
+use crate::machine::mmu::riscv::table::PteFlags;
+
+use super::Access;
+use super::state::NestState;
 
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum FaultKind {
@@ -8,6 +15,26 @@ pub enum FaultKind {
     Load,
     #[error("Store OOM Data")]
     Store,
+}
+
+impl FaultKind {
+    fn satisfies(self, flags: PteFlags) -> bool {
+        let need = match self {
+            FaultKind::Instruction => PteFlags::X,
+            FaultKind::Load => PteFlags::R,
+            FaultKind::Store => PteFlags::W,
+        };
+        flags.contains(PteFlags::V | need)
+    }
+
+    fn allows(self, access: Access) -> bool {
+        let need = match self {
+            FaultKind::Instruction => Access::EXECUTE,
+            FaultKind::Load => Access::READ,
+            FaultKind::Store => Access::WRITE,
+        };
+        access.contains(need)
+    }
 }
 
 /// 一次用户页错误在纯探针下的结论。
@@ -27,4 +54,44 @@ pub enum FaultOutcome {
     Materialize,
     /// 身份不在，或活动权限不容纳这次访问：不再续，交入口按原样处置。
     Invalid,
+}
+
+impl FaultOutcome {
+    pub(super) fn probe(
+        state: &NestState,
+        geometry: Geo,
+        address: VirtAddr,
+        kind: FaultKind,
+    ) -> Self {
+        if !state.retirement.invalidation().is_clean() {
+            return Self::Materialize;
+        }
+        let Some(mapping) = state.index.find(address.as_usize()) else {
+            return Self::Invalid;
+        };
+        let inner = mapping.state.lock();
+        let Some(range) = inner.range_at(address.as_usize()) else {
+            return Self::Invalid;
+        };
+        if !kind.allows(range.current) {
+            return Self::Invalid;
+        }
+        let page = address.page_align();
+        let offset = PageOffset::new(mapping.page_index(page));
+        if let Ok((_, flags)) = state.root.walk_ref_geometry(page, geometry)
+            && kind.satisfies(flags)
+        {
+            return Self::Resolved;
+        }
+        if inner.explicit || inner.memo(offset.get()).is_some() {
+            return Self::Wait(mapping.identity());
+        }
+        match inner.source.can_materialize(offset) {
+            Ok(true) => {}
+            // 承载已移走，或正被一次移交持有/预留：只能等。
+            Ok(false) => return Self::Wait(mapping.identity()),
+            Err(_) => return Self::Invalid,
+        }
+        Self::Materialize
+    }
 }

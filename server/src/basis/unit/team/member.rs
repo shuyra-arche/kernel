@@ -11,14 +11,14 @@ use crate::basis::unit::task::TaskState;
 use crate::basis::unit::task::TaskWeak;
 use crate::machine::sync::SpinLock;
 
-/// 团队里的一名成员：身份、外壳（弱引用）、与任务共享的状态机、生命周期线，
-/// 以及它替家长欠着的收据。
 /// 一条收据：某个家长（`owner`）还在哪些子团队根（`roots`）上欠着一次退出。
 pub(crate) struct Receipt {
     pub owner: TaskId,
     pub roots: Vec<TeamId>,
 }
 
+/// 团队里的一名成员：身份、外壳（弱引用）、与任务共享的状态机、生命周期线，
+/// 以及它替家长欠着的收据。
 pub(crate) struct Member {
     pub id: TaskId,
     pub team: kernel_api::model::identity::TeamId,
