@@ -64,20 +64,12 @@ fn schedulers() -> &'static [Conductor] {
 
 /// 把一枚就绪任务放到挑中的那颗核上。
 pub(crate) fn launch(task: Arc<Task>) {
-    kick(pick(), task);
+    kick(pick(|candidate| task.can_run_on(candidate)), task);
 }
 
 /// 把一枚就绪任务放到指定核上：接进它那张饥饿队列，必要时叫醒它。
-pub(crate) fn kick(hart: HartId, task: Arc<Task>) {
-    let hart = if task.can_run_on(hart) {
-        hart
-    } else {
-        schedulers()
-            .iter()
-            .find(|s| task.can_run_on(s.hart))
-            .expect("Task has no compatible Hart")
-            .hart
-    };
+fn kick(hart: HartId, task: Arc<Task>) {
+    assert!(task.can_run_on(hart), "incompatible Task placement");
     let notify = schedulers()[hart.get()].push(task);
     if waiting(hart) || notify {
         notify_hart(hart);

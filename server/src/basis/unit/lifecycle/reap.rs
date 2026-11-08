@@ -81,6 +81,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
         (cause, reason)
     };
     crate::basis::unit::team::exit::member_dying(&task, reason);
+    task.release_extensions();
     hooked(&task);
     {
         let _commit = crate::basis::commit();
