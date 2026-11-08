@@ -126,7 +126,7 @@ impl Nest {
             TEAM_FRAME_BASE.as_usize() + TEAM_FRAME_WINDOW_SIZE - 1,
         )?;
         if kernel {
-            let dram = crate::machine::board::info().dram;
+            let dram = crate::machine::board::info().memory.envelope();
             let base = mode::lower()
                 .as_usize()
                 .checked_add(dram.base)

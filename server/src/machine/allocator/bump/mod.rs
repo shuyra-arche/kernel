@@ -38,11 +38,6 @@ impl BumpAllocator {
         })
     }
 
-    pub fn boundary(&self) -> usize {
-        self.inner
-            .with(|slot| slot.as_ref().expect("bump allocator not initialized").edge)
-    }
-
     pub fn frontier(&self) -> usize {
         self.inner.with(|slot| {
             let inner = slot.as_ref().expect("bump allocator not initialized");
@@ -59,14 +54,15 @@ unsafe impl Allocator for BumpAllocator {
         self.inner.with(|slot| {
             let inner = slot.as_mut().ok_or(AllocError)?;
 
-            let frontier = (inner.base + inner.used) as *mut u8;
-            let next = unsafe { frontier.add(frontier.align_offset(layout.align())) };
-
-            if next.addr() + layout.size() > inner.edge {
+            let next = (inner.base + inner.used)
+                .checked_next_multiple_of(layout.align())
+                .ok_or(AllocError)?;
+            let end = next.checked_add(layout.size()).ok_or(AllocError)?;
+            if end > inner.edge {
                 return Err(AllocError);
             }
-
-            inner.used = next.addr() - inner.base + layout.size();
+            inner.used = end - inner.base;
+            let next = next as *mut u8;
             Ok(NonNull::slice_from_raw_parts(
                 NonNull::new(next).ok_or(AllocError)?,
                 layout.size(),
@@ -83,17 +79,13 @@ pub fn allocator() -> &'static dyn Allocator {
     &BUMP_ALLOCATOR
 }
 
-pub(crate) fn boundary() -> usize {
-    BUMP_ALLOCATOR.boundary()
-}
-
 pub(crate) fn frontier() -> usize {
     BUMP_ALLOCATOR.frontier()
 }
 
 pub fn init() -> InitResult<()> {
-    let free = crate::machine::board::info().free;
-    // SAFETY: board::info().free 是内核实际拥有的 free DRAM 区间；它在整个分配器
+    let free = crate::machine::board::info().memory.bootstrap();
+    // SAFETY: board::info().memory.bootstrap() 是内核实际拥有的 free DRAM 区间；它在整个分配器
     // 生存期内独占有效，Bump 与随后派生的 Frame 都只从这一实例取前沿。
     unsafe { BUMP_ALLOCATOR.init(Region::new(free.base, free.size)) }
         .annotate("initializing bump allocator")

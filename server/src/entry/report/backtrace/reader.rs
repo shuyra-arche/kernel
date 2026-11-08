@@ -23,13 +23,14 @@ impl StackReader {
         {
             return Some(base);
         }
-        let edge = crate::machine::board::dram_edge().unwrap_or(0x9000_0000);
         let (base, flags) = TableNode::walk_raw(
             self.root,
             crate::machine::mmu::riscv::canonical(page),
-            |pa| (0x8000_0000..edge).contains(&pa.as_usize()),
+            |pa| crate::machine::board::contains_identity(pa.as_usize(), PAGE_SIZE),
         )?;
-        if !flags.contains(PteFlags::R) {
+        if !flags.contains(PteFlags::R)
+            || !crate::machine::board::contains_identity(base.as_usize(), PAGE_SIZE)
+        {
             return None;
         }
         self.page = Some((page, base));

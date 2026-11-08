@@ -164,6 +164,23 @@ must rebuild and migrate separately; this provider change does not update them.
 
 ## Build and verification
 
+Boot validates all enabled root RAM nodes and `reg` tuples before initializing
+either heap. It subtracts the kernel/ROOT stack, DTB, initrd, FDT reservation
+map and static `/reserved-memory` regions. Bump uses the largest remaining
+interval; Frame admits every remaining interval after excluding Bump's consumed
+prefix. Identity mappings omit bank holes and `no-map` pages. MMIO exclusion
+continues to conservatively protect the whole RAM envelope.
+
+Early parsing uses fixed storage: at most 16 disjoint RAM ranges, 64 merged
+reservations (including boot objects) and 32 tree levels. Exhaustion, conflicting
+boot objects, overflowing or malformed descriptions fail boot before allocation.
+RAM and DTB addresses must be page aligned; partial reserved pages are withheld.
+Dynamic reserved-memory requests and nonempty/missing reserved-memory `ranges`
+are rejected. Allocator metadata still indexes the physical envelope, so widely
+separated banks can exhaust the bootstrap interval; this reports allocation
+failure rather than admitting holes. The firmware must supply a readable FDT
+blob; structural validation cannot establish the validity of a raw pointer.
+
 Use nightly Rust with `riscv64gc-unknown-none-elf`; the repository does not set a
 local toolchain override. The Server package is `kernel`, its executable `shuyra`.
 
@@ -189,7 +206,9 @@ of these imports and never change production lint policy.
 
 The ignored hardware suite builds an initial Unit against API/Client, boots the
 actual Kernel through Capsule, and runs debug with one/four harts and release
-with four harts. CPU scenarios cover all Slot/Memo endpoint shapes, stale
+with four harts. An additional debug/four-hart CPU boot supplies two RAM banks,
+a physical hole and reservation-map entries through a modified QEMU DTB.
+CPU scenarios cover all Slot/Memo endpoint shapes, stale
 transitions, persistent freezing, replacement, borrowed ownership denial, Pend
 windows, Sign revocation, stable Unit results and atomic WaitValue/WakeValue.
 The I/O variants boot the separate test image with the same Kernel library and

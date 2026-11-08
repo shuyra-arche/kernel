@@ -110,8 +110,13 @@ fn run(mode: &str) {
             hashes.stdout,
         )
         .unwrap();
-        for harts in harts {
-            let name = format!("{profile}-smp{harts}");
+        let cases = harts
+            .iter()
+            .map(|harts| (*harts, false))
+            .chain((profile == "debug" && !io).then_some((4, true)));
+        for (harts, split_memory) in cases {
+            let suffix = if split_memory { "-split-memory" } else { "" };
+            let name = format!("{profile}-smp{harts}{suffix}");
             let mut command = Command::new(&qemu);
             command
                 .args([
@@ -133,6 +138,11 @@ fn run(mode: &str) {
                 .args(["-nographic", "-monitor", "none", "-nic", "none"]);
             if io {
                 command.args(["-device", "edu,addr=1.0"]);
+            }
+            if split_memory {
+                let dtb = evidence.join("split-memory.dtb");
+                super::memory::fixture(&qemu, &dtb, harts);
+                command.arg("-dtb").arg(dtb);
             }
             std::fs::write(
                 evidence.join(format!("{name}-command.txt")),

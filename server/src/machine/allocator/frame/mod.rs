@@ -1,7 +1,3 @@
-mod facts;
-
-use facts::MachineFacts;
-
 use crate::machine::allocator::InitResult;
 use alloc::boxed::Box;
 use core::ptr::NonNull;
@@ -47,7 +43,7 @@ unsafe impl Allocator for FrameAllocator {
         crate::machine::allocator::assert_allocation_allowed();
         self.inner.with(|frame| {
             let size = layout.size().max(PAGE_SIZE);
-            let power = block_power(size);
+            let power = block_power(size.max(layout.align()));
             let index = unsafe { frame.split_block(power) }.ok_or(AllocError)?;
             let addr = frame.frame_addr(index) as *mut u8;
             #[cfg(debug_assertions)]
@@ -73,7 +69,7 @@ unsafe impl Allocator for FrameAllocator {
         unsafe {
             self.inner.with(|frame| {
                 let size = layout.size().max(PAGE_SIZE);
-                let power = block_power(size);
+                let power = block_power(size.max(layout.align()));
                 let addr = ptr.addr().get();
                 #[cfg(debug_assertions)]
                 {
@@ -90,15 +86,6 @@ unsafe impl Allocator for FrameAllocator {
                 frame.merge_block(index, power);
             })
         }
-    }
-}
-
-fn machine_facts() -> MachineFacts {
-    let m = crate::machine::board::info();
-    MachineFacts {
-        reserved: m
-            .reserved
-            .map(|r| r.map(|r| super::Region::new(r.base, r.size))),
     }
 }
 

@@ -1,5 +1,6 @@
 mod error;
 mod machine;
+pub(crate) mod memory;
 mod region;
 
 pub use error::MachineError;
@@ -27,5 +28,11 @@ pub fn device_tree() -> Option<fdt::Fdt<'static>> {
 }
 
 pub(crate) fn dram_edge() -> Option<usize> {
-    MACHINE.get().map(|m| m.dram.range().end)
+    MACHINE.get().map(|m| m.memory.envelope().range().end)
+}
+
+pub(crate) fn contains_identity(base: usize, size: usize) -> bool {
+    MACHINE
+        .get()
+        .is_some_and(|m| m.memory.contains_identity(Region::new(base, size)))
 }
