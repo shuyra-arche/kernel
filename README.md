@@ -153,6 +153,21 @@ QEMU covers VLEN 128/256 and absent V on one/four Harts in debug and release.
 Firmware declarations must describe implemented V 1.0 instructions; this is not
 an emulator for dishonest firmware or pre-ratification vector hardware.
 
+Compatibility is checked at placement, dequeue/steal and final return. Rejected
+destinations rotate over compatible idle Harts, so gaps in the capability set do
+not funnel every wakeup into its first member. Execution ownership is asserted
+at save/restore. Once a Task has detached and entered termination, its optional
+register images are released before asynchronous memory cleanup or retained
+results finish; no Hart retains an image pointer.
+
+The context guest checks illegal instructions, stopped running/waiting Tasks
+and fresh state after repeated exits. QEMU checkpoint traces establish that each
+register-bearing Task actually runs on multiple Harts. A four-Hart fixture declares
+V only on physical Harts 0/1 and checks that vector execution visits both and never
+2/3. Mismatched VLEN/SEW rejection and allocation-failure rollback are checked by
+Host tests; QEMU runs 128/256 separately, not heterogeneous physical VLEN. Physical
+hardware and measured Dirty-state optimization remain outside this verification.
+
 ## External access
 
 External access is an address projection, not a separate device work object.

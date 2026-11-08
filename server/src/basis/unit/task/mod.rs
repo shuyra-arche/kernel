@@ -75,15 +75,40 @@ impl Task {
 
     /// Called before publishing any waiting/ready/terminal transition.
     pub(crate) unsafe fn capture_extensions(&self, status: usize) {
+        assert_eq!(
+            self.on_hart(),
+            Some(crate::machine::hart::hart_id()),
+            "capture without execution ownership"
+        );
         unsafe { self.extensions.lock().capture(status) };
     }
 
     pub(crate) unsafe fn restore_extensions(&self, status: &mut usize) {
+        assert_eq!(
+            self.on_hart(),
+            Some(crate::machine::hart::hart_id()),
+            "restore without execution ownership"
+        );
         assert!(
             self.can_run_on(crate::machine::hart::hart_id()),
             "incompatible execution Hart"
         );
         unsafe { self.extensions.lock().restore(status) };
+    }
+
+    /// Reaping runs only after the running/waiting/ready owner has detached.
+    /// Extended CPU images have no asynchronous hardware obligations; release
+    /// them now, even if other resources retain a cleanup husk or result record.
+    pub(crate) fn release_extensions(&self) {
+        let image = {
+            let _commit = commit();
+            assert!(
+                self.dead() && self.on_hart().is_none(),
+                "release before execution stops"
+            );
+            core::mem::take(&mut *self.extensions.lock())
+        };
+        drop(image);
     }
 
     pub(crate) fn enable_extension(

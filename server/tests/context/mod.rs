@@ -152,3 +152,5 @@ fn vector_csr_access_and_absent_hardware_keep_fault_boundaries() {
         assert!(!extension::instruction::vector(word), "{word:#x}");
     }
 }
+
+mod allocation;

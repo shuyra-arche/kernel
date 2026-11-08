@@ -1,3 +1,4 @@
+mod boundary;
 #[cfg(feature = "vector")]
 mod vector;
 use super::{Console, lifecycle};
@@ -48,7 +49,14 @@ fn worker(id: usize) -> ! {
         unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
         assert!(now - start < 30_000_000, "no timer preemption");
     }
-    for _ in 0..16 {
+    for _ in 0..64 {
+        unsafe {
+            if id == 1 {
+                context_float_one();
+            } else {
+                context_float_two();
+            }
+        }
         unsafe { save(&mut observed) };
         assert_eq!(observed.regs, expected.regs);
         assert_eq!(observed.fcsr, expected.fcsr);
@@ -62,8 +70,10 @@ fn worker(id: usize) -> ! {
 }
 
 pub(super) fn run() {
-    #[cfg(feature = "vector")]
+    #[cfg(all(feature = "vector", not(feature = "migration")))]
     vector::run();
+    #[cfg(feature = "migration")]
+    vector::migration();
     let tasks = [
         lifecycle::spawn(one as *const () as usize),
         lifecycle::spawn(two as *const () as usize),
@@ -76,6 +86,7 @@ pub(super) fn run() {
         assert_eq!(lifecycle::result(task), (1, 0));
         lifecycle::delete(task);
     }
+    boundary::run();
     writeln!(
         Console,
         "PASS context float=32 fcsr=1 initial=1 preempt=1 block=1"
@@ -169,4 +180,16 @@ unsafe extern "C" fn load(_image: *const Image) {
         "ret",
         ".option pop",
     );
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn context_float_one() {
+    core::arch::naked_asm!("nop", "ret");
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn context_float_two() {
+    core::arch::naked_asm!("nop", "ret");
 }

@@ -112,7 +112,12 @@ impl Conductor {
 
     pub(super) fn starved_clear(&self, i: &mut Inner) {
         let _commit = crate::basis::commit();
-        while i.chain.pop().is_some() {}
+        while let Some(task) = i.chain.pop() {
+            if task.stopped() || task.ident.team.paused() {
+                Task::park(task);
+            }
+        }
+        i.ready_since = None;
     }
 
     pub(super) fn push(&self, task: Arc<Task>) -> bool {

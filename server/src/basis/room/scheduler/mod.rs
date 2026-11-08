@@ -29,6 +29,7 @@ use self::roster::roster;
 static SCHEDULERS: OnceLock<&'static [Conductor]> = OnceLock::new();
 
 static STEAL_CURSOR: AtomicUsize = AtomicUsize::new(0);
+static COMPATIBLE_CURSOR: AtomicUsize = AtomicUsize::new(0);
 
 static KICKS: Counter = Counter::new();
 static FALLBACK: Counter = Counter::new();
@@ -72,11 +73,29 @@ pub(crate) fn kick(hart: HartId, task: Arc<Task>) {
     let hart = if task.can_run_on(hart) {
         hart
     } else {
-        schedulers()
-            .iter()
-            .find(|s| task.can_run_on(s.hart))
-            .expect("Task has no compatible Hart")
-            .hart
+        let eligible = || {
+            schedulers()
+                .iter()
+                .map(|s| s.hart)
+                .filter(|candidate| task.can_run_on(*candidate))
+        };
+        // Rotate by eligible ordinal, not by the rejected physical slot. Gaps
+        // in an asymmetric capability set must not funnel wakeups to one Hart.
+        let idle_count = eligible().filter(|candidate| waiting(*candidate)).count();
+        let cursor = COMPATIBLE_CURSOR.fetch_add(1, Ordering::Relaxed);
+        if idle_count != 0 {
+            eligible()
+                .filter(|candidate| waiting(*candidate))
+                .nth(cursor % idle_count)
+        } else {
+            let count = eligible().count();
+            assert_ne!(count, 0, "Task has no compatible Hart");
+            eligible().nth(cursor % count)
+        }
+        // Idle flags may change between the two passes; compatibility cannot
+        // change while this Task is off-Hart, so retry without the idle filter.
+        .or_else(|| eligible().next())
+        .expect("Task has no compatible Hart")
     };
     let notify = schedulers()[hart.get()].push(task);
     if waiting(hart) || notify {

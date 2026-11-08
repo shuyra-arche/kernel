@@ -12,20 +12,30 @@ use kernel_api::{
 };
 use kernel_client::call::{room, unit};
 static STARTED: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "migration")]
+static MIGRATION_ENTERED: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+#[cfg(not(feature = "migration"))]
 extern "C" fn probe() -> ! {
     let bytes: usize;
     unsafe { core::arch::asm!("csrr {}, vlenb", out(reg) bytes) };
     unit::exit(bytes as u64, 0, VirtAddr::new(0), 0)
 }
+#[cfg(not(feature = "migration"))]
 extern "C" fn one() -> ! {
-    worker(1)
+    worker(1, true)
 }
+#[cfg(not(feature = "migration"))]
 extern "C" fn two() -> ! {
-    worker(2)
+    worker(2, true)
 }
-fn worker(id: usize) -> ! {
+fn worker(id: usize, barrier: bool) -> ! {
     let bytes: usize;
     unsafe { core::arch::asm!("csrr {}, vlenb", out(reg) bytes) };
+    #[cfg(feature = "migration")]
+    if !barrier {
+        MIGRATION_ENTERED.store(true, Ordering::Release);
+    }
     assert!(matches!(bytes, 16 | 32));
     let mut expected = [0u64; 128];
     let mut observed = [0u64; 128];
@@ -38,15 +48,24 @@ fn worker(id: usize) -> ! {
     }
     let wanted = [id, id + 3, 0, id]; // nonzero vstart, vl, e8/m1/tu/mu, vcsr
     unsafe { load(expected.as_ptr(), wanted.as_ptr(), bytes) };
-    STARTED.fetch_or(1 << id, Ordering::Release);
-    let start: u64;
-    unsafe { core::arch::asm!("rdtime {}", out(reg) start) };
-    while STARTED.load(Ordering::Acquire) != 6 {
-        let now: u64;
-        unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
-        assert!(now - start < 30_000_000, "no vector timer preemption");
+    if barrier {
+        STARTED.fetch_or(1 << id, Ordering::Release);
+        let start: u64;
+        unsafe { core::arch::asm!("rdtime {}", out(reg) start) };
+        while STARTED.load(Ordering::Acquire) != 6 {
+            let now: u64;
+            unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
+            assert!(now - start < 30_000_000, "no vector timer preemption");
+        }
     }
-    for _ in 0..16 {
+    for _ in 0..64 {
+        unsafe {
+            if id == 1 {
+                context_vector_one();
+            } else {
+                context_vector_two();
+            }
+        }
         unsafe { save(observed.as_mut_ptr(), controls.as_mut_ptr(), bytes) };
         assert_eq!(&observed[..bytes * 4], &expected[..bytes * 4]);
         assert_eq!(controls, wanted);
@@ -70,6 +89,7 @@ fn worker(id: usize) -> ! {
     unit::exit(0, 0, VirtAddr::new(0), 0)
 }
 
+#[cfg(not(feature = "migration"))]
 pub(super) fn run() {
     let probe = lifecycle::spawn(probe as *const () as usize);
     unit::resume(UnitTarget::Task(probe)).unwrap();
@@ -153,4 +173,45 @@ unsafe extern "C" fn load(_data: *const u64, _control: *const usize, _bytes: usi
         "ret",
         ".option pop",
     );
+}
+
+#[cfg(feature = "migration")]
+extern "C" fn migrant() -> ! {
+    worker(1, false)
+}
+#[cfg(feature = "migration")]
+pub(super) fn migration() {
+    for _ in 0..32 {
+        MIGRATION_ENTERED.store(false, Ordering::Release);
+        let task = lifecycle::spawn(migrant as *const () as usize);
+        unit::resume(UnitTarget::Task(task)).unwrap();
+        assert!(lifecycle::wait_task(task));
+        let info = lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task)));
+        lifecycle::delete(task);
+        if info.exit == Some((ExitCause::Fault, EXIT_FAULT as u64)) {
+            assert!(
+                !MIGRATION_ENTERED.load(Ordering::Acquire),
+                "fault after vector activation"
+            );
+            continue;
+        }
+        assert_eq!(info.result, Some(0));
+        Console
+            .write_str("PASS context migration-state=1 incompatible-harts=2\n")
+            .unwrap();
+        return;
+    }
+    panic!("no vector-capable Hart admitted first use");
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn context_vector_one() {
+    core::arch::naked_asm!("nop", "ret");
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn context_vector_two() {
+    core::arch::naked_asm!("nop", "ret");
 }

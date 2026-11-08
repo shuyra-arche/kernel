@@ -61,3 +61,54 @@ fn replace(bytes: &mut Vec<u8>, path: &str, name: &str, value: &[u8]) {
         bytes[offset..offset + 4].copy_from_slice(&((old as isize + delta) as u32).to_be_bytes());
     }
 }
+
+/// Hardware is RVV-capable, but only Harts 0/1 are admitted as V providers.
+/// This exercises the scheduler's unavailable-capability boundary without
+/// pretending QEMU can configure a different VLEN on each Hart.
+pub(super) fn vector_fixture(qemu: &OsStr, path: &Path, cpu: &str) {
+    let output = Command::new(qemu)
+        .args([
+            "-M",
+            &format!("virt,dumpdtb={}", path.display()),
+            "-cpu",
+            cpu,
+            "-m",
+            "128M",
+            "-smp",
+            "4",
+            "-bios",
+            "none",
+            "-nographic",
+            "-monitor",
+            "none",
+            "-nic",
+            "none",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let mut bytes = std::fs::read(path).unwrap();
+    for id in [2, 3] {
+        let node_path = format!("/cpus/cpu@{id}");
+        let tree = fdt::Fdt::new(&bytes).unwrap();
+        let node = tree.find_node(&node_path).unwrap();
+        let old = node.property("riscv,isa-extensions").unwrap().value;
+        let mut filtered = Vec::new();
+        for extension in old.split(|b| *b == 0).filter(|s| !s.is_empty()) {
+            if extension == b"v" || extension.starts_with(b"zv") {
+                continue;
+            }
+            filtered.extend_from_slice(extension);
+            filtered.push(0);
+        }
+        replace(&mut bytes, &node_path, "riscv,isa-extensions", &filtered);
+        // Keep the ignored legacy property consistent with the modern pair.
+        replace(
+            &mut bytes,
+            &node_path,
+            "riscv,isa",
+            b"rv64imafdc_zicsr_zifencei_zicntr\0",
+        );
+    }
+    std::fs::write(path, bytes).unwrap();
+}

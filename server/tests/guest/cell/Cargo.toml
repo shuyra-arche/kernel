@@ -23,5 +23,6 @@ panic = "abort"
 [features]
 context = []
 vector = ["context"]
+migration = ["vector"]
 io = []
 io-exit = ["io"]

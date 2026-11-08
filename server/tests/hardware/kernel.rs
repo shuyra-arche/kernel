@@ -25,11 +25,17 @@ fn task_extended_context_isolated() {
 fn task_vector_context_isolated() {
     run("vector")
 }
+#[test]
+#[ignore = "requires RVV-capable QEMU and OpenSBI"]
+fn task_migration_respects_hart_capabilities() {
+    run("migration")
+}
 static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn run(mode: &str) {
     let _run = RUN.lock().unwrap_or_else(|e| e.into_inner());
     let io = matches!(mode, "io" | "io-exit");
-    let context = matches!(mode, "context" | "vector");
+    let context = matches!(mode, "context" | "vector" | "migration");
+    let mixed = mode == "migration";
     let vector = mode == "vector";
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -127,7 +133,9 @@ fn run(mode: &str) {
             .map(|harts| (*harts, ""))
             .chain((profile == "debug" && !io).then_some((4, "-split-memory")))
             .chain((profile == "debug" && mode != "io-exit").then_some((4, "-sparse-harts")));
-        let cases: Vec<_> = if vector {
+        let cases: Vec<_> = if mixed {
+            vec![(4, "-mixed-v", "rv64,v=true,vlen=128,elen=64")]
+        } else if vector {
             vec![
                 (1, "-v128", "rv64,v=true,vlen=128,elen=64"),
                 (4, "-v128", "rv64,v=true,vlen=128,elen=64"),
@@ -161,6 +169,17 @@ fn run(mode: &str) {
                 .args(["-nographic", "-monitor", "none", "-nic", "none"]);
             if io {
                 command.args(["-device", "edu,addr=1.0"]);
+            }
+            let trace_path = evidence.join(format!("{name}-migration.log"));
+            let symbols = if context && harts == 4 {
+                super::context::trace(&mut command, &elf, &trace_path, vector || mixed, mixed)
+            } else {
+                Vec::new()
+            };
+            if mixed {
+                let dtb = evidence.join("mixed-vector.dtb");
+                super::harts::vector_fixture(&qemu, &dtb, cpu);
+                command.arg("-dtb").arg(dtb);
             }
             if suffix == "-split-memory" {
                 let dtb = evidence.join("split-memory.dtb");
@@ -199,6 +218,21 @@ fn run(mode: &str) {
             if context {
                 assert!(
                     log.contains("PASS context float=32 fcsr=1 initial=1 preempt=1 block=1"),
+                    "{name}: {log}"
+                );
+            }
+            if context {
+                assert!(
+                    log.contains("PASS context faults=2 reuse=16 stop=2"),
+                    "{name}: {log}"
+                );
+                if !symbols.is_empty() {
+                    super::context::verify(&trace_path, &symbols, mixed);
+                }
+            }
+            if mixed {
+                assert!(
+                    log.contains("PASS context migration-state=1 incompatible-harts=2"),
                     "{name}: {log}"
                 );
             }
