@@ -1145,7 +1145,7 @@ impl Nest {
             self.drain_closed();
             return Ok(());
         }
-        {
+        if self.state.lock().retirement.tickets.has_settled() {
             let mut layout = self.layout.lock();
             let mut state = self.state.lock();
             for ticket in state.retirement.tickets.drain() {

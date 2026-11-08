@@ -34,7 +34,9 @@ fn reclaiming_a_fenced_ticket_keeps_later_failed_tickets_reserved() {
     assert!(invalidate(&backend, 7).is_err());
     assert!(!tickets.claim(3));
     assert!(tickets.claim(1));
+    assert!(tickets.has_settled());
     assert_eq!(tickets.drain().collect::<Vec<_>>(), [2]);
+    assert!(!tickets.has_settled());
 
     backend.0.set(true);
     assert_eq!(invalidate(&backend, 7).unwrap().target(), 7);

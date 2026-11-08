@@ -31,6 +31,10 @@ impl Tickets {
         self.settled = self.entries.len();
     }
 
+    pub(crate) fn has_settled(&self) -> bool {
+        self.settled != 0
+    }
+
     pub(crate) fn claim(&mut self, ticket: usize) -> bool {
         let Some(index) = self.entries[..self.settled]
             .iter()
