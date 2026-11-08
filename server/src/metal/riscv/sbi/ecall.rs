@@ -1,7 +1,7 @@
 use erra::ResultExt;
 use fack::prelude::Error;
 
-use crate::extension::Extension;
+use super::Extension;
 
 pub type SResult<T> = Result<T, erra::Error<SError>>;
 

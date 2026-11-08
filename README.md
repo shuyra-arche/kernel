@@ -20,7 +20,7 @@ Shuyra's RV64 kernel, public contracts and typed call transport.
 | `server/src/metal/riscv/interrupt/` | CPU-local interrupt operations and controller claims |
 | `server/src/metal/riscv/mmu/` | CPU page tables, ASIDs and TLB synchronization |
 | `server/src/metal/riscv/iommu/` | Device translation, command queues and trusted completion |
-| `server/sbi/` | SBI calls used by the kernel |
+| `server/src/metal/riscv/sbi/` | RISC-V firmware calls (TIME, IPI, RFENCE, HSM, SRST and DBCN) |
 | `.github/workflows/` | Compilation checks and source version releases |
 
 One root Cargo workspace and lockfile cover production packages and the Host
@@ -400,10 +400,12 @@ published release, and the workflow does not publish packages to crates.io.
 Kernel and API derive from [anreonyr/sqware](https://github.com/anreonyr/sqware)
 commit `672d8d2deafc8067c94b6af340a5f89c6a765c9c`. Historical Client mechanisms derive from
 [Execution](https://github.com/shuyra-arche/execution) commit
-`1b333a28bc4c34beaea3f7986a9bb6e8ab2db414`. SBI was imported without source changes
+`1b333a28bc4c34beaea3f7986a9bb6e8ab2db414`. SBI was originally imported without source changes
 from [SBI](https://github.com/shuyra-arche/sbi) commit
 `2dc10bafb919eb2e8f6ca37c95cfd56f9a05831d`, originally extracted from
-`anreonyr/sqware` at `c970afaf7dae1145633278253351be729b625717` (`crates/sbi`).
+`anreonyr/sqware` at `c970afaf7dae1145633278253351be729b625717` (`crates/sbi`). It is now an internal `metal/riscv/sbi` module; unused
+standalone-crate extensions were removed while the active call encodings and
+register convention remain unchanged.
 
 Original author identities and migration records remain in Git history. The
 source checkpoints contained no license grant; this repository adds none.

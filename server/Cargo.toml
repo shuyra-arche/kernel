@@ -34,5 +34,4 @@ semihosting = { version = "0.1.25", features = ["fs"], optional = true }
 bitflags = { workspace = true }
 fack = { workspace = true }
 erra = { workspace = true }
-sbi = { path = "sbi" }
 kernel-api = { workspace = true }

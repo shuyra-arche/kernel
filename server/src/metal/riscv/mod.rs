@@ -9,5 +9,6 @@ pub(crate) mod interrupt;
 pub(crate) mod iommu;
 pub(crate) mod layout;
 pub(crate) mod mmu;
+pub(crate) mod sbi;
 pub(crate) mod stop;
 pub(crate) mod sync;

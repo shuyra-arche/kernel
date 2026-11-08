@@ -1,3 +1,4 @@
+use crate::metal::riscv::sbi;
 use ::core::fmt;
 use ::core::fmt::Write;
 

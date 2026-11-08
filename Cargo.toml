@@ -5,7 +5,6 @@ members = [
   "tools/abi-macros",
   "client",
   "server",
-  "server/sbi",
   "server/tests",
 ]
 

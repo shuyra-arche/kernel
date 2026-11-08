@@ -1,8 +1,8 @@
 use crate::metal::hart;
+use crate::metal::riscv::sbi;
 use ::core::sync::atomic::AtomicUsize;
 use ::core::sync::atomic::Ordering;
-use sbi;
-use sbi::fid;
+use sbi::{Hsm, SystemReset};
 
 static ALARMER: AtomicUsize = AtomicUsize::new(usize::MAX);
 static QUIET: AtomicUsize = AtomicUsize::new(0);
@@ -19,7 +19,7 @@ fn hunker() -> ! {
     unsafe { ::core::arch::asm!("csrci sstatus, 2") };
     // This path never returns: each peer acknowledges once after vacating its lease.
     QUIET.fetch_add(1, Ordering::Release);
-    let _ = sbi::HsmCall::new(fid::Hsm::Stop).call();
+    let _ = sbi::HsmCall::new(Hsm::Stop).call();
     loop {
         ::core::hint::spin_loop();
     }
@@ -57,14 +57,14 @@ pub(crate) fn broadcast() {
 }
 
 pub(crate) fn reset() {
-    let _ = sbi::SystemResetCall::new(fid::SystemReset::SystemReset).call();
+    let _ = sbi::SystemResetCall::new(SystemReset::SystemReset).call();
 }
 
 /// Terminal failure reset; this path never returns to the caller's stack.
 pub(crate) fn failed() -> ! {
     unsafe { core::arch::asm!("csrci sstatus, 2") };
     loop {
-        let _ = sbi::SystemResetCall::new(fid::SystemReset::SystemReset)
+        let _ = sbi::SystemResetCall::new(SystemReset::SystemReset)
             .args(sbi::ecall::SArgs {
                 a0: 0,
                 a1: 1,

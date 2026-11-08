@@ -1,9 +1,10 @@
 use crate::metal::mmu::Address;
+use crate::metal::riscv::sbi;
 use ::core::fmt;
 
+use sbi::Dbcn;
 use sbi::DbcnCall;
 use sbi::ecall::SArgs;
-use sbi::fid::Dbcn;
 
 mod line;
 mod logger;
