@@ -1,3 +1,4 @@
+use crate::topology::Topology;
 mod fixtures;
 use crate::plan::Plan;
 use crate::topology::RouteError;
@@ -185,4 +186,41 @@ fn protected_bar_windows_and_plic_aliases_never_reach_units() {
             .collect::<Vec<_>>(),
         [(0x10000000, 4096)]
     );
+}
+
+#[test]
+fn mmio_authority_and_topology_reject_the_same_ambiguous_register_facts() {
+    for iommu in [
+        controller(CONTROLLER, 1).reg(0x4010000, 4096),
+        controller(CONTROLLER, 1).property("#iommu-cells", words(&[1])),
+        controller(CONTROLLER, 1).property("status", b"okay\0extra\0"),
+        Node::new("bus")
+            .cells()
+            .property("ranges", [])
+            .property("ranges", [])
+            .child(controller(CONTROLLER, 1)),
+    ] {
+        let bytes = root()
+            .child(iommu)
+            .child(host(HOST, &[0, 1, 0, 65536]))
+            .encode();
+        let fdt = fdt::Fdt::new(&bytes).unwrap();
+        assert!(Topology::discover(&fdt).is_err());
+        assert!(Plan::discover(&fdt, 0x80000000, 0x10000000).is_err());
+    }
+    // A narrow outer bus cannot carry a wide register address even when every
+    // ranges property says identity; both consumers must enforce that width.
+    let bytes = Node::new("")
+        .property("#address-cells", words(&[1]))
+        .property("#size-cells", words(&[1]))
+        .child(
+            Node::new("bus")
+                .cells()
+                .property("ranges", [])
+                .child(controller(0x1_03010000, 1)),
+        )
+        .encode();
+    let fdt = fdt::Fdt::new(&bytes).unwrap();
+    assert!(Topology::discover(&fdt).is_err());
+    assert!(Plan::discover(&fdt, 0x80000000, 0x10000000).is_err());
 }

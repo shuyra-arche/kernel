@@ -1,13 +1,11 @@
 //! Validated firmware routing, not a authority to a Unit. The trusted binding path
 //! must still establish device ownership, immutable topology, borrowing and
 //! platform quiescence. No register is read or written while building this plan.
-mod tree;
 
+use crate::machine::board::tree::{
+    self, Identities, enabled, mmio, property, scalar, word as number,
+};
 use alloc::vec::Vec;
-use tree::number;
-use tree::parent;
-use tree::physical;
-use tree::scalar;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RouteError {
@@ -58,24 +56,10 @@ impl Topology {
             windows: Vec::new(),
             hosts: Vec::new(),
         };
-        // A phandle is a tree-wide identity. Duplicate/malformed identities cannot
-        // be resolved by selecting whichever node the iterator happens to visit.
-        let mut identities = Vec::new();
+        let identities = Identities::discover(fdt)?;
         for node in fdt.all_nodes() {
-            let a = scalar(node, "phandle")?;
-            let b = scalar(node, "linux,phandle")?;
-            if a.is_some() && b.is_some() && a != b {
-                return Err(RouteError::Ambiguous);
-            }
-            if let Some(id) = a.or(b) {
-                if id == 0 || id == u32::MAX || identities.contains(&id) {
-                    return Err(RouteError::Ambiguous);
-                }
-                identities.try_reserve(1).map_err(|_| RouteError::Memory)?;
-                identities.push(id);
-            }
             let platform = compatible(node, "riscv,iommu");
-            if !platform && node.property("#iommu-cells").is_none() {
+            if !platform && property(node, "#iommu-cells")?.is_none() {
                 continue;
             }
             if !platform || compatible(node, "riscv,pci-iommu") {
@@ -87,8 +71,9 @@ impl Topology {
             if scalar(node, "#iommu-cells")? != Some(1) {
                 return Err(RouteError::Unsupported);
             }
-            let phandle = a.or(b).ok_or(RouteError::Malformed)?;
-            let (base, size) = physical(fdt, node)?;
+            let phandle = identities.id(node).ok_or(RouteError::Malformed)?;
+            let region = mmio::single(fdt, node)?;
+            let (base, size) = (region.base, region.size);
             if base == 0 || !base.is_multiple_of(4096) || size != 4096 {
                 return Err(RouteError::Unsupported);
             }
@@ -103,16 +88,18 @@ impl Topology {
         }
         for node in fdt.all_nodes() {
             let active = enabled(fdt, node)?;
-            if node.property("iommu-map").is_none() {
+            if property(node, "iommu-map")?.is_none() {
                 // No implicit identity/bypass fallback, including mask-only hosts.
-                if node.property("iommu-map-mask").is_some() || node.property("iommus").is_some() {
+                if property(node, "iommu-map-mask")?.is_some()
+                    || property(node, "iommus")?.is_some()
+                {
                     return Err(RouteError::Unsupported);
                 }
                 continue;
             }
-            if node.property("device_type").and_then(|p| p.as_str()) != Some("pci")
+            if property(node, "device_type")? != Some(b"pci\0")
                 || !compatible(node, "pci-host-ecam-generic")
-                || node.property("iommus").is_some()
+                || property(node, "iommus")?.is_some()
             {
                 return Err(RouteError::Unsupported);
             }
@@ -121,14 +108,12 @@ impl Topology {
             if scalar(node, "iommu-map-mask")?.is_some_and(|mask| mask & 0xffff != 0xffff) {
                 return Err(RouteError::Unsupported);
             }
-            let (host, size) = physical(fdt, node)?;
+            let region = mmio::single(fdt, node)?;
+            let (host, size) = (region.base, region.size);
             if host == 0 || !host.is_multiple_of(1 << 20) || !size.is_multiple_of(1 << 20) {
                 return Err(RouteError::Unsupported);
             }
-            let bus = node
-                .property("bus-range")
-                .ok_or(RouteError::Malformed)?
-                .value;
+            let bus = property(node, "bus-range")?.ok_or(RouteError::Malformed)?;
             if bus.len() != 8 {
                 return Err(RouteError::Malformed);
             }
@@ -146,7 +131,7 @@ impl Topology {
                 .try_reserve(1)
                 .map_err(|_| RouteError::Memory)?;
             result.hosts.push((host, edge));
-            let map = node.property("iommu-map").unwrap().value;
+            let map = property(node, "iommu-map")?.expect("map present");
             if map.is_empty() || !map.len().is_multiple_of(16) {
                 return Err(RouteError::Malformed);
             }
@@ -229,21 +214,11 @@ fn compatible(node: fdt::node::FdtNode, value: &str) -> bool {
         .is_some_and(|c| c.all().any(|s| s == value))
 }
 
-fn enabled<'b, 'a>(
-    fdt: &'b fdt::Fdt<'a>,
-    mut node: fdt::node::FdtNode<'b, 'a>,
-) -> Result<bool, RouteError> {
-    loop {
-        if let Some(status) = node.property("status") {
-            match status.as_str() {
-                Some("okay" | "ok") => {}
-                Some("disabled" | "reserved" | "fail") => return Ok(false),
-                _ => return Err(RouteError::Unsupported),
-            }
-        }
-        match parent(fdt, node) {
-            Some(p) => node = p,
-            None => return Ok(true),
+impl From<tree::Error> for RouteError {
+    fn from(error: tree::Error) -> Self {
+        match error {
+            tree::Error::Description => Self::Malformed,
+            tree::Error::OutOfMemory => Self::Memory,
         }
     }
 }

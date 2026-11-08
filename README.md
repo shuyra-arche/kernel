@@ -209,9 +209,9 @@ IPI and remote fences use exact firmware targets, and PLIC selection uses the
 hardware ID. Disabled CPUs are not started or included in the capability set.
 Duplicate IDs, malformed CPU properties, a missing/disabled boot hart and SBI's
 reserved all-harts ID fail boot before allocation. Early CPU storage is bounded
-to 256 CPU nodes (including disabled ones), independent of ID magnitude. The
-immutable CPU table is stored once outside the by-value memory initialization
-result to preserve the 64 KiB ROOT stack budget.
+to 256 CPU nodes (including disabled ones), independent of ID magnitude. CPU and
+memory facts are each frozen once in separate initialization steps; Machine holds
+references to both, preserving the 64 KiB ROOT stack budget.
 
 Each enabled CPU must declare `mmu-type` as Sv39, Sv48 or Sv57 and provide the
 RV64GC, CSR, instruction-fence and counter baseline used by the Kernel. The
@@ -225,6 +225,20 @@ The current policy selects the largest mode common to all admitted CPUs, relying
 on Sv57 implying Sv48 and Sv48 implying Sv39. Normal boot no longer probes modes
 by writing `satp`. The validated, nonzero `/cpus/timebase-frequency` feeds the
 existing clock consumer; SBI runtime capabilities remain SBI's responsibility.
+
+The shared `machine/board/tree` decoder owns checked properties, ancestor status,
+phandle identity and MMIO byte/page geometry used by boot grants, IOMMU topology,
+PLIC routing and PCI host lookup. Controller backends still require explicit
+identity bus paths and one register span; sharing the decoder does not broaden
+hardware support. The phandle index rejects duplicate or conflicting identities
+across the whole DTB and accepts consistent `linux,phandle` aliases.
+
+PLIC resolves CPU-local interrupt controllers through that identity index and
+uses the admitted CPU-node membership retained by HartInfo, instead of rebuilding
+CPU admission during routing. Matching node text in another DTB does not identify
+an admitted CPU. Supervisor contexts belonging to disabled CPUs remain masked and
+cannot become the selected route. Existing QEMU IRQ-pair compatibility and the
+PCI bus-zero/identity BAR rule remain explicit backend constraints.
 
 Use nightly Rust with `riscv64gc-unknown-none-elf`; the repository does not set a
 local toolchain override. The Server package is `kernel`, its executable `shuyra`.

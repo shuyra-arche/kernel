@@ -3,6 +3,7 @@ pub(crate) mod harts;
 mod machine;
 pub(crate) mod memory;
 mod region;
+pub(crate) mod tree;
 
 pub use error::MachineError;
 pub use machine::Machine;

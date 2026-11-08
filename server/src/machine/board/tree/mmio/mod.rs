@@ -1,9 +1,11 @@
 //! CPU physical coordinates for ordinary memory-mapped bus resources.
+use super::{Error, cells, number, parent, property};
 use alloc::vec::Vec;
 use fdt::{Fdt, node::FdtNode};
-use kernel_api::{abi::call::pend::PendFail, address::PAGE_SIZE};
+use kernel_api::address::PAGE_SIZE;
 
-use super::region::Region;
+mod region;
+pub(crate) use region::Region;
 
 #[derive(Clone, Copy)]
 struct Span {
@@ -12,11 +14,11 @@ struct Span {
 }
 
 impl Span {
-    fn new(base: usize, size: usize) -> Result<Self, PendFail> {
+    fn new(base: usize, size: usize) -> Result<Self, Error> {
         let end = base
             .checked_add(size)
             .filter(|_| size != 0)
-            .ok_or(PendFail::Denied)?;
+            .ok_or(Error::Description)?;
         Ok(Self { base, end })
     }
 
@@ -27,9 +29,9 @@ impl Span {
         self.base < other.end && other.base < self.end
     }
 
-    fn width(self, cells: usize) -> Result<Self, PendFail> {
+    fn width(self, cells: usize) -> Result<Self, Error> {
         if cells == 1 && self.end as u64 > 1u64 << 32 {
-            return Err(PendFail::Denied);
+            return Err(Error::Description);
         }
         Ok(self)
     }
@@ -44,14 +46,17 @@ struct Translation {
 }
 
 impl Translation {
-    fn through(&mut self, child: Span, parent: Span) -> Result<(), PendFail> {
+    fn through(&mut self, child: Span, parent: Span) -> Result<(), Error> {
         if !self.resource.within(child) {
-            return Err(PendFail::Denied);
+            return Err(Error::Description);
         }
-        let translate = |span: Span| -> Result<Span, PendFail> {
-            let offset = span.base.checked_sub(child.base).ok_or(PendFail::Denied)?;
+        let translate = |span: Span| -> Result<Span, Error> {
+            let offset = span
+                .base
+                .checked_sub(child.base)
+                .ok_or(Error::Description)?;
             Span::new(
-                parent.base.checked_add(offset).ok_or(PendFail::Denied)?,
+                parent.base.checked_add(offset).ok_or(Error::Description)?,
                 span.end - span.base,
             )
         };
@@ -64,143 +69,67 @@ impl Translation {
         Ok(())
     }
 
-    fn finish(self) -> Result<Region, PendFail> {
+    fn finish(self) -> Result<Region, Error> {
         let page = Span {
             base: self.resource.base / PAGE_SIZE * PAGE_SIZE,
             end: self
                 .resource
                 .end
                 .checked_next_multiple_of(PAGE_SIZE)
-                .ok_or(PendFail::Denied)?,
+                .ok_or(Error::Description)?,
         };
         if self.window.is_some_and(|window| !page.within(window)) {
-            return Err(PendFail::Denied);
+            return Err(Error::Description);
         }
         Region::new(self.resource.base, self.resource.end - self.resource.base)
     }
 }
 
-pub(super) fn property<'a>(
-    node: FdtNode<'_, 'a>,
-    name: &str,
-) -> Result<Option<&'a [u8]>, PendFail> {
-    let mut values = node.properties().filter(|p| p.name == name);
-    let value = values.next().map(|p| p.value);
-    if values.next().is_some() {
-        return Err(PendFail::Denied);
-    }
-    Ok(value)
-}
-
-pub(super) fn number(bytes: &[u8]) -> Result<usize, PendFail> {
-    if !matches!(bytes.len(), 4 | 8) {
-        return Err(PendFail::Denied);
-    }
-    bytes.iter().try_fold(0usize, |n, b| {
-        n.checked_mul(256)
-            .and_then(|n| n.checked_add(*b as usize))
-            .ok_or(PendFail::Denied)
-    })
-}
-
-pub(super) fn cells(node: FdtNode<'_, '_>, name: &str, default: usize) -> Result<usize, PendFail> {
-    match property(node, name)? {
-        None => Ok(default),
-        Some(bytes) if bytes.len() == 4 => number(bytes),
-        _ => Err(PendFail::Denied),
-    }
-}
-
-fn address_cells(node: FdtNode<'_, '_>) -> Result<usize, PendFail> {
+fn address_cells(node: FdtNode<'_, '_>) -> Result<usize, Error> {
     let count = cells(node, "#address-cells", 2)?;
     if matches!(count, 1 | 2) {
         Ok(count)
     } else {
-        Err(PendFail::Denied)
+        Err(Error::Description)
     }
 }
 
-fn size_cells(node: FdtNode<'_, '_>) -> Result<usize, PendFail> {
+fn size_cells(node: FdtNode<'_, '_>) -> Result<usize, Error> {
     let count = cells(node, "#size-cells", 1)?;
     if matches!(count, 1 | 2) {
         Ok(count)
     } else {
-        Err(PendFail::Denied)
-    }
-}
-
-pub(super) fn parent<'b, 'a>(fdt: &'b Fdt<'a>, node: FdtNode<'b, 'a>) -> Option<FdtNode<'b, 'a>> {
-    // Names have distinct storage even when equal under different parents.
-    fdt.all_nodes()
-        .find(|p| p.children().any(|c| core::ptr::eq(c.name, node.name)))
-}
-
-pub(super) fn enabled<'b, 'a>(
-    fdt: &'b Fdt<'a>,
-    mut node: FdtNode<'b, 'a>,
-) -> Result<bool, PendFail> {
-    loop {
-        match property(node, "status")? {
-            None | Some(b"okay\0" | b"ok\0") => {}
-            Some(b"disabled\0" | b"reserved\0" | b"fail\0") => return Ok(false),
-            Some(s) if s.starts_with(b"fail-") && s.ends_with(&[0]) => return Ok(false),
-            _ => return Err(PendFail::Denied),
-        }
-        match parent(fdt, node) {
-            Some(p) => node = p,
-            None => return Ok(true),
-        }
-    }
-}
-
-/// CPU IDs, reserved-memory and PCI child encodings are not ordinary MMIO.
-/// A bus with zero size cells describes identifiers, not memory apertures.
-pub(super) fn ordinary<'b, 'a>(fdt: &'b Fdt<'a>, node: FdtNode<'b, 'a>) -> Result<bool, PendFail> {
-    let mut current = node;
-    loop {
-        if matches!(
-            current.name.split('@').next(),
-            Some("cpus" | "reserved-memory" | "memory")
-        ) {
-            return Ok(false);
-        }
-        let Some(bus) = parent(fdt, current) else {
-            return Ok(true);
-        };
-        if super::ranges::is_pci_host(bus) || cells(bus, "#size-cells", 1)? == 0 {
-            return Ok(false);
-        }
-        current = bus;
+        Err(Error::Description)
     }
 }
 
 /// Keep restricted IOMMU/interrupt backends on explicitly identity-mapped paths.
-pub(super) fn identity_path<'b, 'a>(
+pub(crate) fn identity_path<'b, 'a>(
     fdt: &'b Fdt<'a>,
     mut bus: FdtNode<'b, 'a>,
-) -> Result<(), PendFail> {
+) -> Result<(), Error> {
     while let Some(p) = parent(fdt, bus) {
         if property(bus, "ranges")? != Some(&[]) {
-            return Err(PendFail::Denied);
+            return Err(Error::Description);
         }
         bus = p;
     }
     Ok(())
 }
 
-pub(super) fn regions(fdt: &Fdt<'_>, node: FdtNode<'_, '_>) -> Result<Vec<Region>, PendFail> {
-    let bus = parent(fdt, node).ok_or(PendFail::Denied)?;
+pub(crate) fn regions(fdt: &Fdt<'_>, node: FdtNode<'_, '_>) -> Result<Vec<Region>, Error> {
+    let bus = parent(fdt, node).ok_or(Error::Description)?;
     let addresses = address_cells(bus)?;
     let sizes = size_cells(bus)?;
-    let reg = property(node, "reg")?.ok_or(PendFail::Denied)?;
+    let reg = property(node, "reg")?.ok_or(Error::Description)?;
     let stride = (addresses + sizes) * 4;
     if reg.is_empty() || !reg.len().is_multiple_of(stride) {
-        return Err(PendFail::Denied);
+        return Err(Error::Description);
     }
     let mut result = Vec::new();
     result
         .try_reserve(reg.len() / stride)
-        .map_err(|_| PendFail::OutOfMemory)?;
+        .map_err(|_| Error::OutOfMemory)?;
     for entry in reg.chunks_exact(stride) {
         let base = number(&entry[..addresses * 4])?;
         let size = number(&entry[addresses * 4..])?;
@@ -210,12 +139,12 @@ pub(super) fn regions(fdt: &Fdt<'_>, node: FdtNode<'_, '_>) -> Result<Vec<Region
 }
 
 /// Translate one range in `bus` coordinates through every ancestor.
-pub(super) fn physical<'b, 'a>(
+pub(crate) fn physical<'b, 'a>(
     fdt: &'b Fdt<'a>,
     mut bus: FdtNode<'b, 'a>,
     base: usize,
     size: usize,
-) -> Result<Region, PendFail> {
+) -> Result<Region, Error> {
     let mut translation = Translation {
         resource: Span::new(base, size)?,
         window: None,
@@ -227,17 +156,17 @@ pub(super) fn physical<'b, 'a>(
             return translation.finish();
         };
         let parent_addresses = address_cells(p)?;
-        let ranges = property(bus, "ranges")?.ok_or(PendFail::Denied)?;
+        let ranges = property(bus, "ranges")?.ok_or(Error::Description)?;
         if !ranges.is_empty() {
             let sizes = size_cells(bus)?;
             let stride = (addresses + parent_addresses + sizes) * 4;
             if !ranges.len().is_multiple_of(stride) {
-                return Err(PendFail::Denied);
+                return Err(Error::Description);
             }
             let mut windows: Vec<(Span, Span)> = Vec::new();
             windows
                 .try_reserve(ranges.len() / stride)
-                .map_err(|_| PendFail::OutOfMemory)?;
+                .map_err(|_| Error::OutOfMemory)?;
             for entry in ranges.chunks_exact(stride) {
                 let cut = addresses * 4;
                 let end = cut + parent_addresses * 4;
@@ -245,16 +174,27 @@ pub(super) fn physical<'b, 'a>(
                 let child = Span::new(number(&entry[..cut])?, size)?.width(addresses)?;
                 let parent = Span::new(number(&entry[cut..end])?, size)?.width(parent_addresses)?;
                 if windows.iter().any(|(old, _)| child.overlaps(*old)) {
-                    return Err(PendFail::Denied);
+                    return Err(Error::Description);
                 }
                 windows.push((child, parent));
             }
             let (child, parent) = windows
                 .into_iter()
                 .find(|(child, _)| translation.resource.within(*child))
-                .ok_or(PendFail::Denied)?;
+                .ok_or(Error::Description)?;
             translation.through(child, parent)?;
         }
         bus = p;
     }
+}
+
+/// One register span accepted by current controller backends. Identity-only is
+/// a backend constraint, applied before the shared byte/page geometry decoder.
+pub(crate) fn single(fdt: &Fdt, node: FdtNode) -> Result<Region, Error> {
+    identity_path(fdt, parent(fdt, node).ok_or(Error::Description)?)?;
+    let mut regions = regions(fdt, node)?;
+    if regions.len() != 1 {
+        return Err(Error::Description);
+    }
+    Ok(regions.pop().expect("one region"))
 }

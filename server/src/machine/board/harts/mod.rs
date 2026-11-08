@@ -26,9 +26,15 @@ pub enum HartError {
     Isa(usize),
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Cpu {
+    id: FirmwareId,
+    node: usize,
+}
+
 #[derive(Debug)]
 pub struct HartInfo {
-    ids: [FirmwareId; CAPACITY],
+    cpus: [Cpu; CAPACITY],
     pub count: usize,
     pub hertz: usize,
     pub(crate) common: Capability,
@@ -59,7 +65,10 @@ impl HartInfo {
             return Err(HartError::Property("timebase-frequency"));
         }
         let mut result = Self {
-            ids: [FirmwareId::new(0); CAPACITY],
+            cpus: [Cpu {
+                id: FirmwareId::new(0),
+                node: 0,
+            }; CAPACITY],
             count: 0,
             hertz,
             common: Capability::ceiling(),
@@ -86,20 +95,31 @@ impl HartInfo {
             }
             let caps = Capability::parse(node, id)?;
             result.common.intersect(caps);
-            result.ids[result.count] = FirmwareId::new(id);
+            result.cpus[result.count] = Cpu {
+                id: FirmwareId::new(id),
+                node: node.name.as_ptr() as usize,
+            };
             result.count += 1;
         }
-        let boot_slot = result.ids[..result.count]
+        let boot_slot = result.cpus[..result.count]
             .iter()
-            .position(|id| *id == boot)
+            .position(|cpu| cpu.id == boot)
             .ok_or(HartError::Boot(boot.get()))?;
-        result.ids.swap(0, boot_slot);
+        result.cpus.swap(0, boot_slot);
         Ok(result)
+    }
+
+    /// Membership of an already-admitted CPU node in the same immutable DTB.
+    /// The stored address is compared only; it is never dereferenced.
+    pub(crate) fn admitted(&self, node: fdt::node::FdtNode) -> Option<FirmwareId> {
+        self.cpus[..self.count]
+            .iter()
+            .find_map(|cpu| (cpu.node == node.name.as_ptr() as usize).then_some(cpu.id))
     }
 
     pub fn firmware(&self, slot: HartId) -> FirmwareId {
         assert!(slot.get() < self.count, "unregistered hart slot");
-        self.ids[slot.get()]
+        self.cpus[slot.get()].id
     }
 }
 
