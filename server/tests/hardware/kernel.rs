@@ -20,11 +20,17 @@ fn cell_io_creator_death_keeps_retirement_until_hardware_settles() {
 fn task_extended_context_isolated() {
     run("context")
 }
+#[test]
+#[ignore = "requires RVV-capable QEMU and OpenSBI"]
+fn task_vector_context_isolated() {
+    run("vector")
+}
 static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn run(mode: &str) {
     let _run = RUN.lock().unwrap_or_else(|e| e.into_inner());
     let io = matches!(mode, "io" | "io-exit");
-    let context = mode == "context";
+    let context = matches!(mode, "context" | "vector");
+    let vector = mode == "vector";
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -121,7 +127,18 @@ fn run(mode: &str) {
             .map(|harts| (*harts, ""))
             .chain((profile == "debug" && !io).then_some((4, "-split-memory")))
             .chain((profile == "debug" && mode != "io-exit").then_some((4, "-sparse-harts")));
-        for (harts, suffix) in cases {
+        let cases: Vec<_> = if vector {
+            vec![
+                (1, "-v128", "rv64,v=true,vlen=128,elen=64"),
+                (4, "-v128", "rv64,v=true,vlen=128,elen=64"),
+                (1, "-v256", "rv64,v=true,vlen=256,elen=64"),
+                (4, "-v256", "rv64,v=true,vlen=256,elen=64"),
+                (1, "-no-v", "rv64,v=false"),
+            ]
+        } else {
+            cases.map(|(h, s)| (h, s, "rv64")).collect()
+        };
+        for (harts, suffix, cpu) in cases {
             let name = format!("{profile}-smp{harts}{suffix}");
             let mut command = Command::new(&qemu);
             command
@@ -129,7 +146,7 @@ fn run(mode: &str) {
                     "-M",
                     if io { "virt,iommu-sys=on" } else { "virt" },
                     "-cpu",
-                    "rv64",
+                    cpu,
                     "-m",
                     "128M",
                     "-smp",
@@ -184,6 +201,18 @@ fn run(mode: &str) {
                     log.contains("PASS context float=32 fcsr=1 initial=1 preempt=1 block=1"),
                     "{name}: {log}"
                 );
+            }
+            if vector {
+                let marker = match suffix {
+                    "-v128" => {
+                        "PASS context vector=32 vlenb=16 controls=4 vstart=1 preempt=1 block=1"
+                    }
+                    "-v256" => {
+                        "PASS context vector=32 vlenb=32 controls=4 vstart=1 preempt=1 block=1"
+                    }
+                    _ => "PASS context vector-absent=1",
+                };
+                assert!(log.contains(marker), "{name}: {log}");
             }
             if io {
                 assert!(

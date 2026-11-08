@@ -28,6 +28,7 @@ fn extension(name: &str) -> u16 {
         "f" => 8,
         "d" => 16,
         "q" => 512,
+        "v" => 1024,
         "c" => 32,
         "zicsr" => 64,
         "zifencei" => 128,
@@ -37,6 +38,9 @@ fn extension(name: &str) -> u16 {
 }
 
 impl Capability {
+    pub(crate) fn vector(self) -> bool {
+        self.isa & 1024 != 0
+    }
     pub(crate) fn floating(self) -> bool {
         self.isa & 16 != 0 && self.isa & 512 == 0
     }
@@ -123,6 +127,7 @@ fn legacy(value: &str) -> Result<u16, HartError> {
             b'f' => 8,
             b'd' => 16,
             b'q' => 512,
+            b'v' => 1024,
             b'c' => 32,
             _ => 0,
         };

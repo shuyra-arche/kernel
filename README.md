@@ -138,7 +138,20 @@ The existing boot baseline requires RV64GC, so F-only hardware is not admitted.
 A CPU advertising Q cannot enable a 64-bit Task image. Queue placement and stealing
 use one compatibility check, preserving the image independently of the Hart.
 This is a correctness-first full save/restore path; Dirty-state optimization is
-not enabled. RVV state support is tracked separately in #28.
+not enabled.
+
+For firmware-declared V, each Hart probes its hardware `vlenb` and supported SEW
+set before becoming online. The supported profile is V 1.0 with SEW 8/16/32/64
+and VLEN 128..65536; undeclared or unsupported profiles cannot enable VS. A Task
+allocates and zeroes `32 * vlenb` bytes on first use. Whole-register operations
+preserve every lane, including tails, together with `vl`, `vtype`, `vstart` and
+`vcsr`. Save clears `vstart` before register stores; restore writes it last.
+Vector floating instructions also acquire an F/D image when necessary.
+
+An active vector image can move only to an exactly matching vector geometry;
+QEMU covers VLEN 128/256 and absent V on one/four Harts in debug and release.
+Firmware declarations must describe implemented V 1.0 instructions; this is not
+an emulator for dishonest firmware or pre-ratification vector hardware.
 
 ## External access
 

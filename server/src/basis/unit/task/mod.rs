@@ -64,9 +64,7 @@ impl Task {
     pub(crate) fn execution_capability(
         hart: HartId,
     ) -> crate::machine::switcher::context::extension::Capability {
-        crate::machine::switcher::context::extension::Capability {
-            float: crate::machine::board::info().hart.floating(hart),
-        }
+        crate::machine::switcher::context::extension::hardware::capability(hart)
     }
 
     pub(crate) fn can_run_on(&self, hart: HartId) -> bool {

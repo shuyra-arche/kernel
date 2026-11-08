@@ -31,3 +31,46 @@ pub(crate) fn float(word: u32) -> bool {
         _ => false,
     }
 }
+
+/// Vector major opcodes are distinct from scalar F/D memory widths. Reserved
+/// arithmetic encodings may retry once, then fault with VS enabled; the PC is
+/// never advanced and they cannot be mistaken for repeated first use.
+pub(crate) fn vector(word: u32) -> bool {
+    let f3 = (word >> 12) & 7;
+    match word & 0x7f {
+        0x57 if f3 == 7 => word >> 31 == 0 || word >> 30 == 3 || word >> 25 == 0x40,
+        0x57 => true,
+        0x07 | 0x27 => {
+            if !matches!(f3, 0 | 5 | 6 | 7) || word & (1 << 28) != 0 {
+                return false;
+            }
+            if (word >> 26) & 3 != 0 {
+                return true;
+            }
+            match (word >> 20) & 31 {
+                0 => true,
+                8 => {
+                    // Whole-register groups: unmasked, aligned power-of-two count.
+                    let count = (word >> 29) + 1;
+                    matches!(count, 1 | 2 | 4 | 8)
+                        && word & (1 << 25) != 0
+                        && ((word >> 7) & 31) % count == 0
+                        && (word & 0x7f == 0x07 || f3 == 0)
+                }
+                11 => f3 == 0 && word >> 29 == 0 && word & (1 << 25) != 0,
+                16 => word & 0x7f == 0x07,
+                _ => false,
+            }
+        }
+        0x73 if matches!(f3, 1 | 2 | 3 | 5 | 6 | 7) => match word >> 20 {
+            8..=10 | 15 => true,
+            0xc20..=0xc22 => matches!(f3, 2 | 3 | 6 | 7) && (word >> 15) & 31 == 0,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+pub(crate) fn vector_float(word: u32) -> bool {
+    word & 0x7f == 0x57 && matches!((word >> 12) & 7, 1 | 5)
+}
