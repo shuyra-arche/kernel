@@ -1,12 +1,8 @@
-mod count;
-mod index;
-mod offset;
+mod page;
 mod phys;
 mod virt;
 
-pub use count::PageCount;
-pub use index::PageIndex;
-pub use offset::PageOffset;
+pub use page::{PageCount, PageIndex, PageOffset};
 pub use phys::PhysAddr;
 pub use virt::VirtAddr;
 

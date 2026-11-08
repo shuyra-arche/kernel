@@ -24,7 +24,7 @@ pub(crate) fn next_id() -> Result<usize, PendFail> {
         id.checked_add(1)
             .filter(|next| *next <= isize::MAX as usize)
     })
-    .map_err(|_| PendFail::OoM)
+    .map_err(|_| PendFail::OutOfMemory)
 }
 
 #[derive(Clone)]

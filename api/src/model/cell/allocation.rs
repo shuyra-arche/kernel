@@ -1,5 +1,7 @@
 //! 新 RAM 来源的物理分配约束（过线的那一格）。
 
+use crate::abi::register::{Decode, Wire};
+
 use super::PAGE_SIZE;
 
 /// 新 RAM 来源：`size` 至少 4 KiB，合法长度向上取整到页；`align` 是每页起址的对齐下界。
@@ -29,5 +31,18 @@ impl Allocation {
             return None;
         }
         self.size.checked_next_multiple_of(PAGE_SIZE)
+    }
+}
+
+impl Wire for Allocation {
+    const WORDS: usize = Allocation::WORDS;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        self.size.pack(s, i);
+        self.align.pack(s, i);
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let size = usize::unpack(s, i)?;
+        let align = usize::unpack(s, i)?;
+        Self::new(size, align).ok_or(Decode::Invalid)
     }
 }

@@ -21,10 +21,10 @@ operation's execution context, pointer validity and resource lifetime contract.
 `invoke_terminal(call)` enters a non-returning fault path if the terminal trap
 unexpectedly returns; it uses neither TLS nor a panic handler.
 
-Named signatures are declared in `src/call/definitions.rs`. The local macro only
-removes execution boilerplate and does not define ABI values or generate service
-protocols. Each domain imports the types it uses. `unit::exit` takes result,
-reason and a readable diagnostic note buffer, bounded by `abi::call::unit::NOTE_MAX`.
+Each domain declares its named signatures and imports in its own module under
+`src/call`. The shared macro executes typed requests defined in Kernel API.
+`unit::exit` takes a result, reason and readable diagnostic note buffer.
+The buffer length is bounded by `abi::call::unit::NOTE_MAX`.
 `deadline_after(Duration)` converts a relative timeout once using Room Clock;
 reuse the returned Wait across retries to avoid extending the deadline.
 

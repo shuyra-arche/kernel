@@ -19,7 +19,7 @@ pub(crate) fn grant_controls(target: &Task) -> Result<[Entry; CONTROL_ENTRIES], 
         let id = target
             .administration
             .install(kind, delegable)
-            .map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
         *slot = Entry::new(Name::Call(call), ResourceKind::Control, id.get());
     }
     Ok(entries)
@@ -35,7 +35,7 @@ pub(crate) fn grant_sign(target: &Task) -> Result<Entry, PendFail> {
             SignRights::LISTEN,
             false,
         )
-        .map_err(|_| PendFail::OoM)?;
+        .map_err(|_| PendFail::OutOfMemory)?;
     Ok(Entry::new(
         Name::Trap(Trap::SupervisorExternal),
         ResourceKind::Sign,

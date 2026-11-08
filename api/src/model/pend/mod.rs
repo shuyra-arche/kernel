@@ -1,9 +1,9 @@
-//! Shared PendEntry resource values.
-mod info;
-pub use info::PendInfo;
+//! Delegation, authorized ranges and Pend observation.
+
 mod accord;
-pub use accord::{AccordRequest, AccordTarget};
+mod info;
 mod range;
+
+pub use accord::{AccordRequest, AccordTarget};
+pub use info::{PendInfo, PendStatus};
 pub use range::PendRange;
-mod status;
-pub use status::PendStatus;

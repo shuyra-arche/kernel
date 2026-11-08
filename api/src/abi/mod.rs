@@ -8,5 +8,5 @@ pub mod reply;
 
 /// Incompatible register and descriptor contract. Version zero is retired.
 pub const VERSION: u16 = 1;
-/// Call number: version[63:48], domain[47:32], operation[31:0].
+/// The call number packs `version[63:48]`, `domain[47:32]` and `operation[31:0]`.
 pub const PREFIX: usize = (VERSION as usize) << 48;

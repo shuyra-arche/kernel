@@ -149,7 +149,7 @@ impl SourceAuthorization {
             bindings: SpinLock::new(Vec::new()),
             phase: SpinLock::new(Phase::Private),
         })
-        .map_err(|_| PendFail::OoM)
+        .map_err(|_| PendFail::OutOfMemory)
     }
 
     /// Under the shared work commit boundary: no old CPU publication may remain,
@@ -309,7 +309,7 @@ impl SourceAuthorization {
             return Err(PendFail::Denied);
         }
         let mut inflight = self.inflight.lock();
-        inflight.try_reserve(1).map_err(|_| PendFail::OoM)?;
+        inflight.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
         inflight.push((id, window));
         Ok(())
     }
@@ -332,7 +332,7 @@ impl SourceAuthorization {
     /// 备下一条成员的位置（可失败的准备；调用方在同一提交段里紧接着写入）。
     pub(crate) fn reserve_binding(&self) -> Result<(), PendFail> {
         let mut members = self.bindings.lock();
-        members.try_reserve(1).map_err(|_| PendFail::OoM)
+        members.try_reserve(1).map_err(|_| PendFail::OutOfMemory)
     }
 
     /// 写入一条成员：容量已在同一提交段备好，这一步只推入。
@@ -381,7 +381,9 @@ impl SourceAuthorization {
     pub(crate) fn bindings(&self) -> Result<Vec<Arc<MappingBinding>>, PendFail> {
         let held = self.bindings.lock();
         let mut members = Vec::new();
-        members.try_reserve(held.len()).map_err(|_| PendFail::OoM)?;
+        members
+            .try_reserve(held.len())
+            .map_err(|_| PendFail::OutOfMemory)?;
         members.extend(held.iter().cloned());
         Ok(members)
     }
@@ -399,7 +401,7 @@ impl SourceAuthorization {
         let mut spaces = Vec::new();
         spaces
             .try_reserve(members.len())
-            .map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
         for binding in &members {
             if let Some(space) = binding.nest().upgrade()
                 && !spaces.iter().any(|held| Arc::ptr_eq(held, &space))

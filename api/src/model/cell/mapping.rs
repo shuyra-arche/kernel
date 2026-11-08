@@ -4,6 +4,9 @@
 //! **目标地址空间那张表**里解析得动，所以每次定位都必须同时给出目标域。
 //! 数字身份可跨线程传递；它本身不授予控制权。
 
+use crate::abi::register::{Decode, Wire};
+use crate::abi::reply::FromPair;
+use crate::address::VirtAddr;
 use crate::model::identity::{PendId, TeamId};
 
 #[repr(transparent)]
@@ -48,6 +51,28 @@ impl From<MappingId> for usize {
     }
 }
 
+impl Wire for MappingId {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        s[*i] = self.0;
+        *i += 1;
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let v = *s.get(*i).ok_or(Decode::Overflow)?;
+        *i += 1;
+        if v > isize::MAX as usize {
+            return Err(Decode::Invalid);
+        }
+        Ok(Self::new(v))
+    }
+}
+
+impl FromPair for (MappingId, VirtAddr) {
+    fn from_pair(v0: usize, v1: usize) -> Self {
+        (MappingId::new(v0), VirtAddr(v1))
+    }
+}
+
 /// 一次 `Attach` 的控制权选择：这段映射由谁控制。
 ///
 /// 默认 `Caller`（发起 `Attach` 的那个 Task）；`SpaceMembers` 是目标 Space 成员，
@@ -62,10 +87,56 @@ pub enum MappingControl {
     SpaceMembers,
 }
 
+impl Wire for MappingControl {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        let word = match self {
+            Self::Caller => 0usize,
+            Self::SpaceMembers => 1usize,
+        };
+        word.pack(s, i);
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        match usize::unpack(s, i)? {
+            0 => Ok(Self::Caller),
+            1 => Ok(Self::SpaceMembers),
+            _ => Err(Decode::Invalid),
+        }
+    }
+}
+
 /// A CPU space selected by Team control, or an I/O space selected by a trusted
 /// MMIO View's Pend. Numeric addresses never mint an external routing authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MappingTarget {
     Cpu(TeamId),
     Io(PendId),
+}
+
+impl Wire for MappingTarget {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        let raw = match *self {
+            Self::Cpu(team) => {
+                assert!(team.get() <= isize::MAX as usize);
+                team.get()
+            }
+            Self::Io(token) => {
+                assert!(token.get() > 0 && token.get() <= isize::MAX as usize);
+                token.get() | (1usize << (usize::BITS - 1))
+            }
+        };
+        raw.pack(s, i);
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let raw = usize::unpack(s, i)?;
+        let tag = 1usize << (usize::BITS - 1);
+        if raw & tag == 0 {
+            Ok(Self::Cpu(TeamId::new(raw)))
+        } else if raw != tag {
+            Ok(Self::Io(PendId::new(raw & !tag)))
+        } else {
+            Err(Decode::Invalid)
+        }
+    }
 }

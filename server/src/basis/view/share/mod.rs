@@ -71,11 +71,12 @@ impl ShareView {
             return Err(PendFail::Denied);
         }
         let mut maps = Vec::new();
-        maps.try_reserve_exact(1).map_err(|_| PendFail::OoM)?;
+        maps.try_reserve_exact(1)
+            .map_err(|_| PendFail::OutOfMemory)?;
         let mut authorities = Vec::new();
         authorities
             .try_reserve_exact(1)
-            .map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
         Arc::try_new(Self {
             source,
             authorization: SpinLock::new(None),
@@ -86,9 +87,9 @@ impl ShareView {
             operating: AtomicBool::new(false),
             owner,
             id: super::next_id()?,
-            life: Life::try_new().map_err(|_| PendFail::OoM)?,
+            life: Life::try_new().map_err(|_| PendFail::OutOfMemory)?,
         })
-        .map_err(|_| PendFail::OoM)
+        .map_err(|_| PendFail::OutOfMemory)
     }
 
     /// 从一份**完整来源范围**建立 Share：不造 keeper / canonical 来源视图，
@@ -143,8 +144,11 @@ impl ShareView {
         self.authorities
             .lock()
             .try_reserve(1)
-            .map_err(|_| PendFail::OoM)?;
-        self.maps.lock().try_reserve(1).map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
+        self.maps
+            .lock()
+            .try_reserve(1)
+            .map_err(|_| PendFail::OutOfMemory)?;
         {
             let mut maps = self.maps.lock();
             if let Some(input) = maps
@@ -185,7 +189,7 @@ impl ShareView {
         self.maps
             .lock()
             .try_reserve(count)
-            .map_err(|_| PendFail::OoM)
+            .map_err(|_| PendFail::OutOfMemory)
     }
 
     /// 把一段已有关系关联到根 Pend：创建事务的 Input 交接。
@@ -309,7 +313,7 @@ fn covers_source(source: &FlatRange, entry: &HeldMap) -> bool {
 
 fn pend_map_error(error: NestError) -> PendFail {
     match error {
-        NestError::OutOfMemory => PendFail::OoM,
+        NestError::OutOfMemory => PendFail::OutOfMemory,
         NestError::Shootdown => PendFail::Busy,
         _ => PendFail::Denied,
     }

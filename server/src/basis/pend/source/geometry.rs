@@ -18,7 +18,7 @@ pub(crate) struct Geometry {
 impl Geometry {
     /// 页窗口只在这一处成型，之后没有放宽的路。
     pub(crate) fn new(offset: PageOffset, count: PageCount) -> Result<Arc<Self>, PendFail> {
-        Arc::try_new(Self { offset, count }).map_err(|_| PendFail::OoM)
+        Arc::try_new(Self { offset, count }).map_err(|_| PendFail::OutOfMemory)
     }
 
     /// 这一段窗口（相对某份来源起点的页偏移与页数）。

@@ -1,12 +1,13 @@
 //! Operation domains and aggregate Server dispatch.
 pub mod cell;
-pub mod clone_view;
 pub mod debug;
 pub mod pend;
 pub mod room;
-pub mod share_view;
 pub mod sign;
 pub mod unit;
+mod view;
+
+pub use view::{clone as clone_view, share as share_view};
 
 /// Decoded environment call.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

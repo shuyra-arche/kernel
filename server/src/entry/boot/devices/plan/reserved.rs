@@ -24,7 +24,7 @@ pub(crate) fn discover(fdt: &fdt::Fdt) -> Result<Vec<Region>, PendFail> {
         let regions = node_regions(fdt, node)?;
         reserved
             .try_reserve(regions.len())
-            .map_err(|_| PendFail::OoM)?;
+            .map_err(|_| PendFail::OutOfMemory)?;
         reserved.extend(regions);
     }
     Ok(reserved)
@@ -93,7 +93,7 @@ pub(super) fn node_regions(fdt: &fdt::Fdt, node: FdtNode) -> Result<Vec<Region>,
     let mut reserved = Vec::new();
     reserved
         .try_reserve(reg.len() / width)
-        .map_err(|_| PendFail::OoM)?;
+        .map_err(|_| PendFail::OutOfMemory)?;
     for entry in reg.chunks_exact(width) {
         let base = number(&entry[..address * 4])?;
         let size = number(&entry[address * 4..])?;

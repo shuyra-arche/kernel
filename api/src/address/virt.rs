@@ -1,3 +1,5 @@
+use crate::abi::register::{Decode, Wire};
+
 use core::ops::Add;
 use core::ops::AddAssign;
 use core::ops::Sub;
@@ -75,5 +77,18 @@ impl core::fmt::Debug for VirtAddr {
 impl From<VirtAddr> for usize {
     fn from(value: VirtAddr) -> usize {
         value.0
+    }
+}
+
+impl Wire for VirtAddr {
+    const WORDS: usize = 1;
+    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
+        s[*i] = self.get();
+        *i += 1;
+    }
+    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
+        let v = *s.get(*i).ok_or(Decode::Overflow)?;
+        *i += 1;
+        Ok(VirtAddr(v))
     }
 }

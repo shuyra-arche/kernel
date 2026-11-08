@@ -60,7 +60,9 @@ pub(crate) fn ranges_windows(
     }
     let count = value.len() / (width * 4);
     let mut windows = alloc::vec::Vec::new();
-    windows.try_reserve(count).map_err(|_| PendFail::OoM)?;
+    windows
+        .try_reserve(count)
+        .map_err(|_| PendFail::OutOfMemory)?;
     for entry in value.chunks_exact(width * 4) {
         let cell = |at: usize| -> u64 {
             let bytes: [u8; 4] = entry[at * 4..at * 4 + 4].try_into().expect("whole cell");

@@ -1,25 +1,31 @@
 //! Memory identities, ranges and placement descriptors.
 
 mod allocation;
+mod creation;
+mod info;
 mod mapping;
 mod object;
-mod owner;
 mod placement;
-mod range;
 mod slot;
 
 pub use allocation::Allocation;
+pub use creation::{CellCreate, CellSource, CreatedCell};
+pub use info::{CellInfo, CellState};
 pub use mapping::{MappingControl, MappingId, MappingTarget};
-pub use object::{
-    CellCreate, CellHandoff, CellInfo, CellObject, CellPosition, CellSource, CellState, CreatedCell,
-};
-pub use owner::PageOwner;
+pub use object::{CellHandoff, CellObject, CellPosition};
 pub use placement::{Placement, PlacementAt, PlacementError};
-pub use range::ReferenceRange;
-pub use slot::SlotId;
+pub use slot::{ReferenceRange, SlotId};
 
 /// 环境内存调用与装载格式使用的页粒度。
 pub use crate::address::PAGE_SIZE;
+
+/// A protection domain owns managed memory. Task membership and management
+/// authority do not create additional owners of the same physical Page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageOwner {
+    Kernel,
+    Team(crate::model::identity::TeamId),
+}
 
 /// 范围坐标的唯一 checked 口径：`count` 非零，且偏移、页数与字节跨度都不溢出。
 ///

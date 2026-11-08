@@ -22,7 +22,7 @@ use super::outcome::Outcome;
 
 fn map_err(e: NestError) -> UnitFail {
     match e {
-        NestError::OutOfMemory => UnitFail::OoM,
+        NestError::OutOfMemory => UnitFail::OutOfMemory,
         NestError::Busy => UnitFail::Busy,
         // 承载已移出：Unit 域没有对应的失败词，也不新造一个看起来等价的码。
         NestError::Missing => UnitFail::Denied,

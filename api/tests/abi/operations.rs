@@ -85,6 +85,47 @@ fn error_domains_preserve_busy_and_auxiliary_codes() {
 }
 
 #[test]
+fn out_of_memory_keeps_each_domain_code() {
+    use kernel_api::abi::call::{
+        cell::CellFail,
+        clone_view::CloneFail,
+        pend::PendFail,
+        room::RoomFail,
+        share_view::ShareFail,
+        sign::{SignEventFail, SignFail, SignReply},
+        unit::UnitFail,
+    };
+    use kernel_api::model::{
+        identity::{PendId, TaskId},
+        sign::SignSource,
+    };
+
+    assert_eq!(
+        [
+            CellFail::OutOfMemory.code(),
+            CloneFail::OutOfMemory.code(),
+            PendFail::OutOfMemory.code(),
+            RoomFail::OutOfMemory.code(),
+            ShareFail::OutOfMemory.code(),
+            SignFail::OutOfMemory.code(),
+            SignEventFail::OutOfMemory.code(),
+            UnitFail::OutOfMemory.code(),
+        ],
+        [-2, -4, -3, -2, -4, -4, -4, -3],
+    );
+    let reply = SignReply::Source {
+        source: SignSource::Inspect {
+            task: TaskId::new(17),
+            token: PendId::mint(23),
+        },
+        fail: Some(SignEventFail::OutOfMemory),
+    };
+    let words = reply.words();
+    assert_eq!(words[0] >> 8, 4);
+    assert_eq!(SignReply::of(words), Some(reply));
+}
+
+#[test]
 fn compound_field_widths_match_their_actual_register_consumption() {
     fn check<T: kernel_api::abi::register::Wire + PartialEq + core::fmt::Debug>(value: T) {
         let mut words = [0usize; 6];

@@ -52,7 +52,7 @@ impl Pend {
             external: AtomicUsize::new(0),
             routing: AtomicBool::new(false),
         })
-        .map_err(|_| PendFail::OoM)
+        .map_err(|_| PendFail::OutOfMemory)
     }
     pub(crate) fn window(&self) -> Option<(PageOffset, PageCount)> {
         *self.window.lock()

@@ -23,8 +23,9 @@ pub(crate) fn init() -> Result<(), PendFail> {
         return Ok(());
     }
     let interrupts = Interrupts {
-        supervisor_external: Endpoint::try_new(TaskId::new(0)).map_err(|_| PendFail::OoM)?,
-        page_fault: CloneView::try_new(TaskId::new(0)).map_err(|_| PendFail::OoM)?,
+        supervisor_external: Endpoint::try_new(TaskId::new(0))
+            .map_err(|_| PendFail::OutOfMemory)?,
+        page_fault: CloneView::try_new(TaskId::new(0)).map_err(|_| PendFail::OutOfMemory)?,
     };
     assert!(
         INTERRUPTS.set(interrupts).is_ok(),

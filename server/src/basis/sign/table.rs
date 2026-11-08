@@ -66,25 +66,31 @@ impl Table {
     ) -> Result<SignId, SignFail> {
         let depth = parent.as_ref().map_or(0, |parent| parent.depth + 1);
         if depth > 64 {
-            return Err(SignFail::OoM);
+            return Err(SignFail::OutOfMemory);
         }
         let authority = Arc::try_new(Authority {
             active: AtomicBool::new(true),
             parent,
             depth,
         })
-        .map_err(|_| SignFail::OoM)?;
+        .map_err(|_| SignFail::OutOfMemory)?;
         static NEXT: AtomicUsize = AtomicUsize::new(1);
         let id = NEXT
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
                 (id < isize::MAX as usize).then_some(id + 1)
             })
             .map(SignId::new)
-            .map_err(|_| SignFail::OoM)?;
+            .map_err(|_| SignFail::OutOfMemory)?;
         let mut entries = self.0.lock();
-        entries.handles.try_reserve(1).map_err(|_| SignFail::OoM)?;
+        entries
+            .handles
+            .try_reserve(1)
+            .map_err(|_| SignFail::OutOfMemory)?;
         if own {
-            entries.owned.try_reserve(1).map_err(|_| SignFail::OoM)?;
+            entries
+                .owned
+                .try_reserve(1)
+                .map_err(|_| SignFail::OutOfMemory)?;
             entries.owned.push(endpoint.clone());
         }
         entries.handles.push(Handle {

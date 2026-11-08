@@ -55,23 +55,23 @@ impl Table {
     ) -> Result<ControlId, UnitFail> {
         let depth = parent.as_ref().map_or(0, |parent| parent.depth + 1);
         if depth > 64 {
-            return Err(UnitFail::OoM);
+            return Err(UnitFail::OutOfMemory);
         }
         let authority = Arc::try_new(Authority {
             active: AtomicBool::new(true),
             parent,
             depth,
         })
-        .map_err(|_| UnitFail::OoM)?;
+        .map_err(|_| UnitFail::OutOfMemory)?;
         static NEXT: AtomicUsize = AtomicUsize::new(1);
         let id = NEXT
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
                 (id < isize::MAX as usize).then_some(id + 1)
             })
             .map(ControlId::new)
-            .map_err(|_| UnitFail::OoM)?;
+            .map_err(|_| UnitFail::OutOfMemory)?;
         let mut entries = self.0.lock();
-        entries.try_reserve(1).map_err(|_| UnitFail::OoM)?;
+        entries.try_reserve(1).map_err(|_| UnitFail::OutOfMemory)?;
         entries.push(Entry {
             id,
             kind,

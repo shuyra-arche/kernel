@@ -16,7 +16,7 @@ impl Registry {
         let reason = if !valid(name, &root) || self.entries.iter().any(|(n, _)| *n == name) {
             Some(PendFail::Denied)
         } else if self.entries.try_reserve(1).is_err() {
-            Some(PendFail::OoM)
+            Some(PendFail::OutOfMemory)
         } else {
             None
         };
@@ -66,14 +66,14 @@ impl Frozen {
         let mut ledger = Vec::new();
         if ledger.try_reserve_exact(self.entries.len()).is_err() {
             return Err(Failure {
-                reason: PendFail::OoM,
+                reason: PendFail::OutOfMemory,
                 value: self,
             });
         }
         let mut entries = target.pend.entries.lock();
         if entries.try_reserve(self.entries.len()).is_err() {
             return Err(Failure {
-                reason: PendFail::OoM,
+                reason: PendFail::OutOfMemory,
                 value: self,
             });
         }
