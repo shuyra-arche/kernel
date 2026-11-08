@@ -95,7 +95,7 @@ pub(in super::super) fn init() -> Result<(), NestError> {
         frame.kernel_satp = ksatp;
         frame.kernel_sp = trap_stack_edge(h);
         frame.trap_handler = crate::machine::mmu::riscv::canonical(
-            crate::entry::trap::trap_handler as *const () as usize,
+            crate::machine::switcher::trap::trap_handler as *const () as usize,
         );
         frame.trap_stack_corrupt = TRAP_STACK_CANARY;
         frame.user_pa = pa;

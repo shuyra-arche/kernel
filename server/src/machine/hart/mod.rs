@@ -40,6 +40,10 @@ pub fn hart_count() -> usize {
     n
 }
 
+pub(crate) fn wait() {
+    unsafe { core::arch::asm!("wfi", options(nostack)) };
+}
+
 #[inline]
 pub fn hart_id() -> HartId {
     let id: usize;

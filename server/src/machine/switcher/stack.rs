@@ -33,6 +33,19 @@ pub fn trap_stack_edge(hart: HartId) -> VirtAddr {
     trap_stack_segment(hart.get()).1
 }
 
+#[cfg(debug_assertions)]
+pub(crate) fn assert_active() {
+    let sp: usize;
+    unsafe { core::arch::asm!("mv {}, sp", out(reg) sp, options(nomem, nostack)) };
+    let me = crate::machine::hart::hart_id();
+    let base = trap_stack_base(me).get();
+    let edge = trap_stack_edge(me).get();
+    assert!(
+        sp > base && sp <= edge,
+        "idle must use the guarded hart stack"
+    );
+}
+
 pub(crate) fn trap_stack_hart(sp: usize) -> Option<HartId> {
     let off = sp.checked_sub(TRAP_STACK_BASE.as_usize())?;
     let h = off >> TRAP_STACK_SLOT_SHIFT;

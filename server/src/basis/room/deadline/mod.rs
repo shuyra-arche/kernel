@@ -82,7 +82,7 @@ fn head_changed(changed: bool) {
         if is_owner() {
             refresh();
         } else {
-            super::scheduler::idle::try_nudge(OWNER).expect("deadline owner IPI");
+            crate::machine::interrupt::ipi::send(OWNER).expect("deadline owner IPI");
             REMOTE_REARMS.fetch_add(1, Ordering::Relaxed);
         }
     }

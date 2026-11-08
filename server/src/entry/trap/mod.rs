@@ -1,15 +1,6 @@
 mod fault;
 pub(crate) mod resources;
 
-use alloc::sync::Arc;
-use riscv::interrupt::Exception;
-use riscv::interrupt::Interrupt;
-use riscv::interrupt::Trap;
-use riscv::register::scause;
-use riscv::register::sepc;
-use riscv::register::sie;
-use riscv::register::stval;
-
 use crate::basis::nest::FaultOutcome;
 use crate::basis::nest::Nest;
 use crate::basis::room::conductor::identity::Identity;
@@ -19,19 +10,18 @@ use crate::basis::room::deadline;
 use crate::basis::sign::redeem;
 use crate::basis::unit::task::TaskIdent;
 use crate::machine::hart;
-use crate::machine::hart::HartId;
+use crate::machine::interrupt::{self, ipi};
 use crate::machine::mmu::riscv::identity as asid;
 use crate::machine::mmu::riscv::identity::Asid;
 use crate::machine::switcher::context::TrapContext;
 use crate::putln;
+use alloc::sync::Arc;
 use kernel_api::address::VirtAddr as KVirt;
 
-use crate::machine::switcher::stack::TRAP_STACK_CANARY;
-use crate::machine::switcher::stack::trap_stack_base;
-#[cfg(debug_assertions)]
-use crate::machine::switcher::stack::trap_stack_edge;
-use crate::machine::switcher::stack::trap_stack_guard_hart;
-use crate::machine::switcher::stack::trap_stack_hart;
+use crate::machine::switcher::{
+    stack::TRAP_STACK_CANARY,
+    trap::{self, TrapEvent},
+};
 
 pub(crate) fn persist(frame: &TrapContext) -> bool {
     let Some(i) = ident() else {
@@ -48,71 +38,27 @@ pub(crate) fn persist(frame: &TrapContext) -> bool {
     };
     let dst = pa.as_usize() as *mut TrapContext;
     unsafe {
-        (*dst).gpr = frame.gpr;
-        (*dst).sstatus = frame.sstatus;
-        (*dst).sepc = frame.sepc;
+        (*dst).copy_registers_from(frame);
     }
     true
 }
 
-fn hart_frame_pa() -> usize {
-    unsafe {
-        (*(hart::hart_frame().as_usize() as *const TrapContext))
-            .user_pa
-            .as_usize()
-    }
-}
-
-#[unsafe(no_mangle)]
-pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapContext {
-    let sp: usize;
-    unsafe {
-        ::core::arch::asm!("mv {}, sp", out(reg) sp, options(nomem, nostack, preserves_flags));
-    }
-    let hart = trap_stack_hart(sp).unwrap_or(HartId::new(0));
-    let tp = crate::machine::hart::per_hart_ptr(hart);
-    unsafe {
-        ::core::arch::asm!("mv tp, {}", in(reg) tp, options(nomem, nostack, preserves_flags));
-    }
-
-    let frame_va = crate::machine::hart::hart_frame().as_usize();
-    unsafe {
-        ::core::arch::asm!(
-            "csrw sscratch, {}",
-            in(reg) frame_va,
-            options(nomem, nostack, preserves_flags)
-        );
-    }
-
+pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapContext {
     asid::occupy(Asid::kernel());
-
-    let from_task = (frame as *const TrapContext as usize) != hart_frame_pa();
 
     if from_task {
         let task = crate::basis::room::conductor::current()
             .running_task()
             .expect("task trap without owner");
         assert_eq!(task.ident.frame_pa.as_usize(), frame as *const _ as usize);
-        unsafe { task.capture_extensions(frame.sstatus.bits()) };
+        unsafe { task.capture_extensions(frame.status()) };
     }
     let ident = ident();
 
     crate::machine::stop::hush();
 
-    let cause = scause::read();
-    if cause.is_exception() && matches!(cause.code(), 12 | 13 | 15) {
-        let stv = stval::read();
-        if let Some(h) = trap_stack_guard_hart(stv) {
-            panic!("trap stack overflow on hart {h} (stval = {stv:#x})");
-        }
-    }
-
-    let me = hart::hart_id();
-    let canary = unsafe { (trap_stack_base(me).as_usize() as *const usize).read() };
-    assert_eq!(
-        canary, TRAP_STACK_CANARY,
-        "trap stack corrupted on hart {me} (overflow?)"
-    );
+    let event = TrapEvent::capture();
+    trap::check_stack();
     assert_eq!(
         frame.trap_stack_corrupt, TRAP_STACK_CANARY,
         "kernel trap frame corrupted"
@@ -121,32 +67,17 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
     if let Some(i) = ident.as_ref()
         && from_task
     {
-        let sp: usize;
-        unsafe {
-            ::core::arch::asm!("mv {}, sp", out(reg) sp, options(nomem, nostack, preserves_flags));
-        }
-        let top = trap_stack_edge(me).as_usize();
-        let ksp = frame.kernel_sp.as_usize();
-        debug_assert!(
-            sp <= top && top - sp < 0x4000,
-            "user trap on hart {me}: sp={sp:#x} top={top:#x} frame.kernel_sp={ksp:#x} (task #{}) — kernel_sp per-switch write missing?",
-            i.task_id()
-        );
+        trap::check_task_stack(frame, i.task_id());
     }
 
-    let trap: Trap<Interrupt, Exception> = scause::read().cause().try_into().unwrap_or_else(|e| {
-        panic!("unknown trap cause: {e:?}");
-    });
-    let next: *mut TrapContext = match trap {
-        Trap::Interrupt(Interrupt::SupervisorTimer) => {
+    let next: *mut TrapContext = match event {
+        TrapEvent::Timer => {
             if !deadline::elapsed() {
                 // A comparator update can take time to clear a pending STIP.
                 return resume(frame as *mut TrapContext);
             }
             crate::basis::cell::projection::maintain();
-            unsafe {
-                sie::set_sext();
-            }
+            interrupt::enable_external();
             redeem();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
                 && let Some(reason) = crate::basis::unit::lifecycle::take_doomed(running.id)
@@ -163,8 +94,8 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 frame as *mut TrapContext
             }
         }
-        Trap::Interrupt(Interrupt::SupervisorSoft) => {
-            crate::basis::room::scheduler::idle::acknowledge();
+        TrapEvent::Ipi => {
+            ipi::acknowledge();
             deadline::refresh();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
                 && let Some(reason) = crate::basis::unit::lifecycle::take_doomed(running.id)
@@ -178,25 +109,15 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 frame as *mut TrapContext
             }
         }
-        Trap::Interrupt(Interrupt::SupervisorExternal) => {
+        TrapEvent::External => {
             if crate::machine::iommu::riscv::interrupt::handle() {
                 crate::basis::cell::projection::maintain();
-            } else {
-                let result = crate::basis::sign::endpoint::trigger(
-                    &crate::basis::room::interrupt::get().supervisor_external,
-                );
-                crate::basis::room::interrupt::note_external(result.is_err(), false);
-                if result.is_err() {
-                    unsafe {
-                        sie::clear_sext();
-                    }
-                }
+            } else if crate::basis::room::interrupt::deliver_external(false) {
+                interrupt::disable_external();
             }
             frame as *mut TrapContext
         }
-        Trap::Exception(
-            Exception::Breakpoint | Exception::UserEnvCall | Exception::SupervisorEnvCall,
-        ) => {
+        TrapEvent::Call => {
             if !from_task {
                 panic!("kernel ebreak from the kernel itself");
             }
@@ -205,18 +126,15 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 None => crate::basis::unit::lifecycle::quit() as *mut TrapContext,
             }
         }
-        Trap::Exception(
-            Exception::InstructionPageFault | Exception::LoadPageFault | Exception::StorePageFault,
-        ) => {
+        TrapEvent::PageFault(fault) => {
             if !from_task {
                 panic!(
                     "kernel page fault on hart {} at sepc={:#x}, stval={:#x}",
                     hart::hart_id(),
-                    sepc::read(),
-                    stval::read()
+                    fault.detail.pc,
+                    fault.detail.value
                 );
             }
-            let fault = unsafe { fault::PageFault::capture() };
             // 先取定这一次错误的身份：真正终止任务前会先把 id 标量留下来。
             let (tid, nest) = {
                 let running = ident
@@ -237,7 +155,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                         log::error!(
                             "page fault resource failure: {resource:?} at {:?} pc={:#x}",
                             fault.addr,
-                            fault.pc
+                            fault.detail.pc
                         );
                         drop(nest);
                         return fault::killed(ident, tid, fault);
@@ -257,18 +175,18 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 }
             }
         }
-        Trap::Exception(Exception::IllegalInstruction) if from_task => {
+        TrapEvent::IllegalInstruction(_) if from_task => {
             let task = crate::basis::room::conductor::current()
                 .running_task()
                 .expect("task fault without owner");
             let space = &task.ident.team.nest;
             let instruction = instruction(space, frame.sepc);
-            let mut status = frame.sstatus.bits();
+            let mut status = frame.status();
             let enabled = instruction.map(|word| task.enable_extension(word, &mut status));
             drop(task);
             match enabled {
                 Some(Ok(true)) => {
-                    frame.sstatus = riscv::register::sstatus::Sstatus::from_bits(status);
+                    frame.set_status(status);
                     frame as *mut TrapContext // Retry the same PC, including compressed instructions.
                 }
                 Some(Err(())) => {
@@ -278,51 +196,45 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 _ => return kill_fault(ident),
             }
         }
-        Trap::Exception(other) => {
+        TrapEvent::Exception(fault) | TrapEvent::IllegalInstruction(fault) => {
             if from_task {
                 let running = ident
                     .as_ref()
                     .and_then(Identity::live)
                     .expect("user exception without running task");
                 let tid = running.id.get();
-                let stval_bits = stval::read();
                 putln!(
-                    "user exception killed: tid={tid} cause={:?} stval={stval_bits:#x}",
-                    other
+                    "user exception killed: tid={tid} cause={} stval={:#x}",
+                    fault.cause,
+                    fault.value
                 );
                 return kill_fault(ident);
             }
             panic!(
-                "unhandled kernel exception: {other:?} at sepc={:#x}, stval={:#x}",
-                sepc::read(),
-                stval::read()
+                "unhandled kernel exception: {} at sepc={:#x}, stval={:#x}",
+                fault.cause, fault.pc, fault.value
             );
         }
     };
 
-    let me = hart::hart_id();
-    let canary = unsafe { (trap_stack_base(me).as_usize() as *const usize).read() };
-    assert_eq!(
-        canary, TRAP_STACK_CANARY,
-        "trap stack corrupted on hart {me} after handler"
-    );
-
+    trap::check_stack();
     resume(next)
 }
 
 pub(crate) fn resume(next: *mut TrapContext) -> *mut TrapContext {
-    if unsafe { (*next).user_satp.asid() } != 0 {
+    let space = unsafe { (*next).address_space() };
+    if !space.is_kernel() {
         let task = crate::basis::room::conductor::current()
             .running_task()
             .expect("return without Task owner");
         assert_eq!(task.ident.frame_pa.as_usize(), next as usize);
-        let mut status = unsafe { (*next).sstatus.bits() };
+        let mut status = unsafe { (*next).status() };
         unsafe {
             task.restore_extensions(&mut status);
-            (*next).sstatus = riscv::register::sstatus::Sstatus::from_bits(status);
+            (*next).set_status(status);
         }
     }
-    asid::occupy(Asid::from_raw(unsafe { (*next).user_satp.asid() }));
+    asid::occupy(space);
     next
 }
 

@@ -24,6 +24,24 @@ pub struct TrapContext {
 }
 
 impl TrapContext {
+    pub(crate) fn copy_registers_from(&mut self, frame: &Self) {
+        self.gpr = frame.gpr;
+        self.sstatus = frame.sstatus;
+        self.sepc = frame.sepc;
+    }
+
+    pub(crate) fn status(&self) -> usize {
+        self.sstatus.bits()
+    }
+
+    pub(crate) fn set_status(&mut self, bits: usize) {
+        self.sstatus = sstatus::Sstatus::from_bits(bits);
+    }
+
+    pub(crate) fn address_space(&self) -> crate::machine::mmu::riscv::identity::Asid {
+        crate::machine::mmu::riscv::identity::Asid::from_raw(self.user_satp.asid())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) unsafe fn init(
         &mut self,

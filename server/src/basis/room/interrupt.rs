@@ -38,7 +38,13 @@ pub(crate) fn get() -> &'static Interrupts {
     INTERRUPTS.get().expect("trap resources not initialized")
 }
 
-pub(crate) fn note_external(busy: bool, idle: bool) {
+pub(crate) fn deliver_external(idle: bool) -> bool {
+    let busy = crate::basis::sign::endpoint::trigger(&get().supervisor_external).is_err();
+    note_external(busy, idle);
+    busy
+}
+
+fn note_external(busy: bool, idle: bool) {
     RING.fetch_add(1, Ordering::Relaxed);
     if busy {
         BUSY.fetch_add(1, Ordering::Relaxed);

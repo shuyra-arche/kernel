@@ -1,42 +1,14 @@
 use alloc::sync::Arc;
-use riscv::register::scause;
-use riscv::register::sepc;
-use riscv::register::stval;
 
 use crate::basis::nest::{FaultKind, FaultOutcome, Nest};
 use crate::basis::room::Handoff;
 use crate::basis::room::conductor::identity::Identity;
 use crate::basis::sign::{self, WakeKey};
-use crate::machine::switcher::context::TrapContext;
+use crate::machine::switcher::{context::TrapContext, trap::PageFault};
 use crate::putln;
 
 use super::{kill_fault, resume};
 use kernel_api::address::VirtAddr;
-
-#[derive(Debug)]
-pub(super) struct PageFault {
-    pub addr: VirtAddr,
-    pub pc: usize,
-    pub kind: FaultKind,
-}
-
-impl PageFault {
-    pub(super) unsafe fn capture() -> Self {
-        let code = scause::read().code();
-        let kind = match code {
-            12 => FaultKind::Instruction,
-            13 => FaultKind::Load,
-            15 => FaultKind::Store,
-            _ => panic!("capture() called on non-page-fault scause={}", code),
-        };
-
-        Self {
-            addr: crate::machine::mmu::riscv::canonical(stval::read()),
-            pc: sepc::read(),
-            kind,
-        }
-    }
-}
 
 /// 一次页错误的等待上下文：纯探针重查所需的地址空间、地址、访问种类与
 /// **本次登记的那段关系身份**。
@@ -108,13 +80,13 @@ pub(super) fn wait(
 
 /// 按原样处置：记录真杀事件并终止这个任务。
 pub(super) fn killed(ident: Option<Identity>, tid: usize, fault: PageFault) -> *mut TrapContext {
-    let cause_bits = scause::read().bits();
-    let stval_bits = stval::read();
+    let cause_bits = fault.detail.cause;
+    let stval_bits = fault.detail.value;
     log::error!(
         "user page fault killed: {:?} at {:?} pc={:#x}",
         fault.kind,
         fault.addr,
-        fault.pc
+        fault.detail.pc
     );
     putln!("user fault killed: tid={tid} cause={cause_bits} stval={stval_bits:#x}");
     kill_fault(ident)
