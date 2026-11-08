@@ -1,3 +1,4 @@
+pub(crate) mod extension;
 use riscv::register::satp;
 use riscv::register::sstatus;
 

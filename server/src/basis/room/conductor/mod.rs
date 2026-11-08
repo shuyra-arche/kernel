@@ -84,9 +84,11 @@ impl Conductor {
         i.chain.push(task);
     }
 
-    fn starved_pop(&self, i: &mut Inner) -> Option<Arc<Task>> {
+    fn starved_pop(&self, i: &mut Inner, destination: HartId) -> Option<Arc<Task>> {
         loop {
-            let head = i.chain.pop()?;
+            let head = i
+                .chain
+                .remove_if(&mut |task| task.can_run_on(destination))?;
             i.ready_since = if i.chain.is_empty() {
                 None
             } else {
@@ -110,7 +112,7 @@ impl Conductor {
 
     pub(super) fn starved_clear(&self, i: &mut Inner) {
         let _commit = crate::basis::commit();
-        while self.starved_pop(i).is_some() {}
+        while i.chain.pop().is_some() {}
     }
 
     pub(super) fn push(&self, task: Arc<Task>) -> bool {
@@ -125,13 +127,13 @@ impl Conductor {
     fn pull(&self) -> Option<Arc<Task>> {
         let _commit = crate::basis::commit();
         let mut i = self.inner.lock();
-        self.starved_pop(&mut i)
+        self.starved_pop(&mut i, self.hart)
     }
 
-    pub(super) fn steal(&self) -> Option<Arc<Task>> {
+    pub(super) fn steal(&self, destination: HartId) -> Option<Arc<Task>> {
         let _commit = crate::basis::commit();
         let mut i = self.inner.try_lock()?;
-        self.starved_pop(&mut i)
+        self.starved_pop(&mut i, destination)
     }
 
     fn prepare(&self, task: &mut Arc<Task>, ceiling: u64) {
@@ -156,6 +158,7 @@ impl Conductor {
             Task::park(task);
             return None;
         }
+        assert!(task.can_run_on(self.hart), "incompatible Task placement");
         self.prepare(&mut task, i.ready_ceiling());
         let pa = task.ident.frame_pa.as_usize();
         self.badge.seat(&task.ident);
@@ -169,7 +172,7 @@ impl Conductor {
         let _commit = crate::basis::commit();
         let mut i = self.inner.lock();
         let task = i.running.take().expect("no running task");
-        let next = self.starved_pop(&mut i);
+        let next = self.starved_pop(&mut i, self.hart);
         drop(i);
         self.badge.shed(&task.ident);
         let next_pa = if let Some(next) = next {
@@ -188,7 +191,7 @@ impl Conductor {
     fn rotate(&self, i: &mut Inner, cur: Arc<Task>) -> Option<Arc<Task>> {
         cur.transform_checked(TaskState::ready());
         self.starved_push(i, cur);
-        self.starved_pop(i)
+        self.starved_pop(i, self.hart)
     }
 
     pub(crate) fn starve(&self) -> usize {
@@ -229,7 +232,7 @@ impl Conductor {
         if cur.stopped() || cur.ident.team.paused() {
             self.badge.shed(&cur.ident);
             Task::park(cur);
-            let next = self.starved_pop(&mut i);
+            let next = self.starved_pop(&mut i, self.hart);
             drop(i);
             return next.and_then(|next| self.seat(next));
         }

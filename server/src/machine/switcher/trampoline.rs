@@ -54,6 +54,8 @@ global_asm!(
     "    sd    x31, 0x128(sp)",
     "    csrr  t0, sstatus",
     "    sd    t0,  0x130(sp)",
+    "    li    t0, 0x6600",
+    "    csrc  sstatus, t0",
     "    csrr  t0, sepc",
     "    sd    t0,  0x138(sp)",
     "    ld    t0,  0x00(sp)",
@@ -99,6 +101,8 @@ global_asm!(
     "    sd    t0,  0x40(sp)",
     "    csrr  t0, sstatus",
     "    sd    t0,  0x130(sp)",
+    "    li    t0, 0x6600",
+    "    csrc  sstatus, t0",
     "    csrr  t0, sepc",
     "    sd    t0,  0x138(sp)",
     "    ld    t2,  0x10(sp)",
@@ -183,6 +187,7 @@ unsafe extern "C" {
 }
 
 pub fn restore(frame_pa: usize) -> ! {
+    crate::entry::trap::resume(frame_pa as *mut TrapContext);
     asid::occupy(Asid::from_raw(unsafe {
         (*(frame_pa as *const TrapContext)).user_satp.asid()
     }));

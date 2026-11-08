@@ -15,10 +15,16 @@ fn cell_io_calls_run_through_the_real_kernel_and_iommu() {
 fn cell_io_creator_death_keeps_retirement_until_hardware_settles() {
     run("io-exit")
 }
+#[test]
+#[ignore = "requires RV64 toolchain, QEMU and OpenSBI"]
+fn task_extended_context_isolated() {
+    run("context")
+}
 static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn run(mode: &str) {
     let _run = RUN.lock().unwrap_or_else(|e| e.into_inner());
-    let io = mode != "cpu";
+    let io = matches!(mode, "io" | "io-exit");
+    let context = mode == "context";
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -37,7 +43,7 @@ fn run(mode: &str) {
     }
     std::fs::create_dir_all(&evidence).unwrap();
     let mut guest_build = Command::new("cargo");
-    if io {
+    if io || context {
         guest_build.args(["+nightly", "build", "--features", mode]);
     } else {
         guest_build.args(["+nightly", "build"]);
@@ -172,6 +178,12 @@ fn run(mode: &str) {
                 "task: all tasks exited",
             ] {
                 assert!(log.contains(marker), "{name}: {log}");
+            }
+            if context {
+                assert!(
+                    log.contains("PASS context float=32 fcsr=1 initial=1 preempt=1 block=1"),
+                    "{name}: {log}"
+                );
             }
             if io {
                 assert!(

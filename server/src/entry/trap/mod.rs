@@ -89,6 +89,13 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
 
     let from_task = (frame as *const TrapContext as usize) != hart_frame_pa();
 
+    if from_task {
+        let task = crate::basis::room::conductor::current()
+            .running_task()
+            .expect("task trap without owner");
+        assert_eq!(task.ident.frame_pa.as_usize(), frame as *const _ as usize);
+        unsafe { task.capture_extensions(frame.sstatus.bits()) };
+    }
     let ident = ident();
 
     crate::machine::stop::hush();
@@ -249,6 +256,27 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 }
             }
         }
+        Trap::Exception(Exception::IllegalInstruction) if from_task => {
+            let task = crate::basis::room::conductor::current()
+                .running_task()
+                .expect("task fault without owner");
+            let space = &task.ident.team.nest;
+            let instruction = instruction(space, frame.sepc);
+            let mut status = frame.sstatus.bits();
+            let enabled = instruction.map(|word| task.enable_extension(word, &mut status));
+            drop(task);
+            match enabled {
+                Some(Ok(true)) => {
+                    frame.sstatus = riscv::register::sstatus::Sstatus::from_bits(status);
+                    frame as *mut TrapContext // Retry the same PC, including compressed instructions.
+                }
+                Some(Err(())) => {
+                    log::error!("Task extended context allocation failed");
+                    return kill_fault(ident);
+                }
+                _ => return kill_fault(ident),
+            }
+        }
         Trap::Exception(other) => {
             if from_task {
                 let running = ident
@@ -281,7 +309,18 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
     resume(next)
 }
 
-fn resume(next: *mut TrapContext) -> *mut TrapContext {
+pub(crate) fn resume(next: *mut TrapContext) -> *mut TrapContext {
+    if unsafe { (*next).user_satp.asid() } != 0 {
+        let task = crate::basis::room::conductor::current()
+            .running_task()
+            .expect("return without Task owner");
+        assert_eq!(task.ident.frame_pa.as_usize(), next as usize);
+        let mut status = unsafe { (*next).sstatus.bits() };
+        unsafe {
+            task.restore_extensions(&mut status);
+            (*next).sstatus = riscv::register::sstatus::Sstatus::from_bits(status);
+        }
+    }
     asid::occupy(Asid::from_raw(unsafe { (*next).user_satp.asid() }));
     next
 }
@@ -387,4 +426,18 @@ fn doom(ident: Option<&Arc<TaskIdent>>, cause: kernel_api::model::unit::ExitCaus
             .lock()
             .doom(Some(crate::machine::hart::hart_id()), cause, reason);
     }
+}
+
+/// Fetch only resident executable bytes through Nest; never dereference a user PC.
+fn instruction(space: &Nest, pc: KVirt) -> Option<u32> {
+    let mut word = u32::from(space.instruction_byte(pc)?);
+    let second = pc.as_usize().checked_add(1)?;
+    word |= u32::from(space.instruction_byte(KVirt::wrap(second))?) << 8;
+    if word & 3 == 3 {
+        for offset in 2..4 {
+            let address = pc.as_usize().checked_add(offset)?;
+            word |= u32::from(space.instruction_byte(KVirt::wrap(address))?) << (offset * 8);
+        }
+    }
+    Some(word)
 }

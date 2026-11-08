@@ -69,6 +69,15 @@ pub(crate) fn launch(task: Arc<Task>) {
 
 /// 把一枚就绪任务放到指定核上：接进它那张饥饿队列，必要时叫醒它。
 pub(crate) fn kick(hart: HartId, task: Arc<Task>) {
+    let hart = if task.can_run_on(hart) {
+        hart
+    } else {
+        schedulers()
+            .iter()
+            .find(|s| task.can_run_on(s.hart))
+            .expect("Task has no compatible Hart")
+            .hart
+    };
     let notify = schedulers()[hart.get()].push(task);
     if waiting(hart) || notify {
         notify_hart(hart);
@@ -97,7 +106,7 @@ pub(crate) fn steal() -> Option<Arc<Task>> {
     for offset in 0..all.len() {
         let victim = &all[(start + offset) % all.len()];
         if victim.hart != me
-            && let Some(task) = victim.steal()
+            && let Some(task) = victim.steal(me)
         {
             return Some(task);
         }
