@@ -23,10 +23,10 @@ use kernel_api::address::PageIndex;
 
 use super::Flat;
 use super::FlatRange;
-use super::slot;
-use super::slot::Slot;
-use super::state::FlatSource;
-use super::state::FlatState;
+use super::storage::FlatSource;
+use super::storage::FlatState;
+use super::storage::slot;
+use super::storage::slot::Slot;
 
 #[derive(PartialEq, Eq)]
 enum Phase {

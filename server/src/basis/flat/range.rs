@@ -7,9 +7,7 @@ use kernel_api::address::PageOffset;
 use kernel_api::address::PhysAddr;
 
 use super::Flat;
-use super::error::FlatError;
-use super::pages::Pages;
-use super::residency::Residency;
+use super::FlatError;
 use crate::basis::cell::page::Page;
 
 /// 强持同一个 `Flat` 的校验范围。子范围用相对偏移选择，合成后仍是原来源身份，
@@ -135,5 +133,46 @@ impl FlatRange {
     /// 物理地址是地址信息，不是持有凭证。
     pub(super) fn physical(&self, offset: PageOffset) -> Result<PhysAddr, FlatError> {
         self.flat.physical_at(self.page_at(offset)?)
+    }
+}
+
+/// Blocks ownership changes for this logical window until the last actual holder drops it.
+pub struct Residency {
+    range: FlatRange,
+    id: usize,
+}
+
+impl Residency {
+    pub(super) fn new(range: FlatRange, id: usize) -> Self {
+        Self { range, id }
+    }
+
+    pub fn range(&self) -> &FlatRange {
+        &self.range
+    }
+}
+
+impl Drop for Residency {
+    fn drop(&mut self) {
+        self.range.release_residency(self.id);
+    }
+}
+
+/// 一个来源范围的完整、稳定物化结果。
+///
+/// Managed 的页此时已全部物化，Borrowed 的借用凭证仍被引用持有；它只由
+/// `FlatRange::materialize` 构造，不用裸 `Vec<PhysAddr>` 代替持有。
+pub struct Pages {
+    residency: Residency,
+}
+
+impl Pages {
+    pub(crate) fn new(residency: Residency) -> Self {
+        Self { residency }
+    }
+
+    /// 范围起点之内第 `offset` 页的物理地址；物理地址是地址信息，不是持有凭证。
+    pub(crate) fn physical(&self, offset: PageOffset) -> Result<PhysAddr, FlatError> {
+        self.residency.range().physical(offset)
     }
 }

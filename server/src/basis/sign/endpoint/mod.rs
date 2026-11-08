@@ -1,9 +1,6 @@
-pub(crate) mod codec;
 mod route;
-pub(crate) mod wait;
-mod watch;
-
 mod state;
+pub(crate) mod wait;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::life::Life;
@@ -19,13 +16,10 @@ use kernel_api::abi::call::sign::SignFail;
 use kernel_api::abi::reply::SignReply;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::sign::SignSource;
-use state::Event;
-use state::Rejection;
-use state::State;
+use state::{Event, Rejection, State};
 
-pub(crate) use route::Route;
+pub(crate) use route::{Route, Watch, codec};
 pub(crate) use wait::AwaitWait;
-pub(crate) use watch::Watch;
 
 const MAX: usize = 1024;
 

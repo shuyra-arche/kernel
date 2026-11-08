@@ -2,7 +2,7 @@ use crate::basis::room::deadline;
 use crate::basis::room::halt;
 use crate::basis::room::interrupt;
 use crate::basis::room::scheduler;
-use crate::basis::unit::tally;
+use crate::basis::unit::lifecycle::tally;
 use crate::machine::clock;
 use crate::putln;
 

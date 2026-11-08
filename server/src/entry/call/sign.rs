@@ -161,7 +161,7 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: SignSource) -> Result<Route,
         | SignSource::MappingFault { token, mapping } => {
             let fault = matches!(source, SignSource::MappingFault { .. });
             let (life, _) =
-                crate::basis::unit::space::external::event(actor, token, mapping, fault)
+                crate::basis::unit::space::mapping::external::event(actor, token, mapping, fault)
                     .map_err(|_| SignFail::Denied)?;
             keys.push((WakeKey::ExternalMapping { id: mapping.get() }, life));
             Watch::ExternalMapping {
@@ -198,8 +198,8 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: SignSource) -> Result<Route,
             Watch::Resource { source }
         }
         SignSource::Join { target } => {
-            let selected =
-                crate::basis::unit::join::observe(actor, target).map_err(|_| SignFail::Denied)?;
+            let selected = crate::basis::unit::lifecycle::join::observe(actor, target)
+                .map_err(|_| SignFail::Denied)?;
             keys.push((selected.key(), selected.life()));
             Watch::Join { target, selected }
         }

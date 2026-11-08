@@ -18,21 +18,14 @@ use crate::machine::sync::SpinLock;
 use crate::machine::sync::SpinLockGuard;
 
 mod builder;
-pub(crate) mod exit;
-mod kernel;
-pub(super) mod life;
-mod member;
-mod state;
-mod tasks;
+pub(crate) mod capsule;
+pub(super) mod lifecycle;
+mod membership;
 
-pub(crate) use builder::TeamBuilder;
-pub(crate) use kernel::init_kernel;
-pub(crate) use kernel::kernel;
-pub(crate) use member::Member;
-pub(crate) use member::Receipt;
-pub(crate) use state::TeamPhase;
-pub(crate) use state::TeamState;
-pub(crate) use tasks::Tasks;
+pub(crate) use builder::{TeamBuilder, init_kernel, kernel};
+pub(crate) use lifecycle::exit;
+pub(crate) use lifecycle::{TeamPhase, TeamState};
+pub(crate) use membership::{Member, Receipt, Tasks};
 
 pub(crate) const MAX_DEPTH: usize = 32;
 pub(crate) const MAX_MEMBERS: usize = 1024;

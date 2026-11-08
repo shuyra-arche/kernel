@@ -8,9 +8,9 @@ use kernel_api::model::unit::UnitTarget;
 use crate::basis::nest::NestError;
 use crate::basis::nest::SpaceKind;
 use crate::basis::room::scheduler::roster::muster;
-use crate::basis::unit::copies::Origin;
 use crate::basis::unit::space::Space;
 use crate::basis::unit::task::MAX_ARGS;
+use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::unit::task::TaskWeak;
@@ -97,8 +97,8 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                 UnitTarget::Team(id) => crate::basis::unit::team::oust(&me, id),
                 UnitTarget::Task(_) => (|| {
                     let _commit = crate::basis::commit();
-                    let crate::basis::unit::join::JoinTarget::Task(member) =
-                        crate::basis::unit::join::observe(&me, target)?
+                    let crate::basis::unit::lifecycle::join::JoinTarget::Task(member) =
+                        crate::basis::unit::lifecycle::join::observe(&me, target)?
                     else {
                         unreachable!()
                     };

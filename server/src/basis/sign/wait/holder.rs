@@ -5,7 +5,7 @@ use core::sync::atomic::Ordering;
 use hashbrown::HashMap;
 
 use crate::basis::room::deadline;
-use crate::basis::unit::copies::Origin;
+use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskWeak;
 use crate::machine::sync::Level;

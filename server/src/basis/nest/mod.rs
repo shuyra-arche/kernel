@@ -2,7 +2,12 @@
 //!
 //! Flat 继续独立管理来源与物化；这里不保存来源页槽。
 
-use crate::basis::cell::page::{Change, Page};
+mod error;
+mod index;
+pub(crate) mod mapping;
+mod reservation;
+mod translation;
+
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -12,12 +17,14 @@ use core::sync::atomic::Ordering;
 
 use riscv::register::satp;
 
+use crate::basis::cell::page::{Change, Page};
 use crate::basis::flat::Pages;
-use crate::basis::nest::publication::Publication;
+use crate::basis::zone::Zone;
 use crate::machine::layout::TEAM_FRAME_BASE;
 use crate::machine::layout::TEAM_FRAME_WINDOW_SIZE;
 use crate::machine::layout::TRAP_STACK_BASE;
-use crate::machine::mmu::riscv::mode;
+use crate::machine::mmu::riscv::synchronize::Invalidation;
+use crate::machine::mmu::riscv::{identity, mode, table};
 use crate::machine::sync::Level;
 use crate::machine::sync::SpinLock;
 use crate::machine::sync::SpinLockGuard;
@@ -27,43 +34,40 @@ use kernel_api::address::PageOffset;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
 
-mod cleanup;
-mod error;
-mod fault;
-mod index;
-mod kind;
-pub(crate) mod publication;
-mod reservation;
-mod retirement;
-pub(crate) mod source;
-mod state;
-
-use crate::machine::mmu::riscv::identity;
-
-pub(crate) mod mapping;
-use crate::machine::mmu::riscv::synchronize::Invalidation;
-use crate::machine::mmu::riscv::table;
-
 pub use error::NestError;
-pub use fault::{FaultKind, FaultOutcome};
 pub use identity::Asid;
-pub use kind::SpaceKind;
-pub use mapping::Access;
-pub use mapping::ActiveRange;
-pub use mapping::Mapping;
+pub use mapping::{Access, ActiveRange, Mapping};
 pub use reservation::Reservation;
+pub use translation::{FaultKind, FaultOutcome};
 
 pub(crate) use crate::basis::zone::Placement;
 pub(crate) use crate::basis::zone::PlacementAt;
 pub(crate) use crate::basis::zone::RegionId;
 pub(crate) use mapping::MappingRange;
 
-use crate::basis::zone::Zone;
-use cleanup::CleanupNode;
 use index::IndexNode;
-use state::NestState;
+use mapping::{publication::Publication, source};
 use table::PteFlags;
 use table::TableNode;
+use translation::NestState;
+
+/// 待清理链条上的一环：一笔已经消费、但还没收尾的关系。
+///
+/// 节点在发布前预留下来，接管回收时不再分配；
+/// 它只保存关系的强持，占用票（退休）与 Page / 表页的账在 Nest 自己那里。
+struct CleanupNode {
+    mapping: Option<Arc<Mapping>>,
+    next: Option<Box<CleanupNode>>,
+}
+
+impl CleanupNode {
+    const fn empty() -> Self {
+        Self {
+            mapping: None,
+            next: None,
+        }
+    }
+}
 
 /// 一个 CPU 地址空间：身份、根页表、全局占用、关系与同步退休。
 ///
@@ -1474,5 +1478,34 @@ impl Drop for Nest {
             }
         }
         unsafe { ManuallyDrop::drop(&mut self.state) };
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpaceKind {
+    Supervisor,
+    User,
+}
+
+impl SpaceKind {
+    pub fn is_supervisor(self) -> bool {
+        matches!(self, SpaceKind::Supervisor)
+    }
+
+    pub(crate) fn spp(self) -> riscv::register::sstatus::SPP {
+        if self.is_supervisor() {
+            riscv::register::sstatus::SPP::Supervisor
+        } else {
+            riscv::register::sstatus::SPP::User
+        }
+    }
+}
+
+impl From<kernel_api::model::unit::ProgramKind> for SpaceKind {
+    fn from(k: kernel_api::model::unit::ProgramKind) -> Self {
+        match k {
+            kernel_api::model::unit::ProgramKind::User => SpaceKind::User,
+            kernel_api::model::unit::ProgramKind::Supervisor => SpaceKind::Supervisor,
+        }
     }
 }

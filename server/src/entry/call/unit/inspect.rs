@@ -37,8 +37,8 @@ pub(super) fn query(me: &Arc<Task>, query: UnitQuery) -> Result<Option<UnitInfo>
             let member = if id == me.ident.id {
                 me.ident.team.life.member(id).ok_or(UnitFail::Denied)?
             } else {
-                let crate::basis::unit::join::JoinTarget::Task(member) =
-                    crate::basis::unit::join::observe(me, target)?
+                let crate::basis::unit::lifecycle::join::JoinTarget::Task(member) =
+                    crate::basis::unit::lifecycle::join::observe(me, target)?
                 else {
                     unreachable!()
                 };

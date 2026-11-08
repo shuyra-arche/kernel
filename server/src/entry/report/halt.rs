@@ -79,7 +79,7 @@ extern "C" fn info(info: &PanicInfo) -> ! {
             ));
         }
         let mut rows: Vec<Vec<Option<String>>> = Vec::new();
-        if let Some(i) = crate::basis::room::identity::ident() {
+        if let Some(i) = crate::basis::room::conductor::identity::ident() {
             rows.push(vec![Some(format!(
                 "team #{} / task #{} @ hart {}",
                 i.team_id(),

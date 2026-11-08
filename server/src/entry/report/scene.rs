@@ -18,7 +18,7 @@ use riscv::register::stval;
 use riscv::register::stvec;
 
 use crate::basis::nest::SpaceKind;
-use crate::basis::room::identity::ident;
+use crate::basis::room::conductor::identity::ident;
 use crate::entry::report::backtrace;
 use crate::entry::report::backtrace::Backtrace;
 use crate::entry::report::backtrace::StackReader;

@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 
-pub(crate) use super::team::life::TeamLife;
+pub(crate) use super::team::lifecycle::TeamLife;
 
 #[derive(Debug)]
 pub(crate) struct Life;

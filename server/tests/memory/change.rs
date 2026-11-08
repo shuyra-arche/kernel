@@ -19,7 +19,7 @@ fn receipt_closes_admission_until_the_last_inflight_holder_finishes() {
     assert!(page.changing());
     drop(inflight);
     assert!(!page.changing());
-    assert!(super::cell::change::take_completion());
+    assert!(super::cell::reclaim::change::take_completion());
     let next = page.begin().unwrap();
     assert!(Arc::ptr_eq(next.page(), &page));
     drop(next);

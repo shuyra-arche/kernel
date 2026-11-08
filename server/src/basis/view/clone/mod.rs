@@ -1,7 +1,5 @@
 pub(crate) mod payload;
 mod queue;
-mod reading;
-mod reservation;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -26,9 +24,7 @@ use queue::Pending;
 use queue::Queue;
 use queue::Slot;
 
-pub(crate) use reading::peek;
-pub(crate) use reading::read;
-pub(crate) use reservation::reserve_len;
+pub(crate) use queue::{peek, read, reserve_len};
 
 pub struct CloneView {
     pub(crate) id: usize,
