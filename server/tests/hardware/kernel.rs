@@ -30,6 +30,11 @@ fn task_vector_context_isolated() {
 fn task_migration_respects_hart_capabilities() {
     run("migration")
 }
+#[test]
+#[ignore = "requires RV64 QEMU with Sstc and OpenSBI"]
+fn clock_backends_rearm_deadlines() {
+    run("clock")
+}
 static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn run(mode: &str) {
     let _run = RUN.lock().unwrap_or_else(|e| e.into_inner());
@@ -37,6 +42,7 @@ fn run(mode: &str) {
     let context = matches!(mode, "context" | "vector" | "migration");
     let mixed = mode == "migration";
     let vector = mode == "vector";
+    let clock = mode == "clock";
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -89,6 +95,9 @@ fn run(mode: &str) {
         ("debug", None, &[1, 4][..]),
         ("release", Some("--release"), &[4][..]),
     ] {
+        if clock && profile == "release" {
+            continue; // The comparator counters are debug-only.
+        }
         let mut build = Command::new("cargo");
         build.current_dir(&workspace).args([
             "+nightly",
@@ -133,7 +142,13 @@ fn run(mode: &str) {
             .map(|harts| (*harts, ""))
             .chain((profile == "debug" && !io).then_some((4, "-split-memory")))
             .chain((profile == "debug" && mode != "io-exit").then_some((4, "-sparse-harts")));
-        let cases: Vec<_> = if mixed {
+        let cases: Vec<_> = if clock {
+            vec![
+                (4, "-sbi", "rv64,sstc=true"),
+                (4, "-sstc", "rv64,sstc=true"),
+                (4, "-no-sstc", "rv64,sstc=false"),
+            ]
+        } else if mixed {
             vec![(4, "-mixed-v", "rv64,v=true,vlen=128,elen=64")]
         } else if vector {
             vec![
@@ -177,6 +192,18 @@ fn run(mode: &str) {
             } else {
                 Vec::new()
             };
+            if clock && suffix != "-sbi" {
+                let dtb = evidence.join(format!("{name}.dtb"));
+                super::clock::fixture(
+                    &qemu,
+                    &dtb,
+                    &kernel,
+                    cpu,
+                    harts,
+                    &["shuyra,supervisor-stimecmp"],
+                );
+                command.arg("-dtb").arg(dtb);
+            }
             if suffix == "-absent-v" {
                 let dtb = evidence.join("absent-vector.dtb");
                 super::harts::absent_vector_fixture(&qemu, &dtb, harts);
@@ -205,6 +232,9 @@ fn run(mode: &str) {
             let output = super::run(command, &evidence, &name);
             let log = String::from_utf8_lossy(&output.stdout);
             assert!(output.status.success(), "{name}: {log}");
+            if clock {
+                super::clock::verify(&log, suffix == "-sstc");
+            }
             if suffix == "-sparse-harts" {
                 assert!(
                     log.contains("cpu: admitted=2 boot=1 paging=Sv39")

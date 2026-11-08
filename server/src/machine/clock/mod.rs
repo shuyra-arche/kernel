@@ -27,7 +27,19 @@ pub fn init() -> Result<(), ClockError> {
         .set(hertz as u64)
         .map_err(|_| ClockError::AlreadyInit)?;
     CYCLE.store(time::read() as u64, Ordering::Relaxed);
+    timer::configure(firmware_allows("shuyra,supervisor-stimecmp"));
     Ok(())
+}
+
+// These opt-ins come from the trusted boot DT, never from a Task or ISA alone.
+fn firmware_allows(name: &str) -> bool {
+    let Some(tree) = board::device_tree() else {
+        return false;
+    };
+    let Some(chosen) = tree.find_node("/chosen") else {
+        return false;
+    };
+    matches!(board::tree::property(chosen, name), Ok(Some([])))
 }
 
 fn hertz() -> u64 {

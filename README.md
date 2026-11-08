@@ -174,6 +174,28 @@ VLEN/SEW rejection and allocation-failure rollback are checked by Host tests;
 QEMU runs 128/256 separately, not heterogeneous physical VLEN. Physical hardware
 and measured Dirty-state optimization remain outside this verification.
 
+## Monotonic deadlines
+
+`Room.Clock` and `Wait::At` use nanoseconds since the Kernel captured its boot
+counter. Absolute waits round upward to the next hardware tick. Overflow
+saturates at the counter horizon, so an unrepresentable deadline cannot expire
+early. The RV64 counter is assumed not to wrap during a boot.
+
+The boot Hart owns the global indexed deadline heap. A changed head on another
+Hart sends an IPI. The owner clears the interrupt before reading the head, so a
+concurrent update is visible in the queue or leaves another notification. Each
+Hart separately owns its local scheduling comparator state. An unchanged
+comparator is reused, including a due comparator whose interrupt is still
+pending. Timeout and explicit wake use the same commit boundary and wait ticket.
+
+The default timer backend is SBI TIME. Trusted boot firmware may provide the
+empty `/chosen/shuyra,supervisor-stimecmp` property when S-mode may access
+`stimecmp` and receive supervisor timer interrupts on every admitted Hart
+advertising Sstc. The Kernel uses direct CSR writes only on those Harts and
+otherwise uses SBI. The ISA bit by itself is insufficient. Debug shutdown
+reports comparator writes, avoided writes, measured programming ticks and
+observed deadline lateness.
+
 ## External access
 
 External access is an address projection, not a separate device work object.
