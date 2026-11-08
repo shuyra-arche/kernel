@@ -19,7 +19,7 @@ use core::sync::atomic::Ordering;
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
 use crate::basis::nest::Nest;
-use crate::basis::nest::mapping::MappingBinding;
+use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::Pend;
 use crate::basis::view::share::ShareView;
 use crate::metal::sync::SpinLock;
@@ -110,10 +110,10 @@ pub(crate) struct SourceAuthorization {
     revoked: SpinLock<bool>,
     /// 未结 CPU 关系：包含显式 Attach 控制与资源 Open 映射。
     ///
-    /// 成员与 Registry 项是同一个 `Arc<MappingBinding>`，所以“还欠着谁”只有这一份
+    /// 成员与 Registry 项是同一个 `Arc<RangeBinding>`，所以“还欠着谁”只有这一份
     /// 事实：只有显式结清（`Nest::retire_mapping` / `reap_mappings`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
-    bindings: SpinLock<Vec<Arc<MappingBinding>>>,
+    bindings: SpinLock<Vec<Arc<RangeBinding>>>,
     phase: SpinLock<Phase>,
 }
 
@@ -164,7 +164,7 @@ impl SourceAuthorization {
                         || space.mappings.registered(binding.id()).is_none_or(|entry| {
                             entry
                                 .mapping()
-                                .is_none_or(|mapping| !mapping.state.lock().published.is_empty())
+                                .is_none_or(|mapping| space.has_published(mapping))
                         })
                 })
             })
@@ -337,7 +337,7 @@ impl SourceAuthorization {
     }
 
     /// 写入一条成员：容量已在同一提交段备好，这一步只推入。
-    pub(crate) fn register_binding(&self, binding: Arc<MappingBinding>) {
+    pub(crate) fn register_binding(&self, binding: Arc<RangeBinding>) {
         self.bindings.lock().push(binding);
     }
 
@@ -345,7 +345,7 @@ impl SourceAuthorization {
     ///
     /// 最后一条成员撤下就是显式的“结清”事件：来源不再占着任何东西时顺带向上收尾，
     /// 不在 `Drop` 里猜。
-    pub(crate) fn release_binding(self: &Arc<Self>, binding: &Arc<MappingBinding>) {
+    pub(crate) fn release_binding(self: &Arc<Self>, binding: &Arc<RangeBinding>) {
         self.bindings
             .lock()
             .retain(|held| !Arc::ptr_eq(held, binding));
@@ -379,7 +379,7 @@ impl SourceAuthorization {
     }
 
     /// 未结 CPU 身份的快照；不复制关系或物理持有。
-    pub(crate) fn bindings(&self) -> Result<Vec<Arc<MappingBinding>>, PendFail> {
+    pub(crate) fn bindings(&self) -> Result<Vec<Arc<RangeBinding>>, PendFail> {
         let held = self.bindings.lock();
         let mut members = Vec::new();
         members
@@ -414,7 +414,7 @@ impl SourceAuthorization {
     }
 
     /// 这份来源名下是否仍有这一份未结绑定。
-    pub(crate) fn owns_binding(&self, binding: &Arc<MappingBinding>) -> bool {
+    pub(crate) fn owns_binding(&self, binding: &Arc<RangeBinding>) -> bool {
         self.bindings
             .lock()
             .iter()

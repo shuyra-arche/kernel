@@ -26,7 +26,7 @@ fn reclaiming_a_fenced_ticket_keeps_later_failed_tickets_reserved() {
     tickets.reserve(3).unwrap();
     tickets.retire(1);
     tickets.retire(2);
-    assert_eq!(invalidate(&backend, 7).unwrap().target(), 7);
+    assert!(invalidate(&backend, 7).unwrap().confirms(7));
     tickets.settle();
 
     tickets.retire(3);
@@ -39,7 +39,48 @@ fn reclaiming_a_fenced_ticket_keeps_later_failed_tickets_reserved() {
     assert!(!tickets.has_settled());
 
     backend.0.set(true);
-    assert_eq!(invalidate(&backend, 7).unwrap().target(), 7);
+    assert!(invalidate(&backend, 7).unwrap().confirms(7));
     tickets.settle();
     assert_eq!(tickets.drain().collect::<Vec<_>>(), [3]);
+}
+
+#[test]
+fn cpu_completion_is_bound_to_domain_attempt_and_full_coverage() {
+    use crate::scope::{Request, Scope};
+    struct Cpu;
+    // Host fixture owns no actual translations; it reports only this invocation.
+    unsafe impl Shootdown for Cpu {
+        type Target = Request<usize>;
+        type Error = ();
+        fn invalidate(&self, _: &Self::Target) -> Result<(), ()> {
+            Ok(())
+        }
+    }
+    let pending = Request {
+        domain: 3,
+        attempt: 7,
+        identifier: 4,
+        scope: Scope::Global,
+    };
+    for unrelated in [
+        Request {
+            domain: 2,
+            ..pending
+        },
+        Request {
+            attempt: 6,
+            ..pending
+        },
+        Request {
+            identifier: 5,
+            ..pending
+        },
+        Request {
+            scope: Scope::AddressSpace,
+            ..pending
+        },
+    ] {
+        assert!(!invalidate(&Cpu, unrelated).unwrap().confirms(pending));
+    }
+    assert!(invalidate(&Cpu, pending).unwrap().confirms(pending));
 }

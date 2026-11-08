@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use kernel_api::abi::call::pend::PendFail;
 
-use crate::basis::nest::mapping::MappingBinding;
+use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::SourceAuthorization;
 
 use super::ShareView;
@@ -35,7 +35,7 @@ pub(crate) fn close(root: &Arc<ShareView>) -> Result<(), PendFail> {
 
 fn close_bindings(
     source: &Arc<SourceAuthorization>,
-    bindings: Vec<Arc<MappingBinding>>,
+    bindings: Vec<Arc<RangeBinding>>,
 ) -> Result<(), PendFail> {
     for binding in bindings {
         let (space, mapping) = {

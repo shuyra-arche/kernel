@@ -39,7 +39,7 @@ fn a_change_preserves_memos_but_cannot_reuse_the_page_until_all_are_withdrawn() 
     left.complete();
     right.complete();
     let change = page.begin().unwrap();
-    assert!(matches!(left, Publication::Mapped(_)));
+    assert!(matches!(left.phase(), crate::memo::Phase::Mapped));
     assert_eq!(left.id(), id);
     assert_eq!(change.external(true).unwrap_err(), RetainError::Borrowed);
     // SAFETY: host tests publish no hardware; this tests bookkeeping only.
@@ -69,15 +69,15 @@ fn fault_supply_uses_the_same_receipt_and_preserves_page_identity() {
     let mut memo = Publication::prepare(&page, true, Some(&change)).unwrap();
     let id = page.id();
     memo.publish();
-    assert!(matches!(memo, Publication::Publishing(_)));
+    assert!(matches!(memo.phase(), crate::memo::Phase::Publishing));
     memo.complete();
-    assert!(matches!(memo, Publication::Mapped(_)));
+    assert!(matches!(memo.phase(), crate::memo::Phase::Mapped));
     assert_eq!(memo.id(), id);
     drop(change);
     drop(page);
     assert_eq!(pool.gives(), 0);
     let memo = memo.retire();
-    assert!(matches!(memo, Publication::Withdrawing(_)));
+    assert!(matches!(memo.phase(), crate::memo::Phase::Withdrawing));
     unsafe { memo.settle() };
     assert_eq!(pool.gives(), 1);
 }

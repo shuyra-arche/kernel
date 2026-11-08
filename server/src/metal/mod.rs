@@ -1,15 +1,9 @@
 pub(crate) mod allocator;
-pub(crate) mod board;
-pub(crate) mod clock;
-pub(crate) mod console;
 pub(crate) mod generic;
-pub(crate) mod image;
-pub(crate) mod interrupt;
-pub(crate) mod iommu;
-pub(crate) mod layout;
-pub(crate) mod mmu;
-pub(crate) mod stop;
-pub(crate) mod sync;
 
 pub(crate) mod riscv;
-pub(crate) use riscv::{hart, switcher};
+// The only architecture selection point. Public mechanism paths select one
+// complete provider; no mechanism-first directory forwards to another tree.
+pub(crate) use riscv::{
+    clock, console, hart, image, interrupt, iommu, layout, mmu, stop, switcher, sync,
+};

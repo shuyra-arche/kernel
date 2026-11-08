@@ -13,11 +13,11 @@ use crate::basis::flat::Flat;
 use crate::basis::flat::FlatError;
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
-use crate::basis::nest::Mapping;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
+use crate::basis::nest::Span;
 use crate::basis::pend::Pend;
 use crate::basis::pend::SourceAuthorization;
 use crate::basis::sign;
@@ -45,7 +45,7 @@ pub(crate) use close::pending_close;
 ///
 /// 来源由 `source` 唯一承担：保留 RAM、设备区间与后续挂载都从这里出发，
 /// 不为持有内存另建 kernel VA，也没有 keeper / canonical 来源视图。
-/// 授权记录（token → 权限位）与实际 `Mapping` 分开保存；
+/// 授权记录（token → 权限位）与实际 `Span` 分开保存；
 /// 该 token 下的关系自带 token，所以撤销边不丢。
 pub struct ShareView {
     source: FlatRange,
@@ -195,13 +195,13 @@ impl ShareView {
     /// 把一段已有关系关联到根 Pend：创建事务的 Input 交接。
     ///
     /// 它成为该 token 下的活跃关系——`open` 会复用它，撤销也关它。
-    pub(crate) fn adopt_input(&self, token: PendId, space: &Arc<Nest>, mapping: Arc<Mapping>) {
+    pub(crate) fn adopt_input(&self, token: PendId, space: &Arc<Nest>, mapping: Arc<Span>) {
         self.add(mapping, space, Some(token), Relation::Input);
     }
 
     fn add(
         &self,
-        mapping: Arc<Mapping>,
+        mapping: Arc<Span>,
         space: &Arc<Nest>,
         token: Option<PendId>,
         relation: Relation,
@@ -211,14 +211,14 @@ impl ShareView {
             .push(HeldMap::placed(mapping, space, token, relation));
     }
 
-    /// 把一段已落地的关系记入该 token：先核对授权记录，再入活跃 Mapping 表。
+    /// 把一段已落地的关系记入该 token：先核对授权记录，再入活跃 Span 表。
     pub(crate) fn record(
         &self,
         token: PendId,
         space: &Arc<Nest>,
-        mapping: Arc<Mapping>,
+        mapping: Arc<Span>,
         opened: bool,
-    ) -> Result<(), Arc<Mapping>> {
+    ) -> Result<(), Arc<Span>> {
         let permitted = self
             .authorities
             .lock()
@@ -234,7 +234,7 @@ impl ShareView {
             if opened {
                 Relation::Open
             } else {
-                Relation::Mapping
+                Relation::Span
             },
         ));
         Ok(())
@@ -362,11 +362,7 @@ impl Drop for ShareView {
 /// 把一条关系的每个活动区间的上限与当前权限都收到 `access`。
 ///
 /// 收窄是幂等的：已在同一上限上的区间重放不改变库存与 PTE。
-fn narrow_mapping(
-    space: &Arc<Nest>,
-    mapping: &Arc<Mapping>,
-    access: Access,
-) -> Result<(), NestError> {
+fn narrow_mapping(space: &Arc<Nest>, mapping: &Arc<Span>, access: Access) -> Result<(), NestError> {
     for range in mapping.active()? {
         let offset = (range.start.as_usize() - mapping.initial_start().as_usize()) / PAGE_SIZE;
         let count = PageCount::new(range.size.get() / PAGE_SIZE).ok_or(NestError::NotAligned)?;
@@ -479,7 +475,7 @@ pub(crate) fn shut(meta: &Arc<ShareView>, token: PendId) -> Result<(), PendFail>
 
 /// 设备区域：借用的物理区间代替存储保留。
 ///
-/// 既不清零、不按 RAM 回收，也不占内核 VA；实际 CPU 访问另建普通 `Mapping`。
+/// 既不清零、不按 RAM 回收，也不占内核 VA；实际 CPU 访问另建普通 `Span`。
 pub(crate) fn region(base: usize, reg: usize, owner: TaskId) -> Result<Arc<ShareView>, PendFail> {
     let end = base
         .checked_add(reg)

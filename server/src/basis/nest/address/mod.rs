@@ -3,17 +3,14 @@
 mod layout;
 mod occupancy;
 mod placement;
+mod range;
 mod reservation;
 
+pub(crate) use layout::AddressError;
 pub(super) use layout::Layout;
 pub(crate) use layout::RegionKind;
 pub(crate) use placement::{Placement, PlacementAt};
 pub use reservation::Reservation;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AddressError {
-    OutOfMemory,
-    NotAligned,
-    NoRegion,
-    Occupied,
-}
+pub(crate) mod span;
+pub(crate) use range::NestRange;

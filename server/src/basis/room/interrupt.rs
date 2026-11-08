@@ -65,3 +65,15 @@ pub(crate) fn stats() -> (usize, usize, usize, usize) {
         IDLE_BUSY.load(Ordering::Relaxed),
     )
 }
+
+use crate::metal::generic::interrupt::External;
+use alloc::boxed::Box;
+static EXTERNAL: OnceLock<Box<dyn External>> = OnceLock::new();
+
+pub(crate) fn install_external(route: Box<dyn External>) -> Result<(), ()> {
+    EXTERNAL.set(route).map_err(|_| ())
+}
+
+pub(crate) fn external() -> Option<&'static dyn External> {
+    EXTERNAL.get().map(Box::as_ref)
+}

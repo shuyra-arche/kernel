@@ -22,5 +22,4 @@ pub(crate) trait Controller {
 pub(crate) trait External: Send + Sync {
     fn handle(&self) -> bool;
     fn rearm(&self);
-    fn overlaps(&self, base: usize, end: usize) -> bool;
 }

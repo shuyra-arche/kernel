@@ -1,6 +1,6 @@
 use super::*;
 use crate::basis::cell::page::Page;
-use crate::basis::cell::projection;
+use crate::basis::nest::authority::external;
 use kernel_api::model::cell::*;
 fn reference(id: usize) -> SlotId {
     SlotId::from_bytes(&(id as u64).to_le_bytes()).unwrap()
@@ -12,14 +12,14 @@ fn position(at: KVirt, ident: &Arc<TaskIdent>) -> Result<CellPosition, CellFail>
     )?)
     .ok_or(CellFail::NotAligned)
 }
-fn index(entry: &MappingEntry, page: usize) -> Result<MappingRange, CellFail> {
+fn index(entry: &RangeEntry, page: usize) -> Result<NestRange, CellFail> {
     entry
         .mapping()
         .ok_or(CellFail::Denied)?
         .range(PageOffset::new(page), PageCount::new(1).unwrap())
         .map_err(CellFail::from)
 }
-fn check(entry: &MappingEntry, actor: &Arc<Task>) -> Result<(), CellFail> {
+fn check(entry: &RangeEntry, actor: &Arc<Task>) -> Result<(), CellFail> {
     if !pend::live(actor) {
         return Err(CellFail::Denied);
     }
@@ -112,7 +112,7 @@ pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize,
                         .get(range.reference.get())
                         .ok_or(CellFail::Denied)?;
                     Ok((
-                        projection::create(
+                        external::create(
                             &actor,
                             token,
                             hold,
@@ -154,7 +154,7 @@ pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize,
                         }
                         MappingTarget::Io(token) => {
                             if let Some(actor) = caller(ident) {
-                                let _ = projection::delete(&actor, token, mapping);
+                                let _ = external::delete(&actor, token, mapping);
                             }
                         }
                     }
@@ -215,7 +215,7 @@ fn source(pos: CellPosition, ident: &Arc<TaskIdent>) -> Result<(FlatRange, Arc<P
             if pos.page != 0 {
                 return Err(CellFail::NoRegion);
             }
-            projection::page(&actor, token, mapping, pos.generation)
+            external::page(&actor, token, mapping, pos.generation)
         }
     }
 }
@@ -265,7 +265,7 @@ fn inspect(pos: CellPosition, ident: &Arc<TaskIdent>) -> Result<CellInfo, CellFa
             if pos.page != 0 {
                 return Err(CellFail::NoRegion);
             }
-            projection::snapshot(&actor, token, mapping)
+            external::snapshot(&actor, token, mapping)
         }
     }
 }
@@ -346,7 +346,7 @@ fn handoff_prepared(
                 let (r, page) = {
                     let _serial = actor.pend.lock();
                     let (hold, page) =
-                        projection::owning_hold(&actor, token, mapping, spec.source.generation)?;
+                        external::owning_hold(&actor, token, mapping, spec.source.generation)?;
                     let (offset, count) = hold.window();
                     let id = actor
                         .pend
@@ -409,7 +409,7 @@ fn handoff_prepared(
             };
             let _serial = actor.pend.lock();
             let _commit = crate::basis::commit();
-            projection::associate(&actor, token, mapping, spec.target.generation, &from, page)?;
+            external::associate(&actor, token, mapping, spec.target.generation, &from, page)?;
             Ok(0)
         }
     }
@@ -521,9 +521,9 @@ fn publication(
             let _serial = actor.pend.lock();
             let _commit = crate::basis::commit();
             if publishing {
-                projection::publish(&actor, token, mapping, pos.generation)?;
+                external::publish(&actor, token, mapping, pos.generation)?;
             } else {
-                projection::retract(&actor, token, mapping, pos.generation)?;
+                external::retract(&actor, token, mapping, pos.generation)?;
             }
             Ok(0)
         }
@@ -594,7 +594,7 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
                 } => with_mapping(team, mapping, ident, |target, entry| {
                     target.nest.retry_invalidation()?;
                     let relation = entry.mapping().ok_or(CellFail::Denied)?;
-                    if !relation.state.lock().published.is_empty() {
+                    if target.nest.has_published(relation) {
                         return Err(CellFail::Busy);
                     }
                     target.nest.detach(relation.whole())?;
@@ -610,7 +610,7 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
                     let actor = caller(ident).ok_or(CellFail::Denied)?;
                     let _serial = actor.pend.lock();
                     let _commit = crate::basis::commit();
-                    projection::delete(&actor, token, mapping)?;
+                    external::delete(&actor, token, mapping)?;
                     Ok(0)
                 }
             }

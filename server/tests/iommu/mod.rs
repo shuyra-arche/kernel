@@ -10,20 +10,30 @@ pub(crate) mod cell;
 #[path = "../support/iommu/mod.rs"]
 pub(crate) mod iommu;
 
-#[path = "../../src/basis/cell/projection/admission.rs"]
-pub(crate) mod admission;
-
 #[allow(dead_code, unused_imports)]
 #[path = "../../src/basis/name/mod.rs"]
 mod name;
 
+#[allow(dead_code)]
+#[path = "../../src/basis/nest/translation/external/state.rs"]
+pub(crate) mod external;
+#[allow(dead_code)]
+#[path = "../../src/basis/nest/memo/publication/receipt.rs"]
+pub(crate) mod publication;
+#[allow(dead_code)]
+#[path = "../support/iommu/target.rs"]
+pub(crate) mod target;
+
 mod basis {
     pub(crate) use crate::name;
+    pub(crate) mod nest {
+        pub(crate) use crate::iommu::Error as PublicationError;
+        pub(crate) mod memo {
+            pub(crate) use crate::publication;
+        }
+    }
     pub(crate) mod cell {
         pub(crate) use crate::cell as page;
-        pub(crate) mod projection {
-            pub(crate) use crate::admission;
-        }
     }
 }
 
@@ -32,24 +42,11 @@ mod engine;
 mod hardware;
 mod lifecycle;
 mod retirement;
-pub(crate) use iommu::riscv::topology;
-#[path = "../boot/routing/fixtures.rs"]
-mod routing_fixture;
 #[path = "../memory/support.rs"]
 mod support;
-#[path = "../boot/tree.rs"]
-mod tree;
-
-#[allow(dead_code)]
-#[path = "../../src/metal/board/tree/mod.rs"]
-pub(crate) mod description;
-
 mod metal {
     pub(crate) mod generic {
         pub(crate) use crate::iommu::contract as iommu;
     }
     pub(crate) use crate::iommu;
-    pub(crate) mod board {
-        pub(crate) use crate::description as tree;
-    }
 }

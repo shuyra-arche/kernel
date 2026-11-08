@@ -7,7 +7,7 @@ use crate::basis::nest::Access;
 use crate::basis::nest::NestError;
 use crate::basis::room::deadline;
 use crate::basis::unit::team::kernel;
-use crate::metal::board;
+use crate::entry::boot::facts;
 use crate::metal::generic::mmu::Attributes;
 use crate::metal::hart;
 use crate::metal::hart::HartId;
@@ -42,7 +42,7 @@ pub(in super::super) fn init() -> Result<(), NestError> {
         .checked_mul(pages_per_hart)
         .and_then(|pages| pages.checked_mul(PAGE_SIZE))
         .ok_or(NestError::OutOfMemory)?;
-    if board::info()
+    if facts::info()
         .memory
         .free()
         .iter()

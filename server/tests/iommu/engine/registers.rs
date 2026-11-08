@@ -1,4 +1,4 @@
-use crate::iommu::riscv::registers::*;
+use crate::iommu::registers::*;
 use std::sync::Arc;
 use std::sync::Mutex;
 

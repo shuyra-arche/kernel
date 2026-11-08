@@ -1,22 +1,22 @@
 use alloc::sync::Arc;
 
 use crate::basis::nest::Access;
-use crate::basis::nest::Mapping;
 use crate::basis::nest::Nest;
+use crate::basis::nest::Span;
 use kernel_api::model::identity::PendId;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Relation {
     Input,
     Open,
-    Mapping,
+    Span,
 }
 
-/// 一项活跃关系：真实 `Mapping` 加上它的放在哪、属于哪个 token。
+/// 一项活跃关系：真实 `Span` 加上它的放在哪、属于哪个 token。
 ///
-/// 来源与授权记录都不在这里：`Mapping` 自己强持来源，权限位归 `Pend`。
+/// 来源与授权记录都不在这里：`Span` 自己强持来源，权限位归 `Pend`。
 pub(super) struct HeldMap {
-    pub(super) mapping: Arc<Mapping>,
+    pub(super) mapping: Arc<Span>,
     pub(super) token: Option<PendId>,
     pub(super) placement: Arc<Nest>,
     pub(super) relation: Relation,
@@ -45,7 +45,7 @@ impl HeldMap {
     }
 
     pub(super) fn placed(
-        mapping: Arc<Mapping>,
+        mapping: Arc<Span>,
         space: &Arc<Nest>,
         token: Option<PendId>,
         relation: Relation,

@@ -1,8 +1,7 @@
+mod admission;
 pub(super) mod external;
 mod iommu;
-mod plan;
-
-use plan::reserved::discover as iommu_regions;
+pub(super) use admission::{admit, configured, ready};
 
 pub(super) use external::init as init_external;
 pub use external::{ExternalRoute, MapMmio};
@@ -14,26 +13,21 @@ use crate::basis::pend::Modifiable;
 use crate::basis::pend::SourceAuthorization;
 use crate::basis::view;
 use crate::basis::view::View;
+use crate::entry::boot::facts;
 use crate::entry::boot::resources::Registry;
-use crate::metal::board;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::boot::ledger::Name;
 use kernel_api::boot::ledger::Page;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::TaskId;
-use plan::Plan;
 
 pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
-    let dtb = board::info().dtb();
-    let fdt = board::device_tree().ok_or(PendFail::Denied)?;
-    let dram = board::info().memory.envelope();
-    // Discover and validate every reservation before creating any device authority.
-    let plan = Plan::discover(&fdt, dram.base, dram.size)?;
-    for region in plan.authorities() {
+    let dtb = facts::info().dtb();
+    for region in admission::description()?.authorities.iter() {
         grant_region(registry, *region)?;
     }
-    // Export each validated BAR through the ordinary View/Pend boot ledger.
-    let apertures = crate::metal::iommu::aperture::APERTURES.lock();
+    // Export each validated resource through the ordinary View/Pend boot ledger.
+    let apertures = crate::basis::nest::authority::aperture::APERTURES.lock();
     for aperture in apertures.iter() {
         let source = aperture.source.clone();
         let size = source
@@ -59,7 +53,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     registry
         .register(Name::Page(Page::Dtb), root)
         .map_err(|e| e.into_parts().0)?;
-    if let Some(initrd) = board::info().initrd() {
+    if let Some(initrd) = facts::info().initrd() {
         let meta = view::share::region(initrd.base, initrd.size, TaskId::new(0))?;
         let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
         registry
@@ -71,7 +65,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
 
 fn grant_region(
     registry: &mut Registry,
-    region: board::tree::mmio::Region,
+    region: kernel_api::boot::platform::Region,
 ) -> Result<(), PendFail> {
     let (base, size) = (region.base, region.size);
     let meta = view::share::region(base, size, TaskId::new(0))?;
@@ -88,10 +82,4 @@ fn grant_region(
     registry
         .register(Name::Page(Page::Region(base as u64)), root)
         .map_err(|e| e.into_parts().0)
-}
-
-/// Validate the exact same authority plan before configuring any protected endpoint.
-pub(super) fn validate(fdt: &fdt::Fdt) -> Result<(), PendFail> {
-    let dram = board::info().memory.envelope();
-    Plan::discover(fdt, dram.base, dram.size).map(|_| ())
 }

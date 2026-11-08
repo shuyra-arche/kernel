@@ -3,16 +3,16 @@ mod registers;
 
 use crate::cell::Owner as PageOwner;
 use crate::cell::Page;
-use crate::iommu::riscv::Engine;
-use crate::iommu::riscv::EngineError;
-use crate::iommu::riscv::Phase;
-use crate::iommu::riscv::registers::BUSY;
-use crate::iommu::riscv::registers::CQCSR;
-use crate::iommu::riscv::registers::DDTP;
-use crate::iommu::riscv::registers::ENABLE;
-use crate::iommu::riscv::registers::FQCSR;
-use crate::iommu::riscv::registers::ON;
-use crate::iommu::riscv::registers::Registers;
+use crate::iommu::Engine;
+use crate::iommu::EngineError;
+use crate::iommu::Phase;
+use crate::iommu::registers::BUSY;
+use crate::iommu::registers::CQCSR;
+use crate::iommu::registers::DDTP;
+use crate::iommu::registers::ENABLE;
+use crate::iommu::registers::FQCSR;
+use crate::iommu::registers::ON;
+use crate::iommu::registers::Registers;
 use crate::support::Pool;
 use registers::Device;
 
@@ -123,7 +123,7 @@ fn partial_startup_keeps_pages_when_fault_queue_reports_failure() {
 
 #[test]
 fn wired_notifications_do_not_substitute_for_tagged_cq_completion() {
-    use crate::iommu::riscv::registers::{CAP, FCTL, ICVEC, INTERRUPT, IPSR, PQCSR};
+    use crate::iommu::registers::{CAP, FCTL, ICVEC, INTERRUPT, IPSR, PQCSR};
     let (mut engine, mut device, pools) = engine();
     assert_eq!(engine.enable_interrupts(), Err(EngineError::Unsupported));
     assert_eq!(device.read32(FCTL), 0);
@@ -149,17 +149,4 @@ fn wired_notifications_do_not_substitute_for_tagged_cq_completion() {
     assert!(pools.iter().all(|p| p.gives() == 1));
 }
 
-fn topology() -> crate::topology::Topology {
-    crate::routing_fixture::discover(
-        crate::routing_fixture::root()
-            .child(crate::routing_fixture::controller(
-                crate::routing_fixture::CONTROLLER,
-                1,
-            ))
-            .child(crate::routing_fixture::host(
-                crate::routing_fixture::HOST,
-                &[0, 1, 0, 0x10000],
-            )),
-    )
-    .unwrap()
-}
+const CONTROLLER: usize = 0x3010000;

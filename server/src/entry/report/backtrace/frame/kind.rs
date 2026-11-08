@@ -1,4 +1,4 @@
-use crate::metal::mmu::riscv::Address;
+use crate::metal::mmu::Address;
 use kernel_api::address::VirtAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

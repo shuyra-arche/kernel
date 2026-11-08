@@ -1,8 +1,6 @@
 extern crate alloc;
 
-#[path = "../../src/metal/board/region.rs"]
-mod region;
-use region::Region;
+use kernel_api::boot::platform::{Memory, Region};
 #[allow(dead_code)]
 #[path = "../../src/metal/allocator/error.rs"]
 mod error;
@@ -10,17 +8,10 @@ mod error;
 mod frame;
 #[path = "../../src/metal/allocator/link.rs"]
 mod link;
-#[allow(dead_code)]
-#[path = "../../src/metal/board/memory/mod.rs"]
-mod memory;
-#[allow(dead_code)]
-#[path = "../boot/tree.rs"]
-mod tree;
-
 mod metal {
     pub mod board {
         pub struct Machine {
-            pub memory: crate::memory::Memory,
+            pub memory: crate::Memory,
         }
         pub static FACTS: std::sync::OnceLock<Machine> = std::sync::OnceLock::new();
         pub fn info() -> &'static Machine {
@@ -58,25 +49,18 @@ fn frame_split_and_merge_never_publish_reserved_pages_or_bank_holes() {
     unsafe {
         ptr.write_bytes(0xa5, layout.size());
     }
-    let bytes = tree::Node::new("")
-        .cells()
-        .child(
-            tree::Node::new("memory").property(
-                "reg",
-                [base as u64, 0x80000, (base + 0x100000) as u64, 0x80000]
-                    .into_iter()
-                    .flat_map(u64::to_be_bytes)
-                    .collect::<Vec<_>>(),
-            ),
-        )
-        .child(
-            tree::Node::new("reserved-memory")
-                .cells()
-                .property("ranges", [])
-                .child(tree::Node::new("firmware").reg((base + 0x40000) as u64, 0x10000)),
-        )
-        .encode();
-    let memory = memory::Memory::parse(&bytes, base + 0x20000, Region::new(base, 0x10000)).unwrap();
+    let memory = Memory::new(
+        &[
+            Region::new(base, 0x80000),
+            Region::new(base + 0x100000, 0x80000),
+        ],
+        &[Region::new(base + 0x40000, 0x10000)],
+        &[],
+        Region::new(base + 0x20000, 4096),
+        Region::new(base, 0x10000),
+        None,
+    )
+    .unwrap();
     metal::board::FACTS
         .set(metal::board::Machine { memory })
         .unwrap_or_else(|_| panic!("once"));
@@ -138,5 +122,11 @@ fn frame_split_and_merge_never_publish_reserved_pages_or_bank_holes() {
     drop(allocator);
     unsafe {
         std::alloc::dealloc(ptr, layout);
+    }
+}
+
+mod entry {
+    pub(crate) mod boot {
+        pub(crate) use crate::metal::board as facts;
     }
 }

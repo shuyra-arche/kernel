@@ -13,7 +13,7 @@ pub use per_hart::set_scheduler;
 use ::core::sync::atomic::AtomicUsize;
 use ::core::sync::atomic::Ordering;
 
-use crate::metal::board;
+use crate::entry::boot::facts;
 use crate::metal::layout::MAX_HART_SLOTS;
 use kernel_api::address::VirtAddr;
 
@@ -32,7 +32,7 @@ pub(crate) fn online(hart: HartId) -> bool {
 }
 
 pub fn hart_count() -> usize {
-    let n = board::info().hart.count;
+    let n = facts::info().hart.count();
     assert!(
         n <= MAX_HART_SLOTS,
         "DTB reports {n} harts, at most {MAX_HART_SLOTS} VA slots"
@@ -94,5 +94,5 @@ pub fn firmware_id() -> FirmwareId {
 }
 
 pub fn firmware(slot: HartId) -> FirmwareId {
-    board::info().hart.firmware(slot)
+    facts::info().hart.firmware(slot)
 }

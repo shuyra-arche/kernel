@@ -156,7 +156,7 @@ impl Pend {
     }
     /// Retain routing responsibility without lending the BAR's CPU access.
     /// Caller holds work commit; publication must either cancel or retain this
-    /// obligation until the matching IoSpace completion has settled.
+    /// obligation until the matching Nest completion has settled.
     pub(crate) fn retain_route(&self) -> Result<(), PendFail> {
         let state = self.state.lock();
         if !state.usable() || state.access != Modifiable::Yes {

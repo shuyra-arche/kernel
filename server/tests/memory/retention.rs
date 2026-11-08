@@ -237,7 +237,7 @@ fn publication_cannot_complete_or_retire_an_unpublished_preparation() {
     let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let mut prepared = Publication::prepare(&page, false, None).unwrap();
     assert!(catch_unwind(AssertUnwindSafe(|| prepared.complete())).is_err());
-    assert!(matches!(prepared, Publication::Prepared(_)));
+    assert!(matches!(prepared.phase(), crate::memo::Phase::Prepared));
     drop(prepared);
     assert!(page.allows_return());
     let prepared = Publication::prepare(&page, false, None).unwrap();

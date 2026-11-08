@@ -29,7 +29,7 @@ impl FrameInner {
     }
 
     pub(super) fn init(&mut self) -> Result<(), InitError> {
-        let memory = &crate::metal::board::info().memory;
+        let memory = &crate::entry::boot::facts::info().memory;
         let bounds = memory.allocation_bounds();
         self.base = bounds.base;
         self.edge = bounds.range().end;

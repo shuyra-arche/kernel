@@ -7,12 +7,13 @@ mod name;
 mod basis {
     pub(crate) use crate::name;
     pub(crate) mod nest {
+        #[allow(dead_code)]
         pub struct Nest;
     }
 }
 
 #[allow(dead_code, unused_imports)]
-#[path = "../../src/basis/nest/address/mod.rs"]
+#[path = "support.rs"]
 mod address;
 
 use address::{Layout, Placement, RegionKind};

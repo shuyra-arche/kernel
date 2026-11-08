@@ -1,5 +1,6 @@
 pub(crate) mod devices;
 pub(crate) mod error;
+pub(crate) mod facts;
 mod init;
 pub(crate) mod resources;
 mod space;
@@ -10,7 +11,7 @@ pub use error::BootError;
 pub use error::MapOperation;
 pub use error::ResourceOperation;
 pub use error::fail;
-pub use init::{init, init_with_external};
+pub use init::{bind_external, configure, init, map_mmio};
 
 use alloc::sync::Arc;
 
@@ -24,7 +25,6 @@ use crate::basis::nest::RegionKind;
 use crate::basis::room::conductor;
 use crate::basis::room::scheduler;
 use crate::basis::unit::team::kernel;
-use crate::metal::board;
 use crate::metal::hart;
 use crate::metal::hart::HartId;
 use crate::metal::image::ROOT_STACK_CANARY;
@@ -38,7 +38,19 @@ use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
 
+/// Executing image and ROOT stack reservation, independent of board layout.
+pub fn image_region() -> kernel_api::boot::platform::Region {
+    unsafe extern "C" {
+        static _kernel_base: u8;
+    }
+    let base = (&raw const _kernel_base).addr();
+    kernel_api::boot::platform::Region::new(base, crate::metal::image::root_stack_edge() - base)
+}
+
 pub fn start() -> Result<(), BootError> {
+    if !devices::ready() {
+        return Err(BootError::Description("devices not configured"));
+    }
     scheduler::init().map_err(BootError::Scheduler)?;
     register_runtime_hooks();
 
@@ -89,7 +101,7 @@ pub(crate) fn register_runtime_hooks() {
 }
 
 fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Task>>, BootError> {
-    let Some(region) = board::info().initrd() else {
+    let Some(region) = facts::info().initrd() else {
         return Ok(None);
     };
     let blob: &'static [u8] =

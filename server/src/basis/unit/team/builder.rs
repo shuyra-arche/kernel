@@ -126,8 +126,7 @@ pub(crate) fn make_team(
     .map_err(|_| NestError::OutOfMemory)?;
     let team = Arc::try_new(Team {
         nest,
-        external: crate::basis::cell::projection::Admission::new()
-            .map_err(|_| NestError::OutOfMemory)?,
+        external: crate::basis::nest::authority::admission::Admission::new(),
         id,
         creator,
         cells: crate::basis::cell::page::Owner::team(id).map_err(|_| NestError::OutOfMemory)?,

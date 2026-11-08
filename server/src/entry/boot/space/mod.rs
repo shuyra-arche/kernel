@@ -13,14 +13,14 @@ use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
 use crate::basis::nest::{Nest, NestError};
 use crate::basis::unit::team;
-use crate::metal::board;
+use crate::entry::boot::facts;
 use crate::metal::generic::mmu::Attributes;
 use crate::metal::hart;
 use crate::metal::image::kernel_edge;
 use crate::metal::layout::HART_FRAME_BASE;
 use crate::metal::layout::TRAMPOLINE;
 use crate::metal::layout::trampoline_pa;
-use crate::metal::mmu::riscv::mode;
+use crate::metal::mmu::mode;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -44,7 +44,7 @@ unsafe extern "C" {
 pub fn init() -> NestResult<()> {
     (|| -> Result<(), NestError> {
         unsafe {
-            let m = board::info();
+            let m = facts::info();
             let dram = m.memory.envelope();
 
             if crate::metal::mmu::canonical(dram.range().end) > mode::upper() {
@@ -168,7 +168,7 @@ pub fn init() -> NestResult<()> {
 
             team::init_kernel(kernel_space.clone())?;
             hart::mark_online();
-            crate::metal::mmu::riscv::activate(kernel_space.root());
+            crate::metal::mmu::activate(kernel_space.root());
             #[cfg(debug_assertions)]
             crate::metal::layout::validate();
 

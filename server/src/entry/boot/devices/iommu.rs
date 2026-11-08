@@ -7,74 +7,33 @@ use crate::basis::nest::Access;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
 use crate::basis::unit::team::kernel;
-use crate::metal::board;
-use crate::metal::iommu::riscv::Engine;
-use crate::metal::iommu::riscv::Phase;
-use crate::metal::iommu::riscv::controllers::CONTROLLERS;
-use crate::metal::iommu::riscv::controllers::Controllers;
-use crate::metal::iommu::riscv::mmio::Mmio;
-use crate::metal::iommu::riscv::topology::Topology;
+use crate::metal::iommu::Engine;
+use crate::metal::iommu::Phase;
+use crate::metal::iommu::controllers::CONTROLLERS;
+use crate::metal::iommu::controllers::Controllers;
+use crate::metal::iommu::mmio::Mmio;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PhysAddr;
 
 const STEP_BUDGET: usize = 1_000_000;
 
-pub(in super::super) fn init() -> Result<(), PendFail> {
-    let tree = board::device_tree().ok_or(PendFail::Denied)?;
-    let regions = super::iommu_regions(&tree)?;
+pub(in super::super) fn init(
+    description: kernel_api::boot::platform::devices::Devices<'_>,
+) -> Result<(), PendFail> {
+    let regions = description.controllers;
     if regions.is_empty() {
         return Ok(());
     }
-    // The fence-only MMIO backend has been validated for coherent QEMU virt.
-    // Other platforms need an explicit coherence/order contract before binding.
-    if !tree.all_nodes().next().is_some_and(|root| {
-        root.compatible().is_some_and(|c| {
-            c.all()
-                .any(|s| matches!(s, "riscv-virtio" | "riscv-virtio,qemu"))
-        })
-    }) {
-        return Err(PendFail::Denied);
-    }
-    let dram = board::info().memory.envelope();
-    let edge = dram.base.checked_add(dram.size).ok_or(PendFail::Denied)?;
-    for (index, region) in regions.iter().enumerate() {
-        if region.size != 4096
-            || region.base == 0
-            || !region.base.is_multiple_of(4096)
-            || (region.base < edge && dram.base < region.base + region.size)
-            || regions[..index].iter().any(|prior| prior.overlaps(*region))
-        {
-            return Err(PendFail::Denied);
-        }
-    }
-    let topology = Topology::discover(&tree).map_err(|_| PendFail::Denied)?;
-    // Never silently skip reserved but disabled/unresolved hardware: its initial
-    // DMA state is unknown. Reject the whole setup before starting any engine.
-    if regions
-        .iter()
-        .any(|region| !topology.controllers().any(|base| base == region.base))
-    {
-        return Err(PendFail::Denied);
-    }
-    super::validate(&tree)?;
-    if regions.len() != 1 {
-        return Err(PendFail::Denied);
-    }
-    let route = crate::metal::iommu::riscv::interrupt::plan::Plan::discover(
-        &tree,
-        board::info().hart,
-        crate::metal::hart::hart_id(),
-        regions[0].base,
-    )
-    .map_err(|_| PendFail::Denied)?;
+    let route = description.interrupt.ok_or(PendFail::Denied)?;
     let plic = super::external::mapped(route.base, route.size)?;
-    unsafe { crate::metal::iommu::riscv::interrupt::install(plic, route) }
+    unsafe { crate::metal::iommu::interrupt::install(plic, route) }
         .map_err(|_| PendFail::Denied)?;
     let mut storage = CONTROLLERS.lock();
     if storage.is_some() {
         return Err(PendFail::Denied);
     }
-    *storage = Some(Controllers::new(topology).map_err(|_| PendFail::OutOfMemory)?);
+    *storage =
+        Some(Controllers::new(regions.iter().map(|r| r.base)).map_err(|_| PendFail::OutOfMemory)?);
     let controllers = storage.as_mut().expect("installed controller registry");
     let nest = &kernel().ok_or(PendFail::Denied)?.nest;
     for region in regions {
@@ -103,7 +62,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
             fault.map_err(|_| PendFail::OutOfMemory)?,
             completion.map_err(|_| PendFail::OutOfMemory)?,
         ];
-        // SAFETY: trusted QEMU platform discovery; Kernel-only MMIO mapping and
+        // SAFETY: trusted normalized platform admission; Kernel-only MMIO mapping and
         // all overlapping boot authorities are withheld. No other MMIO owner exists.
         let registers = unsafe { Mmio::new(mapping.initial_start().as_usize(), region.base) };
         let mut engine = Engine::new(registers, cells).map_err(|_| PendFail::OutOfMemory)?;
@@ -141,13 +100,13 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     Ok(())
 }
 
-fn failure(error: crate::metal::iommu::riscv::EngineError) -> PendFail {
+fn failure(error: crate::metal::iommu::EngineError) -> PendFail {
     log::error!("iommu: command engine failure: {error:?}; hardware pages retained");
     PendFail::Denied
 }
 
 pub(in super::super) fn shutdown() {
-    crate::metal::iommu::riscv::interrupt::report();
+    crate::metal::iommu::interrupt::report();
     let mut storage = CONTROLLERS.lock();
     let Some(controllers) = storage.as_mut() else {
         return;

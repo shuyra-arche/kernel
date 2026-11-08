@@ -120,7 +120,6 @@ dependencies = [
  "bitflags",
  "erra",
  "fack",
- "fdt",
  "hashbrown",
  "kernel-api",
  "log",

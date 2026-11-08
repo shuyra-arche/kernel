@@ -87,7 +87,7 @@ fn wait() -> usize {
         let redeemed = deadline::elapsed() && sign::redeem();
         beacon::idle(me);
 
-        let external_pending = crate::basis::cell::projection::maintain();
+        let external_pending = crate::basis::nest::authority::external::maintain();
         let fallback = if beacon::shutting_down() || external_pending {
             crate::metal::clock::now()
                 .as_ticks()
@@ -98,7 +98,7 @@ fn wait() -> usize {
         deadline::arm(fallback);
         interrupt::enable_external();
         if interrupt::external_pending()
-            && !interrupt::external().is_some_and(|route| route.handle())
+            && !crate::basis::room::interrupt::external().is_some_and(|route| route.handle())
         {
             crate::basis::room::interrupt::deliver_external(true);
         }

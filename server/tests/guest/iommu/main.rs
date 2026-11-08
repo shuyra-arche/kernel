@@ -12,15 +12,12 @@ mod edu;
 #[allow(dead_code)]
 #[path = "../../support/iommu/mod.rs"]
 pub(crate) mod iommu;
-#[path = "../../../src/metal/iommu/riscv/mmio.rs"]
+#[path = "../../../src/metal/riscv/iommu/mmio.rs"]
 mod mmio;
 #[allow(dead_code)] // This M-mode fixture uses only ordinary authority admission.
 #[path = "../../../src/entry/boot/devices/plan/mod.rs"]
 mod plan;
 mod pool;
-
-#[path = "../../../src/basis/cell/projection/admission.rs"]
-pub(crate) mod admission;
 
 // This hardware-only harness needs serial identities, not registration tables.
 #[path = "../../../src/basis/name/serial.rs"]
@@ -29,21 +26,34 @@ mod name {
     pub(crate) use crate::serial::Serial;
 }
 
+#[allow(dead_code)]
+#[path = "../../../src/basis/nest/translation/external/state.rs"]
+pub(crate) mod external;
+#[allow(dead_code)]
+#[path = "../../../src/basis/nest/memo/publication/receipt.rs"]
+pub(crate) mod publication;
+#[allow(dead_code)]
+#[path = "../../support/iommu/target.rs"]
+pub(crate) mod target;
+
 mod basis {
     pub(crate) use crate::name;
+    pub(crate) mod nest {
+        pub(crate) use crate::iommu::Error as PublicationError;
+        pub(crate) mod memo {
+            pub(crate) use crate::publication;
+        }
+    }
     pub(crate) mod cell {
         pub(crate) use crate::cell as page;
-        pub(crate) mod projection {
-            pub(crate) use crate::admission;
-        }
     }
 }
 
 use ::core::fmt;
 use ::core::fmt::Write;
 use ::core::sync::atomic::Ordering;
-use iommu::riscv::Engine;
-use iommu::riscv::Phase;
+use iommu::Engine;
+use iommu::Phase;
 use pool::POOL;
 use pool::RETURNS;
 
@@ -198,6 +208,8 @@ mod metal {
     pub(crate) mod generic {
         pub(crate) use crate::iommu::contract as iommu;
     }
-    pub(crate) mod board { pub(crate) use crate::description as tree; }
+    pub(crate) mod board {
+        pub(crate) use crate::description as tree;
+    }
     pub(crate) use crate::iommu;
 }

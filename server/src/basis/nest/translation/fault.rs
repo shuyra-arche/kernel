@@ -70,12 +70,15 @@ impl FaultOutcome {
         }
         let page = address.page_align();
         let offset = PageOffset::new(mapping.page_index(page));
-        if let Ok((_, flags)) = state.root.walk_ref_geometry(page, geometry)
+        if let Ok((_, flags)) = state
+            .root
+            .cpu()
+            .and_then(|table| table.walk_ref_geometry(page, geometry))
             && kind.satisfies(flags)
         {
             return Self::Resolved;
         }
-        if inner.explicit || inner.memo(offset.get()).is_some() {
+        if inner.explicit || state.memos.controlled(&mapping, offset.get()) {
             return Self::Wait(mapping.identity());
         }
         match inner.source.can_materialize(offset) {

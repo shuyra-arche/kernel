@@ -2,13 +2,11 @@ use ::core::fmt;
 use ::core::fmt::Write;
 
 use crate::basis::nest::NestError;
-use crate::entry::report::halt;
 use crate::metal::allocator::InitError;
-use crate::metal::board::MachineError;
 use crate::metal::clock::ClockError;
 use crate::metal::console::Sink;
 use crate::metal::hart::HartId;
-use crate::metal::mmu::riscv::mode::SatpError;
+use crate::metal::mmu::mode::SatpError;
 
 mod map_operation;
 mod resource_operation;
@@ -20,10 +18,7 @@ const TITLE: &str = "shuyra: boot failed";
 
 #[derive(Debug)]
 pub enum BootError {
-    Machine {
-        dtp: usize,
-        source: MachineError,
-    },
+    Description(&'static str),
     Allocator(erra::Error<InitError>),
     PagingMode(SatpError),
     KernelSpace(erra::Error<NestError>),
@@ -69,10 +64,9 @@ impl BootError {
             }};
         }
         match self {
-            Self::Machine { dtp, source } => {
-                field!("operation", "read machine information");
-                field!("dtb", "{dtp:#x}");
-                field!("reason", "{source}");
+            Self::Description(reason) => {
+                field!("operation", "admit boot description");
+                field!("reason", "{reason}");
             }
             Self::Allocator(source) => {
                 field!("operation", "initialize allocator");
@@ -138,14 +132,7 @@ impl BootError {
 }
 
 pub fn fail(error: BootError) -> ! {
-    halt::stop_boot();
+    crate::metal::stop::stop_boot();
     error.print(&mut Sink);
-    let _ = sbi::SystemResetCall::new(sbi::fid::SystemReset::SystemReset)
-        .args(sbi::ecall::SArgs {
-            a0: 0,
-            a1: 1,
-            ..Default::default()
-        })
-        .call();
-    halt::halt_loop()
+    crate::metal::stop::failed()
 }

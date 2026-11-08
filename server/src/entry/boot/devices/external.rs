@@ -1,22 +1,20 @@
 //! Validate a trusted external resource and its immutable translation route.
 //! Hardware discovery/configuration is performed by the caller's boot image.
 use crate::basis::flat::{BorrowedRegion, Flat};
+use crate::basis::nest::authority::aperture::{APERTURES, Aperture};
 use crate::basis::nest::{Access, Placement, RegionKind};
 use crate::basis::unit::team::kernel;
-use crate::metal::board;
 use crate::metal::generic::iommu::Quiescence;
-use crate::metal::iommu::aperture::{APERTURES, Aperture};
-use crate::metal::iommu::riscv::port::Requester;
-use crate::metal::iommu::riscv::topology::Topology;
+use crate::metal::iommu::port::Requester;
 use alloc::boxed::Box;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
 
-/// An exclusively owned, platform-configured resource window. Host/requester
-/// are resolved through validated firmware topology, not used as a raw DID.
+/// An exclusively owned resource and normalized controller/source identity.
+/// Firmware and bus identities are resolved by the trusted integration owner.
 pub struct ExternalRoute {
-    pub host: usize,
-    pub requester: u16,
+    pub controller: usize,
+    pub requester: u32,
     pub base: usize,
     pub size: usize,
     pub proof: Box<dyn Quiescence>,
@@ -52,30 +50,18 @@ pub(in super::super) fn mapped(base: usize, size: usize) -> Result<usize, PendFa
 }
 
 pub(in super::super) fn init(route: ExternalRoute) -> Result<(), PendFail> {
-    let tree = board::device_tree().ok_or(PendFail::Denied)?;
-    super::validate(&tree)?;
-    let topology = Topology::discover(&tree).map_err(|_| PendFail::Denied)?;
-    let did = topology
-        .resolve(route.host, route.requester)
-        .map_err(|_| PendFail::Denied)?
-        .device();
-    let region = board::tree::mmio::Region::new(route.base, route.size)?;
-    let end = route.base.checked_add(route.size).ok_or(PendFail::Denied)?;
-    let ram = board::info().memory.envelope();
-    super::plan::Plan::discover(&tree, ram.base, ram.size)?.external(&tree, region)?;
-    if !route.base.is_multiple_of(PAGE_SIZE)
-        || !route.size.is_multiple_of(PAGE_SIZE)
-        || region.overlaps(board::tree::mmio::Region::new(ram.base, ram.size)?)
-        || crate::metal::interrupt::external().is_some_and(|irq| irq.overlaps(route.base, end))
-        || topology
-            .configurations()
-            .any(|(base, size)| route.base < base + size && base < end)
-        || topology
-            .controllers()
-            .any(|base| route.base < base + PAGE_SIZE && base < end)
+    let description = super::admission::description()?;
+    let region = kernel_api::boot::platform::Region::new(route.base, route.size);
+    description.admits(region)?;
+    if !description
+        .controllers
+        .iter()
+        .any(|r| r.base == route.controller)
+        || route.requester >= 64
     {
         return Err(PendFail::Denied);
     }
+    let did = route.requester;
     let mut apertures = APERTURES.lock();
     if !apertures.is_empty() {
         return Err(PendFail::Denied);
@@ -89,7 +75,7 @@ pub(in super::super) fn init(route: ExternalRoute) -> Result<(), PendFail> {
         .map_err(|_| PendFail::OutOfMemory)?
         .whole();
     let port = Box::try_new(Requester {
-        host: route.host,
+        controller: route.controller,
         id: route.requester,
         proof: Some(route.proof),
     })
