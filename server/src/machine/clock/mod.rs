@@ -57,3 +57,27 @@ pub(crate) fn duration_to_ticks(d: Duration) -> u64 {
     let t = ns.saturating_mul(hertz() as u128) / NANOS_PER_SEC;
     t.min(u64::MAX as u128) as u64
 }
+
+/// Convert an absolute ABI deadline once, rounding up to prevent early wakeups.
+pub(crate) fn deadline(wait: kernel_api::model::wait::Wait) -> Option<u64> {
+    use kernel_api::model::wait::Wait;
+    match wait {
+        Wait::Infinite => None,
+        Wait::Poll => Some(now().as_ticks()),
+        Wait::At(ns) => {
+            let ticks = (ns as u128 * hertz() as u128)
+                .div_ceil(NANOS_PER_SEC)
+                .min(u64::MAX as u128) as u64;
+            Some(CYCLE.load(Ordering::Relaxed).saturating_add(ticks))
+        }
+    }
+}
+pub(crate) fn remaining(at: Option<u64>) -> Duration {
+    at.map_or(Duration::MAX, |at| {
+        Duration::from_nanos(
+            ((at.saturating_sub(now().as_ticks()) as u128 * NANOS_PER_SEC)
+                .div_ceil(hertz() as u128))
+            .min(u64::MAX as u128) as u64,
+        )
+    })
+}

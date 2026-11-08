@@ -1,6 +1,5 @@
 use super::outcome::Outcome;
 use super::outcome::answer;
-use super::outcome::answer_pair;
 use crate::basis::pend;
 use crate::basis::room::Handoff;
 use crate::basis::room::conductor::current;
@@ -27,15 +26,23 @@ use kernel_api::model::wait::Wait;
 pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskIdent>) -> Outcome {
     drop(ident);
     match call {
-        SignCall::Next { after } => answer_pair(
+        SignCall::Revoke {
+            token,
+            target,
+            branch,
+        } => answer(
             frame,
-            current()
-                .running_task()
-                .ok_or(SignFail::Denied)
-                .map(|task| task.signs.next(after)),
+            (|| {
+                let _commit = crate::basis::commit();
+                let task = current().running_task().ok_or(SignFail::Denied)?;
+                let target = muster(target)
+                    .and_then(|weak| weak.upgrade())
+                    .ok_or(SignFail::Denied)?;
+                task.signs.revoke(token, &target.signs, branch).map(|()| 0)
+            })(),
         ),
         SignCall::Create => answer(frame, create()),
-        SignCall::Close { token } => answer(
+        SignCall::Delete { token } => answer(
             frame,
             (|| {
                 let _commit = crate::basis::commit();
@@ -43,7 +50,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
                 task.signs.close(task.ident.id, token).map(|()| 0)
             })(),
         ),
-        SignCall::Release { token } => answer(
+        SignCall::Return { token } => answer(
             frame,
             (|| {
                 let _commit = crate::basis::commit();
@@ -51,7 +58,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
                 task.signs.release(task.ident.id, token).map(|()| 0)
             })(),
         ),
-        SignCall::Delegate {
+        SignCall::Accord {
             token,
             target,
             rights,
@@ -65,20 +72,20 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
                 crate::basis::sign::delegate(&task, &target, token, rights).map(SignId::get)
             })(),
         ),
-        SignCall::Route { token, source } => {
+        SignCall::Attach { token, source } => {
             answer(
                 frame,
                 attach(token, |task| typed_cell(task, source)).map(|()| 0),
             );
         }
-        SignCall::Unroute { token, source } => {
+        SignCall::Detach { token, source } => {
             let _commit = crate::basis::commit();
             let result = with_group(token, SignRights::ROUTE, |task, group| {
                 endpoint::detach(group, task.ident.id, source)
             });
             answer(frame, result.map(|()| 0));
         }
-        SignCall::Listen { token, millis } => return await_group(frame, token, millis),
+        SignCall::Listen { token, wait } => return await_group(frame, token, wait),
         SignCall::Trigger { token } => answer(
             frame,
             with_group(token, SignRights::TRIGGER, |_, endpoint| {
@@ -86,11 +93,10 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
             })
             .map(|()| 0),
         ),
-        SignCall::Consume { token } => answer(
+        SignCall::Consume { token, sequence } => answer(
             frame,
             with_group(token, SignRights::LISTEN, |_, endpoint| {
-                endpoint::consume(endpoint)?;
-                crate::basis::room::interrupt::acknowledge(endpoint);
+                endpoint::consume(endpoint, sequence)?;
                 Ok(0)
             }),
         ),
@@ -194,13 +200,7 @@ pub(crate) fn typed_cell(actor: &Arc<Task>, source: SignSource) -> Result<Route,
         SignSource::Join { target } => {
             let selected =
                 crate::basis::unit::join::observe(actor, target).map_err(|_| SignFail::Denied)?;
-            let wait = crate::basis::unit::join::JoinWait::new(
-                selected.clone(),
-                actor.ident.id,
-                false,
-                Wait::POLL,
-            );
-            keys.push((wait.target.key(), wait.target.life()));
+            keys.push((selected.key(), selected.life()));
             Watch::Join { target, selected }
         }
         SignSource::Inspect { task: id, token } => {

@@ -1,4 +1,5 @@
 pub const MAGIC: [u8; 8] = *b"SQBOOT01";
+pub const VERSION: u16 = 2;
 pub const PAGE: usize = crate::model::cell::PAGE_SIZE;
 pub const HEADER: usize = 32;
 pub const RECORD: usize = 40;
@@ -27,8 +28,8 @@ fn number(bytes: &[u8], at: usize, len: usize) -> Option<usize> {
 impl<'a> Capsule<'a> {
     pub fn parse(bytes: &'a [u8]) -> Option<Self> {
         if bytes.get(..8)? != MAGIC
-            || number(bytes, 8, 2)? != 1
-            || bytes.get(10..12)? != [12, 0]
+            || number(bytes, 8, 2)? != VERSION as usize
+            || bytes.get(10..12)? != [12, crate::abi::VERSION as u8]
             || number(bytes, 24, 8)? != bytes.len()
         {
             return None;

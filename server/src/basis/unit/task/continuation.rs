@@ -6,7 +6,7 @@ use alloc::sync::Arc;
 #[derive(Clone)]
 pub(crate) enum WaitCall {
     Value { deadline: Option<u64> },
-    Join(crate::basis::unit::join::JoinWait),
+    Sleep { deadline: u64 },
     Sign(crate::basis::sign::endpoint::AwaitWait),
 }
 
@@ -19,6 +19,34 @@ pub(crate) enum Resumption {
 impl WaitCall {
     pub(crate) fn resume(self, task: &Arc<Task>) -> Resumption {
         match self {
+            Self::Sleep { deadline } => {
+                if clock::now().as_ticks() < deadline {
+                    let key = crate::basis::sign::WakeKey::Alarm {
+                        task: task.ident.id,
+                    };
+                    if crate::basis::sign::requeue(
+                        task,
+                        key,
+                        task.life(),
+                        clock::remaining(Some(deadline)),
+                        Self::Sleep { deadline },
+                        (),
+                    )
+                    .is_ok()
+                    {
+                        return Resumption::Waiting;
+                    }
+                    let frame = unsafe {
+                        &mut *(task.ident.frame_pa.as_usize()
+                            as *mut crate::machine::switcher::context::TrapContext)
+                    };
+                    frame.gpr.set_x(
+                        crate::machine::switcher::context::Gprs::A0,
+                        (-2isize) as usize,
+                    );
+                }
+                Resumption::Complete
+            }
             Self::Value { deadline } => {
                 use crate::machine::switcher::context::{Gprs, TrapContext};
                 let timely = deadline.is_none_or(|at| clock::now().as_ticks() < at);
@@ -26,7 +54,6 @@ impl WaitCall {
                 frame.gpr.set_x(Gprs::A0, timely as usize);
                 Resumption::Complete
             }
-            Self::Join(join) => crate::basis::unit::join::wait::resume(task, join),
             Self::Sign(wait) => crate::basis::sign::endpoint::wait::resume(task, wait),
         }
     }
@@ -37,11 +64,11 @@ impl WaitCall {
         }
     }
 
-    pub(crate) fn deadline(&self, duration: core::time::Duration) -> Option<u64> {
+    pub(crate) fn deadline(&self, _duration: core::time::Duration) -> Option<u64> {
         match self {
             Self::Value { deadline } => *deadline,
-            _ => (duration != core::time::Duration::MAX)
-                .then(|| clock::now().add(duration).as_ticks()),
+            Self::Sleep { deadline } => Some(*deadline),
+            Self::Sign(wait) => wait.deadline,
         }
     }
 }

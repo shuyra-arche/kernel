@@ -9,8 +9,6 @@ use kernel_api::model::sign::SignSource;
 
 use crate::basis::pend;
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::join::JoinTarget;
-use crate::basis::unit::join::JoinWait;
 use crate::basis::unit::life::Life;
 use crate::basis::unit::task::Task;
 
@@ -70,21 +68,20 @@ impl Route {
                 };
                 ready.then_some(None)
             }
-            Watch::Join { selected, .. } => {
-                if let JoinTarget::Team(team) = selected {
-                    if team.next(actor.ident.id).is_some() {
-                        return Some(None);
+            Watch::Join { target, selected } => {
+                match crate::basis::unit::join::observe(actor, *target).and_then(|current| {
+                    if selected.same(&current) {
+                        Ok(current)
+                    } else {
+                        Err(kernel_api::abi::call::unit::UnitFail::Denied)
                     }
-                }
-                let join = JoinWait::new(
-                    selected.clone(),
-                    actor.ident.id,
-                    false,
-                    kernel_api::model::wait::Wait::POLL,
-                );
-                match join.poll() {
-                    Ok(kernel_api::model::unit::JoinReply::Pending) => None,
-                    Ok(_) => Some(None),
+                }) {
+                    Ok(crate::basis::unit::join::JoinTarget::Task(member)) => {
+                        member.exit().is_some().then_some(None)
+                    }
+                    Ok(crate::basis::unit::join::JoinTarget::Team(team)) => {
+                        (!team.admitting() && team.all_reaped()).then_some(None)
+                    }
                     Err(_) => Some(Some(SignEventFail::Denied)),
                 }
             }

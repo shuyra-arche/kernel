@@ -11,19 +11,16 @@ use alloc::sync::Weak;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
-use core::time::Duration;
 
 use crate::machine::clock;
 use crate::machine::sync::Level;
 use crate::machine::sync::SpinLock;
 
-use kernel_api::abi::call::clone_view::CloneFail;
 use kernel_api::model::clone_view::CloneCondition;
 use kernel_api::model::clone_view::CloneLimits;
 use kernel_api::model::identity::TaskId;
 
 use crate::basis::pend::Need;
-use crate::basis::room::Handoff;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::life::Life;
@@ -43,7 +40,6 @@ pub struct CloneView {
     pending: SpinLock<Pending>,
     limits: CloneLimits,
     alarmed: AtomicBool,
-    stuck: AtomicBool,
 }
 
 impl CloneView {
@@ -63,7 +59,6 @@ impl CloneView {
             pending: SpinLock::new_level(Level::L3, Pending::Queue(Queue::default())),
             limits,
             alarmed: AtomicBool::new(false),
-            stuck: AtomicBool::new(false),
         })
         .map_err(|_| crate::basis::nest::NestError::OutOfMemory)
     }
@@ -111,36 +106,6 @@ pub(crate) fn need(dir: CloneCondition) -> Need {
     }
 }
 
-pub(crate) fn wait(
-    meta: &CloneView,
-    dir: CloneCondition,
-    dur: Duration,
-) -> Result<Handoff<bool>, CloneFail> {
-    if !meta.alive() {
-        return Err(CloneFail::Dead);
-    }
-    if meta.ready(dir) {
-        return Ok(Handoff::Resume(true));
-    }
-    if dur != Duration::ZERO && dir == CloneCondition::Empty && hand_age(meta).is_none() {
-        note_shape(meta);
-    }
-    if dur == Duration::ZERO {
-        return Ok(Handoff::Resume(false));
-    }
-    let out = sign::wait(key(meta, dir), meta.life(), dur)?;
-    if dir == CloneCondition::Empty
-        && let Some((from, len, ms)) = hand_age(meta)
-    {
-        note_hold(meta, from, ms);
-        alarm_stuck(meta, from, len, ms);
-    }
-    Ok(match out {
-        Handoff::Resume(()) => Handoff::Resume(meta.alive() && meta.ready(dir)),
-        Handoff::Switch(pa) => Handoff::Switch(pa),
-    })
-}
-
 static HOLD_N: AtomicUsize = AtomicUsize::new(0);
 static HOLD_MAX_MS: AtomicUsize = AtomicUsize::new(0);
 static HOLD_WORST: AtomicUsize = AtomicUsize::new(0);
@@ -151,55 +116,8 @@ static ALARM_N: AtomicUsize = AtomicUsize::new(0);
 const HOLD_MS: usize = 1000;
 const ALARM_MAX: usize = 8;
 
-fn note_shape(meta: &CloneView) {
-    static N: AtomicUsize = AtomicUsize::new(0);
-    if meta.stuck.swap(true, Ordering::Relaxed) {
-        return;
-    }
-    N.fetch_add(1, Ordering::Relaxed);
-    if N.load(Ordering::Relaxed) > ALARM_MAX {
-        return;
-    }
-    let shape = match &*meta.pending.lock() {
-        Pending::Queue(q) => {
-            if q.hands.is_empty() {
-                "queue-empty"
-            } else if q.head().is_none() {
-                "queue-reserved"
-            } else if q.taking {
-                "queue-taking"
-            } else {
-                "queue-hands"
-            }
-        }
-        Pending::Dead => "dead",
-    };
-    crate::putln!(
-        "view: push not ready clone_view#{} owner={} pending={} live={}",
-        meta.id,
-        meta.owner.get(),
-        shape,
-        HANDS_LIVE.load(Ordering::Relaxed),
-    );
-}
-
 fn elapsed_ms(at: u64) -> usize {
     clock::ticks_to_duration(clock::uptime_ticks().wrapping_sub(at)).as_millis() as usize
-}
-
-fn hand_age(meta: &CloneView) -> Option<(TaskId, usize, usize)> {
-    let pending = meta.pending.lock();
-    let (from, len, at) = match &*pending {
-        Pending::Queue(q) => match q.head() {
-            Some(hand) => (hand.from, hand.buf.len(), hand.at),
-            None => return None,
-        },
-        _ => return None,
-    };
-    if at == 0 {
-        return None;
-    }
-    Some((from, len, elapsed_ms(at)))
 }
 
 fn note_hold(meta: &CloneView, from: TaskId, ms: usize) {

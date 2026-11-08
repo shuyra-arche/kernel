@@ -6,17 +6,37 @@ use crate::basis::unit::task::Task;
 use crate::machine::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicBool, AtomicUsize};
 use kernel_api::abi::call::sign::SignFail;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::sign::SignId;
 use kernel_api::model::sign::SignRights;
 
+struct Authority {
+    active: AtomicBool,
+    parent: Option<Arc<Authority>>,
+    depth: usize,
+}
+impl Authority {
+    fn alive(&self) -> bool {
+        let mut at = self;
+        loop {
+            if !at.active.load(Ordering::Acquire) {
+                return false;
+            }
+            match &at.parent {
+                Some(parent) => at = parent,
+                None => return true,
+            }
+        }
+    }
+}
 struct Handle {
     id: SignId,
     endpoint: Arc<Endpoint>,
     rights: SignRights,
+    authority: Arc<Authority>,
 }
 #[derive(Default)]
 struct Entries {
@@ -35,6 +55,25 @@ impl Table {
         rights: SignRights,
         own: bool,
     ) -> Result<SignId, SignFail> {
+        self.insert(endpoint, rights, own, None)
+    }
+    fn insert(
+        &self,
+        endpoint: Arc<Endpoint>,
+        rights: SignRights,
+        own: bool,
+        parent: Option<Arc<Authority>>,
+    ) -> Result<SignId, SignFail> {
+        let depth = parent.as_ref().map_or(0, |parent| parent.depth + 1);
+        if depth > 64 {
+            return Err(SignFail::OoM);
+        }
+        let authority = Arc::try_new(Authority {
+            active: AtomicBool::new(true),
+            parent,
+            depth,
+        })
+        .map_err(|_| SignFail::OoM)?;
         static NEXT: AtomicUsize = AtomicUsize::new(1);
         let id = NEXT
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
@@ -52,6 +91,7 @@ impl Table {
             id,
             endpoint,
             rights,
+            authority,
         });
         Ok(id)
     }
@@ -63,6 +103,9 @@ impl Table {
                 .iter()
                 .find(|handle| handle.id == id)
                 .ok_or(SignFail::Denied)?;
+            if !handle.authority.alive() {
+                return Err(SignFail::Dead);
+            }
             if !handle.rights.contains(need) {
                 return Err(SignFail::Denied);
             }
@@ -73,16 +116,45 @@ impl Table {
         }
         Ok(endpoint)
     }
-    pub(crate) fn next(&self, after: usize) -> (usize, usize) {
-        self.0
-            .lock()
+    pub(crate) fn revoke(
+        &self,
+        id: SignId,
+        target: &Table,
+        branch: SignId,
+    ) -> Result<(), SignFail> {
+        let authority = self.authority(id)?;
+        let endpoint = {
+            let entries = target.0.lock();
+            let handle = entries
+                .handles
+                .iter()
+                .find(|handle| handle.id == branch)
+                .ok_or(SignFail::Denied)?;
+            if !handle
+                .authority
+                .parent
+                .as_ref()
+                .is_some_and(|parent| Arc::ptr_eq(parent, &authority))
+            {
+                return Err(SignFail::Denied);
+            }
+            handle.authority.active.store(false, Ordering::Release);
+            handle.endpoint.clone()
+        };
+        endpoint::authority_changed(&endpoint);
+        Ok(())
+    }
+    fn authority(&self, id: SignId) -> Result<Arc<Authority>, SignFail> {
+        let entries = self.0.lock();
+        let handle = entries
             .handles
             .iter()
-            .filter(|handle| handle.id.get() > after)
-            .min_by_key(|handle| handle.id.get())
-            .map_or((0, 0), |handle| {
-                (handle.id.get(), handle.rights.bits() as usize)
-            })
+            .find(|handle| handle.id == id)
+            .ok_or(SignFail::Denied)?;
+        if !handle.authority.alive() {
+            return Err(SignFail::Dead);
+        }
+        Ok(handle.authority.clone())
     }
     pub(crate) fn close(&self, actor: TaskId, id: SignId) -> Result<(), SignFail> {
         let endpoint = self.get(id, SignRights::empty())?;
@@ -105,12 +177,13 @@ impl Table {
                 .position(|handle| handle.id == id)
                 .ok_or(SignFail::Denied)?;
             let handle = entries.handles.remove(at);
-            let last = !entries
-                .handles
-                .iter()
-                .any(|other| Arc::ptr_eq(&handle.endpoint, &other.endpoint));
+            handle.authority.active.store(false, Ordering::Release);
+            let last = !entries.handles.iter().any(|other| {
+                other.authority.alive() && Arc::ptr_eq(&handle.endpoint, &other.endpoint)
+            });
             (handle, last)
         };
+        endpoint::authority_changed(&handle.endpoint);
         if last {
             endpoint::release_actor(&handle.endpoint, actor);
         }
@@ -127,6 +200,8 @@ impl Table {
             endpoint::seal(&endpoint);
         }
         for handle in entries.handles {
+            handle.authority.active.store(false, Ordering::Release);
+            endpoint::authority_changed(&handle.endpoint);
             endpoint::release_actor(&handle.endpoint, actor);
             super::wipe(WakeKey::SignHandle {
                 task: actor,
@@ -150,5 +225,7 @@ pub(crate) fn delegate(
         return Err(SignFail::Denied);
     }
     let endpoint = caller.signs.get(id, rights)?;
-    target.signs.install(endpoint, rights, false)
+    target
+        .signs
+        .insert(endpoint, rights, false, Some(caller.signs.authority(id)?))
 }

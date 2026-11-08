@@ -26,8 +26,7 @@ mod control;
 pub(crate) use continuation::Resumption;
 pub(crate) use continuation::WaitCall;
 mod ident;
-pub(super) mod life;
-mod prepared;
+pub(super) mod prepared;
 mod state;
 mod weak;
 

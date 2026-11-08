@@ -1,8 +1,8 @@
-error[E0277]: the trait bound `kernel_api::abi::call::room::operations::Reap: KernelCall` is not satisfied
+error[E0277]: the trait bound `kernel_api::abi::call::unit::operations::Exit: KernelCall` is not satisfied
  --> tests/abi/fixtures/fail/terminal_call.rs:5:17
   |
-5 |     returning::<Reap>();
-  |                 ^^^^ the trait `KernelCall` is not implemented for `kernel_api::abi::call::room::operations::Reap`
+5 |     returning::<Exit>();
+  |                 ^^^^ the trait `KernelCall` is not implemented for `kernel_api::abi::call::unit::operations::Exit`
   |
   = help: the following other types implement trait `KernelCall`:
             kernel_api::abi::call::cell::operations::Acquire

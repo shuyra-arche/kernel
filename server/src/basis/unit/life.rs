@@ -1,7 +1,6 @@
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 
-pub(crate) use super::task::life::TaskLife;
 pub(crate) use super::team::life::TeamLife;
 
 #[derive(Debug)]

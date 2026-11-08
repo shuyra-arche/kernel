@@ -54,9 +54,19 @@ impl AccordRequest {
 }
 
 impl PendInfo {
-    pub const WORDS: usize = 8;
-    pub const SIZE: usize = Self::WORDS * core::mem::size_of::<usize>();
+    pub const WORDS: usize = 11;
+    pub const SIZE: usize = Self::WORDS * super::WORD_BYTES;
+    pub fn to_bytes(self) -> [u8; Self::SIZE] {
+        let mut bytes = [0; Self::SIZE];
+        store_words(self.words(), &mut bytes);
+        bytes
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        Self::from_words(fetch_words(bytes)?)
+    }
     pub fn words(self) -> [usize; Self::WORDS] {
+        let mut range = [0; 6];
+        self.range.pack(&mut range, &mut 0);
         [
             self.token.get(),
             self.view.get(),
@@ -66,6 +76,9 @@ impl PendInfo {
             self.lender.get(),
             self.mark.get() as usize,
             self.status as usize,
+            range[0],
+            range[1],
+            range[2],
         ]
     }
     pub fn from_words(w: [usize; Self::WORDS]) -> Option<Self> {
@@ -81,6 +94,7 @@ impl PendInfo {
             lender: TaskId::new(w[5]),
             mark: Mark::new(w[6] as u64),
             status: PendStatus::of(w[7])?,
+            range: PendRange::unpack(&[w[8], w[9], w[10], 0, 0, 0], &mut 0).ok()?,
         })
     }
 }

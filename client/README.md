@@ -5,7 +5,7 @@
 
 | Module | Responsibility |
 | --- | --- |
-| `call::{cell,unit,room,...}` | Named typed calls, including terminal `room::reap` |
+| `call::{cell,unit,room,...}` | Named typed calls, including terminal `unit::exit` |
 | `invoke` | Execute a returning or terminal API operation |
 | `transport` | RV64 `ebreak` register boundary |
 
@@ -23,11 +23,10 @@ unexpectedly returns; it uses neither TLS nor a panic handler.
 
 Named signatures are declared in `src/call/definitions.rs`. The local macro only
 removes execution boilerplate and does not define ABI values or generate service
-protocols. Each domain imports the types it uses. Sign, View/Pend and Unit calls follow the current API model; old resource aliases
-are not retained. `call::room::reap(reason, note, len)` passes the three ABI fields
-directly; callers provide a valid note buffer and obey `abi::call::room::NOTE_MAX`.
-The old root `room::park(Duration)` and `room::reap(reason, Option<&str>)` adapters
-have been removed.
+protocols. Each domain imports the types it uses. `unit::exit` takes result,
+reason and a readable diagnostic note buffer, bounded by `abi::call::unit::NOTE_MAX`.
+`deadline_after(Duration)` converts a relative timeout once using Room Clock;
+reuse the returned Wait across retries to avoid extending the deadline.
 
 `call::pend::accord(request)` takes the address of `AccordRequest::to_bytes()`;
 keep that 64-byte buffer readable until the call returns. Use AccordTarget::Caller
@@ -43,7 +42,6 @@ cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-g
 
 Tests exercise public `invoke_with` with a recording transport. They do not
 execute the named native-trap wrappers; RV64 compilation checks those wrappers.
-Native call
-execution is verified by the consuming integration project. See the API
+The Kernel guest suite also executes real traps for Pend, Sign, Unit and Room. See the API
 [compatibility notes](../api/README.md#source-migration-and-abi-compatibility)
 before updating a consumer's Kernel pin.

@@ -41,14 +41,7 @@ impl AwaitWait {
             group,
             token,
             actor: Arc::downgrade(actor),
-            deadline: match wait {
-                kernel_api::model::wait::Wait::Forever => None,
-                _ => Some(
-                    crate::machine::clock::now()
-                        .add(wait.into_duration())
-                        .as_ticks(),
-                ),
-            },
+            deadline: crate::machine::clock::deadline(wait),
         }
     }
 
@@ -109,11 +102,7 @@ impl AwaitWait {
     }
 
     pub fn remaining(&self) -> Duration {
-        self.deadline.map_or(Duration::MAX, |at| {
-            crate::machine::clock::ticks_to_duration(
-                at.saturating_sub(crate::machine::clock::now().as_ticks()),
-            )
-        })
+        crate::machine::clock::remaining(self.deadline)
     }
 }
 

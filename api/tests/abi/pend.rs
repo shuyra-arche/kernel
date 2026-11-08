@@ -85,7 +85,7 @@ fn new_calls_do_not_reinterpret_retired_pend_registers() {
         PendCall::from_wire(Return::SLOT, &returned.pack()),
         Ok(returned.into())
     );
-    for slot in [4, 7, 10, 13] {
+    for slot in [4, 5, 7, 8, 9, 10, 13] {
         for words in [[0; 6], [1; 6], [usize::MAX; 6]] {
             assert_eq!(
                 EnvCall::from_wire((7usize << 32) | slot, &words),

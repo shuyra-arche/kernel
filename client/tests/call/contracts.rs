@@ -38,22 +38,24 @@ fn reply(value: (usize, usize, usize)) {
 }
 
 fn called(slot: usize, arguments: [usize; 6]) {
-    TRANSPORT.with_borrow(|transport| assert_eq!(transport.calls, vec![(slot, arguments)]));
+    TRANSPORT.with_borrow(|transport| {
+        assert_eq!(
+            transport.calls,
+            vec![(kernel_api::abi::PREFIX | slot, arguments)]
+        )
+    });
 }
 
 #[test]
 fn infallible_returns_keep_the_high_bit_even_in_a_fallible_domain() {
     reply((usize::MAX, 0, 0));
     assert_eq!(
-        invoke(kernel_api::abi::call::chrono::operations::Clock).unwrap(),
+        invoke(kernel_api::abi::call::room::operations::Clock).unwrap(),
         u64::MAX
     );
-    called((4usize << 32) | 1, [0; 6]);
-    reply((usize::MAX, 0, 0));
-    assert!(invoke(kernel_api::abi::call::room::operations::Wake { key: 19 }).unwrap());
-    called(4, [19, 0, 0, 0, 0, 0]);
+    called(4, [0; 6]);
     reply((0, 0, 0));
-    invoke(kernel_api::abi::call::room::operations::Starve).unwrap();
+    invoke(kernel_api::abi::call::room::operations::Yield).unwrap();
     called(0, [0; 6]);
 }
 
@@ -82,9 +84,11 @@ fn structured_arguments_keep_all_six_registers_and_the_explicit_slot() {
     })
     .unwrap();
     called((2usize << 32) | 9, [17, 23, 1, 3, 5, 6]);
-    let decoded =
-        kernel_api::abi::call::EnvCall::from_wire((2usize << 32) | 9, &[17, 23, 1, 3, 5, 6])
-            .unwrap();
+    let decoded = kernel_api::abi::call::EnvCall::from_wire(
+        kernel_api::abi::PREFIX | (2usize << 32) | 9,
+        &[17, 23, 1, 3, 5, 6],
+    )
+    .unwrap();
     assert!(
         matches!(decoded, kernel_api::abi::call::EnvCall::Cell(kernel_api::abi::call::cell::CellCall::SetAccess {
         team, mapping: decoded_mapping, selection: MappingSelection::Pages { offset: 3, count: 5 }, access: 6,
@@ -114,12 +118,12 @@ fn three_word_returns_are_preserved() {
     assert_eq!(
         invoke(kernel_api::abi::call::sign::operations::Listen {
             token: kernel_api::model::sign::SignId::new(token.get()),
-            millis: Wait::Forever
+            wait: Wait::Infinite
         })
         .unwrap(),
         expected
     );
-    called((11usize << 32) | 2, [17, usize::MAX, 0, 0, 0, 0]);
+    called((11usize << 32) | 2, [17, 2, 0, 0, 0, 0]);
 }
 
 #[test]
@@ -160,7 +164,7 @@ fn generic_invocation_orders_packing_transport_and_decode_once() {
 
 #[test]
 fn operations_return_their_own_types_without_a_domain_result_enum() {
-    use kernel_api::abi::call::{cell::operations::Release, chrono::operations::Clock};
+    use kernel_api::abi::call::{cell::operations::Release, room::operations::Clock};
     let reference =
         kernel_api::model::cell::FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap();
     let released: Result<(), erra::Error<CellFail>> =
@@ -183,24 +187,30 @@ fn conditional_waits_encode_address_value_deadline_and_wake_scope() {
         invoke(operations::WaitValue {
             address: VirtAddr::new(0x4000),
             expected: u32::MAX,
-            millis: Wait::Forever,
+            wait: Wait::Infinite,
         })
         .unwrap()
     );
-    called(7, [0x4000, u32::MAX as usize, usize::MAX, 0, 0, 0]);
+    called(2, [0x4000, u32::MAX as usize, 2, 0, 0, 0]);
     assert!(
-        matches!(EnvCall::from_wire(7, &[0x4000, 42, 0, 0, 0, 0]).unwrap(),
-        EnvCall::Room(RoomCall::WaitValue { address, expected: 42, millis: Wait::AtMost(0) })
+        matches!(EnvCall::from_wire(kernel_api::abi::PREFIX | 2, &[0x4000, 42, 0, 0, 0, 0]).unwrap(),
+        EnvCall::Room(RoomCall::WaitValue { address, expected: 42, wait: Wait::Poll })
             if address == VirtAddr::new(0x4000))
     );
-    assert!(EnvCall::from_wire(7, &[0x4000, (u32::MAX as usize) + 1, 0, 0, 0, 0]).is_err());
-    assert!(EnvCall::from_wire(8, &[0x4000, 2, 0, 0, 0, 0]).is_err());
+    assert!(
+        EnvCall::from_wire(
+            kernel_api::abi::PREFIX | 2,
+            &[0x4000, (u32::MAX as usize) + 1, 0, 0, 0, 0]
+        )
+        .is_err()
+    );
+    assert!(EnvCall::from_wire(3, &[0x4000, 2, 0, 0, 0, 0]).is_err());
     reply((0, 0, 0));
     assert!(
         !invoke(operations::WaitValue {
             address: VirtAddr::new(0x4000),
             expected: 42,
-            millis: Wait::POLL,
+            wait: Wait::Poll,
         })
         .unwrap()
     );
@@ -213,13 +223,13 @@ fn conditional_waits_encode_address_value_deadline_and_wake_scope() {
         .unwrap(),
         3
     );
-    called(8, [0x4000, 1, 0, 0, 0, 0]);
+    called(3, [0x4000, 1, 0, 0, 0, 0]);
     reply(((-5isize) as usize, 0, 0));
     assert_eq!(
         invoke(operations::WaitValue {
             address: VirtAddr::new(1),
             expected: 0,
-            millis: Wait::POLL,
+            wait: Wait::Poll,
         })
         .unwrap_err()
         .source,

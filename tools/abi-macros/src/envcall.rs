@@ -160,7 +160,7 @@ fn expand_checked(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStre
     let (mut class, mut call) = (None, None);
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("class") {
-            let value = meta.value()?.parse::<LitInt>()?.base10_parse::<u32>()?;
+            let value = u32::from(meta.value()?.parse::<LitInt>()?.base10_parse::<u16>()?);
             set_once(&mut class, value, &meta)
         } else if meta.path.is_ident("call") {
             let value = meta.value()?.parse::<Ident>()?;
@@ -382,7 +382,7 @@ fn emit_operation(op: &Operation, class: u32, call: &Ident) -> TokenStream {
         const _: () = assert!(0usize #(+ <#types as crate::abi::register::Wire>::WORDS)* <= 6,
             "operation inputs exceed six ABI registers");
         impl crate::abi::operation::RegisterCall for #name {
-            const SLOT: usize = #slot as usize;
+            const SLOT: usize = crate::abi::PREFIX | #slot as usize;
             #[inline]
             fn pack(&self) -> [usize; 6] {
                 #pack
@@ -432,7 +432,7 @@ fn emit_call(operations: &[Operation], class: u32, name: &Ident) -> TokenStream 
         impl #name {
             #[inline]
             pub fn from_wire(slot: usize, registers: &[usize; 6]) -> Result<Self, crate::abi::register::Decode> {
-                if (slot >> 32) != #class as usize {
+                if (slot >> 48) != crate::abi::VERSION as usize || ((slot >> 32) & 0xffff) != #class as usize {
                     return Err(crate::abi::register::Decode::BadSlot);
                 }
                 match slot as u32 {

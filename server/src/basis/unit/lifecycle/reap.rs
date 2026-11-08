@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use kernel_api::abi::call::room::NOTE_MAX;
+use kernel_api::abi::call::unit::NOTE_MAX;
 use kernel_api::model::identity::TaskId;
 
 use super::diagnostics;
@@ -178,6 +178,11 @@ pub(crate) fn bury() {
         if z.retire().is_err() {
             HUSKS.lock().push(z);
             break;
+        }
+        if let Some(member) = z.ident.team.life.member(z.ident.id) {
+            member
+                .reclaimed
+                .store(true, core::sync::atomic::Ordering::Release);
         }
         wipe(WakeKey::Task { id: z.ident.id });
         wipe(WakeKey::Pends { task: z.ident.id });

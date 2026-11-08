@@ -23,7 +23,11 @@ use super::outcome::answer;
 pub(crate) fn dispatch(frame: &mut TrapContext, call: PendCall, ident: Arc<TaskIdent>) {
     match call {
         PendCall::Accord { request } => accord(frame, &ident, request),
-        PendCall::Narrow { token, subset } => narrow(frame, token, subset),
+        PendCall::Narrow {
+            token,
+            subset,
+            range,
+        } => narrow(frame, token, subset, range),
         PendCall::Revoke { dst, token } => revoke(frame, dst, token),
         PendCall::Collect {
             after,
@@ -60,11 +64,16 @@ fn accord(frame: &mut TrapContext, ident: &TaskIdent, request: VirtAddr) {
     answer(frame, r);
 }
 
-fn narrow(frame: &mut TrapContext, token: PendId, subset: Modifiable) {
+fn narrow(
+    frame: &mut TrapContext,
+    token: PendId,
+    subset: Modifiable,
+    range: kernel_api::model::pend::PendRange,
+) {
     let r = current()
         .running_task()
         .ok_or(PendFail::Denied)
-        .and_then(|task| pend::reduce(&task, token, subset))
+        .and_then(|task| pend::reduce(&task, token, subset, range))
         .map(|()| 0);
     answer(frame, r);
 }
@@ -80,6 +89,20 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
 
 fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendSnapshot) -> PendInfo {
     PendInfo {
+        range: pend
+            .view()
+            .share_view()
+            .map(|meta| {
+                let (offset, count) = pend.authority().window().unwrap_or((
+                    kernel_api::address::PageOffset::ZERO,
+                    meta.source().page_count(),
+                ));
+                kernel_api::model::pend::PendRange::Pages {
+                    offset: offset.get(),
+                    count: count.get(),
+                }
+            })
+            .unwrap_or(kernel_api::model::pend::PendRange::Inherit),
         token: pend.token(),
         view: kernel_api::model::view::ViewId::new(pend.view().id()),
         kind: pend.view().kind(),
@@ -100,10 +123,8 @@ fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendSnapshot) 
 }
 
 fn write_info(ident: &TaskIdent, buf: usize, info: PendInfo) -> Result<(), PendFail> {
-    let words = info.words();
-    let bytes =
-        unsafe { ::core::slice::from_raw_parts(words.as_ptr().cast::<u8>(), PendInfo::SIZE) };
-    if !ident.team.space.copy_out(bytes, KVirt::wrap(buf)) {
+    let bytes = info.to_bytes();
+    if !ident.team.space.copy_out(&bytes, KVirt::wrap(buf)) {
         return Err(PendFail::Denied);
     }
     Ok(())

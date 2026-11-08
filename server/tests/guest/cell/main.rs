@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
+mod lifecycle;
 mod pend;
+mod sign;
 use core::fmt::Write;
 use kernel_api::{
     address::VirtAddr,
@@ -39,7 +41,7 @@ impl core::fmt::Write for Console {
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     let _ = writeln!(Console, "FAIL cell-kernel {info}");
-    unit::return_(1)
+    unit::exit(1, 0, VirtAddr::new(0), 0)
 }
 fn allocate(count: usize) -> FlatReference {
     cell::acquire(
@@ -196,9 +198,10 @@ extern "C" fn run() -> ! {
     cell::release(a).unwrap();
     let _ = writeln!(Console, "PASS cell-kernel swap=1 cleanup=1");
     pend::run();
+    sign::run();
     let _ = writeln!(
         Console,
         "PASS pend-kernel range=1 return=1 inspect=1 collect=1"
     );
-    unit::return_(0)
+    unit::exit(0, 0, VirtAddr::new(0), 0)
 }

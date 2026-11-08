@@ -24,7 +24,7 @@ mod errors {
 fn declarations_provide_typed_calls_and_dispatch() {
     fn terminal<T: TerminalCall>() {}
     terminal::<clock::Stop>();
-    assert_eq!(clock::Ticks::SLOT, 4usize << 32);
+    assert_eq!(clock::Ticks::SLOT, kernel_api::abi::PREFIX | (4usize << 32));
     assert_eq!(clock::Ticks.pack(), [0; 6]);
     assert_eq!(
         clock::Ticks::decode_return((usize::MAX, 0, 0)),
@@ -34,7 +34,10 @@ fn declarations_provide_typed_calls_and_dispatch() {
         clock::ClockCall::from_wire(clock::Ticks::SLOT, &[0; 6]),
         Ok(clock::ClockCall::Ticks)
     );
-    assert_eq!(clock::Stop::SLOT, (4usize << 32) | 1);
+    assert_eq!(
+        clock::Stop::SLOT,
+        kernel_api::abi::PREFIX | (4usize << 32) | 1
+    );
     assert_eq!(
         clock::ClockCall::from_wire(clock::Stop::SLOT, &[0; 6]),
         Ok(clock::ClockCall::Stop)

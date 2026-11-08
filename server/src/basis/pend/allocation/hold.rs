@@ -105,6 +105,9 @@ impl Hold {
         }
         if let Some((_, authority)) = &self.branch {
             authority.modifiable()?;
+            if !authority.contains(self.offset, self.count) {
+                return None;
+            }
             let (meta, _, _) = self.source.root()?;
             if !meta.alive() {
                 return None;

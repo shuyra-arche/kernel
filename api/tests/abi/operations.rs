@@ -6,11 +6,11 @@ use kernel_api::abi::operation::TerminalCall;
 fn domain_decoders_reject_foreign_classes_and_unknown_slots() {
     // The operation number alone is valid for Chrono; the class is not.
     assert_eq!(
-        kernel_api::abi::call::chrono::ChronoCall::from_wire(1, &[0; 6]),
+        kernel_api::abi::call::sign::SignCall::from_wire(1, &[0; 6]),
         Err(kernel_api::abi::register::Decode::BadSlot)
     );
     assert_eq!(
-        kernel_api::abi::call::chrono::ChronoCall::from_wire((4usize << 32) | 99, &[0; 6]),
+        kernel_api::abi::call::sign::SignCall::from_wire((4usize << 32) | 99, &[0; 6]),
         Err(kernel_api::abi::register::Decode::BadSlot)
     );
     assert_eq!(
@@ -43,19 +43,20 @@ fn typed_and_dispatch_requests_share_encoding_and_validation() {
 
 #[test]
 fn terminal_operations_keep_their_request_abi_without_a_return_decoder() {
-    use kernel_api::abi::call::room::operations::Reap;
+    use kernel_api::abi::call::unit::operations::Exit;
     fn terminal<C: TerminalCall>() {}
-    terminal::<Reap>();
-    let request = Reap {
+    terminal::<Exit>();
+    let request = Exit {
+        value: 17,
         reason: 2,
         note: kernel_api::address::VirtAddr::new(0x1234),
         len: 8,
     };
-    assert_eq!(Reap::SLOT, 2);
-    assert_eq!(request.pack(), [2, 0x1234, 8, 0, 0, 0]);
+    assert_eq!(Exit::SLOT, kernel_api::abi::PREFIX | (1usize << 32) | 5);
+    assert_eq!(request.pack(), [17, 2, 0x1234, 8, 0, 0]);
     assert!(matches!(
-        kernel_api::abi::call::room::RoomCall::from_wire(Reap::SLOT, &request.pack()),
-        Ok(kernel_api::abi::call::room::RoomCall::Reap {
+        kernel_api::abi::call::unit::UnitCall::from_wire(Exit::SLOT, &request.pack()),
+        Ok(kernel_api::abi::call::unit::UnitCall::Exit {
             reason: 2,
             len: 8,
             ..
@@ -153,7 +154,7 @@ fn external_mapping_requires_a_target_pend_and_retired_device_abi_is_rejected() 
             sign::SignSource,
         },
     };
-    assert_eq!(Attach::SLOT, (2usize << 32) | 19);
+    assert_eq!(Attach::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 19);
     for slot in 0..10 {
         assert!(EnvCall::from_wire((13usize << 32) | slot, &[1; 6]).is_err());
     }
@@ -200,8 +201,8 @@ fn sign_rights_reject_unknown_and_empty_authority_without_truncation() {
     assert!(kernel_api::abi::call::EnvCall::from_wire(12usize << 32, &[0; 6]).is_err());
     use kernel_api::abi::reply::SignReply;
     assert_eq!(
-        SignReply::of(SignReply::Triggered.words()),
-        Some(SignReply::Triggered)
+        SignReply::of(SignReply::Triggered { sequence: 1 }.words()),
+        Some(SignReply::Triggered { sequence: 1 })
     );
 }
 
@@ -224,7 +225,7 @@ fn data_authority_uses_one_bit_and_retired_signal_slots_are_invalid() {
         assert!(EnvCall::from_wire((class << 32) | slot, &[0; 6]).is_err());
     }
     use kernel_api::model::pend::PendInfo;
-    let active = [1, 2, 0, 1, 3, 4, 5, 0];
+    let active = [1, 2, 0, 1, 3, 4, 5, 0, 0, 0, 0];
     assert_eq!(PendInfo::from_words(active).unwrap().words(), active);
     for (index, value) in [(0, 0), (1, 0), (2, 1), (3, 2), (7, 4)] {
         let mut bad = active;

@@ -19,13 +19,13 @@ pub mod operations {
     }
     #[operation(slot = 0, output = super::PendId, error = ShareFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Unseal {
+    pub struct Create {
         pub reference: super::FlatReference,
         pub modifiable: crate::model::modifiable::Modifiable,
     }
     #[operation(slot = 1, output = (), error = ShareFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Seal {
+    pub struct Delete {
         pub token: super::PendId,
     }
     #[operation(slot = 2, output = (super::VirtAddr, usize), error = ShareFail)]

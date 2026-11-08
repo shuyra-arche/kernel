@@ -25,7 +25,7 @@ use crate::machine::switcher::context::TrapContext;
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: ShareCall, ident: Arc<TaskIdent>) -> Outcome {
     match call {
-        ShareCall::Unseal {
+        ShareCall::Create {
             reference,
             modifiable,
         } => {
@@ -35,7 +35,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: ShareCall, ident: Arc<Task
                 .and_then(|task| create_share(&task, reference, modifiable));
             answer(frame, result.map(|token| token.get()).map_err(fail));
         }
-        ShareCall::Seal { token } => {
+        ShareCall::Delete { token } => {
             answer(
                 frame,
                 super::seal::seal_resource(token, ViewKind::Share).map_err(fail),

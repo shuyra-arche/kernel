@@ -58,10 +58,3 @@ pub(crate) fn stats() -> (usize, usize, usize, usize) {
         IDLE_BUSY.load(Ordering::Relaxed),
     )
 }
-
-/// Re-enable only the interrupt source whose retained notification was consumed.
-pub(crate) fn acknowledge(endpoint: &Arc<Endpoint>) {
-    if Arc::ptr_eq(endpoint, &get().supervisor_external) {
-        unsafe { riscv::register::sie::set_sext() };
-    }
-}

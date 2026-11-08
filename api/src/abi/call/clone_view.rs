@@ -4,9 +4,7 @@ use crate::model::clone_view::PullOutcome;
 use crate::model::identity::Mark;
 use crate::model::identity::PendId;
 use crate::model::identity::TaskId;
-use crate::model::wait::Wait;
 
-use crate::model::clone_view::CloneCondition;
 use crate::model::clone_view::CloneLimits;
 pub type CloneResult<T> = Result<T, erra::Error<CloneFail>>;
 
@@ -24,13 +22,13 @@ pub mod operations {
     }
     #[operation(slot = 0, output = super::PendId, error = CloneFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Unseal {
+    pub struct Create {
         pub mark: super::Mark,
         pub limits: super::CloneLimits,
     }
     #[operation(slot = 1, output = (), error = CloneFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Seal {
+    pub struct Delete {
         pub token: super::PendId,
     }
     #[operation(slot = 2, output = (), error = CloneFail)]
@@ -54,13 +52,5 @@ pub mod operations {
     pub struct Peek {
         pub token: super::PendId,
     }
-    #[operation(slot = 5, output = bool, error = CloneFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Wait {
-        pub token: super::PendId,
-        pub condition: super::CloneCondition,
-        pub millis: super::Wait,
-    }
 }
-pub use operations::CloneCall;
-pub use operations::CloneFail;
+pub use operations::{CloneCall, CloneFail};

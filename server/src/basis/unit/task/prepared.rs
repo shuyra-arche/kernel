@@ -60,6 +60,13 @@ impl PreparedTask {
         }
         let member = Arc::try_new(Member {
             id: self.ident.id,
+            team: team.id,
+            controller: self.ident.controller,
+            creator: team.creator(),
+            sire: team
+                .sire()
+                .unwrap_or(kernel_api::model::identity::TaskId::new(0)),
+            reclaimed: core::sync::atomic::AtomicBool::new(false),
             task: TaskWeak::empty(),
             node: Arc::downgrade(&team.life),
             state: self.state.clone(),

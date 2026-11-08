@@ -41,16 +41,6 @@ pub mod operations {
         pub buf: super::VirtAddr,
         pub len: usize,
     }
-    /// 开关**报文对账**：此后每次一次往返都把"推出去那一帧"与"收回来那一帧"的前
-    /// [`DBCN_MAX`](crate::abi::call::debug::DBCN_MAX) 字节以十六进制打进调试控制台。
-    ///
-    /// 为什么它是 ABI 的一格而不是一个环境变量：布局错位这类病**只有真实字节能证**，
-    /// "读代码推布局"无济于事。
-    #[operation(slot = 2, output = (), infallible)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct SetTrace {
-        pub on: usize,
-    }
 }
 pub use operations::DebugCall;
 pub use operations::DebugFail;
@@ -58,5 +48,5 @@ pub use operations::DebugFail;
 /// [`DebugCall`] 那两格一次能搬的字节数上限。
 ///
 /// 为什么是编译期常量：内核在入口把它拷进**栈上的定长缓冲**（诊断路径不分配，与
-/// [`NOTE_MAX`](crate::abi::call::room::NOTE_MAX) 同一条理由）。256 够一句 `file:line + 消息`，也够敲一条命令。
+/// [`NOTE_MAX`](crate::abi::call::unit::NOTE_MAX) 同一条理由）。256 够一句 `file:line + 消息`，也够敲一条命令。
 pub const DBCN_MAX: usize = 256;

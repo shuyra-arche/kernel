@@ -150,8 +150,11 @@ impl SourceAuthorization {
         if let Some(range) = self.own_range() {
             return range.range(offset, count).ok();
         }
-        let (meta, _, _) = self.root()?;
+        let (meta, _, authority) = self.root()?;
         self.modifiable()?;
+        if !authority.contains(offset, count) {
+            return None;
+        }
         meta.source().range(offset, count).ok()
     }
 

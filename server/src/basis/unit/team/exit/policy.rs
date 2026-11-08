@@ -40,20 +40,6 @@ impl ExitPolicy {
         }
     }
 
-    pub(crate) fn disarm(&self, owner: TaskId) -> Result<(), UnitFail> {
-        let mut state = self.state.lock();
-        if state.deaths != 0 {
-            return Err(UnitFail::Denied);
-        }
-        match state.mode {
-            Mode::Armed { owner: current } if current == owner => {
-                state.mode = Mode::Dormant;
-                Ok(())
-            }
-            _ => Err(UnitFail::Denied),
-        }
-    }
-
     pub(crate) fn protected(&self) -> bool {
         !matches!(self.state.lock().mode, Mode::Dormant)
     }

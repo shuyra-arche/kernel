@@ -2,11 +2,10 @@ use kernel_api::{
     abi::call::pend::PendFail,
     address::VirtAddr,
     model::{
-        identity::{Mark, PendId, TaskId, TeamId},
+        identity::{Mark, PendId, TaskId},
         modifiable::Modifiable,
         pend::{AccordRequest, AccordTarget, PendInfo, PendRange, PendStatus},
         unit::UnitTarget,
-        wait::Wait,
     },
 };
 use kernel_client::call::{cell, pend, share_view, unit};
@@ -45,12 +44,12 @@ extern "C" fn recipient() -> ! {
     assert_eq!(len, 4096);
     assert_eq!(super::read(address, 0), 0x13579);
     pend::return_(token).unwrap();
-    unit::return_(0)
+    unit::exit(0, 0, VirtAddr::new(0), 0)
 }
 
 pub(super) fn run() {
     let reference = super::allocate(8);
-    let root = share_view::unseal(reference, Modifiable::Yes).unwrap();
+    let root = share_view::create(reference, Modifiable::Yes).unwrap();
     let (address, len) = share_view::open(root).unwrap();
     assert_eq!(len, 8 * 4096);
     super::write(address, 3 * 4096, 0x13579);
@@ -65,7 +64,7 @@ pub(super) fn run() {
     .unwrap();
     let leaf = accord(
         child,
-        AccordTarget::Task(unit::self_id()),
+        AccordTarget::Task(super::lifecycle::self_id()),
         Modifiable::No,
         PendRange::pages(1, 1).unwrap(),
     )
@@ -140,14 +139,7 @@ pub(super) fn run() {
     }
     assert_eq!(found, 2);
     // A distinct Task receives a range relative to this already narrowed child.
-    let task = unit::spawn(
-        TeamId::new(0),
-        recipient as *const () as usize,
-        VirtAddr::new(0),
-        0,
-        0,
-    )
-    .unwrap();
+    let task = super::lifecycle::spawn(recipient as *const () as usize);
     let remote = accord(
         child,
         AccordTarget::Task(task),
@@ -156,13 +148,28 @@ pub(super) fn run() {
     )
     .unwrap();
     assert!(pend::inspect(remote, VirtAddr::new(words.as_mut_ptr() as usize)).is_err());
-    unit::embark(UnitTarget::Task(task)).unwrap();
-    assert!(
-        unit::join(UnitTarget::Task(task), Wait::AtMost(5000), false)
-            .unwrap()
-            .is_reaped()
-    );
+    unit::resume(UnitTarget::Task(task)).unwrap();
+    assert!(super::lifecycle::wait_task(task));
+    super::lifecycle::delete(task);
     assert_eq!(inspect(root).status, PendStatus::Suspended);
+    assert_eq!(
+        pend::narrow(child, Modifiable::No, PendRange::pages(1, 1).unwrap())
+            .unwrap_err()
+            .source,
+        PendFail::Busy
+    );
+    pend::return_(leaf).unwrap();
+    pend::narrow(child, Modifiable::No, PendRange::pages(1, 1).unwrap()).unwrap();
+    assert_eq!(inspect(child).range, PendRange::pages(3, 1).unwrap());
+    let (narrowed, len) = share_view::open(child).unwrap();
+    assert_eq!(len, 4096);
+    assert_eq!(super::read(narrowed, 0), 0x13579);
+    assert_eq!(
+        pend::narrow(child, Modifiable::No, PendRange::pages(0, 2).unwrap())
+            .unwrap_err()
+            .source,
+        PendFail::Denied
+    );
     pend::return_(child).unwrap();
     assert!(pend::inspect(leaf, VirtAddr::new(words.as_mut_ptr() as usize)).is_err());
     assert_eq!(inspect(root).status, PendStatus::Active);

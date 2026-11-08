@@ -20,7 +20,7 @@ pub(crate) fn narrows(from: Modifiable, to: Modifiable) -> bool {
 /// survives handle removal until CPU withdrawal and any external use are settled.
 pub(crate) struct Pend {
     state: SpinLock<State>,
-    window: Option<(PageOffset, PageCount)>,
+    window: SpinLock<Option<(PageOffset, PageCount)>>,
     parent: SpinLock<Option<(Arc<Pend>, Modifiable, bool)>>,
     external: AtomicUsize,
     routing: AtomicBool,
@@ -39,7 +39,7 @@ impl Pend {
     ) -> Result<Arc<Self>, PendFail> {
         Arc::try_new(Self {
             state: SpinLock::new(State::new(access)),
-            window,
+            window: SpinLock::new(window),
             parent: SpinLock::new(None),
             external: AtomicUsize::new(0),
             routing: AtomicBool::new(false),
@@ -47,7 +47,13 @@ impl Pend {
         .map_err(|_| PendFail::OoM)
     }
     pub(crate) fn window(&self) -> Option<(PageOffset, PageCount)> {
-        self.window
+        *self.window.lock()
+    }
+    pub(crate) fn contains(&self, offset: PageOffset, count: PageCount) -> bool {
+        self.window().is_none_or(|(base, size)| {
+            matches!((offset.get().checked_add(count.get()), base.get().checked_add(size.get())),
+                (Some(end), Some(limit)) if offset.get() >= base.get() && end <= limit)
+        })
     }
     pub(crate) fn configured(&self) -> Modifiable {
         self.state.lock().access
@@ -108,12 +114,17 @@ impl Pend {
             .map(|_| ())
             .map_err(fail)
     }
-    pub(crate) fn narrow(&self, access: Modifiable) -> Result<(), PendFail> {
+    pub(crate) fn narrow(
+        &self,
+        access: Modifiable,
+        window: Option<(PageOffset, PageCount)>,
+    ) -> Result<(), PendFail> {
         let mut state = self.state.lock();
         if self.routing.load(Ordering::Acquire) {
             return Err(PendFail::Busy);
         }
         *state = state.transition(Event::Narrow(access)).map_err(fail)?;
+        *self.window.lock() = window;
         Ok(())
     }
     pub(crate) fn external_pending(&self) -> bool {

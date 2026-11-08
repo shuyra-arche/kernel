@@ -12,7 +12,7 @@ code or runtime state. There is no Env package or compatibility facade.
 | `model::identity` | TaskId, TeamId, PendId and Mark |
 | `model::cell` | FlatReference, MappingId, allocation, reference ranges, Position and Attachment |
 | `model::modifiable` | Modifiable: shared read or exclusive write access |
-| `model::unit` | ProgramKind, UnitTarget, control authorities, task exit, result and join values |
+| `model::unit` | ProgramKind, UnitTarget, control authorities, creation descriptors, queries and stable results |
 | `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
 | `model::{wait,exit}` | Waiting and exit vocabulary |
 | `abi::call` | Operation declarations, domain failures and aggregate dispatch |
@@ -59,65 +59,73 @@ manifest parser and packer have been removed.
 
 ## Source migration and ABI compatibility
 
-This is an intentional model/ABI break with no legacy aliases:
+This branch implements Issue #42 in stages. Pend, Sign, Unit, Room and versioned
+transport have migrated; Cell still uses its prior Attach/Detach and Begin/End
+contracts until the Page freezing replacement is complete.
 
-| Old contract | Current contract |
+Call numbers are `(version << 48) | (domain << 32) | operation`; version is 1.
+Version zero and unknown versions are rejected before domain dispatch. All byte
+descriptors use fixed little-endian 64-bit words and checked tags/reserved fields.
+Boot capsule format 2 declares the matching ABI in byte 11; old executable
+capsules are rejected before launch. The resource ledger is version 3.
+
+| Domain | Current operations |
 | --- | --- |
-| Hole / Pole | Clone / Share View, addressed through PendId |
-| Pie / generic Grant | Pend borrow tree with Modifiable No or Yes |
-| FETCH/STORE/VEST/ONLY permissions | Modifiable for data; ControlId for administration |
-| Nole / Tole / View-local Ring and Hush | Sign Listen/Trigger/Route, retained state and checked delegation |
-| Nest View-prefixed handles | MappingId / MappingSelection / MappingControl |
-| Seven-word resource inspection | Eight-word PendInfo including ViewId and PendStatus |
-| All boot entries typed as data authority | Ledger version 2, ResourceKind-qualified raw handles |
-| Implicit writable bootstrap handoff | Spawn execution, then explicit Pend Accord before starting the child |
-| Implicit same-Team control | Explicit Task controller; membership does not grant peer control |
-| Pend Derive and four-register Accord | Accord with a caller-memory request and explicit Caller / Task target |
-| Pend Release with a one-choice mode | Pend Return; no release-mode parameter |
-| Pend Same | Compare PendInfo.view from Inspect / Collect; this tests View identity only |
+| Pend | Accord, Revoke, Narrow, Return, Inspect, Collect |
+| Clone View | Create, Delete, Push, Pull, Peek |
+| Share View | Create, Delete, Open, Shut |
+| Sign | Create, Delete, Listen, Trigger, Consume, Attach, Detach, Accord, Revoke, Return |
+| Unit | Create, Delete, Resume, Freeze, Stop, Exit, Finish, Inspect, Accord, Revoke, Return |
+| Room | Yield, SleepUntil, WaitValue, WakeValue, Clock |
+| Debug | Put, Get |
 
-Pend Accord slot 14 takes a pointer to one 64-byte `AccordRequest`, encoded by
-`to_bytes`. Server copies and validates it once before checking authority. The
-descriptor contains source Pend, target, Modifiable, mark and PendRange. A Pages
-offset is relative to the **parent's effective window**, including for nested
-derivations; Inherit preserves that window. Explicit ranges require a Share View.
-Caller and Task targets use the same permission, adjacency and borrow checks.
-Malformed descriptors return Invalid; unreadable memory or unauthorized requests
-return Denied. A zero mark inherits the parent mark.
+Pend Accord snapshots a 64-byte request. Both Accord and Narrow interpret a
+Pages range relative to the immediate parent's/current effective window.
+Narrow retains identity, rejects live descendants with Busy, withdraws old CPU
+access before committing a smaller window, and refuses outstanding external
+responsibilities. The 88-byte PendInfo includes the effective source window.
+Inspect/Collect return identity and state, never a reusable authorization proof.
+Return and Revoke restore parent access only after descendant and hardware
+responsibilities have settled. Busy retains cleanup responsibility.
 
-Pend Return slot 15 retires the holder's branch and its descendants. Revoke uses
-the grantor's authority to retire a target branch. Both return the parent borrow
-only after descendants and CPU/device access settle; Busy retains the cleanup
-responsibility for retry. Pend slots 4, 7, 10 and 13 are retired and rejected.
-Inspect and Collect retain their eight-word PendInfo layout, including ViewId and
-status; matching ViewId does not imply matching permissions or ranges. Narrow
-currently narrows Modifiable only. Share Open/Shut and Debug Put/Get are retained.
+Wait has exactly Poll, At(monotonic nanoseconds), and Infinite. Deadlines are
+converted once, rounded up, and retained across wake/requeue. WaitValue compares
+and enqueues under the same boundary as WakeValue; callers keep the AtomicU32
+and mapping alive through all waits. True requires rechecking the predicate.
 
-Cell operations use `abi::call::cell::CellCall` and `model::cell`; the old
-MemoryCall/model::memory paths are removed. VirtAddr moves from model::identity
-to address. Slot 10 (Transfer) is retired: Push (15) and Pull (16) take a Position
-descriptor and optional change receipt. Begin (17) / End (18) delimit admission
-changes across calls. Memo Pull uses FlatReference::NONE and zero destination
-page; withdrawal does not mint ownership. Receipts are task-local authorization
-objects, not Page IDs or pointers.
+Sign retains one event with a non-wrapping sequence. Listen observes;
+Consume(sequence) rejects stale sequences and only clears that direct event.
+It does not acknowledge an IRQ, consume a Unit result or resolve a page fault.
+Attach watches authorized sources. Accord can only reduce rights; Revoke and
+Return invalidate the entire branch and wake listeners to revalidate. Delegation
+depth is bounded at 64; exhausted sequences/handles fail instead of wrapping.
+Delete requires endpoint ownership; returning an owner handle does not transfer
+ownership. Owner death still closes its endpoints.
 
-Old Attach slot 12 is retired. Slot 19 takes MappingTarget plus a pointer to one
-72-byte Attachment containing ReferenceRange, Placement, access, MappingControl
-and optional change receipt. Nonzero receipts are accepted for I/O publication;
-CPU supply under a change uses Push. Detach (13), Inspect (14), class 2 and their
-error encodings are unchanged. The API codec rejects malformed descriptors;
-server authority checks remain mandatory. Client callers must marshal these
-new descriptors and rebuild with the matching API.
+Unit Create snapshots a 48-byte Team or Task descriptor. Tasks start dormant.
+Team creation requires Build authority; Supervisor creation additionally requires
+a Supervisor caller. A Guard authority may choose an immutable fail-stop policy
+at Team creation, before any member can execute; dynamic Guard/Unguard are gone.
+Membership alone does not authorize managing peer Tasks. Resume/Freeze/Stop
+require the controller or ancestor Team manager; Stop is a request, not proof of
+completion. Finish permanently closes member admission.
 
-Unchanged operations keep their slot numbers; removed operations are rejected.
-Do not infer compatibility from a matching call class: permission values and
-several layouts have deliberately changed. Build requires the caller's own
-TaskId as sire. Unit Return, ReadResult and Team Finish separate result data,
-execution exit, stable cohort completion and eventual resource reclamation.
+Unit Inspect snapshots identity, state, result and independent reclamation status
+into 112 bytes. Caller, target, child enumeration and member enumeration share
+this query contract. Observing a result does not consume it. Task Delete requires
+completed reclamation and removes only the caller's retained record; subsequent
+observations through that record are denied. Team Delete requires retirement.
+Task Exit publishes a value plus a bounded diagnostic note; the first committed
+termination wins. Exit is not proof of Page/DMA reclamation. Unit Accord/Revoke/
+Return operate on independent administrative authorities with revocable ancestry.
 
-Publish this provider first. Migrate consumers together to matching API/Client
-revisions and regenerate boot ledgers. Previously compiled binaries are not
-compatible. Full upper-layer migration is outside this Kernel change.
+Dedicated Join/ReadResult, SelfId/Sire/Creator/Scan, generic key Wait/Wake,
+Chrono/Ticks, Control/Backtrace and Debug SetTrace have been removed. Inspect,
+Sign routing and Room Clock provide their retained core capabilities. Kernel
+crash backtraces and bounded Debug Put/Get remain available.
+
+Consumers must rebuild together with this API and regenerate capsules/ledgers.
+Upper-layer migration is outside this Kernel change.
 
 ## Verification
 

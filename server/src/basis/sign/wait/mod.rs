@@ -20,7 +20,6 @@ use crate::basis::room::conductor::run::run;
 use crate::basis::room::deadline;
 use crate::basis::room::scheduler::launch;
 use crate::basis::unit::life::Life;
-use crate::basis::unit::life::TaskLife;
 use crate::basis::unit::task::Resumption;
 use crate::basis::unit::task::Task;
 use crate::machine::clock;
@@ -70,38 +69,31 @@ fn rise<I: IntoIterator<Item = Arc<Task>>>(tasks: I) -> usize {
     woke
 }
 
-fn alarm_block<E: WaitFail>(task: Arc<Task>, dur: Duration) -> Result<usize, E> {
-    let me = task.ident.id;
-    let life = task.life();
-    drop(task);
-    match wait(WakeKey::Alarm { task: me }, life, dur)? {
-        Handoff::Switch(pa) => Ok(pa),
-        Handoff::Resume(()) => unreachable!("Alarm 无投信方"),
-    }
-}
-
-pub fn park<E: WaitFail>(duration: Duration) -> Result<usize, E> {
-    let Some(task) = current().running_task() else {
-        return Ok(run());
-    };
-    alarm_block::<E>(task, duration)
-}
-
 pub fn park_until<E: WaitFail>(at: u64) -> Result<Option<usize>, E> {
-    let at_ticks = clock::duration_to_ticks(Duration::from_nanos(at));
-    let now_ticks = clock::uptime_ticks();
-    if at_ticks <= now_ticks {
-        return Ok(None);
+    let deadline = clock::deadline(kernel_api::model::wait::Wait::At(at)).expect("finite");
+    loop {
+        if clock::now().as_ticks() >= deadline {
+            return Ok(None);
+        }
+        let Some(task) = current().running_task() else {
+            return Ok(Some(run()));
+        };
+        let key = WakeKey::Alarm {
+            task: task.ident.id,
+        };
+        let life = task.life();
+        drop(task);
+        let blocked = block_with_call::<E>(
+            key,
+            life,
+            clock::remaining(Some(deadline)),
+            Some(WaitCall::Sleep { deadline }),
+        )?;
+        match finish_block(blocked) {
+            Handoff::Switch(pa) => return Ok(Some(pa)),
+            Handoff::Resume(()) => {}
+        }
     }
-    let Some(task) = current().running_task() else {
-        return Ok(Some(run()));
-    };
-    let wait_ticks = at_ticks - now_ticks;
-    alarm_block::<E>(task, clock::ticks_to_duration(wait_ticks)).map(Some)
-}
-
-pub fn wait<E: WaitFail>(key: WakeKey, life: Weak<Life>, dur: Duration) -> Result<Handoff<()>, E> {
-    Ok(finish_block(block_with_call(key, life, dur, None)?))
 }
 
 /// 条件等待：在同一提交边界内只跑一次纯谓词，不满足才入队。
@@ -132,14 +124,6 @@ where
         None => Handoff::Resume(()),
         Some(blocked) => finish_block(blocked),
     })
-}
-
-pub fn fall<E: WaitFail>(me: TaskLife, dur: Duration) -> Result<Handoff<bool>, E> {
-    let TaskLife { id, life } = me;
-    match wait(WakeKey::Pends { task: id }, life, dur)? {
-        Handoff::Switch(pa) => Ok(Handoff::Switch(pa)),
-        Handoff::Resume(()) => Ok(Handoff::Resume(true)),
-    }
 }
 
 pub(crate) fn wipe(key: WakeKey) -> usize {
@@ -240,7 +224,7 @@ pub(crate) fn wipe_space(space: Asid) -> usize {
                     .find(|k| {
                         matches!(
                             k,
-                            WakeKey::Space { space: s, .. } | WakeKey::Mapping { space: s, .. } | WakeKey::Value { space: s, .. }
+                            WakeKey::Mapping { space: s, .. } | WakeKey::Value { space: s, .. }
                                 if *s == space
                         )
                     })
@@ -339,9 +323,9 @@ pub(crate) fn requeue<E: Copy>(
         Site::ensure(&mut table, key, &life).map_err(|()| oom)?;
     }
     let ticket = Ticket::next_id();
-    if dur != Duration::MAX {
+    if let Some(at) = call.deadline(dur) {
         hold(ticket, key, task).map_err(|_| oom)?;
-        if deadline::tock(ticket.raw(), clock::now().add(dur).as_ticks()).is_err() {
+        if deadline::tock(ticket.raw(), at).is_err() {
             void(ticket);
             return Err(oom);
         }

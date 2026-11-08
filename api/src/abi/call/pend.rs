@@ -34,11 +34,12 @@ pub mod operations {
     pub struct Accord {
         pub request: super::VirtAddr,
     }
-    #[operation(slot = 5, output = (), error = PendFail)]
+    #[operation(slot = 16, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Narrow {
         pub token: super::PendId,
         pub subset: super::Modifiable,
+        pub range: crate::model::pend::PendRange,
     }
     #[operation(slot = 6, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,8 +54,8 @@ pub mod operations {
     pub struct Return {
         pub token: super::PendId,
     }
-    /// Write eight words (PendInfo) to buf. Closed resources can still be inspected.
-    #[operation(slot = 8, output = (), error = PendFail)]
+    /// Write eleven RV64 words (PendInfo) to buf. Closed resources can still be inspected.
+    #[operation(slot = 17, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Inspect {
         pub token: super::PendId,
@@ -62,7 +63,7 @@ pub mod operations {
     }
     /// Write at most capacity records in increasing token order, strictly after after.
     /// Returns the number written. Each batch observes current state, not a frozen table.
-    #[operation(slot = 9, output = usize, error = PendFail)]
+    #[operation(slot = 18, output = usize, error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Collect {
         pub after: super::PendId,

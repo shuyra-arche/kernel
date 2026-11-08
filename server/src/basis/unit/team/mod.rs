@@ -121,41 +121,6 @@ impl Team {
         self.state.lock().ready()
     }
 
-    pub(crate) fn guard(&self, owner: TaskId) -> Result<(), UnitFail> {
-        let _commit = commit();
-        if !self.state.lock().debarked() || self.state.lock().constructing() {
-            return Err(UnitFail::Denied);
-        }
-        if exit::conflicts(&self.life) || self.has_unavailable_members() {
-            return Err(UnitFail::Busy);
-        }
-        exit::arm(&self.life, owner)
-    }
-
-    pub(crate) fn unguard(&self, owner: TaskId) -> Result<(), UnitFail> {
-        let _commit = commit();
-        if !self.state.lock().debarked() || self.state.lock().constructing() {
-            return Err(UnitFail::Denied);
-        }
-        if self.has_unavailable_members() {
-            return Err(UnitFail::Busy);
-        }
-        exit::disarm(&self.life, owner)
-    }
-
-    fn has_unavailable_members(&self) -> bool {
-        let mut unavailable = false;
-        self.life.visit(&mut |node| {
-            for member in node.tasks.lock().iter() {
-                let state = member.state.lock();
-                if state.is_dead() || state.on_hart().is_some() {
-                    unavailable = true;
-                }
-            }
-        });
-        unavailable
-    }
-
     pub(crate) fn constructing(&self) -> bool {
         self.state.lock().constructing()
     }

@@ -98,8 +98,6 @@ impl FromPair for TeamId {
 mod sign;
 pub use sign::SignReply;
 
-mod lifecycle;
-
 impl FromPair for (usize, usize) {
     fn from_pair(v0: usize, v1: usize) -> Self {
         (v0, v1)
@@ -118,3 +116,19 @@ impl FromPair for crate::model::unit::ControlId {
 }
 
 mod mapping;
+
+impl FromPair for crate::model::unit::UnitTarget {
+    fn from_pair(kind: usize, id: usize) -> Self {
+        assert!(
+            id != 0 && id <= isize::MAX as usize,
+            "invalid Unit Create identity"
+        );
+        match kind {
+            0 => Self::Task(TaskId::new(id)),
+            1 => Self::Team(TeamId::new(id)),
+            _ => panic!("invalid Unit Create kind"),
+        }
+    }
+}
+
+mod clone_view;

@@ -284,6 +284,8 @@ fn attach(
         .as_ref()
         .map(|meta| ShareOperation::acquire(meta).ok_or(CellFail::Busy))
         .transpose()?;
+    // Revalidate after acquiring ShareOperation: Narrow may have run after the initial resolution.
+    hold.resolve().ok_or(CellFail::Denied)?;
     let modifiable = match &authority {
         Some(authority) => authority.modifiable(),
         None => authorization.modifiable(),
