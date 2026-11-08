@@ -29,7 +29,7 @@ impl PerHart {
             id,
             frame: VirtAddr::wrap(HART_FRAME_BASE.as_usize() + id * PAGE_SIZE),
             scheduler: AtomicPtr::new(::core::ptr::null_mut()),
-            lease: AtomicUsize::new(crate::metal::riscv::mmu::identity::vacant()),
+            lease: AtomicUsize::new(crate::metal::mmu::identity::vacant()),
             instruction_sync: AtomicUsize::new(1),
             firmware: AtomicUsize::new(0),
             boot_stack: AtomicUsize::new(0),

@@ -20,7 +20,7 @@ use crate::metal::layout::HART_FRAME_BASE;
 use crate::metal::layout::TRAMPOLINE;
 use crate::metal::layout::trampoline_pa;
 use crate::metal::mmu::Attributes;
-use crate::metal::riscv::mmu::mode;
+use crate::metal::mmu::riscv::mode;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -168,7 +168,7 @@ pub fn init() -> NestResult<()> {
 
             team::init_kernel(kernel_space.clone())?;
             hart::mark_online();
-            crate::metal::riscv::mmu::activate(kernel_space.root());
+            crate::metal::mmu::riscv::activate(kernel_space.root());
             #[cfg(debug_assertions)]
             crate::metal::layout::validate();
 

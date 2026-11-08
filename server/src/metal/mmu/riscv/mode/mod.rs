@@ -33,7 +33,7 @@ pub fn levels() -> usize {
 }
 
 pub fn lower() -> VirtAddr {
-    crate::metal::riscv::mmu::canonical(1usize << geometry(mode()).split_bit())
+    crate::metal::mmu::riscv::canonical(1usize << geometry(mode()).split_bit())
 }
 
 pub fn upper() -> VirtAddr {

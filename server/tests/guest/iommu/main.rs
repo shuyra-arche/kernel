@@ -12,7 +12,7 @@ mod edu;
 #[allow(dead_code)]
 #[path = "../../support/iommu/mod.rs"]
 pub(crate) mod iommu;
-#[path = "../../../src/metal/riscv/iommu/mmio.rs"]
+#[path = "../../../src/metal/iommu/riscv/mmio.rs"]
 mod mmio;
 #[path = "../../../src/entry/boot/devices/plan/mod.rs"]
 mod plan;
@@ -196,5 +196,4 @@ pub(crate) mod description;
 mod metal {
     pub(crate) mod board { pub(crate) use crate::description as tree; }
     pub(crate) use crate::iommu;
-    pub(crate) mod riscv { pub(crate) use crate::iommu::riscv as iommu; }
 }

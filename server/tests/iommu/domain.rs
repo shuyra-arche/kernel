@@ -1,4 +1,4 @@
-#[path = "../../src/metal/riscv/iommu/domain/phase.rs"]
+#[path = "../../src/metal/iommu/riscv/domain/phase.rs"]
 mod phase;
 use super::super::BatchId;
 use phase::{DomainPhase as Phase, Event};

@@ -42,7 +42,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             expected,
             wait,
         } => {
-            let at = crate::metal::riscv::mmu::canonical(address.get());
+            let at = crate::metal::mmu::canonical(address.get());
             if address.get() % 4 != 0 || !crate::basis::nest::Nest::user_range(at, 4) {
                 return Outcome::fail(frame, RoomFail::Invalid);
             }
@@ -58,7 +58,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             }
         }
         RoomCall::WakeValue { address, all } => {
-            let at = crate::metal::riscv::mmu::canonical(address.get());
+            let at = crate::metal::mmu::canonical(address.get());
             if address.get() % 4 != 0 || !crate::basis::nest::Nest::user_range(at, 4) {
                 return Outcome::fail(frame, RoomFail::Invalid);
             }

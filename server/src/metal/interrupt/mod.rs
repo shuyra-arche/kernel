@@ -1,7 +1,7 @@
-pub(crate) use super::riscv::ipi;
-pub(crate) use super::riscv::local_interrupt::{
-    disable_external, enable_external, external_pending,
-};
+pub(crate) mod plic;
+mod riscv;
+
+pub(crate) use riscv::{disable_external, enable_external, external_pending, ipi};
 
 use alloc::boxed::Box;
 

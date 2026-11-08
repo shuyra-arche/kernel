@@ -14,9 +14,12 @@ Shuyra's RV64 kernel, public contracts and typed call transport.
 | `server/src/entry/` | Boot assembly of providers, normalized trap dispatch, calls and diagnostics |
 | `server/src/metal/` | Hardware contracts and the selected backend bindings |
 | `server/src/metal/allocator/` | Allocation algorithms, platform facts and allocator instances |
-| `server/src/metal/riscv/` | RV64 boot handoffs, trap context, timer and interrupt delivery |
-| `server/src/metal/riscv/mmu/` | CPU page tables, ASIDs and TLB synchronization |
-| `server/src/metal/riscv/iommu/` | Device translation, command queues and trusted completion |
+| `server/src/metal/riscv/` | RV64 boot handoffs, Hart state, traps and context switching |
+| `server/src/metal/clock/` | Counter and comparator contracts with the RV64 implementation |
+| `server/src/metal/interrupt/` | CPU-local interrupt operations, controller claims and installed routes |
+| `server/src/metal/mmu/` | CPU translation contracts, page tables, ASIDs and TLB synchronization |
+| `server/src/metal/iommu/` | Device translation, command queues and trusted completion |
+| `server/src/metal/pci/` | ECAM access and PCI endpoint configuration |
 | `server/sbi/` | SBI calls used by the kernel |
 | `.github/workflows/` | Compilation checks and source version releases |
 

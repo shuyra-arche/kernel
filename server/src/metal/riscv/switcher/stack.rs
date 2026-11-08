@@ -20,8 +20,8 @@ static BOOT_STACKS: OnceLock<Vec<Page>> = OnceLock::new();
 fn trap_stack_segment(hart: usize) -> (VirtAddr, VirtAddr) {
     let base = TRAP_STACK_BASE.as_usize() + hart * TRAP_STACK_SLOT_SIZE;
     (
-        crate::metal::riscv::mmu::canonical(base + TRAP_STACK_GUARD),
-        crate::metal::riscv::mmu::canonical(base + TRAP_STACK_SLOT_SIZE),
+        crate::metal::mmu::canonical(base + TRAP_STACK_GUARD),
+        crate::metal::mmu::canonical(base + TRAP_STACK_SLOT_SIZE),
     )
 }
 

@@ -25,8 +25,8 @@ impl Backtrace {
     fn new(world: SpaceKind) -> Self {
         Self {
             frames: [Frame {
-                pc: crate::metal::riscv::mmu::canonical(0),
-                sp: crate::metal::riscv::mmu::canonical(0),
+                pc: crate::metal::mmu::canonical(0),
+                sp: crate::metal::mmu::canonical(0),
                 fp: None,
                 space: world,
             }; DEPTH],

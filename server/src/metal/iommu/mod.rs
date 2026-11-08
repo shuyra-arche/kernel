@@ -9,6 +9,7 @@ mod error;
 mod hardware;
 mod identity;
 pub(crate) mod retirement;
+pub(crate) mod riscv;
 pub(crate) mod runtime;
 
 pub(crate) use error::Error;

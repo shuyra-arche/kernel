@@ -8,7 +8,7 @@ use crate::metal::board::MachineError;
 use crate::metal::clock::ClockError;
 use crate::metal::console::Sink;
 use crate::metal::hart::HartId;
-use crate::metal::riscv::mmu::mode::SatpError;
+use crate::metal::mmu::riscv::mode::SatpError;
 
 mod map_operation;
 mod resource_operation;

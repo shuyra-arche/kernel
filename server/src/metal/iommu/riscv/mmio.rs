@@ -1,4 +1,4 @@
-use crate::metal::riscv::iommu::registers::Registers;
+use crate::metal::iommu::riscv::registers::Registers;
 
 pub(crate) struct Mmio {
     base: usize,

@@ -1,11 +1,11 @@
 //! PCI admission and quiescence for the RV64 I/O backend.
 use alloc::boxed::Box;
 
-use super::super::adapter::Quiescence;
-use super::super::controllers::CONTROLLERS;
-use super::{Ecam, Endpoint};
+use super::adapter::Quiescence;
+use super::controllers::CONTROLLERS;
 use crate::basis::cell::page::Owner as PageOwner;
 use crate::metal::iommu::{Error, HardwareError, aperture::Port, runtime};
+use crate::metal::pci::{Ecam, Endpoint};
 
 pub(crate) struct PciPort {
     pub(crate) host: usize,

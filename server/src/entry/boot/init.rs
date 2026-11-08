@@ -25,12 +25,12 @@ pub unsafe fn init_with_pci(dtp: usize, route: PciRoute) -> Result<(), BootError
 fn initialize(dtp: usize, route: Option<PciRoute>) -> Result<(), BootError> {
     console::init();
     board::init(dtp).map_err(|source| BootError::Machine { dtp, source })?;
-    crate::metal::riscv::mmu::mode::init().map_err(BootError::PagingMode)?;
+    crate::metal::mmu::riscv::mode::init().map_err(BootError::PagingMode)?;
     console::_write(format_args!(
         "cpu: admitted={} boot={} paging={:?}\n",
         board::info().hart.count,
         crate::metal::hart::firmware_id().get(),
-        crate::metal::riscv::mmu::mode::mode(),
+        crate::metal::mmu::riscv::mode::mode(),
     ));
     crate::metal::allocator::init().map_err(BootError::Allocator)?;
     // 锁序检测要在任何被验证的调用之前启用：分配器就绪即可建池，

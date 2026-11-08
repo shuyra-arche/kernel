@@ -1,10 +1,10 @@
+use crate::metal::mmu::riscv::Address;
 use crate::metal::mmu::{Attributes, PageTable as TranslationTable};
-use crate::metal::riscv::mmu::Address;
 use alloc::alloc::Allocator;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::metal::riscv::mmu::mode;
+use crate::metal::mmu::riscv::mode;
 use kernel_api::address::PAGE_SHIFT;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
@@ -85,7 +85,7 @@ impl TableNode {
                     base
                 };
                 visit(
-                    crate::metal::riscv::mmu::canonical(canonical),
+                    crate::metal::mmu::riscv::canonical(canonical),
                     PhysAddr::from_raw(entry.paddr() as usize),
                     entry.flags().attributes(),
                     span,

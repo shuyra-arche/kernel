@@ -8,7 +8,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::metal::{board, hart, layout::MAX_HART_SLOTS, sync::OnceLock};
 
-use crate::metal::riscv::timer::Backend;
+use super::riscv::Backend;
 use compare::{Compare, LocalTimer};
 
 // Each slot is initialized and accessed by its own Hart with interrupts masked.
@@ -59,8 +59,5 @@ static SKIPPED: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(debug_assertions)]
 pub(crate) fn measures() -> ([(u64, u64); 2], u64) {
-    (
-        crate::metal::riscv::timer::measures(),
-        SKIPPED.load(Ordering::Relaxed),
-    )
+    (super::riscv::measures(), SKIPPED.load(Ordering::Relaxed))
 }

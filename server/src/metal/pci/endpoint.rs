@@ -1,4 +1,4 @@
-//! Protected PCI configuration effects for a platform-bound IOMMU adapter.
+//! Protected PCI endpoint configuration and BAR lifetime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Error {
     Absent,

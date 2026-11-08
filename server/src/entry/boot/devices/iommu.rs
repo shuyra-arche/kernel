@@ -8,12 +8,12 @@ use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
 use crate::basis::unit::team::kernel;
 use crate::metal::board;
-use crate::metal::riscv::iommu::Engine;
-use crate::metal::riscv::iommu::Phase;
-use crate::metal::riscv::iommu::controllers::CONTROLLERS;
-use crate::metal::riscv::iommu::controllers::Controllers;
-use crate::metal::riscv::iommu::mmio::Mmio;
-use crate::metal::riscv::iommu::topology::Topology;
+use crate::metal::iommu::riscv::Engine;
+use crate::metal::iommu::riscv::Phase;
+use crate::metal::iommu::riscv::controllers::CONTROLLERS;
+use crate::metal::iommu::riscv::controllers::Controllers;
+use crate::metal::iommu::riscv::mmio::Mmio;
+use crate::metal::iommu::riscv::topology::Topology;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PhysAddr;
 
@@ -60,7 +60,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     if regions.len() != 1 {
         return Err(PendFail::Denied);
     }
-    let route = crate::metal::riscv::iommu::interrupt::plan::Plan::discover(
+    let route = crate::metal::iommu::riscv::interrupt::plan::Plan::discover(
         &tree,
         board::info().hart,
         crate::metal::hart::hart_id(),
@@ -68,7 +68,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     )
     .map_err(|_| PendFail::Denied)?;
     let plic = super::pci::mapped(route.base, route.size)?;
-    unsafe { crate::metal::riscv::iommu::interrupt::install(plic, route) }
+    unsafe { crate::metal::iommu::riscv::interrupt::install(plic, route) }
         .map_err(|_| PendFail::Denied)?;
     let mut storage = CONTROLLERS.lock();
     if storage.is_some() {
@@ -141,13 +141,13 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     Ok(())
 }
 
-fn failure(error: crate::metal::riscv::iommu::EngineError) -> PendFail {
+fn failure(error: crate::metal::iommu::riscv::EngineError) -> PendFail {
     log::error!("iommu: command engine failure: {error:?}; hardware pages retained");
     PendFail::Denied
 }
 
 pub(in super::super) fn shutdown() {
-    crate::metal::riscv::iommu::interrupt::report();
+    crate::metal::iommu::riscv::interrupt::report();
     let mut storage = CONTROLLERS.lock();
     let Some(controllers) = storage.as_mut() else {
         return;

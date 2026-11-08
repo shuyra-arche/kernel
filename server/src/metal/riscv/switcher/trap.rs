@@ -3,7 +3,7 @@ use riscv::register::{scause, sepc, stval};
 
 use crate::basis::nest::FaultKind;
 use crate::metal::hart::{self, HartId};
-use crate::metal::riscv::mmu::canonical;
+use crate::metal::mmu::canonical;
 use kernel_api::address::VirtAddr;
 
 use super::context::TrapContext;
