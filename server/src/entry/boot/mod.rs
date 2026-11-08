@@ -48,12 +48,15 @@ global_asm!(
     ".align 2",
     ".globl _boot_entry",
     "_boot_entry:",
-    "    la   t0, PER_HART",
-    "    slli t1, a0, 6",
-    "    add  tp, t0, t1",
+    "    mv   tp, a1",
+    "    fence r, rw",
+    "    ld   t0, 0x28(tp)",
+    "    bne  a0, t0, 2f",
     "    csrc sstatus, 2",
-    "    mv   sp, a1",
+    "    ld   sp, 0x30(tp)",
     "    call boot_main",
+    "2:  wfi",
+    "    j 2b",
 );
 
 unsafe extern "C" {
@@ -265,12 +268,16 @@ pub(crate) fn boot_harts() -> Result<(), BootError> {
         if HartId::new(hart) == me {
             continue;
         }
-        let stack_top = boot_stack(hart);
+        let slot = HartId::new(hart);
+        let opaque = hart::prepare_boot(slot, boot_stack(hart));
+        unsafe {
+            core::arch::asm!("fence rw, rw", options(nostack));
+        }
         let r = sbi::HsmCall::new(sbi::fid::Hsm::Start)
             .args(sbi::ecall::SArgs {
-                a0: hart,
+                a0: hart::firmware(slot).get(),
                 a1: entry,
-                a2: stack_top,
+                a2: opaque,
                 ..Default::default()
             })
             .call();

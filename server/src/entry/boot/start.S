@@ -1,9 +1,9 @@
 .section .text._start
 .globl _start
 _start:
-    la   t0, PER_HART
-    slli t1, a0, 6
-    add  tp, t0, t1
+    # The boot hart owns dense slot zero, regardless of firmware ID.
+    la   tp, PER_HART
+    sd   a0, 0x28(tp)
     csrc sstatus, 2
     la   sp, _kernel_edge
     ld   t0, _canary

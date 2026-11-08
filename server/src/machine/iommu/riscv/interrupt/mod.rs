@@ -11,7 +11,7 @@ struct Route {
     physical: usize,
     size: usize,
     context: usize,
-    hart: usize,
+    hart: hart::HartId,
     queues: [u32; 3],
 }
 static ROUTE: OnceLock<Route> = OnceLock::new();
@@ -53,7 +53,7 @@ pub(crate) unsafe fn install(base: usize, plan: Plan) -> Result<(), ()> {
             physical: plan.base,
             size: plan.size,
             context: plan.selected,
-            hart: hart::hart_id().get(),
+            hart: hart::hart_id(),
             queues: plan.queues,
         })
         .map_err(|_| ())?;
@@ -67,7 +67,7 @@ pub(crate) fn handle() -> bool {
     let Some(route) = ROUTE.get() else {
         return false;
     };
-    if hart::hart_id().get() != route.hart {
+    if hart::hart_id() != route.hart {
         return false;
     }
     let claim = 0x200004 + route.context * 0x1000;
@@ -97,7 +97,7 @@ pub(crate) fn rearm() {
         return;
     };
     // Only the routed hart changes enable words; other harts can progress data.
-    if hart::hart_id().get() != route.hart {
+    if hart::hart_id() != route.hart {
         return;
     }
     let masked = MASKED.swap(0, Ordering::AcqRel);

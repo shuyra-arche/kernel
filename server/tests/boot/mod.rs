@@ -12,6 +12,13 @@ mod interrupt;
 mod translation;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
+#[path = "../../src/machine/board/harts/mod.rs"]
+mod hart_facts;
+#[allow(dead_code)]
+#[path = "../../src/machine/hart/id.rs"]
+mod hart_id;
+mod harts;
+#[allow(dead_code)]
 #[path = "../../src/machine/iommu/riscv/interrupt/plan.rs"]
 mod interrupt_plan;
 mod memory;
@@ -26,6 +33,9 @@ use region::Region;
 mod memory_facts;
 
 mod machine {
+    pub(crate) mod hart {
+        pub(crate) use crate::hart_id::{FirmwareId, HartId};
+    }
     pub(crate) mod iommu {
         pub(crate) mod riscv {
             pub(crate) use crate::topology;

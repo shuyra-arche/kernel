@@ -25,16 +25,22 @@ pub unsafe fn init_with_pci(dtp: usize, route: PciRoute) -> Result<(), BootError
 fn initialize(dtp: usize, route: Option<PciRoute>) -> Result<(), BootError> {
     console::init();
     board::init(dtp).map_err(|source| BootError::Machine { dtp, source })?;
+    crate::machine::mmu::riscv::mode::init().map_err(BootError::PagingMode)?;
+    console::_write(format_args!(
+        "cpu: admitted={} boot={} paging={:?}\n",
+        board::info().hart.count,
+        crate::machine::hart::firmware_id().get(),
+        crate::machine::mmu::riscv::mode::mode(),
+    ));
     crate::machine::allocator::init().map_err(BootError::Allocator)?;
     // 锁序检测要在任何被验证的调用之前启用：分配器就绪即可建池，
-    // 之后的 mode / 空间 / 时钟 / 栈初始化都在它的看护下跑。
+    // 之后的空间 / 时钟 / 栈初始化都在它的看护下跑。
     // 池按机器建一次：测试台架会重复走公共 init，重复就是“已经启用”。
     #[cfg(debug_assertions)]
     match crate::machine::sync::init_depend(crate::machine::hart::hart_count()) {
         Ok(()) | Err(crate::machine::sync::DepInitError::AlreadyInit) => {}
         Err(error) => return Err(BootError::Dependencies(error)),
     }
-    crate::machine::mmu::riscv::mode::detect().map_err(BootError::PagingMode)?;
     super::space::init().map_err(BootError::KernelSpace)?;
     clock::init().map_err(BootError::Clock)?;
     super::devices::init_iommu().map_err(|source| BootError::Resources {

@@ -79,7 +79,7 @@ impl BootError {
                 field!("context", "{}", source.context());
                 field!("reason", "{}", source.source);
             }
-            Self::PagingMode(source) => reason!("detect page table mode", source),
+            Self::PagingMode(source) => reason!("select page table mode", source),
             Self::KernelSpace(source) => {
                 field!("operation", "initialize kernel space");
                 field!("context", "{}", source.context());

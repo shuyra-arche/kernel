@@ -203,6 +203,29 @@ identity-translated paths. PCI retains its dedicated window and routing rules;
 its parent-side windows now also pass through the CPU address conversion.
 Boot ledger region names use the resulting CPU physical addresses.
 
+CPU admission keeps firmware Hart IDs separate from dense Kernel slots. The boot
+hart always owns slot zero; enabled CPUs receive the remaining slots. SBI HSM,
+IPI and remote fences use exact firmware targets, and PLIC selection uses the
+hardware ID. Disabled CPUs are not started or included in the capability set.
+Duplicate IDs, malformed CPU properties, a missing/disabled boot hart and SBI's
+reserved all-harts ID fail boot before allocation. Early CPU storage is bounded
+to 256 CPU nodes (including disabled ones), independent of ID magnitude. The
+immutable CPU table is stored once outside the by-value memory initialization
+result to preserve the 64 KiB ROOT stack budget.
+
+Each enabled CPU must declare `mmu-type` as Sv39, Sv48 or Sv57 and provide the
+RV64GC, CSR, instruction-fence and counter baseline used by the Kernel. The
+complete `riscv,isa-base` / `riscv,isa-extensions` pair takes precedence; an
+incomplete pair fails. Legacy `riscv,isa` supports the unversioned canonical
+single-letter sequence with underscore-separated multi-letter extensions, with
+I implying CSR/fence/counters as specified by the deprecated DT binding.
+Unknown well-formed extensions do not enable Kernel features. Missing or
+unsupported MMU/ISA facts fail explicitly; no capability is guessed from QEMU.
+The current policy selects the largest mode common to all admitted CPUs, relying
+on Sv57 implying Sv48 and Sv48 implying Sv39. Normal boot no longer probes modes
+by writing `satp`. The validated, nonzero `/cpus/timebase-frequency` feeds the
+existing clock consumer; SBI runtime capabilities remain SBI's responsibility.
+
 Use nightly Rust with `riscv64gc-unknown-none-elf`; the repository does not set a
 local toolchain override. The Server package is `kernel`, its executable `shuyra`.
 
@@ -230,6 +253,12 @@ The ignored hardware suite builds an initial Unit against API/Client, boots the
 actual Kernel through Capsule, and runs debug with one/four harts and release
 with four harts. An additional debug/four-hart CPU boot supplies two RAM banks,
 a physical hole and reservation-map entries through a modified QEMU DTB.
+Debug CPU and I/O boots also disable physical harts 0 and 2 in a four-hart QEMU
+DTB and advertise different MMU ceilings on harts 1 and 3. These scenarios verify
+a nonzero boot hart, sparse enabled identities, common Sv39 selection and the
+existing scheduler/fence and IOMMU interrupt paths. Host FDT tests additionally
+cover IDs above the SBI mask width; QEMU does not validate arbitrary physical
+Hart ID values or physical hardware.
 CPU scenarios cover all Slot/Memo endpoint shapes, stale
 transitions, persistent freezing, replacement, borrowed ownership denial, Pend
 windows, Sign revocation, stable Unit results and atomic WaitValue/WakeValue.

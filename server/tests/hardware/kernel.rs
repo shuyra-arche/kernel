@@ -112,10 +112,10 @@ fn run(mode: &str) {
         .unwrap();
         let cases = harts
             .iter()
-            .map(|harts| (*harts, false))
-            .chain((profile == "debug" && !io).then_some((4, true)));
-        for (harts, split_memory) in cases {
-            let suffix = if split_memory { "-split-memory" } else { "" };
+            .map(|harts| (*harts, ""))
+            .chain((profile == "debug" && !io).then_some((4, "-split-memory")))
+            .chain((profile == "debug" && mode != "io-exit").then_some((4, "-sparse-harts")));
+        for (harts, suffix) in cases {
             let name = format!("{profile}-smp{harts}{suffix}");
             let mut command = Command::new(&qemu);
             command
@@ -139,9 +139,14 @@ fn run(mode: &str) {
             if io {
                 command.args(["-device", "edu,addr=1.0"]);
             }
-            if split_memory {
+            if suffix == "-split-memory" {
                 let dtb = evidence.join("split-memory.dtb");
                 super::memory::fixture(&qemu, &dtb, harts);
+                command.arg("-dtb").arg(dtb);
+            }
+            if suffix == "-sparse-harts" {
+                let dtb = evidence.join("sparse-harts.dtb");
+                super::harts::fixture(&qemu, &dtb, io);
                 command.arg("-dtb").arg(dtb);
             }
             std::fs::write(
@@ -152,6 +157,13 @@ fn run(mode: &str) {
             let output = super::run(command, &evidence, &name);
             let log = String::from_utf8_lossy(&output.stdout);
             assert!(output.status.success(), "{name}: {log}");
+            if suffix == "-sparse-harts" {
+                assert!(
+                    log.contains("cpu: admitted=2 boot=1 paging=Sv39")
+                        || log.contains("cpu: admitted=2 boot=3 paging=Sv39"),
+                    "{name}: {log}"
+                );
+            }
             for marker in [
                 "PASS cell-kernel movement=1 memo=1 generation=1 freeze=1",
                 "PASS cell-kernel swap=1 cleanup=1",
