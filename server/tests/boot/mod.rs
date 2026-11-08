@@ -9,6 +9,7 @@ pub(crate) mod topology;
 
 mod authority;
 mod interrupt;
+mod translation;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
 #[path = "../../src/machine/iommu/riscv/interrupt/plan.rs"]

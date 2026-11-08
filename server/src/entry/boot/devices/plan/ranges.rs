@@ -10,32 +10,6 @@ pub(crate) fn is_pci_host(node: fdt::node::FdtNode) -> bool {
         == Some("pci")
 }
 
-fn cells(node: fdt::node::FdtNode, name: &str) -> Option<usize> {
-    node.property(name).and_then(|property| property.as_usize())
-}
-
-/// 这一节点的**父节点**（靠“谁的 children 里有它”找）。
-///
-/// fdt 那一层不公开父链接，故父的单元数不能猜：查不到就当场拒，
-/// 宁可不开这条窗口，也不能按根的数目先登记一段错的物理区。
-///
-/// 认节点用**借用切片的身份**（同一条属性值在 DTB 里的地址），不用名字或内容：
-/// 两个不同父节点下可以有同名、且 `ranges` 字节完全一样的子节点，
-/// 按内容匹配就会把后来的那个认到先出现的父上去，于是用错父的 `#address-cells`。
-fn parent_of<'b, 'a>(
-    fdt: &'b fdt::Fdt<'a>,
-    node: fdt::node::FdtNode<'b, 'a>,
-) -> Option<fdt::node::FdtNode<'b, 'a>> {
-    let ranges = node.property("ranges")?.value;
-    fdt.all_nodes().find(|candidate| {
-        candidate.children().any(|child| {
-            child
-                .property("ranges")
-                .is_some_and(|property| core::ptr::eq(property.value, ranges))
-        })
-    })
-}
-
 /// PCI 宿主的 `ranges` 里那几段**内存空间**窗口的父地址与长度。
 ///
 /// 一条占 `child + parent + size` 格（都是**四字节格**）：
@@ -95,12 +69,18 @@ pub(crate) fn memory_windows(
     fdt: &fdt::Fdt,
     node: fdt::node::FdtNode,
 ) -> Result<alloc::vec::Vec<(usize, usize)>, PendFail> {
-    let Some(ranges) = node.property("ranges") else {
+    let Some(ranges) = super::address::property(node, "ranges")? else {
         return Ok(alloc::vec::Vec::new());
     };
-    let child = cells(node, "#address-cells").ok_or(PendFail::Denied)?;
-    let size = cells(node, "#size-cells").ok_or(PendFail::Denied)?;
-    let parent = parent_of(fdt, node).ok_or(PendFail::Denied)?;
-    let parent = cells(parent, "#address-cells").ok_or(PendFail::Denied)?;
-    ranges_windows(ranges.value, child, parent, size)
+    let child = super::address::cells(node, "#address-cells", 0)?;
+    let size = super::address::cells(node, "#size-cells", 0)?;
+    let parent = super::address::parent(fdt, node).ok_or(PendFail::Denied)?;
+    let addresses = super::address::cells(parent, "#address-cells", 0)?;
+    let mut windows = ranges_windows(ranges, child, addresses, size)?;
+    for (base, size) in &mut windows {
+        let physical = super::address::physical(fdt, parent, *base, *size)?;
+        *base = physical.base;
+        *size = physical.size;
+    }
+    Ok(windows)
 }

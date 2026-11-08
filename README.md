@@ -188,6 +188,21 @@ separated banks can exhaust the bootstrap interval; this reports allocation
 failure rather than admitting holes. The firmware must supply a readable FDT
 blob; structural validation cannot establish the validity of a raw pointer.
 
+Ordinary MMIO resources are decoded using their immediate parent's cell widths
+and translated through every ancestor's `ranges` before boot authority is
+published. Empty `ranges` means identity; missing, malformed, ambiguous or
+uncovered translations reject the whole plan. A resource must fit one window
+at each hop, and its final CPU page coverage must fit the intersection of those
+windows. Distinct boot authorities cannot overlap even partially within a page.
+Disabled nodes and descendants, CPU identifiers, reserved-memory descriptions
+and PCI child registers do not become ordinary MMIO authorities.
+
+Interrupt/timer and IOMMU register pages remain protected, including aliases
+and disabled controllers. Their existing hardware backends still require
+identity-translated paths. PCI retains its dedicated window and routing rules;
+its parent-side windows now also pass through the CPU address conversion.
+Boot ledger region names use the resulting CPU physical addresses.
+
 Use nightly Rust with `riscv64gc-unknown-none-elf`; the repository does not set a
 local toolchain override. The Server package is `kernel`, its executable `shuyra`.
 
