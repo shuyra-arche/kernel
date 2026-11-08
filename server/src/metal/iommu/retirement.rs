@@ -4,6 +4,7 @@ use super::BindingId;
 use super::Error;
 use super::Hardware;
 use super::IoSpace;
+use crate::basis::cell::page::PageId;
 use crate::basis::cell::projection::admission::{Admission, Watch};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -13,7 +14,7 @@ use core::sync::atomic::Ordering;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DomainId(BindingId);
 
-struct Entry<H: Hardware> {
+struct Entry<H: Hardware<PageId>> {
     id: DomainId,
     admission: Watch,
     space: IoSpace<H>,
@@ -21,7 +22,7 @@ struct Entry<H: Hardware> {
     completed: Arc<AtomicBool>,
 }
 
-pub(crate) struct Registry<H: Hardware> {
+pub(crate) struct Registry<H: Hardware<PageId>> {
     entries: Vec<Entry<H>>,
     cursor: usize,
 }
@@ -33,7 +34,7 @@ pub(crate) struct Progress {
     pub(crate) failed: usize,
 }
 
-impl<H: Hardware> Registry<H> {
+impl<H: Hardware<PageId>> Registry<H> {
     pub(crate) const fn new() -> Self {
         Self {
             entries: Vec::new(),

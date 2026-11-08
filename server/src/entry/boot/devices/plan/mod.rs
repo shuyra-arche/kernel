@@ -1,4 +1,4 @@
-use crate::metal::riscv::iommu::topology::Topology;
+use crate::metal::iommu::riscv::topology::Topology;
 use alloc::vec::Vec;
 use fdt::{Fdt, node::FdtNode};
 use kernel_api::abi::call::pend::PendFail;

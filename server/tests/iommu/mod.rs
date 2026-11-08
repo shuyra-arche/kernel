@@ -44,13 +44,20 @@ mod tree;
 mod pci_tests;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
-#[path = "../../src/metal/riscv/iommu/pci/endpoint.rs"]
+#[path = "../../src/metal/pci/endpoint.rs"]
 mod pci;
 
 #[allow(dead_code)]
 #[path = "../../src/metal/board/tree/mod.rs"]
 pub(crate) mod description;
+#[path = "../../src/metal/generic/pci.rs"]
+pub(crate) mod pci_contract;
+
 mod metal {
+    pub(crate) mod generic {
+        pub(crate) use crate::iommu::contract as iommu;
+        pub(crate) use crate::pci_contract as pci;
+    }
     pub(crate) use crate::iommu;
     pub(crate) mod board {
         pub(crate) use crate::description as tree;

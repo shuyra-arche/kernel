@@ -7,7 +7,7 @@ mod retirement;
 mod tickets;
 pub(super) use invalidation::Invalidation;
 
-pub use fault::{FaultKind, FaultOutcome};
+pub use fault::FaultOutcome;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -17,14 +17,15 @@ use super::mapping::publication::Publication;
 use super::{Access, Mapping};
 use super::{Asid, NestError};
 use crate::basis::cell::page::{Change, Page};
-use crate::metal::mmu::{Geometry, PageTable};
+use crate::metal::generic::mmu::PageTable;
+use crate::metal::mmu::Geometry;
 use kernel_api::address::VirtAddr;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
 #[cfg(debug_assertions)]
-use {super::Nest, crate::metal::mmu::Attributes, kernel_api::address::PageOffset};
+use {super::Nest, crate::metal::generic::mmu::Attributes, kernel_api::address::PageOffset};
 
+use crate::metal::generic::mmu::fence::Completed;
 use crate::metal::mmu::Table;
-use crate::metal::mmu::fence::Completed;
 use phase::ClosePhase;
 
 use self::retirement::{Fenced, Retirement};

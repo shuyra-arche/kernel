@@ -2,33 +2,20 @@
 
 use alloc::{boxed::Box, vec::Vec};
 
-use crate::basis::{cell::projection::Admission, flat::FlatRange};
+use crate::basis::{
+    cell::{page::PageId, projection::Admission},
+    flat::FlatRange,
+};
+use crate::metal::generic::iommu::Port;
 use crate::metal::sync::SpinLock;
 
 use super::retirement::{Completion, DomainId};
 use super::{Error, runtime};
 
-/// A trusted port bound to one requester. The provider owns platform effects
-/// such as admission and blocking future requests.
-///
-/// # Safety
-/// A bound backend must cover every request issued through the port. After an
-/// irreversible binding attempt, the port must reject a second bind until the
-/// implementation can prove reauthorization safe.
-pub(crate) unsafe trait Port: Send {
-    fn bind(&mut self) -> Result<runtime::Backend, Error>;
-
-    /// # Safety
-    /// The matching retained I/O space must be active and authorized.
-    unsafe fn activate(&mut self) -> Result<(), Error>;
-
-    fn stop(&mut self) -> Result<(), Error>;
-}
-
 pub(crate) struct Aperture {
     pub(crate) base: usize,
     pub(crate) did: u32,
-    pub(crate) port: Box<dyn Port>,
+    pub(crate) port: Box<dyn Port<PageId, Error = Error>>,
     pub(crate) source: FlatRange,
 }
 

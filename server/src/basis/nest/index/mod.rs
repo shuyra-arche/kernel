@@ -3,11 +3,9 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 #[cfg(debug_assertions)]
-use crate::metal::mmu::Attributes;
+use crate::metal::generic::mmu::{Attributes, PageTable};
 #[cfg(debug_assertions)]
-use crate::metal::mmu::Table;
-#[cfg(debug_assertions)]
-use crate::metal::mmu::{Geometry, PageTable};
+use crate::metal::mmu::{Geometry, Table};
 #[cfg(debug_assertions)]
 use kernel_api::address::PAGE_SIZE;
 

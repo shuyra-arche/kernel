@@ -1,5 +1,6 @@
 mod error;
 mod instant;
+mod riscv;
 pub(crate) mod timer;
 
 pub use error::ClockError;
@@ -11,8 +12,8 @@ use ::core::time::Duration;
 
 use kernel_api::model::clock::ClockSource;
 
+use self::riscv as counter;
 use crate::metal::board;
-use crate::metal::riscv::timer as counter;
 use crate::metal::sync::OnceLock;
 
 const NANOS_PER_SEC: u128 = 1_000_000_000;

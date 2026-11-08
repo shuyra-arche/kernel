@@ -1,4 +1,4 @@
-use super::endpoint::Config;
+use crate::metal::generic::pci::Config;
 
 pub struct Ecam {
     base: usize,

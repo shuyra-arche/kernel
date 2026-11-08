@@ -1,11 +1,6 @@
 use crate::basis::cell::page::RetainError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HardwareError {
-    Unavailable,
-    Fault,
-    Timeout,
-}
+use crate::metal::generic::iommu::HardwareError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Error {

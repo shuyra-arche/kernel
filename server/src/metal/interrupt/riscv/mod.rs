@@ -1,3 +1,5 @@
+pub(crate) mod ipi;
+
 use riscv::register::{sie, sip};
 
 pub(crate) fn enable_external() {

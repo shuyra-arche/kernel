@@ -4,7 +4,7 @@ extern crate alloc;
 mod plan;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
-#[path = "../../src/metal/riscv/iommu/topology/mod.rs"]
+#[path = "../../src/metal/iommu/riscv/topology/mod.rs"]
 pub(crate) mod topology;
 
 mod authority;
@@ -19,7 +19,7 @@ pub(crate) mod hart_facts;
 mod hart_id;
 mod harts;
 #[allow(dead_code)]
-#[path = "../../src/metal/riscv/iommu/interrupt/plan.rs"]
+#[path = "../../src/metal/iommu/riscv/interrupt/plan.rs"]
 mod interrupt_plan;
 mod memory;
 #[allow(dead_code)]
@@ -44,8 +44,8 @@ mod metal {
     pub(crate) mod hart {
         pub(crate) use crate::hart_id::{FirmwareId, HartId};
     }
-    pub(crate) mod riscv {
-        pub(crate) mod iommu {
+    pub(crate) mod iommu {
+        pub(crate) mod riscv {
             pub(crate) use crate::topology;
         }
     }

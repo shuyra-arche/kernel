@@ -17,7 +17,7 @@ use crate::metal::sync::SpinLock;
 // drains the global heap; other comparators serve local scheduling.
 const OWNER: HartId = HartId::new(0);
 static LOCAL: [AtomicU64; MAX_HART_SLOTS] =
-    [const { AtomicU64::new(timer::DISARMED) }; MAX_HART_SLOTS];
+    [const { AtomicU64::new(crate::metal::generic::clock::DISARMED) }; MAX_HART_SLOTS];
 
 pub const BLIND_MS: u64 = 100;
 

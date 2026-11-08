@@ -33,7 +33,7 @@ use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::unit::team::Team;
 use crate::basis::view::share::ShareOperation;
-use crate::metal::riscv::mmu::identity;
+use crate::metal::mmu::identity;
 use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;

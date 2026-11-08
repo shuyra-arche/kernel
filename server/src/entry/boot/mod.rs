@@ -4,7 +4,8 @@ mod init;
 pub(crate) mod resources;
 mod space;
 
-pub use crate::metal::riscv::iommu::pci::{Ecam as PciConfig, aperture::QuiescenceStatus};
+pub use crate::metal::iommu::riscv::port::QuiescenceStatus;
+pub use crate::metal::pci::Ecam as PciConfig;
 pub use devices::PciRoute;
 pub use error::BootError;
 pub use error::MapOperation;
@@ -29,7 +30,7 @@ use crate::metal::hart;
 use crate::metal::hart::HartId;
 use crate::metal::image::ROOT_STACK_CANARY;
 use crate::metal::image::root_stack_base;
-use crate::metal::riscv::mmu::identity;
+use crate::metal::mmu::identity;
 use crate::metal::switcher::context::TrapContext;
 use crate::metal::switcher::stack::arm_hart;
 use crate::metal::switcher::stack::boot_stack;

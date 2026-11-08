@@ -53,3 +53,12 @@ fn mixed_deadline_operations_match_an_independent_ordered_model() {
         assert_eq!(queue.nearest(), model.values().copied().min());
     }
 }
+
+#[path = "../../src/metal/generic/clock.rs"]
+pub(crate) mod clock_contract;
+
+mod metal {
+    pub(crate) mod generic {
+        pub(crate) use crate::clock_contract as clock;
+    }
+}

@@ -1,5 +1,5 @@
 use super::{Access, Attributes, Nest, NestError};
-use crate::metal::mmu::PageTable;
+use crate::metal::generic::mmu::PageTable;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
 

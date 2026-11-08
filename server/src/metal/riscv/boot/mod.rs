@@ -4,9 +4,10 @@ use core::arch::{asm, global_asm};
 use riscv::register::satp;
 use sbi::{HsmCall, ecall::SArgs, fid::Hsm};
 
+use crate::metal::mmu::riscv::mode;
+
 use super::{
     hart::{self, HartId},
-    mmu::mode,
     switcher::context::TrapContext,
 };
 

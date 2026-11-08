@@ -15,11 +15,11 @@ bitflags! {
 }
 
 impl PteFlags {
-    pub(super) fn from_attributes(attrs: crate::metal::mmu::Attributes) -> Self {
+    pub(super) fn from_attributes(attrs: crate::metal::generic::mmu::Attributes) -> Self {
         Self::from_bits_truncate(attrs.bits() << 1)
     }
 
-    pub(super) fn attributes(self) -> crate::metal::mmu::Attributes {
-        crate::metal::mmu::Attributes::from_bits_truncate(self.bits() >> 1)
+    pub(super) fn attributes(self) -> crate::metal::generic::mmu::Attributes {
+        crate::metal::generic::mmu::Attributes::from_bits_truncate(self.bits() >> 1)
     }
 }

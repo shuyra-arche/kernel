@@ -1,5 +1,5 @@
-use crate::metal::riscv::mmu::table::PteFlags;
-use crate::metal::riscv::mmu::table::TableNode;
+use crate::metal::mmu::riscv::table::PteFlags;
+use crate::metal::mmu::riscv::table::TableNode;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
 
@@ -24,7 +24,7 @@ impl StackReader {
             return Some(base);
         }
         let (base, flags) =
-            TableNode::walk_raw(self.root, crate::metal::riscv::mmu::canonical(page), |pa| {
+            TableNode::walk_raw(self.root, crate::metal::mmu::canonical(page), |pa| {
                 crate::metal::board::contains_identity(pa.as_usize(), PAGE_SIZE)
             })?;
         if !flags.contains(PteFlags::R)

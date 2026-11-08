@@ -4,8 +4,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use super::{Invalidation, tickets::Tickets};
+use crate::metal::generic::mmu::fence::{Completed, Scope};
 use crate::metal::mmu::Table;
-use crate::metal::mmu::fence::{Completed, Scope};
 
 use super::super::{Asid, Mapping};
 use crate::basis::nest::mapping::publication::Publication;

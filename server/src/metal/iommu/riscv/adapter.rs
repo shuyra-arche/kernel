@@ -6,11 +6,11 @@ use super::Phase;
 use super::domain::Domain;
 use super::domain::DomainPhase;
 use super::registers::Registers;
-use crate::basis::cell::page::Page;
 use crate::basis::cell::page::Retention;
+use crate::basis::cell::page::{Page, PageId};
+use crate::metal::generic::iommu::Hardware;
 use crate::metal::iommu::BatchId;
 use crate::metal::iommu::Fault;
-use crate::metal::iommu::Hardware;
 use crate::metal::iommu::HardwareError;
 use crate::metal::iommu::Projection;
 
@@ -93,7 +93,7 @@ fn failure(error: EngineError) -> HardwareError {
 // restricted to one checked projection, every teardown step is retained, and no
 // outer batch completes until Domain is Closed AND independent platform proof
 // succeeds. Dropping either live Domain or Engine quarantines its Cells.
-unsafe impl<R: Registers, Q: Quiescence> Hardware for Adapter<R, Q> {
+unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
     fn capacity(&self) -> usize {
         usize::from(!matches!(self.state, State::Settled(_)))
     }

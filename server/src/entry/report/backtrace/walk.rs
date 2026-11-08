@@ -29,10 +29,9 @@ impl<'a> Walk<'a> {
                 break;
             };
             self.backtrace.push(Frame {
-                pc: crate::metal::riscv::mmu::canonical(ra),
-                sp: crate::metal::riscv::mmu::canonical(f),
-                fp: (caller != 0 && caller > f)
-                    .then(|| crate::metal::riscv::mmu::canonical(caller)),
+                pc: crate::metal::mmu::canonical(ra),
+                sp: crate::metal::mmu::canonical(f),
+                fp: (caller != 0 && caller > f).then(|| crate::metal::mmu::canonical(caller)),
                 space: world,
             });
             if caller == 0 || caller <= f {
@@ -57,8 +56,8 @@ impl<'a> Walk<'a> {
                 Some(w) => {
                     if code(w) {
                         self.backtrace.push(Frame {
-                            pc: crate::metal::riscv::mmu::canonical(w),
-                            sp: crate::metal::riscv::mmu::canonical(a),
+                            pc: crate::metal::mmu::canonical(w),
+                            sp: crate::metal::mmu::canonical(a),
                             fp: None,
                             space: world,
                         });

@@ -1,75 +1,50 @@
 use riscv::interrupt::{Exception, Interrupt, Trap};
 use riscv::register::{scause, sepc, stval};
 
-use crate::basis::nest::FaultKind;
+use crate::metal::generic::trap::{Fault, FaultKind, PageFault, TrapEvent};
 use crate::metal::hart::{self, HartId};
-use crate::metal::riscv::mmu::canonical;
-use kernel_api::address::VirtAddr;
+use crate::metal::mmu::canonical;
 
 use super::context::TrapContext;
 use super::stack::{TRAP_STACK_CANARY, trap_stack_base, trap_stack_guard_hart, trap_stack_hart};
 
-pub(crate) enum TrapEvent {
-    Timer,
-    Ipi,
-    External,
-    Call,
-    PageFault(PageFault),
-    IllegalInstruction(Fault),
-    Exception(Fault),
-}
-
-pub(crate) struct Fault {
-    pub(crate) cause: usize,
-    pub(crate) value: usize,
-    pub(crate) pc: usize,
-}
-
-pub(crate) struct PageFault {
-    pub(crate) detail: Fault,
-    pub(crate) addr: VirtAddr,
-    pub(crate) kind: FaultKind,
-}
-
-impl TrapEvent {
-    pub(crate) fn capture() -> Self {
-        let cause = scause::read();
-        let trap: Trap<Interrupt, Exception> = cause
-            .cause()
-            .try_into()
-            .unwrap_or_else(|error| panic!("unknown trap cause: {error:?}"));
-        match trap {
-            Trap::Interrupt(Interrupt::SupervisorTimer) => Self::Timer,
-            Trap::Interrupt(Interrupt::SupervisorSoft) => Self::Ipi,
-            Trap::Interrupt(Interrupt::SupervisorExternal) => Self::External,
-            Trap::Exception(
-                Exception::Breakpoint | Exception::UserEnvCall | Exception::SupervisorEnvCall,
-            ) => Self::Call,
-            Trap::Exception(exception) => {
-                let detail = Fault {
-                    cause: cause.bits(),
-                    value: stval::read(),
-                    pc: sepc::read(),
-                };
-                let kind = match exception {
-                    Exception::InstructionPageFault => FaultKind::Instruction,
-                    Exception::LoadPageFault => FaultKind::Load,
-                    Exception::StorePageFault => FaultKind::Store,
-                    Exception::IllegalInstruction => return Self::IllegalInstruction(detail),
-                    _ => return Self::Exception(detail),
-                };
-                if let Some(hart) = trap_stack_guard_hart(detail.value) {
-                    panic!(
-                        "trap stack overflow on hart {hart} (stval={:#x})",
-                        detail.value
-                    );
-                }
-                Self::PageFault(PageFault {
-                    addr: canonical(detail.value),
-                    detail,
-                    kind,
-                })
+pub(crate) fn capture() -> TrapEvent {
+    let cause = scause::read();
+    let trap: Trap<Interrupt, Exception> = cause
+        .cause()
+        .try_into()
+        .unwrap_or_else(|error| panic!("unknown trap cause: {error:?}"));
+    match trap {
+        Trap::Interrupt(Interrupt::SupervisorTimer) => TrapEvent::Timer,
+        Trap::Interrupt(Interrupt::SupervisorSoft) => TrapEvent::Ipi,
+        Trap::Interrupt(Interrupt::SupervisorExternal) => TrapEvent::External,
+        Trap::Exception(
+            Exception::Breakpoint | Exception::UserEnvCall | Exception::SupervisorEnvCall,
+        ) => TrapEvent::Call,
+        Trap::Exception(exception) => {
+            let detail = Fault {
+                cause: cause.bits(),
+                value: stval::read(),
+                pc: sepc::read(),
+            };
+            let kind = match exception {
+                Exception::InstructionPageFault => FaultKind::Instruction,
+                Exception::LoadPageFault => FaultKind::Load,
+                Exception::StorePageFault => FaultKind::Store,
+                Exception::IllegalInstruction => return TrapEvent::IllegalInstruction(detail),
+                _ => return TrapEvent::Exception(detail),
+            };
+            if let Some(hart) = trap_stack_guard_hart(detail.value) {
+                panic!(
+                    "trap stack overflow on hart {hart} (stval={:#x})",
+                    detail.value
+                );
             }
+            TrapEvent::PageFault(PageFault {
+                addr: canonical(detail.value),
+                detail,
+                kind,
+            })
         }
     }
 }

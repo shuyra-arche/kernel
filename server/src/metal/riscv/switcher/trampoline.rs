@@ -1,8 +1,8 @@
 use ::core::arch::global_asm;
 
 use crate::metal::layout::TRAMPOLINE;
-use crate::metal::riscv::mmu::identity as asid;
-use crate::metal::riscv::mmu::identity::Asid;
+use crate::metal::mmu::identity as asid;
+use crate::metal::mmu::identity::Asid;
 use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::PAGE_SIZE;
 

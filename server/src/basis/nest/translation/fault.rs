@@ -1,21 +1,13 @@
-use fack::prelude::Error;
 use kernel_api::address::{PageOffset, VirtAddr};
 
-use crate::metal::mmu::Attributes;
-use crate::metal::mmu::{Geometry, PageTable};
+use crate::metal::generic::mmu::Attributes;
+use crate::metal::generic::mmu::PageTable;
+use crate::metal::mmu::Geometry;
 
 use super::super::Access;
 use super::NestState;
 
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub enum FaultKind {
-    #[error("Execute OOM Instruction")]
-    Instruction,
-    #[error("Load OOM Data")]
-    Load,
-    #[error("Store OOM Data")]
-    Store,
-}
+use crate::metal::generic::trap::FaultKind;
 
 impl FaultKind {
     fn satisfies(self, flags: Attributes) -> bool {

@@ -1,15 +1,13 @@
 //! Kernel-lifetime storage, independent of Team/Task objects. Trusted device
 //! binding installs adapters before publishing any Unit data.
 use crate::basis::cell::projection::Admission;
+use crate::metal::iommu::Backend;
 use crate::metal::iommu::Error;
-use crate::metal::iommu::Hardware;
 use crate::metal::iommu::IoSpace;
 use crate::metal::iommu::retirement::DomainId;
 use crate::metal::iommu::retirement::Registry;
 use crate::metal::sync::SpinLock;
-use alloc::boxed::Box;
 
-pub(crate) type Backend = Box<dyn Hardware + Send>;
 static DOMAINS: SpinLock<Registry<Backend>> = SpinLock::new(Registry::new());
 
 pub(crate) fn install(owner: &Admission, hardware: Backend) -> Result<DomainId, (Error, Backend)> {

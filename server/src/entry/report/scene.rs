@@ -1,4 +1,4 @@
-use crate::metal::riscv::mmu::Address;
+use crate::metal::mmu::riscv::Address;
 use ::core::arch::asm;
 
 use alloc::format;
@@ -103,14 +103,14 @@ impl Scene {
         };
         let mut reader = StackReader::new(satp::read().bits() & ((1usize << 44) - 1));
         let cfg = WalkConfig::kernel(ceiling);
-        let code = |w: usize| crate::metal::riscv::mmu::canonical(w).is_kernel();
+        let code = |w: usize| crate::metal::mmu::canonical(w).is_kernel();
         let backtrace = Backtrace::walk(&mut reader, &cfg, sp, fp, Some(&code));
         Some(Scene {
             hart: crate::metal::hart::hart_id(),
             task: ident().map(|i| i.task_id()),
-            pc: crate::metal::riscv::mmu::canonical(sepc::read()),
-            sp: crate::metal::riscv::mmu::canonical(sp),
-            fp: crate::metal::riscv::mmu::canonical(fp),
+            pc: crate::metal::mmu::canonical(sepc::read()),
+            sp: crate::metal::mmu::canonical(sp),
+            fp: crate::metal::mmu::canonical(fp),
             cause: scause::read().cause().try_into().ok(),
             backtrace,
         })
@@ -134,14 +134,14 @@ impl Scene {
         let fp = frame.gpr.x(Gprs::S0);
         let mut reader = StackReader::new(frame.user_satp.ppn());
         let cfg = WalkConfig::normal(world, sp.saturating_add(backtrace::SPAN));
-        let code = |w: usize| crate::metal::riscv::mmu::canonical(w).is_user();
+        let code = |w: usize| crate::metal::mmu::canonical(w).is_user();
         let backtrace = Backtrace::walk(&mut reader, &cfg, sp, fp, Some(&code));
         Some(Scene {
             hart: crate::metal::hart::hart_id(),
             task: Some(info.task_id()),
             pc: frame.sepc,
-            sp: crate::metal::riscv::mmu::canonical(sp),
-            fp: crate::metal::riscv::mmu::canonical(fp),
+            sp: crate::metal::mmu::canonical(sp),
+            fp: crate::metal::mmu::canonical(fp),
             cause: None,
             backtrace,
         })
@@ -178,9 +178,7 @@ fn csr_rows() -> Vec<Vec<Option<String>>> {
     rows.push(vec![
         Some("sepc".into()),
         Some(hex(sepc::read())),
-        Some(address_label(crate::metal::riscv::mmu::canonical(
-            sepc::read(),
-        ))),
+        Some(address_label(crate::metal::mmu::canonical(sepc::read()))),
     ]);
     {
         let a = stval::read();
@@ -203,7 +201,7 @@ fn csr_rows() -> Vec<Vec<Option<String>>> {
     rows.push(vec![
         Some("stvec".into()),
         Some(hex(stvec::read().address())),
-        Some(address_label(crate::metal::riscv::mmu::canonical(
+        Some(address_label(crate::metal::mmu::canonical(
             stvec::read().address(),
         ))),
     ]);

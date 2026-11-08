@@ -1,4 +1,4 @@
-use crate::metal::interrupt::{Claim, Controller, Irq};
+use crate::metal::generic::interrupt::{Claim, Controller, Irq};
 
 /// Access to one S-mode context of an exclusively owned PLIC. The route must
 /// serialize MMIO on its Hart with interrupts masked.

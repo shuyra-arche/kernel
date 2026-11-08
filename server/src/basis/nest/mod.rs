@@ -21,10 +21,11 @@ use crate::basis::cell::page::{Change, Page};
 use crate::basis::flat::Pages;
 use crate::basis::sign::{self, WakeKey};
 use crate::basis::unit::anchor::Anchor;
+use crate::metal::generic::mmu::{Attributes, PageTable, fence};
 use crate::metal::layout::TEAM_FRAME_BASE;
 use crate::metal::layout::TEAM_FRAME_WINDOW_SIZE;
 use crate::metal::layout::TRAP_STACK_BASE;
-use crate::metal::mmu::{self, Attributes, Geometry, PageTable, Root, Table, identity};
+use crate::metal::mmu::{self, Geometry, Root, Table, identity};
 use crate::metal::sync::Level;
 use crate::metal::sync::SpinLock;
 use crate::metal::sync::SpinLockGuard;
@@ -35,11 +36,12 @@ use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
 use translation::Invalidation;
 
+use crate::metal::generic::trap::FaultKind;
 pub use address::Reservation;
 pub use error::NestError;
 pub use identity::Asid;
 pub use mapping::{Access, ActiveRange, Mapping};
-pub use translation::{FaultKind, FaultOutcome};
+pub use translation::FaultOutcome;
 
 use address::Layout;
 pub(crate) use address::{Placement, PlacementAt, RegionKind};
@@ -1185,7 +1187,7 @@ impl Nest {
             let target = state.retirement.begin(self.asid);
             drop(state);
 
-            let result = mmu::fence::invalidate(&identity::Cpu, target);
+            let result = fence::invalidate(&identity::Cpu, target);
             let fenced = {
                 let mut state = self.state.lock();
                 match result {

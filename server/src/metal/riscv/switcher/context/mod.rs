@@ -38,8 +38,8 @@ impl TrapContext {
         self.sstatus = sstatus::Sstatus::from_bits(bits);
     }
 
-    pub(crate) fn address_space(&self) -> crate::metal::riscv::mmu::identity::Asid {
-        crate::metal::riscv::mmu::identity::Asid::from_raw(self.user_satp.asid())
+    pub(crate) fn address_space(&self) -> crate::metal::mmu::identity::Asid {
+        crate::metal::mmu::identity::Asid::from_raw(self.user_satp.asid())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -58,7 +58,7 @@ impl TrapContext {
         self.trap_handler = template.trap_handler;
         self.trap_stack_corrupt = template.trap_stack_corrupt;
         self.user_pa = pa;
-        self.user_satp = crate::metal::riscv::mmu::encode_root(root);
+        self.user_satp = crate::metal::mmu::riscv::encode_root(root);
         self.self_va = self_va;
         self.sepc = entry;
         self.gpr.set_x(Gprs::SP, stack_top.as_usize());
