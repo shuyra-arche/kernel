@@ -106,3 +106,16 @@ pub fn sync_instructions() -> Result<(), NestError> {
     }
     Ok(())
 }
+
+pub(crate) struct Cpu;
+
+// SAFETY: shootdown orders the preceding page-table writes, invalidates the
+// local cache and uses synchronous SBI RFENCE for all covering remote leases.
+unsafe impl crate::machine::mmu::fence::Shootdown for Cpu {
+    type Target = Asid;
+    type Error = Deaf;
+
+    fn invalidate(&self, target: &Asid) -> Result<(), Deaf> {
+        shootdown(*target)
+    }
+}

@@ -208,7 +208,7 @@ fn pressing_page(mapping: &Mapping, source: &FlatRange, page: PageIndex) -> Opti
         .initial_start()
         .as_usize()
         .checked_add(offset.checked_mul(kernel_api::address::PAGE_SIZE)?)?;
-    Some(crate::machine::mmu::riscv::canonical(address))
+    Some(crate::machine::mmu::canonical(address))
 }
 
 /// Allocation-free wake after Page admission reopens. Pointer order is used only

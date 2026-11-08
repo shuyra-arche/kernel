@@ -5,13 +5,12 @@ use core::num::NonZeroUsize;
 use crate::basis::nest::NestError;
 use kernel_api::address::VirtAddr;
 
-use crate::machine::mmu::riscv::table::PteFlags;
+use crate::machine::mmu::Attributes;
 
 bitflags! {
     /// 映射权限的逻辑三位：只讲读写执行。
     ///
-    /// 线上对应 PTE 的 R/W/X，位于 `CellCall` 位 1/2/3；U/G/V/A/D 属于
-    /// 独立的架构属性，由挂载时的政策给出。
+    /// CellCall 在线上使用位 1/2/3。其余页表属性由挂载策略给出。
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Access: u64 {
         const READ = 1 << 0;
@@ -34,13 +33,13 @@ impl Access {
         Self::from_bits(flags >> 1)
     }
 
-    /// 页表里的 RWX 三位折成逻辑三位。
-    pub fn from_pte(flags: PteFlags) -> Self {
-        Self::from_bits_truncate(flags.bits() >> 1)
+    /// Extract the logical permissions of a valid leaf.
+    pub fn from_attributes(flags: Attributes) -> Self {
+        Self::from_bits_truncate(flags.bits())
     }
 
-    pub(crate) fn to_pte(self) -> PteFlags {
-        PteFlags::from_bits_truncate(self.bits() << 1)
+    pub(crate) fn to_attributes(self) -> Attributes {
+        Attributes::from_bits_truncate(self.bits())
     }
 
     /// 合法叶子权限：RWX 非空，且写必须有读。
@@ -159,7 +158,7 @@ impl ActiveRange {
                 let part_lo = rlo.max(lo);
                 let part_hi = rhi.min(hi);
                 out.push(Self {
-                    start: crate::machine::mmu::riscv::canonical(part_lo),
+                    start: crate::machine::mmu::canonical(part_lo),
                     size: NonZeroUsize::new(part_hi - part_lo + 1).unwrap(),
                     current: access,
                     ..*range
@@ -168,7 +167,7 @@ impl ActiveRange {
             if rhi > hi {
                 let part_lo = hi + 1;
                 out.push(Self {
-                    start: crate::machine::mmu::riscv::canonical(part_lo),
+                    start: crate::machine::mmu::canonical(part_lo),
                     size: NonZeroUsize::new(rhi - part_lo + 1).unwrap(),
                     ..*range
                 });
@@ -211,7 +210,7 @@ impl ActiveRange {
                 return Err(NestError::WidenDenied);
             }
             next.push(Self {
-                start: crate::machine::mmu::riscv::canonical(mid_lo),
+                start: crate::machine::mmu::canonical(mid_lo),
                 size: NonZeroUsize::new(mid_hi - mid_lo + 1).unwrap(),
                 ceiling,
                 current,
@@ -220,7 +219,7 @@ impl ActiveRange {
             if rhi > hi {
                 let right = hi + 1;
                 next.push(Self {
-                    start: crate::machine::mmu::riscv::canonical(right),
+                    start: crate::machine::mmu::canonical(right),
                     size: NonZeroUsize::new(rhi - right + 1).unwrap(),
                     ..*range
                 });

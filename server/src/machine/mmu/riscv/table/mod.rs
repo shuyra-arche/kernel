@@ -1,4 +1,5 @@
 use crate::machine::mmu::riscv::Address;
+use crate::machine::mmu::{Attributes, PageTable as TranslationTable};
 use alloc::alloc::Allocator;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -14,7 +15,7 @@ use crate::basis::nest::NestError;
 mod entry;
 mod flags;
 
-pub use entry::PageTableEntry;
+use entry::PageTableEntry;
 pub use flags::PteFlags;
 
 mod page;
@@ -36,18 +37,11 @@ impl Drop for TableNode {
 }
 
 impl TableNode {
-    pub(crate) fn root() -> Result<Self, NestError> {
-        Ok(Self {
-            page: PageTable::new()?,
-            children: Vec::new(),
-        })
-    }
-
-    pub(crate) fn ppn(&self) -> usize {
+    fn ppn(&self) -> usize {
         Box::as_ptr(&self.page) as usize >> PAGE_SHIFT
     }
 
-    pub(crate) fn node_count(&self) -> usize {
+    fn node_count(&self) -> usize {
         1 + self
             .children
             .iter()
@@ -56,12 +50,12 @@ impl TableNode {
     }
 
     #[cfg(debug_assertions)]
-    pub(crate) fn visit_leaves(
+    fn walk_leaves(
         &self,
         level: usize,
         node_va: usize,
         geo: mode::Geo,
-        visit: &mut impl FnMut(VirtAddr, PhysAddr, PteFlags, usize),
+        visit: &mut impl FnMut(VirtAddr, PhysAddr, Attributes, usize),
     ) {
         for (slot, child) in &self.children {
             let entry = self.page.entries[*slot];
@@ -93,7 +87,7 @@ impl TableNode {
                 visit(
                     crate::machine::mmu::riscv::canonical(canonical),
                     PhysAddr::from_raw(entry.paddr() as usize),
-                    entry.flags(),
+                    entry.flags().attributes(),
                     span,
                 );
             } else if entry.is_branch() {
@@ -104,7 +98,7 @@ impl TableNode {
                     .find(|(s, _)| *s == slot)
                     .map(|(_, child)| child)
                     .expect("branch PTE has no owned child table");
-                child.visit_leaves(level - 1, base, geo, visit);
+                child.walk_leaves(level - 1, base, geo, visit);
             }
         }
     }
@@ -117,7 +111,7 @@ impl TableNode {
         })
     }
 
-    pub(crate) fn walk_mut(
+    fn walk_mut(
         &mut self,
         vaddr: VirtAddr,
         alloc: bool,
@@ -169,7 +163,7 @@ impl TableNode {
         unreachable!("page table target level")
     }
 
-    pub(crate) fn leaf_ref_geometry(
+    fn leaf_ref_geometry(
         &self,
         va: VirtAddr,
         geo: mode::Geo,
@@ -268,15 +262,6 @@ impl TableNode {
         Ok(())
     }
 
-    pub(crate) fn prepare_geometry(
-        &mut self,
-        va: VirtAddr,
-        size: usize,
-        geo: mode::Geo,
-    ) -> Result<(), NestError> {
-        self.prepare_with(va, size, &mut Self::leaf, geo)
-    }
-
     pub(crate) fn walk_raw(
         root: PhysAddr,
         page_va: VirtAddr,
@@ -310,139 +295,6 @@ impl TableNode {
             }
         }
         None
-    }
-
-    pub(crate) fn walk_ref_geometry(
-        &self,
-        vaddr: VirtAddr,
-        geo: mode::Geo,
-    ) -> Result<(PhysAddr, PteFlags), NestError> {
-        let (entry, level) = self.leaf_ref_geometry(vaddr, geo)?;
-        if !entry.is_valid() || !entry.is_leaf() {
-            return Err(NestError::NotMapped);
-        }
-        let span = Self::span(level);
-        let base = entry.paddr() as usize;
-        if base & (span - 1) != 0 {
-            return Err(NestError::NotMapped);
-        }
-        let offset = vaddr.as_usize() & (span - 1) & !(PAGE_SIZE - 1);
-        Ok((PhysAddr::from_raw(base + offset), entry.flags()))
-    }
-
-    pub(crate) fn prepare_range_geometry(
-        &mut self,
-        va: VirtAddr,
-        pa: PhysAddr,
-        size: usize,
-        geo: mode::Geo,
-    ) -> Result<(), NestError> {
-        if va.offset() != 0 || !pa.is_aligned() || size == 0 || size & (PAGE_SIZE - 1) != 0 {
-            return Err(NestError::NotAligned);
-        }
-        let levels = geo.levels as usize;
-        let mut offset = 0;
-        while offset < size {
-            let v = va + offset;
-            let p = pa + offset;
-            let mut target = 2.min(levels - 1);
-            while target > 0
-                && (size - offset < Self::span(target)
-                    || (v.as_usize() | p.as_usize()) & (Self::span(target) - 1) != 0)
-            {
-                target -= 1;
-            }
-            loop {
-                let entry = self.entry_at(v, target, true, levels)?;
-                if !entry.is_valid() {
-                    offset += Self::span(target);
-                    break;
-                }
-                if target == 0 || entry.is_leaf() {
-                    return Err(NestError::AlreadyMapped);
-                }
-                target -= 1;
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) fn map_range_prepared_geometry(
-        &mut self,
-        va: VirtAddr,
-        pa: PhysAddr,
-        size: usize,
-        flags: PteFlags,
-        geo: mode::Geo,
-    ) {
-        debug_assert_eq!(va.offset(), 0);
-        debug_assert!(pa.is_aligned());
-        let levels = geo.levels as usize;
-        let mut offset = 0;
-        while offset < size {
-            let v = va + offset;
-            let p = pa + offset;
-            let mut target = 2.min(levels - 1);
-            while target > 0
-                && (size - offset < Self::span(target)
-                    || (v.as_usize() | p.as_usize()) & (Self::span(target) - 1) != 0)
-            {
-                target -= 1;
-            }
-            let entry = self
-                .entry_at(v, target, false, levels)
-                .expect("prepared range path");
-            debug_assert!(!entry.is_valid());
-            entry.set((p.as_usize() >> PAGE_SHIFT) as u64, flags | PteFlags::V);
-            offset += Self::span(target);
-        }
-    }
-
-    pub(crate) fn set_permissions_prepared_geometry(
-        &mut self,
-        va: VirtAddr,
-        flags: PteFlags,
-        geo: mode::Geo,
-    ) {
-        let leaf = self
-            .walk_mut(va, false, geo.levels as usize)
-            .expect("preflighted page-table path");
-        debug_assert!(
-            leaf.is_valid() && leaf.is_leaf(),
-            "preflighted leaf mapping"
-        );
-        leaf.set_flags((leaf.flags() - (PteFlags::R | PteFlags::W | PteFlags::X)) | flags);
-    }
-
-    pub(crate) fn unmap_keep_tables_geometry(
-        &mut self,
-        va: VirtAddr,
-        size: usize,
-        geo: mode::Geo,
-    ) -> Result<(), NestError> {
-        self.prepare_geometry(va, size, geo)?;
-        self.unmap_prepared_geometry(va, size, geo);
-        Ok(())
-    }
-
-    pub(crate) fn unmap_prepared_geometry(&mut self, va: VirtAddr, size: usize, geo: mode::Geo) {
-        let mask = (1usize << geo.va_bits) - 1;
-        let start = va.as_usize() & mask;
-        self.clear_leaf_range((geo.levels - 1) as usize, 0, start, start + size);
-    }
-
-    pub(crate) fn reserve_retired_tables(
-        &self,
-        retired: &mut Vec<TableNode>,
-    ) -> Result<(), NestError> {
-        retired
-            .try_reserve(self.node_count())
-            .map_err(|_| NestError::OutOfMemory)
-    }
-
-    pub(crate) fn reclaim_empty_tables(&mut self, retired: &mut Vec<TableNode>) {
-        debug_assert!(retired.capacity() - retired.len() >= self.node_count());
-        self.prune_empty(retired);
     }
 
     fn clear_leaf_range(&mut self, level: usize, node_va: usize, start: usize, end: usize) {
@@ -484,5 +336,168 @@ impl TableNode {
             }
         }
         self.page.entries.iter().all(|entry| !entry.is_valid())
+    }
+}
+
+// SAFETY: each branch is owned by its parent, prepared edits affect only the
+// selected leaves, and pruning transfers detached nodes to the caller.
+unsafe impl TranslationTable for TableNode {
+    type Geometry = mode::Geo;
+
+    fn frame(&self) -> PhysAddr {
+        PhysAddr::from_raw(Box::as_ptr(&self.page) as usize)
+    }
+
+    fn root() -> Result<Self, NestError> {
+        Ok(Self {
+            page: PageTable::new()?,
+            children: Vec::new(),
+        })
+    }
+
+    fn prepare_geometry(
+        &mut self,
+        va: VirtAddr,
+        size: usize,
+        geo: mode::Geo,
+    ) -> Result<(), NestError> {
+        self.prepare_with(va, size, &mut Self::leaf, geo)
+    }
+
+    fn prepare_range_geometry(
+        &mut self,
+        va: VirtAddr,
+        pa: PhysAddr,
+        size: usize,
+        geo: mode::Geo,
+    ) -> Result<(), NestError> {
+        if va.offset() != 0 || !pa.is_aligned() || size == 0 || size & (PAGE_SIZE - 1) != 0 {
+            return Err(NestError::NotAligned);
+        }
+        let levels = geo.levels as usize;
+        let mut offset = 0;
+        while offset < size {
+            let v = va + offset;
+            let p = pa + offset;
+            let mut target = 2.min(levels - 1);
+            while target > 0
+                && (size - offset < Self::span(target)
+                    || (v.as_usize() | p.as_usize()) & (Self::span(target) - 1) != 0)
+            {
+                target -= 1;
+            }
+            loop {
+                let entry = self.entry_at(v, target, true, levels)?;
+                if !entry.is_valid() {
+                    offset += Self::span(target);
+                    break;
+                }
+                if target == 0 || entry.is_leaf() {
+                    return Err(NestError::AlreadyMapped);
+                }
+                target -= 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn map_range_prepared_geometry(
+        &mut self,
+        va: VirtAddr,
+        pa: PhysAddr,
+        size: usize,
+        attrs: Attributes,
+        geo: mode::Geo,
+    ) {
+        debug_assert_eq!(va.offset(), 0);
+        debug_assert!(pa.is_aligned());
+        let levels = geo.levels as usize;
+        let mut offset = 0;
+        while offset < size {
+            let v = va + offset;
+            let p = pa + offset;
+            let mut target = 2.min(levels - 1);
+            while target > 0
+                && (size - offset < Self::span(target)
+                    || (v.as_usize() | p.as_usize()) & (Self::span(target) - 1) != 0)
+            {
+                target -= 1;
+            }
+            let entry = self
+                .entry_at(v, target, false, levels)
+                .expect("prepared range path");
+            debug_assert!(!entry.is_valid());
+            entry.set(
+                (p.as_usize() >> PAGE_SHIFT) as u64,
+                PteFlags::from_attributes(attrs) | PteFlags::V,
+            );
+            offset += Self::span(target);
+        }
+    }
+
+    fn walk_ref_geometry(
+        &self,
+        vaddr: VirtAddr,
+        geo: mode::Geo,
+    ) -> Result<(PhysAddr, Attributes), NestError> {
+        let (entry, level) = self.leaf_ref_geometry(vaddr, geo)?;
+        if !entry.is_valid() || !entry.is_leaf() {
+            return Err(NestError::NotMapped);
+        }
+        let span = Self::span(level);
+        let base = entry.paddr() as usize;
+        if base & (span - 1) != 0 {
+            return Err(NestError::NotMapped);
+        }
+        let offset = vaddr.as_usize() & (span - 1) & !(PAGE_SIZE - 1);
+        Ok((
+            PhysAddr::from_raw(base + offset),
+            entry.flags().attributes(),
+        ))
+    }
+
+    fn set_permissions_prepared_geometry(
+        &mut self,
+        va: VirtAddr,
+        attrs: Attributes,
+        geo: mode::Geo,
+    ) {
+        let leaf = self
+            .walk_mut(va, false, geo.levels as usize)
+            .expect("preflighted page-table path");
+        debug_assert!(
+            leaf.is_valid() && leaf.is_leaf(),
+            "preflighted leaf mapping"
+        );
+        leaf.set_flags(
+            (leaf.flags() - (PteFlags::R | PteFlags::W | PteFlags::X))
+                | PteFlags::from_attributes(attrs),
+        );
+    }
+
+    fn unmap_prepared_geometry(&mut self, va: VirtAddr, size: usize, geo: mode::Geo) {
+        let mask = (1usize << geo.va_bits) - 1;
+        let start = va.as_usize() & mask;
+        self.clear_leaf_range((geo.levels - 1) as usize, 0, start, start + size);
+    }
+
+    fn reserve_retired_tables(&self, retired: &mut Vec<TableNode>) -> Result<(), NestError> {
+        retired
+            .try_reserve(self.node_count())
+            .map_err(|_| NestError::OutOfMemory)
+    }
+
+    fn reclaim_empty_tables(&mut self, retired: &mut Vec<TableNode>) {
+        debug_assert!(retired.capacity() - retired.len() >= self.node_count());
+        self.prune_empty(retired);
+    }
+
+    #[cfg(debug_assertions)]
+    fn visit_leaves(
+        &self,
+        geo: Self::Geometry,
+        visit: &mut impl FnMut(VirtAddr, PhysAddr, Attributes, usize),
+    ) {
+        self.walk_leaves((geo.levels - 1) as usize, 0, geo, visit);
     }
 }

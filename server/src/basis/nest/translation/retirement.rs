@@ -3,18 +3,20 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use crate::machine::mmu::riscv::synchronize::{Invalidation, Scope};
-use crate::machine::mmu::riscv::table::TableNode;
+use super::{Invalidation, tickets::Tickets};
+use crate::machine::mmu::Table;
+use crate::machine::mmu::fence::{Completed, Scope};
 
 use super::super::{Asid, Mapping};
 use crate::basis::nest::mapping::publication::Publication;
 
 /// PTE edits and their obligations stay together until the covering fence completes.
-/// Address-occupancy tickets have a separate lifetime and remain in NestState.
+/// Address tickets become claimable in the same transition as the covering fence.
 pub(in crate::basis::nest) struct Retirement {
     invalidation: Invalidation,
     scope: Scope,
-    pub(in crate::basis::nest) tables: Vec<TableNode>,
+    pub(in crate::basis::nest) tickets: Tickets,
+    pub(in crate::basis::nest) tables: Vec<Table>,
     pub(in crate::basis::nest) cells: Vec<Publication>,
     pub(in crate::basis::nest) mappings: Vec<Arc<Mapping>>,
 }
@@ -24,6 +26,7 @@ impl Retirement {
         Self {
             invalidation: Invalidation::Clean,
             scope: Scope::AddressSpace,
+            tickets: Tickets::new(),
             tables: Vec::new(),
             cells: Vec::new(),
             mappings: Vec::new(),
@@ -35,18 +38,25 @@ impl Retirement {
     }
 
     pub(in crate::basis::nest) fn mark_dirty(&mut self, global: bool) {
+        assert!(
+            !self.invalidation.is_fencing(),
+            "cannot mutate a fencing translation batch"
+        );
         self.scope = self.scope.include(global);
         self.invalidation = self.invalidation.mark_dirty();
     }
 
     /// Select the covering fence before releasing the Nest lock to run it.
     pub(in crate::basis::nest) fn begin(&mut self, asid: Asid) -> Asid {
-        let target = match self.scope {
+        self.invalidation = self.invalidation.begin();
+        self.target(asid)
+    }
+
+    fn target(&self, asid: Asid) -> Asid {
+        match self.scope {
             Scope::AddressSpace => asid,
             Scope::Global => Asid::kernel(),
-        };
-        self.invalidation = self.invalidation.begin();
-        target
+        }
     }
 
     /// Keep all obligations available for the retry.
@@ -55,15 +65,19 @@ impl Retirement {
     }
 
     /// Acknowledge publications while holding the Nest lock.
-    ///
-    /// # Safety
-    /// The fence selected by `begin` must have completed successfully.
-    pub(in crate::basis::nest) unsafe fn complete(&mut self) -> Fenced {
+    pub(in crate::basis::nest) fn complete(
+        &mut self,
+        asid: Asid,
+        proof: Completed<Asid>,
+    ) -> Fenced {
+        assert!(self.invalidation.is_fencing());
+        assert_eq!(proof.target(), self.target(asid));
         for mapping in &self.mappings {
             for (_, publication) in &mut mapping.state.lock().published {
                 publication.complete();
             }
         }
+        self.tickets.settle();
         self.invalidation = self.invalidation.complete();
         self.scope = Scope::AddressSpace;
         Fenced {
@@ -76,7 +90,7 @@ impl Retirement {
 
 /// Resources from a completed fence. Release them outside the Nest lock.
 pub(in crate::basis::nest) struct Fenced {
-    tables: Vec<TableNode>,
+    tables: Vec<Table>,
     cells: Vec<Publication>,
     mappings: Vec<Arc<Mapping>>,
 }

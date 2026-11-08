@@ -1,6 +1,5 @@
 pub(crate) mod identity;
 pub(crate) mod mode;
-pub(crate) mod synchronize;
 pub(crate) mod table;
 
 use kernel_api::address::PAGE_SHIFT;
@@ -35,4 +34,12 @@ impl Address for VirtAddr {
         self.get() >= (&raw const _kernel_base).addr()
             && self.get() < (&raw const _kernel_edge).addr()
     }
+}
+
+pub(crate) fn encode_root(root: super::Root) -> ::riscv::register::satp::Satp {
+    ::riscv::register::satp::Satp::from_bits(
+        (mode::mode().into_usize() << 60)
+            | (root.asid.get() << 44)
+            | (root.frame.as_usize() >> PAGE_SHIFT),
+    )
 }

@@ -18,7 +18,6 @@ use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
 use crate::basis::nest::Reservation;
 use crate::basis::nest::SpaceKind;
-use crate::machine::mmu::riscv::table::PteFlags;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -45,8 +44,7 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
         let region = capsule.region(i).ok_or(NestError::NoRegion)?;
         let size = region.pages.checked_mul(PAGE).ok_or(NestError::NoRegion)?;
         let va = VirtAddr::wrap(region.va);
-        let access =
-            Access::from_pte(PteFlags::from_bits(region.flags).ok_or(NestError::WidenDenied)?);
+        let access = Access::from_wire(region.flags).ok_or(NestError::WidenDenied)?;
         let data_size = region
             .data_pages
             .checked_mul(PAGE)
@@ -81,7 +79,7 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
         }
     }
     nest.advance_window(RegionKind::Normal, image_end)?;
-    crate::machine::mmu::riscv::identity::sync_instructions()?;
+    crate::machine::mmu::identity::sync_instructions()?;
     team.set_default_entry(capsule.entry);
     Ok(team)
 }

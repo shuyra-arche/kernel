@@ -21,9 +21,9 @@ use crate::machine::image::kernel_edge;
 use crate::machine::layout::HART_FRAME_BASE;
 use crate::machine::layout::TRAMPOLINE;
 use crate::machine::layout::trampoline_pa;
-use crate::machine::mmu::riscv::identity;
+use crate::machine::mmu::Attributes;
+use crate::machine::mmu::identity;
 use crate::machine::mmu::riscv::mode;
-use crate::machine::mmu::riscv::table::PteFlags;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -50,7 +50,7 @@ pub fn init() -> NestResult<()> {
             let m = board::info();
             let dram = m.memory.envelope();
 
-            if crate::machine::mmu::riscv::canonical(dram.range().end) > mode::upper() {
+            if crate::machine::mmu::canonical(dram.range().end) > mode::upper() {
                 return Err(NestError::DramOverlap);
             }
 
@@ -64,12 +64,20 @@ pub fn init() -> NestResult<()> {
             if !(text_start < text_end && text_end <= rodata_start && rodata_start <= image_end) {
                 return Err(NestError::NoRegion);
             }
-            let ram_flags =
-                PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::A | PteFlags::D | PteFlags::G;
-            let ro_flags = PteFlags::V | PteFlags::R | PteFlags::A | PteFlags::G;
-            let text_flags = ro_flags | PteFlags::X;
-            let arch =
-                |flags: PteFlags| flags & (PteFlags::U | PteFlags::G | PteFlags::A | PteFlags::D);
+            let ram_flags = Attributes::READ
+                | Attributes::WRITE
+                | Attributes::ACCESSED
+                | Attributes::DIRTY
+                | Attributes::GLOBAL;
+            let ro_flags = Attributes::READ | Attributes::ACCESSED | Attributes::GLOBAL;
+            let text_flags = ro_flags | Attributes::EXECUTE;
+            let arch = |flags: Attributes| {
+                flags
+                    & (Attributes::USER
+                        | Attributes::GLOBAL
+                        | Attributes::ACCESSED
+                        | Attributes::DIRTY)
+            };
 
             // Each bank is split only at image permission boundaries. No
             // identity mapping is created for a hole between physical banks.
@@ -95,12 +103,12 @@ pub fn init() -> NestResult<()> {
                         ram_flags
                     };
                     let size = end - start;
-                    let access = Access::from_pte(flags);
+                    let access = Access::from_attributes(flags);
                     let source =
                         Flat::from_region(BorrowedRegion::new(PhysAddr::from_raw(start), size)?)?
                             .whole();
                     let grid = ActiveRange::new(
-                        crate::machine::mmu::riscv::canonical(start),
+                        crate::machine::mmu::canonical(start),
                         size,
                         access,
                         access,
@@ -120,15 +128,18 @@ pub fn init() -> NestResult<()> {
             }
             nest.advance_window(RegionKind::Normal, image_end)?;
 
-            let tramp_flags =
-                PteFlags::V | PteFlags::R | PteFlags::X | PteFlags::A | PteFlags::D | PteFlags::G;
+            let tramp_flags = Attributes::READ
+                | Attributes::EXECUTE
+                | Attributes::ACCESSED
+                | Attributes::DIRTY
+                | Attributes::GLOBAL;
             let trampoline = BorrowedRegion::new(trampoline_pa(), PAGE_SIZE)?;
             let source = Flat::from_region(trampoline)?.whole();
             attach_exact(
                 nest,
                 TRAMPOLINE,
                 source,
-                Access::from_pte(tramp_flags),
+                Access::from_attributes(tramp_flags),
                 arch(tramp_flags),
             )?;
 
@@ -147,12 +158,13 @@ pub fn init() -> NestResult<()> {
                     indexed,
                 )?
                 .whole();
-                let flags = PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::A | PteFlags::D;
+                let flags =
+                    Attributes::READ | Attributes::WRITE | Attributes::ACCESSED | Attributes::DIRTY;
                 attach_exact(
                     nest,
                     HART_FRAME_BASE + h * PAGE_SIZE,
                     source,
-                    Access::from_pte(flags),
+                    Access::from_attributes(flags),
                     arch(flags),
                 )?;
             }
@@ -162,7 +174,7 @@ pub fn init() -> NestResult<()> {
             satp::set(
                 mode::mode(),
                 kernel_space.asid().get(),
-                kernel_space.root_ppn(),
+                kernel_space.root().frame.as_usize() / PAGE_SIZE,
             );
 
             identity::flush(kernel_space.asid());
@@ -184,7 +196,7 @@ fn attach_exact(
     start: VirtAddr,
     source: FlatRange,
     access: Access,
-    attrs: PteFlags,
+    attrs: Attributes,
 ) -> Result<(), NestError> {
     let size = source
         .page_count()

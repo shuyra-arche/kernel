@@ -46,8 +46,8 @@ impl TrapContext {
     pub(crate) unsafe fn init(
         &mut self,
         template: &TrapContext,
-        user_satp: satp::Satp,
-        spp: sstatus::SPP,
+        root: crate::machine::mmu::Root,
+        supervisor: bool,
         entry: VirtAddr,
         stack_top: VirtAddr,
         args: (VirtAddr, usize),
@@ -58,7 +58,7 @@ impl TrapContext {
         self.trap_handler = template.trap_handler;
         self.trap_stack_corrupt = template.trap_stack_corrupt;
         self.user_pa = pa;
-        self.user_satp = user_satp;
+        self.user_satp = crate::machine::mmu::riscv::encode_root(root);
         self.self_va = self_va;
         self.sepc = entry;
         self.gpr.set_x(Gprs::SP, stack_top.as_usize());
@@ -66,7 +66,11 @@ impl TrapContext {
         self.gpr.set_x(Gprs::A1, args.1);
         let mut ss = sstatus::Sstatus::from_bits(0);
         ss.set_spie(true);
-        ss.set_spp(spp);
+        ss.set_spp(if supervisor {
+            sstatus::SPP::Supervisor
+        } else {
+            sstatus::SPP::User
+        });
         self.sstatus = ss;
     }
 }

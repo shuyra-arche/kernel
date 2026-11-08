@@ -3,11 +3,11 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 #[cfg(debug_assertions)]
-use crate::machine::mmu::riscv::mode;
+use crate::machine::mmu::Attributes;
 #[cfg(debug_assertions)]
-use crate::machine::mmu::riscv::table::PteFlags;
+use crate::machine::mmu::Table;
 #[cfg(debug_assertions)]
-use crate::machine::mmu::riscv::table::TableNode;
+use crate::machine::mmu::{Geometry, PageTable};
 #[cfg(debug_assertions)]
 use kernel_api::address::PAGE_SIZE;
 
@@ -87,7 +87,7 @@ impl Index {
 
     /// 索引内的关系与地址空间、硬件页表一致。
     #[cfg(debug_assertions)]
-    pub(super) fn audit_mappings(&self, nest: &Nest, root: &TableNode, geo: mode::Geo) {
+    pub(super) fn audit_mappings(&self, nest: &Nest, root: &Table, geo: Geometry) {
         audit_mappings(self.root.as_deref(), nest, root, geo);
     }
 }
@@ -254,7 +254,7 @@ fn overlaps_other(node: &IndexNode, mapping: &Arc<Mapping>, lo: usize, hi: usize
 }
 
 #[cfg(debug_assertions)]
-fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: mode::Geo) {
+fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &Table, geo: Geometry) {
     let Some(node) = node else { return };
     audit_mappings(node.left.as_deref(), nest, root, geo);
     let mapping = &node.mapping;
@@ -296,14 +296,17 @@ fn audit_mappings(node: Option<&IndexNode>, nest: &Nest, root: &TableNode, geo: 
             cell.physical_address(),
             "published Page PTE physical address"
         );
-        let expected = mapping.leaf_flags(
+        let expected = mapping.leaf_attributes(
             state
                 .range_at(address.as_usize())
                 .expect("Page range exists")
                 .current,
         );
-        let mask =
-            PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::X | PteFlags::U | PteFlags::G;
+        let mask = Attributes::READ
+            | Attributes::WRITE
+            | Attributes::EXECUTE
+            | Attributes::USER
+            | Attributes::GLOBAL;
         assert_eq!(
             (flags & mask).bits(),
             (expected & mask).bits(),
