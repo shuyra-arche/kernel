@@ -20,37 +20,34 @@ enum Phase {
 #[derive(Debug)]
 pub(crate) struct Change {
     page: Arc<Page>,
-    id: usize,
     phase: Phase,
+    freezes: AtomicUsize,
 }
 impl Change {
     pub(super) fn begin(page: &Arc<Page>) -> Result<Arc<Self>, RetainError> {
-        static NEXT: AtomicUsize = AtomicUsize::new(1);
-        let id = NEXT
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-                n.checked_add(1).filter(|next| *next <= isize::MAX as usize)
-            })
-            .map_err(|_| RetainError::Exhausted)?;
         let mut change = Arc::try_new(Self {
             page: page.clone(),
-            id,
             phase: Phase::Prepared,
+            freezes: AtomicUsize::new(0),
         })
         .map_err(|_| RetainError::Exhausted)?;
         page.reclaim.begin()?;
         Arc::get_mut(&mut change).expect("unpublished change").phase = Phase::Held;
         Ok(change)
     }
-    pub(crate) fn id(&self) -> usize {
-        self.id
-    }
     pub(crate) fn page(&self) -> &Arc<Page> {
         &self.page
     }
     pub(crate) fn hardware(&self, modifiable: bool) -> Result<Retention, RetainError> {
+        if modifiable && self.freezes.load(Ordering::Acquire) > 1 {
+            return Err(RetainError::Busy);
+        }
         Retention::during(self, Kind::Cpu, modifiable)
     }
     pub(crate) fn external(&self, modifiable: bool) -> Result<Retention, RetainError> {
+        if modifiable && self.freezes.load(Ordering::Acquire) > 1 {
+            return Err(RetainError::Busy);
+        }
         Retention::during(self, Kind::Device, modifiable)
     }
 }
@@ -60,5 +57,22 @@ impl Drop for Change {
             self.page.reclaim.end();
             COMPLETED.store(true, Ordering::Release);
         }
+    }
+}
+
+/// A logical object's persistent freeze, distinct from a transient change permit.
+#[derive(Debug)]
+pub(crate) struct Freeze {
+    change: Arc<Change>,
+}
+impl Freeze {
+    pub(crate) fn new(change: Arc<Change>) -> Self {
+        change.freezes.fetch_add(1, Ordering::AcqRel);
+        Self { change }
+    }
+}
+impl Drop for Freeze {
+    fn drop(&mut self) {
+        assert!(self.change.freezes.fetch_sub(1, Ordering::AcqRel) > 0);
     }
 }

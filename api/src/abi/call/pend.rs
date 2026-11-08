@@ -1,17 +1,12 @@
 //! call::pend — **Pend 域（class 7，权柄轴：许可的生死与流动）**：调用表（[`PendCall`]）与失败词汇（[`PendFail`]）。
 
 use crate::address::VirtAddr;
-use crate::model::identity::Mark;
 use crate::model::identity::PendId;
 use crate::model::identity::TaskId;
 use crate::model::modifiable::Modifiable;
 
-use crate::model::pend::PendRange;
-
 /// `PendFail` 的结果别名。
 pub type PendResult<T> = Result<T, erra::Error<PendFail>>;
-
-use crate::model::pend::ReleaseMode;
 
 #[kernel_api_macros::envcall(class = 7, call = PendCall)]
 pub mod operations {
@@ -30,20 +25,21 @@ pub mod operations {
         HandedOver = -5,
         #[busy]
         Busy = -6,
+        /// Malformed Accord request descriptor.
+        Invalid = -7,
     }
-    #[operation(slot = 4, output = super::PendId, error = PendFail)]
+    /// Read one AccordRequest snapshot from caller memory. Slots 4 and 13 are retired.
+    #[operation(slot = 14, output = super::PendId, error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Accord {
-        pub src: super::PendId,
-        pub dst: super::TaskId,
-        pub subset: super::Modifiable,
-        pub mark: super::Mark,
+        pub request: super::VirtAddr,
     }
-    #[operation(slot = 5, output = (), error = PendFail)]
+    #[operation(slot = 16, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Narrow {
         pub token: super::PendId,
         pub subset: super::Modifiable,
+        pub range: crate::model::pend::PendRange,
     }
     #[operation(slot = 6, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,16 +47,15 @@ pub mod operations {
         pub dst: super::TaskId,
         pub token: super::PendId,
     }
-    /// Revoke retires this Pend and its descendants, returning the parent borrow
+    /// The holder retires this Pend and its descendants, returning the parent borrow
     /// only after all CPU/device access has settled. Busy retains the responsibility.
-    #[operation(slot = 7, output = (), error = PendFail)]
+    #[operation(slot = 15, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Release {
+    pub struct Return {
         pub token: super::PendId,
-        pub mode: super::ReleaseMode,
     }
-    /// Write eight words (PendInfo) to buf. Closed resources can still be inspected.
-    #[operation(slot = 8, output = (), error = PendFail)]
+    /// Write eleven RV64 words (PendInfo) to buf. Closed resources can still be inspected.
+    #[operation(slot = 17, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Inspect {
         pub token: super::PendId,
@@ -68,27 +63,12 @@ pub mod operations {
     }
     /// Write at most capacity records in increasing token order, strictly after after.
     /// Returns the number written. Each batch observes current state, not a frozen table.
-    #[operation(slot = 9, output = usize, error = PendFail)]
+    #[operation(slot = 18, output = usize, error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Collect {
         pub after: super::PendId,
         pub buf: super::VirtAddr,
         pub capacity: usize,
-    }
-    #[operation(slot = 10, output = bool, error = PendFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Same {
-        pub a: super::PendId,
-        pub b: super::PendId,
-    }
-    /// 本地精确派生：目标就是调用者，范围继承父窗口或按来源起点收窄。
-    #[operation(slot = 13, output = super::PendId, error = PendFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Derive {
-        pub src: super::PendId,
-        pub subset: super::Modifiable,
-        pub mark: super::Mark,
-        pub range: super::PendRange,
     }
 }
 pub use operations::PendCall;

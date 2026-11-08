@@ -1,6 +1,6 @@
 //! Share Views and Pend-authorized CPU mappings.
 use crate::address::VirtAddr;
-use crate::model::cell::FlatReference;
+use crate::model::cell::SlotId;
 use crate::model::identity::PendId;
 
 pub type ShareResult<T> = Result<T, erra::Error<ShareFail>>;
@@ -19,13 +19,13 @@ pub mod operations {
     }
     #[operation(slot = 0, output = super::PendId, error = ShareFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Unseal {
-        pub reference: super::FlatReference,
+    pub struct Create {
+        pub reference: super::SlotId,
         pub modifiable: crate::model::modifiable::Modifiable,
     }
     #[operation(slot = 1, output = (), error = ShareFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Seal {
+    pub struct Delete {
         pub token: super::PendId,
     }
     #[operation(slot = 2, output = (super::VirtAddr, usize), error = ShareFail)]

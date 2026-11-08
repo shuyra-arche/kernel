@@ -9,7 +9,7 @@ mod owner;
 pub(crate) use owner::Owner;
 pub(crate) mod change;
 mod reclaim;
-pub(crate) use change::Change;
+pub(crate) use change::{Change, Freeze};
 mod retention;
 
 use alloc::alloc::Allocator;
@@ -106,6 +106,10 @@ impl Page {
         modifiable: bool,
     ) -> Result<Retention, RetainError> {
         Retention::prepare(self, reclaim::Kind::Device, modifiable)
+    }
+
+    pub(crate) fn frozen(&self) -> bool {
+        self.reclaim.frozen()
     }
 
     pub(crate) fn changing(&self) -> bool {

@@ -77,8 +77,8 @@ impl Endpoint {
         if !self.alive() {
             return Err(SignFail::Dead);
         }
-        if self.ready() {
-            return Ok(SignReply::Triggered);
+        if let Some(sequence) = self.state.lock().sequence() {
+            return Ok(SignReply::Triggered { sequence });
         }
         let count = self.routes.lock().len();
         if count == 0 {
@@ -210,19 +210,30 @@ pub(crate) fn trigger(meta: &Endpoint) -> Result<(), SignFail> {
     sign::knock(key(meta), &meta.life());
     Ok(())
 }
-pub(crate) fn consume(meta: &Endpoint) -> Result<(), SignFail> {
+pub(crate) fn consume(meta: &Endpoint, sequence: u64) -> Result<(), SignFail> {
     let _commit = crate::basis::commit();
-    apply(meta, Event::Consume)
+    apply(meta, Event::Consume(sequence))
 }
 fn apply(meta: &Endpoint, event: Event) -> Result<(), SignFail> {
     let mut state = meta.state.lock();
     *state = state.transition(event).map_err(|error| match error {
         Rejection::Closed => SignFail::Dead,
         Rejection::Busy => SignFail::Busy,
+        Rejection::Exhausted => SignFail::OoM,
     })?;
     Ok(())
 }
 
 pub(crate) fn release_actor(meta: &Endpoint, actor: TaskId) {
-    let _ = detach_where(meta, actor, |_| true);
+    while meta.routes.lock().iter().any(|route| route.actor == actor) {
+        if detach_where(meta, actor, |_| true).is_err() {
+            break;
+        }
+    }
+}
+
+/// Authority changes wake direct listeners and observers to revalidate their handles.
+pub(crate) fn authority_changed(meta: &Endpoint) {
+    sign::signal(trigger_key(meta));
+    sign::signal(key(meta));
 }

@@ -11,8 +11,9 @@ fn number(bytes: &mut [u8], at: usize, value: u64, width: usize) {
 fn capsule() -> Vec<u8> {
     let mut bytes = vec![0; PAGE * 2];
     bytes[..8].copy_from_slice(&MAGIC);
-    number(&mut bytes, 8, 1, 2);
+    number(&mut bytes, 8, 2, 2);
     bytes[10] = 12;
+    bytes[11] = kernel_api::abi::VERSION as u8;
     number(&mut bytes, 12, 1, 4);
     number(&mut bytes, 16, 0x1000, 8);
     number(&mut bytes, 24, (PAGE * 2) as u64, 8);
@@ -39,6 +40,9 @@ fn capsule_preserves_entry_and_region_layout() {
 #[test]
 fn capsule_rejects_invalid_execute_permissions_ranges_and_payloads() {
     for (offset, value, width) in [
+        (8, 1, 2),                           // retired capsule format
+        (11, 0, 1),                          // retired kernel ABI
+        (11, 2, 1),                          // future kernel ABI
         (16, 0x3000, 8),                     // entry outside executable region
         (HEADER + 32, 7, 4),                 // writable executable region
         (HEADER + 36, 1, 4),                 // nonzero reserved field

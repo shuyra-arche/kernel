@@ -1,63 +1,39 @@
+//! Find a Page's in-kernel admission gate. This is never an authority table:
+//! callers must already hold the source and destination permissions. Memo freeze
+//! objects own the gate; the registry holds only Weak references across Task death.
 use super::page::{Change, Page};
 use crate::machine::sync::{Level, SpinLock};
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use kernel_api::abi::call::cell::CellFail;
-use kernel_api::model::identity::TaskId;
-
-struct Record {
-    owner: TaskId,
-    change: Arc<Change>,
-}
-static LIVE: SpinLock<Vec<Record>> = SpinLock::new_level(Level::L3, Vec::new());
-
-pub(crate) fn begin(owner: TaskId, page: &Arc<Page>) -> Result<usize, CellFail> {
+static LIVE: SpinLock<Vec<Weak<Change>>> = SpinLock::new_level(Level::L3, Vec::new());
+pub(crate) fn acquire(page: &Arc<Page>) -> Result<Arc<Change>, CellFail> {
     let mut live = LIVE.lock();
+    live.retain(|change| change.strong_count() != 0);
+    if let Some(change) = live
+        .iter()
+        .filter_map(Weak::upgrade)
+        .find(|c| Arc::ptr_eq(c.page(), page))
+    {
+        return Ok(change);
+    }
     live.try_reserve(1).map_err(|_| CellFail::OoM)?;
     let change = page
         .begin()
         .map_err(|e| CellFail::from(crate::basis::nest::NestError::from(e)))?;
-    let id = change.id();
-    live.push(Record { owner, change });
-    Ok(id)
+    live.push(Arc::downgrade(&change));
+    Ok(change)
 }
-pub(crate) fn get(owner: TaskId, id: usize) -> Result<Arc<Change>, CellFail> {
+pub(crate) fn find(page: &Arc<Page>) -> Option<Arc<Change>> {
     LIVE.lock()
         .iter()
-        .find(|r| r.owner == owner && r.change.id() == id)
-        .map(|r| r.change.clone())
-        .ok_or(CellFail::Denied)
+        .filter_map(Weak::upgrade)
+        .find(|c| Arc::ptr_eq(c.page(), page))
 }
-pub(crate) fn end(owner: TaskId, id: usize) -> Result<(), CellFail> {
-    let removed = {
-        let mut live = LIVE.lock();
-        let at = live
-            .iter()
-            .position(|r| r.owner == owner && r.change.id() == id)
-            .ok_or(CellFail::Denied)?;
-        live.remove(at)
-    };
-    drop(removed);
-    Ok(())
-}
-pub(crate) fn close(owner: TaskId) {
-    loop {
-        let removed = {
-            let mut live = LIVE.lock();
-            live.iter()
-                .position(|r| r.owner == owner)
-                .map(|at| live.remove(at))
-        };
-        match removed {
-            Some(record) => drop(record),
-            None => break,
-        }
-    }
-}
-
 /// Completion notification runs outside Task/Flat/Mapping locks, including death cleanup.
 pub(crate) fn maintain() {
     if super::page::change::take_completion() {
+        LIVE.lock().retain(|change| change.strong_count() != 0);
         crate::basis::nest::source_mappings::wake_all();
     }
 }

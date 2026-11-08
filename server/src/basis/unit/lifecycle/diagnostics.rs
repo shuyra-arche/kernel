@@ -1,6 +1,6 @@
 //! Bounded diagnostics for nonzero exits without a registered result recipient.
 
-use kernel_api::abi::call::room::NOTE_MAX;
+use kernel_api::abi::call::unit::NOTE_MAX;
 use kernel_api::model::exit::Reason;
 use kernel_api::model::identity::TaskId;
 

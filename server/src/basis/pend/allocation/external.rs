@@ -45,7 +45,7 @@ impl ExternalBorrow {
         } else {
             Access::READ
         };
-        if !hold.ceiling().contains(need) || hold.retains() {
+        if !hold.ceiling().contains(need) {
             return Err(PendFail::Denied);
         }
         let source = hold.source();
@@ -74,7 +74,7 @@ impl ExternalBorrow {
             let _operation = ShareOperation::acquire(&meta).ok_or(PendFail::Busy)?;
             let _publication = source.begin_withdraw()?;
             let (offset, count) = hold.window();
-            source.check_publish(offset, count, None)?;
+            source.check_publish(offset, count)?;
             // A writable parent must explicitly unmap before external publication.
             // Immutable parents and their read-only CPU aliases may coexist.
             if authority.configured() == Modifiable::Yes && meta.pending_maps(token) {

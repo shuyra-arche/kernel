@@ -15,69 +15,33 @@ use crate::basis::view::share_view::ShareOperation;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
 
-/// 这一枚子分支的有效窗口。
-///
-/// 不请求就**继承**父的那一段（带窗口的父派生出来的子仍带那一段，不是整段来源）；
-/// 请求的那一段必须落在父的有效窗口里（父没有窗口就是整段来源），越窗与溢出一律拒。
-/// ABI 解码检查非空与溢出；这一层检查父范围。
-/// 窗口只在 Share（有真实来源）上成立。
+/// Resolve the window while the source/target transaction locks are held.
 fn effective_window(
     pend_entry: &PendSnapshot,
-    requested: Option<(PageOffset, PageCount)>,
+    requested: super::Window,
 ) -> Result<Option<(PageOffset, PageCount)>, PendFail> {
-    let Some(requested) = requested else {
+    if matches!(
+        requested,
+        super::Window::Parent(kernel_api::model::pend::PendRange::Inherit)
+    ) {
         return Ok(pend_entry.authority().window());
-    };
+    }
     let meta = pend_entry.view().share_view().ok_or(PendFail::Denied)?;
     let outer = pend_entry
         .authority()
         .window()
         .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-    let outer_end = outer.0.get().checked_add(outer.1.get());
-    let inner_end = requested.0.get().checked_add(requested.1.get());
-    let inside = matches!(
-        (outer_end, inner_end),
-        (Some(outer_end), Some(inner_end))
-            if requested.0.get() >= outer.0.get() && inner_end <= outer_end
-    );
-    if !inside {
-        return Err(PendFail::Denied);
-    }
-    Ok(Some(requested))
+    requested.resolve(outer).map(Some)
 }
 
+/// Local derivation and cross-Task delegation share the same authorization commit.
 pub(crate) fn accord(
     caller: &Arc<Task>,
     src: PendId,
     dst: &Weak<Task>,
     subset: Modifiable,
     mark: Mark,
-) -> Result<usize, PendFail> {
-    publish(caller, src, dst, subset, mark, None)
-}
-
-/// 本地派生：目标就是 `caller`，范围继承或收窄，仍走同一条授权发布实现。
-pub(crate) fn derive(
-    caller: &Arc<Task>,
-    src: PendId,
-    subset: Modifiable,
-    mark: Mark,
-    window: Option<(PageOffset, PageCount)>,
-) -> Result<usize, PendFail> {
-    publish(caller, src, &Arc::downgrade(caller), subset, mark, window)
-}
-
-/// 两条授权路径的唯一发布后端：`accord` 继承父窗口，`derive` 可显式收窄。
-///
-/// 请求的那一段用**相对来源起点的绝对页偏移**说（不是相对父分支的偏移），
-/// 且必须落在父的有效窗口里：重复与嵌套派生只能单调收窄，没有放宽的路。
-fn publish(
-    caller: &Arc<Task>,
-    src: PendId,
-    dst: &Weak<Task>,
-    subset: Modifiable,
-    mark: Mark,
-    requested: Option<(PageOffset, PageCount)>,
+    requested: super::Window,
 ) -> Result<usize, PendFail> {
     let target = dst.upgrade().ok_or(PendFail::Denied)?;
     if !crate::basis::unit::control::adjacent(caller, &target) {
@@ -120,7 +84,7 @@ fn publish(
             {
                 let (offset, count) =
                     window.unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-                authorization.check_publish(offset, count, None)?;
+                authorization.check_publish(offset, count)?;
             }
             if share_view.is_some() {
                 pend_entry.authority().can_borrow(subset)?;

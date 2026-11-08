@@ -34,16 +34,10 @@ pub struct TaskExit {
     pub cause: ExitCause,
     pub reason: usize,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JoinReply {
-    Pending,
-    Reaped(TaskExit),
-    Complete,
-}
-impl JoinReply {
-    pub fn is_reaped(self) -> bool {
-        matches!(self, Self::Reaped(_))
-    }
-}
 mod control;
 pub use control::{ControlId, ControlKind};
+
+mod create;
+mod info;
+pub use create::UnitCreate;
+pub use info::{UnitInfo, UnitQuery, UnitState};

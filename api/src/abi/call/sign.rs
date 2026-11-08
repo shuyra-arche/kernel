@@ -33,7 +33,7 @@ pub mod operations {
     pub struct Create;
     #[operation(slot = 1, output = (), error = SignFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Close {
+    pub struct Delete {
         pub token: super::SignId,
     }
     /// Observe a retained direct trigger or a ready source; does not consume it.
@@ -42,7 +42,7 @@ pub mod operations {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Listen {
         pub token: super::SignId,
-        pub millis: super::Wait,
+        pub wait: super::Wait,
     }
     /// Capacity is one pending direct trigger; a second trigger returns Busy.
     #[operation(slot = 3, output = (), error = SignFail)]
@@ -55,37 +55,40 @@ pub mod operations {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Consume {
         pub token: super::SignId,
+        pub sequence: u64,
     }
     /// Register observation of a source already authorized to this Task.
     #[operation(slot = 5, output = (), error = SignFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Route {
+    pub struct Attach {
         pub token: super::SignId,
         pub source: super::SignSource,
     }
     #[operation(slot = 6, output = (), error = SignFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Unroute {
+    pub struct Detach {
         pub token: super::SignId,
         pub source: super::SignSource,
     }
     #[operation(slot = 7, output = super::SignId, error = SignFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Delegate {
+    pub struct Accord {
         pub token: super::SignId,
         pub target: super::TaskId,
         pub rights: super::SignRights,
     }
     #[operation(slot = 8, output = (), error = SignFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Release {
+    pub struct Return {
         pub token: super::SignId,
     }
-    /// Enumerate only this Task's qualified handles; (0, 0) marks the end.
-    #[operation(slot = 9, output = (usize, usize), error = SignFail)]
+    /// Revoke the branch accorded directly from this handle, including its descendants.
+    #[operation(slot = 9, output = (), error = SignFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Next {
-        pub after: usize,
+    pub struct Revoke {
+        pub token: super::SignId,
+        pub target: super::TaskId,
+        pub branch: super::SignId,
     }
 }
 pub use operations::{SignCall, SignEventFail, SignFail};

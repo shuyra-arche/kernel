@@ -7,8 +7,6 @@ use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::PendId;
-mod forget;
-pub(crate) use forget::same;
 mod accord;
 mod allocation;
 mod cull;
@@ -21,7 +19,6 @@ pub(crate) use allocation::ExternalBorrow;
 pub(crate) use allocation::Geometry;
 pub(crate) use allocation::Hold;
 pub(crate) use allocation::HoldTable;
-pub(crate) use allocation::IndependentHold;
 pub(crate) use allocation::SourceAuthorization;
 pub(crate) use ledger::Table;
 pub(crate) use need::Need;
@@ -34,12 +31,13 @@ pub(crate) use pend_entry::locate;
 pub(crate) use pend_entry::vestor;
 
 pub(crate) use accord::accord;
-pub(crate) use accord::derive;
+mod window;
 pub(crate) use cull::doom;
-pub(crate) use cull::release;
 pub(crate) use cull::retire;
+pub(crate) use cull::return_;
 pub(crate) use cull::revoke;
 pub(crate) use narrow::reduce;
+pub(crate) use window::Window;
 
 pub(super) const RETRIES: usize = 8;
 

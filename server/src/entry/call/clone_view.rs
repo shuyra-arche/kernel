@@ -3,14 +3,12 @@ use alloc::sync::Arc;
 use kernel_api::abi::call::clone_view::CloneCall;
 use kernel_api::abi::call::clone_view::CloneFail;
 use kernel_api::abi::call::pend::PendFail;
-use kernel_api::model::clone_view::CloneCondition;
 use kernel_api::model::clone_view::CloneLimits;
 use kernel_api::model::clone_view::PullOutcome;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::view::ViewKind;
-use kernel_api::model::wait::Wait;
 
 use super::gate;
 use super::outcome::Outcome;
@@ -20,7 +18,6 @@ use crate::basis::nest::Access;
 use crate::basis::pend;
 use crate::basis::pend::Modifiable;
 use crate::basis::pend::Need;
-use crate::basis::room::Handoff;
 use crate::basis::room::conductor::current;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::view;
@@ -31,11 +28,11 @@ use kernel_api::address::VirtAddr as KVirt;
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: CloneCall, ident: Arc<TaskIdent>) -> Outcome {
     match call {
-        CloneCall::Unseal { mark, limits } => {
+        CloneCall::Create { mark, limits } => {
             answer(frame, create(mark, limits).map_err(fail));
             Outcome::Resume
         }
-        CloneCall::Seal { token } => {
+        CloneCall::Delete { token } => {
             answer(
                 frame,
                 super::seal::seal_resource(token, ViewKind::Clone).map_err(fail),
@@ -45,11 +42,6 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: CloneCall, ident: Arc<Task
         CloneCall::Push { token, msg, len } => push(frame, ident, token, msg.get(), len),
         CloneCall::Pull { token, max_len } => pull(frame, token, max_len),
         CloneCall::Peek { token } => peek(frame, token),
-        CloneCall::Wait {
-            token,
-            condition,
-            millis,
-        } => wait(frame, ident, token, condition, millis),
     }
 }
 
@@ -148,27 +140,6 @@ fn peek(frame: &mut TrapContext, token: PendId) -> Outcome {
     Outcome::Resume
 }
 
-fn wait(
-    frame: &mut TrapContext,
-    ident: Arc<TaskIdent>,
-    token: PendId,
-    condition: CloneCondition,
-    millis: Wait,
-) -> Outcome {
-    let dur = millis.into_duration();
-    let r = with_clone(token, view::clone_view::need(condition), |meta| {
-        frame.gpr.set_x(Gprs::A0, 0);
-        drop(ident);
-        view::clone_view::wait(meta, condition, dur)
-    });
-    match r {
-        Ok(Handoff::Resume(ready)) => frame.gpr.set_x(Gprs::A0, ready as usize),
-        Ok(Handoff::Switch(pa)) => return Outcome::Switch(pa as *mut TrapContext),
-        Err(e) => ret_err(frame, e),
-    }
-    Outcome::Resume
-}
-
 /// 取这一枚 Clone 并按本域词汇报错：失败不是 Clone 的状态就是权柄轴的状态。
 fn with_clone<T>(
     token: PendId,
@@ -196,7 +167,7 @@ pub(crate) fn create(mark: Mark, limits: CloneLimits) -> Result<usize, PendFail>
 
 fn fail(error: PendFail) -> CloneFail {
     match error {
-        PendFail::Denied | PendFail::NotAligned => CloneFail::Denied,
+        PendFail::Denied | PendFail::NotAligned | PendFail::Invalid => CloneFail::Denied,
         PendFail::Dead => CloneFail::Dead,
         PendFail::OoM => CloneFail::OoM,
         PendFail::HandedOver => CloneFail::HandedOver,

@@ -3,21 +3,41 @@ use std::{path::Path, process::Command};
 #[test]
 #[ignore = "requires RV64 toolchain, QEMU and OpenSBI"]
 fn cell_calls_run_through_the_real_kernel_and_cpu_mmu() {
+    run("cpu")
+}
+#[test]
+#[ignore = "requires QEMU virt iommu-sys and EDU"]
+fn cell_io_calls_run_through_the_real_kernel_and_iommu() {
+    run("io")
+}
+#[test]
+#[ignore = "requires QEMU virt iommu-sys and EDU"]
+fn cell_io_creator_death_keeps_retirement_until_hardware_settles() {
+    run("io-exit")
+}
+static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn run(mode: &str) {
+    let _run = RUN.lock().unwrap_or_else(|e| e.into_inner());
+    let io = mode != "cpu";
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
         .unwrap();
     let guest = workspace.join("server/tests/guest/cell");
     let target = guest.join("target");
-    let evidence = target.join("evidence");
+    let evidence = target.join("evidence").join(mode);
     if evidence.exists() {
         std::fs::remove_dir_all(&evidence).unwrap();
     }
     std::fs::create_dir_all(&evidence).unwrap();
-    let output = Command::new("cargo")
+    let mut guest_build = Command::new("cargo");
+    if io {
+        guest_build.args(["+nightly", "build", "--features", mode]);
+    } else {
+        guest_build.args(["+nightly", "build"]);
+    }
+    let output = guest_build
         .args([
-            "+nightly",
-            "build",
             "--locked",
             "--release",
             "--target",
@@ -56,6 +76,9 @@ fn cell_calls_run_through_the_real_kernel_and_cpu_mmu() {
             "riscv64gc-unknown-none-elf",
         ]);
         build.env("CARGO_TARGET_DIR", workspace.join("target"));
+        if io {
+            build.args(["--features", "qemu-edu-dma"]);
+        }
         if let Some(extra) = extra {
             build.arg(extra);
         }
@@ -89,7 +112,7 @@ fn cell_calls_run_through_the_real_kernel_and_cpu_mmu() {
             command
                 .args([
                     "-M",
-                    "virt",
+                    if io { "virt,iommu-sys=on" } else { "virt" },
                     "-cpu",
                     "rv64",
                     "-m",
@@ -104,6 +127,9 @@ fn cell_calls_run_through_the_real_kernel_and_cpu_mmu() {
                 .arg("-initrd")
                 .arg(&initrd)
                 .args(["-nographic", "-monitor", "none", "-nic", "none"]);
+            if io {
+                command.args(["-device", "edu,addr=1.0"]);
+            }
             std::fs::write(
                 evidence.join(format!("{name}-command.txt")),
                 format!("{command:?}\n"),
@@ -113,11 +139,23 @@ fn cell_calls_run_through_the_real_kernel_and_cpu_mmu() {
             let log = String::from_utf8_lossy(&output.stdout);
             assert!(output.status.success(), "{name}: {log}");
             for marker in [
-                "PASS cell-kernel movement=1 memo=1 receipt=1",
+                "PASS cell-kernel movement=1 memo=1 generation=1 freeze=1",
                 "PASS cell-kernel swap=1 cleanup=1",
+                "PASS room-kernel atomic-wait=1 wake=1 deadline=1",
+                "PASS pend-kernel range=1 return=1 inspect=1 collect=1",
                 "task: all tasks exited",
             ] {
                 assert!(log.contains(marker), "{name}: {log}");
+            }
+            if io {
+                assert!(
+                    log.contains(if mode == "io-exit" {
+                        "PASS cell-io death=1 result=1 retirement=1"
+                    } else {
+                        "PASS cell-io external=1 readonly=1 fault=1 fenced=1 ownership=1"
+                    }),
+                    "{name}: {log}"
+                );
             }
             for failure in ["FAIL cell-kernel", "panic", "boot failed"] {
                 assert!(!log.contains(failure), "{name}: {log}");

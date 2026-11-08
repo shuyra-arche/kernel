@@ -19,3 +19,7 @@ kernel-client = { path = "../../../../client" }
 
 [profile.release]
 panic = "abort"
+
+[features]
+io = []
+io-exit = ["io"]

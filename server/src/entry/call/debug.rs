@@ -9,8 +9,6 @@ use kernel_api::address::VirtAddr as KVirt;
 
 use super::outcome::ret_err;
 
-pub static TRACE: ::core::sync::atomic::AtomicBool = ::core::sync::atomic::AtomicBool::new(false);
-
 const DBCN_MAX: usize = 256;
 
 pub(super) fn put(frame: &mut TrapContext, ident: &TaskIdent, buf: usize, len: usize) {
@@ -62,10 +60,4 @@ pub(super) fn get(frame: &mut TrapContext, ident: &TaskIdent, buf: usize, len: u
         return;
     }
     frame.gpr.set_x(Gprs::A0, n);
-}
-
-pub(super) fn set_trace(on: usize) -> usize {
-    let v = on != 0;
-    TRACE.store(v, ::core::sync::atomic::Ordering::Relaxed);
-    v as usize
 }

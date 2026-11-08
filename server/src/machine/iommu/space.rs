@@ -44,17 +44,6 @@ impl<H: Hardware> IoSpace<H> {
     /// # Safety
     /// 调用方已验证设备域资格、Page 范围借用以及与 CPU/其他设备的访问互斥，
     /// 并在关系存续期间保持 Flat 驻留/迁移约束。Arc 本身不能替代这些授权。
-    pub(crate) unsafe fn register(
-        &mut self,
-        cell: &Arc<Page>,
-        iova: usize,
-        modifiable: bool,
-    ) -> Result<BindingId, Error> {
-        unsafe { self.register_during(cell, iova, modifiable, None) }
-    }
-
-    /// Same authorization contract as register; a change only permits admission
-    /// of its own Page and never supplies source or device authority.
     pub(crate) unsafe fn register_during(
         &mut self,
         cell: &Arc<Page>,

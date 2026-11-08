@@ -4,7 +4,9 @@ use crate::model::sign::SignSource;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignReply {
     Pending,
-    Triggered,
+    Triggered {
+        sequence: u64,
+    },
     Source {
         source: SignSource,
         fail: Option<SignEventFail>,
@@ -19,7 +21,7 @@ impl SignReply {
     pub fn words(self) -> [usize; 3] {
         match self {
             Self::Pending => [0; 3],
-            Self::Triggered => [9, 0, 0],
+            Self::Triggered { sequence } => [9, sequence as usize, 0],
             Self::Source { source, fail } => {
                 let mut words = source.words();
                 words[0] |=
@@ -33,8 +35,10 @@ impl SignReply {
         if words == [0; 3] {
             return Some(Self::Pending);
         }
-        if words == [9, 0, 0] {
-            return Some(Self::Triggered);
+        if words[0] == 9 && words[1] != 0 && words[2] == 0 {
+            return Some(Self::Triggered {
+                sequence: words[1] as u64,
+            });
         }
         let fail = match words[0] >> 8 {
             0 => None,

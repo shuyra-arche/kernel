@@ -86,6 +86,22 @@ pub fn start() -> Result<(), BootError> {
 }
 
 pub fn run() -> ! {
+    // Secondary harts enter with a one-page physical bootstrap stack. Idle
+    // scheduling can retire I/O before that hart ever runs a Task, so it must
+    // already use the full guarded stack rather than waiting for its first trap.
+    let top = crate::machine::switcher::stack::trap_stack_edge(hart::hart_id()).get();
+    unsafe {
+        ::core::arch::asm!(
+            "mv sp, {top}",
+            "j {enter}",
+            top = in(reg) top,
+            enter = sym run_on_stack,
+            options(noreturn),
+        );
+    }
+}
+
+extern "C" fn run_on_stack() -> ! {
     restore(conductor::run::run())
 }
 

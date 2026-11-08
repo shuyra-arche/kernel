@@ -15,7 +15,5 @@ impl ControlId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ControlKind {
     Build,
-    Doom,
-    Retain,
     Guard,
 }

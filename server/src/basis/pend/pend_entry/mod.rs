@@ -72,6 +72,10 @@ impl PendEntry {
     pub(crate) fn narrow(
         &mut self,
         subset: Modifiable,
+        window: Option<(
+            kernel_api::address::PageOffset,
+            kernel_api::address::PageCount,
+        )>,
     ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
         if !self.core.alive() {
             return Err(kernel_api::abi::call::pend::PendFail::Dead);
@@ -79,7 +83,7 @@ impl PendEntry {
         if !narrows(self.core.modifiable(), subset) {
             return Err(kernel_api::abi::call::pend::PendFail::Denied);
         }
-        self.core.authority.narrow(subset)
+        self.core.authority.narrow(subset, window)
     }
 }
 

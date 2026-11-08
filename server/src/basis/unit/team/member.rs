@@ -16,6 +16,11 @@ use super::Receipt;
 /// 以及它替家长欠着的收据。
 pub(crate) struct Member {
     pub id: TaskId,
+    pub team: kernel_api::model::identity::TeamId,
+    pub controller: TaskId,
+    pub creator: TaskId,
+    pub sire: TaskId,
+    pub reclaimed: core::sync::atomic::AtomicBool,
     pub task: TaskWeak,
     pub node: alloc::sync::Weak<TeamLife>,
     pub state: Arc<SpinLock<TaskState>>,

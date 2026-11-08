@@ -30,7 +30,7 @@ fn ledger(entries: &[Entry]) -> Vec<u8> {
 fn ledger_keeps_header_entry_offsets_and_reserved_bytes() {
     let bytes = ledger(&[entry()]);
     let mut expected = vec![0u8; 40];
-    expected[0] = 2; // version
+    expected[0] = 3; // version
     expected[4] = 1; // count
     expected[8] = 2; // Name::Page class, Dtb item 0
     expected[32] = 19; // token, after name/kind/seven reserved bytes

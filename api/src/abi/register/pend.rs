@@ -1,5 +1,5 @@
 use super::{Decode, Wire};
-use crate::model::pend::{PendRange, ReleaseMode};
+use crate::model::pend::PendRange;
 
 impl Wire for PendRange {
     const WORDS: usize = PendRange::WORDS;
@@ -25,20 +25,6 @@ impl Wire for PendRange {
         match tag {
             0 if offset == 0 && count == 0 => Ok(Self::Inherit),
             1 => Self::pages(offset, count).ok_or(Decode::Invalid),
-            _ => Err(Decode::Invalid),
-        }
-    }
-}
-
-impl Wire for ReleaseMode {
-    const WORDS: usize = 1;
-    fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
-        (*self as usize).pack(words, at);
-    }
-
-    fn unpack(words: &[usize; 6], at: &mut usize) -> Result<Self, Decode> {
-        match usize::unpack(words, at)? {
-            0 => Ok(Self::Revoke),
             _ => Err(Decode::Invalid),
         }
     }

@@ -57,29 +57,26 @@ instances live together in `machine/allocator`; there is no allocator adapter
 package. `api::address` owns address/page-coordinate types; machine-dependent
 canonicalization stays in the CPU MMU backend.
 
-`CellCall::Push` / `Pull` select a 32-byte `Position`. Slot-to-Slot movement
-preserves existing Memos and Page identity. CPU Memo Push publishes into a
-pre-authorized source position; Memo Pull withdraws one Page while preserving
-the address relation, and grants no ownership. Missing Slots are tombstones:
-faults never refill them with zeroes. A replacement Page must be moved back into
-the original source position before its Memo can be supplied.
+Cell exposes Create/Delete, Push/Pull, Publish/Retract, Protect and Inspect.
+Push/Pull snapshot a CellHandoff and only move a Slot holding or establish a
+Memo association; publication is explicit. A Memo retains the exact Page even
+when the original Slot moves. Vacant, Ready and Published are separate stable
+states; hardware publication and withdrawal have retained in-flight states.
+Missing Slots never refill with zeroes. Replacement uses a qualified association,
+not a fault that silently follows the newest Slot Page.
 
-`Begin` closes new Page admission and returns a Task-scoped, nonreused receipt.
-Existing accesses continue until explicitly withdrawn. Operations carrying that
-receipt can supply a CPU Memo or attach an authorized I/O mapping; they still
-undergo source, target and Pend checks. `End` and Task death release the receipt;
-they cannot discharge hardware obligations. Short changes are used when the
-receipt is zero. Retained operations keep admission closed until they finish.
-Publication/withdrawal use `Publishing`, `Mapped` and `Withdrawing` states;
-unmapped positions have no sparse entry. State decisions precede hardware effects,
-and allocation or shootdown failures keep the necessary cleanup responsibility.
+Retract closes Page admission before withdrawing hardware and keeps a freeze in
+the logical Memo after fencing. Another Memo cannot bypass that freeze to open a
+conflicting writer. Read-only DMA can preserve the snapshot. Non-wrapping Memo
+generations reject stale publication, replacement and protection. Delete and
+replacement explicitly release that object's freeze; historical references do
+not keep deleted freezes alive. Begin/End and public change receipts are gone.
 
-For swap, the Page service holds a change across withdrawal and I/O, waits for
-trusted completion, then restores/supplies the original source position and ends
-the change. The kernel provides these mechanisms; backing-store policy, logical
-content identity and victim selection remain service responsibilities.
-`Internal` / `External` here describe absence/presence of retained device access
-responsibilities, independently of physical resource origin and CPU address domain.
+Swap policy remains a Page-service responsibility. Kernel supplies stable Memo
+identity, exact Page association, freezing, ownership movement and trusted
+retirement. `Internal` / `External` describe absence/presence of retained device
+access obligations independently of ownership, Slot location or CPU mappings.
+See [the ABI contracts](api/README.md#cell-contracts) for the full endpoint matrix.
 
 A Share View has a single Pend tree. Modifiable is its only data access flag:
 readers coexist, a writer excludes all other borrowers, and a mutable parent
@@ -97,7 +94,7 @@ up to the page boundary; receiving performs no second data copy. The payload
 uses Share access to the copy, not the sender's original memory. A failed Pull
 retains the message, including when max_len is too small; Peek reports its size.
 Publication and dequeue commit together. A later Open failure can be retried on
-the returned Pend. Closing the queue does not revoke delivered payloads. Release
+the returned Pend. Closing the queue does not revoke delivered payloads. Pend Return
 or Task exit withdraws their mappings and holds before Cell reclamation.
 
 This replaces the copy-out Pull ABI: slot 3 is retired, mapped Pull uses slot 8,
@@ -114,13 +111,13 @@ including registration after completion. View-local signal bits are removed.
 
 Task control follows its explicit controller or the controlling Team ancestry;
 ordinary membership does not permit controlling or reading peer Task results.
-Build attaches a Team to the calling Task. Spawn prepares execution; writable
-cross-Unit data is delivered separately with Pend Accord. Read-only code may be
-mapped into a controlled Team before Spawn, retaining its Pend revocation edge.
-Return stores one scalar result separately from execution exit. ReadResult keeps
-it until Join consumes the receipt. Team Finish seals membership admission;
-only a sealed and fully exited cohort reports Complete. Completion is not proof
-that all CPU/DMA reclamation work has finished.
+Unit Create makes an empty Team or dormant Task; Resume admits execution.
+Writable cross-Unit data uses Pend Accord. Read-only code may be mapped into a
+controlled constructing Team before Task creation, retaining its revocation edge.
+Unit Exit records the first committed result independently of resource cleanup.
+Inspect observes results repeatedly; Delete requires reclamation and removes the
+caller's retained record. Sign routes completion without consuming results.
+Team Finish permanently closes admission. Membership never grants peer control.
 
 ## DMA boundary
 
@@ -130,7 +127,7 @@ A boot MMIO View is delegated with Pend; Driver Units map it through Share Open
 and perform their own register operations. Kernel never proxies business BAR
 reads or writes.
 
-Cell Attach/Detach select MappingTarget::Cpu(TeamId) or Io(PendId). The I/O
+Cell Memo creation selects MappingTarget::Cpu(TeamId) or Io(PendId). The I/O
 Pend identifies a platform-bound MMIO View; a numeric address or ordinary RAM
 View cannot mint a route. Source Cells use the existing Pend borrow tree and
 Flat residency. Nest IoSpace retains mapping and fence obligations. Inspect
@@ -140,7 +137,7 @@ holders may observe while lending, but cannot use a suspended Pend to publish.
 
 External projection records in Unit Space join Pend obligations to Nest
 completion. They survive execution exit; source revocation, target revocation,
-explicit Detach and creator exit all close admission. A live I/O projection
+explicit Retract and creator exit all close admission. A live I/O projection
 retains a routing obligation on its target Pend: ordinary BAR access remains
 available, while reborrowing or narrowing waits for hardware settlement. Cells remain External
 until the matching trusted completion settles. Notifications run after commit
@@ -156,12 +153,15 @@ platform quiescence stay in machine/iommu. ECAM and the surrounding aperture
 are withheld; only the validated BAR is exported as a Pend. General PCI policy
 belongs to upper Units. ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough
 remain unsupported; PQ is disabled. The normal build exports no such route.
-Settled mapping receipts are retained for this bounded one-shot deployment.
+Settled logical records survive for observation/Delete while their creator lives.
+After creator death they expire only when hardware responsibility has settled.
 
-ABI changes: Device class 13 and its event tags 7/8 are retired. Generalized
-Attach uses slot 19 and one 72-byte Attachment snapshot; Detach uses slot 13 and Inspect slot 14. Slots 10 (Transfer) and 12 (old Attach) are rejected. Mapping events use tags 9/10.
-SetAccess remains CPU-only; an external mapping's access is fixed at publication.
-Upper product migration is deferred; the minimal real-Unit test is updated.
+ABI v1 rejects version-zero calls and removed domains. Capsule v2 declares the
+ABI before execution; Ledger v3 removes obsolete Doom/Retain qualifications.
+Cell uses fixed descriptor snapshots and generation-qualified transitions.
+Protect is CPU-only; a published I/O binding cannot widen access. The current
+one-shot platform route rejects republishing after settlement. Upper consumers
+must rebuild and migrate separately; this provider change does not update them.
 
 ## Build and verification
 
@@ -188,35 +188,28 @@ scripted retirement failure and boot admission. Target-only source modules are
 imported into isolated host harnesses; test-only allowances cover unused parts
 of these imports and never change production lint policy.
 
-The ignored hardware suite builds a separate no_std guest and runs nine QEMU
-scenarios, including expected rejection when IOMMU is missing. It uses QEMU
-10.0+ (`QEMU_RISCV64` may select it) and writes commands, hashes and logs under
-`server/tests/guest/iommu/target/evidence/`. It exercises real MMIO/queues and EDU
-DMA, but is distinct from firmware-backed production Kernel execution.
+The ignored hardware suite builds an initial Unit against API/Client, boots the
+actual Kernel through Capsule, and runs debug with one/four harts and release
+with four harts. CPU scenarios cover all Slot/Memo endpoint shapes, stale
+transitions, persistent freezing, replacement, borrowed ownership denial, Pend
+windows, Sign revocation, stable Unit results and atomic WaitValue/WakeValue.
+The I/O variants execute Cell traps against real QEMU EDU/IOMMU hardware: DMA
+permission failure, trusted retirement, ownership movement, and creator death
+with a delayed DMA callback. Each variant preserves its own commands, hashes and
+logs under `server/tests/guest/cell/target/evidence/`.
 
-[Vanllia](https://github.com/shuyra-arche/vanllia) owns the minimal real-Unit test:
-`cargo +nightly test --locked --test device -- --ignored --nocapture`, with explicit
-`SHUYRA_KERNEL_ELF`, `SHUYRA_FIRMWARE` and `QEMU_RISCV64`. Its manager/driver scenarios
-cover Sign routing, cross-Unit Pend return, peer control rejection, result versus
-cleanup, normal DMA, read-only DMA, driver crash and exit during activation.
-No test inventory is encoded in CI; Cargo remains the test entry point.
+The separate no_std IOMMU guest runs ten hardware scenarios covering queues,
+failure, delayed completion, owner exit and denied DMA after physical reuse. It
+uses production hardware mechanisms directly and is distinct from the real Kernel
+call tests. Its evidence is under `server/tests/guest/iommu/target/evidence/`.
+`QEMU_RISCV64` selects QEMU 10.0+; `QEMU_OPENSBI` selects firmware for Kernel tests.
+Physical-device quiescence, ATS/PRI and noncoherent DMA are not validated here.
 
-This change intentionally breaks the old Mail/Pie ABI. See the
-[API compatibility notes](api/README.md#source-migration-and-abi-compatibility).
-Upper-layer migrations are deferred; pin API and Client to the same provider
-revision when migrating a consumer. Kernel has no concrete Driver dependency.
-
-The hardware suite now includes an initial Unit built against the new Client.
-It boots the actual Kernel through the public Capsule format and exercises
-Attach, multi-Slot movement with an existing CPU mapping, wrong/stale receipts,
-Memo withdrawal/supply, replacement backing and cleanup on one/four harts
-(debug) and four harts (release). This tests the kernel-side swap protocol; it
-uses an in-memory backing value, not a disk/page-service implementation. The
-separate IOMMU guest executes ten QEMU hardware scenarios, including DMA under
-a change receipt, stale completions, exit and denied DMA after physical reuse.
-Evidence and exact commands are generated beneath each guest's `target/evidence`.
-`QEMU_RISCV64` selects QEMU; `QEMU_OPENSBI` optionally supplies the kernel guest's
-firmware path. Default CI uses the installed QEMU/OpenSBI firmware.
+Tests remain Cargo entry points; CI does not encode a scenario inventory.
+Upper-layer migrations are deferred. Pin API and Client to the same provider
+revision, and regenerate boot artifacts according to the
+[ABI compatibility notes](api/README.md#source-migration-and-abi-compatibility).
+Kernel has no concrete Driver dependency.
 
 ## Versions
 

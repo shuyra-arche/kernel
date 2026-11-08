@@ -315,7 +315,7 @@ fn reap(task: &Arc<Task>, token: PendId) -> Result<Option<PendEntry>, PendFail> 
     Ok(Some(take(task, token).ok_or(PendFail::Denied)?))
 }
 
-pub(crate) fn release(task: &Arc<Task>, token: PendId) -> Result<usize, PendFail> {
+pub(crate) fn return_(task: &Arc<Task>, token: PendId) -> Result<usize, PendFail> {
     for _ in 0..super::RETRIES {
         match reap(task, token) {
             Ok(Some(pend_entry)) => {
@@ -347,7 +347,6 @@ pub(crate) fn doom(task: &Arc<Task>) {
         // 这个 Task 的来源引用走到尽头：本表清空，未消费的一次性资格随最后一份引用结束。
         // 关系不由这里拆——那是来源 Pend 原有责任，走 Share / Nest 的清理链，
         // 不让这张表把同步失败吞掉。
-        crate::basis::cell::changes::close(task.ident.id);
         task.pend.references.clear();
         let mut tokens = Vec::new();
         let entries = task.pend.entries.lock();

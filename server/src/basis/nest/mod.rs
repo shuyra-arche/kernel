@@ -12,7 +12,7 @@ use core::sync::atomic::Ordering;
 use riscv::register::satp;
 
 use crate::basis::flat::Pages;
-use crate::basis::nest::memo::Memo;
+use crate::basis::nest::publication::Publication;
 use crate::machine::layout::TEAM_FRAME_BASE;
 use crate::machine::layout::TEAM_FRAME_WINDOW_SIZE;
 use crate::machine::layout::TRAP_STACK_BASE;
@@ -32,7 +32,8 @@ mod fault;
 mod fault_outcome;
 mod index;
 mod kind;
-pub(crate) mod memo;
+mod memo;
+pub(crate) mod publication;
 mod reservation;
 pub(crate) mod source_mappings;
 mod state;
@@ -268,6 +269,42 @@ impl Nest {
         self.attach_shaped(reservation, source, attrs, &active)
     }
 
+    /// Reserve an explicit Memo collection without making any address accessible.
+    pub(crate) fn create_memo(
+        self: &Arc<Self>,
+        reservation: Reservation,
+        source: crate::basis::flat::FlatRange,
+        ceiling: Access,
+        current: Access,
+    ) -> Result<Arc<Mapping>, NestError> {
+        if let Err(error) = self.check_owner(&reservation) {
+            return Err(Self::abandon(reservation, error));
+        }
+        if source.is_borrowed() {
+            return Err(Self::abandon(reservation, NestError::Pinned));
+        }
+        let attrs = self.attrs(reservation.region());
+        let active =
+            match ActiveRange::new(reservation.start(), reservation.size(), ceiling, current) {
+                Ok(active) => active,
+                Err(error) => return Err(Self::abandon(reservation, error)),
+            };
+        let mut ranges = Vec::new();
+        if ranges.try_reserve(1).is_err() {
+            return Err(Self::abandon(reservation, NestError::OutOfMemory));
+        }
+        ranges.push(active);
+        let mapping = Mapping::new(reservation, attrs, ranges, source)?;
+        mapping.state.lock().explicit = true;
+        match self.commit(&mapping) {
+            Ok(()) => Ok(mapping),
+            Err(error) => {
+                self.settle_failed_install(&mapping);
+                Err(error)
+            }
+        }
+    }
+
     /// 按给定活动形状挂载：与普通入口共用一个私有安装/提交。
     ///
     /// 只接真实占用、真实来源与明确的活动区间；不接来源关系、
@@ -360,18 +397,24 @@ impl Nest {
         }
         // 本关系要发布哪些页：Managed 只取已物化的，缺口留给缺页；
         // Borrowed 的整段都可用，挂载时就全部发布。
-        let mut published: Vec<(usize, Memo)> = Vec::new();
+        let mut published: Vec<(usize, Publication)> = Vec::new();
         let mut borrowed: Vec<(VirtAddr, usize, Access)> = Vec::new();
         let mut pages: Option<Pages> = None;
         // 发布窗口的短期驻留：在抓承载快照**之前**取得，覆盖 PTE 写入与发布记录提交，
         // 之后才解除。在途的移交槽会让这次驻留当场 Busy，正好与事务互斥。
         let lease = {
             let inner = mapping.state.lock();
-            inner.source.reside()?
+            if inner.explicit {
+                None
+            } else {
+                Some(inner.source.reside()?)
+            }
         };
         {
             let inner = mapping.state.lock();
-            if inner.source.is_borrowed() {
+            if inner.explicit {
+                // Association and publication are separate explicit operations.
+            } else if inner.source.is_borrowed() {
                 pages = Some(inner.source.materialize()?);
                 borrowed
                     .try_reserve(inner.active.len())
@@ -394,7 +437,11 @@ impl Nest {
                     {
                         published.push((
                             page,
-                            Memo::prepare(&cell, range.ceiling.contains(Access::WRITE), None)?,
+                            Publication::prepare(
+                                &cell,
+                                range.ceiling.contains(Access::WRITE),
+                                None,
+                            )?,
                         ));
                     }
                 }
@@ -534,7 +581,7 @@ impl Nest {
             .map_err(|_| NestError::OutOfMemory)?;
         for (offset, cell) in materialized {
             let page = first + offset.get();
-            if !inner.publishes(page) {
+            if !inner.explicit && inner.memo(page).is_none() && !inner.publishes(page) {
                 let address = mapping.reservation.start() + page * PAGE_SIZE;
                 let range = inner
                     .active
@@ -543,7 +590,7 @@ impl Nest {
                     .ok_or(NestError::NoRegion)?;
                 fresh.push((
                     page,
-                    Memo::prepare(&cell, range.ceiling.contains(Access::WRITE), None)?,
+                    Publication::prepare(&cell, range.ceiling.contains(Access::WRITE), None)?,
                 ));
             }
         }
@@ -1075,6 +1122,12 @@ impl Nest {
                 // all ASIDs when the batch includes global mappings.
                 unsafe { retained.settle() };
             }
+            for mapping in &pending_mappings {
+                mapping
+                    .state
+                    .lock()
+                    .settle_deleted_memos(mapping.initial_start().get());
+            }
             drop(pending_mappings);
             return Ok(());
         }
@@ -1393,6 +1446,9 @@ impl Nest {
             && satisfies(flags, kind)
         {
             return FaultOutcome::Resolved;
+        }
+        if inner.explicit || inner.memo(offset.get()).is_some() {
+            return FaultOutcome::Wait(mapping.identity());
         }
         match inner.source.can_materialize(offset) {
             Ok(true) => {}

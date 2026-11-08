@@ -1,8 +1,6 @@
 //! Operation domains and aggregate Server dispatch.
 pub mod cell;
-pub mod chrono;
 pub mod clone_view;
-pub mod control;
 pub mod debug;
 pub mod pend;
 pub mod room;
@@ -16,11 +14,9 @@ pub enum EnvCall {
     Room(self::room::RoomCall),
     Unit(self::unit::UnitCall),
     Cell(self::cell::CellCall),
-    Chrono(self::chrono::ChronoCall),
     Clone(self::clone_view::CloneCall),
     Share(self::share_view::ShareCall),
     Sign(self::sign::SignCall),
-    Control(self::control::ControlCall),
     Pend(self::pend::PendCall),
     /// 调试面（见 [`self::debug::DebugCall`]）。
     Debug(self::debug::DebugCall),
@@ -29,18 +25,15 @@ pub enum EnvCall {
 impl EnvCall {
     /// 由调用号 + 寄存器组解码回带载荷的聚合枚举。
     pub fn from_wire(slot: usize, regs: &[usize; 6]) -> Result<Self, crate::abi::register::Decode> {
-        let class = slot >> 32;
+        if (slot >> 48) != crate::abi::VERSION as usize {
+            return Err(crate::abi::register::Decode::BadSlot);
+        }
+        let class = (slot >> 32) & 0xffff;
         match class {
             0 => Ok(EnvCall::Room(self::room::RoomCall::from_wire(slot, regs)?)),
             1 => Ok(EnvCall::Unit(self::unit::UnitCall::from_wire(slot, regs)?)),
             2 => Ok(EnvCall::Cell(self::cell::CellCall::from_wire(slot, regs)?)),
-            4 => Ok(EnvCall::Chrono(self::chrono::ChronoCall::from_wire(
-                slot, regs,
-            )?)),
             5 => Ok(EnvCall::Clone(self::clone_view::CloneCall::from_wire(
-                slot, regs,
-            )?)),
-            6 => Ok(EnvCall::Control(self::control::ControlCall::from_wire(
                 slot, regs,
             )?)),
             7 => Ok(EnvCall::Pend(self::pend::PendCall::from_wire(slot, regs)?)),

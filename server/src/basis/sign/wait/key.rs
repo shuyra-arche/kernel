@@ -14,10 +14,6 @@ pub enum WakeKey {
     ExternalMapping {
         id: usize,
     },
-    Space {
-        space: Asid,
-        slot: usize,
-    },
     Mapping {
         space: Asid,
         mapping: usize,
@@ -73,9 +69,6 @@ impl WakeKey {
     pub(super) fn fold(self) -> u64 {
         match self {
             WakeKey::ExternalMapping { id } => (id as u64).wrapping_mul(0xB8A7_641D_2C39_EF05),
-            WakeKey::Space { space, slot } => {
-                (space.get() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ slot as u64
-            }
             WakeKey::Value { space, address } => {
                 (space.get() as u64).wrapping_mul(0xA24B_AED4_963E_E407) ^ address as u64
             }

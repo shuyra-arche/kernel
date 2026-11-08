@@ -4,11 +4,8 @@ use kernel_api::abi::call::cell::CellFail;
 use kernel_api::abi::operation::KernelCall;
 use kernel_api::abi::operation::Operation;
 use kernel_api::abi::operation::RegisterCall;
-use kernel_api::model::cell::MappingId;
-use kernel_api::model::cell::MappingSelection;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
-use kernel_api::model::identity::TeamId;
 use kernel_api::model::wait::Wait;
 use kernel_client::invoke::invoke_with;
 
@@ -38,58 +35,46 @@ fn reply(value: (usize, usize, usize)) {
 }
 
 fn called(slot: usize, arguments: [usize; 6]) {
-    TRANSPORT.with_borrow(|transport| assert_eq!(transport.calls, vec![(slot, arguments)]));
+    TRANSPORT.with_borrow(|transport| {
+        assert_eq!(
+            transport.calls,
+            vec![(kernel_api::abi::PREFIX | slot, arguments)]
+        )
+    });
 }
 
 #[test]
 fn infallible_returns_keep_the_high_bit_even_in_a_fallible_domain() {
     reply((usize::MAX, 0, 0));
     assert_eq!(
-        invoke(kernel_api::abi::call::chrono::operations::Clock).unwrap(),
+        invoke(kernel_api::abi::call::room::operations::Clock).unwrap(),
         u64::MAX
     );
-    called((4usize << 32) | 1, [0; 6]);
-    reply((usize::MAX, 0, 0));
-    assert!(invoke(kernel_api::abi::call::room::operations::Wake { key: 19 }).unwrap());
-    called(4, [19, 0, 0, 0, 0, 0]);
+    called(4, [0; 6]);
     reply((0, 0, 0));
-    invoke(kernel_api::abi::call::room::operations::Starve).unwrap();
+    invoke(kernel_api::abi::call::room::operations::Yield).unwrap();
     called(0, [0; 6]);
 }
 
 #[test]
 fn failures_preserve_the_domain_and_do_not_retry() {
     reply(((-7isize) as usize, 0, 0));
-    let reference =
-        kernel_api::model::cell::FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap();
-    let error = invoke(kernel_api::abi::call::cell::operations::Release { reference }).unwrap_err();
+    let object = kernel_api::address::VirtAddr::new(17);
+    let error = invoke(kernel_api::abi::call::cell::operations::Delete { object }).unwrap_err();
     assert_eq!(error.source, CellFail::Busy);
-    called((2usize << 32) | 6, [17, 0, 0, 0, 0, 0]);
+    called((2usize << 32) | 1, [17, 0, 0, 0, 0, 0]);
 }
 
 #[test]
-fn structured_arguments_keep_all_six_registers_and_the_explicit_slot() {
+fn descriptor_arguments_keep_the_explicit_slot() {
+    use kernel_api::address::VirtAddr;
     reply((0, 0, 0));
-    let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
-    invoke(kernel_api::abi::call::cell::operations::SetAccess {
-        team: TeamId::new(17),
-        mapping,
-        selection: MappingSelection::Pages {
-            offset: 3,
-            count: 5,
-        },
+    invoke(kernel_api::abi::call::cell::operations::Protect {
+        position: VirtAddr::new(0x4000),
         access: 6,
     })
     .unwrap();
-    called((2usize << 32) | 9, [17, 23, 1, 3, 5, 6]);
-    let decoded =
-        kernel_api::abi::call::EnvCall::from_wire((2usize << 32) | 9, &[17, 23, 1, 3, 5, 6])
-            .unwrap();
-    assert!(
-        matches!(decoded, kernel_api::abi::call::EnvCall::Cell(kernel_api::abi::call::cell::CellCall::SetAccess {
-        team, mapping: decoded_mapping, selection: MappingSelection::Pages { offset: 3, count: 5 }, access: 6,
-    }) if team == TeamId::new(17) && decoded_mapping == mapping)
-    );
+    called((2usize << 32) | 6, [0x4000, 6, 0, 0, 0, 0]);
 }
 
 #[test]
@@ -114,12 +99,12 @@ fn three_word_returns_are_preserved() {
     assert_eq!(
         invoke(kernel_api::abi::call::sign::operations::Listen {
             token: kernel_api::model::sign::SignId::new(token.get()),
-            millis: Wait::Forever
+            wait: Wait::Infinite
         })
         .unwrap(),
         expected
     );
-    called((11usize << 32) | 2, [17, usize::MAX, 0, 0, 0, 0]);
+    called((11usize << 32) | 2, [17, 2, 0, 0, 0, 0]);
 }
 
 #[test]
@@ -160,11 +145,10 @@ fn generic_invocation_orders_packing_transport_and_decode_once() {
 
 #[test]
 fn operations_return_their_own_types_without_a_domain_result_enum() {
-    use kernel_api::abi::call::{cell::operations::Release, chrono::operations::Clock};
-    let reference =
-        kernel_api::model::cell::FlatReference::from_bytes(&17u64.to_le_bytes()).unwrap();
+    use kernel_api::abi::call::{cell::operations::Delete, room::operations::Clock};
+    let object = kernel_api::address::VirtAddr::new(17);
     let released: Result<(), erra::Error<CellFail>> =
-        invoke_with(Release { reference }, |_, _| (0, 0, 0));
+        invoke_with(Delete { object }, |_, _| (0, 0, 0));
     assert_eq!(released.unwrap(), ());
     let clock: Result<u64, core::convert::Infallible> =
         invoke_with(Clock, |_, _| (usize::MAX, 0, 0));
@@ -183,24 +167,30 @@ fn conditional_waits_encode_address_value_deadline_and_wake_scope() {
         invoke(operations::WaitValue {
             address: VirtAddr::new(0x4000),
             expected: u32::MAX,
-            millis: Wait::Forever,
+            wait: Wait::Infinite,
         })
         .unwrap()
     );
-    called(7, [0x4000, u32::MAX as usize, usize::MAX, 0, 0, 0]);
+    called(2, [0x4000, u32::MAX as usize, 2, 0, 0, 0]);
     assert!(
-        matches!(EnvCall::from_wire(7, &[0x4000, 42, 0, 0, 0, 0]).unwrap(),
-        EnvCall::Room(RoomCall::WaitValue { address, expected: 42, millis: Wait::AtMost(0) })
+        matches!(EnvCall::from_wire(kernel_api::abi::PREFIX | 2, &[0x4000, 42, 0, 0, 0, 0]).unwrap(),
+        EnvCall::Room(RoomCall::WaitValue { address, expected: 42, wait: Wait::Poll })
             if address == VirtAddr::new(0x4000))
     );
-    assert!(EnvCall::from_wire(7, &[0x4000, (u32::MAX as usize) + 1, 0, 0, 0, 0]).is_err());
-    assert!(EnvCall::from_wire(8, &[0x4000, 2, 0, 0, 0, 0]).is_err());
+    assert!(
+        EnvCall::from_wire(
+            kernel_api::abi::PREFIX | 2,
+            &[0x4000, (u32::MAX as usize) + 1, 0, 0, 0, 0]
+        )
+        .is_err()
+    );
+    assert!(EnvCall::from_wire(3, &[0x4000, 2, 0, 0, 0, 0]).is_err());
     reply((0, 0, 0));
     assert!(
         !invoke(operations::WaitValue {
             address: VirtAddr::new(0x4000),
             expected: 42,
-            millis: Wait::POLL,
+            wait: Wait::Poll,
         })
         .unwrap()
     );
@@ -213,13 +203,13 @@ fn conditional_waits_encode_address_value_deadline_and_wake_scope() {
         .unwrap(),
         3
     );
-    called(8, [0x4000, 1, 0, 0, 0, 0]);
+    called(3, [0x4000, 1, 0, 0, 0, 0]);
     reply(((-5isize) as usize, 0, 0));
     assert_eq!(
         invoke(operations::WaitValue {
             address: VirtAddr::new(1),
             expected: 0,
-            millis: Wait::POLL,
+            wait: Wait::Poll,
         })
         .unwrap_err()
         .source,
@@ -244,22 +234,53 @@ fn clone_delivery_returns_authority_and_retires_copy_out_slot() {
 }
 
 #[test]
-fn external_mapping_inspection_preserves_target_authority_and_fault_receipt() {
+fn cell_inspection_uses_an_output_snapshot_and_create_returns_identity() {
     use kernel_api::{
-        abi::call::cell::operations::Inspect,
-        model::cell::{MappingState, MappingTarget},
+        abi::call::cell::operations::{Create, Inspect},
+        address::VirtAddr,
     };
-    reply((4, 13, 0x500000));
-    let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
-    let info = invoke(Inspect {
-        target: MappingTarget::Io(PendId::mint(17)),
-        mapping,
+    reply((0, 0, 0));
+    invoke(Inspect {
+        position: VirtAddr::new(0x4000),
+        out: VirtAddr::new(0x5000),
     })
     .unwrap();
-    assert_eq!(info.state, MappingState::Settled);
-    assert_eq!((info.fault_cause, info.fault_address), (13, 0x500000));
-    called(
-        (2usize << 32) | 14,
-        [(1usize << (usize::BITS - 1)) | 17, 23, 0, 0, 0, 0],
+    called((2usize << 32) | 7, [0x4000, 0x5000, 0, 0, 0, 0]);
+    reply((1, 23, 0x6000));
+    let made = invoke(Create {
+        request: VirtAddr::new(0x4000),
+    })
+    .unwrap();
+    assert_eq!((made.kind, made.id, made.address.get()), (1, 23, 0x6000));
+    called(2usize << 32, [0x4000, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn pend_accord_returns_the_new_identity_and_return_preserves_busy() {
+    use kernel_api::{
+        abi::call::pend::{
+            PendFail,
+            operations::{Accord, Return},
+        },
+        address::VirtAddr,
+    };
+    reply((91, 0, 0));
+    assert_eq!(
+        invoke(Accord {
+            request: VirtAddr::new(0x4000)
+        })
+        .unwrap(),
+        PendId::mint(91)
     );
+    called((7usize << 32) | 14, [0x4000, 0, 0, 0, 0, 0]);
+    reply(((-6isize) as usize, 0, 0));
+    assert_eq!(
+        invoke(Return {
+            token: PendId::mint(91)
+        })
+        .unwrap_err()
+        .source,
+        PendFail::Busy
+    );
+    called((7usize << 32) | 15, [91, 0, 0, 0, 0, 0]);
 }

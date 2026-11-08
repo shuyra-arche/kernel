@@ -37,7 +37,7 @@ mod retention;
 mod support;
 
 mod change;
-#[path = "../../src/basis/nest/memo.rs"]
+#[path = "../../src/basis/nest/publication.rs"]
 mod memo;
 
 #[allow(dead_code)]

@@ -1,3 +1,4 @@
+use super::{WORD_BYTES, fetch_words, store_words};
 use crate::abi::register::Decode;
 use crate::abi::register::Wire;
 use crate::address::VirtAddr;
@@ -5,27 +6,6 @@ use crate::model::cell::Placement;
 use crate::model::cell::PlacementAt;
 use crate::model::cell::PlacementError;
 use crate::model::cell::ReferenceRange;
-
-/// The RV64 ABI's byte width, independent of the build host's pointer width.
-pub(crate) const WORD_BYTES: usize = 8;
-
-pub(crate) fn store_words<const N: usize>(words: [usize; N], out: &mut [u8]) {
-    assert_eq!(out.len(), N * WORD_BYTES);
-    for (word, bytes) in words.into_iter().zip(out.chunks_exact_mut(WORD_BYTES)) {
-        bytes.copy_from_slice(&(word as u64).to_le_bytes());
-    }
-}
-
-pub(crate) fn fetch_words<const N: usize>(bytes: &[u8]) -> Option<[usize; N]> {
-    if bytes.len() != N * WORD_BYTES {
-        return None;
-    }
-    let mut words = [0; N];
-    for (word, bytes) in words.iter_mut().zip(bytes.chunks_exact(WORD_BYTES)) {
-        *word = usize::try_from(u64::from_le_bytes(bytes.try_into().ok()?)).ok()?;
-    }
-    Some(words)
-}
 
 impl ReferenceRange {
     /// 过线的字数；也是它在用户内存里作定长描述时的字数（同一份布局）。
@@ -108,86 +88,5 @@ impl Placement {
 
     pub fn fetch(bytes: &[u8]) -> Option<Self> {
         Self::decode_bytes(bytes).ok()
-    }
-}
-
-use crate::model::cell::{FlatReference, MappingId, Position};
-use crate::model::identity::TeamId;
-impl Position {
-    pub const WIDTH: usize = 32;
-    pub fn to_bytes(self) -> [u8; Self::WIDTH] {
-        let words = match self {
-            Self::Slot { reference, page } => [0, reference.get() as u64, page as u64, 0],
-            Self::Memo {
-                team,
-                mapping,
-                page,
-            } => [1, team.get() as u64, mapping.get() as u64, page as u64],
-        };
-        let mut bytes = [0; Self::WIDTH];
-        for (word, out) in words.into_iter().zip(bytes.chunks_exact_mut(8)) {
-            out.copy_from_slice(&word.to_le_bytes());
-        }
-        bytes
-    }
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != Self::WIDTH {
-            return None;
-        }
-        let mut words = [0usize; 4];
-        for (out, bytes) in words.iter_mut().zip(bytes.chunks_exact(8)) {
-            *out = usize::try_from(u64::from_le_bytes(bytes.try_into().ok()?)).ok()?;
-        }
-        match words {
-            [0, reference, page, 0] if reference != 0 => Some(Self::Slot {
-                reference: FlatReference::from_bytes(&(reference as u64).to_le_bytes())?,
-                page,
-            }),
-            [1, team, mapping, page] if mapping != 0 => Some(Self::Memo {
-                team: TeamId::new(team),
-                mapping: MappingId::from_bytes(&(mapping as u64).to_le_bytes())?,
-                page,
-            }),
-            _ => None,
-        }
-    }
-}
-
-use crate::model::cell::{Attachment, MappingControl};
-impl Attachment {
-    pub const WIDTH: usize = 72;
-    pub fn to_bytes(self) -> [u8; Self::WIDTH] {
-        let mut bytes = [0; Self::WIDTH];
-        self.range.store(&mut bytes[..24]);
-        self.placement.store(&mut bytes[24..48]);
-        bytes[48..56].copy_from_slice(&self.access.to_le_bytes());
-        store_words(
-            [
-                match self.control {
-                    MappingControl::Caller => 0,
-                    MappingControl::SpaceMembers => 1,
-                },
-                self.change,
-            ],
-            &mut bytes[56..],
-        );
-        bytes
-    }
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != Self::WIDTH {
-            return None;
-        }
-        let [control, change] = fetch_words(&bytes[56..])?;
-        Some(Self {
-            range: ReferenceRange::fetch(&bytes[..24])?,
-            placement: Placement::decode_bytes(&bytes[24..48]).ok()?,
-            access: u64::from_le_bytes(bytes[48..56].try_into().ok()?),
-            control: match control {
-                0 => MappingControl::Caller,
-                1 => MappingControl::SpaceMembers,
-                _ => return None,
-            },
-            change,
-        })
     }
 }

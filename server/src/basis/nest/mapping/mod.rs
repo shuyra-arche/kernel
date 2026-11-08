@@ -40,6 +40,7 @@ pub struct Mapping {
     pub(crate) reservation: Reservation,
     pub(crate) attrs: PteFlags,
     pub(crate) state: SpinLock<MappingState>,
+    operation: core::sync::atomic::AtomicBool,
 }
 
 impl core::fmt::Debug for Mapping {
@@ -101,6 +102,7 @@ impl Mapping {
         let identity = reservation.id();
         match Arc::try_new(Self {
             reservation,
+            operation: core::sync::atomic::AtomicBool::new(false),
             attrs,
             state: SpinLock::new_level(Level::Mapping, MappingState::new(active, source)),
         }) {
@@ -221,5 +223,25 @@ impl Mapping {
             .active
             .iter()
             .any(|range| range.overlaps(lo, hi))
+    }
+}
+
+pub(crate) struct MappingOperation<'a>(&'a core::sync::atomic::AtomicBool);
+impl Drop for MappingOperation<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, core::sync::atomic::Ordering::Release);
+    }
+}
+impl Mapping {
+    pub(crate) fn operation(&self) -> Option<MappingOperation<'_>> {
+        self.operation
+            .compare_exchange(
+                false,
+                true,
+                core::sync::atomic::Ordering::AcqRel,
+                core::sync::atomic::Ordering::Acquire,
+            )
+            .ok()
+            .map(|_| MappingOperation(&self.operation))
     }
 }

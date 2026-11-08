@@ -22,6 +22,9 @@ pub(crate) struct TeamLife {
 }
 
 impl TeamLife {
+    pub(crate) fn protected(&self) -> bool {
+        self.exit.protected() || self.parent.as_ref().is_some_and(|p| p.protected())
+    }
     pub fn paused(&self) -> bool {
         let local = matches!(self.state.lock().phase, TeamPhase::Paused);
         local || self.parent.as_ref().is_some_and(|p| p.paused())
@@ -63,20 +66,6 @@ impl TeamLife {
             }
         });
         done
-    }
-    pub fn next(&self, owner: TaskId) -> Option<Arc<Member>> {
-        let mut found = None;
-        self.visit(&mut |node| {
-            if found.is_none() {
-                found = node
-                    .tasks
-                    .lock()
-                    .iter()
-                    .find(|m| m.pending(owner) && m.exit().is_some())
-                    .cloned();
-            }
-        });
-        found
     }
     pub fn find(&self, id: TaskId) -> Option<Arc<Member>> {
         let mut found = None;

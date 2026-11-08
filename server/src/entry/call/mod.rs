@@ -8,9 +8,7 @@ use crate::machine::switcher::context::Gprs;
 use crate::machine::switcher::context::TrapContext;
 
 pub(in crate::entry) mod cell;
-mod chrono;
 mod clone_view;
-mod control;
 mod debug;
 mod gate;
 mod outcome;
@@ -52,17 +50,9 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
             cell::dispatch(frame, call, &ident);
             Outcome::Resume
         }
-        EnvCall::Chrono(call) => {
-            chrono::dispatch(frame, call);
-            Outcome::Resume
-        }
         EnvCall::Clone(call) => clone_view::dispatch(frame, call, ident),
         EnvCall::Share(call) => share_view::dispatch(frame, call, ident),
         EnvCall::Sign(call) => sign::dispatch(frame, call, ident),
-        EnvCall::Control(call) => {
-            control::dispatch(frame, call, &ident);
-            Outcome::Resume
-        }
         EnvCall::Pend(call) => {
             pend::dispatch(frame, call, ident);
             Outcome::Resume
@@ -73,10 +63,6 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
         }
         EnvCall::Debug(DebugCall::Get { buf, len }) => {
             debug::get(frame, &ident, buf.get(), len);
-            Outcome::Resume
-        }
-        EnvCall::Debug(DebugCall::SetTrace { on }) => {
-            frame.gpr.set_x(Gprs::A0, debug::set_trace(on));
             Outcome::Resume
         }
     };

@@ -3,12 +3,10 @@ use alloc::sync::Arc;
 use kernel_api::abi::call::pend::PendCall;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::VirtAddr;
-use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::pend::PendInfo;
-use kernel_api::model::pend::PendRange;
-use kernel_api::model::pend::ReleaseMode;
+use kernel_api::model::pend::{AccordRequest, AccordTarget};
 
 use crate::basis::nest::Access;
 use crate::basis::pend;
@@ -18,21 +16,18 @@ use crate::basis::room::conductor::current;
 use crate::basis::room::scheduler::roster::muster;
 use crate::basis::unit::task::TaskIdent;
 use crate::machine::switcher::context::TrapContext;
-use kernel_api::address::PageCount;
-use kernel_api::address::PageOffset;
 use kernel_api::address::VirtAddr as KVirt;
 
 use super::outcome::answer;
 
 pub(crate) fn dispatch(frame: &mut TrapContext, call: PendCall, ident: Arc<TaskIdent>) {
     match call {
-        PendCall::Accord {
-            src,
-            dst,
+        PendCall::Accord { request } => accord(frame, &ident, request),
+        PendCall::Narrow {
+            token,
             subset,
-            mark,
-        } => accord(frame, src, dst, subset, mark),
-        PendCall::Narrow { token, subset } => narrow(frame, token, subset),
+            range,
+        } => narrow(frame, token, subset, range),
         PendCall::Revoke { dst, token } => revoke(frame, dst, token),
         PendCall::Collect {
             after,
@@ -40,76 +35,45 @@ pub(crate) fn dispatch(frame: &mut TrapContext, call: PendCall, ident: Arc<TaskI
             capacity,
         } => collect(frame, &ident, after, buf, capacity),
         PendCall::Inspect { token, buf } => inspect(frame, &ident, token, buf),
-        PendCall::Release { token, mode } => release(frame, token, mode),
-        PendCall::Same { a, b } => {
-            answer(
-                frame,
-                current()
-                    .running_task()
-                    .ok_or(PendFail::Denied)
-                    .and_then(|task| pend::same(&task, a, b))
-                    .map(usize::from),
-            );
-        }
-        PendCall::Derive {
-            src,
-            subset,
-            mark,
-            range,
-        } => derive(frame, src, subset, mark, range),
+        PendCall::Return { token } => return_(frame, token),
     }
 }
 
-fn accord(
-    frame: &mut TrapContext,
-    src_token: PendId,
-    dst_id: TaskId,
-    subset: Modifiable,
-    mark: Mark,
-) {
+fn accord(frame: &mut TrapContext, ident: &TaskIdent, request: VirtAddr) {
     let r = (|| -> Result<usize, PendFail> {
-        let caller = current().running_task().ok_or(PendFail::Denied)?;
-        let src = pend::locate(&caller, src_token).ok_or(PendFail::Denied)?;
-        if !src.alive() {
-            return Err(PendFail::Dead);
+        // Copy once; authorization never rereads mutable user memory.
+        let mut bytes = [0; AccordRequest::WIDTH];
+        if !ident.team.space.copy_in(&mut bytes, request) {
+            return Err(PendFail::Denied);
         }
-        let dst = muster(dst_id).ok_or(PendFail::Denied)?;
-        pend::accord(&caller, src_token, dst.as_weak(), subset, mark)
-    })();
-    answer(frame, r);
-}
-
-/// 本地精确派生：目标就是调用者，范围继承父窗口或按来源起点收窄。
-fn derive(
-    frame: &mut TrapContext,
-    src_token: PendId,
-    subset: Modifiable,
-    mark: Mark,
-    range: PendRange,
-) {
-    let r = (|| -> Result<usize, PendFail> {
-        let window = match range {
-            PendRange::Inherit => None,
-            PendRange::Pages { offset, count } => {
-                let count = PageCount::new(count).ok_or(PendFail::NotAligned)?;
-                Some((PageOffset::new(offset), count))
-            }
+        let request = AccordRequest::from_bytes(&bytes).ok_or(PendFail::Invalid)?;
+        let caller = current().running_task().ok_or(PendFail::Denied)?;
+        let target = match request.target {
+            AccordTarget::Caller => Arc::downgrade(&caller),
+            AccordTarget::Task(id) => muster(id).ok_or(PendFail::Denied)?.as_weak().clone(),
         };
-        let caller = current().running_task().ok_or(PendFail::Denied)?;
-        let src = pend::locate(&caller, src_token).ok_or(PendFail::Denied)?;
-        if !src.alive() {
-            return Err(PendFail::Dead);
-        }
-        pend::derive(&caller, src_token, subset, mark, window)
+        pend::accord(
+            &caller,
+            request.src,
+            &target,
+            request.subset,
+            request.mark,
+            pend::Window::Parent(request.range),
+        )
     })();
     answer(frame, r);
 }
 
-fn narrow(frame: &mut TrapContext, token: PendId, subset: Modifiable) {
+fn narrow(
+    frame: &mut TrapContext,
+    token: PendId,
+    subset: Modifiable,
+    range: kernel_api::model::pend::PendRange,
+) {
     let r = current()
         .running_task()
         .ok_or(PendFail::Denied)
-        .and_then(|task| pend::reduce(&task, token, subset))
+        .and_then(|task| pend::reduce(&task, token, subset, range))
         .map(|()| 0);
     answer(frame, r);
 }
@@ -125,6 +89,20 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
 
 fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendSnapshot) -> PendInfo {
     PendInfo {
+        range: pend
+            .view()
+            .share_view()
+            .map(|meta| {
+                let (offset, count) = pend.authority().window().unwrap_or((
+                    kernel_api::address::PageOffset::ZERO,
+                    meta.source().page_count(),
+                ));
+                kernel_api::model::pend::PendRange::Pages {
+                    offset: offset.get(),
+                    count: count.get(),
+                }
+            })
+            .unwrap_or(kernel_api::model::pend::PendRange::Inherit),
         token: pend.token(),
         view: kernel_api::model::view::ViewId::new(pend.view().id()),
         kind: pend.view().kind(),
@@ -145,10 +123,8 @@ fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendSnapshot) 
 }
 
 fn write_info(ident: &TaskIdent, buf: usize, info: PendInfo) -> Result<(), PendFail> {
-    let words = info.words();
-    let bytes =
-        unsafe { ::core::slice::from_raw_parts(words.as_ptr().cast::<u8>(), PendInfo::SIZE) };
-    if !ident.team.space.copy_out(bytes, KVirt::wrap(buf)) {
+    let bytes = info.to_bytes();
+    if !ident.team.space.copy_out(&bytes, KVirt::wrap(buf)) {
         return Err(PendFail::Denied);
     }
     Ok(())
@@ -223,13 +199,11 @@ fn collect(
     answer(frame, r);
 }
 
-fn release(frame: &mut TrapContext, token: PendId, mode: ReleaseMode) {
+fn return_(frame: &mut TrapContext, token: PendId) {
     let r = current()
         .running_task()
         .ok_or(PendFail::Denied)
-        .and_then(|task| match mode {
-            ReleaseMode::Revoke => pend::release(&task, token).map(|_| ()),
-        })
+        .and_then(|task| pend::return_(&task, token))
         .map(|_| 0);
     answer(frame, r);
 }

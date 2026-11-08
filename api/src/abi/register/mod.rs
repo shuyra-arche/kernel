@@ -59,16 +59,25 @@ impl Wire for u64 {
 }
 
 impl Wire for crate::model::wait::Wait {
-    const WORDS: usize = 1;
+    const WORDS: usize = 2;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
-        s[*i] = self.to_wire();
-        *i += 1;
+        let (tag, at): (usize, u64) = match self {
+            Self::Poll => (0, 0),
+            Self::At(at) => (1, *at),
+            Self::Infinite => (2, 0),
+        };
+        tag.pack(s, i);
+        (at as usize).pack(s, i);
     }
     fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
-        let v = *s.get(*i).ok_or(Decode::Overflow)?;
-        *i += 1;
-        // 满射（每个 `usize` 都有一格）⇒ 解码这一步没有非法位可拒。
-        Ok(crate::model::wait::Wait::from_wire(v))
+        let tag = usize::unpack(s, i)?;
+        let at = usize::unpack(s, i)?;
+        match (tag, at) {
+            (0, 0) => Ok(Self::Poll),
+            (1, at) => Ok(Self::At(at as u64)),
+            (2, 0) => Ok(Self::Infinite),
+            _ => Err(Decode::Invalid),
+        }
     }
 }
 

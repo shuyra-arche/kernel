@@ -1,15 +1,10 @@
-use alloc::sync::Arc;
-
-use crate::basis::unit::space::Space;
 use crate::machine::mmu::riscv::table::PteFlags;
 use crate::machine::mmu::riscv::table::TableNode;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
-use kernel_api::address::VirtAddr;
 
 #[derive(Clone)]
 pub struct StackReader {
-    space: Option<Arc<Space>>,
     root: PhysAddr,
     page: Option<(usize, PhysAddr)>,
 }
@@ -17,16 +12,7 @@ pub struct StackReader {
 impl StackReader {
     pub fn new(root_ppn: usize) -> StackReader {
         StackReader {
-            space: None,
             root: PhysAddr::from_raw(root_ppn << 12),
-            page: None,
-        }
-    }
-
-    pub fn user(space: Arc<Space>) -> Self {
-        Self {
-            space: Some(space),
-            root: PhysAddr::from_raw(0),
             page: None,
         }
     }
@@ -51,12 +37,6 @@ impl StackReader {
     }
 
     pub fn word(&mut self, addr: usize) -> Option<usize> {
-        if let Some(space) = &self.space {
-            let mut bytes = [0u8; size_of::<usize>()];
-            return space
-                .copy_in(&mut bytes, VirtAddr::wrap(addr))
-                .then(|| usize::from_le_bytes(bytes));
-        }
         if (addr & (PAGE_SIZE - 1)) + size_of::<usize>() > PAGE_SIZE {
             return None;
         }

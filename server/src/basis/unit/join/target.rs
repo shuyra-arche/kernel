@@ -13,6 +13,13 @@ pub(crate) enum JoinTarget {
 }
 
 impl JoinTarget {
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Task(a), Self::Task(b)) => Arc::ptr_eq(a, b),
+            (Self::Team(a), Self::Team(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
     pub(crate) fn key(&self) -> WakeKey {
         match self {
             Self::Task(member) => WakeKey::Task { id: member.id },

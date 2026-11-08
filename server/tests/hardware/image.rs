@@ -48,7 +48,7 @@ pub(super) fn initrd(elf: &[u8]) -> Vec<u8> {
     }
     assert!(HEADER + regions.len() * RECORD <= PAGE);
     capsule[..8].copy_from_slice(&MAGIC);
-    capsule[8..12].copy_from_slice(&[1, 0, 12, 0]);
+    capsule[8..12].copy_from_slice(&[2, 0, 12, kernel_api::abi::VERSION as u8]);
     capsule[12..16].copy_from_slice(&(regions.len() as u32).to_le_bytes());
     put(&mut capsule, 16, entry);
     let length = capsule.len();

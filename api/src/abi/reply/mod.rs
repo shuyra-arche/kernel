@@ -5,8 +5,8 @@
 //! 输入寄存器由 `Wire::unpack` 校验；这里按 Kernel 保证的返回布局还原值。
 
 use crate::address::VirtAddr;
-use crate::model::cell::FlatReference;
 use crate::model::cell::MappingId;
+use crate::model::cell::SlotId;
 use crate::model::identity::PendId;
 use crate::model::identity::TaskId;
 use crate::model::identity::TeamId;
@@ -42,9 +42,9 @@ impl FromPair for (VirtAddr, usize) {
     }
 }
 
-impl FromPair for FlatReference {
+impl FromPair for SlotId {
     fn from_pair(v0: usize, _v1: usize) -> Self {
-        FlatReference::new(v0)
+        SlotId::new(v0)
     }
 }
 
@@ -98,8 +98,6 @@ impl FromPair for TeamId {
 mod sign;
 pub use sign::SignReply;
 
-mod lifecycle;
-
 impl FromPair for (usize, usize) {
     fn from_pair(v0: usize, v1: usize) -> Self {
         (v0, v1)
@@ -117,4 +115,18 @@ impl FromPair for crate::model::unit::ControlId {
     }
 }
 
-mod mapping;
+impl FromPair for crate::model::unit::UnitTarget {
+    fn from_pair(kind: usize, id: usize) -> Self {
+        assert!(
+            id != 0 && id <= isize::MAX as usize,
+            "invalid Unit Create identity"
+        );
+        match kind {
+            0 => Self::Task(TaskId::new(id)),
+            1 => Self::Team(TeamId::new(id)),
+            _ => panic!("invalid Unit Create kind"),
+        }
+    }
+}
+
+mod clone_view;

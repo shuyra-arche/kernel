@@ -17,8 +17,9 @@ pub(crate) fn wait_value(
     space: Arc<Space>,
     address: VirtAddr,
     expected: u32,
-    duration: Duration,
+    wait: kernel_api::model::wait::Wait,
 ) -> Result<Handoff<bool>, RoomFail> {
+    let deadline = clock::deadline(wait);
     let blocked = {
         let _commit = crate::basis::commit();
         let value = space.nest.load_u32(address).map_err(|error| match error {
@@ -28,22 +29,21 @@ pub(crate) fn wait_value(
         if value != expected {
             return Ok(Handoff::Resume(true));
         }
-        if duration == Duration::ZERO {
+        if clock::remaining(deadline) == Duration::ZERO {
             return Ok(Handoff::Resume(false));
         }
-        // Saturation prevents a very large finite timeout wrapping into the past.
-        let deadline = (duration != Duration::MAX).then(|| {
-            clock::now()
-                .as_ticks()
-                .saturating_add(clock::duration_to_ticks(duration))
-        });
         let key = WakeKey::Value {
             space: space.nest.asid(),
             address: address.as_usize(),
         };
         let life = space.life();
         drop(space);
-        match block_with_call::<RoomFail>(key, life, duration, Some(WaitCall::Value { deadline })) {
+        match block_with_call::<RoomFail>(
+            key,
+            life,
+            clock::remaining(deadline),
+            Some(WaitCall::Value { deadline }),
+        ) {
             Ok(blocked) => blocked,
             Err(error) => {
                 // A timer/holder allocation may fail after creating the site.

@@ -20,8 +20,8 @@ fn old_retry_completion_and_cross_domain_identity_cannot_release_memory() {
     let mut space = IoSpace::new(hardware);
     let mut other_space = IoSpace::new(other);
     // SAFETY: no hardware or payload access; both are read-only projections.
-    let id = unsafe { space.register(&cell, 0, false) }.unwrap();
-    let other_id = unsafe { other_space.register(&cell, 0, false) }.unwrap();
+    let id = unsafe { space.register_during(&cell, 0, false, None) }.unwrap();
+    let other_id = unsafe { other_space.register_during(&cell, 0, false, None) }.unwrap();
     space.publish(id).unwrap();
     other_space.publish(other_id).unwrap();
     assert_ne!(id, other_id);
@@ -66,7 +66,7 @@ fn fence_submission_failure_keeps_iova_reserved_until_retry_settlement() {
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     // SAFETY: no hardware or payload access.
-    let id = unsafe { space.register(&cell, 4096, true) }.unwrap();
+    let id = unsafe { space.register_during(&cell, 4096, true, None) }.unwrap();
     space.publish(id).unwrap();
     trace.lock().unwrap().fail_fence = Some(HardwareError::Unavailable);
     assert_eq!(
@@ -76,14 +76,14 @@ fn fence_submission_failure_keeps_iova_reserved_until_retry_settlement() {
     assert_eq!(space.phase(id), Ok(Phase::Failed));
     // SAFETY: rejected before producing any hardware effect.
     assert_eq!(
-        unsafe { space.register(&cell, 4096, false) },
+        unsafe { space.register_during(&cell, 4096, false, None) },
         Err(Error::Overlap)
     );
     let batch = space.revoke(id).unwrap().unwrap();
     trace.lock().unwrap().completion.push_back(Ok(Some(batch)));
     space.poll(id).unwrap();
     // SAFETY: no actual hardware; the earlier relationship is fully settled.
-    let reused = unsafe { space.register(&cell, 4096, false) }.unwrap();
+    let reused = unsafe { space.register_during(&cell, 4096, false, None) }.unwrap();
     assert_ne!(id, reused);
     assert_eq!(space.poll(id), Err(Error::UnknownBinding));
     assert_eq!(cell.exposure(), Exposure::External);
@@ -101,7 +101,7 @@ fn rejected_geometry_does_not_register_external_risk() {
     for iova in [1, usize::MAX - 4095] {
         // SAFETY: rejected preparation with no hardware or payload accesses.
         assert_eq!(
-            unsafe { space.register(&cell, iova, false) },
+            unsafe { space.register_during(&cell, iova, false, None) },
             Err(Error::InvalidRange)
         );
         assert_eq!(cell.exposure(), Exposure::Internal);
@@ -120,7 +120,7 @@ fn riscv_fence_encoding_and_error_status_do_not_confuse_notification_with_succes
     let (hardware, trace) = Scripted::new();
     let mut space = IoSpace::new(hardware);
     // SAFETY: no hardware or payload accesses; obtains a real production batch.
-    let id = unsafe { space.register(&cell, 0, true) }.unwrap();
+    let id = unsafe { space.register_during(&cell, 0, true, None) }.unwrap();
     space.publish(id).unwrap();
     let batch = space.revoke(id).unwrap().unwrap();
     assert_eq!(riscv::Command::invalidate_host().words(), [1, 0]);

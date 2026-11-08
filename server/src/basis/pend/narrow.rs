@@ -1,59 +1,80 @@
-use super::pend_entry::Modifiable;
-use crate::basis::pend::authority::narrows;
-use crate::basis::view::share_view::ShareOperation;
-use kernel_api::abi::call::pend::PendFail;
+use crate::basis::{unit::task::Task, view::share_view::ShareOperation};
+use alloc::sync::Arc;
+use kernel_api::{
+    abi::call::pend::PendFail,
+    model::{identity::PendId, modifiable::Modifiable, pend::PendRange},
+};
 
+/// Narrow preserves identity. Live descendants/external loans return Busy before
+/// changing the window; the holder can Return/Revoke them and retry.
 pub(crate) fn reduce(
-    task: &alloc::sync::Arc<crate::basis::unit::task::Task>,
-    token: kernel_api::model::identity::PendId,
+    task: &Arc<Task>,
+    token: PendId,
     subset: Modifiable,
+    range: PendRange,
 ) -> Result<(), PendFail> {
-    reduce_locked(task, token, subset)?;
-    super::notify(task.ident.id, token);
-    Ok(())
-}
-
-fn reduce_locked(
-    task: &alloc::sync::Arc<crate::basis::unit::task::Task>,
-    token: kernel_api::model::identity::PendId,
-    subset: Modifiable,
-) -> Result<(), PendFail> {
-    let pend_entry = super::locate(task, token).ok_or(PendFail::Denied)?;
-    if !pend_entry.alive() {
+    let observed = super::locate(task, token).ok_or(PendFail::Denied)?;
+    let share = observed.view().share_view();
+    let _operation = share
+        .as_ref()
+        .map(|meta| ShareOperation::acquire(meta).ok_or(PendFail::Busy))
+        .transpose()?;
+    let _serial = task.pend.lock();
+    let observed = super::locate(task, token).ok_or(PendFail::Denied)?;
+    if !observed.alive() {
         return Err(PendFail::Dead);
     }
-    if !narrows(pend_entry.modifiable(), subset) {
-        return Err(PendFail::Denied);
+    observed.authority().can_narrow(subset)?;
+    if task
+        .pend
+        .heirs
+        .lock()
+        .iter()
+        .any(|(parent, _, _)| *parent == token)
+    {
+        return Err(PendFail::Busy);
     }
-    if let Some(p) = pend_entry.view().share_view() {
-        let meta = &p;
-        let _operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
-        pend_entry.authority().can_narrow(subset)?;
-        if pend_entry.authority().modifiable().is_none() {
-            return Err(PendFail::Busy);
+    let window = match range {
+        PendRange::Inherit => observed.authority().window(),
+        _ => {
+            let meta = share.as_ref().ok_or(PendFail::Denied)?;
+            let outer = observed.authority().window().unwrap_or((
+                kernel_api::address::PageOffset::ZERO,
+                meta.source().page_count(),
+            ));
+            Some(super::Window::Parent(range).resolve(outer)?)
         }
-        if subset != pend_entry.modifiable() {
+    };
+    let authorization = share.as_ref().and_then(|meta| meta.authorization());
+    // No in-flight publication may cross the narrowing commit.
+    {
+        let _commit = crate::basis::commit();
+        let _withdraw = authorization
+            .as_ref()
+            .map(|source| source.begin_withdraw())
+            .transpose()?;
+    }
+    if let Some(meta) = &share {
+        if subset != observed.modifiable() || window != observed.authority().window() {
             meta.close_maps(Some(token))?;
         }
-        let _pend = task.pend.lock();
-        let _commit = crate::basis::commit();
-        let mut entries = task.pend.entries.lock();
-        let pend_entry = entries
-            .iter_mut()
-            .find(|pend_entry| pend_entry.token() == token)
-            .ok_or(PendFail::Denied)?;
-        pend_entry.narrow(subset)?;
-        super::changed(task);
-        return Ok(());
     }
-    let _pend = task.pend.lock();
-    let _commit = crate::basis::commit();
-    let mut entries = task.pend.entries.lock();
-    let pend_entry = entries
-        .iter_mut()
-        .find(|pend_entry| pend_entry.token() == token)
-        .ok_or(PendFail::Denied)?;
-    pend_entry.narrow(subset)?;
-    super::changed(task);
+    {
+        let _commit = crate::basis::commit();
+        let _withdraw = authorization
+            .as_ref()
+            .map(|source| source.begin_withdraw())
+            .transpose()?;
+        let mut entries = task.pend.entries.lock();
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.token() == token)
+            .ok_or(PendFail::Denied)?;
+        entry.narrow(subset, window)?;
+        super::changed(task);
+    }
+    drop(_serial);
+    drop(_operation);
+    super::notify(task.ident.id, token);
     Ok(())
 }

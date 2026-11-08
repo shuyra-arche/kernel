@@ -1,10 +1,10 @@
-use super::PendStatus;
+use super::{PendRange, PendStatus};
 use crate::model::{
     identity::{Mark, PendId, TaskId},
     modifiable::Modifiable,
     view::{ViewId, ViewKind},
 };
-/// Eight whole words. A View identity is descriptive; the holder's Pend grants access.
+/// Eleven RV64 words. A View identity is descriptive; the holder's Pend grants access.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendInfo {
     pub token: PendId,
@@ -15,4 +15,6 @@ pub struct PendInfo {
     pub lender: TaskId,
     pub mark: Mark,
     pub status: PendStatus,
+    /// Effective source window for Share; Inherit denotes a non-ranged View.
+    pub range: PendRange,
 }
