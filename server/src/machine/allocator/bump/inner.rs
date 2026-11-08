@@ -17,7 +17,10 @@ impl BumpInner {
             return Err(InitError::NoFreeMemory);
         }
         self.base = free.base;
-        self.edge = free.base + free.size;
+        self.edge = free
+            .base
+            .checked_add(free.size)
+            .ok_or(InitError::NoFreeMemory)?;
         Ok(())
     }
 }

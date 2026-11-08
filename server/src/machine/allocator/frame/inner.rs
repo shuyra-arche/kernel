@@ -2,7 +2,6 @@ use core::ptr::NonNull;
 
 use alloc::vec::Vec;
 
-use super::facts::{MAX_RESERVED, MachineFacts};
 use crate::machine::allocator::InitError;
 use crate::machine::allocator::Link;
 use kernel_api::model::cell::PAGE_SIZE;
@@ -30,61 +29,48 @@ impl FrameInner {
     }
 
     pub(super) fn init(&mut self) -> Result<(), InitError> {
-        self.edge = crate::machine::allocator::bump::boundary();
-        let prov_base = crate::machine::allocator::bump::frontier().next_multiple_of(PAGE_SIZE);
-        let max_frame = self.edge.saturating_sub(prov_base) / PAGE_SIZE;
-        if max_frame == 0 {
-            return Err(InitError::NoFreeFrames);
-        }
+        let memory = &crate::machine::board::info().memory;
+        let bounds = memory.allocation_bounds();
+        self.base = bounds.base;
+        self.edge = bounds.range().end;
+        let max_frame = bounds.size / PAGE_SIZE;
         let max_power = max_frame.ilog2() as usize + 1;
         self.freelist
-            .try_reserve(max_power)
+            .try_reserve_exact(max_power)
             .map_err(|_| InitError::OutOfMemory)?;
         self.freelist.resize_with(max_power, || None);
         self.pagemeta
-            .try_reserve(max_frame)
+            .try_reserve_exact(max_frame)
             .map_err(|_| InitError::OutOfMemory)?;
         self.pagemeta.resize_with(max_frame, || None);
         crate::machine::allocator::statistics::install_frame_kinds(max_frame)?;
 
-        self.base = crate::machine::allocator::bump::frontier().next_multiple_of(PAGE_SIZE);
-        let max_frame = self.edge.saturating_sub(self.base) / PAGE_SIZE;
-        if max_frame == 0 {
-            return Err(InitError::NoFreeFrames);
+        // Metadata was allocated only inside the validated bootstrap interval.
+        // Publish free links only after the final Bump frontier is known.
+        let bootstrap = memory.bootstrap();
+        let frontier = crate::machine::allocator::bump::frontier()
+            .checked_next_multiple_of(PAGE_SIZE)
+            .ok_or(InitError::NoFreeFrames)?;
+        let mut available = false;
+        for region in memory.free() {
+            let mut start = region.base;
+            if start == bootstrap.base {
+                start = frontier;
+            }
+            let end = region.range().end;
+            while start < end {
+                let pages = (end - start) / PAGE_SIZE;
+                let power =
+                    ((start / PAGE_SIZE).trailing_zeros() as usize).min(pages.ilog2() as usize);
+                unsafe {
+                    self.push_link(self.frame_index(start), power);
+                }
+                start += PAGE_SIZE << power;
+                available = true;
+            }
         }
-        let max_power = max_frame.ilog2() as usize + 1;
-        self.freelist.resize_with(max_power, || None);
-        self.pagemeta.resize_with(max_frame, || None);
-
-        let mut index = 0usize;
-        let mut remaining = max_frame;
-        let facts = super::machine_facts();
-        let holes = Self::holes(&facts, self.base, self.edge, max_frame);
-        while remaining > 0 {
-            if let Some(end) = hole_containing(&holes, index) {
-                let skip = end - index;
-                index += skip;
-                remaining -= skip;
-                continue;
-            }
-            let limit = holes
-                .iter()
-                .flatten()
-                .map(|&(start, _)| start)
-                .filter(|&start| start > index)
-                .min()
-                .unwrap_or(max_frame);
-            let mut power = (index.trailing_zeros() as usize)
-                .min(remaining.ilog2() as usize)
-                .min(max_power - 1);
-            while index + (1 << power) > limit {
-                power -= 1;
-            }
-            unsafe {
-                self.push_link(index, power);
-            }
-            index += 1 << power;
-            remaining -= 1 << power;
+        if !available {
+            return Err(InitError::NoFreeFrames);
         }
         Ok(())
     }
@@ -97,30 +83,11 @@ impl FrameInner {
         self.base + index * PAGE_SIZE
     }
 
-    fn holes(
-        facts: &MachineFacts,
-        base: usize,
-        edge: usize,
-        max_frame: usize,
-    ) -> [Option<(usize, usize)>; MAX_RESERVED] {
-        let mut out = [None; MAX_RESERVED];
-        let mut n = 0;
-        for r in facts.reserved.iter().flatten() {
-            let (hs, he) = (r.base, r.base + r.size);
-            if he <= base || hs >= edge {
-                continue;
-            }
-            let start = (hs.max(base) - base) / PAGE_SIZE;
-            let end = (he.min(edge) - base).div_ceil(PAGE_SIZE);
-            out[n] = Some((start.min(max_frame), end.min(max_frame)));
-            n += 1;
-        }
-        out[..n].sort_unstable();
-        out
-    }
-
-    fn buddy_index(index: usize, power: usize) -> usize {
-        index ^ (1 << power)
+    fn buddy_index(&self, index: usize, power: usize) -> Option<usize> {
+        let page = self.base / PAGE_SIZE + index;
+        (page ^ (1 << power))
+            .checked_sub(self.base / PAGE_SIZE)
+            .filter(|buddy| *buddy < self.pagemeta.len())
     }
 
     fn clear_head(&mut self, index: usize) {
@@ -214,7 +181,9 @@ impl FrameInner {
 
             while k > power {
                 k -= 1;
-                let buddy = Self::buddy_index(index, k);
+                let buddy = self
+                    .buddy_index(index, k)
+                    .expect("split stays within admitted block");
                 self.push_link(buddy, k);
             }
 
@@ -226,7 +195,9 @@ impl FrameInner {
         unsafe {
             self.clear_head(index);
             while power < self.freelist.len() {
-                let buddy = Self::buddy_index(index, power);
+                let Some(buddy) = self.buddy_index(index, power) else {
+                    break;
+                };
 
                 if buddy >= self.pagemeta.len() {
                     break;
@@ -270,12 +241,4 @@ impl FrameInner {
         }
         false
     }
-}
-
-fn hole_containing(holes: &[Option<(usize, usize)>], index: usize) -> Option<usize> {
-    holes
-        .iter()
-        .flatten()
-        .find(|&&(start, end)| index >= start && index < end)
-        .map(|&(_, end)| end)
 }

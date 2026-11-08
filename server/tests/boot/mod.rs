@@ -13,8 +13,16 @@ mod interrupt;
 #[allow(dead_code)]
 #[path = "../../src/machine/iommu/riscv/interrupt/plan.rs"]
 mod interrupt_plan;
+mod memory;
+#[allow(dead_code)]
+#[path = "../../src/machine/board/region.rs"]
+mod region;
 mod routing;
 mod tree;
+use region::Region;
+#[allow(dead_code)]
+#[path = "../../src/machine/board/memory/mod.rs"]
+mod memory_facts;
 
 mod machine {
     pub(crate) mod iommu {

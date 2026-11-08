@@ -8,6 +8,7 @@ autotests = false
 # A test-only workspace member; it does not depend on the RV64 Server crate.
 
 [dependencies]
+erra.workspace = true
 hashbrown = { version = "0.17.1", default-features = false, features = ["alloc", "default-hasher"] }
 kernel-api = { path = "../../api" }
 fack = { version = "0.2.0", default-features = false }
@@ -52,3 +53,7 @@ path = "unit/mod.rs"
 [[test]]
 name = "room"
 path = "room/mod.rs"
+
+[[test]]
+name = "allocator"
+path = "allocator/mod.rs"

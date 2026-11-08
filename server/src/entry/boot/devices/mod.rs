@@ -26,7 +26,7 @@ use plan::Plan;
 pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     let dtb = board::info().dtb();
     let fdt = board::device_tree().ok_or(PendFail::Denied)?;
-    let dram = board::info().dram;
+    let dram = board::info().memory.envelope();
     // Discover and validate every reservation before creating any device authority.
     let plan = Plan::discover(&fdt, dram.base, dram.size)?;
     for region in plan.authorities() {
@@ -89,6 +89,6 @@ fn grant_region(registry: &mut Registry, region: plan::region::Region) -> Result
 
 /// Validate the exact same authority plan before configuring any protected endpoint.
 pub(super) fn validate(fdt: &fdt::Fdt) -> Result<(), PendFail> {
-    let dram = board::info().dram;
+    let dram = board::info().memory.envelope();
     Plan::discover(fdt, dram.base, dram.size).map(|_| ())
 }

@@ -196,3 +196,5 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str) -> Output {
 
 mod image;
 mod kernel;
+
+mod memory;

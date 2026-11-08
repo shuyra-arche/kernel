@@ -15,10 +15,6 @@ pub use sink::Sink;
 
 const IDENTITY_BASE: usize = 0x8000_0000;
 
-fn identity_edge() -> usize {
-    crate::machine::board::dram_edge().unwrap_or(0x9000_0000)
-}
-
 fn write(s: &str) {
     let bytes = s.as_bytes();
     if let Some(pa) = physical_buffer(bytes.as_ptr() as usize, bytes.len()) {
@@ -50,7 +46,11 @@ pub fn read(buf: &mut [u8]) -> Option<usize> {
 }
 
 fn physical_buffer(va: usize, len: usize) -> Option<usize> {
-    if va >= IDENTITY_BASE && va + len <= identity_edge() {
+    if crate::machine::board::contains_identity(va, len)
+        || (crate::machine::board::dram_edge().is_none()
+            && va >= IDENTITY_BASE
+            && va.checked_add(len).is_some_and(|end| end <= 0x9000_0000))
+    {
         Some(va)
     } else {
         translate_kernel(va, len)

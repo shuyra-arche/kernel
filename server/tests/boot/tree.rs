@@ -38,12 +38,16 @@ impl Node {
     }
 
     pub fn encode(self) -> Vec<u8> {
+        self.encode_reserved(&[])
+    }
+
+    pub fn encode_reserved(self, reservations: &[(u64, u64)]) -> Vec<u8> {
         let mut structure = Vec::new();
         let mut strings = Vec::new();
         self.write(&mut structure, &mut strings);
         structure.extend(9u32.to_be_bytes());
         // Ten-word header, one empty reservation-map entry, structure, strings.
-        let structure_offset = 56;
+        let structure_offset = 56 + reservations.len() * 16;
         let strings_offset = structure_offset + structure.len();
         let size = strings_offset + strings.len();
         let mut bytes = [
@@ -61,6 +65,10 @@ impl Node {
         .into_iter()
         .flat_map(u32::to_be_bytes)
         .collect::<Vec<_>>();
+        for (base, size) in reservations {
+            bytes.extend(base.to_be_bytes());
+            bytes.extend(size.to_be_bytes());
+        }
         bytes.extend([0; 16]);
         bytes.extend(structure);
         bytes.extend(strings);

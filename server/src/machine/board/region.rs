@@ -1,13 +1,13 @@
 use ::core::ops;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Region {
     pub base: usize,
     pub size: usize,
 }
 
 impl Region {
-    pub fn new(base: usize, size: usize) -> Self {
+    pub const fn new(base: usize, size: usize) -> Self {
         Self { base, size }
     }
     pub fn range(&self) -> ops::Range<usize> {

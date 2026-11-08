@@ -43,7 +43,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
             return Err(PendFail::Denied);
         }
     }
-    let dram = board::info().dram;
+    let dram = board::info().memory.envelope();
     let edge = dram.base.checked_add(dram.size).ok_or(PendFail::Denied)?;
     for (index, region) in regions.iter().enumerate() {
         if region.size != 4096

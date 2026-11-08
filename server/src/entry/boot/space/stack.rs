@@ -42,7 +42,14 @@ pub(in super::super) fn init() -> Result<(), NestError> {
         .checked_mul(pages_per_hart)
         .and_then(|pages| pages.checked_mul(PAGE_SIZE))
         .ok_or(NestError::OutOfMemory)?;
-    if board::info().free.size < need {
+    if board::info()
+        .memory
+        .free()
+        .iter()
+        .map(|r| r.size)
+        .sum::<usize>()
+        < need
+    {
         return Err(NestError::OutOfMemory);
     }
 

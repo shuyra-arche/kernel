@@ -43,18 +43,12 @@ impl BlockAllocator {
     pub fn new() -> Result<Self, InitError> {
         let nodes = crate::machine::hart::hart_count();
         assert!(nodes > 0, "block init: no harts");
-        let m = crate::machine::board::info().free;
+        let m = crate::machine::board::info().memory.allocation_bounds();
 
         let tally = {
             let meta_len = m.size.div_ceil(PAGE_SIZE);
             let meta = crate::machine::allocator::bump::allocator()
-                .allocate(
-                    Layout::from_size_align(
-                        meta_len * core::mem::size_of::<BlockMeta>(),
-                        core::mem::align_of::<BlockMeta>(),
-                    )
-                    .unwrap(),
-                )
+                .allocate(Layout::array::<BlockMeta>(meta_len).map_err(|_| InitError::OutOfMemory)?)
                 .map_err(|_| InitError::OutOfMemory)?;
             let cells = meta.as_ptr() as *mut BlockMeta;
             unsafe {
