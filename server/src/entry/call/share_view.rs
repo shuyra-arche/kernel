@@ -7,6 +7,7 @@ use kernel_api::abi::call::share_view::ShareFail;
 use kernel_api::model::cell::SlotId;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
+use kernel_api::model::pend::{Operations, ShareRights};
 use kernel_api::model::view::ViewKind;
 
 use super::authority;
@@ -84,7 +85,13 @@ pub(crate) fn create_share(
             task,
             parent,
             &Arc::downgrade(task),
-            requested,
+            kernel_api::model::pend::Limits {
+                modifiable: requested,
+                ..pend::locate(task, parent)
+                    .ok_or(PendFail::Denied)?
+                    .authority()
+                    .limits()
+            },
             Mark::NONE,
             pend::Window::Source(offset, count),
         )
@@ -165,6 +172,9 @@ pub(crate) fn create_share(
 fn open_resource(ident: Arc<TaskIdent>, token: PendId) -> Result<(usize, usize), PendFail> {
     let pend = authority::accede(token, Need::Read)?;
     authority::usable(&pend)?;
+    if !pend.permits(Operations::Share(ShareRights::OPEN)) {
+        return Err(PendFail::Denied);
+    }
     let p = pend.view().share_view().ok_or(PendFail::Denied)?;
     let access = subset_to_access(pend.modifiable())?;
     view::share::open(&p, token, &ident.team.nest, access)
@@ -173,7 +183,7 @@ fn open_resource(ident: Arc<TaskIdent>, token: PendId) -> Result<(usize, usize),
 fn shut_resource(token: PendId) -> Result<usize, PendFail> {
     let task = current().running_task().ok_or(PendFail::Denied)?;
     let pend = pend::locate(&task, token).ok_or(PendFail::Denied)?;
-    if !pend.allows(Need::Read) {
+    if !pend.allows(Need::Read) || !pend.permits(Operations::Share(ShareRights::SHUT)) {
         return Err(PendFail::Denied);
     }
     authority::usable(&pend)?;

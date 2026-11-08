@@ -34,8 +34,8 @@ impl FlatRange {
     }
 
     /// 这一段窗口的来源身份：跨地址空间按来源找关系时做键。
-    pub(crate) fn source_id(&self) -> usize {
-        Arc::as_ptr(&self.flat) as usize
+    pub fn source_id(&self) -> kernel_api::model::flat::FlatId {
+        self.flat.id()
     }
 
     pub fn page_count(&self) -> PageCount {

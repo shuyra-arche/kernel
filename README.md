@@ -289,15 +289,17 @@ selects the EDU image. CI checks out a pinned consumer, patches both image manif
 to this candidate Kernel/API, updates their locks and runs locked tests. This
 prevents silently testing a consumer's older provider. The source-only boot
 interface replaces `init(dtp)` and `init_with_external`; images must rebuild and
-supply the new descriptors. Cell ABI v1, MappingId encoding and syscall operation
-numbers are unchanged; the new boot types are Rust contracts, not wire records.
+supply the normalized platform descriptors. Boot types are Rust contracts; the
+wire ABI is versioned independently.
 
 ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough remain unsupported.
 PQ is disabled.
 Settled logical records survive for observation/Delete while their creator lives.
 After creator death they expire only when hardware responsibility has settled.
 
-ABI v1 rejects version-zero calls and removed domains. Capsule v2 declares the
+ABI v2 rejects version-zero/version-one calls and removed domains. Pend Accord
+and Narrow carry target-specific operation permissions, independent Distributable
+and Modifiable limits, and the relative source window. Capsule v2 declares the
 ABI before execution; Ledger v3 removes obsolete Doom/Retain qualifications.
 Cell uses fixed descriptor snapshots and generation-qualified transitions.
 Protect is CPU-only; a published I/O binding cannot widen access. The current

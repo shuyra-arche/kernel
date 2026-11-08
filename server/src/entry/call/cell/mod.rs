@@ -459,7 +459,9 @@ fn resolve_source(source: SourceSpec, ident: &Arc<TaskIdent>) -> Result<usize, C
             // 从 Share 的某一枚 PendEntry 取得：撤销边与上限按**这一枚**的子 Pend 算，
             // 不因同 Flat、共享根资格就并到根上去。
             let pend = crate::basis::pend::locate(&task, token).ok_or(CellFail::Denied)?;
-            if !pend.alive() {
+            if !pend.permits(kernel_api::model::pend::Operations::Share(
+                kernel_api::model::pend::ShareRights::ASSOCIATE,
+            )) {
                 return Err(CellFail::Denied);
             }
             let meta = pend.view().share_view().ok_or(CellFail::Denied)?;
@@ -529,8 +531,9 @@ fn resolve_source(source: SourceSpec, ident: &Arc<TaskIdent>) -> Result<usize, C
                 let token = branch.unwrap_or(root_token);
                 let pend = crate::basis::pend::locate(&task, token).ok_or(CellFail::Denied)?;
                 let authority = meta.authority(token).ok_or(CellFail::Denied)?;
-                if !pend.alive()
-                    || !pend.modifiable().allows(Modifiable::No)
+                if !pend.permits(kernel_api::model::pend::Operations::Share(
+                    kernel_api::model::pend::ShareRights::ASSOCIATE,
+                )) || !pend.modifiable().allows(Modifiable::No)
                     || !Arc::ptr_eq(pend.authority(), &authority)
                 {
                     return Err(CellFail::Denied);

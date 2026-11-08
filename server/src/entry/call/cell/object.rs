@@ -31,7 +31,10 @@ fn check(entry: &RangeEntry, actor: &Arc<Task>) -> Result<(), CellFail> {
             .and_then(|c| c.control().1)
             .unwrap_or(root);
         let authority = meta.authority(token).ok_or(CellFail::Denied)?;
-        if !source.branch_check(Some(&authority), Access::READ) {
+        if !authority.permits(kernel_api::model::pend::Operations::Share(
+            kernel_api::model::pend::ShareRights::ASSOCIATE,
+        )) || !source.branch_check(Some(&authority), Access::READ)
+        {
             return Err(CellFail::Denied);
         }
     } else if !source.private_owner(actor.ident.id) {

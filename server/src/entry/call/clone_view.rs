@@ -8,6 +8,7 @@ use kernel_api::model::clone_view::PullOutcome;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
+use kernel_api::model::pend::{CloneRights, Operations};
 use kernel_api::model::view::ViewKind;
 
 use super::authority;
@@ -56,7 +57,7 @@ fn push(
         .running_task()
         .map(|t| t.ident.id)
         .unwrap_or(TaskId::new(0));
-    let r = with_clone(token, Need::Write, |meta| {
+    let r = with_clone(token, Need::Write, CloneRights::PUSH, |meta| {
         if len == 0
             || !ident
                 .team
@@ -90,6 +91,9 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
     let task = current().running_task().ok_or(CloneFail::Denied)?;
     let observed = authority::accede(token, Need::Read).map_err(fail)?;
     authority::usable(&observed).map_err(fail)?;
+    if !observed.permits(Operations::Clone(CloneRights::PULL)) {
+        return Err(CloneFail::Denied);
+    }
     let meta = observed.view().clone_view().ok_or(CloneFail::Denied)?;
     let mut reading = view::clone::read(&meta)?;
     let len = reading.bytes.len();
@@ -111,7 +115,10 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
             return Err(CloneFail::Dead);
         }
         let current = pend::locate(&task, token).ok_or(CloneFail::Denied)?;
-        if !current.view().same(observed.view()) || !current.allows(Need::Read) {
+        if !current.view().same(observed.view())
+            || !current.allows(Need::Read)
+            || !current.permits(Operations::Clone(CloneRights::PULL))
+        {
             return Err(CloneFail::Denied);
         }
         registration.commit(|publish| {
@@ -126,7 +133,9 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
 }
 
 fn peek(frame: &mut TrapContext, token: PendId) -> Outcome {
-    let r = with_clone(token, Need::Read, |meta| view::clone::peek(meta));
+    let r = with_clone(token, Need::Read, CloneRights::PEEK, |meta| {
+        view::clone::peek(meta)
+    });
     match r {
         Ok((n, from, depth)) => {
             frame.gpr.set_x(Gprs::A0, n);
@@ -142,10 +151,16 @@ fn peek(frame: &mut TrapContext, token: PendId) -> Outcome {
 fn with_clone<T>(
     token: PendId,
     need: Need,
+    rights: CloneRights,
     operation: impl FnOnce(&Arc<view::clone::CloneView>) -> Result<T, CloneFail>,
 ) -> Result<T, CloneFail> {
+    let task = current().running_task().ok_or(CloneFail::Denied)?;
+    let _serial = task.pend.lock();
     let pend = authority::accede(token, need).map_err(fail)?;
     authority::usable(&pend).map_err(fail)?;
+    if !pend.permits(Operations::Clone(rights)) {
+        return Err(CloneFail::Denied);
+    }
     let meta = pend.view().clone_view().ok_or(CloneFail::Denied)?;
     operation(&meta)
 }

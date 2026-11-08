@@ -50,7 +50,10 @@ fn failure(error: Error) -> CellFail {
 }
 fn target(actor: &Task, token: PendId, write: bool) -> Result<Arc<pend::PendEntry>, CellFail> {
     let entry = pend::locate(actor, token).ok_or(CellFail::Denied)?;
-    if !entry.alive() || (write && !entry.allows(Need::Write)) {
+    if !entry.permits(kernel_api::model::pend::Operations::Share(
+        kernel_api::model::pend::ShareRights::ASSOCIATE,
+    )) || (write && !entry.allows(Need::Write))
+    {
         return Err(CellFail::Denied);
     }
     let view = entry.view().share_view().ok_or(CellFail::Denied)?;

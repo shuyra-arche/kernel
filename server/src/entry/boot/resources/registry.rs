@@ -14,6 +14,24 @@ pub(crate) struct Registry {
 
 impl Registry {
     pub(crate) fn register(&mut self, name: Name, root: PendEntry) -> Result<(), RegisterError> {
+        // Boot grants access to Kernel-owned endpoints, not permission to
+        // destroy them or inject synthetic hardware/fault notifications.
+        use kernel_api::model::pend::{CloneRights, Operations, ShareRights};
+        let mut limits = root.authority().limits();
+        limits.operations = match root.view().kind() {
+            kernel_api::model::view::ViewKind::Clone => {
+                Operations::Clone(CloneRights::PULL | CloneRights::PEEK)
+            }
+            kernel_api::model::view::ViewKind::Share => {
+                Operations::Share(ShareRights::OPEN | ShareRights::SHUT | ShareRights::ASSOCIATE)
+            }
+        };
+        if let Err(reason) = root.narrow(limits, root.authority().window()) {
+            return Err(Failure {
+                reason,
+                value: (name, root),
+            });
+        }
         let reason = if !valid(name, &root) || self.entries.iter().any(|(n, _)| *n == name) {
             Some(PendFail::Denied)
         } else if self.entries.try_reserve(1).is_err() {

@@ -8,14 +8,13 @@ use kernel_api::model::identity::PendId;
 use super::Modifiable;
 use super::PendEntry;
 use super::ledger::{insert_heir, with_pair_uncommitted};
-use crate::basis::pend::narrows;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::task::Task;
 use crate::basis::view::share::ShareOperation;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
-use kernel_api::model::pend::PendRange;
+use kernel_api::model::pend::{Limits, PendRange};
 
 /// Resolve the window while the source/target transaction locks are held.
 fn effective_window(
@@ -41,16 +40,17 @@ pub(crate) fn accord(
     caller: &Arc<Task>,
     src: PendId,
     dst: &Weak<Task>,
-    subset: Modifiable,
+    limits: Limits,
     mark: Mark,
     requested: super::Window,
 ) -> Result<usize, PendFail> {
+    let subset = limits.modifiable;
     let target = dst.upgrade().ok_or(PendFail::Denied)?;
     if !crate::basis::unit::control::adjacent(caller, &target) {
         return Err(PendFail::Denied);
     }
     let observed = super::locate(caller, src).ok_or(PendFail::Denied)?;
-    if !narrows(observed.modifiable(), subset) {
+    if !observed.authority().limits().permits_child(limits) {
         return Err(PendFail::Denied);
     }
     let share_view = observed.view().share_view();
@@ -70,7 +70,7 @@ pub(crate) fn accord(
             if !pend_entry.alive() {
                 return Err(PendFail::Dead);
             }
-            if !narrows(pend_entry.modifiable(), subset) {
+            if !pend_entry.authority().limits().permits_child(limits) {
                 return Err(PendFail::Denied);
             }
             let mark = if mark == Mark::NONE {
@@ -91,7 +91,7 @@ pub(crate) fn accord(
             if share_view.is_some() {
                 pend_entry.authority().can_borrow(subset)?;
             }
-            let mut granted = pend_entry.vest_window(mark, subset, window)?;
+            let mut granted = pend_entry.vest_window(mark, limits, window)?;
             granted.parent(src, Arc::downgrade(caller));
             let granted = Arc::try_new(granted).map_err(|_| PendFail::OutOfMemory)?;
             caller
@@ -142,12 +142,8 @@ pub(crate) fn accord(
 
 /// Narrow preserves identity. Live descendants/external loans return Busy before
 /// changing the window; the holder can Return/Revoke them and retry.
-pub(crate) fn reduce(
-    task: &Arc<Task>,
-    token: PendId,
-    subset: Modifiable,
-    range: PendRange,
-) -> Result<(), PendFail> {
+pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<(), PendFail> {
+    let range = limits.range;
     let observed = super::locate(task, token).ok_or(PendFail::Denied)?;
     let share = observed.view().share_view();
     let _operation = share
@@ -159,7 +155,7 @@ pub(crate) fn reduce(
     if !observed.alive() {
         return Err(PendFail::Dead);
     }
-    observed.authority().can_narrow(subset)?;
+    observed.authority().can_narrow(limits)?;
     if task
         .pend
         .heirs
@@ -190,7 +186,7 @@ pub(crate) fn reduce(
             .transpose()?;
     }
     if let Some(meta) = &share {
-        if subset != observed.modifiable() || window != observed.authority().window() {
+        if limits != observed.authority().limits() || window != observed.authority().window() {
             meta.close_maps(Some(token))?;
         }
     }
@@ -202,7 +198,7 @@ pub(crate) fn reduce(
             .transpose()?;
         let entries = task.pend.entries.lock();
         let entry = entries.get(token).ok_or(PendFail::Denied)?;
-        entry.narrow(subset, window)?;
+        entry.narrow(limits, window)?;
         super::changed(task);
     }
     drop(_serial);

@@ -68,3 +68,49 @@ fn cancellation_and_settlement_require_different_proofs() {
     assert_eq!(retiring.transition(Cancel), Err(Failure::Denied));
     assert_eq!(retiring.transition(Settle).unwrap().phase, Phase::Dead);
 }
+
+#[test]
+fn live_permission_restricts_operations_without_changing_borrow_rules() {
+    use kernel_api::model::pend::{Distributable, Operations, ShareRights};
+    let all = Operations::Share(ShareRights::all());
+    let open = Operations::Share(ShareRights::OPEN);
+    let root = State::authorized(Yes, all, Distributable::Yes);
+    let limited = root
+        .transition(Limit {
+            access: Yes,
+            operations: open,
+            distributable: Distributable::No,
+        })
+        .unwrap();
+    assert!(limited.permits(open));
+    assert!(!limited.permits(Operations::Share(ShareRights::ASSOCIATE)));
+    assert_eq!(
+        limited.transition(Limit {
+            access: Yes,
+            operations: all,
+            distributable: Distributable::No
+        }),
+        Err(Failure::Denied)
+    );
+    assert_eq!(
+        limited.transition(Limit {
+            access: Yes,
+            operations: open,
+            distributable: Distributable::Yes
+        }),
+        Err(Failure::Denied)
+    );
+    let lent = limited.transition(Borrow(No)).unwrap();
+    assert!(!lent.permits(open));
+    assert_eq!(
+        lent.transition(Limit {
+            access: No,
+            operations: open,
+            distributable: Distributable::No
+        }),
+        Err(Failure::Busy)
+    );
+    let back = lent.transition(Return(No)).unwrap();
+    assert!(back.permits(open));
+    assert!(!back.transition(Retire).unwrap().permits(open));
+}

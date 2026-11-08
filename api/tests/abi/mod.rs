@@ -9,3 +9,5 @@ mod pend;
 
 mod unit;
 mod version;
+
+mod permission;

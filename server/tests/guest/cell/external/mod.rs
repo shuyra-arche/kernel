@@ -203,13 +203,22 @@ pub(super) fn death(at: usize, count: usize) {
             .unwrap()
             .handle(),
     );
+    assert!(share_view::delete(root).is_err());
     let task = super::lifecycle::spawn(publisher as *const () as usize);
     let request = AccordRequest {
         src: root,
         target: AccordTarget::Task(task),
-        subset: Modifiable::Yes,
+        limits: kernel_api::model::pend::Limits {
+            operations: kernel_api::model::pend::Operations::Share(
+                kernel_api::model::pend::ShareRights::OPEN
+                    | kernel_api::model::pend::ShareRights::SHUT
+                    | kernel_api::model::pend::ShareRights::ASSOCIATE,
+            ),
+            modifiable: Modifiable::Yes,
+            distributable: kernel_api::model::pend::Distributable::Yes,
+            range: PendRange::Inherit,
+        },
         mark: Mark::NONE,
-        range: PendRange::Inherit,
     }
     .to_bytes();
     let token = pend::accord(super::ptr(&request)).unwrap();

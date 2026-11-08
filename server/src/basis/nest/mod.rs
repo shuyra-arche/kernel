@@ -1,4 +1,4 @@
-//! CPU 翻译：地址占用、翻译关系、页表、身份与同步退休。
+//! 地址翻译：地址占用、翻译关系、硬件后端、身份与同步退休。
 //!
 //! Flat 继续独立管理来源与物化；这里不保存来源页槽。
 
@@ -71,20 +71,17 @@ impl CleanupNode {
     }
 }
 
-/// 一个 CPU 地址空间：身份、根页表、全局占用、关系与同步退休。
+/// 一个地址组织：身份、翻译后端、全局占用、关系与同步退休。
 ///
 /// Nest owns each Memo and its publication. Address spans describe source
 /// selection and permissions; the index never duplicates per-position state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct NestId(usize);
-impl NestId {
-    pub(crate) fn get(self) -> usize {
-        self.0
-    }
-    fn allocate() -> Result<Self, NestError> {
-        static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, usize::MAX);
-        NEXT.allocate().map(Self).ok_or(NestError::OutOfMemory)
-    }
+pub use kernel_api::model::nest::NestId;
+fn next_id() -> Result<NestId, NestError> {
+    static NEXT: crate::basis::name::Serial =
+        crate::basis::name::Serial::new(1, isize::MAX as usize);
+    NEXT.allocate()
+        .and_then(NestId::new)
+        .ok_or(NestError::OutOfMemory)
 }
 
 struct CpuContext {
@@ -136,7 +133,7 @@ impl Nest {
             layout.register_window(RegionKind::Resource, base, TRAP_STACK_BASE.as_usize() - 1)?;
         }
         let life = Anchor::try_new()?;
-        let id = NestId::allocate()?;
+        let id = next_id()?;
         let domain = mmu::Domain::create(id.get(), kernel)?;
         let nest = Arc::try_new(Self {
             id,
@@ -181,7 +178,7 @@ impl Nest {
         Arc::downgrade(&self.life)
     }
 
-    pub(crate) fn id(&self) -> NestId {
+    pub fn id(&self) -> NestId {
         self.id
     }
 

@@ -7,9 +7,9 @@ use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 
-use crate::basis::pend::narrows;
 use crate::basis::unit::task::Task;
 use crate::basis::view::View;
+use kernel_api::model::pend::{Limits, Operations};
 
 use crate::basis::pend::{Modifiable, Need};
 
@@ -49,10 +49,6 @@ impl PendEntry {
         self.mark
     }
 
-    pub(crate) fn owner(&self) -> Option<TaskId> {
-        self.alive().then(|| self.meta.owner())
-    }
-
     pub(crate) fn alive(&self) -> bool {
         self.meta.alive() && self.authority.alive()
     }
@@ -63,6 +59,10 @@ impl PendEntry {
             .is_some_and(|access| need.allowed_by(access))
     }
 
+    pub(crate) fn permits(&self, operations: Operations) -> bool {
+        self.alive() && self.authority.permits(operations)
+    }
+
     pub(crate) fn view(&self) -> &View {
         &self.meta
     }
@@ -71,19 +71,21 @@ impl PendEntry {
     pub(crate) fn vest_window(
         &self,
         mark: Mark,
-        modifiable: Modifiable,
+        limits: Limits,
         window: Option<(
             kernel_api::address::PageOffset,
             kernel_api::address::PageCount,
         )>,
     ) -> Result<PendEntry, kernel_api::abi::call::pend::PendFail> {
-        PendEntry::try_new_window(
+        let entry = PendEntry::try_new_window(
             self.meta.clone(),
             mark,
-            modifiable,
+            limits.modifiable,
             Some(self.token),
             window,
-        )
+        )?;
+        entry.authority.narrow(limits, window)?;
+        Ok(entry)
     }
 }
 
@@ -140,7 +142,7 @@ impl PendEntry {
 
     pub(crate) fn narrow(
         &self,
-        subset: Modifiable,
+        limits: Limits,
         window: Option<(
             kernel_api::address::PageOffset,
             kernel_api::address::PageCount,
@@ -149,10 +151,7 @@ impl PendEntry {
         if !self.alive() {
             return Err(kernel_api::abi::call::pend::PendFail::Dead);
         }
-        if !narrows(self.modifiable(), subset) {
-            return Err(kernel_api::abi::call::pend::PendFail::Denied);
-        }
-        self.authority.narrow(subset, window)
+        self.authority.narrow(limits, window)
     }
 }
 

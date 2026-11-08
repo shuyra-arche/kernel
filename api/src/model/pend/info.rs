@@ -1,29 +1,20 @@
+use super::{Limits, Target};
 use crate::abi::layout::{WORD_BYTES, fetch_words, store_words};
-use crate::abi::register::Wire;
+use crate::model::identity::{Mark, PendId, TaskId};
 
-use super::PendRange;
-use crate::model::{
-    identity::{Mark, PendId, TaskId},
-    modifiable::Modifiable,
-    view::{ViewId, ViewKind},
-};
-/// Eleven RV64 words. A View identity is descriptive; the holder's Pend grants access.
+/// An observation, never an authorization handle. Live permission stays in the Kernel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendInfo {
     pub token: PendId,
-    pub view: ViewId,
-    pub kind: ViewKind,
-    pub modifiable: Modifiable,
+    pub target: Target,
+    pub limits: Limits,
     pub owner: TaskId,
     pub lender: TaskId,
     pub mark: Mark,
     pub status: PendStatus,
-    /// Effective source window for Share; Inherit denotes a non-ranged View.
-    pub range: PendRange,
 }
-
 impl PendInfo {
-    pub const WORDS: usize = 11;
+    pub const WORDS: usize = 14;
     pub const SIZE: usize = Self::WORDS * WORD_BYTES;
     pub fn to_bytes(self) -> [u8; Self::SIZE] {
         let mut bytes = [0; Self::SIZE];
@@ -34,36 +25,37 @@ impl PendInfo {
         Self::from_words(fetch_words(bytes)?)
     }
     pub fn words(self) -> [usize; Self::WORDS] {
-        let mut range = [0; 6];
-        self.range.pack(&mut range, &mut 0);
-        [
+        let [kind, id] = self.target.words();
+        let mut words = [0; Self::WORDS];
+        words[..7].copy_from_slice(&[
             self.token.get(),
-            self.view.get(),
-            self.kind as usize,
-            self.modifiable.bits() as usize,
+            kind,
+            id,
             self.owner.get(),
             self.lender.get(),
             self.mark.get() as usize,
             self.status as usize,
-            range[0],
-            range[1],
-            range[2],
-        ]
+        ]);
+        words[7..].copy_from_slice(&self.limits.words());
+        words
     }
     pub fn from_words(w: [usize; Self::WORDS]) -> Option<Self> {
-        if w[0] == 0 || w[1] == 0 {
+        if w[0] == 0 {
+            return None;
+        }
+        let target = Target::of([w[1], w[2]])?;
+        let limits = Limits::of(w[7..].try_into().ok()?)?;
+        if !target.accepts(limits.operations) {
             return None;
         }
         Some(Self {
             token: PendId::new(w[0]),
-            view: ViewId::new(w[1]),
-            kind: ViewKind::of(w[2])?,
-            modifiable: Modifiable::from_bits(u32::try_from(w[3]).ok()?)?,
-            owner: TaskId::new(w[4]),
-            lender: TaskId::new(w[5]),
-            mark: Mark::new(w[6] as u64),
-            status: PendStatus::of(w[7])?,
-            range: PendRange::unpack(&[w[8], w[9], w[10], 0, 0, 0], &mut 0).ok()?,
+            target,
+            limits,
+            owner: TaskId::new(w[3]),
+            lender: TaskId::new(w[4]),
+            mark: Mark::new(w[5] as u64),
+            status: PendStatus::of(w[6])?,
         })
     }
 }

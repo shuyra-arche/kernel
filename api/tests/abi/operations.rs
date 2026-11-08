@@ -243,9 +243,9 @@ fn data_authority_uses_one_bit_and_retired_signal_slots_are_invalid() {
         assert!(EnvCall::from_wire((class << 32) | slot, &[0; 6]).is_err());
     }
     use kernel_api::model::pend::PendInfo;
-    let active = [1, 2, 0, 1, 3, 4, 5, 0, 0, 0, 0];
+    let active = [1, 1, 2, 3, 4, 5, 0, 1, 7, 1, 1, 0, 0, 0];
     assert_eq!(PendInfo::from_words(active).unwrap().words(), active);
-    for (index, value) in [(0, 0), (1, 0), (2, 1), (3, 2), (7, 4)] {
+    for (index, value) in [(0, 0), (1, 0), (2, 0), (9, 2), (6, 4)] {
         let mut bad = active;
         bad[index] = value;
         assert!(PendInfo::from_words(bad).is_none());

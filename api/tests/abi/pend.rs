@@ -14,7 +14,9 @@ use kernel_api::{
     model::{
         identity::{Mark, PendId, TaskId},
         modifiable::Modifiable,
-        pend::{AccordRequest, AccordTarget, PendRange},
+        pend::{
+            AccordRequest, AccordTarget, Distributable, Limits, Operations, PendRange, ShareRights,
+        },
     },
 };
 
@@ -22,9 +24,13 @@ fn request() -> AccordRequest {
     AccordRequest {
         src: PendId::mint(17),
         target: AccordTarget::Caller,
-        subset: Modifiable::No,
+        limits: Limits {
+            operations: Operations::Share(ShareRights::OPEN),
+            modifiable: Modifiable::No,
+            distributable: Distributable::No,
+            range: PendRange::pages(2, 3).unwrap(),
+        },
         mark: Mark::new(u64::MAX),
-        range: PendRange::pages(2, 3).unwrap(),
     }
 }
 
@@ -34,14 +40,14 @@ fn accord_snapshot_has_a_fixed_checked_little_endian_layout() {
     for target in [AccordTarget::Caller, AccordTarget::Task(TaskId::new(23))] {
         for range in [PendRange::Inherit, PendRange::pages(2, 3).unwrap()] {
             value.target = target;
-            value.range = range;
+            value.limits.range = range;
             let bytes = value.to_bytes();
-            assert_eq!(bytes.len(), 64);
+            assert_eq!(bytes.len(), 88);
             assert_eq!(&bytes[..8], &17u64.to_le_bytes());
-            assert_eq!(&bytes[32..40], &u64::MAX.to_le_bytes());
+            assert_eq!(&bytes[24..32], &u64::MAX.to_le_bytes());
             assert_eq!(AccordRequest::from_bytes(&bytes), Some(value));
-            assert_eq!(AccordRequest::from_bytes(&bytes[..63]), None);
-            assert_eq!(AccordRequest::from_bytes(&[0; 65]), None);
+            assert_eq!(AccordRequest::from_bytes(&bytes[..87]), None);
+            assert_eq!(AccordRequest::from_bytes(&[0; 89]), None);
         }
     }
 }
@@ -52,14 +58,18 @@ fn accord_rejects_noncanonical_targets_permissions_and_ranges() {
         (0, 0),
         (1, 2),
         (1, 1),
-        (2, 23), // missing source, unknown tag, Task(0), Caller payload
-        (3, 2),
-        (3, 1u64 << 32), // no permission truncation
-        (5, 2),
-        (5, 0),
-        (6, u64::MAX),
-        (7, 0),
-        (7, u64::MAX),
+        (2, 23),
+        (4, 99),
+        (5, 1u64 << 32),
+        (5, 1u64 << 31),
+        (6, 2),
+        (6, 1u64 << 32),
+        (7, 2),
+        (8, 2),
+        (8, 0),
+        (9, u64::MAX),
+        (10, 0),
+        (10, u64::MAX),
     ] {
         let mut bytes = request().to_bytes();
         bytes[word * 8..(word + 1) * 8].copy_from_slice(&invalid.to_le_bytes());

@@ -146,11 +146,38 @@ receipt or duplicate reference lifecycle.
 
 ### Authority and control contracts
 
-Pend Accord snapshots a 64-byte request. Both Accord and Narrow interpret a
+Pend Accord snapshots an 88-byte request; Narrow snapshots a 64-byte request.
+Both carry typed operation permissions, independent Modifiable/Distributable
+limits, and a checked range. Derivation requires Distributable; neither
+derivation nor narrowing can add operations or change the target family.
+Both Accord and Narrow interpret a
 Pages range relative to the immediate parent's/current effective window.
 Narrow retains identity, rejects live descendants with Busy, withdraws old CPU
 access before committing a smaller window, and refuses outstanding external
-responsibilities. The 88-byte PendInfo includes the effective source window.
+responsibilities. The 112-byte PendInfo identifies its target and includes the
+effective permissions and source window. FlatId and NestId are stable object
+identities; they grant no access on their own.
+The target/permission vocabulary also reserves None, Flat, Nest and Port;
+runtime registration and calls for these targets are not yet implemented.
+Sign continues to use its existing handle table until the remaining #84 migration.
+
+| Live View operation | Required operation permission | Additional condition |
+| --- | --- | --- |
+| Clone Push | Clone PUSH | Modifiable Yes; queue capacity and payload bounds |
+| Clone Pull | Clone PULL | A live queued message; payload becomes an independent read-only Share |
+| Clone Peek / queue condition | Clone PEEK | Live queue |
+| Clone/Share Delete | Matching DELETE | Live branch; closing Share can retry pending withdrawal |
+| Share Open | Share OPEN | Effective range, Modifiable and borrow constraints |
+| Share Shut | Share SHUT | Matching live branch and mapping |
+| Cell association through Share | Share ASSOCIATE | Same branch/window, Page and publication constraints |
+
+Creation grants all supported operations to the new View's root. Boot grants
+are narrower: fault queues allow PULL/PEEK, memory resources allow
+OPEN/SHUT/ASSOCIATE. Neither permits deleting Kernel-owned resources. Accord
+requires an explicit operation subset and Distributable Yes. Return and Revoke
+continue to follow ownership of the authorization branch and need no extra
+operation grant. Removing data permissions first withdraws existing mappings;
+retained Slot references revalidate the same authority before association.
 Inspect/Collect return identity and state, never a reusable authorization proof.
 Return and Revoke restore parent access only after descendant and hardware
 responsibilities have settled. Busy retains cleanup responsibility.

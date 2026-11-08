@@ -6,11 +6,10 @@ use kernel_api::address::VirtAddr;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::pend::PendInfo;
-use kernel_api::model::pend::{AccordRequest, AccordTarget};
+use kernel_api::model::pend::{AccordRequest, AccordTarget, NarrowRequest, Target, ViewTarget};
 
 use crate::basis::nest::Access;
 use crate::basis::pend;
-use crate::basis::pend::Modifiable;
 use crate::basis::pend::PendEntry;
 use crate::basis::room::conductor::current;
 use crate::basis::room::scheduler::roster::muster;
@@ -23,11 +22,7 @@ use super::outcome::answer;
 pub(crate) fn dispatch(frame: &mut TrapContext, call: PendCall, ident: Arc<TaskIdent>) {
     match call {
         PendCall::Accord { request } => accord(frame, &ident, request),
-        PendCall::Narrow {
-            token,
-            subset,
-            range,
-        } => narrow(frame, token, subset, range),
+        PendCall::Narrow { request } => narrow(frame, &ident, request),
         PendCall::Revoke { dst, token } => revoke(frame, dst, token),
         PendCall::Collect {
             after,
@@ -56,25 +51,25 @@ fn accord(frame: &mut TrapContext, ident: &TaskIdent, request: VirtAddr) {
             &caller,
             request.src,
             &target,
-            request.subset,
+            request.limits,
             request.mark,
-            pend::Window::Parent(request.range),
+            pend::Window::Parent(request.limits.range),
         )
     })();
     answer(frame, r);
 }
 
-fn narrow(
-    frame: &mut TrapContext,
-    token: PendId,
-    subset: Modifiable,
-    range: kernel_api::model::pend::PendRange,
-) {
-    let r = current()
-        .running_task()
-        .ok_or(PendFail::Denied)
-        .and_then(|task| pend::reduce(&task, token, subset, range))
-        .map(|()| 0);
+fn narrow(frame: &mut TrapContext, ident: &TaskIdent, request: VirtAddr) {
+    let r = (|| -> Result<usize, PendFail> {
+        let mut bytes = [0; NarrowRequest::WIDTH];
+        if !ident.team.nest.copy_in(&mut bytes, request) {
+            return Err(PendFail::Denied);
+        }
+        let request = NarrowRequest::from_bytes(&bytes).ok_or(PendFail::Invalid)?;
+        let task = current().running_task().ok_or(PendFail::Denied)?;
+        pend::reduce(&task, request.token, request.limits)?;
+        Ok(0)
+    })();
     answer(frame, r);
 }
 
@@ -88,25 +83,26 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
 }
 
 fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendEntry) -> PendInfo {
+    let mut limits = pend.authority().limits();
+    if let Some(meta) = pend.view().share_view() {
+        let (offset, count) = pend.authority().window().unwrap_or((
+            kernel_api::address::PageOffset::ZERO,
+            meta.source().page_count(),
+        ));
+        limits.range = kernel_api::model::pend::PendRange::Pages {
+            offset: offset.get(),
+            count: count.get(),
+        };
+    }
+    let id = kernel_api::model::view::ViewId::new(pend.view().id());
+    let target = Target::View(match pend.view().kind() {
+        kernel_api::model::view::ViewKind::Clone => ViewTarget::Clone(id),
+        kernel_api::model::view::ViewKind::Share => ViewTarget::Share(id),
+    });
     PendInfo {
-        range: pend
-            .view()
-            .share_view()
-            .map(|meta| {
-                let (offset, count) = pend.authority().window().unwrap_or((
-                    kernel_api::address::PageOffset::ZERO,
-                    meta.source().page_count(),
-                ));
-                kernel_api::model::pend::PendRange::Pages {
-                    offset: offset.get(),
-                    count: count.get(),
-                }
-            })
-            .unwrap_or(kernel_api::model::pend::PendRange::Inherit),
         token: pend.token(),
-        view: kernel_api::model::view::ViewId::new(pend.view().id()),
-        kind: pend.view().kind(),
-        modifiable: pend.modifiable(),
+        target,
+        limits,
         owner: pend.view().owner(),
         lender: if pend.sire().is_some() {
             pend::vestor(task, pend.token()).unwrap_or(TaskId::new(0))
