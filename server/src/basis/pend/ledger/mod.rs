@@ -89,7 +89,7 @@ pub(super) fn with_tasks_checked<T>(
     validate: impl FnOnce() -> bool,
     run: impl FnOnce() -> T,
 ) -> Result<T, PendFail> {
-    crate::machine::sync::reserve_depend(tasks.len() + 8).map_err(|_| PendFail::OutOfMemory)?;
+    crate::metal::sync::reserve_depend(tasks.len() + 8).map_err(|_| PendFail::OutOfMemory)?;
     debug_assert!(
         tasks
             .windows(2)

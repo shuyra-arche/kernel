@@ -1,6 +1,6 @@
 //! The suspended operation and its resume/cancel effects belong to the Task.
 use super::super::Task;
-use crate::machine::clock;
+use crate::metal::clock;
 use alloc::sync::Arc;
 
 #[derive(Clone)]
@@ -38,17 +38,17 @@ impl WaitCall {
                     }
                     let frame = unsafe {
                         &mut *(task.ident.frame_pa.as_usize()
-                            as *mut crate::machine::switcher::context::TrapContext)
+                            as *mut crate::metal::switcher::context::TrapContext)
                     };
                     frame.gpr.set_x(
-                        crate::machine::switcher::context::Gprs::A0,
+                        crate::metal::switcher::context::Gprs::A0,
                         (-2isize) as usize,
                     );
                 }
                 Resumption::Complete
             }
             Self::Value { deadline } => {
-                use crate::machine::switcher::context::{Gprs, TrapContext};
+                use crate::metal::switcher::context::{Gprs, TrapContext};
                 let timely = deadline.is_none_or(|at| clock::now().as_ticks() < at);
                 let frame = unsafe { &mut *(task.ident.frame_pa.as_usize() as *mut TrapContext) };
                 frame.gpr.set_x(Gprs::A0, timely as usize);

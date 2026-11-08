@@ -3,7 +3,7 @@
 
 use ::core::arch::global_asm;
 
-global_asm!(include_str!("entry/boot/start.S"));
+global_asm!(include_str!("metal/riscv/boot/start.S"));
 
 #[unsafe(no_mangle)]
 extern "C" fn main(_hartid: usize, dtp: usize) -> ! {

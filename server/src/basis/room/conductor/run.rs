@@ -6,9 +6,9 @@ use crate::basis::room::halt::beacon;
 use crate::basis::room::scheduler;
 use crate::basis::sign;
 use crate::basis::unit::lifecycle::tally;
-use crate::machine::hart;
-use crate::machine::interrupt::{self, ipi};
-use crate::machine::stop::hush;
+use crate::metal::hart;
+use crate::metal::interrupt::{self, ipi};
+use crate::metal::stop::hush;
 
 use super::current;
 
@@ -55,7 +55,7 @@ pub(super) fn fetch() -> usize {
     #[cfg(debug_assertions)]
     {
         crate::basis::assert_unlocked();
-        crate::machine::switcher::stack::assert_active();
+        crate::metal::switcher::stack::assert_active();
     }
     interrupt::enable_external();
     if let Some(pa) = dispatch(true) {
@@ -89,11 +89,11 @@ fn wait() -> usize {
 
         let external_pending = crate::basis::cell::projection::maintain();
         let fallback = if beacon::shutting_down() || external_pending {
-            crate::machine::clock::now()
+            crate::metal::clock::now()
                 .as_ticks()
                 .saturating_add(BEACON_TICK)
         } else {
-            crate::machine::clock::timer::DISARMED
+            crate::metal::clock::timer::DISARMED
         };
         deadline::arm(fallback);
         interrupt::enable_external();

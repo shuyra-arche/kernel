@@ -2,7 +2,7 @@
 //! callers must already hold the source and destination permissions. Memo freeze
 //! objects own the gate; the registry holds only Weak references across Task death.
 use super::page::{Change, Page};
-use crate::machine::sync::{Level, SpinLock};
+use crate::metal::sync::{Level, SpinLock};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use kernel_api::abi::call::cell::CellFail;

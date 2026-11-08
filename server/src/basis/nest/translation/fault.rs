@@ -1,8 +1,8 @@
 use fack::prelude::Error;
 use kernel_api::address::{PageOffset, VirtAddr};
 
-use crate::machine::mmu::Attributes;
-use crate::machine::mmu::{Geometry, PageTable};
+use crate::metal::mmu::Attributes;
+use crate::metal::mmu::{Geometry, PageTable};
 
 use super::super::Access;
 use super::NestState;

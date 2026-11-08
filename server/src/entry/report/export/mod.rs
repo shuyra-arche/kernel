@@ -3,7 +3,7 @@ use ::core::sync::atomic::{AtomicUsize, Ordering};
 use semihosting::io::Write as _;
 
 use crate::entry::report::record::Report;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 
 mod failure;
 
@@ -21,7 +21,7 @@ fn fail(failure: Failure) {
 const HOST_WAIT_TICKS: u64 = 10_000;
 
 fn with_host(wait_ticks: Option<u64>, f: impl FnOnce(&mut semihosting::fs::File) -> bool) {
-    let budget = wait_ticks.map(|ticks| (crate::machine::clock::now().as_ticks(), ticks));
+    let budget = wait_ticks.map(|ticks| (crate::metal::clock::now().as_ticks(), ticks));
     let mut g = loop {
         if FAILURE.load(Ordering::Acquire) != 0 {
             return;
@@ -32,12 +32,12 @@ fn with_host(wait_ticks: Option<u64>, f: impl FnOnce(&mut semihosting::fs::File)
         match budget {
             // Panic may have stopped the hart holding HOST; ordinary tracing must not discard contention.
             Some((start, ticks)) => {
-                if crate::machine::clock::now().as_ticks().wrapping_sub(start) >= ticks {
+                if crate::metal::clock::now().as_ticks().wrapping_sub(start) >= ticks {
                     fail(Failure::LockTimeout);
                     return;
                 }
             }
-            None => crate::machine::stop::hush(),
+            None => crate::metal::stop::hush(),
         }
         ::core::hint::spin_loop();
     };

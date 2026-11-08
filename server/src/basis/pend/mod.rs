@@ -14,7 +14,7 @@ use kernel_api::address::{PageCount, PageOffset};
 pub(crate) use kernel_api::model::modifiable::Modifiable;
 
 use crate::basis::unit::task::Task;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 
 use state::{Event, Failure, Phase, State};
 

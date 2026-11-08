@@ -44,7 +44,7 @@ impl AwaitWait {
             group,
             token,
             actor: Arc::downgrade(actor),
-            deadline: crate::machine::clock::deadline(wait),
+            deadline: crate::metal::clock::deadline(wait),
         }
     }
 
@@ -84,17 +84,17 @@ impl AwaitWait {
 
     pub fn write(
         &self,
-        frame: &mut crate::machine::switcher::context::TrapContext,
+        frame: &mut crate::metal::switcher::context::TrapContext,
         result: Result<SignReply, SignFail>,
     ) {
         Self::write_result(frame, result);
     }
 
     pub fn write_result(
-        frame: &mut crate::machine::switcher::context::TrapContext,
+        frame: &mut crate::metal::switcher::context::TrapContext,
         result: Result<SignReply, SignFail>,
     ) {
-        use crate::machine::switcher::context::Gprs;
+        use crate::metal::switcher::context::Gprs;
         let words = match result {
             Ok(reply) => reply.words(),
             Err(e) => [kernel_api::abi::error::FailCode::code(e) as usize, 0, 0],
@@ -105,7 +105,7 @@ impl AwaitWait {
     }
 
     pub fn remaining(&self) -> Duration {
-        crate::machine::clock::remaining(self.deadline)
+        crate::metal::clock::remaining(self.deadline)
     }
 }
 
@@ -173,8 +173,7 @@ pub(crate) fn resume(
         result
     };
     let frame = unsafe {
-        &mut *(task.ident.frame_pa.as_usize()
-            as *mut crate::machine::switcher::context::TrapContext)
+        &mut *(task.ident.frame_pa.as_usize() as *mut crate::metal::switcher::context::TrapContext)
     };
     wait.unwatch();
     wait.write(frame, result);

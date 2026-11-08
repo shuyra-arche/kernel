@@ -6,11 +6,11 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::entry::report::record::Report;
-use crate::machine::hart;
-use crate::machine::image::ROOT_STACK_SIZE;
-use crate::machine::stop::alarm;
-use crate::machine::stop::broadcast;
-use crate::machine::stop::claim;
+use crate::metal::hart;
+use crate::metal::image::ROOT_STACK_SIZE;
+use crate::metal::stop::alarm;
+use crate::metal::stop::broadcast;
+use crate::metal::stop::claim;
 use sbi::fid;
 
 static mut SCENE: [usize; 2] = [0; 2];
@@ -62,10 +62,10 @@ extern "C" fn home(_info: &PanicInfo) -> ! {
 #[allow(improper_ctypes_definitions)]
 extern "C" fn info(info: &PanicInfo) -> ! {
     let root_ok =
-        unsafe { (crate::machine::image::root_stack_base() as *const usize).read_volatile() }
-            == crate::machine::image::ROOT_STACK_CANARY;
+        unsafe { (crate::metal::image::root_stack_base() as *const usize).read_volatile() }
+            == crate::metal::image::ROOT_STACK_CANARY;
 
-    crate::machine::allocator::portal::switch(crate::machine::allocator::portal::Backend::Spare);
+    crate::metal::allocator::portal::switch(crate::metal::allocator::portal::Backend::Spare);
 
     let mut report = Report::default();
     {
@@ -100,7 +100,7 @@ extern "C" fn info(info: &PanicInfo) -> ! {
 
     let sealed = report.seal();
     crate::putln!();
-    let mut sink = crate::machine::console::Sink;
+    let mut sink = crate::metal::console::Sink;
     crate::entry::report::render::render(sealed, &mut sink, 2);
     #[cfg(feature = "semihosting")]
     crate::entry::report::export::export(sealed);
@@ -110,7 +110,7 @@ extern "C" fn info(info: &PanicInfo) -> ! {
 
 pub(crate) fn stop_boot() {
     unsafe { ::core::arch::asm!("csrci sstatus, 2") };
-    if claim() && crate::machine::board::dram_edge().is_some() {
+    if claim() && crate::metal::board::dram_edge().is_some() {
         broadcast();
     }
 }
@@ -119,11 +119,11 @@ pub(crate) fn stop_boot() {
 /// evidence that a device stopped.
 pub(crate) fn protected_stop(_reason: usize) -> ! {
     if !alarm() {
-        crate::machine::stop::hush();
+        crate::metal::stop::hush();
     }
     unsafe { ::core::arch::asm!("csrci sstatus, 2") };
     let expected = hart::hart_count().saturating_sub(1);
-    while crate::machine::stop::quiesced_peers() != expected {
+    while crate::metal::stop::quiesced_peers() != expected {
         ::core::hint::spin_loop();
     }
     loop {

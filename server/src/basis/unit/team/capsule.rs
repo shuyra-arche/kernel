@@ -29,7 +29,7 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
     if !(bytes.as_ptr() as usize).is_multiple_of(PAGE) {
         return Err(NestError::NotAligned);
     }
-    let mut image_end = crate::machine::layout::IMAGE_BASE.as_usize();
+    let mut image_end = crate::metal::layout::IMAGE_BASE.as_usize();
     for i in 0..capsule.count {
         let region = capsule.region(i).ok_or(NestError::NoRegion)?;
         let size = region.pages.checked_mul(PAGE).ok_or(NestError::NoRegion)?;
@@ -79,7 +79,7 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
         }
     }
     nest.advance_window(RegionKind::Normal, image_end)?;
-    crate::machine::mmu::identity::sync_instructions()?;
+    crate::metal::mmu::identity::sync_instructions()?;
     team.set_default_entry(capsule.entry);
     Ok(team)
 }

@@ -4,7 +4,7 @@ mod init;
 pub(crate) mod resources;
 mod space;
 
-pub use crate::machine::iommu::riscv::pci::{Ecam as PciConfig, aperture::QuiescenceStatus};
+pub use crate::metal::riscv::iommu::pci::{Ecam as PciConfig, aperture::QuiescenceStatus};
 pub use devices::PciRoute;
 pub use error::BootError;
 pub use error::MapOperation;
@@ -12,11 +12,7 @@ pub use error::ResourceOperation;
 pub use error::fail;
 pub use init::{init, init_with_pci};
 
-use ::core::arch::global_asm;
-
 use alloc::sync::Arc;
-
-use riscv::register::satp;
 
 use crate::basis::flat::BorrowedRegion;
 use crate::basis::flat::Flat;
@@ -28,40 +24,19 @@ use crate::basis::nest::RegionKind;
 use crate::basis::room::conductor;
 use crate::basis::room::scheduler;
 use crate::basis::unit::team::kernel;
-use crate::machine::board;
-use crate::machine::hart;
-use crate::machine::hart::HartId;
-use crate::machine::image::ROOT_STACK_CANARY;
-use crate::machine::image::root_stack_base;
-use crate::machine::mmu::riscv::identity;
-use crate::machine::mmu::riscv::mode;
-use crate::machine::switcher::context::TrapContext;
-use crate::machine::switcher::stack::arm_hart;
-use crate::machine::switcher::stack::boot_stack;
-use crate::machine::switcher::trampoline::restore;
+use crate::metal::board;
+use crate::metal::hart;
+use crate::metal::hart::HartId;
+use crate::metal::image::ROOT_STACK_CANARY;
+use crate::metal::image::root_stack_base;
+use crate::metal::riscv::mmu::identity;
+use crate::metal::switcher::context::TrapContext;
+use crate::metal::switcher::stack::arm_hart;
+use crate::metal::switcher::stack::boot_stack;
+use crate::metal::switcher::trampoline::restore;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
-
-global_asm!(
-    ".section .text.boot",
-    ".align 2",
-    ".globl _boot_entry",
-    "_boot_entry:",
-    "    mv   tp, a1",
-    "    fence r, rw",
-    "    ld   t0, 0x28(tp)",
-    "    bne  a0, t0, 2f",
-    "    csrc sstatus, 2",
-    "    ld   sp, 0x30(tp)",
-    "    call boot_main",
-    "2:  wfi",
-    "    j 2b",
-);
-
-unsafe extern "C" {
-    static _boot_entry: u8;
-}
 
 pub fn start() -> Result<(), BootError> {
     scheduler::init().map_err(BootError::Scheduler)?;
@@ -87,16 +62,8 @@ pub fn run() -> ! {
     // Secondary harts enter with a one-page physical bootstrap stack. Idle
     // scheduling can retire I/O before that hart ever runs a Task, so it must
     // already use the full guarded stack rather than waiting for its first trap.
-    let top = crate::machine::switcher::stack::trap_stack_edge(hart::hart_id()).get();
-    unsafe {
-        ::core::arch::asm!(
-            "mv sp, {top}",
-            "j {enter}",
-            top = in(reg) top,
-            enter = sym run_on_stack,
-            options(noreturn),
-        );
-    }
+    let top = crate::metal::switcher::stack::trap_stack_edge(hart::hart_id()).get();
+    unsafe { crate::metal::riscv::boot::enter_idle(top, run_on_stack) }
 }
 
 extern "C" fn run_on_stack() -> ! {
@@ -116,7 +83,7 @@ pub(crate) fn register_runtime_hooks() {
         devices::shutdown_iommu,
         crate::entry::report::shutdown::report,
         crate::basis::room::scheduler::rip,
-        crate::machine::allocator::block::flush,
+        crate::metal::allocator::block::flush,
     ];
     halt::hook(SHUTDOWN_HOOKS, crate::entry::report::shutdown::waiting);
 }
@@ -263,24 +230,13 @@ fn map_borrowed(nest: &Arc<Nest>, physical: PhysAddr, size: usize) -> Result<Vir
 pub(crate) fn boot_harts() -> Result<(), BootError> {
     let me = hart::hart_id();
     let count = hart::hart_count();
-    let entry = ::core::ptr::addr_of!(_boot_entry) as usize;
     for hart in 0..count {
         if HartId::new(hart) == me {
             continue;
         }
         let slot = HartId::new(hart);
         let opaque = hart::prepare_boot(slot, boot_stack(hart));
-        unsafe {
-            core::arch::asm!("fence rw, rw", options(nostack));
-        }
-        let r = sbi::HsmCall::new(sbi::fid::Hsm::Start)
-            .args(sbi::ecall::SArgs {
-                a0: hart::firmware(slot).get(),
-                a1: entry,
-                a2: opaque,
-                ..Default::default()
-            })
-            .call();
+        let r = crate::metal::riscv::boot::start_hart(slot, opaque);
         r.map_err(|source| BootError::HartStart {
             hart: HartId::new(hart),
             source,
@@ -297,12 +253,7 @@ pub(crate) extern "C" fn boot_main() -> ! {
         .physical_at(hart::hart_frame())
         .expect("kernel frame not mapped");
     let frame = unsafe { &*(ktc.as_usize() as *const TrapContext) };
-    let ksatp = frame.kernel_satp;
-    unsafe {
-        hart::mark_online();
-        satp::set(mode::mode(), ksatp.asid(), ksatp.ppn());
-        ::core::arch::asm!("sfence.vma", "fence.i");
-    }
+    unsafe { crate::metal::riscv::boot::activate_secondary(frame) };
     arm_hart();
     identity::occupy(crate::basis::nest::Asid::kernel());
     run()

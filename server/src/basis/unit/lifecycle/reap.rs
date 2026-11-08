@@ -11,9 +11,9 @@ use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskExitCause;
 use crate::basis::unit::task::TaskState;
-use crate::machine::sync::Level;
-use crate::machine::sync::OnceLock;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::Level;
+use crate::metal::sync::OnceLock;
+use crate::metal::sync::SpinLock;
 use kernel_api::address::VirtAddr;
 
 use crate::basis::sign;

@@ -1,6 +1,6 @@
 use crate::basis::sign::endpoint::Endpoint;
 use crate::basis::view::CloneView;
-use crate::machine::sync::OnceLock;
+use crate::metal::sync::OnceLock;
 use ::core::sync::atomic::AtomicUsize;
 use ::core::sync::atomic::Ordering;
 use alloc::sync::Arc;

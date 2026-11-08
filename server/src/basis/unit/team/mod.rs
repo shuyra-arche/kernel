@@ -13,8 +13,8 @@ use crate::basis::room::scheduler;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskBuilder;
 use crate::basis::unit::task::TaskWeak;
-use crate::machine::sync::SpinLock;
-use crate::machine::sync::SpinLockGuard;
+use crate::metal::sync::SpinLock;
+use crate::metal::sync::SpinLockGuard;
 
 mod builder;
 pub(crate) mod capsule;
@@ -256,7 +256,7 @@ pub(crate) fn spawn(
         entry
     };
     // 入口的前两个字节都要取得到：取不到就拒收。
-    let entry = crate::machine::mmu::canonical(entry_va);
+    let entry = crate::metal::mmu::canonical(entry_va);
     if !entry_va.is_multiple_of(2)
         || target.nest.instruction_byte(entry).is_none()
         || target.nest.instruction_byte(entry + 1).is_none()
@@ -265,7 +265,7 @@ pub(crate) fn spawn(
     }
     let mut builder = target
         .task()
-        .entry(crate::machine::mmu::canonical(entry_va))
+        .entry(crate::metal::mmu::canonical(entry_va))
         .args(words);
     if let Some(caller) = caller {
         builder = builder.controller(caller.ident.id);

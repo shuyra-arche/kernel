@@ -16,9 +16,9 @@ use crate::basis::room::conductor::Conductor;
 use crate::basis::room::counter::Counter;
 use crate::basis::sign;
 use crate::basis::unit::task::Task;
-use crate::machine::hart;
-use crate::machine::hart::HartId;
-use crate::machine::sync::OnceLock;
+use crate::metal::hart;
+use crate::metal::hart::HartId;
+use crate::metal::sync::OnceLock;
 
 use self::idle::nudge;
 use self::idle::pick;

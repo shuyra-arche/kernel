@@ -3,7 +3,7 @@ use crate::basis::room::halt;
 use crate::basis::room::interrupt;
 use crate::basis::room::scheduler;
 use crate::basis::unit::lifecycle::tally;
-use crate::machine::clock;
+use crate::metal::clock;
 use crate::putln;
 
 pub(crate) fn waiting() {
@@ -45,7 +45,7 @@ pub(crate) fn report() {
         "supervisor_external: ring={ring} busy={busy} idle_ring={idle_ring} idle_busy={idle_busy}"
     );
     crate::basis::view::clone::hold_line();
-    use crate::machine::allocator::statistics;
+    use crate::metal::allocator::statistics;
     putln!(
         "memory: frames={} pools={}",
         statistics::frame_occupied(),

@@ -2,7 +2,7 @@ use super::outcome::Outcome;
 use crate::basis::room::{Handoff, conductor::current};
 use crate::basis::sign::{self, WakeKey, park_until};
 use crate::basis::unit::task::TaskIdent;
-use crate::machine::switcher::context::{Gprs, TrapContext};
+use crate::metal::switcher::context::{Gprs, TrapContext};
 use alloc::sync::Arc;
 use kernel_api::abi::call::room::{RoomCall, RoomFail};
 pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskIdent>) -> Outcome {
@@ -15,14 +15,14 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
         RoomCall::Clock => {
             frame.gpr.set_x(
                 Gprs::A0,
-                crate::machine::clock::uptime()
+                crate::metal::clock::uptime()
                     .as_nanos()
                     .min(u64::MAX as u128) as usize,
             );
             Outcome::Resume
         }
         RoomCall::ClockInfo => {
-            let Some(source) = crate::machine::clock::user_source() else {
+            let Some(source) = crate::metal::clock::user_source() else {
                 return Outcome::fail(frame, RoomFail::Denied);
             };
             frame.gpr.set_x(Gprs::A1, source.boot_tick() as usize);
@@ -42,7 +42,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             expected,
             wait,
         } => {
-            let at = crate::machine::mmu::riscv::canonical(address.get());
+            let at = crate::metal::riscv::mmu::canonical(address.get());
             if address.get() % 4 != 0 || !crate::basis::nest::Nest::user_range(at, 4) {
                 return Outcome::fail(frame, RoomFail::Invalid);
             }
@@ -58,7 +58,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             }
         }
         RoomCall::WakeValue { address, all } => {
-            let at = crate::machine::mmu::riscv::canonical(address.get());
+            let at = crate::metal::riscv::mmu::canonical(address.get());
             if address.get() % 4 != 0 || !crate::basis::nest::Nest::user_range(at, 4) {
                 return Outcome::fail(frame, RoomFail::Invalid);
             }

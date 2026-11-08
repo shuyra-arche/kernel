@@ -29,12 +29,12 @@ use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
-use crate::machine::iommu::BindingId;
-use crate::machine::iommu::Error;
-use crate::machine::iommu::Phase;
-use crate::machine::iommu::aperture;
-use crate::machine::iommu::runtime as retirement;
-use crate::machine::sync::SpinLock;
+use crate::metal::iommu::BindingId;
+use crate::metal::iommu::Error;
+use crate::metal::iommu::Phase;
+use crate::metal::iommu::aperture;
+use crate::metal::iommu::runtime as retirement;
+use crate::metal::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
@@ -495,7 +495,7 @@ pub(crate) fn maintain() -> bool {
             sign::signal(WakeKey::ExternalMapping { id });
         }
     }
-    if let Some(route) = crate::machine::interrupt::external() {
+    if let Some(route) = crate::metal::interrupt::external() {
         route.rearm();
     }
     pending

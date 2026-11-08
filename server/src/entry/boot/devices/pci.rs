@@ -6,12 +6,12 @@ use crate::basis::nest::Access;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
 use crate::basis::unit::team::kernel;
-use crate::machine::board;
-use crate::machine::iommu::aperture::{APERTURES, Aperture};
-use crate::machine::iommu::riscv::pci::Ecam;
-use crate::machine::iommu::riscv::pci::Endpoint;
-use crate::machine::iommu::riscv::pci::aperture::{PciPort, QuiescenceStatus};
-use crate::machine::iommu::riscv::topology::Topology;
+use crate::metal::board;
+use crate::metal::iommu::aperture::{APERTURES, Aperture};
+use crate::metal::riscv::iommu::pci::Ecam;
+use crate::metal::riscv::iommu::pci::Endpoint;
+use crate::metal::riscv::iommu::pci::aperture::{PciPort, QuiescenceStatus};
+use crate::metal::riscv::iommu::topology::Topology;
 use alloc::boxed::Box;
 use board::tree::{self, mmio, property, scalar};
 use kernel_api::abi::call::pend::PendFail;
@@ -52,7 +52,7 @@ pub(in super::super) fn init(route: PciRoute) -> Result<(), PendFail> {
         .map_err(|_| PendFail::Denied)?
         .device();
     let (start, end) = bar_window(&tree, route.host)?;
-    if crate::machine::interrupt::external().is_some_and(|route| route.overlaps(start, end))
+    if crate::metal::interrupt::external().is_some_and(|route| route.overlaps(start, end))
         || topology
             .configurations()
             .any(|(base, size)| start < base + size && base < end)

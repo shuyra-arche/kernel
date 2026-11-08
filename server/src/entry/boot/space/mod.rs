@@ -4,8 +4,6 @@ use alloc::vec::Vec;
 
 use erra::ResultExt;
 
-use riscv::register::satp;
-
 use crate::basis::flat::BorrowedRegion;
 use crate::basis::flat::Flat;
 use crate::basis::flat::FlatRange;
@@ -15,15 +13,14 @@ use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
 use crate::basis::nest::{Nest, NestError};
 use crate::basis::unit::team;
-use crate::machine::board;
-use crate::machine::hart;
-use crate::machine::image::kernel_edge;
-use crate::machine::layout::HART_FRAME_BASE;
-use crate::machine::layout::TRAMPOLINE;
-use crate::machine::layout::trampoline_pa;
-use crate::machine::mmu::Attributes;
-use crate::machine::mmu::identity;
-use crate::machine::mmu::riscv::mode;
+use crate::metal::board;
+use crate::metal::hart;
+use crate::metal::image::kernel_edge;
+use crate::metal::layout::HART_FRAME_BASE;
+use crate::metal::layout::TRAMPOLINE;
+use crate::metal::layout::trampoline_pa;
+use crate::metal::mmu::Attributes;
+use crate::metal::riscv::mmu::mode;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -50,7 +47,7 @@ pub fn init() -> NestResult<()> {
             let m = board::info();
             let dram = m.memory.envelope();
 
-            if crate::machine::mmu::canonical(dram.range().end) > mode::upper() {
+            if crate::metal::mmu::canonical(dram.range().end) > mode::upper() {
                 return Err(NestError::DramOverlap);
             }
 
@@ -108,7 +105,7 @@ pub fn init() -> NestResult<()> {
                         Flat::from_region(BorrowedRegion::new(PhysAddr::from_raw(start), size)?)?
                             .whole();
                     let grid = ActiveRange::new(
-                        crate::machine::mmu::canonical(start),
+                        crate::metal::mmu::canonical(start),
                         size,
                         access,
                         access,
@@ -171,15 +168,9 @@ pub fn init() -> NestResult<()> {
 
             team::init_kernel(kernel_space.clone())?;
             hart::mark_online();
-            satp::set(
-                mode::mode(),
-                kernel_space.asid().get(),
-                kernel_space.root().frame.as_usize() / PAGE_SIZE,
-            );
-
-            identity::flush(kernel_space.asid());
+            crate::metal::riscv::mmu::activate(kernel_space.root());
             #[cfg(debug_assertions)]
-            crate::machine::layout::validate();
+            crate::metal::layout::validate();
 
             Ok(())
         }

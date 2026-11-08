@@ -9,7 +9,7 @@ use alloc::boxed::Box;
 pub(crate) mod change;
 /// 分配器一侧分配并清零 RAM，再将唯一归还凭证交给 Page。
 pub(crate) fn allocate(owner: Owner) -> Result<Page, FlatError> {
-    let allocator: &'static (dyn Allocator + Sync) = crate::machine::allocator::frame::instance();
+    let allocator: &'static (dyn Allocator + Sync) = crate::metal::allocator::frame::instance();
     let page: InternalPage = crate::tag!(Plain, unsafe {
         Box::try_new_zeroed_in(allocator)
             .map_err(|_| FlatError::OutOfMemory)?

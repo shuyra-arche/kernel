@@ -4,7 +4,7 @@ use kernel_api::abi::call::unit::NOTE_MAX;
 use kernel_api::model::exit::Reason;
 use kernel_api::model::identity::TaskId;
 
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 
 const RING: usize = 8;
 

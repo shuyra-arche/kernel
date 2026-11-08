@@ -17,14 +17,14 @@ use super::mapping::publication::Publication;
 use super::{Access, Mapping};
 use super::{Asid, NestError};
 use crate::basis::cell::page::{Change, Page};
-use crate::machine::mmu::{Geometry, PageTable};
+use crate::metal::mmu::{Geometry, PageTable};
 use kernel_api::address::VirtAddr;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
 #[cfg(debug_assertions)]
-use {super::Nest, crate::machine::mmu::Attributes, kernel_api::address::PageOffset};
+use {super::Nest, crate::metal::mmu::Attributes, kernel_api::address::PageOffset};
 
-use crate::machine::mmu::Table;
-use crate::machine::mmu::fence::Completed;
+use crate::metal::mmu::Table;
+use crate::metal::mmu::fence::Completed;
 use phase::ClosePhase;
 
 use self::retirement::{Fenced, Retirement};

@@ -10,7 +10,7 @@ use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::team::MAX_MEMBERS;
 use crate::basis::unit::team::Member;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 
 use super::super::Task;
 use super::super::TaskIdent;
@@ -79,7 +79,7 @@ impl PreparedTask {
         // 下面的提交段在 `NoAllocation` 下并持几把锁：这里自己四把（提交锁、成员表、
         // 暂扣表、名册），回调里还会取它自己那几把。依赖栈容量按「自己四把 + 四把
         // 余量」先在这里备好：提交段里惰性扩容就是一次分配，回调再取锁就只剩溢出。
-        crate::machine::sync::reserve_depend(8).map_err(|_| NestError::OutOfMemory)?;
+        crate::metal::sync::reserve_depend(8).map_err(|_| NestError::OutOfMemory)?;
         {
             let mut tasks = team.node.tasks.lock();
             if tasks.len() >= MAX_MEMBERS {
@@ -119,7 +119,7 @@ impl PreparedTask {
                     heir: SpinLock::new(Vec::new()),
                     controls: SpinLock::new(Vec::new()),
                     extensions: SpinLock::new(
-                        crate::machine::switcher::context::extension::ExtendedContext::new(),
+                        crate::metal::switcher::context::extension::ExtendedContext::new(),
                     ),
                 });
             let task = unsafe { slot.assume_init() };

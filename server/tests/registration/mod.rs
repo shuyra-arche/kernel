@@ -52,7 +52,7 @@ mod basis {
         COMMIT.lock().unwrap()
     }
 }
-mod machine {
+mod metal {
     pub(crate) mod sync {
         pub(crate) use crate::support::{SpinLock, spin};
     }

@@ -1,4 +1,4 @@
-use crate::machine::mmu::riscv::Address;
+use crate::metal::riscv::mmu::Address;
 use ::core::arch::asm;
 
 use alloc::format;
@@ -24,8 +24,8 @@ use crate::entry::report::backtrace::Backtrace;
 use crate::entry::report::backtrace::StackReader;
 use crate::entry::report::backtrace::WalkConfig;
 use crate::entry::report::record::Report;
-use crate::machine::switcher::context::Gprs;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::switcher::context::Gprs;
+use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
 
@@ -73,7 +73,7 @@ fn gprs() -> [usize; 32] {
 
 #[derive(Debug)]
 pub struct Scene {
-    pub hart: crate::machine::hart::HartId,
+    pub hart: crate::metal::hart::HartId,
     pub task: Option<usize>,
     pc: VirtAddr,
     sp: VirtAddr,
@@ -95,22 +95,22 @@ impl Scene {
             }
             s => s,
         };
-        let ceiling = match crate::machine::switcher::stack::trap_stack_hart(sp)
-            .map(crate::machine::switcher::stack::trap_stack_edge)
+        let ceiling = match crate::metal::switcher::stack::trap_stack_hart(sp)
+            .map(crate::metal::switcher::stack::trap_stack_edge)
         {
             Some(edge) => sp.saturating_add(backtrace::SPAN).min(edge.as_usize()),
             None => sp.saturating_add(backtrace::SPAN),
         };
         let mut reader = StackReader::new(satp::read().bits() & ((1usize << 44) - 1));
         let cfg = WalkConfig::kernel(ceiling);
-        let code = |w: usize| crate::machine::mmu::riscv::canonical(w).is_kernel();
+        let code = |w: usize| crate::metal::riscv::mmu::canonical(w).is_kernel();
         let backtrace = Backtrace::walk(&mut reader, &cfg, sp, fp, Some(&code));
         Some(Scene {
-            hart: crate::machine::hart::hart_id(),
+            hart: crate::metal::hart::hart_id(),
             task: ident().map(|i| i.task_id()),
-            pc: crate::machine::mmu::riscv::canonical(sepc::read()),
-            sp: crate::machine::mmu::riscv::canonical(sp),
-            fp: crate::machine::mmu::riscv::canonical(fp),
+            pc: crate::metal::riscv::mmu::canonical(sepc::read()),
+            sp: crate::metal::riscv::mmu::canonical(sp),
+            fp: crate::metal::riscv::mmu::canonical(fp),
             cause: scause::read().cause().try_into().ok(),
             backtrace,
         })
@@ -134,14 +134,14 @@ impl Scene {
         let fp = frame.gpr.x(Gprs::S0);
         let mut reader = StackReader::new(frame.user_satp.ppn());
         let cfg = WalkConfig::normal(world, sp.saturating_add(backtrace::SPAN));
-        let code = |w: usize| crate::machine::mmu::riscv::canonical(w).is_user();
+        let code = |w: usize| crate::metal::riscv::mmu::canonical(w).is_user();
         let backtrace = Backtrace::walk(&mut reader, &cfg, sp, fp, Some(&code));
         Some(Scene {
-            hart: crate::machine::hart::hart_id(),
+            hart: crate::metal::hart::hart_id(),
             task: Some(info.task_id()),
             pc: frame.sepc,
-            sp: crate::machine::mmu::riscv::canonical(sp),
-            fp: crate::machine::mmu::riscv::canonical(fp),
+            sp: crate::metal::riscv::mmu::canonical(sp),
+            fp: crate::metal::riscv::mmu::canonical(fp),
             cause: None,
             backtrace,
         })
@@ -178,7 +178,7 @@ fn csr_rows() -> Vec<Vec<Option<String>>> {
     rows.push(vec![
         Some("sepc".into()),
         Some(hex(sepc::read())),
-        Some(address_label(crate::machine::mmu::riscv::canonical(
+        Some(address_label(crate::metal::riscv::mmu::canonical(
             sepc::read(),
         ))),
     ]);
@@ -203,19 +203,19 @@ fn csr_rows() -> Vec<Vec<Option<String>>> {
     rows.push(vec![
         Some("stvec".into()),
         Some(hex(stvec::read().address())),
-        Some(address_label(crate::machine::mmu::riscv::canonical(
+        Some(address_label(crate::metal::riscv::mmu::canonical(
             stvec::read().address(),
         ))),
     ]);
     {
         let scr = sscratch::read();
-        let kfb = crate::machine::layout::HART_FRAME_BASE.as_usize();
+        let kfb = crate::metal::layout::HART_FRAME_BASE.as_usize();
         let n = if scr == 0 {
             "Kernel frame".to_string()
-        } else if scr >= kfb && scr < kfb + crate::machine::layout::MAX_HART_SLOTS * PAGE_SIZE {
+        } else if scr >= kfb && scr < kfb + crate::metal::layout::MAX_HART_SLOTS * PAGE_SIZE {
             format!("Kernel frame @ {}", (scr - kfb) / PAGE_SIZE)
-        } else if scr >= crate::machine::layout::TEAM_FRAME_BASE.as_usize()
-            && scr < crate::machine::layout::HART_FRAME_BASE.as_usize()
+        } else if scr >= crate::metal::layout::TEAM_FRAME_BASE.as_usize()
+            && scr < crate::metal::layout::HART_FRAME_BASE.as_usize()
         {
             "User frame".into()
         } else {
@@ -332,7 +332,7 @@ pub fn dump(r: &mut Report) {
     let hart = kernel_scene
         .as_ref()
         .map(|s| s.hart)
-        .unwrap_or_else(crate::machine::hart::hart_id);
+        .unwrap_or_else(crate::metal::hart::hart_id);
     let scene_head = kernel_scene
         .as_ref()
         .and_then(|s| {
@@ -366,7 +366,7 @@ macro_rules! crash_scene {
         let mut __r = $crate::entry::report::record::Report::default();
         $crate::entry::report::scene::dump(&mut __r);
         let __sealed = __r.seal();
-        let mut __sink = $crate::machine::console::Sink;
+        let mut __sink = $crate::metal::console::Sink;
         $crate::entry::report::render::render(__sealed, &mut __sink, 2);
         #[cfg(feature = "semihosting")]
         $crate::entry::report::export::export(__sealed);

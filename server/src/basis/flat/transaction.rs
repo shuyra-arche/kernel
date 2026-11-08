@@ -6,7 +6,7 @@
 //! panic=abort 都不会让承载失去归属——它始终在源槽里。到点 `commit` 消费守卫，
 //! 没 commit 就被 Drop 的按同一笔身份原样回退两端。
 //!
-//! 同一份来源只取一次锁；不同来源按地址序共持一对（`machine::sync::with_pair`）。
+//! 同一份来源只取一次锁；不同来源按地址序共持一对（`metal::sync::with_pair`）。
 //! 可失败的步骤（两端资格、两端驻留与在途、目标槽容量，以及在这之后、写槽之前的
 //! 纯 core 准备回调）全在任何槽被改动之前做完；随后只有承载独占与写槽，写槽不再
 //! 返回失败。
@@ -17,7 +17,7 @@
 use alloc::sync::Arc;
 
 use crate::basis::cell::transfer::TransferError;
-use crate::machine::sync::with_pair;
+use crate::metal::sync::with_pair;
 use kernel_api::address::PageIndex;
 
 use super::Flat;

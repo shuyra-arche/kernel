@@ -9,16 +9,16 @@ use crate::basis::room::conductor::run::run;
 use crate::basis::room::deadline;
 use crate::basis::sign::redeem;
 use crate::basis::unit::task::TaskIdent;
-use crate::machine::hart;
-use crate::machine::interrupt::{self, ipi};
-use crate::machine::mmu::riscv::identity as asid;
-use crate::machine::mmu::riscv::identity::Asid;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::hart;
+use crate::metal::interrupt::{self, ipi};
+use crate::metal::riscv::mmu::identity as asid;
+use crate::metal::riscv::mmu::identity::Asid;
+use crate::metal::switcher::context::TrapContext;
 use crate::putln;
 use alloc::sync::Arc;
 use kernel_api::address::VirtAddr as KVirt;
 
-use crate::machine::switcher::{
+use crate::metal::switcher::{
     stack::TRAP_STACK_CANARY,
     trap::{self, TrapEvent},
 };
@@ -55,7 +55,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
     }
     let ident = ident();
 
-    crate::machine::stop::hush();
+    crate::metal::stop::hush();
 
     let event = TrapEvent::capture();
     trap::check_stack();
@@ -337,7 +337,7 @@ fn doom(ident: Option<&Arc<TaskIdent>>, cause: kernel_api::model::unit::ExitCaus
     if !task.dead() {
         task.state
             .lock()
-            .doom(Some(crate::machine::hart::hart_id()), cause, reason);
+            .doom(Some(crate::metal::hart::hart_id()), cause, reason);
     }
 }
 

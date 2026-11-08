@@ -13,8 +13,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::basis::cell::page::Page;
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::Level;
+use crate::metal::sync::SpinLock;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;

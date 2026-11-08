@@ -12,7 +12,7 @@ mod edu;
 #[allow(dead_code)]
 #[path = "../../support/iommu/mod.rs"]
 pub(crate) mod iommu;
-#[path = "../../../src/machine/iommu/riscv/mmio.rs"]
+#[path = "../../../src/metal/riscv/iommu/mmio.rs"]
 mod mmio;
 #[path = "../../../src/entry/boot/devices/plan/mod.rs"]
 mod plan;
@@ -191,9 +191,10 @@ fn progress(engine: &mut Engine<mmio::Mmio>, target: Phase) {
 }
 
 #[allow(dead_code)]
-#[path = "../../../src/machine/board/tree/mod.rs"]
+#[path = "../../../src/metal/board/tree/mod.rs"]
 pub(crate) mod description;
-mod machine {
+mod metal {
     pub(crate) mod board { pub(crate) use crate::description as tree; }
     pub(crate) use crate::iommu;
+    pub(crate) mod riscv { pub(crate) use crate::iommu::riscv as iommu; }
 }

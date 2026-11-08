@@ -4,7 +4,7 @@ use crate::basis::nest::{FaultKind, FaultOutcome, Nest};
 use crate::basis::room::Handoff;
 use crate::basis::room::conductor::identity::Identity;
 use crate::basis::sign::{self, WakeKey};
-use crate::machine::switcher::{context::TrapContext, trap::PageFault};
+use crate::metal::switcher::{context::TrapContext, trap::PageFault};
 use crate::putln;
 
 use super::{kill_fault, resume};

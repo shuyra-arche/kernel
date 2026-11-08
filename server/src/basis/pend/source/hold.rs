@@ -2,7 +2,7 @@
 //! independent Retain privilege. After a Share adopts its source, every resolution
 //! revalidates the exact Pend branch and window; hardware residency is separate.
 
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;

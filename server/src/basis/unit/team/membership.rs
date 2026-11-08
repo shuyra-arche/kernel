@@ -7,7 +7,7 @@ use kernel_api::model::unit::TaskExit;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::{Task, TaskState, TaskWeak};
 use crate::basis::unit::team::TeamNode;
-use crate::machine::sync::SpinLock;
+use crate::metal::sync::SpinLock;
 
 /// Executions retained while held or parked. Persistent membership belongs to TeamNode.
 pub(crate) struct Tasks {

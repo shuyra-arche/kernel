@@ -9,7 +9,7 @@ use crate::basis::sign::Ticket;
 use crate::basis::sign::WakeKey;
 mod continuation;
 
-use crate::machine::hart::HartId;
+use crate::metal::hart::HartId;
 pub(crate) use continuation::{Resumption, WaitCall};
 
 use super::Task;

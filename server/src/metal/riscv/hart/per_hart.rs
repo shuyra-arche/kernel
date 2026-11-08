@@ -1,0 +1,110 @@
+use ::core::sync::atomic::AtomicPtr;
+use ::core::sync::atomic::AtomicUsize;
+use ::core::sync::atomic::Ordering;
+
+use crate::metal::layout::HART_FRAME_BASE;
+use crate::metal::layout::MAX_HART_SLOTS;
+use kernel_api::address::PAGE_SIZE;
+use kernel_api::address::VirtAddr;
+
+use super::HartId;
+use super::hart_count;
+use super::hart_id;
+
+#[repr(C, align(64))]
+pub struct PerHart {
+    pub id: usize,
+    pub frame: VirtAddr,
+    pub scheduler: AtomicPtr<()>,
+    pub lease: AtomicUsize,
+    pub(crate) instruction_sync: AtomicUsize,
+    firmware: AtomicUsize,
+    boot_stack: AtomicUsize,
+    _pad: usize,
+}
+
+impl PerHart {
+    const fn at(id: usize) -> Self {
+        Self {
+            id,
+            frame: VirtAddr::wrap(HART_FRAME_BASE.as_usize() + id * PAGE_SIZE),
+            scheduler: AtomicPtr::new(::core::ptr::null_mut()),
+            lease: AtomicUsize::new(crate::metal::riscv::mmu::identity::vacant()),
+            instruction_sync: AtomicUsize::new(1),
+            firmware: AtomicUsize::new(0),
+            boot_stack: AtomicUsize::new(0),
+            _pad: 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+static PER_HART: [PerHart; MAX_HART_SLOTS] = {
+    let mut a: ::core::mem::MaybeUninit<[PerHart; MAX_HART_SLOTS]> =
+        ::core::mem::MaybeUninit::uninit();
+    let ptr = a.as_mut_ptr().cast::<PerHart>();
+    let mut i = 0;
+    while i < MAX_HART_SLOTS {
+        unsafe { ptr.add(i).write(PerHart::at(i)) };
+        i += 1;
+    }
+    unsafe { a.assume_init() }
+};
+
+#[inline]
+pub fn per_hart_ptr(id: HartId) -> usize {
+    debug_assert!(
+        id.get() < MAX_HART_SLOTS,
+        "per_hart_ptr: id {id} beyond MAX_HART_SLOTS"
+    );
+    ::core::ptr::addr_of!(PER_HART[id.get()]) as usize
+}
+
+pub fn set_scheduler(id: HartId, p: *mut ()) {
+    debug_assert!(
+        id.get() < MAX_HART_SLOTS,
+        "set_scheduler: id {id} beyond MAX_HART_SLOTS"
+    );
+    PER_HART[id.get()].scheduler.store(p, Ordering::Release);
+}
+
+pub(crate) fn request_instruction_sync() {
+    for hart in &PER_HART[..hart_count()] {
+        hart.instruction_sync.store(1, Ordering::Release);
+    }
+}
+
+pub(crate) fn lease_load(hart: HartId) -> usize {
+    debug_assert!(
+        hart.get() < MAX_HART_SLOTS,
+        "lease_load: hart {hart} beyond MAX_HART_SLOTS"
+    );
+    PER_HART[hart.get()].lease.load(Ordering::Acquire)
+}
+
+pub(crate) fn lease_store(value: usize) {
+    let me = hart_id();
+    PER_HART[me.get()].lease.store(value, Ordering::Release);
+}
+
+const _: () = {
+    assert!(::core::mem::offset_of!(PerHart, id) == 0x00);
+    assert!(::core::mem::offset_of!(PerHart, frame) == 0x08);
+    assert!(::core::mem::offset_of!(PerHart, scheduler) == 0x10);
+    assert!(::core::mem::offset_of!(PerHart, lease) == 0x18);
+    assert!(::core::mem::offset_of!(PerHart, instruction_sync) == 0x20);
+    assert!(::core::mem::offset_of!(PerHart, firmware) == 0x28);
+    assert!(::core::mem::offset_of!(PerHart, boot_stack) == 0x30);
+    assert!(::core::mem::size_of::<PerHart>() == 64);
+};
+
+/// Publish the checked dense slot and physical stack before SBI starts this hart.
+/// The opaque SBI argument is this record's physical pointer, never a hart number.
+pub(crate) fn prepare_boot(slot: HartId, stack: usize) -> usize {
+    let record = &PER_HART[slot.get()];
+    record
+        .firmware
+        .store(super::firmware(slot).get(), Ordering::Relaxed);
+    record.boot_stack.store(stack, Ordering::Release);
+    per_hart_ptr(slot)
+}

@@ -7,20 +7,20 @@ use crate::basis::nest::Access;
 use crate::basis::nest::NestError;
 use crate::basis::room::deadline;
 use crate::basis::unit::team::kernel;
-use crate::machine::board;
-use crate::machine::hart;
-use crate::machine::hart::HartId;
-use crate::machine::layout::HART_FRAME_BASE;
-use crate::machine::layout::TRAP_STACK_GUARD;
-use crate::machine::layout::TRAP_STACK_SLOT_SHIFT;
-use crate::machine::layout::TRAP_STACK_SLOT_SIZE;
-use crate::machine::mmu::Attributes;
-use crate::machine::switcher::context::TrapContext;
-use crate::machine::switcher::stack;
-use crate::machine::switcher::stack::TRAP_STACK_CANARY;
-use crate::machine::switcher::stack::trap_stack_base;
-use crate::machine::switcher::stack::trap_stack_edge;
-use crate::machine::switcher::trampoline::check_fits_page;
+use crate::metal::board;
+use crate::metal::hart;
+use crate::metal::hart::HartId;
+use crate::metal::layout::HART_FRAME_BASE;
+use crate::metal::layout::TRAP_STACK_GUARD;
+use crate::metal::layout::TRAP_STACK_SLOT_SHIFT;
+use crate::metal::layout::TRAP_STACK_SLOT_SIZE;
+use crate::metal::mmu::Attributes;
+use crate::metal::switcher::context::TrapContext;
+use crate::metal::switcher::stack;
+use crate::metal::switcher::stack::TRAP_STACK_CANARY;
+use crate::metal::switcher::stack::trap_stack_base;
+use crate::metal::switcher::stack::trap_stack_edge;
+use crate::metal::switcher::trampoline::check_fits_page;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -101,8 +101,8 @@ pub(in super::super) fn init() -> Result<(), NestError> {
         let frame = unsafe { &mut *(pa.as_usize() as *mut TrapContext) };
         frame.kernel_satp = ksatp;
         frame.kernel_sp = trap_stack_edge(h);
-        frame.trap_handler = crate::machine::mmu::canonical(
-            crate::machine::switcher::trap::trap_handler as *const () as usize,
+        frame.trap_handler = crate::metal::mmu::canonical(
+            crate::metal::switcher::trap::trap_handler as *const () as usize,
         );
         frame.trap_stack_corrupt = TRAP_STACK_CANARY;
         frame.user_pa = pa;

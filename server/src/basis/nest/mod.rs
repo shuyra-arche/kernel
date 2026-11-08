@@ -21,13 +21,13 @@ use crate::basis::cell::page::{Change, Page};
 use crate::basis::flat::Pages;
 use crate::basis::sign::{self, WakeKey};
 use crate::basis::unit::anchor::Anchor;
-use crate::machine::layout::TEAM_FRAME_BASE;
-use crate::machine::layout::TEAM_FRAME_WINDOW_SIZE;
-use crate::machine::layout::TRAP_STACK_BASE;
-use crate::machine::mmu::{self, Attributes, Geometry, PageTable, Root, Table, identity};
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
-use crate::machine::sync::SpinLockGuard;
+use crate::metal::layout::TEAM_FRAME_BASE;
+use crate::metal::layout::TEAM_FRAME_WINDOW_SIZE;
+use crate::metal::layout::TRAP_STACK_BASE;
+use crate::metal::mmu::{self, Attributes, Geometry, PageTable, Root, Table, identity};
+use crate::metal::sync::Level;
+use crate::metal::sync::SpinLock;
+use crate::metal::sync::SpinLockGuard;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
@@ -114,7 +114,7 @@ impl Nest {
         let mut layout = Layout::new();
         layout.register_window(
             RegionKind::Normal,
-            crate::machine::layout::IMAGE_BASE.as_usize(),
+            crate::metal::layout::IMAGE_BASE.as_usize(),
             mmu::upper().as_usize() - 1,
         )?;
         layout.register_window(
@@ -123,7 +123,7 @@ impl Nest {
             TEAM_FRAME_BASE.as_usize() + TEAM_FRAME_WINDOW_SIZE - 1,
         )?;
         if kernel {
-            let dram = crate::machine::board::info().memory.envelope();
+            let dram = crate::metal::board::info().memory.envelope();
             let base = mmu::lower()
                 .as_usize()
                 .checked_add(dram.base)
@@ -258,7 +258,7 @@ impl Nest {
         Ok(Reservation::new(
             Arc::downgrade(self),
             placement.region(),
-            crate::machine::mmu::canonical(start),
+            crate::metal::mmu::canonical(start),
             placement.size(),
             id,
         ))
@@ -794,7 +794,7 @@ impl Nest {
             .map_err(|_| NestError::OutOfMemory)?;
         for range in &inner.active {
             if let Some((start, last)) = range.intersection(lo, hi) {
-                spans.push((crate::machine::mmu::canonical(start), last - start + 1));
+                spans.push((crate::metal::mmu::canonical(start), last - start + 1));
             }
         }
         Ok(spans)
@@ -919,7 +919,7 @@ impl Nest {
                 }
                 floor = start;
             }
-            spans.push((crate::machine::mmu::canonical(floor), last - floor + 1));
+            spans.push((crate::metal::mmu::canonical(floor), last - floor + 1));
             if last >= hi {
                 covered = true;
                 break;
@@ -972,7 +972,7 @@ impl Nest {
         let mut inner = mapping.state.lock();
         let next = ActiveRange::split(&inner.active, start.as_usize(), last, None)?;
         let first_page = mapping.page_index(start);
-        let last_page = mapping.page_index(crate::machine::mmu::canonical(last));
+        let last_page = mapping.page_index(crate::metal::mmu::canonical(last));
         let mut removed = 0;
         for (page, _) in &inner.published {
             if *page >= first_page && *page <= last_page {
@@ -1098,7 +1098,7 @@ impl Nest {
             Reservation::new(
                 nest,
                 region,
-                crate::machine::mmu::canonical(right_start),
+                crate::metal::mmu::canonical(right_start),
                 size - left_size,
                 right_id,
             ),

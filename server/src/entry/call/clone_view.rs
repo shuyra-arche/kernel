@@ -22,8 +22,8 @@ use crate::basis::room::conductor::current;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::view;
 use crate::basis::view::View;
-use crate::machine::switcher::context::Gprs;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::switcher::context::Gprs;
+use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::VirtAddr as KVirt;
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: CloneCall, ident: Arc<TaskIdent>) -> Outcome {

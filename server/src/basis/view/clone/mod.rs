@@ -7,9 +7,9 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
-use crate::machine::clock;
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
+use crate::metal::clock;
+use crate::metal::sync::Level;
+use crate::metal::sync::SpinLock;
 
 use kernel_api::model::clone_view::CloneCondition;
 use kernel_api::model::clone_view::CloneLimits;

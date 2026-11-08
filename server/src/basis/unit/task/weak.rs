@@ -32,7 +32,7 @@ const ORIGINS: usize = Origin::Snapshot as usize + 1;
 
 #[cfg(debug_assertions)]
 pub(crate) fn register(origin: Origin) -> usize {
-    let hart = crate::machine::hart::hart_id().get();
+    let hart = crate::metal::hart::hart_id().get();
     let record = hart * ORIGINS + origin as usize + 1;
     for (i, slot) in RECORDS.iter().enumerate() {
         if slot.compare_exchange(0, record, Acquire, Relaxed).is_ok() {
@@ -52,7 +52,7 @@ pub(crate) fn release(slot: usize) {
 
 #[cfg(debug_assertions)]
 pub(crate) fn check_block_heldout() {
-    let me = crate::machine::hart::hart_id().get();
+    let me = crate::metal::hart::hart_id().get();
     for slot in &RECORDS {
         let record = slot.load(Acquire);
         if record == 0 || (record - 1) / ORIGINS != me {

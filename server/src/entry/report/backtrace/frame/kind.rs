@@ -1,4 +1,4 @@
-use crate::machine::mmu::riscv::Address;
+use crate::metal::riscv::mmu::Address;
 use kernel_api::address::VirtAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,8 +11,8 @@ pub(crate) enum FrameKind {
 
 impl FrameKind {
     pub(crate) fn of(pc: VirtAddr) -> Self {
-        let k = crate::machine::image::kernel_edge();
-        if pc.as_usize() >= k && pc.as_usize() < k + crate::machine::image::ROOT_STACK_SIZE {
+        let k = crate::metal::image::kernel_edge();
+        if pc.as_usize() >= k && pc.as_usize() < k + crate::metal::image::ROOT_STACK_SIZE {
             Self::Root
         } else if pc.is_kernel() {
             Self::Kernel

@@ -2,9 +2,9 @@ use super::BootError;
 use super::PciRoute;
 use super::ResourceOperation;
 use crate::basis::room::interrupt;
-use crate::machine::board;
-use crate::machine::clock;
-use crate::machine::console;
+use crate::metal::board;
+use crate::metal::clock;
+use crate::metal::console;
 
 pub fn init(dtp: usize) -> Result<(), BootError> {
     initialize(dtp, None)
@@ -25,20 +25,20 @@ pub unsafe fn init_with_pci(dtp: usize, route: PciRoute) -> Result<(), BootError
 fn initialize(dtp: usize, route: Option<PciRoute>) -> Result<(), BootError> {
     console::init();
     board::init(dtp).map_err(|source| BootError::Machine { dtp, source })?;
-    crate::machine::mmu::riscv::mode::init().map_err(BootError::PagingMode)?;
+    crate::metal::riscv::mmu::mode::init().map_err(BootError::PagingMode)?;
     console::_write(format_args!(
         "cpu: admitted={} boot={} paging={:?}\n",
         board::info().hart.count,
-        crate::machine::hart::firmware_id().get(),
-        crate::machine::mmu::riscv::mode::mode(),
+        crate::metal::hart::firmware_id().get(),
+        crate::metal::riscv::mmu::mode::mode(),
     ));
-    crate::machine::allocator::init().map_err(BootError::Allocator)?;
+    crate::metal::allocator::init().map_err(BootError::Allocator)?;
     // 锁序检测要在任何被验证的调用之前启用：分配器就绪即可建池，
     // 之后的空间 / 时钟 / 栈初始化都在它的看护下跑。
     // 池按机器建一次：测试台架会重复走公共 init，重复就是“已经启用”。
     #[cfg(debug_assertions)]
-    match crate::machine::sync::init_depend(crate::machine::hart::hart_count()) {
-        Ok(()) | Err(crate::machine::sync::DepInitError::AlreadyInit) => {}
+    match crate::metal::sync::init_depend(crate::metal::hart::hart_count()) {
+        Ok(()) | Err(crate::metal::sync::DepInitError::AlreadyInit) => {}
         Err(error) => return Err(BootError::Dependencies(error)),
     }
     super::space::init().map_err(BootError::KernelSpace)?;

@@ -1,9 +1,9 @@
-use crate::machine::iommu::riscv::topology::Topology;
+use crate::metal::riscv::iommu::topology::Topology;
 use alloc::vec::Vec;
 use fdt::{Fdt, node::FdtNode};
 use kernel_api::abi::call::pend::PendFail;
 
-use crate::machine::board::tree::{self, mmio as address};
+use crate::metal::board::tree::{self, mmio as address};
 mod ranges;
 pub(super) mod reserved;
 

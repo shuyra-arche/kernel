@@ -1,4 +1,4 @@
-#[path = "../../src/machine/clock/timer/compare.rs"]
+#[path = "../../src/metal/clock/timer/compare.rs"]
 mod compare;
 
 use compare::{Comparator, Compare, LocalTimer};

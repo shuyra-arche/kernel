@@ -1,8 +1,8 @@
 use crate::basis::nest::Access;
 use crate::basis::nest::Nest;
 use crate::basis::unit::task::TaskIdent;
-use crate::machine::switcher::context::Gprs;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::switcher::context::Gprs;
+use crate::metal::switcher::context::TrapContext;
 use crate::putln;
 use kernel_api::abi::call::debug::DebugFail;
 use kernel_api::address::VirtAddr as KVirt;
@@ -43,7 +43,7 @@ pub(super) fn get(frame: &mut TrapContext, ident: &TaskIdent, buf: usize, len: u
         return;
     }
     let mut stage = [0u8; DBCN_MAX];
-    let n = match crate::machine::console::read(&mut stage[..len]) {
+    let n = match crate::metal::console::read(&mut stage[..len]) {
         Some(n) if n <= len => n,
         _ => {
             ret_err(frame, DebugFail::Denied);

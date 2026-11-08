@@ -11,11 +11,12 @@ Shuyra's RV64 kernel, public contracts and typed call transport.
 | `tools/abi-macros/` | Compile-time Kernel operation and ABI generation |
 | `server/` | Kernel implementation, build script and linker script |
 | `server/src/basis/` | Memory and execution mechanisms, separate from Rust `core` |
-| `server/src/entry/` | Boot, traps, calls and diagnostic output |
-| `server/src/machine/` | Hardware mechanisms |
-| `server/src/machine/allocator/` | Allocation algorithms, platform facts and allocator instances |
-| `server/src/machine/mmu/riscv/` | CPU page tables, ASIDs and TLB synchronization |
-| `server/src/machine/iommu/riscv/` | Device translation, command queues and trusted completion |
+| `server/src/entry/` | Boot assembly of providers, normalized trap dispatch, calls and diagnostics |
+| `server/src/metal/` | Hardware contracts and the selected backend bindings |
+| `server/src/metal/allocator/` | Allocation algorithms, platform facts and allocator instances |
+| `server/src/metal/riscv/` | RV64 boot handoffs, trap context, timer and interrupt delivery |
+| `server/src/metal/riscv/mmu/` | CPU page tables, ASIDs and TLB synchronization |
+| `server/src/metal/riscv/iommu/` | Device translation, command queues and trusted completion |
 | `server/sbi/` | SBI calls used by the kernel |
 | `.github/workflows/` | Compilation checks and source version releases |
 
@@ -24,6 +25,12 @@ test package. Standalone RV64 guests keep their own workspace and lockfile.
 Client and Server consume the same API; Server does not depend on Client. Language runtime/std support belongs to the separate Toolchain workstream.
 Platform denotes hardware porting; Kernel defines no Runtime/Execution layer. Cluster is an organizational
 boundary, not a configuration file.
+
+`basis` owns scheduling, authorization and retirement records. The local timer
+owns its confirmed comparator setting. CPU retirement accepts a covering fence
+receipt before settling Pages, tables and address tickets. External access
+uses the Kernel's I/O registry and a boot-selected port. IRQ delivery only
+requests work, while the installed backend supplies retirement evidence.
 
 ## Model boundaries
 
@@ -53,7 +60,7 @@ external ranges without inventing duplicate managed Page identities.
 and `room`. Flat and Nest are peers. Each Team holds its Nest directly. Nest owns address
 windows, reservations and retirement tickets. Occupancy releases an address
 only after the covering translation invalidation has completed. The allocator implementation and its
-instances live together in `machine/allocator`; there is no allocator adapter
+instances live together in `metal/allocator`; there is no allocator adapter
 package. `api::address` owns address/page-coordinate types; machine-dependent
 canonicalization stays in the CPU MMU backend.
 
@@ -304,7 +311,7 @@ on Sv57 implying Sv48 and Sv48 implying Sv39. Normal boot no longer probes modes
 by writing `satp`. The validated, nonzero `/cpus/timebase-frequency` feeds the
 existing clock consumer; SBI runtime capabilities remain SBI's responsibility.
 
-The shared `machine/board/tree` decoder owns checked properties, ancestor status,
+The shared `metal/board/tree` decoder owns checked properties, ancestor status,
 phandle identity and MMIO byte/page geometry used by boot grants, IOMMU topology,
 PLIC routing and PCI host lookup. Controller backends still require explicit
 identity bus paths and one register span; sharing the decoder does not broaden

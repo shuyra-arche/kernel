@@ -21,7 +21,7 @@ use crate::basis::room::conductor::current;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::view;
 use crate::basis::view::View;
-use crate::machine::switcher::context::TrapContext;
+use crate::metal::switcher::context::TrapContext;
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: ShareCall, ident: Arc<TaskIdent>) -> Outcome {
     match call {

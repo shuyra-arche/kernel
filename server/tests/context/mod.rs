@@ -1,7 +1,7 @@
 #![feature(allocator_ext)]
 extern crate alloc;
 #[allow(dead_code)]
-#[path = "../../src/machine/switcher/context/extension/mod.rs"]
+#[path = "../../src/metal/riscv/switcher/context/extension/mod.rs"]
 mod extension;
 use extension::{Capability, ExtendedContext};
 
