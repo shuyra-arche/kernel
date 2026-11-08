@@ -49,7 +49,11 @@ fn run(mode: &str) {
         .unwrap();
     let guest = workspace.join("server/tests/guest/cell");
     let target = guest.join("target");
-    let fixture = workspace.join("server/tests/platform/qemu/Cargo.toml");
+    let fixture = io.then(|| {
+        std::env::var_os("KERNEL_PLATFORM_MANIFEST")
+            .map(std::path::PathBuf::from)
+            .expect("I/O boot needs KERNEL_PLATFORM_MANIFEST pointing to the matching external platform image (Vanllia tests/platform/qemu/Cargo.toml)")
+    });
     let (kernel_target, binary) = if io {
         (target.join("platform"), "shuyra-qemu")
     } else {
@@ -105,7 +109,7 @@ fn run(mode: &str) {
         ]);
         build.env("CARGO_TARGET_DIR", &kernel_target);
         if io {
-            build.arg("--manifest-path").arg(&fixture);
+            build.arg("--manifest-path").arg(fixture.as_ref().unwrap());
         } else {
             build.args(["-p", "kernel"]);
         }

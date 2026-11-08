@@ -13,14 +13,13 @@ Shuyra's RV64 kernel, public contracts and typed call transport.
 | `server/src/basis/` | Memory and execution mechanisms, separate from Rust `core` |
 | `server/src/entry/` | Boot assembly of providers, normalized trap dispatch, calls and diagnostics |
 | `server/src/metal/` | Hardware mechanisms and the selected providers |
-| `server/src/metal/generic/` | Shared clock, interrupt, translation, PCI and trap contracts |
+| `server/src/metal/generic/` | Shared clock, interrupt, translation, platform ordering and trap contracts |
 | `server/src/metal/allocator/` | Allocation algorithms, platform facts and allocator instances |
 | `server/src/metal/riscv/` | RV64 boot handoffs, Hart state, traps and context switching |
 | `server/src/metal/clock/` | Counter state, per-Hart timers and the RV64 implementation |
 | `server/src/metal/interrupt/` | CPU-local interrupt operations, controller claims and installed routes |
 | `server/src/metal/mmu/` | CPU page tables, ASIDs and TLB synchronization |
 | `server/src/metal/iommu/` | Device translation, command queues and trusted completion |
-| `server/src/metal/pci/` | ECAM access and PCI endpoint configuration |
 | `server/sbi/` | SBI calls used by the kernel |
 | `.github/workflows/` | Compilation checks and source version releases |
 
@@ -239,13 +238,41 @@ until the matching trusted completion settles. Notifications run after commit
 and registry locks are released. An interrupt or business completion is never a
 reclamation receipt. Failed synchronization retains the obligation.
 
-Trusted boot images supply the exact PCI route, BAR placement and quiescence
-check. The Kernel validates the route and keeps ECAM, IOMMU registers, private
-queues and interrupts under its control. It exports the validated BAR as a Pend.
-The normal boot image supplies no PCI route. Upper Units own general PCI policy.
+Trusted boot images call `init_with_external` with a preparation function. Kernel
+initializes MMIO and IOMMU control first, then invokes trusted preparation with a
+boot-lifetime MMIO mapper. The image owns PCI configuration and supplies an
+`ExternalRoute` containing the immutable firmware route, a configured resource
+window, and a `Quiescence` implementation. Kernel resolves the requester through
+firmware topology and rejects overlapping RAM, ordinary grants and protected
+controls before publishing a Pend. The default boot image supplies no route.
 
-The test image in `server/tests/platform/qemu` supplies the coherent QEMU virt
-EDU route. It exercises one full payload Cell, exact IOVA and a one-shot domain.
+Kernel never enables or disables PCI Bus Master, reads ECAM, sizes BARs, or uses
+a device stop register during retirement. Translation withdrawal closes memory
+access even if the requester continues issuing work. The RV64 backend completes
+its invalidation/fences, leaves DDTP Off and disables queues before requesting
+platform ordering evidence. Its opaque `Retirement` token binds the controller,
+requester, binding identity and fresh retirement batch. Pending, error, and a
+mismatched/stale token keep the Page and table responsibilities retained. Queue
+storage has its separate confirmed shutdown boundary. The one-shot controller
+cannot be rebound after settlement. No ordinary Unit can install a proof provider.
+See the `Quiescence` safety contract and its pinned IOMMU specification reference;
+IOFENCE PR/PW completion alone is not the platform proof.
+
+The coherent QEMU virt image and PCI regression tests live in
+[Vanllia tests/platform/qemu](https://github.com/shuyra-arche/vanllia/tree/main/tests/platform/qemu).
+The image leaves Bus Master enabled through retirement and supplies bounded
+Pending followed by the QEMU-specific ordering check. The hardware suite receives
+its manifest through `KERNEL_PLATFORM_MANIFEST`; use the matching Kernel provider
+revision. Kernel has no production dependency on Vanllia or a PCI implementation.
+The guest CI gate checks out a fixed external fixture revision and applies a
+temporary Cargo patch to this checkout's Kernel/API, updating only the fixture
+lockfile before the locked test run. This tests the candidate Kernel rather than
+silently running the fixture's previously pinned provider.
+This replaces the source-only `PciRoute` / `PciConfig` / `init_with_pci` boot
+interface; Cell ABI v1 is unchanged. Rebuild external images against the new
+provider. PCI topology parsing and the existing controller admission policy remain
+for the separate #79 architecture work.
+
 ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough remain unsupported.
 PQ is disabled.
 Settled logical records survive for observation/Delete while their creator lives.
@@ -327,7 +354,8 @@ uses the admitted CPU-node membership retained by HartInfo, instead of rebuildin
 CPU admission during routing. Matching node text in another DTB does not identify
 an admitted CPU. Supervisor contexts belonging to disabled CPUs remain masked and
 cannot become the selected route. Existing QEMU IRQ-pair compatibility and the
-PCI bus-zero/identity BAR rule remain explicit backend constraints.
+firmware routing restrictions remain explicit backend constraints; PCI BAR
+placement belongs to the external image.
 
 Use nightly Rust with `riscv64gc-unknown-none-elf`; the repository does not set a
 local toolchain override. The Server package is `kernel`, its executable `shuyra`.
@@ -337,6 +365,7 @@ cargo +nightly fmt --all -- --check
 cargo +nightly build --locked --workspace --target riscv64gc-unknown-none-elf
 cargo +nightly build --locked --workspace --release --all-features --target riscv64gc-unknown-none-elf
 cargo +nightly test --locked --workspace --target x86_64-unknown-linux-gnu
+KERNEL_PLATFORM_MANIFEST=/path/to/vanllia/tests/platform/qemu/Cargo.toml \
 cargo +nightly test --locked -p kernel-memory-tests --test hardware --target x86_64-unknown-linux-gnu -- --ignored --nocapture
 ```
 

@@ -44,10 +44,75 @@ pub(crate) struct Projection<P> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HardwareError {
+pub enum HardwareError {
     Unavailable,
     Fault,
     Timeout,
+}
+
+/// Exact retirement attempt presented only after translation and queue teardown.
+/// Fields are Kernel-issued: a platform can retain/return the token, not mint one.
+/// The binding identifies its immutable full-Page range; binding and batch IDs
+/// are boot-wide, never-reused identities, including across controller instances.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Retirement {
+    controller: usize,
+    requester: u32,
+    binding: BindingId,
+    batch: BatchId,
+}
+
+impl Retirement {
+    pub(crate) fn new(
+        controller: usize,
+        requester: u32,
+        binding: BindingId,
+        batch: BatchId,
+    ) -> Self {
+        Self {
+            controller,
+            requester,
+            binding,
+            batch,
+        }
+    }
+
+    pub fn controller(&self) -> usize {
+        self.controller
+    }
+    pub fn requester(&self) -> u32 {
+        self.requester
+    }
+}
+
+/// Bounded platform ordering evidence, installed by trusted boot code only.
+/// This is a Rust boot interface, never a Unit acknowledgement or call ABI.
+///
+/// # Safety
+/// The implementation must exclusively cover the token's controller/requester
+/// and every other requester sharing its current one-shot controller. Returning
+/// the token proves that earlier accesses which could reach the old Pages have
+/// completed, including required interconnect ordering. Future requests remain
+/// blocked by the retired IOMMU domain; bypass, ATS/PRI and noncoherent access
+/// are unsupported. A stopped device or business completion alone is insufficient.
+/// Each call is bounded; None and errors retain all outstanding responsibilities.
+/// An implementation must not re-enable the controller or expose its queues.
+///
+/// RISC-V IOMMU v20250828, "IOMMU Command-queue Fence commands": IOFENCE.C
+/// PR/PW orders requests already processed by the IOMMU. Platform ordering for
+/// requests not yet observed is a separate condition. The caller first revokes
+/// the translation, completes invalidation with PR/PW, holds DDTP Off, and stops
+/// queues before asking for this additional proof.
+/// https://docs.riscv.org/reference/iommu/v20250828/iommu_in_memory_queues.html
+pub unsafe trait Quiescence: Send {
+    fn poll(&mut self, retirement: Retirement) -> Result<Option<Retirement>, HardwareError>;
+}
+
+// SAFETY: exclusive forwarding preserves the installed provider's contract.
+unsafe impl<Q: Quiescence + ?Sized> Quiescence for Box<Q> {
+    fn poll(&mut self, retirement: Retirement) -> Result<Option<Retirement>, HardwareError> {
+        (**self).poll(retirement)
+    }
 }
 
 /// Diagnostic evidence from a failed external access.
@@ -129,8 +194,8 @@ unsafe impl<P: Copy, H: Hardware<P> + ?Sized> Hardware<P> for Box<H> {
 
 pub(crate) type Backend<P> = Box<dyn Hardware<P> + Send>;
 
-/// A trusted port bound to one requester. The provider owns platform effects
-/// such as admission and blocking future requests.
+/// A trusted one-shot binding to an IOMMU requester. Device business control
+/// lives outside Kernel; publication and withdrawal govern hardware reachability.
 ///
 /// # Safety
 /// A bound backend must cover every request issued through the port. After an
@@ -140,10 +205,4 @@ pub(crate) unsafe trait Port<P: Copy>: Send {
     type Error;
 
     fn bind(&mut self) -> Result<Backend<P>, Self::Error>;
-
-    /// # Safety
-    /// The matching retained I/O space must be active and authorized.
-    unsafe fn activate(&mut self) -> Result<(), Self::Error>;
-
-    fn stop(&mut self) -> Result<(), Self::Error>;
 }

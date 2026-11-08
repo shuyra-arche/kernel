@@ -22,6 +22,33 @@ fn root() -> Node {
     Node::new("").cells()
 }
 
+#[test]
+fn prepared_external_resource_cannot_alias_other_authority_or_control() {
+    use super::description::mmio::Region;
+    let bytes = root()
+        .child(iommu(IOMMU, 0x1000))
+        .child(Node::new("uart@10000000").reg(UART, 0x100))
+        .child(
+            Node::new("timer@2000000")
+                .compatible("riscv,clint0")
+                .property("status", b"disabled\0")
+                .reg(0x2000000, 0x10000),
+        )
+        .encode();
+    let tree = fdt::Fdt::new(&bytes).unwrap();
+    let plan = Plan::discover(&tree, DRAM, 0x1000_0000).unwrap();
+    for base in [0, UART as usize, IOMMU as usize, 0x2000000] {
+        assert_eq!(
+            plan.external(&tree, Region::new(base, 0x1000).unwrap()),
+            Err(PendFail::Denied)
+        );
+    }
+    assert!(
+        plan.external(&tree, Region::new(0x40000000, 0x1000).unwrap())
+            .is_ok()
+    );
+}
+
 fn iommu(base: u64, size: u64) -> Node {
     Node::new("controller@3010000")
         .compatible("qemu,riscv-iommu\0riscv,iommu")

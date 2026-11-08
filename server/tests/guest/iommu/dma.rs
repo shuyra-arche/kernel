@@ -8,7 +8,7 @@ use crate::iommu::retirement::Registry;
 use crate::iommu::riscv::Engine;
 use crate::iommu::riscv::Phase;
 use crate::iommu::riscv::adapter::Adapter;
-use crate::iommu::riscv::adapter::Quiescence;
+use crate::iommu::contract::{Quiescence, Retirement};
 use crate::iommu::riscv::controllers::Controllers;
 use crate::iommu::riscv::topology::Topology;
 use crate::mmio;
@@ -34,14 +34,14 @@ struct Platform<'a> {
 // DDTP Off, PCI read completions order older accesses; future delayed callbacks
 // are denied. The test keeps DDTP Off and holds exclusive control of topology.
 unsafe impl Quiescence for Platform<'_> {
-    fn poll(&mut self) -> Result<bool, HardwareError> {
+    fn poll(&mut self, ticket: Retirement) -> Result<Option<Retirement>, HardwareError> {
         if !self.allow.load(Ordering::Acquire) {
-            return Ok(false);
+            return Ok(None);
         }
         for endpoint in self.endpoints {
             endpoint.drain();
         }
-        Ok(true)
+        Ok(Some(ticket))
     }
 }
 

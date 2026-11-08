@@ -9,21 +9,11 @@ use super::registers::Registers;
 use crate::basis::cell::page::Retention;
 use crate::basis::cell::page::{Page, PageId};
 use crate::metal::generic::iommu::Hardware;
+use crate::metal::generic::iommu::{Quiescence, Retirement};
 use crate::metal::iommu::BatchId;
 use crate::metal::iommu::Fault;
 use crate::metal::iommu::HardwareError;
 use crate::metal::iommu::Projection;
-
-/// Kernel-installed platform proof, never a callback supplied by a driver Unit.
-///
-/// # Safety
-/// After DDTP and queues are Off, true proves all earlier accesses that could
-/// reach the old Cells have finished. Include endpoint/interconnect ordering,
-/// device caches and ATS where relevant. The caller must keep the domain Off
-/// afterwards. Pending/error is not proof. Each poll must be a bounded step.
-pub(crate) unsafe trait Quiescence {
-    fn poll(&mut self) -> Result<bool, HardwareError>;
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -38,6 +28,7 @@ pub(crate) struct Adapter<R: Registers, Q: Quiescence> {
     setup: Option<(Engine<R>, [Retention; 4])>,
     domain: Option<Domain<R>>,
     device: u32,
+    controller: usize,
     proof: Q,
     projection: Option<Projection>,
     state: State,
@@ -64,6 +55,7 @@ impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
             Err(error) => return Err((error, engine)),
         };
         Ok(Self {
+            controller: engine.physical_base(),
             setup: Some((engine, tables)),
             domain: None,
             device,
@@ -164,10 +156,20 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
             DomainPhase::Closed => {
                 // Errors leave the Domain and all table/data obligations intact.
                 // A retry gets a fresh outer batch and must poll proof again.
-                if self.proof.poll()? {
-                    unsafe { self.domain.take().unwrap().settle() }.map_err(failure)?;
-                    self.state = State::Settled(Some(batch));
-                    return Ok(Some(batch));
+                let ticket = Retirement::new(
+                    self.controller,
+                    self.device,
+                    self.projection.ok_or(HardwareError::Fault)?.id,
+                    batch,
+                );
+                match self.proof.poll(ticket)? {
+                    None => {}
+                    Some(proof) if proof == ticket => {
+                        unsafe { self.domain.take().unwrap().settle() }.map_err(failure)?;
+                        self.state = State::Settled(Some(batch));
+                        return Ok(Some(batch));
+                    }
+                    Some(_) => return Err(HardwareError::Fault),
                 }
             }
             _ => {

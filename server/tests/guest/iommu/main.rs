@@ -14,6 +14,7 @@ mod edu;
 pub(crate) mod iommu;
 #[path = "../../../src/metal/iommu/riscv/mmio.rs"]
 mod mmio;
+#[allow(dead_code)] // This M-mode fixture uses only ordinary authority admission.
 #[path = "../../../src/entry/boot/devices/plan/mod.rs"]
 mod plan;
 mod pool;

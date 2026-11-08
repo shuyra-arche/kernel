@@ -4,14 +4,13 @@ mod init;
 pub(crate) mod resources;
 mod space;
 
-pub use crate::metal::iommu::riscv::port::QuiescenceStatus;
-pub use crate::metal::pci::Ecam as PciConfig;
-pub use devices::PciRoute;
+pub use crate::metal::generic::iommu::{HardwareError, Quiescence, Retirement};
+pub use devices::{ExternalRoute, MapMmio};
 pub use error::BootError;
 pub use error::MapOperation;
 pub use error::ResourceOperation;
 pub use error::fail;
-pub use init::{init, init_with_pci};
+pub use init::{init, init_with_external};
 
 use alloc::sync::Arc;
 

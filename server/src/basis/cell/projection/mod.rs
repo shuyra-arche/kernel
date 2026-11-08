@@ -354,9 +354,8 @@ fn close(record: &mut Projection) {
     let Some(platform) = &record.platform else {
         return;
     };
-    let stopped = aperture::stop(platform.port);
     let closing = retirement::close(platform.domain);
-    record.info.state = if stopped.is_ok() && closing.is_ok() {
+    record.info.state = if closing.is_ok() {
         MappingState::Retiring
     } else {
         MappingState::Failed
@@ -427,15 +426,9 @@ fn advance(record: &mut Projection) -> [Option<(TaskId, PendId)>; 2] {
                 },
             );
             match ready {
-                // SAFETY: the matching retained domain has just reached Active.
                 Ok(true) => {
-                    match unsafe { aperture::activate(record.platform.as_ref().unwrap().port) } {
-                        Ok(()) => {
-                            record.info.state = MappingState::Active;
-                            record.freeze = None;
-                        }
-                        Err(_) => close(record),
-                    }
+                    record.info.state = MappingState::Active;
+                    record.freeze = None;
                 }
                 Ok(false) => {}
                 Err(_) => close(record),

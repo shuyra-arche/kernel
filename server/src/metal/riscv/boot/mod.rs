@@ -1,6 +1,9 @@
 //! CPU-side boot handoffs. Entry owns initialization order and resource policy.
 
 use core::arch::{asm, global_asm};
+
+// Library-owned entry lets external boot images share the exact same handoff.
+global_asm!(include_str!("start.S"));
 use riscv::register::satp;
 use sbi::{HsmCall, ecall::SArgs, fid::Hsm};
 
