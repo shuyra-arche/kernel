@@ -2,24 +2,21 @@ pub mod bitmap;
 pub mod block;
 pub mod bump;
 pub mod frame;
+mod guard;
 pub mod hybrid;
-mod no_allocation;
 pub mod portal;
 pub mod spare;
 pub mod statistics;
 
 mod error;
-mod facts;
 mod link;
 mod region;
 pub(crate) use error::InitError;
 pub(crate) use error::InitResult;
-pub(crate) use facts::MAX_RESERVED;
-pub(crate) use facts::MachineFacts;
-pub(crate) use link::Link;
 #[cfg(debug_assertions)]
-pub(crate) use no_allocation::NoAllocation;
-pub(crate) use no_allocation::assert_allocation_allowed;
+pub(crate) use guard::NoAllocation;
+pub(crate) use guard::assert_allocation_allowed;
+pub(crate) use link::Link;
 pub(crate) use region::Region;
 
 pub fn init() -> InitResult<()> {

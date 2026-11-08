@@ -7,14 +7,13 @@ use crate::basis::unit::task::TaskIdent;
 use crate::machine::switcher::context::Gprs;
 use crate::machine::switcher::context::TrapContext;
 
+mod authority;
 pub(in crate::entry) mod cell;
 mod clone_view;
 mod debug;
-mod gate;
 mod outcome;
 mod pend;
 mod room;
-mod seal;
 pub(crate) mod share_view;
 pub(crate) mod sign;
 mod unit;

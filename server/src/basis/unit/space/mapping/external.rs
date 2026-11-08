@@ -29,7 +29,7 @@ use crate::basis::unit::task::Task;
 use crate::machine::iommu::BindingId;
 use crate::machine::iommu::Error;
 use crate::machine::iommu::Phase;
-use crate::machine::iommu::riscv::aperture;
+use crate::machine::iommu::riscv::pci::aperture;
 use crate::machine::iommu::riscv::retirement;
 use crate::machine::sync::SpinLock;
 use alloc::sync::Arc;

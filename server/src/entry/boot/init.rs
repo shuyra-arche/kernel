@@ -18,13 +18,13 @@ pub fn init(dtp: usize) -> Result<(), BootError> {
         Err(error) => return Err(BootError::Dependencies(error)),
     }
     crate::machine::mmu::riscv::mode::detect().map_err(BootError::PagingMode)?;
-    super::unit::init().map_err(BootError::KernelSpace)?;
+    super::space::init().map_err(BootError::KernelSpace)?;
     clock::init().map_err(BootError::Clock)?;
-    super::iommu::init().map_err(|source| BootError::Resources {
+    super::devices::init_iommu().map_err(|source| BootError::Resources {
         operation: ResourceOperation::InitializeIommu,
         source,
     })?;
-    super::pci::init().map_err(|source| BootError::Resources {
+    super::devices::init_pci().map_err(|source| BootError::Resources {
         operation: ResourceOperation::Devices,
         source,
     })?;
@@ -32,6 +32,6 @@ pub fn init(dtp: usize) -> Result<(), BootError> {
         operation: ResourceOperation::InitializeTraps,
         source,
     })?;
-    super::stack::init().map_err(BootError::TrapStacks)?;
+    super::space::init_stacks().map_err(BootError::TrapStacks)?;
     Ok(())
 }

@@ -5,8 +5,8 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::entry::report::report::Paragraph;
-use crate::entry::report::report::Report;
+use crate::entry::report::record::Paragraph;
+use crate::entry::report::record::Report;
 use kernel_api::address::VirtAddr;
 
 use super::backtrace::Backtrace;

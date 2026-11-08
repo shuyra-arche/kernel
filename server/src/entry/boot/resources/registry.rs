@@ -1,14 +1,10 @@
+use ::core::fmt;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
-use kernel_api::boot::ledger::Name;
+use kernel_api::boot::ledger::{Entry, Name};
 
-use crate::basis::pend::PendEntry;
-
-use super::Failure;
-use super::FreezeError;
-use super::Frozen;
-use super::RegisterError;
-use super::valid;
+use crate::basis::pend::{self, PendEntry};
+use crate::basis::unit::task::Task;
 
 #[derive(Default)]
 pub(crate) struct Registry {
@@ -48,4 +44,83 @@ impl Registry {
             entries: self.entries,
         })
     }
+}
+
+pub(crate) struct Frozen {
+    entries: Vec<(Name, PendEntry)>,
+}
+
+impl Frozen {
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+    pub(crate) fn authority(self, target: &Task) -> Result<Vec<Entry>, DeliveryError> {
+        let closed = target.pend.lock();
+        let commit = crate::basis::commit();
+        if !target.held() || self.entries.iter().any(|(n, p)| !valid(*n, p)) {
+            return Err(Failure {
+                reason: PendFail::Denied,
+                value: self,
+            });
+        }
+        let mut ledger = Vec::new();
+        if ledger.try_reserve_exact(self.entries.len()).is_err() {
+            return Err(Failure {
+                reason: PendFail::OoM,
+                value: self,
+            });
+        }
+        let mut entries = target.pend.entries.lock();
+        if entries.try_reserve(self.entries.len()).is_err() {
+            return Err(Failure {
+                reason: PendFail::OoM,
+                value: self,
+            });
+        }
+        for (name, root) in self.entries {
+            ledger.push(Entry::new(
+                name,
+                root.view().kind().into(),
+                root.token().get(),
+            ));
+            entries.push(root);
+        }
+        drop(entries);
+        pend::changed(target);
+        drop(commit);
+        drop(closed);
+        Ok(ledger)
+    }
+}
+
+pub(crate) struct Failure<T> {
+    pub reason: PendFail,
+    pub value: T,
+}
+
+impl<T> Failure<T> {
+    pub(crate) fn into_parts(self) -> (PendFail, T) {
+        (self.reason, self.value)
+    }
+}
+
+impl<T> fmt::Debug for Failure<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.reason.fmt(f)
+    }
+}
+
+pub(crate) type RegisterError = Failure<(Name, PendEntry)>;
+pub(crate) type FreezeError = Failure<Registry>;
+pub(crate) type DeliveryError = Failure<Frozen>;
+
+fn valid(name: Name, pend_entry: &PendEntry) -> bool {
+    let mut bytes = [0u8; kernel_api::boot::ledger::NAME_LEN];
+    name.store(&mut bytes);
+    Name::fetch(&bytes) == Some(name)
+        && name.kind() == pend_entry.view().kind().into()
+        && pend_entry.alive()
+        && pend_entry.sire().is_none()
+        && pend_entry.authority().modifiable().is_some()
+        && pend_entry.authority().modifiable().is_some()
 }

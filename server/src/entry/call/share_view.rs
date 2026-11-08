@@ -9,7 +9,7 @@ use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::view::ViewKind;
 
-use super::gate;
+use super::authority;
 use super::outcome::Outcome;
 use super::outcome::answer;
 use super::outcome::answer_pair;
@@ -38,7 +38,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: ShareCall, ident: Arc<Task
         ShareCall::Delete { token } => {
             answer(
                 frame,
-                super::seal::seal_resource(token, ViewKind::Share).map_err(fail),
+                authority::seal_resource(token, ViewKind::Share).map_err(fail),
             );
         }
         ShareCall::Open { token } => {
@@ -171,8 +171,8 @@ pub(crate) fn create_share(
 }
 
 fn open_resource(ident: Arc<TaskIdent>, token: PendId) -> Result<(usize, usize), PendFail> {
-    let pend = gate::accede(token, Need::Read)?;
-    gate::usable(&pend)?;
+    let pend = authority::accede(token, Need::Read)?;
+    authority::usable(&pend)?;
     let p = pend.view().share_view().ok_or(PendFail::Denied)?;
     let access = subset_to_access(pend.modifiable())?;
     view::share::open(&p, token, &ident.team.space, access)
@@ -184,7 +184,7 @@ fn shut_resource(token: PendId) -> Result<usize, PendFail> {
     if !pend.allows(Need::Read) {
         return Err(PendFail::Denied);
     }
-    gate::usable(&pend)?;
+    authority::usable(&pend)?;
     let p = pend.view().share_view().ok_or(PendFail::Denied)?;
     view::share::shut(&p, token).map(|()| 0)
 }

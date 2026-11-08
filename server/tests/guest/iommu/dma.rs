@@ -53,9 +53,9 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
     // including its zero-length tuple and PCI apertures, before touching devices.
     let plan = crate::plan::Plan::discover(fdt, 0x8000_0000, 128 << 20).unwrap();
     for authority in plan.authorities() {
-        assert!(!authority.overlaps(crate::region::Region::new(base, 4096).unwrap()));
+        assert!(!authority.overlaps(crate::plan::region::Region::new(base, 4096).unwrap()));
         for (ecam, size) in topology.configurations() {
-            assert!(!authority.overlaps(crate::region::Region::new(ecam, size).unwrap()));
+            assert!(!authority.overlaps(crate::plan::region::Region::new(ecam, size).unwrap()));
         }
     }
     let mut controllers = Controllers::new(topology).unwrap();

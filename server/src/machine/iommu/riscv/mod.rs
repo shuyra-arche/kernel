@@ -7,23 +7,10 @@ pub(crate) mod adapter;
 pub(crate) mod controllers;
 pub(crate) mod domain;
 mod engine;
-mod fault;
-mod pages;
-mod phase;
-pub(crate) mod registers;
 pub(crate) mod topology;
 
-pub(crate) use engine::Engine;
-pub(crate) use engine::EngineError;
-pub(crate) use fault::Fault;
-pub(crate) use phase::Phase;
+pub(crate) use engine::{Engine, EngineError, Fault, Phase, fence_complete, registers};
 
-mod command;
-pub(crate) use command::{Command, fence_complete};
-
-pub(crate) mod aperture;
-pub(crate) mod config;
-pub(crate) mod device;
 pub(crate) mod interrupt;
 pub(crate) mod mmio;
 pub(crate) mod pci;

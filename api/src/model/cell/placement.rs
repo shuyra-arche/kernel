@@ -1,4 +1,4 @@
-//! 一次选址的完整数据：选址方式与起始对齐。//!
+//! 一次选址的完整数据：选址方式与起始对齐。
 //! 选址值嵌入 CellCreate 的单次快照；ABI codec 负责 checked 解码。
 //!
 //! 描述里只有选址数据：没有来源、授权、清理，也没有第二份长度（长度只来自
@@ -7,7 +7,6 @@
 use crate::address::VirtAddr;
 
 use super::PAGE_SIZE;
-use super::placement_at::PlacementAt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Placement {
@@ -53,4 +52,19 @@ impl Placement {
     pub fn align(self) -> usize {
         self.align
     }
+}
+
+/// 三者共用同一份占用检查：`Lowest` / `Highest` 在窗口内选空档，`Exact` 直接给出
+/// 固定跨度——即使它落在所有窗口之外，也按同一全局占用登记。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlacementAt {
+    Lowest,
+    Highest,
+    Exact(VirtAddr),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlacementError {
+    Tag,
+    Align,
 }

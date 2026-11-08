@@ -1,20 +1,10 @@
-mod error;
 mod stats;
 
 #[cfg(debug_assertions)]
-mod block_kinds;
-#[cfg(debug_assertions)]
-mod frame_kinds;
-#[cfg(debug_assertions)]
 mod kind;
 #[cfg(debug_assertions)]
-mod kinds;
-#[cfg(debug_assertions)]
 mod mark;
-#[cfg(debug_assertions)]
-mod mark_cell;
 
-pub use error::Error;
 pub(crate) use stats::init;
 pub(crate) use stats::record_block_give;
 pub(crate) use stats::record_block_take;
@@ -27,11 +17,11 @@ pub(crate) use stats::record_spare_take;
 pub(crate) use stats::record_spare_total;
 
 #[cfg(debug_assertions)]
-pub(crate) use block_kinds::install_block_kinds;
-#[cfg(debug_assertions)]
-pub(crate) use frame_kinds::install_frame_kinds;
-#[cfg(debug_assertions)]
 pub(crate) use kind::Kind;
+#[cfg(debug_assertions)]
+pub(crate) use kind::block::install_block_kinds;
+#[cfg(debug_assertions)]
+pub(crate) use kind::frame::install_frame_kinds;
 #[cfg(debug_assertions)]
 pub(crate) use mark::mark;
 
@@ -72,3 +62,9 @@ pub(crate) use stats::kinds;
 pub(crate) use stats::spare_available;
 #[cfg(debug_assertions)]
 pub(crate) use stats::spare_occupied;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    AlreadyInitialized,
+    OutOfMemory,
+}

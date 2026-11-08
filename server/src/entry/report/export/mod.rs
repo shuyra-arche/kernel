@@ -2,7 +2,7 @@ use ::core::sync::atomic::{AtomicUsize, Ordering};
 
 use semihosting::io::Write as _;
 
-use crate::entry::report::report::Report;
+use crate::entry::report::record::Report;
 use crate::machine::sync::SpinLock;
 
 mod failure;

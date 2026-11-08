@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::entry::report::report::Report;
+use crate::entry::report::record::Report;
 use crate::machine::hart;
 use crate::machine::image::ROOT_STACK_SIZE;
 use crate::machine::stop::alarm;
