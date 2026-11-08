@@ -14,7 +14,6 @@ use crate::basis::nest::ActiveRange;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionId;
 use crate::basis::nest::{Nest, NestError};
-use crate::basis::unit::space::SpaceBuilder;
 use crate::basis::unit::team;
 use crate::machine::board;
 use crate::machine::hart;
@@ -54,8 +53,8 @@ pub fn init() -> NestResult<()> {
                 return Err(NestError::DramOverlap);
             }
 
-            let kernel_space = SpaceBuilder::kernel().build()?;
-            let nest = &kernel_space.nest;
+            let kernel_space = Nest::kernel()?;
+            let nest = &kernel_space;
 
             let text_start = (&raw const _kernel_base).addr();
             let text_end = (&raw const _text_end).addr();
@@ -234,16 +233,15 @@ pub fn init() -> NestResult<()> {
                 )?;
             }
 
-            let kernel_space = Arc::try_new(kernel_space).map_err(|_| NestError::OutOfMemory)?;
             team::init_kernel(kernel_space.clone())?;
             hart::mark_online();
             satp::set(
                 mode::mode(),
-                kernel_space.nest.asid().get(),
-                kernel_space.nest.root_ppn(),
+                kernel_space.asid().get(),
+                kernel_space.root_ppn(),
             );
 
-            identity::flush(kernel_space.nest.asid());
+            identity::flush(kernel_space.asid());
             #[cfg(debug_assertions)]
             crate::machine::layout::validate();
 

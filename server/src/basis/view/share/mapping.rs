@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use crate::basis::nest::Access;
 use crate::basis::nest::Mapping;
-use crate::basis::unit::space::Space;
+use crate::basis::nest::Nest;
 use kernel_api::model::identity::PendId;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -18,12 +18,12 @@ pub(super) enum Relation {
 pub(super) struct HeldMap {
     pub(super) mapping: Arc<Mapping>,
     pub(super) token: Option<PendId>,
-    pub(super) placement: Arc<Space>,
+    pub(super) placement: Arc<Nest>,
     pub(super) relation: Relation,
 }
 
 impl HeldMap {
-    pub(super) fn placed_in(&self, space: &Arc<Space>) -> bool {
+    pub(super) fn placed_in(&self, space: &Arc<Nest>) -> bool {
         Arc::ptr_eq(&self.placement, space)
     }
 
@@ -46,7 +46,7 @@ impl HeldMap {
 
     pub(super) fn placed(
         mapping: Arc<Mapping>,
-        space: &Arc<Space>,
+        space: &Arc<Nest>,
         token: Option<PendId>,
         relation: Relation,
     ) -> Self {

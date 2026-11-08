@@ -4,6 +4,7 @@ use super::publication::{CellRuns, Publication};
 use super::{Access, ActiveRange};
 use crate::basis::cell::page::{Change, Page};
 use crate::basis::nest::NestError;
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use kernel_api::address::PAGE_SIZE;
@@ -34,6 +35,9 @@ pub(crate) struct ProtectionTransition {
 
 /// 一段活动关系的库存：活动区间、强持的平来源、已发布页的强持记录。
 pub(crate) struct MappingState {
+    // Reserved before publication so failed withdrawal can queue the Mapping
+    // without allocating or making its address reusable.
+    pub(in crate::basis::nest) cleanup: Option<Box<super::super::CleanupNode>>,
     pub(crate) active: Vec<ActiveRange>,
     pub(crate) source: FlatRange,
     pub(crate) published: Vec<(usize, Publication)>,
@@ -44,6 +48,7 @@ pub(crate) struct MappingState {
 impl MappingState {
     pub(crate) fn new(active: Vec<ActiveRange>, source: FlatRange) -> Self {
         Self {
+            cleanup: None,
             active,
             source,
             published: Vec::new(),

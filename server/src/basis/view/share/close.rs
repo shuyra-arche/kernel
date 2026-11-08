@@ -3,8 +3,8 @@ use alloc::vec::Vec;
 
 use kernel_api::abi::call::pend::PendFail;
 
+use crate::basis::nest::mapping::MappingBinding;
 use crate::basis::pend::SourceAuthorization;
-use crate::basis::unit::space::MappingBinding;
 
 use super::ShareView;
 use super::pend_map_error;
@@ -43,7 +43,7 @@ fn close_bindings(
             if !source.owns_binding(&binding) {
                 continue;
             }
-            let space = binding.space().upgrade().ok_or(PendFail::Busy)?;
+            let space = binding.nest().upgrade().ok_or(PendFail::Busy)?;
             let entry = space
                 .mappings
                 .registered(binding.id())
@@ -54,21 +54,21 @@ fn close_bindings(
             (space, entry.mapping().cloned())
         };
         let id = binding.id();
-        if !space.nest.settled(id)
-            && let Err(error) = space.nest.retry_invalidation()
-            && !space.nest.settled(id)
+        if !space.settled(id)
+            && let Err(error) = space.retry_invalidation()
+            && !space.settled(id)
         {
             return Err(pend_map_error(error));
         }
-        if !space.nest.settled(id) {
+        if !space.settled(id) {
             let mapping = mapping.ok_or(PendFail::Busy)?;
-            if let Err(error) = space.withdraw(mapping.whole())
-                && !space.nest.settled(id)
+            if let Err(error) = space.detach(mapping.whole())
+                && !space.settled(id)
             {
                 return Err(pend_map_error(error));
             }
         }
-        if !space.nest.settled(id) {
+        if !space.settled(id) {
             return Err(PendFail::Busy);
         }
         space.retire_mapping(id);

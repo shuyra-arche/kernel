@@ -1,5 +1,5 @@
+use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
-use crate::basis::unit::space::Space;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
@@ -49,7 +49,7 @@ pub struct Task {
     pub(crate) signs: crate::basis::sign::Table,
     pub(crate) administration: crate::basis::unit::control::Table,
     pub(crate) heir: SpinLock<Vec<Arc<Team>>>,
-    controls: SpinLock<Vec<(Weak<crate::basis::unit::space::Space>, usize)>>,
+    controls: SpinLock<Vec<(Weak<crate::basis::nest::Nest>, usize)>>,
 }
 
 unsafe impl Send for Task {}
@@ -226,7 +226,7 @@ impl Task {
         Some(child)
     }
 
-    pub(crate) fn track_control(&self, space: &Arc<Space>, id: usize) -> Result<(), NestError> {
+    pub(crate) fn track_control(&self, space: &Arc<Nest>, id: usize) -> Result<(), NestError> {
         let mut controls = self.controls.lock();
         controls
             .try_reserve(1)
@@ -244,7 +244,7 @@ impl Task {
     ///
     /// 返回 `Err` 时表里仍有未结的控制：调用方（`Task::retire` / HUSKS）必须保留
     /// 这个 Task 并再次调用，不能把仍有作用的控制当成已经结清。
-    /// `Space` 已消失的那一档是 raw last-drop 的既有边界：没有 Nest 可重试，也不能
+    /// `Nest` 已消失的那一档是 raw last-drop 的既有边界：没有 Nest 可重试，也不能
     /// 声称结清；它与“已证明结清”分开，只撤掉无法再走的控制记录。
     pub(crate) fn close_controls(&self) -> Result<(), NestError> {
         let mut at = 0;
@@ -276,15 +276,15 @@ impl Task {
                 self.release_control(id);
                 continue;
             }
-            let retry = if space.nest.settled(id) {
+            let retry = if space.settled(id) {
                 Ok(())
             } else {
                 if let Some(mapping) = entry.mapping() {
                     let _ = space.dispose(mapping.clone());
                 }
-                space.nest.retry_invalidation()
+                space.retry_invalidation()
             };
-            if !space.nest.settled(id) {
+            if !space.settled(id) {
                 failure = failure.or(retry.err()).or(Some(NestError::Busy));
                 at += 1;
             } else {

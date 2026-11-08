@@ -19,7 +19,7 @@ const MAX_USES: usize = (1 << COUNTER_BITS) - 1;
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Kind {
     Cpu,
-    Device,
+    External,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +43,7 @@ enum Event {
 #[derive(Clone, Copy)]
 struct State {
     cpu: usize,
-    device: usize,
+    external: usize,
     quarantined: bool,
     modifiable: bool,
     changing: bool,
@@ -69,7 +69,7 @@ impl State {
             }
             Event::Register(_, _, true) if !self.changing => Err(RetainError::Unbalanced),
             Event::Register(kind, modifiable, _) => {
-                if self.modifiable || (modifiable && (self.cpu != 0 || self.device != 0)) {
+                if self.modifiable || (modifiable && (self.cpu != 0 || self.external != 0)) {
                     return Err(RetainError::Borrowed);
                 }
                 let uses = self.uses(kind);
@@ -104,15 +104,15 @@ impl State {
     fn uses(self, kind: Kind) -> usize {
         match kind {
             Kind::Cpu => self.cpu,
-            Kind::Device => self.device,
+            Kind::External => self.external,
         }
     }
 
     fn with_uses(self, kind: Kind, uses: usize) -> Self {
         match kind {
             Kind::Cpu => Self { cpu: uses, ..self },
-            Kind::Device => Self {
-                device: uses,
+            Kind::External => Self {
+                external: uses,
                 ..self
             },
         }
@@ -121,7 +121,7 @@ impl State {
     fn decode(raw: usize) -> Self {
         Self {
             cpu: raw & MAX_USES,
-            device: (raw >> COUNTER_BITS) & MAX_USES,
+            external: (raw >> COUNTER_BITS) & MAX_USES,
             quarantined: raw & QUARANTINED != 0,
             modifiable: raw & MODIFIABLE != 0,
             changing: raw & CHANGING != 0,
@@ -130,7 +130,7 @@ impl State {
 
     fn encode(self) -> usize {
         self.cpu
-            | (self.device << COUNTER_BITS)
+            | (self.external << COUNTER_BITS)
             | if self.quarantined { QUARANTINED } else { 0 }
             | if self.modifiable { MODIFIABLE } else { 0 }
             | if self.changing { CHANGING } else { 0 }
@@ -191,7 +191,7 @@ impl Reclaim {
     }
 
     pub(super) fn exposure(&self) -> Exposure {
-        if State::decode(self.0.load(Ordering::Acquire)).device == 0 {
+        if State::decode(self.0.load(Ordering::Acquire)).external == 0 {
             Exposure::Internal
         } else {
             Exposure::External

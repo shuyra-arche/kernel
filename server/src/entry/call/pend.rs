@@ -43,7 +43,7 @@ fn accord(frame: &mut TrapContext, ident: &TaskIdent, request: VirtAddr) {
     let r = (|| -> Result<usize, PendFail> {
         // Copy once; authorization never rereads mutable user memory.
         let mut bytes = [0; AccordRequest::WIDTH];
-        if !ident.team.space.copy_in(&mut bytes, request) {
+        if !ident.team.nest.copy_in(&mut bytes, request) {
             return Err(PendFail::Denied);
         }
         let request = AccordRequest::from_bytes(&bytes).ok_or(PendFail::Invalid)?;
@@ -124,7 +124,7 @@ fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendSnapshot) 
 
 fn write_info(ident: &TaskIdent, buf: usize, info: PendInfo) -> Result<(), PendFail> {
     let bytes = info.to_bytes();
-    if !ident.team.space.copy_out(&bytes, KVirt::wrap(buf)) {
+    if !ident.team.nest.copy_out(&bytes, KVirt::wrap(buf)) {
         return Err(PendFail::Denied);
     }
     Ok(())
@@ -136,7 +136,7 @@ fn inspect(frame: &mut TrapContext, ident: &TaskIdent, token: PendId, buf: VirtA
         let pend = pend::locate(&task, token).ok_or(PendFail::Denied)?;
         if !ident
             .team
-            .space
+            .nest
             .validate_access(KVirt::wrap(buf.get()), PendInfo::SIZE, Access::WRITE)
         {
             return Err(PendFail::Denied);
@@ -164,7 +164,7 @@ fn collect(
         }
         if !ident
             .team
-            .space
+            .nest
             .validate_access(KVirt::wrap(buf.get()), len, Access::WRITE)
         {
             return Err(PendFail::Denied);

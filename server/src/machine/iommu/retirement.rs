@@ -4,42 +4,18 @@ use super::BindingId;
 use super::Error;
 use super::Hardware;
 use super::IoSpace;
+use crate::basis::cell::projection::admission::{Admission, Watch};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
-
-pub(crate) struct Owner(Arc<AtomicBool>);
-
-impl Owner {
-    pub(crate) fn new() -> Result<Self, Error> {
-        Arc::try_new(AtomicBool::new(false))
-            .map(Self)
-            .map_err(|_| Error::OutOfMemory)
-    }
-    pub(crate) fn close(&self) {
-        self.0.store(true, Ordering::Release);
-    }
-}
-
-impl Owner {
-    pub(crate) fn closed(&self) -> bool {
-        self.0.load(Ordering::Acquire)
-    }
-}
-
-impl Drop for Owner {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DomainId(BindingId);
 
 struct Entry<H: Hardware> {
     id: DomainId,
-    closed: Arc<AtomicBool>,
+    admission: Watch,
     space: IoSpace<H>,
     error: Option<Error>,
     completed: Arc<AtomicBool>,
@@ -70,9 +46,13 @@ impl<H: Hardware> Registry<H> {
 
     /// Install before registering/publishing any data. Setup errors return the
     /// hardware object so the Kernel can still shut down its queues.
-    pub(crate) fn attach(&mut self, owner: &Owner, hardware: H) -> Result<DomainId, (Error, H)> {
+    pub(crate) fn attach(
+        &mut self,
+        owner: &Admission,
+        hardware: H,
+    ) -> Result<DomainId, (Error, H)> {
         let mut prepare = || {
-            if owner.0.load(Ordering::Acquire) {
+            if owner.closed() {
                 return Err(Error::Closed);
             }
             self.entries
@@ -90,7 +70,7 @@ impl<H: Hardware> Registry<H> {
         };
         self.entries.push(Entry {
             id,
-            closed: owner.0.clone(),
+            admission: owner.watch().clone(),
             space: IoSpace::new(hardware),
             error: None,
             completed,
@@ -99,11 +79,11 @@ impl<H: Hardware> Registry<H> {
     }
 
     /// Serialize with progress under the same Kernel lock. The admission load
-    /// linearizes against Owner::close; work admitted just before close is still
+    /// linearizes against Admission::close; work admitted just before close is still
     /// retained and subsequently retired. No IoSpace reference escapes the call.
     pub(crate) fn with_space<T>(
         &mut self,
-        owner: &Owner,
+        owner: &Admission,
         id: DomainId,
         action: impl FnOnce(&mut IoSpace<H>) -> Result<T, Error>,
     ) -> Result<T, Error> {
@@ -112,10 +92,10 @@ impl<H: Hardware> Registry<H> {
             .iter_mut()
             .find(|e| e.id == id)
             .ok_or(Error::UnknownDomain)?;
-        if !Arc::ptr_eq(&entry.closed, &owner.0) {
+        if !entry.admission.same(owner.watch()) {
             return Err(Error::UnknownDomain);
         }
-        if entry.closed.load(Ordering::Acquire) {
+        if entry.admission.closed() {
             return Err(Error::Closed);
         }
         action(&mut entry.space)
@@ -166,7 +146,7 @@ impl<H: Hardware> Registry<H> {
             self.cursor %= self.entries.len();
             let entry = &mut self.entries[self.cursor];
             progress.visited += 1;
-            if entry.closed.load(Ordering::Acquire) || entry.space.life() != super::Life::Open {
+            if entry.admission.closed() || entry.space.life() != super::Life::Open {
                 match entry.space.advance_close() {
                     Ok(true) => {
                         entry.completed.store(true, Ordering::Release);

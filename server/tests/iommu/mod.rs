@@ -10,9 +10,15 @@ pub(crate) mod cell;
 #[path = "../support/iommu/mod.rs"]
 pub(crate) mod iommu;
 
+#[path = "../../src/basis/cell/projection/admission.rs"]
+pub(crate) mod admission;
+
 mod basis {
     pub(crate) mod cell {
         pub(crate) use crate::cell as page;
+        pub(crate) mod projection {
+            pub(crate) use crate::admission;
+        }
     }
 }
 

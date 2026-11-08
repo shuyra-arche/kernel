@@ -19,9 +19,11 @@ impl Default for PageTable {
 }
 
 impl PageTable {
-    pub(super) fn new() -> Result<Box<PageTable, &'static dyn Allocator>, NestError> {
+    pub(super) fn new() -> Result<Box<PageTable, &'static (dyn Allocator + Sync)>, NestError> {
+        let allocator: &'static (dyn Allocator + Sync) =
+            crate::machine::allocator::frame::instance();
         let page = crate::tag!(Table, unsafe {
-            Box::try_new_zeroed_in(crate::machine::allocator::frame::allocator())
+            Box::try_new_zeroed_in(allocator)
                 .map_err(|_| NestError::OutOfMemory)?
                 .assume_init()
         });

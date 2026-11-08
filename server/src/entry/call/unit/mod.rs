@@ -5,10 +5,10 @@ use kernel_api::abi::call::unit::UnitCall;
 use kernel_api::abi::call::unit::UnitFail;
 use kernel_api::model::unit::UnitTarget;
 
+use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::SpaceKind;
 use crate::basis::room::scheduler::roster::muster;
-use crate::basis::unit::space::Space;
 use crate::basis::unit::task::MAX_ARGS;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
@@ -37,7 +37,7 @@ fn map_err(e: NestError) -> UnitFail {
     }
 }
 
-fn copy_words(space: &Space, va: KVirt, count: usize) -> Option<Vec<usize>> {
+fn copy_words(space: &Nest, va: KVirt, count: usize) -> Option<Vec<usize>> {
     if count > MAX_ARGS {
         return None;
     }
@@ -85,7 +85,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                 let Some(info) = info else {
                     return Ok(0);
                 };
-                if !ident.team.space.copy_out(&info.to_bytes(), out) {
+                if !ident.team.nest.copy_out(&info.to_bytes(), out) {
                     return Err(UnitFail::Denied);
                 }
                 Ok(1)
@@ -255,7 +255,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
 }
 fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
     let mut bytes = [0; UnitCreate::WIDTH];
-    if !me.ident.team.space.copy_in(&mut bytes, request) {
+    if !me.ident.team.nest.copy_in(&mut bytes, request) {
         return Err(UnitFail::Denied);
     }
     let spec = UnitCreate::from_bytes(&bytes).ok_or(UnitFail::Denied)?;
@@ -272,7 +272,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
                 Some(team) => me.clan(team).ok_or(UnitFail::Denied)?,
             };
             let words =
-                copy_words(&me.ident.team.space, args, count as usize).ok_or(UnitFail::Denied)?;
+                copy_words(&me.ident.team.nest, args, count as usize).ok_or(UnitFail::Denied)?;
             let task = crate::basis::unit::team::spawn(
                 &target,
                 Some(me),
@@ -286,7 +286,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
             let _commit = crate::basis::commit();
             if !crate::basis::pend::live(me)
                 || kind == kernel_api::model::unit::ProgramKind::Supervisor
-                    && !me.ident.team.space.kind().is_supervisor()
+                    && !me.ident.team.nest.kind().is_supervisor()
                 || !me.administration.allows(ControlKind::Build)
             {
                 return Err(UnitFail::Denied);

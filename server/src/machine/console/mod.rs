@@ -61,16 +61,12 @@ fn translate_kernel(va: usize, len: usize) -> Option<usize> {
     if crate::machine::mmu::riscv::canonical(va).is_user() {
         return None;
     }
-    let space = &crate::basis::unit::team::kernel()?.space;
-    let pa0 = space
-        .nest
-        .physical_at(crate::machine::mmu::riscv::canonical(va))?;
+    let space = &crate::basis::unit::team::kernel()?.nest;
+    let pa0 = space.physical_at(crate::machine::mmu::riscv::canonical(va))?;
     let mut va_cur = va;
     let end = va + len;
     while va_cur < end {
-        let pa = space
-            .nest
-            .physical_at(crate::machine::mmu::riscv::canonical(va_cur))?;
+        let pa = space.physical_at(crate::machine::mmu::riscv::canonical(va_cur))?;
         if pa.as_usize() != pa0.as_usize() + (va_cur - va) {
             return None;
         }

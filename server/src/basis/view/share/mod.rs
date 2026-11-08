@@ -14,6 +14,7 @@ use crate::basis::flat::FlatError;
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
 use crate::basis::nest::Mapping;
+use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionId;
@@ -22,7 +23,6 @@ use crate::basis::pend::SourceAuthorization;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::life::Life;
-use crate::basis::unit::space::Space;
 use crate::machine::sync::Level;
 use crate::machine::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
@@ -191,14 +191,14 @@ impl ShareView {
     /// 把一段已有关系关联到根 Pend：创建事务的 Input 交接。
     ///
     /// 它成为该 token 下的活跃关系——`open` 会复用它，撤销也关它。
-    pub(crate) fn adopt_input(&self, token: PendId, space: &Arc<Space>, mapping: Arc<Mapping>) {
+    pub(crate) fn adopt_input(&self, token: PendId, space: &Arc<Nest>, mapping: Arc<Mapping>) {
         self.add(mapping, space, Some(token), Relation::Input);
     }
 
     fn add(
         &self,
         mapping: Arc<Mapping>,
-        space: &Arc<Space>,
+        space: &Arc<Nest>,
         token: Option<PendId>,
         relation: Relation,
     ) {
@@ -211,7 +211,7 @@ impl ShareView {
     pub(crate) fn record(
         &self,
         token: PendId,
-        space: &Arc<Space>,
+        space: &Arc<Nest>,
         mapping: Arc<Mapping>,
         opened: bool,
     ) -> Result<(), Arc<Mapping>> {
@@ -237,9 +237,10 @@ impl ShareView {
     }
 
     pub(crate) fn pending_maps(&self, token: PendId) -> bool {
-        self.maps.lock().iter().any(|entry| {
-            entry.holds(token) && !entry.placement.nest.settled(entry.mapping.identity())
-        })
+        self.maps
+            .lock()
+            .iter()
+            .any(|entry| entry.holds(token) && !entry.placement.settled(entry.mapping.identity()))
     }
     pub(crate) fn has_maps(&self) -> bool {
         !self.maps.lock().is_empty()
@@ -261,16 +262,16 @@ impl ShareView {
                 let space = &entry.placement;
                 let id = entry.mapping.identity();
                 let result = (|| {
-                    if !space.nest.settled(id) {
-                        space.nest.retry_invalidation()?;
-                        if !space.nest.settled(id) {
-                            space.withdraw(entry.mapping.whole())?;
+                    if !space.settled(id) {
+                        space.retry_invalidation()?;
+                        if !space.settled(id) {
+                            space.detach(entry.mapping.whole())?;
                         }
                     }
                     Ok::<_, NestError>(())
                 })();
                 if let Err(error) = result
-                    && !space.nest.settled(id)
+                    && !space.settled(id)
                 {
                     self.maps.lock().push(entry);
                     return Err(pend_map_error(error));
@@ -346,7 +347,7 @@ impl Drop for ShareView {
             }
             let space = entry.placement;
             let id = entry.mapping.identity();
-            if !space.nest.settled(id) {
+            if !space.settled(id) {
                 let _ = space.dispose(entry.mapping);
             }
             space.retire_mapping(id);
@@ -358,7 +359,7 @@ impl Drop for ShareView {
 ///
 /// 收窄是幂等的：已在同一上限上的区间重放不改变库存与 PTE。
 fn narrow_mapping(
-    space: &Arc<Space>,
+    space: &Arc<Nest>,
     mapping: &Arc<Mapping>,
     access: Access,
 ) -> Result<(), NestError> {
@@ -373,7 +374,7 @@ fn narrow_mapping(
 pub(crate) fn open(
     meta: &Arc<ShareView>,
     token: PendId,
-    space: &Arc<Space>,
+    space: &Arc<Nest>,
     access: Access,
 ) -> Result<(usize, usize), PendFail> {
     let _operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
@@ -432,7 +433,6 @@ pub(crate) fn open(
     meta.reserve_records(1)?;
     // 来源已在手上：先选址登记，再按来源范围挂载，不经任何 kernel / canonical 视图。
     let reservation = space
-        .nest
         .reserve(
             Placement::lowest(RegionId::Normal, size, PAGE_SIZE)
                 .map_err(|e| pend_map_error(e.into()))?,
@@ -444,11 +444,11 @@ pub(crate) fn open(
             .mappings
             .claim_mapping(id, space, authorization.clone())
     {
-        let _ = space.nest.release_reservation(reservation);
+        let _ = space.release_reservation(reservation);
         space.retire_mapping(id);
         return Err(error);
     }
-    let mapping = match space.nest.attach(reservation, source, access, access) {
+    let mapping = match space.attach(reservation, source, access, access) {
         Ok(mapping) => mapping,
         Err(error) => {
             space.retire_mapping(id);

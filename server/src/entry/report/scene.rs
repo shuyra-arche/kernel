@@ -122,7 +122,7 @@ impl Scene {
         let frame = unsafe { &*(pa.as_usize() as *const TrapContext) };
         let world = info
             .live()
-            .map(|t| t.team.space.kind())
+            .map(|t| t.team.nest.kind())
             .unwrap_or(SpaceKind::User);
         if world.is_supervisor() {
             return None;

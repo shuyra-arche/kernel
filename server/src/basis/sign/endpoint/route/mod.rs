@@ -47,16 +47,12 @@ impl Route {
                 token,
                 mapping,
                 fault,
-            } => {
-                match crate::basis::unit::space::mapping::external::event(
-                    actor, *token, *mapping, *fault,
-                ) {
-                    Ok((_, Some(true))) => Some(None),
-                    Ok((_, Some(false))) => Some(Some(SignEventFail::Busy)),
-                    Ok(_) => None,
-                    Err(_) => Some(Some(SignEventFail::Denied)),
-                }
-            }
+            } => match crate::basis::cell::projection::event(actor, *token, *mapping, *fault) {
+                Ok((_, Some(true))) => Some(None),
+                Ok((_, Some(false))) => Some(Some(SignEventFail::Busy)),
+                Ok(_) => None,
+                Err(_) => Some(Some(SignEventFail::Denied)),
+            },
             Watch::Resource { source } => {
                 let Some((token, need)) = codec::source_watch(*source) else {
                     return Some(Some(SignEventFail::Denied));

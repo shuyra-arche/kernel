@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 
+use super::RegionId;
 use crate::basis::nest::Nest;
-use crate::basis::zone::RegionId;
 use kernel_api::address::VirtAddr;
 
 /// 一笔地址保留：只认住它的那个地址空间（`Weak`，升级失败即失效）。

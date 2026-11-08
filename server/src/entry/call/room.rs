@@ -35,12 +35,12 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             wait,
         } => {
             let at = crate::machine::mmu::riscv::canonical(address.get());
-            if address.get() % 4 != 0 || !crate::basis::unit::space::Space::user_range(at, 4) {
+            if address.get() % 4 != 0 || !crate::basis::nest::Nest::user_range(at, 4) {
                 return Outcome::fail(frame, RoomFail::Invalid);
             }
-            let space = ident.team.space.clone();
+            let space = ident.team.nest.clone();
             drop(ident);
-            match crate::basis::unit::space::wait::wait_value(space, at, expected, wait) {
+            match crate::basis::nest::wait::wait_value(space, at, expected, wait) {
                 Ok(Handoff::Resume(value)) => {
                     frame.gpr.set_x(Gprs::A0, value as usize);
                     Outcome::Resume
@@ -51,11 +51,11 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
         }
         RoomCall::WakeValue { address, all } => {
             let at = crate::machine::mmu::riscv::canonical(address.get());
-            if address.get() % 4 != 0 || !crate::basis::unit::space::Space::user_range(at, 4) {
+            if address.get() % 4 != 0 || !crate::basis::nest::Nest::user_range(at, 4) {
                 return Outcome::fail(frame, RoomFail::Invalid);
             }
             let key = WakeKey::Value {
-                space: ident.team.space.nest.asid(),
+                space: ident.team.nest.asid(),
                 address: address.get(),
             };
             frame.gpr.set_x(Gprs::A0, sign::wake_counted(key, all));

@@ -37,5 +37,5 @@ name = "pend"
 path = "pend/mod.rs"
 
 [[test]]
-name = "zone"
-path = "zone/mod.rs"
+name = "address"
+path = "address/mod.rs"

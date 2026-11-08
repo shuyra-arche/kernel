@@ -1,5 +1,4 @@
-use super::ZoneError;
-use crate::basis::zone::RegionId;
+use super::occupancy::{AddressError, RegionId};
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
 
@@ -29,14 +28,14 @@ impl Placement {
         size: usize,
         align: usize,
         at: PlacementAt,
-    ) -> Result<Self, ZoneError> {
+    ) -> Result<Self, AddressError> {
         if size == 0 || !size.is_multiple_of(PAGE_SIZE) || !align.is_power_of_two() {
-            return Err(ZoneError::NotAligned);
+            return Err(AddressError::NotAligned);
         }
         if let PlacementAt::Exact(start) = at
             && (start.offset() != 0 || start.as_usize() % align != 0)
         {
-            return Err(ZoneError::NotAligned);
+            return Err(AddressError::NotAligned);
         }
         Ok(Self {
             region,
@@ -47,17 +46,25 @@ impl Placement {
     }
 
     /// 窗口内最低的满足 `align` 的空档。
-    pub(crate) fn lowest(region: RegionId, size: usize, align: usize) -> Result<Self, ZoneError> {
+    pub(crate) fn lowest(
+        region: RegionId,
+        size: usize,
+        align: usize,
+    ) -> Result<Self, AddressError> {
         Self::new(region, size, align, PlacementAt::Lowest)
     }
 
     /// 窗口内最高的空档。
-    pub(crate) fn highest(region: RegionId, size: usize) -> Result<Self, ZoneError> {
+    pub(crate) fn highest(region: RegionId, size: usize) -> Result<Self, AddressError> {
         Self::new(region, size, PAGE_SIZE, PlacementAt::Highest)
     }
 
     /// 固定跨度：调用方已经知道地址。
-    pub(crate) fn exact(region: RegionId, start: VirtAddr, size: usize) -> Result<Self, ZoneError> {
+    pub(crate) fn exact(
+        region: RegionId,
+        start: VirtAddr,
+        size: usize,
+    ) -> Result<Self, AddressError> {
         Self::new(region, size, PAGE_SIZE, PlacementAt::Exact(start))
     }
 

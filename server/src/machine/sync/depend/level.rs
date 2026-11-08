@@ -3,7 +3,7 @@
 pub enum Level {
     Unit = 0,
     Scheduler = 1,
-    Space = 2,
+    Address = 2,
     Nest = 3,
     Mapping = 4,
     Flat = 5,

@@ -83,20 +83,13 @@ pub(super) fn wait(
 ) -> *mut TrapContext {
     // 登记失败要终止任务时，身份已经交出去了：先把这一 id 标量留下来。
     let tid = ident.as_ref().map_or(0, Identity::task_id);
-    let (space, life) = {
-        let running = ident
-            .as_ref()
-            .and_then(Identity::live)
-            .expect("user page fault without running task");
-        (running.team.space.clone(), running.team.space.life())
-    };
+    let life = nest.life();
     let key = WakeKey::Mapping {
         space: nest.asid(),
         mapping,
     };
     let waiting = FaultWait::new(nest, fault.addr, fault.kind, mapping);
-    // 先放掉空间与身份，再进提交边界的 wait_until；等待捕获自己在其内部释放。
-    drop(space);
+    // 先放掉任务身份；地址探针在提交边界内执行后释放。
     drop(ident);
     match sign::wait_until::<kernel_api::abi::call::room::RoomFail, _>(
         key,

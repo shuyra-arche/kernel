@@ -22,14 +22,13 @@ use crate::basis::nest::Placement;
 use crate::basis::nest::PlacementAt;
 use crate::basis::nest::RegionId;
 use crate::basis::nest::Reservation;
+use crate::basis::nest::mapping::MappingEntry;
 use crate::basis::pend;
 use crate::basis::pend::Geometry;
 use crate::basis::pend::Hold;
 use crate::basis::pend::SourceAuthorization;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::space::MappingEntry;
-use crate::basis::unit::space::Space;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::unit::team::Team;
@@ -77,7 +76,7 @@ fn resolve_team(
 }
 
 /// 从**调用者**地址空间一次快照一段定长只读描述。
-fn read_snapshot<const N: usize>(space: &Space, at: KVirt) -> Result<[u8; N], CellFail> {
+fn read_snapshot<const N: usize>(space: &Nest, at: KVirt) -> Result<[u8; N], CellFail> {
     let mut bytes = [0; N];
     if !space.copy_in(&mut bytes, at) {
         return Err(CellFail::Denied);
@@ -96,7 +95,7 @@ fn nest_placement(
         kernel_api::model::cell::PlacementAt::Highest => PlacementAt::Highest,
         kernel_api::model::cell::PlacementAt::Exact(address) => {
             let address = KVirt::wrap(address.get());
-            if !Space::user_range(address, size) {
+            if !Nest::user_range(address, size) {
                 return Err(CellFail::NotAligned);
             }
             if !nest.window_contains(RegionId::Normal, address, size) {
@@ -116,18 +115,18 @@ fn nest_placement(
 /// 不主动重试或覆盖原始失败；未结责任由后续入口推进。
 /// 结清那一步走 `retire_mapping` 同一条规则：登记、源侧成员与 controller 一起撤。
 pub(in crate::entry) fn rollback(
-    space: &Space,
+    space: &Arc<Nest>,
     id: usize,
     reservation: Option<Reservation>,
     mapping: Option<Arc<Mapping>>,
 ) {
     if let Some(reservation) = reservation {
         debug_assert!(mapping.is_none(), "one attempt has one side to unwind");
-        let _ = space.nest.release_reservation(reservation);
+        let _ = space.release_reservation(reservation);
     } else if let Some(mapping) = mapping {
         let _ = space.dispose(mapping);
     }
-    if !space.nest.settled(id) {
+    if !space.settled(id) {
         return;
     }
     space.retire_mapping(id);
@@ -166,7 +165,7 @@ fn create_memo(
     if access.contains(Access::EXECUTE) && team.get() == 0 {
         return Err(CellFail::Denied);
     }
-    let space = target.space.clone();
+    let space = target.nest.clone();
     // **本域**还是**交付到别的域**：交付出去的关系不算调用者的映射，不得挂在调用者
     // 那条可撤链上（否则来源回收 / 撤销会把别人正在跑的代码拆掉）。
     let own_space = team.get() == 0;
@@ -252,7 +251,7 @@ fn create_memo(
     } else if !authorization.private_owner(ident.id) || !own_space {
         return Err(CellFail::Denied);
     }
-    let nest = &space.nest;
+    let nest = &space;
     nest.retry_invalidation()?;
     space.reap_mappings();
     // 分支下的登记位先备好（只在本域安装时才需要）：提交时只替换，不再可能失败。
@@ -348,16 +347,16 @@ fn with_mapping<T>(
     if team.get() != 0 && !target.constructing() {
         return Err(CellFail::Denied);
     }
-    let space = target.space.clone();
+    let space = target.nest.clone();
     let entry = space
         .mappings
         .locate(mapping.get())
         .ok_or(CellFail::Denied)?;
     let owned = entry
         .binding
-        .space()
+        .nest()
         .upgrade()
-        .is_some_and(|space| Arc::ptr_eq(&space, &target.space));
+        .is_some_and(|space| Arc::ptr_eq(&space, &target.nest));
     if !owned {
         return Err(CellFail::Denied);
     }
@@ -366,9 +365,9 @@ fn with_mapping<T>(
     let (controller, _) = control.control();
     let allowed = match control.scope() {
         kernel_api::model::cell::MappingControl::Caller => controller == ident.id,
-        // 显式把这一段交给本 Space 成员；不是“同 Space 自动全控”。
+        // 显式把这一段交给本 Nest 成员；不是“同 Nest 自动全控”。
         kernel_api::model::cell::MappingControl::SpaceMembers => {
-            Arc::ptr_eq(&ident.team.space, &space)
+            Arc::ptr_eq(&ident.team.nest, &space)
         }
     };
     if !allowed {
@@ -385,12 +384,12 @@ fn delete_mapping(
     ident: &Arc<TaskIdent>,
 ) -> Result<usize, CellFail> {
     with_mapping(team, mapping, ident, |target, entry| {
-        let space = &target.space;
-        space.nest.retry_invalidation()?;
-        if !space.nest.settled(mapping.get()) {
-            space.withdraw(entry.mapping().ok_or(CellFail::Denied)?.whole())?;
+        let space = &target.nest;
+        space.retry_invalidation()?;
+        if !space.settled(mapping.get()) {
+            space.detach(entry.mapping().ok_or(CellFail::Denied)?.whole())?;
         }
-        if space.nest.settled(mapping.get()) {
+        if space.settled(mapping.get()) {
             space.retire_mapping(mapping.get());
         }
         Ok(0)

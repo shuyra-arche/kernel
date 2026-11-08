@@ -3,10 +3,13 @@ use super::MAX_DEPTH;
 use super::lifecycle::{ExitPolicy, TeamStage, TeamState};
 use super::membership::Tasks;
 use crate::basis::commit;
+use crate::basis::flat::{BorrowedRegion, Flat};
+use crate::basis::nest::{Access, ActiveRange, Placement, RegionId};
 use crate::basis::unit::life::Life;
 use crate::basis::unit::life::TeamLife;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
+use crate::machine::mmu::riscv::table::PteFlags;
 use crate::machine::sync::Level;
 use crate::machine::sync::OnceLock;
 use crate::machine::sync::SpinLock;
@@ -15,29 +18,29 @@ use alloc::sync::Weak;
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
+use kernel_api::address::{PAGE_SIZE, VirtAddr};
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
 
+use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::SpaceKind;
-use crate::basis::unit::space::Space;
-use crate::basis::unit::space::SpaceBuilder;
 use crate::basis::unit::task::TaskWeak;
 
 use super::Team;
 
-/// 造一座团队：空间给定，家长位可选。
+/// 按程序类别准备新团队的地址空间，家长位可选。
 pub struct TeamBuilder {
-    space: Space,
+    kind: SpaceKind,
     sire: TaskWeak,
     creator: kernel_api::model::identity::TaskId,
     constructing: bool,
 }
 
 impl TeamBuilder {
-    pub fn new(space: Space) -> Self {
+    pub fn new(kind: SpaceKind) -> Self {
         Self {
-            space,
+            kind,
             sire: TaskWeak::empty(),
             creator: kernel_api::model::identity::TaskId::new(0),
             constructing: false,
@@ -64,12 +67,7 @@ impl TeamBuilder {
         sire: TaskWeak,
         creator: kernel_api::model::identity::TaskId,
     ) -> Result<Arc<Team>, NestError> {
-        let space = match kind {
-            SpaceKind::Supervisor => SpaceBuilder::supervisor(),
-            SpaceKind::User => SpaceBuilder::user(),
-        }
-        .build()?;
-        TeamBuilder::new(space)
+        TeamBuilder::new(kind)
             .sire(sire)
             .creator(creator)
             .constructing()
@@ -82,8 +80,10 @@ impl TeamBuilder {
             None if self.sire.as_weak().ptr_eq(&Weak::new()) => None,
             None => return Err(NestError::NoRegion),
         };
-        let space = Arc::try_new(self.space).map_err(|_| NestError::OutOfMemory)?;
-        make_team(space, sire, self.creator, self.constructing)
+        let nest = Nest::new(self.kind)?;
+        let source = kernel().expect("kernel team not initialized");
+        seed_trampoline(&nest, &source.nest)?;
+        make_team(nest, sire, self.creator, self.constructing)
     }
 }
 
@@ -102,7 +102,7 @@ pub(crate) fn next_id() -> Result<TeamId, NestError> {
 /// 从零落一座团队：造状态机、成员表与生命周期线，再把自己的根挂到家长名下。
 /// 家长位的深度与容量都在这里把关（失败时团队本身还没任何人看得到）。
 pub(crate) fn make_team(
-    space: Arc<Space>,
+    nest: Arc<Nest>,
     sire: Option<Arc<Task>>,
     creator: TaskId,
     constructing: bool,
@@ -133,7 +133,9 @@ pub(crate) fn make_team(
     })
     .map_err(|_| NestError::OutOfMemory)?;
     let team = Arc::try_new(Team {
-        space,
+        nest,
+        external: crate::basis::cell::projection::Admission::new()
+            .map_err(|_| NestError::OutOfMemory)?,
         id,
         creator,
         cells: crate::basis::cell::page::Owner::team(id).map_err(|_| NestError::OutOfMemory)?,
@@ -194,10 +196,10 @@ pub(crate) fn make_team(
 pub(crate) static KERNEL_TEAM: OnceLock<Arc<Team>> = OnceLock::new();
 
 /// 落座内核团队（只一次）：它没有家长、也没有 sire。
-pub(crate) fn init_kernel(space: Arc<Space>) -> Result<&'static Arc<Team>, NestError> {
+pub(crate) fn init_kernel(nest: Arc<Nest>) -> Result<&'static Arc<Team>, NestError> {
     if KERNEL_TEAM.get().is_none() {
         let team = make_team(
-            space,
+            nest,
             None,
             kernel_api::model::identity::TaskId::new(0),
             false,
@@ -209,4 +211,21 @@ pub(crate) fn init_kernel(space: Arc<Space>) -> Result<&'static Arc<Team>, NestE
 
 pub fn kernel() -> Option<&'static Arc<Team>> {
     KERNEL_TEAM.get()
+}
+
+/// 把内核空间的跳板映射复制进新空间：来源是内核那一段借用的物理区间。
+///
+/// 来源先备齐再登记占用；挂载失败的责任按 `Nest` 的划分走。
+fn seed_trampoline(target: &Arc<Nest>, source: &Nest) -> Result<(), NestError> {
+    const TRAMPOLINE: VirtAddr = crate::machine::layout::TRAMPOLINE;
+    let (physical, flags) = source.translate(TRAMPOLINE).ok_or(NestError::NoRegion)?;
+    let region = unsafe { BorrowedRegion::new(physical, PAGE_SIZE)? };
+    let source_range = Flat::from_region(region)?.whole();
+    let access = Access::from_pte(flags);
+    let attrs = flags & (PteFlags::U | PteFlags::G | PteFlags::A | PteFlags::D);
+    // 活动形状与来源都在登记占用之前备好：准备失败不放下一笔无人持有的占用。
+    let active = ActiveRange::new(TRAMPOLINE, PAGE_SIZE, access, access)?;
+    let reservation = target.reserve(Placement::exact(RegionId::Static, TRAMPOLINE, PAGE_SIZE)?)?;
+    target.attach_shaped(reservation, source_range, attrs, &[active])?;
+    Ok(())
 }

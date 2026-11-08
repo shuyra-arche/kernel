@@ -1,9 +1,9 @@
 use crate::Uart;
+use crate::admission::Admission;
 use crate::edu::Edu;
 use crate::finish;
 use crate::iommu::HardwareError;
 use crate::iommu::IoSpace;
-use crate::iommu::retirement::Owner;
 use crate::iommu::retirement::Registry;
 use crate::iommu::riscv::Engine;
 use crate::iommu::riscv::Phase;
@@ -103,7 +103,7 @@ pub fn run(base: usize, scenario: &str, fdt: &fdt::Fdt) -> ! {
     }
     let adapter = unsafe { controllers.bind(0x3000_0000, 8, tables, platform) }.unwrap();
     let mut registry = Registry::new();
-    let mut owner = Some(Owner::new().unwrap());
+    let mut owner = Some(Admission::new().unwrap());
     let domain = registry
         .attach(owner.as_ref().unwrap(), adapter)
         .map_err(|(e, _)| e)

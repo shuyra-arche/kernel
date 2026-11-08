@@ -50,7 +50,7 @@ pub(in super::super) fn init() -> Result<(), NestError> {
     boot_stacks
         .try_reserve_exact(segments)
         .map_err(|_| NestError::OutOfMemory)?;
-    let space = &kernel().expect("kernel team not initialized").space;
+    let space = &kernel().expect("kernel team not initialized").nest;
     let flags = PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::A | PteFlags::D;
     let attrs = flags & (PteFlags::U | PteFlags::G | PteFlags::A | PteFlags::D);
     for h in 0..segments {
@@ -71,7 +71,7 @@ pub(in super::super) fn init() -> Result<(), NestError> {
         // 主体帧先备齐，再登记占用：来源准备失败不留无人持有的地址。
         let source = Flat::from_cells(Owner::Kernel, count, indexed)?.whole();
         let body_va = trap_stack_base(HartId::new(h));
-        attach_exact(&space.nest, body_va, source, Access::from_pte(flags), attrs)?;
+        attach_exact(&space, body_va, source, Access::from_pte(flags), attrs)?;
         unsafe {
             (body_va.as_usize() as *mut usize).write(TRAP_STACK_CANARY);
         }
@@ -82,7 +82,6 @@ pub(in super::super) fn init() -> Result<(), NestError> {
     let ksatp = satp::read();
     for h in (0..hart::hart_count()).map(HartId::new) {
         let pa = space
-            .nest
             .physical_at(HART_FRAME_BASE + h.get() * PAGE_SIZE)
             .expect("kernel frame not mapped");
         let frame = unsafe { &mut *(pa.as_usize() as *mut TrapContext) };

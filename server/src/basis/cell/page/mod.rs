@@ -106,7 +106,7 @@ impl Page {
         self: &Arc<Self>,
         modifiable: bool,
     ) -> Result<Retention, RetainError> {
-        Retention::prepare(self, reclaim::Kind::Device, modifiable)
+        Retention::prepare(self, reclaim::Kind::External, modifiable)
     }
 
     pub(crate) fn frozen(&self) -> bool {

@@ -2,14 +2,16 @@
 //!
 //! Flat 继续独立管理来源与物化；这里不保存来源页槽。
 
+mod access;
+mod address;
 mod error;
 mod index;
 pub(crate) mod mapping;
-mod reservation;
 mod translation;
+pub(crate) mod wait;
 
 use alloc::boxed::Box;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::mem::ManuallyDrop;
 use core::sync::atomic::AtomicBool;
@@ -19,7 +21,8 @@ use riscv::register::satp;
 
 use crate::basis::cell::page::{Change, Page};
 use crate::basis::flat::Pages;
-use crate::basis::zone::Zone;
+use crate::basis::sign::{self, WakeKey};
+use crate::basis::unit::life::Life;
 use crate::machine::layout::TEAM_FRAME_BASE;
 use crate::machine::layout::TEAM_FRAME_WINDOW_SIZE;
 use crate::machine::layout::TRAP_STACK_BASE;
@@ -34,15 +37,14 @@ use kernel_api::address::PageOffset;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
 
+pub use address::Reservation;
 pub use error::NestError;
 pub use identity::Asid;
 pub use mapping::{Access, ActiveRange, Mapping};
-pub use reservation::Reservation;
 pub use translation::{FaultKind, FaultOutcome};
 
-pub(crate) use crate::basis::zone::Placement;
-pub(crate) use crate::basis::zone::PlacementAt;
-pub(crate) use crate::basis::zone::RegionId;
+use address::Occupancy;
+pub(crate) use address::{Placement, PlacementAt, RegionId};
 pub(crate) use mapping::MappingRange;
 
 use index::IndexNode;
@@ -77,7 +79,9 @@ pub struct Nest {
     asid: Asid,
     kind: SpaceKind,
     geometry: mode::Geo,
-    occupancy: SpinLock<Zone<Box<CleanupNode>>>,
+    life: Arc<Life>,
+    pub(crate) mappings: mapping::MappingRegistry,
+    occupancy: SpinLock<Occupancy>,
     pending_cleanup: SpinLock<Option<Box<CleanupNode>>>,
     state: ManuallyDrop<SpinLock<NestState>>,
     asid_released: AtomicBool,
@@ -91,13 +95,13 @@ impl Nest {
     }
 
     /// 内核地址空间：ASID 0 固定，`Resource` 区可用，生命周期为进程期。
-    pub(crate) fn kernel(kind: SpaceKind) -> Result<Arc<Self>, NestError> {
-        Self::build(kind, true)
+    pub(crate) fn kernel() -> Result<Arc<Self>, NestError> {
+        Self::build(SpaceKind::Supervisor, true)
     }
 
     fn build(kind: SpaceKind, kernel: bool) -> Result<Arc<Self>, NestError> {
         let root = TableNode::root()?;
-        let mut occupancy = Zone::new();
+        let mut occupancy = Occupancy::new();
         occupancy.attach(
             RegionId::Normal,
             crate::machine::layout::IMAGE_BASE.as_usize(),
@@ -117,36 +121,30 @@ impl Nest {
                 .ok_or(NestError::DramOverlap)?;
             occupancy.attach(RegionId::Resource, base, TRAP_STACK_BASE.as_usize() - 1)?;
         }
+        let life = Life::try_new()?;
         let asid = if kernel {
             Asid::kernel()
         } else {
             Asid::try_allocate().ok_or(NestError::OutOfMemory)?
         };
-        let nest = Arc::try_new(Self {
+        let mut nest = Arc::try_new(Self {
             asid,
             kind,
             geometry: mode::geometry(mode::mode()),
-            occupancy: SpinLock::new_level(Level::Space, occupancy),
-            pending_cleanup: SpinLock::new_level(Level::Space, None),
+            life,
+            mappings: mapping::MappingRegistry::new(),
+            occupancy: SpinLock::new_level(Level::Address, occupancy),
+            pending_cleanup: SpinLock::new_level(Level::Address, None),
             state: ManuallyDrop::new(SpinLock::new_level(Level::Nest, NestState::new(root))),
             asid_released: AtomicBool::new(kernel),
             published: AtomicBool::new(false),
-        });
-        match nest {
-            Ok(mut nest) => {
-                Arc::get_mut(&mut nest)
-                    .expect("new Arc is unique")
-                    .published
-                    .store(true, Ordering::Release);
-                Ok(nest)
-            }
-            Err(_) => {
-                if !asid.is_kernel() {
-                    Asid::release_unpublished(asid);
-                }
-                Err(NestError::OutOfMemory)
-            }
-        }
+        })
+        .map_err(|_| NestError::OutOfMemory)?;
+        Arc::get_mut(&mut nest)
+            .expect("new Arc is unique")
+            .published
+            .store(true, Ordering::Release);
+        Ok(nest)
     }
 
     /// 尚未发布的事务只在这些阶段可见：Clean 且未关闭。
@@ -168,6 +166,10 @@ impl Nest {
 
     pub fn kind(&self) -> SpaceKind {
         self.kind
+    }
+
+    pub(crate) fn life(&self) -> Weak<Life> {
+        Arc::downgrade(&self.life)
     }
 
     pub(crate) fn asid(&self) -> Asid {
@@ -371,8 +373,7 @@ impl Nest {
             Self::give_back_unpublished(&mapping.reservation);
             return;
         }
-        // 取节点要先把占用锁放掉：它与清理链同属 `Level::Space`，套着取就是同级递归。
-        let node = self.occupancy.lock().take_cleanup(mapping.reservation.id());
+        let node = mapping.take_cleanup();
         if let Some(mut node) = node {
             node.mapping = Some(mapping.clone());
             self.enqueue_cleanup(node);
@@ -386,14 +387,11 @@ impl Nest {
         let start = reservation.start();
         let end = reservation.last();
         {
-            let mut occupancy = self.occupancy.lock();
+            let occupancy = self.occupancy.lock();
             if !occupancy.has_id(reservation.id()) {
                 return Err(NestError::NoRegion);
             }
-            occupancy.prepare_cleanup(reservation.id(), || {
-                Box::try_new(CleanupNode::empty())
-                    .map_err(|_| crate::basis::zone::ZoneError::OutOfMemory)
-            })?;
+            mapping.prepare_cleanup()?;
         }
         // 本关系要发布哪些页：Managed 只取已物化的，缺口留给缺页；
         // Borrowed 的整段都可用，挂载时就全部发布。
@@ -798,15 +796,22 @@ impl Nest {
         selection: MappingRange,
         access: Access,
     ) -> Result<(), NestError> {
-        if !access.is_leaf_set() {
-            return Err(NestError::NotAligned);
-        }
-        self.protect(selection, mapping::Protection::SetAccess(access))
+        let key = self.mapping_key(selection.mapping());
+        let result = if access.is_leaf_set() {
+            self.protect(selection, mapping::Protection::SetAccess(access))
+        } else {
+            Err(NestError::NotAligned)
+        };
+        sign::signal(key);
+        result
     }
 
     /// 收窄选择窗口的权限上限与当前权限；架构属性不变。
     pub(crate) fn narrow(&self, selection: MappingRange, ceiling: Access) -> Result<(), NestError> {
-        self.protect(selection, mapping::Protection::Narrow(ceiling))
+        let key = self.mapping_key(selection.mapping());
+        let result = self.protect(selection, mapping::Protection::Narrow(ceiling));
+        sign::signal(key);
+        result
     }
 
     /// 纯决策在同一 Nest / Mapping 锁内消费，不允许准备与提交间出现过期状态。
@@ -823,11 +828,25 @@ impl Nest {
         self.finish_invalidation()
     }
 
+    fn mapping_key(&self, mapping: &Mapping) -> WakeKey {
+        WakeKey::Mapping {
+            space: self.asid,
+            mapping: mapping.identity(),
+        }
+    }
+
+    pub(crate) fn detach(self: &Arc<Self>, selection: MappingRange) -> Result<(), NestError> {
+        let key = self.mapping_key(selection.mapping());
+        let result = self.detach_range(selection);
+        sign::signal(key);
+        result
+    }
+
     /// 按选择撤下：先退休该段占用，再撤 PTE，同步成功后只回收这一段。
     ///
     /// 失败时退休票、Page、表页、来源与待撤的活动全都保留，VA 禁复用；
     /// 沿用同一身份重试（再次 `detach`，或 `retry_invalidation`）才继续。
-    pub(crate) fn detach(self: &Arc<Self>, selection: MappingRange) -> Result<(), NestError> {
+    fn detach_range(self: &Arc<Self>, selection: MappingRange) -> Result<(), NestError> {
         let mapping = selection.mapping().clone();
         self.check_owner(&mapping.reservation)?;
         if self.is_closed() {
@@ -1020,18 +1039,21 @@ impl Nest {
     /// 失败时责任留在 Nest 自己那里：退休票、退休资源与待撤的活动都还在，
     /// 由 `retry_invalidation` 继续；调用者不再持有这笔关系的凭证。
     pub(crate) fn dispose(self: &Arc<Self>, mapping: Arc<Mapping>) -> Result<(), NestError> {
-        self.check_owner(&mapping.reservation)?;
-        let node = self.occupancy.lock().take_cleanup(mapping.reservation.id());
-        let Some(mut node) = node else {
-            return self.detach(mapping.whole());
-        };
-        node.mapping = Some(mapping.clone());
-        let result = self.detach(mapping.whole());
-        if let Err(error) = result {
-            self.enqueue_cleanup(node);
-            return Err(error.into());
-        }
-        Ok(())
+        let key = self.mapping_key(&mapping);
+        let result = (|| {
+            self.check_owner(&mapping.reservation)?;
+            let cleanup = mapping.take_cleanup();
+            let result = self.detach_range(mapping.whole());
+            if result.is_err()
+                && let Some(mut node) = cleanup
+            {
+                node.mapping = Some(mapping);
+                self.enqueue_cleanup(node);
+            }
+            result
+        })();
+        sign::signal(key);
+        result
     }
 
     /// 把一段占用对半分成两笔；失败时归还原占用。
@@ -1123,7 +1145,7 @@ impl Nest {
                 continue;
             };
             // 已消费的关系只剩收尾：PTE、退休票与退休资源都已清掉时这里是幂等的。
-            if let Err(error) = self.detach(mapping.whole()) {
+            if let Err(error) = self.detach_range(mapping.whole()) {
                 self.enqueue_cleanup(node);
                 if self.is_closed() {
                     self.drain_closed();
@@ -1169,7 +1191,7 @@ impl Nest {
     }
 
     /// 撤下全部关系并等算 shootdown；内核地址空间为进程期，不在此列。
-    pub(crate) fn close(&self) -> Result<(), NestError> {
+    fn close(&self) -> Result<(), NestError> {
         if self.asid.is_kernel() {
             return Err(NestError::Pinned);
         }
@@ -1193,12 +1215,20 @@ impl Nest {
         Ok(())
     }
 
-    pub(crate) fn retired(&self) -> bool {
-        self.asid_released.load(Ordering::Acquire)
+    /// Close translations, clear waits for this ASID, and settle control bindings
+    /// before the identifier can be reused. A failed release keeps it for retry.
+    pub(crate) fn retire(&self) -> Result<(), NestError> {
+        if !self.asid_released.load(Ordering::Acquire) {
+            self.close()?;
+            sign::wipe_space(self.asid);
+            self.reap_mappings();
+            self.release_asid()?;
+        }
+        self.reap_mappings();
+        Ok(())
     }
 
-    pub(crate) fn retire(&self) -> Result<(), NestError> {
-        self.close()?;
+    fn release_asid(&self) -> Result<(), NestError> {
         let _state = self.state.lock();
         if !self.asid_released.load(Ordering::Acquire) {
             identity::deallocate(self.asid).map_err(|_| NestError::Shootdown)?;
@@ -1218,7 +1248,7 @@ impl Nest {
         drop(node);
     }
 
-    /// 与晚到入链共用串行点；关系析构必须在 Space / Nest 锁外。
+    /// 与晚到入链共用串行点；关系析构必须在地址占用锁与 Nest 状态锁外。
     fn drain_closed(&self) {
         let mut nodes = {
             let mut pending = self.pending_cleanup.lock();
@@ -1275,124 +1305,6 @@ impl Nest {
     /// 翻译里只取物理地址的那一面：权限位不外露。
     pub(crate) fn physical_at(&self, address: VirtAddr) -> Option<PhysAddr> {
         self.translate(address).map(|(physical, _)| physical)
-    }
-
-    pub(crate) fn check_access(&self, start: VirtAddr, size: usize, need: Access) -> bool {
-        self.access_range(start, size, need, None)
-    }
-
-    /// 提交边界内的纯原子读；不能在这里推进 shootdown 或物化。
-    pub(crate) fn load_u32(&self, address: VirtAddr) -> Result<u32, NestError> {
-        use core::sync::atomic::{AtomicU32, Ordering};
-        let at = address.as_usize();
-        if at % core::mem::align_of::<AtomicU32>() != 0 {
-            return Err(NestError::NotAligned);
-        }
-        let state = self.state.lock();
-        if !state.retirement.invalidation().is_clean() {
-            return Err(NestError::Busy);
-        }
-        if state.phase.is_closed() {
-            return Err(NestError::NoRegion);
-        }
-        let mapping = state.index.find(at).ok_or(NestError::NoRegion)?;
-        let inner = mapping.state.lock();
-        let range = inner.range_at(at).ok_or(NestError::NoRegion)?;
-        let page = address.page_align();
-        let (physical, flags) = state.root.walk_ref_geometry(page, self.geometry)?;
-        if !range.current.contains(Access::READ)
-            || !flags.contains(PteFlags::R | PteFlags::V)
-            || flags.contains(PteFlags::G)
-            || (!self.kind.is_supervisor() && !flags.contains(PteFlags::U))
-        {
-            return Err(NestError::NoRegion);
-        }
-        // Nest and Mapping guards keep this resident cell mapped during the read.
-        let ptr = (physical.as_usize() + (at & (PAGE_SIZE - 1))) as *mut u32;
-        Ok(unsafe { AtomicU32::from_ptr(ptr) }.load(Ordering::Relaxed))
-    }
-
-    pub(crate) fn copy_from(&self, start: VirtAddr, dst: &mut [u8], need: Access) -> bool {
-        self.access_range(start, dst.len(), need, Some((dst.as_mut_ptr(), false)))
-    }
-
-    pub(crate) fn copy_to(&self, start: VirtAddr, src: &[u8], need: Access) -> bool {
-        self.access_range(
-            start,
-            src.len(),
-            need,
-            Some((src.as_ptr() as *mut u8, true)),
-        )
-    }
-
-    fn access_range(
-        &self,
-        start: VirtAddr,
-        size: usize,
-        need: Access,
-        buffer: Option<(*mut u8, bool)>,
-    ) -> bool {
-        if start.as_usize().checked_add(size).is_none() {
-            return false;
-        }
-        let Ok(state) = self.ready_state() else {
-            return false;
-        };
-        let user = !self.kind.is_supervisor();
-        let mut offset = 0;
-        while offset < size {
-            let at = start.as_usize() + offset;
-            let Some(mapping) = state.index.find(at) else {
-                return false;
-            };
-            let inner = mapping.state.lock();
-            let Some(range) = inner.range_at(at) else {
-                return false;
-            };
-            let page = crate::machine::mmu::riscv::canonical(at & !(PAGE_SIZE - 1));
-            let Ok((_, hardware)) = state.root.walk_ref_geometry(page, self.geometry) else {
-                return false;
-            };
-            if !range.current.contains(need)
-                || !hardware.contains(need.to_pte() | PteFlags::V)
-                || hardware.contains(PteFlags::G)
-            {
-                return false;
-            }
-            if user && !hardware.contains(PteFlags::U) {
-                return false;
-            }
-            let count = (PAGE_SIZE - (at & (PAGE_SIZE - 1))).min(size - offset);
-            offset += count;
-        }
-        let Some((buffer, write_to_user)) = buffer else {
-            return true;
-        };
-        offset = 0;
-        while offset < size {
-            let at = start.as_usize() + offset;
-            let Some(mapping) = state.index.find(at) else {
-                unreachable!("Nest held across access validation and copy")
-            };
-            let _inner = mapping.state.lock();
-            let page = crate::machine::mmu::riscv::canonical(at & !(PAGE_SIZE - 1));
-            let (physical, _) = state
-                .root
-                .walk_ref_geometry(page, self.geometry)
-                .expect("validated page table leaf");
-            let within = at & (PAGE_SIZE - 1);
-            let count = (PAGE_SIZE - within).min(size - offset);
-            let physical = physical.as_usize() as *mut u8;
-            unsafe {
-                if write_to_user {
-                    core::ptr::copy(buffer.add(offset), physical.add(within), count);
-                } else {
-                    core::ptr::copy(physical.add(within), buffer.add(offset), count);
-                }
-            }
-            offset += count;
-        }
-        true
     }
 
     pub(crate) fn translate(&self, address: VirtAddr) -> Option<(PhysAddr, PteFlags)> {
@@ -1473,7 +1385,8 @@ impl Drop for Nest {
         } else if self.asid.is_kernel() {
             return;
         } else if !self.asid_released.load(Ordering::Acquire) {
-            if self.retire().is_err() {
+            sign::wipe_space(self.asid);
+            if self.close().and_then(|()| self.release_asid()).is_err() {
                 return;
             }
         }

@@ -135,15 +135,12 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
     })?;
 
     let mapping_size = region.size.next_multiple_of(PAGE_SIZE);
-    let mapping = map_borrowed(
-        &team.space.nest,
-        PhysAddr::from_raw(region.base),
-        mapping_size,
-    )
-    .map_err(|source| BootError::Mapping {
-        operation: MapOperation::ImageView,
-        source,
-    })?;
+    let mapping = map_borrowed(&team.nest, PhysAddr::from_raw(region.base), mapping_size).map_err(
+        |source| BootError::Mapping {
+            operation: MapOperation::ImageView,
+            source,
+        },
+    )?;
 
     let mut registry = crate::entry::boot::resources::Registry::default();
     crate::entry::boot::devices::register(&mut registry).map_err(|source| {
@@ -172,15 +169,12 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
         source,
     })?;
     let (ledger_pa, ledger_bytes) = crate::entry::boot::resources::ledger::block();
-    let ledger = map_borrowed(
-        &team.space.nest,
-        PhysAddr::from_raw(ledger_pa),
-        ledger_bytes,
-    )
-    .map_err(|source| BootError::Mapping {
-        operation: MapOperation::LedgerView,
-        source,
-    })?;
+    let ledger = map_borrowed(&team.nest, PhysAddr::from_raw(ledger_pa), ledger_bytes).map_err(
+        |source| BootError::Mapping {
+            operation: MapOperation::LedgerView,
+            source,
+        },
+    )?;
 
     let mut args = [0usize; kernel_api::boot::args::LEN];
     args[kernel_api::boot::args::VIEW] = mapping.as_usize();
@@ -242,14 +236,10 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
     })?;
 
     #[cfg(debug_assertions)]
-    team.space.nest.audit();
+    team.nest.audit();
 
     #[cfg(debug_assertions)]
-    kernel()
-        .expect("kernel team not initialized")
-        .space
-        .nest
-        .audit();
+    kernel().expect("kernel team not initialized").nest.audit();
 
     Ok(Some(bootstrap))
 }
@@ -294,7 +284,6 @@ pub(crate) fn boot_harts() -> Result<(), BootError> {
 pub(crate) extern "C" fn boot_main() -> ! {
     let ktc = kernel()
         .expect("kernel team not initialized")
-        .space
         .nest
         .physical_at(hart::hart_frame())
         .expect("kernel frame not mapped");

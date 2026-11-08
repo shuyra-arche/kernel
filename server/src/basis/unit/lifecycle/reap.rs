@@ -4,10 +4,10 @@ use kernel_api::abi::call::unit::NOTE_MAX;
 use kernel_api::model::identity::TaskId;
 
 use super::diagnostics;
+use crate::basis::nest::Nest;
 use crate::basis::room::chain::Chain;
 use crate::basis::room::conductor::current;
 use crate::basis::unit::lifecycle::tally;
-use crate::basis::unit::space::Space;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskExitCause;
 use crate::basis::unit::task::TaskState;
@@ -65,7 +65,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
         let (cause, reason) = state.dying().unwrap_or((cause, reason));
         state.doom(None, cause, reason);
         drop(state);
-        // Last member stops device admission before fallible Pend/CPU cleanup.
+        // Last member closes external admission before fallible Pend/CPU cleanup.
         // Parent Join/Oust and Driver cooperation are not prerequisites.
         if task
             .ident
@@ -76,7 +76,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
             .iter()
             .all(|member| member.state.lock().is_dead())
         {
-            task.ident.team.space.dma.close();
+            task.ident.team.external.close();
         }
         (cause, reason)
     };
@@ -111,7 +111,7 @@ pub fn quit() -> usize {
     let tid = exited.ident.id;
     let mut buf = [0u8; NOTE_MAX];
     let text = note_out(
-        &exited.ident.team.space,
+        &exited.ident.team.nest,
         tid,
         reason,
         note_va,
@@ -133,7 +133,7 @@ pub fn quit() -> usize {
 }
 
 fn note_out<'a>(
-    space: &Space,
+    space: &Nest,
     tid: TaskId,
     reason: usize,
     va: usize,
