@@ -1,6 +1,6 @@
 use super::*;
 use crate::basis::cell::page::Page;
-use crate::basis::unit::space::external;
+use crate::basis::unit::space::mapping::external;
 use kernel_api::model::cell::*;
 fn reference(id: usize) -> SlotId {
     SlotId::from_bytes(&(id as u64).to_le_bytes()).unwrap()

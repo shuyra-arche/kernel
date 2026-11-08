@@ -12,7 +12,7 @@ use alloc::sync::Arc;
 use alloc::sync::Weak;
 use kernel_api::address::VirtAddr;
 mod builder;
-mod mapping;
+pub(crate) mod mapping;
 
 pub use builder::SpaceBuilder;
 pub(crate) use mapping::MappingBinding;
@@ -20,8 +20,6 @@ pub(crate) use mapping::MappingEntry;
 use mapping::MappingRegistry;
 
 pub(crate) mod wait;
-
-pub(crate) mod external;
 
 /// 一个团队的地址空间：CPU 翻译（`Nest`）加一条生命周期线。
 ///

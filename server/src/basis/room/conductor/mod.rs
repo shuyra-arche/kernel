@@ -5,6 +5,7 @@
 //! 跨核的事不在这里：往哪放、怎么叫醒，都归 `scheduler`。
 
 mod badge;
+pub(crate) mod identity;
 pub(crate) mod run;
 
 use alloc::sync::Arc;

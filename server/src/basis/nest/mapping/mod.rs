@@ -1,8 +1,7 @@
 mod access;
-mod active;
-mod memo;
+pub(in crate::basis::nest) mod publication;
 mod range;
-mod runs;
+pub(crate) mod source;
 mod state;
 
 use alloc::sync::Arc;
@@ -10,7 +9,7 @@ use alloc::vec::Vec;
 
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::NestError;
-use crate::basis::nest::reservation::Reservation;
+use crate::basis::nest::Reservation;
 use crate::machine::mmu::riscv::table::PteFlags;
 use crate::machine::sync::Level;
 use crate::machine::sync::SpinLock;
@@ -19,14 +18,11 @@ use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
 use kernel_api::address::VirtAddr;
 
-pub use access::Access;
-pub use active::ActiveRange;
+pub use access::{Access, ActiveRange};
 pub(crate) use range::MappingRange;
 pub(crate) use state::Protection;
 
 use state::MappingState;
-
-use super::source;
 
 /// Flat 来源在一个 Nest 中的地址投影：占用、逻辑权限与已发布页的保留记录。
 ///

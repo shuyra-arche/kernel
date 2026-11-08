@@ -3,14 +3,9 @@
 //! Flat 不含 VA、页表、Task 或授权账目；它决定槽的物化与迁移，
 //! 槽持有不建立另一份物理所有权。共享访问使用同一 Flat 的范围与映射。
 
-mod allocation;
 mod error;
-mod pages;
 mod range;
-mod region;
-mod residency;
-mod slot;
-mod state;
+mod storage;
 pub(crate) mod transaction;
 
 use crate::basis::cell::page::Owner;
@@ -27,17 +22,15 @@ use kernel_api::address::PageOffset;
 use kernel_api::address::PhysAddr;
 
 pub(crate) use crate::basis::cell::allocate as allocate_cell;
-pub use allocation::Allocation;
-pub use error::FlatError;
-pub use pages::Pages;
-pub use range::FlatRange;
-pub use region::BorrowedRegion;
-pub use residency::Residency;
+pub use range::{FlatRange, Pages, Residency};
+pub use storage::BorrowedRegion;
 
-use slot::Slot;
-use state::FlatSource;
-use state::FlatState;
-use state::ResidencyEntry;
+pub use error::FlatError;
+
+use storage::FlatSource;
+use storage::FlatState;
+use storage::ResidencyEntry;
+use storage::slot::{self, Slot};
 
 /// 线性逻辑页来源。
 ///
@@ -323,5 +316,27 @@ impl Flat {
                 }
             }
         }
+    }
+}
+
+/// 来源的物理分配约束：逻辑页数与每页起址的对齐下界。
+///
+/// 对齐只约束每个页地址的下界，不表示各页物理连续；不支持的约束在构造时明确拒绝，
+/// 不接受后忽略。PR1 只接受页大小对齐。
+pub struct Allocation {
+    pages: PageCount,
+}
+
+impl Allocation {
+    pub fn new(pages: usize, align: usize) -> Result<Self, FlatError> {
+        let pages = PageCount::new(pages).ok_or(FlatError::NotAligned)?;
+        if align != PAGE_SIZE {
+            return Err(FlatError::NotAligned);
+        }
+        Ok(Self { pages })
+    }
+
+    pub fn page_count(&self) -> PageCount {
+        self.pages
     }
 }

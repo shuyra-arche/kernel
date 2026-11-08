@@ -6,10 +6,7 @@
 mod identity;
 mod owner;
 pub(crate) use owner::Owner;
-pub(crate) mod change;
-mod reclaim;
-pub(crate) use change::{Change, Freeze};
-mod retention;
+pub(super) mod reclaim;
 
 use alloc::alloc::Allocator;
 use alloc::boxed::Box;
@@ -21,8 +18,7 @@ use kernel_api::model::cell::PAGE_SIZE;
 use kernel_api::model::cell::PageOwner;
 
 pub(crate) use identity::PageId;
-pub(crate) use reclaim::RetainError;
-pub(crate) use retention::Retention;
+pub(crate) use reclaim::{Change, Freeze, RetainError, Retention};
 
 /// 分配器交出的唯一承载。构造 Page 后只有 Page 保留这份回收凭证。
 pub(crate) type InternalPage = Box<UnsafeCell<[u8; PAGE_SIZE]>, &'static (dyn Allocator + Sync)>;

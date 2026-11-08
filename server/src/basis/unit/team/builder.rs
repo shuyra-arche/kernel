@@ -1,14 +1,14 @@
 use super::MAX_CHILDREN;
 use super::MAX_DEPTH;
-use super::state::TeamStage;
-use super::state::TeamState;
-use super::tasks::Tasks;
+use super::lifecycle::{ExitPolicy, TeamStage, TeamState};
+use super::membership::Tasks;
 use crate::basis::commit;
-use crate::basis::unit::copies::Origin;
 use crate::basis::unit::life::Life;
 use crate::basis::unit::life::TeamLife;
+use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::machine::sync::Level;
+use crate::machine::sync::OnceLock;
 use crate::machine::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -129,7 +129,7 @@ pub(crate) fn make_team(
         tasks: tasks.clone(),
         children: SpinLock::new(Vec::new()),
         life: Life::try_new().map_err(|_| NestError::OutOfMemory)?,
-        exit: super::exit::ExitPolicy::new(),
+        exit: ExitPolicy::new(),
     })
     .map_err(|_| NestError::OutOfMemory)?;
     let team = Arc::try_new(Team {
@@ -189,4 +189,24 @@ pub(crate) fn make_team(
         heirs.push(team.clone());
     }
     Ok(team)
+}
+
+pub(crate) static KERNEL_TEAM: OnceLock<Arc<Team>> = OnceLock::new();
+
+/// 落座内核团队（只一次）：它没有家长、也没有 sire。
+pub(crate) fn init_kernel(space: Arc<Space>) -> Result<&'static Arc<Team>, NestError> {
+    if KERNEL_TEAM.get().is_none() {
+        let team = make_team(
+            space,
+            None,
+            kernel_api::model::identity::TaskId::new(0),
+            false,
+        )?;
+        assert!(KERNEL_TEAM.set(team).is_ok());
+    }
+    Ok(KERNEL_TEAM.get().expect("kernel team initialized"))
+}
+
+pub fn kernel() -> Option<&'static Arc<Team>> {
+    KERNEL_TEAM.get()
 }

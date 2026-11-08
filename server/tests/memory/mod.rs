@@ -13,9 +13,8 @@ mod error;
 pub(crate) mod index {
     pub(crate) use kernel_api::address::PageIndex;
 }
-#[allow(dead_code)]
-#[path = "../../src/basis/flat/slot.rs"]
-mod slot;
+use error::FlatError;
+use state::slot;
 
 #[path = "../../src/machine/mmu/riscv/synchronize/scope.rs"]
 mod scope;
@@ -37,16 +36,12 @@ mod retention;
 mod support;
 
 mod change;
-#[path = "../../src/basis/nest/publication.rs"]
+#[path = "../../src/basis/nest/mapping/publication/receipt.rs"]
 mod memo;
 
 #[allow(dead_code)]
-#[path = "../../src/basis/flat/state.rs"]
+#[path = "../../src/basis/flat/storage/mod.rs"]
 mod state;
-
-#[allow(dead_code)]
-#[path = "../../src/basis/flat/region.rs"]
-mod region;
 
 mod transaction;
 #[allow(dead_code)]

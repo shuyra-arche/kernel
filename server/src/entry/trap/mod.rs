@@ -14,10 +14,10 @@ use riscv::register::stval;
 use crate::basis::nest::FaultOutcome;
 use crate::basis::nest::Nest;
 use crate::basis::room::Handoff;
+use crate::basis::room::conductor::identity::Identity;
+use crate::basis::room::conductor::identity::ident;
 use crate::basis::room::conductor::run::run;
 use crate::basis::room::deadline;
-use crate::basis::room::identity::Identity;
-use crate::basis::room::identity::ident;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::sign::redeem;
@@ -139,7 +139,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
     let next: *mut TrapContext = match trap {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             deadline::tick();
-            crate::basis::unit::space::external::maintain();
+            crate::basis::unit::space::mapping::external::maintain();
             unsafe {
                 sie::set_sext();
             }
@@ -177,7 +177,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
         }
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
             if crate::machine::iommu::riscv::interrupt::handle() {
-                crate::basis::unit::space::external::maintain();
+                crate::basis::unit::space::mapping::external::maintain();
             } else {
                 let result = crate::basis::sign::endpoint::trigger(
                     &crate::basis::room::interrupt::get().supervisor_external,

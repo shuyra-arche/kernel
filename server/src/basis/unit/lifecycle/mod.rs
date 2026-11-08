@@ -3,7 +3,9 @@
 
 pub(crate) mod diagnostics;
 mod doom;
+pub(crate) mod join;
 mod reap;
+pub(crate) mod tally;
 
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;

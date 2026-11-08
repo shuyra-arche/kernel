@@ -8,7 +8,7 @@ use core::sync::atomic::Ordering;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
 
-use crate::basis::room::identity::Identity;
+use crate::basis::room::conductor::identity::Identity;
 use crate::basis::unit::task::TaskIdent;
 
 pub(in super::super) struct Badge {

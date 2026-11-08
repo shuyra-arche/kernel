@@ -5,7 +5,7 @@ use crate::basis::room::halt;
 use crate::basis::room::halt::beacon;
 use crate::basis::room::scheduler;
 use crate::basis::sign;
-use crate::basis::unit::tally;
+use crate::basis::unit::lifecycle::tally;
 use crate::machine::hart;
 use crate::machine::stop::hush;
 use riscv::register::sie;
@@ -98,7 +98,7 @@ fn wait() -> Option<usize> {
         }
         beacon::idle(me);
 
-        let device_pending = crate::basis::unit::space::external::maintain();
+        let device_pending = crate::basis::unit::space::mapping::external::maintain();
         let fallback = if beacon::shutting_down() || device_pending {
             BEACON_TICK
         } else {

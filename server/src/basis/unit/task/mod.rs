@@ -14,28 +14,26 @@ use crate::basis::room::scheduler;
 use crate::basis::sign::Ticket;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::life::Life;
-use crate::basis::unit::tally;
+use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::team::Team;
 use crate::basis::unit::team::TeamPhase;
 use crate::machine::hart::HartId;
 use crate::machine::sync::SpinLock;
 
 use crate::basis::unit::control::Request;
-use state::Effect;
+use execution::Effect;
 
-mod builder;
-mod continuation;
-pub(crate) use continuation::Resumption;
-pub(crate) use continuation::WaitCall;
+mod creation;
+mod execution;
 mod identity;
-pub(super) mod prepared;
-mod state;
 mod weak;
 
-pub(crate) use builder::TaskBuilder;
+pub(crate) use creation::TaskBuilder;
+pub(crate) use execution::{Resumption, TaskState, WaitCall};
 pub(crate) use identity::TaskIdent;
-pub(crate) use state::TaskState;
-pub(crate) use weak::TaskWeak;
+#[cfg(debug_assertions)]
+pub(crate) use weak::check_block_heldout;
+pub(crate) use weak::{Origin, TaskWeak};
 
 pub use kernel_api::model::unit::ExitCause as TaskExitCause;
 

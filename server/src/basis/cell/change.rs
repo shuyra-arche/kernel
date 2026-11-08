@@ -32,8 +32,8 @@ pub(crate) fn find(page: &Arc<Page>) -> Option<Arc<Change>> {
 }
 /// Completion notification runs outside Task/Flat/Mapping locks, including death cleanup.
 pub(crate) fn maintain() {
-    if super::page::change::take_completion() {
+    if super::page::reclaim::change::take_completion() {
         LIVE.lock().retain(|change| change.strong_count() != 0);
-        crate::basis::nest::source::wake_all();
+        crate::basis::nest::mapping::source::wake_all();
     }
 }

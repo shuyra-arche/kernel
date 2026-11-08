@@ -9,7 +9,6 @@ pub(crate) mod conductor;
 pub(crate) mod counter;
 pub(crate) mod deadline;
 pub(crate) mod halt;
-pub(crate) mod identity;
 pub(crate) mod interrupt;
 pub mod scheduler;
 

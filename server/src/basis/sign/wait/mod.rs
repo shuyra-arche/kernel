@@ -1,10 +1,8 @@
-pub(super) mod fwd;
 pub(super) mod holder;
 pub(super) mod key;
 pub(super) mod site;
 
 pub(super) mod block;
-mod fail;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -20,14 +18,14 @@ use crate::basis::unit::task::Resumption;
 use crate::basis::unit::task::Task;
 use crate::machine::clock;
 
+use self::block::WaitFail;
 use self::block::block_with_call;
 use self::block::finish_block;
-use self::fail::WaitFail;
-use self::fwd::Fwd;
 use self::holder::Ticket;
 use self::holder::hold;
 use self::holder::void;
 use self::key::WakeKey;
+use self::site::Fwd;
 use self::site::SITE_SHARDS;
 use self::site::Site;
 use self::site::prune;

@@ -10,7 +10,7 @@ use hashbrown::HashMap;
 
 use kernel_api::model::identity::TaskId;
 
-use crate::basis::unit::copies::Origin;
+use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskWeak;
 use crate::machine::sync::Level;

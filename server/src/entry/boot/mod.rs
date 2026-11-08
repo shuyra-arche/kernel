@@ -73,7 +73,7 @@ pub fn start() -> Result<(), BootError> {
         crate::basis::room::halt::beacon::arm(&entry);
     }
 
-    crate::basis::unit::tally::rooted();
+    crate::basis::unit::lifecycle::tally::rooted();
 
     boot_harts()?;
 
@@ -134,11 +134,12 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
             base: region.base,
             size: region.size,
         })?;
-    let team =
-        crate::basis::unit::capsule::assemble(capsule).map_err(|source| BootError::Mapping {
+    let team = crate::basis::unit::team::capsule::assemble(capsule).map_err(|source| {
+        BootError::Mapping {
             operation: MapOperation::AssembleCapsule,
             source,
-        })?;
+        }
+    })?;
 
     let mapping_size = region.size.next_multiple_of(PAGE_SIZE);
     let mapping = map_borrowed(

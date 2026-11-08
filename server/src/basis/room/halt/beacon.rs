@@ -10,7 +10,7 @@ use core::sync::atomic::Ordering;
 
 use kernel_api::model::identity::TaskId;
 
-use crate::basis::unit::tally;
+use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::task::Task;
 use crate::machine::clock;
 
