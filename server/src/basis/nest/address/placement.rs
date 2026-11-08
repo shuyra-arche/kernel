@@ -1,4 +1,4 @@
-use super::occupancy::{AddressError, RegionId};
+use super::{AddressError, RegionKind};
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
 
@@ -16,7 +16,7 @@ pub(crate) enum PlacementAt {
 /// 跨度非零且按页；`Exact` 的起点必须按页且满足对齐。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Placement {
-    region: RegionId,
+    region: RegionKind,
     size: usize,
     align: usize,
     at: PlacementAt,
@@ -24,7 +24,7 @@ pub(crate) struct Placement {
 
 impl Placement {
     pub(crate) fn new(
-        region: RegionId,
+        region: RegionKind,
         size: usize,
         align: usize,
         at: PlacementAt,
@@ -47,7 +47,7 @@ impl Placement {
 
     /// 窗口内最低的满足 `align` 的空档。
     pub(crate) fn lowest(
-        region: RegionId,
+        region: RegionKind,
         size: usize,
         align: usize,
     ) -> Result<Self, AddressError> {
@@ -55,20 +55,20 @@ impl Placement {
     }
 
     /// 窗口内最高的空档。
-    pub(crate) fn highest(region: RegionId, size: usize) -> Result<Self, AddressError> {
+    pub(crate) fn highest(region: RegionKind, size: usize) -> Result<Self, AddressError> {
         Self::new(region, size, PAGE_SIZE, PlacementAt::Highest)
     }
 
     /// 固定跨度：调用方已经知道地址。
     pub(crate) fn exact(
-        region: RegionId,
+        region: RegionKind,
         start: VirtAddr,
         size: usize,
     ) -> Result<Self, AddressError> {
         Self::new(region, size, PAGE_SIZE, PlacementAt::Exact(start))
     }
 
-    pub(crate) fn region(self) -> RegionId {
+    pub(crate) fn region(self) -> RegionKind {
         self.region
     }
 

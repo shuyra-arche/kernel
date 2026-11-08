@@ -4,7 +4,7 @@ use crate::basis::flat::BorrowedRegion;
 use crate::basis::flat::Flat;
 use crate::basis::nest::Access;
 use crate::basis::nest::Placement;
-use crate::basis::nest::RegionId;
+use crate::basis::nest::RegionKind;
 use crate::basis::unit::team::kernel;
 use crate::machine::board;
 use crate::machine::iommu::riscv::pci::Ecam;
@@ -25,7 +25,7 @@ pub(super) fn mapped(base: usize, size: usize) -> Result<usize, PendFail> {
         .map_err(|_| PendFail::OoM)?
         .whole();
     let placement =
-        Placement::lowest(RegionId::Normal, size, 4096).map_err(|_| PendFail::Denied)?;
+        Placement::lowest(RegionKind::Normal, size, 4096).map_err(|_| PendFail::Denied)?;
     let reserve = nest.reserve(placement).map_err(|_| PendFail::OoM)?;
     let access = Access::READ | Access::WRITE;
     let mapping = nest

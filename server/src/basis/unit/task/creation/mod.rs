@@ -8,7 +8,7 @@ use crate::basis::nest::Access;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
-use crate::basis::nest::RegionId;
+use crate::basis::nest::RegionKind;
 use crate::basis::unit::life::Life;
 use crate::basis::unit::team::Team;
 use crate::basis::unit::team::kernel;
@@ -137,7 +137,7 @@ impl TaskBuilder {
         let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;
         let source = Flat::from_cells(self.team.cells.clone(), count, indexed)?.whole();
         let slot = nest.reserve(Placement::highest(
-            RegionId::Normal,
+            RegionKind::Normal,
             stack_size + crate::machine::layout::TASK_STACK_GUARD,
         )?)?;
         let (guard, body) =
@@ -161,7 +161,7 @@ impl TaskBuilder {
         )?
         .whole();
         let reservation =
-            nest.reserve(Placement::lowest(RegionId::Kernel, PAGE_SIZE, PAGE_SIZE)?)?;
+            nest.reserve(Placement::lowest(RegionKind::Kernel, PAGE_SIZE, PAGE_SIZE)?)?;
         let frame_va = reservation.start();
         memory.frame = Some(nest.attach(reservation, source, rw, rw)?);
 

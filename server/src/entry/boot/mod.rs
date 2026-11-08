@@ -22,7 +22,7 @@ use crate::basis::nest::Access;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
-use crate::basis::nest::RegionId;
+use crate::basis::nest::RegionKind;
 use crate::basis::room::conductor;
 use crate::basis::room::scheduler;
 use crate::basis::unit::team::kernel;
@@ -250,7 +250,7 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
 fn map_borrowed(nest: &Arc<Nest>, physical: PhysAddr, size: usize) -> Result<VirtAddr, NestError> {
     let borrowed = unsafe { BorrowedRegion::new(physical, size)? };
     let source = Flat::from_region(borrowed)?.whole();
-    let reservation = nest.reserve(Placement::lowest(RegionId::Normal, size, PAGE_SIZE)?)?;
+    let reservation = nest.reserve(Placement::lowest(RegionKind::Normal, size, PAGE_SIZE)?)?;
     let mapping = nest.attach(reservation, source, Access::READ, Access::READ)?;
     Ok(mapping.initial_start())
 }

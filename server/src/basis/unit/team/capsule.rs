@@ -15,7 +15,7 @@ use crate::basis::nest::Access;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
-use crate::basis::nest::RegionId;
+use crate::basis::nest::RegionKind;
 use crate::basis::nest::Reservation;
 use crate::basis::nest::SpaceKind;
 use crate::machine::mmu::riscv::table::PteFlags;
@@ -80,7 +80,7 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
             nest.attach(reservation, source, access, access)?;
         }
     }
-    nest.advance_region(RegionId::Normal, image_end)?;
+    nest.advance_window(RegionKind::Normal, image_end)?;
     crate::machine::mmu::riscv::identity::sync_instructions()?;
     team.set_default_entry(capsule.entry);
     Ok(team)
@@ -121,8 +121,8 @@ fn reserve_at(nest: &Arc<Nest>, start: VirtAddr, size: usize) -> Result<Reservat
     if size == 0 || start.offset() != 0 || !size.is_multiple_of(PAGE_SIZE) {
         return Err(NestError::NotAligned);
     }
-    if !nest.window_contains(RegionId::Normal, start, size) {
+    if !nest.window_contains(RegionKind::Normal, start, size) {
         return Err(NestError::NoRegion);
     }
-    nest.reserve(Placement::exact(RegionId::Normal, start, size)?)
+    nest.reserve(Placement::exact(RegionKind::Normal, start, size)?)
 }

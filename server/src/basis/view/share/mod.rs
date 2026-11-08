@@ -17,7 +17,7 @@ use crate::basis::nest::Mapping;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
-use crate::basis::nest::RegionId;
+use crate::basis::nest::RegionKind;
 use crate::basis::pend::Pend;
 use crate::basis::pend::SourceAuthorization;
 use crate::basis::sign;
@@ -434,7 +434,7 @@ pub(crate) fn open(
     // 来源已在手上：先选址登记，再按来源范围挂载，不经任何 kernel / canonical 视图。
     let reservation = space
         .reserve(
-            Placement::lowest(RegionId::Normal, size, PAGE_SIZE)
+            Placement::lowest(RegionKind::Normal, size, PAGE_SIZE)
                 .map_err(|e| pend_map_error(e.into()))?,
         )
         .map_err(pend_map_error)?;
