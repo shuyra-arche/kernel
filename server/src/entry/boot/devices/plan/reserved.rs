@@ -35,69 +35,40 @@ fn compatible(node: FdtNode, name: &str) -> bool {
         .is_some_and(|value| value.all().any(|value| value == name))
 }
 
-fn cell_count(node: FdtNode, name: &str, default: usize) -> Result<usize, PendFail> {
-    match node.property(name) {
-        None => Ok(default),
-        Some(property) if property.value.len() == 4 => number(property.value),
-        Some(_) => Err(PendFail::Denied),
-    }
-}
-
-fn number(value: &[u8]) -> Result<usize, PendFail> {
-    value.iter().try_fold(0usize, |number, byte| {
-        number
-            .checked_mul(256)
-            .and_then(|number| number.checked_add(*byte as usize))
-            .ok_or(PendFail::Denied)
-    })
-}
-
-fn parent_of<'b, 'a>(fdt: &'b fdt::Fdt<'a>, node: FdtNode<'b, 'a>) -> Option<FdtNode<'b, 'a>> {
-    // Names have distinct storage in the DTB even when their text is identical.
-    fdt.all_nodes().find(|parent| {
-        parent
-            .children()
-            .any(|child| core::ptr::eq(child.name, node.name))
-    })
-}
-
-fn identity_path<'b, 'a>(fdt: &'b fdt::Fdt<'a>, mut bus: FdtNode<'b, 'a>) -> Result<(), PendFail> {
-    while let Some(parent) = parent_of(fdt, bus) {
-        // Empty ranges explicitly declares identity. Missing or translated ranges
-        // cannot be interpreted as CPU physical coordinates by this adapter.
-        if !bus
-            .property("ranges")
-            .is_some_and(|ranges| ranges.value.is_empty())
-        {
-            return Err(PendFail::Denied);
+/// Keep interrupt and timer controls private even without an active IOMMU route.
+/// Status does not make aliases of a protected register safe to delegate.
+pub(super) fn interrupts(fdt: &fdt::Fdt) -> Result<Vec<Region>, PendFail> {
+    let mut result = Vec::new();
+    for node in fdt.all_nodes() {
+        let local = compatible(node, "riscv,cpu-intc");
+        let controller = node.property("interrupt-controller").is_some()
+            || [
+                "riscv,plic0",
+                "sifive,plic-1.0.0",
+                "riscv,clint0",
+                "sifive,clint0",
+                "riscv,aclint-mtimer",
+                "riscv,aclint-mswi",
+                "riscv,aclint-sswi",
+            ]
+            .into_iter()
+            .any(|name| compatible(node, name));
+        if !controller || (local && node.property("reg").is_none()) {
+            continue;
         }
-        bus = parent;
+        let regions = node_regions(fdt, node)?;
+        result
+            .try_reserve(regions.len())
+            .map_err(|_| PendFail::OutOfMemory)?;
+        result.extend(regions);
     }
-    Ok(())
+    Ok(result)
 }
 
-/// Checked physical control ranges, shared by IOMMU and PLIC reservation.
+/// The hardware consumers still require identity coordinates; decode and check
+/// their byte/page geometry through the same path as ordinary MMIO admission.
 pub(super) fn node_regions(fdt: &fdt::Fdt, node: FdtNode) -> Result<Vec<Region>, PendFail> {
-    let parent = parent_of(fdt, node).ok_or(PendFail::Denied)?;
-    identity_path(fdt, parent)?;
-    let address = cell_count(parent, "#address-cells", 2)?;
-    let size = cell_count(parent, "#size-cells", 1)?;
-    if !(1..=2).contains(&address) || !(1..=2).contains(&size) {
-        return Err(PendFail::Denied);
-    }
-    let reg = node.property("reg").ok_or(PendFail::Denied)?.value;
-    let width = (address + size) * 4;
-    if reg.is_empty() || !reg.len().is_multiple_of(width) {
-        return Err(PendFail::Denied);
-    }
-    let mut reserved = Vec::new();
-    reserved
-        .try_reserve(reg.len() / width)
-        .map_err(|_| PendFail::OutOfMemory)?;
-    for entry in reg.chunks_exact(width) {
-        let base = number(&entry[..address * 4])?;
-        let size = number(&entry[address * 4..])?;
-        reserved.push(Region::new(base, size)?);
-    }
-    Ok(reserved)
+    let parent = super::address::parent(fdt, node).ok_or(PendFail::Denied)?;
+    super::address::identity_path(fdt, parent)?;
+    super::address::regions(fdt, node)
 }

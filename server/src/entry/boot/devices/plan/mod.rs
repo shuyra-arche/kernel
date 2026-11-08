@@ -2,6 +2,7 @@ use crate::machine::iommu::riscv::topology::Topology;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
 
+mod address;
 mod ranges;
 pub(super) mod region;
 pub(super) mod reserved;
@@ -16,6 +17,11 @@ pub(super) struct Plan {
 impl Plan {
     pub fn discover(fdt: &fdt::Fdt, dram_base: usize, dram_size: usize) -> Result<Self, PendFail> {
         let mut reserved = reserved::discover(fdt)?;
+        let interrupts = reserved::interrupts(fdt)?;
+        reserved
+            .try_reserve(interrupts.len())
+            .map_err(|_| PendFail::OutOfMemory)?;
+        reserved.extend(interrupts);
         let dram = Region::new(dram_base, dram_size)?;
         if reserved.iter().any(|region| region.overlaps(dram)) {
             return Err(PendFail::Denied);
@@ -27,22 +33,6 @@ impl Plan {
                 || node.property("iommu-map-mask").is_some()
                 || node.property("iommus").is_some()
         }) {
-            // Kernel owns the shared interrupt controller on this restricted
-            // platform. Withhold aliases too; queue routing cannot be delegated.
-            for node in fdt.all_nodes().filter(|n| {
-                n.compatible().is_some_and(|c| {
-                    c.all()
-                        .any(|v| matches!(v, "riscv,plic0" | "sifive,plic-1.0.0"))
-                })
-            }) {
-                for region in reserved::node_regions(fdt, node)? {
-                    if region.overlaps(dram) {
-                        return Err(PendFail::Denied);
-                    }
-                    reserved.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
-                    reserved.push(region);
-                }
-            }
             let topology = Topology::discover(fdt).map_err(|_| PendFail::Denied)?;
             // A protected ECAM without protected BAR apertures is not exclusive
             // device custody: another Unit could still program the endpoint.
@@ -72,15 +62,12 @@ impl Plan {
             authorities: Vec::new(),
         };
         for node in fdt.all_nodes() {
-            let stem = node.name.split('@').next().unwrap_or(node.name);
-            if matches!(stem, "memory" | "clint") {
+            if !address::enabled(fdt, node)? || !address::ordinary(fdt, node)? {
                 continue;
             }
-            if let Some(regions) = node.reg() {
-                for region in regions {
-                    if let Some(size) = region.size {
-                        plan.offer(region.starting_address.addr(), size, &reserved)?;
-                    }
+            if address::property(node, "reg")?.is_some() {
+                for region in address::regions(fdt, node)? {
+                    plan.offer(region.base, region.size, &reserved)?;
                 }
             }
             if ranges::is_pci_host(node) {
@@ -111,8 +98,9 @@ impl Plan {
         if reserved.iter().any(|reserved| region.overlaps(*reserved)) {
             return Ok(());
         }
-        // Distinct root authorities must not silently compete for one ledger name.
-        if self.authorities.iter().any(|prior| prior.base == base) {
+        // Distinct roots cannot grant overlapping CPU pages, even under different
+        // names or after different bus translations.
+        if self.authorities.iter().any(|prior| prior.overlaps(region)) {
             return Err(PendFail::Denied);
         }
         self.authorities
