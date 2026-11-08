@@ -111,7 +111,7 @@ pub(crate) struct Cpu;
 
 // SAFETY: shootdown orders the preceding page-table writes, invalidates the
 // local cache and uses synchronous SBI RFENCE for all covering remote leases.
-unsafe impl crate::metal::mmu::fence::Shootdown for Cpu {
+unsafe impl crate::metal::generic::mmu::fence::Shootdown for Cpu {
     type Target = Asid;
     type Error = Deaf;
 

@@ -93,7 +93,7 @@ fn wait() -> usize {
                 .as_ticks()
                 .saturating_add(BEACON_TICK)
         } else {
-            crate::metal::clock::timer::DISARMED
+            crate::metal::generic::clock::DISARMED
         };
         deadline::arm(fallback);
         interrupt::enable_external();

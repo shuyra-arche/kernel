@@ -1,4 +1,4 @@
-use crate::pci::Config;
+use crate::metal::generic::pci::Config;
 use crate::pci::Endpoint;
 use crate::pci::Error;
 use std::sync::Arc;

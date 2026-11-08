@@ -4,7 +4,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use riscv::register::{scounteren, time};
 use sbi::{TimerCall, ecall::SArgs, fid::Timer};
 
-use super::timer::compare::{Comparator, Compare};
+use crate::metal::generic::clock::{Comparator, Compare};
 
 pub(crate) enum Backend {
     Sbi,

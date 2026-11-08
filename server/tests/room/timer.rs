@@ -1,7 +1,8 @@
-#[path = "../../src/metal/clock/timer/compare.rs"]
-mod compare;
+#[path = "../../src/metal/clock/timer/local.rs"]
+mod local;
 
-use compare::{Comparator, Compare, LocalTimer};
+use crate::metal::generic::clock::{Comparator, Compare};
+use local::LocalTimer;
 use std::cell::Cell;
 
 struct ScriptedComparator {

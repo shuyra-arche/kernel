@@ -40,7 +40,7 @@ impl Scripted {
 // SAFETY: this fixture never exposes any address to hardware. All access-ending
 // requirements are therefore vacuous. Scripted delayed/error/stale observations
 // exercise the production protocol but do not validate a real Hardware adapter.
-unsafe impl Hardware for Scripted {
+unsafe impl Hardware<crate::cell::PageId> for Scripted {
     fn publish(&mut self, projection: Projection) -> Result<(), HardwareError> {
         let mut trace = self.0.lock().unwrap();
         trace.calls.push(Call::Publish(projection));

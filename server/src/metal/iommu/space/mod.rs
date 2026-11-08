@@ -5,21 +5,21 @@ use super::{BatchId, BindingId, Error, Hardware};
 use binding::Binding;
 use phase::Event;
 
-use crate::basis::cell::page::Page;
+use super::Projection;
+use crate::basis::cell::page::{Page, PageId};
 use alloc::{sync::Arc, vec::Vec};
-pub(crate) use binding::Projection;
 use kernel_api::address::PAGE_SIZE;
 pub(crate) use phase::{Life, Phase};
 /// 记录留在 Kernel，与请求它们的 Unit 存活无关。&mut 是本协议的提交边界；
 /// 接入并发调用时，外层必须提供同一锁/执行器，不能复制硬件适配器绕过本对象。
-pub(crate) struct IoSpace<H: Hardware> {
+pub(crate) struct IoSpace<H: Hardware<PageId>> {
     hardware: Option<H>,
     bindings: Vec<Binding>,
     life: Life,
     cursor: usize,
 }
 
-impl<H: Hardware> IoSpace<H> {
+impl<H: Hardware<PageId>> IoSpace<H> {
     pub(crate) fn new(hardware: H) -> Self {
         Self {
             hardware: Some(hardware),
@@ -295,7 +295,7 @@ impl<H: Hardware> IoSpace<H> {
     }
 }
 
-impl<H: Hardware> Drop for IoSpace<H> {
+impl<H: Hardware<PageId>> Drop for IoSpace<H> {
     fn drop(&mut self) {
         if self
             .bindings

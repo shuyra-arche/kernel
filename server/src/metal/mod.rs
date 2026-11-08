@@ -2,6 +2,7 @@ pub(crate) mod allocator;
 pub(crate) mod board;
 pub(crate) mod clock;
 pub(crate) mod console;
+pub(crate) mod generic;
 pub(crate) mod image;
 pub(crate) mod interrupt;
 pub(crate) mod iommu;

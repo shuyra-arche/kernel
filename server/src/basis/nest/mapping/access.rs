@@ -5,7 +5,7 @@ use core::num::NonZeroUsize;
 use crate::basis::nest::NestError;
 use kernel_api::address::VirtAddr;
 
-use crate::metal::mmu::Attributes;
+use crate::metal::generic::mmu::Attributes;
 
 bitflags! {
     /// 映射权限的逻辑三位：只讲读写执行。

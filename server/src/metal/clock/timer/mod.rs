@@ -1,6 +1,6 @@
-pub(crate) mod compare;
+mod local;
 
-pub(crate) use compare::DISARMED;
+use crate::metal::generic::clock::Compare;
 
 #[cfg(debug_assertions)]
 use core::sync::atomic::AtomicU64;
@@ -9,7 +9,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::metal::{board, hart, layout::MAX_HART_SLOTS, sync::OnceLock};
 
 use super::riscv::Backend;
-use compare::{Compare, LocalTimer};
+use local::LocalTimer;
 
 // Each slot is initialized and accessed by its own Hart with interrupts masked.
 static TIMERS: [OnceLock<LocalTimer<Backend>>; MAX_HART_SLOTS] =

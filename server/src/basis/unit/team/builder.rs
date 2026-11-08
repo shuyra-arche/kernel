@@ -9,7 +9,7 @@ use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::team::TeamNode;
-use crate::metal::mmu::Attributes;
+use crate::metal::generic::mmu::Attributes;
 use crate::metal::sync::Level;
 use crate::metal::sync::OnceLock;
 use crate::metal::sync::SpinLock;

@@ -1,9 +1,10 @@
 //! PLIC owns only delivery. All queue evidence is read through the retained
 //! Engine; neither a claim nor completion of an IRQ settles a memory obligation.
 pub(crate) mod plan;
+use crate::metal::generic::interrupt::{Claim, Controller, External, Irq};
 use crate::metal::hart;
+use crate::metal::interrupt;
 use crate::metal::interrupt::plic::Plic;
-use crate::metal::interrupt::{self, Claim, Controller, External, Irq};
 use alloc::boxed::Box;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;

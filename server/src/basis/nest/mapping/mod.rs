@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Reservation;
-use crate::metal::mmu::Attributes;
+use crate::metal::generic::mmu::Attributes;
 use crate::metal::sync::Level;
 use crate::metal::sync::SpinLock;
 use kernel_api::address::PAGE_SIZE;

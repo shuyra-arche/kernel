@@ -1,9 +1,9 @@
+//! CPU translation and shootdown contracts.
+
+pub(crate) mod fence;
+
 use bitflags::bitflags;
 use kernel_api::address::{PhysAddr, VirtAddr};
-
-use crate::basis::nest::NestError;
-
-use super::identity::Asid;
 
 bitflags! {
     /// Meaning of a valid leaf. Validity and physical encoding belong to the backend.
@@ -20,9 +20,9 @@ bitflags! {
     }
 }
 
-pub(crate) struct Root {
+pub(crate) struct Root<I> {
     pub(crate) frame: PhysAddr,
-    pub(crate) asid: Asid,
+    pub(crate) asid: I,
 }
 
 /// CPU translation storage. Prepare can allocate tables or split a leaf while
@@ -34,22 +34,23 @@ pub(crate) struct Root {
 /// report actual valid leaves, and retain all detached tables for the caller.
 pub(crate) unsafe trait PageTable: Sized {
     type Geometry: Copy;
+    type Error;
 
-    fn root() -> Result<Self, NestError>;
+    fn root() -> Result<Self, Self::Error>;
     fn frame(&self) -> PhysAddr;
     fn prepare_geometry(
         &mut self,
         va: VirtAddr,
         size: usize,
         geo: Self::Geometry,
-    ) -> Result<(), NestError>;
+    ) -> Result<(), Self::Error>;
     fn prepare_range_geometry(
         &mut self,
         va: VirtAddr,
         pa: PhysAddr,
         size: usize,
         geo: Self::Geometry,
-    ) -> Result<(), NestError>;
+    ) -> Result<(), Self::Error>;
     fn map_range_prepared_geometry(
         &mut self,
         va: VirtAddr,
@@ -62,7 +63,7 @@ pub(crate) unsafe trait PageTable: Sized {
         &self,
         va: VirtAddr,
         geo: Self::Geometry,
-    ) -> Result<(PhysAddr, Attributes), NestError>;
+    ) -> Result<(PhysAddr, Attributes), Self::Error>;
     fn set_permissions_prepared_geometry(
         &mut self,
         va: VirtAddr,
@@ -70,7 +71,10 @@ pub(crate) unsafe trait PageTable: Sized {
         geo: Self::Geometry,
     );
     fn unmap_prepared_geometry(&mut self, va: VirtAddr, size: usize, geo: Self::Geometry);
-    fn reserve_retired_tables(&self, retired: &mut alloc::vec::Vec<Self>) -> Result<(), NestError>;
+    fn reserve_retired_tables(
+        &self,
+        retired: &mut alloc::vec::Vec<Self>,
+    ) -> Result<(), Self::Error>;
     fn reclaim_empty_tables(&mut self, retired: &mut alloc::vec::Vec<Self>);
 
     #[cfg(debug_assertions)]

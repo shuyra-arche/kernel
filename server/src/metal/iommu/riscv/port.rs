@@ -3,8 +3,9 @@ use alloc::boxed::Box;
 
 use super::adapter::Quiescence;
 use super::controllers::CONTROLLERS;
-use crate::basis::cell::page::Owner as PageOwner;
-use crate::metal::iommu::{Error, HardwareError, aperture::Port, runtime};
+use crate::basis::cell::page::{Owner as PageOwner, PageId};
+use crate::metal::generic::iommu::{HardwareError, Port};
+use crate::metal::iommu::{Backend, Error};
 use crate::metal::pci::{Ecam, Endpoint};
 
 pub(crate) struct PciPort {
@@ -40,8 +41,10 @@ unsafe impl Quiescence for PlatformCompletion {
 }
 // SAFETY: boot installs this only for the exact validated requester and BAR.
 // Controllers::bind consumes the trusted engine and keeps the route one-shot.
-unsafe impl Port for PciPort {
-    fn bind(&mut self) -> Result<runtime::Backend, Error> {
+unsafe impl Port<PageId> for PciPort {
+    type Error = Error;
+
+    fn bind(&mut self) -> Result<Backend, Error> {
         if self.used {
             return Err(Error::Closed);
         }

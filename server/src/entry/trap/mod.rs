@@ -9,6 +9,7 @@ use crate::basis::room::conductor::run::run;
 use crate::basis::room::deadline;
 use crate::basis::sign::redeem;
 use crate::basis::unit::task::TaskIdent;
+use crate::metal::generic::trap::TrapEvent;
 use crate::metal::hart;
 use crate::metal::interrupt::{self, ipi};
 use crate::metal::mmu::identity as asid;
@@ -18,10 +19,7 @@ use crate::putln;
 use alloc::sync::Arc;
 use kernel_api::address::VirtAddr as KVirt;
 
-use crate::metal::switcher::{
-    stack::TRAP_STACK_CANARY,
-    trap::{self, TrapEvent},
-};
+use crate::metal::switcher::{stack::TRAP_STACK_CANARY, trap};
 
 pub(crate) fn persist(frame: &TrapContext) -> bool {
     let Some(i) = ident() else {
@@ -57,7 +55,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
 
     crate::metal::stop::hush();
 
-    let event = TrapEvent::capture();
+    let event = trap::capture();
     trap::check_stack();
     assert_eq!(
         frame.trap_stack_corrupt, TRAP_STACK_CANARY,

@@ -1,5 +1,5 @@
+use crate::metal::generic::mmu::{Attributes, PageTable as TranslationTable};
 use crate::metal::mmu::riscv::Address;
-use crate::metal::mmu::{Attributes, PageTable as TranslationTable};
 use alloc::alloc::Allocator;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -343,6 +343,7 @@ impl TableNode {
 // selected leaves, and pruning transfers detached nodes to the caller.
 unsafe impl TranslationTable for TableNode {
     type Geometry = mode::Geo;
+    type Error = NestError;
 
     fn frame(&self) -> PhysAddr {
         PhysAddr::from_raw(Box::as_ptr(&self.page) as usize)

@@ -194,6 +194,9 @@ fn progress(engine: &mut Engine<mmio::Mmio>, target: Phase) {
 #[path = "../../../src/metal/board/tree/mod.rs"]
 pub(crate) mod description;
 mod metal {
+    pub(crate) mod generic {
+        pub(crate) use crate::iommu::contract as iommu;
+    }
     pub(crate) mod board { pub(crate) use crate::description as tree; }
     pub(crate) use crate::iommu;
 }
