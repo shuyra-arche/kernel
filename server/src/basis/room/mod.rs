@@ -9,8 +9,11 @@ pub(crate) mod conductor;
 pub(crate) mod counter;
 pub(crate) mod deadline;
 pub(crate) mod halt;
-mod handoff;
 pub(crate) mod identity;
 pub(crate) mod interrupt;
-pub(crate) use handoff::Handoff;
 pub mod scheduler;
+
+pub enum Handoff<T> {
+    Resume(T),
+    Switch(usize),
+}

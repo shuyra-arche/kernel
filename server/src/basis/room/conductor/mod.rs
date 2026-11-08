@@ -5,12 +5,10 @@
 //! 跨核的事不在这里：往哪放、怎么叫醒，都归 `scheduler`。
 
 mod badge;
-mod dispatch;
-mod fetch;
-mod inner;
 pub(crate) mod run;
 
 use alloc::sync::Arc;
+use core::time::Duration;
 
 use crate::basis::room::chain::Chain;
 use crate::basis::room::deadline;
@@ -25,10 +23,31 @@ use crate::machine::sync::Level;
 use crate::machine::sync::SpinLock;
 
 use self::badge::Badge;
-use self::inner::Inner;
 
 const QUANTUM_TICKS: u32 = 8;
 const READY_MS: u64 = 2;
+
+// 槽里被锁住的那部分：在座任务、饥饿队列、队列起等的时刻。
+
+pub(super) struct Inner {
+    pub(super) running: Option<Arc<Task>>,
+    pub(super) chain: Chain,
+    pub(super) ready_since: Option<u64>,
+}
+
+impl Inner {
+    /// 本核这一段能跑多久：队列空着按盲上限，等着了按起等时刻折算出余量。
+    pub(super) fn ready_ceiling(&self) -> u64 {
+        self.ready_since.map_or(deadline::blind_ceiling(), |since| {
+            let budget = clock::duration_to_ticks(Duration::from_millis(READY_MS));
+            budget.saturating_sub(clock::now().as_ticks().saturating_sub(since))
+        })
+    }
+
+    pub(super) fn starved_is_empty(&self) -> bool {
+        self.chain.is_empty()
+    }
+}
 
 #[repr(align(64))]
 pub(crate) struct Conductor {
@@ -183,7 +202,7 @@ impl Conductor {
         {
             let next = self.advance();
             drop(_commit);
-            return next.unwrap_or_else(fetch::fetch);
+            return next.unwrap_or_else(run::fetch);
         }
         let mut i = self.inner.lock();
         let Some(cur) = i.running.take() else {
@@ -199,7 +218,7 @@ impl Conductor {
         drop(i);
         let pa = next.and_then(|next| self.seat(next));
         drop(_commit);
-        pa.unwrap_or_else(fetch::fetch)
+        pa.unwrap_or_else(run::fetch)
     }
 
     fn advance(&self) -> Option<usize> {

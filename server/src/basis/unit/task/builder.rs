@@ -26,9 +26,9 @@ use kernel_api::address::VirtAddr;
 
 use super::MAX_ARGS;
 use super::Task;
-use super::ident::TaskIdent;
-use super::ident::TaskMemory;
-use super::ident::next_id;
+use super::identity::TaskIdent;
+use super::identity::TaskMemory;
+use super::identity::next_id;
 use super::prepared::PreparedTask;
 use super::state::TaskState;
 

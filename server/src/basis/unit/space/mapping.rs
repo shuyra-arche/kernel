@@ -2,6 +2,7 @@
 //! 来源与登记项共享帧无关绑定，真实页表与失效责任仍由 Nest 承担。
 
 use alloc::sync::Arc;
+use alloc::sync::Weak;
 use alloc::vec::Vec;
 
 use crate::basis::nest::Mapping;
@@ -12,10 +13,75 @@ use kernel_api::model::cell::MappingControl;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 
-use super::MappingBinding;
-use super::MappingControlRecord;
-use super::MappingEntry;
 use super::Space;
+
+// 目标空间与来源记录共享的 CPU 关系身份；不持帧，也不授予视图控制权。
+
+pub(crate) struct MappingBinding {
+    id: usize,
+    space: Weak<Space>,
+}
+
+impl MappingBinding {
+    pub(crate) fn new(id: usize, space: &Arc<Space>) -> Result<Arc<Self>, PendFail> {
+        Arc::try_new(Self {
+            id,
+            space: Arc::downgrade(space),
+        })
+        .map_err(|_| PendFail::OoM)
+    }
+
+    pub(crate) fn id(&self) -> usize {
+        self.id
+    }
+
+    pub(crate) fn space(&self) -> &Weak<Space> {
+        &self.space
+    }
+}
+
+pub(crate) struct MappingControlRecord {
+    scope: MappingControl,
+    control: SpinLock<(TaskId, Option<PendId>)>,
+}
+
+impl MappingControlRecord {
+    pub(crate) fn new(
+        controller: TaskId,
+        scope: MappingControl,
+        branch: Option<PendId>,
+    ) -> Result<Arc<Self>, PendFail> {
+        Arc::try_new(Self {
+            scope,
+            control: SpinLock::new((controller, branch)),
+        })
+        .map_err(|_| PendFail::OoM)
+    }
+
+    pub(crate) fn scope(&self) -> MappingControl {
+        self.scope
+    }
+
+    pub(crate) fn control(&self) -> (TaskId, Option<PendId>) {
+        *self.control.lock()
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct MappingEntry {
+    /// 与来源名下那条成员**同一个** `Arc`：控制身份与结清都只有这一处。
+    pub(crate) binding: Arc<MappingBinding>,
+    /// 资源映射没有 Memory 控制记录，不能凭关系号取得额外操作权。
+    pub(crate) control: Option<Arc<MappingControlRecord>>,
+    pub(crate) mapping: Option<Arc<Mapping>>,
+    pub(crate) source: Arc<SourceAuthorization>,
+}
+
+impl MappingEntry {
+    pub(crate) fn mapping(&self) -> Option<&Arc<Mapping>> {
+        self.mapping.as_ref()
+    }
+}
 
 pub(crate) struct MappingRegistry {
     entries: SpinLock<Vec<MappingEntry>>,

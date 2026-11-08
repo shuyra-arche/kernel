@@ -5,7 +5,7 @@ use crate::basis::unit::space::Space;
 use crate::machine::sync::OnceLock;
 
 use super::Team;
-use super::construct::make_team;
+use super::builder::make_team;
 
 pub(crate) static KERNEL_TEAM: OnceLock<Arc<Team>> = OnceLock::new();
 

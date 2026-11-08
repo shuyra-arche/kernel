@@ -1,5 +1,7 @@
+use crate::basis::unit::control::Request;
 use alloc::sync::Arc;
 use core::fmt;
+use kernel_api::abi::call::unit::UnitFail;
 
 use kernel_api::model::unit::ExitCause as TaskExitCause;
 
@@ -8,16 +10,206 @@ use crate::basis::sign::WakeKey;
 use crate::basis::unit::task::WaitCall;
 use crate::machine::hart::HartId;
 
-use axis::TaskAxis;
-
 use super::Task;
 
-mod axis;
-pub(crate) mod control;
+/// 任务状态机的轴：任一时刻只在一根轴上。`next` 是入链载荷，只挂在就绪 / 等待 /
+/// 躯壳三种轴上（饥饿链、等待链、躯壳链共用同一个槽）。
+pub enum TaskAxis {
+    OnHart {
+        hart: HartId,
+        ticks_left: u32,
+    },
+    Ready {
+        next: Option<Arc<Task>>,
+    },
+    Waiting {
+        key: WakeKey,
+        ticket: Ticket,
+        next: Option<Arc<Task>>,
+        wait: Option<WaitCall>,
+    },
+    Held,
+    Parked,
+    Doomed {
+        hart: Option<HartId>,
+        cause: TaskExitCause,
+        reason: usize,
+    },
+    Reaped {
+        cause: TaskExitCause,
+        reason: usize,
+        next: Option<Arc<Task>>,
+    },
+}
 
-use control::Control;
-use control::Phase;
-use control::Transition;
+impl TaskAxis {
+    /// 入链载荷槽：链只穿就绪 / 等待 / 躯壳三种轴，其余轴没有槽。
+    pub(crate) fn chain(&mut self) -> &mut Option<Arc<Task>> {
+        match self {
+            TaskAxis::Ready { next }
+            | TaskAxis::Waiting { next, .. }
+            | TaskAxis::Reaped { next, .. } => next,
+            other => unreachable!("链只穿就绪/等待/躯壳任务，实为 {other:?}"),
+        }
+    }
+
+    /// 入链载荷是否为空：没有槽的轴恒为空。
+    pub(crate) fn unlinked(&self) -> bool {
+        match self {
+            TaskAxis::Ready { next }
+            | TaskAxis::Waiting { next, .. }
+            | TaskAxis::Reaped { next, .. } => next.is_none(),
+            _ => true,
+        }
+    }
+}
+
+impl fmt::Debug for TaskAxis {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TaskAxis::OnHart { hart, ticks_left } => write!(
+                f,
+                "OnHart {{ hart: {}, ticks_left: {ticks_left} }}",
+                hart.get()
+            ),
+            TaskAxis::Ready { next } => write!(f, "Ready {{ next: {} }}", next.is_some()),
+            TaskAxis::Waiting {
+                key, ticket, next, ..
+            } => write!(
+                f,
+                "Waiting {{ key: {key:?}, ticket: {ticket:?}, next: {} }}",
+                next.is_some()
+            ),
+            TaskAxis::Held => write!(f, "Held"),
+            TaskAxis::Parked => write!(f, "Parked"),
+            TaskAxis::Doomed {
+                hart,
+                cause,
+                reason,
+            } => write!(
+                f,
+                "Doomed {{ hart: {}, cause: {cause:?}, reason: {reason:#x} }}",
+                hart.map_or(0, HartId::get)
+            ),
+            TaskAxis::Reaped { cause, reason, .. } => {
+                write!(f, "Reaped {{ cause: {cause:?}, reason: {reason:#x} }}")
+            }
+        }
+    }
+}
+
+// Pure execution-control decisions. Queue, hart and notification effects are
+// applied by Task while holding the work commit boundary.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Phase {
+    Held,
+    Ready,
+    Running,
+    Waiting,
+    Parked,
+    Terminating,
+    Finished,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Control {
+    pub phase: Phase,
+    pub paused: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Effect {
+    None,
+    Release,
+    Enqueue,
+    Dequeue,
+    Interrupt,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Transition {
+    pub before: Control,
+    pub after: Control,
+    pub effect: Effect,
+}
+
+impl Control {
+    /// Compute the next state and required external action without changing
+    /// either the Task or its execution environment.
+    pub(crate) fn transition(self, request: Request) -> Result<Transition, UnitFail> {
+        let (after, effect) = match request {
+            Request::Pause => match self.phase {
+                Phase::Terminating | Phase::Finished => return Err(UnitFail::Denied),
+                Phase::Running if self.paused => return Err(UnitFail::Busy),
+                _ if self.paused => (self, Effect::None),
+                Phase::Running => (
+                    Self {
+                        paused: true,
+                        ..self
+                    },
+                    Effect::Interrupt,
+                ),
+                Phase::Ready => (
+                    Self {
+                        paused: true,
+                        ..self
+                    },
+                    Effect::Dequeue,
+                ),
+                Phase::Parked => (
+                    Self {
+                        phase: Phase::Ready,
+                        paused: true,
+                    },
+                    Effect::None,
+                ),
+                Phase::Held | Phase::Waiting => (
+                    Self {
+                        paused: true,
+                        ..self
+                    },
+                    Effect::None,
+                ),
+            },
+            Request::Resume => {
+                if !self.paused {
+                    return Err(UnitFail::Busy);
+                }
+                match self.phase {
+                    Phase::Terminating | Phase::Finished => return Err(UnitFail::Denied),
+                    Phase::Waiting => (
+                        Self {
+                            paused: false,
+                            ..self
+                        },
+                        Effect::None,
+                    ),
+                    Phase::Held => (
+                        Self {
+                            paused: false,
+                            ..self
+                        },
+                        Effect::Release,
+                    ),
+                    Phase::Ready => (
+                        Self {
+                            paused: false,
+                            ..self
+                        },
+                        Effect::Enqueue,
+                    ),
+                    Phase::Running | Phase::Parked => return Err(UnitFail::Busy),
+                }
+            }
+        };
+        Ok(Transition {
+            before: self,
+            after,
+            effect,
+        })
+    }
+}
 
 /// 一个任务的状态机：一根轴（`TaskAxis`）加一条「暂停」标记。轴上的每个问题与
 /// 每次迁移都住在这里；`Task` 只负责加锁与轴外的效果（发射、停泊、唤醒）。

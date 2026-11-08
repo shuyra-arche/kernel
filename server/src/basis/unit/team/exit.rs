@@ -1,11 +1,23 @@
+use crate::machine::sync::Level;
+use crate::machine::sync::SpinLock;
 use kernel_api::abi::call::unit::UnitFail;
 use kernel_api::model::identity::TaskId;
 
-use crate::machine::sync::Level;
-use crate::machine::sync::SpinLock;
+use crate::basis::unit::task::Task;
 
-use super::mode::Mode;
-use super::state::State;
+use super::life::TeamLife;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Dormant,
+    Armed { owner: TaskId },
+    Tripped,
+}
+
+struct State {
+    mode: Mode,
+    deaths: usize,
+}
 
 pub(crate) struct ExitPolicy {
     state: SpinLock<State>,
@@ -58,4 +70,18 @@ impl ExitPolicy {
             Mode::Tripped => true,
         }
     }
+}
+
+pub(crate) fn member_dying(task: &Task, reason: usize) {
+    let mut node = Some(&*task.ident.team.life);
+    while let Some(team) = node {
+        if team.exit.trip() {
+            crate::entry::report::halt::protected_stop(reason);
+        }
+        node = team.parent.as_deref();
+    }
+}
+
+pub(crate) fn arm(team: &TeamLife, owner: TaskId) -> Result<(), UnitFail> {
+    team.exit.arm(owner)
 }
