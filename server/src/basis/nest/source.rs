@@ -22,9 +22,15 @@ use super::super::flat::FlatRange;
 use super::Mapping;
 use super::NestError;
 
-mod record;
+// 关联里的一条：这段来源窗口被这个关系压着。
+//
+// 一条一次分配、随关系退场就释放：整张关联没有全局容量高水位。
 
-use record::Record;
+struct Record {
+    source_id: usize,
+    mapping: Weak<Mapping>,
+    next: Option<alloc::boxed::Box<Record>>,
+}
 
 /// 全核唯一的一份关联：单链头，每条一个关系。
 struct SourceMappings {

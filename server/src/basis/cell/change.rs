@@ -34,6 +34,6 @@ pub(crate) fn find(page: &Arc<Page>) -> Option<Arc<Change>> {
 pub(crate) fn maintain() {
     if super::page::change::take_completion() {
         LIVE.lock().retain(|change| change.strong_count() != 0);
-        crate::basis::nest::source_mappings::wake_all();
+        crate::basis::nest::source::wake_all();
     }
 }

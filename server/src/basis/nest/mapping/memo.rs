@@ -1,5 +1,5 @@
 //! A stable logical position. Hardware publication lives in Publication separately.
-use super::NestError;
+use super::super::NestError;
 use crate::basis::cell::page::{Freeze, Page};
 use alloc::sync::Arc;
 pub(crate) struct Memo {

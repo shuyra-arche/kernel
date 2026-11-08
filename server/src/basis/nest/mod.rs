@@ -2,6 +2,7 @@
 //!
 //! Flat 继续独立管理来源与物化；这里不保存来源页槽。
 
+use crate::basis::cell::page::{Change, Page};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -29,16 +30,12 @@ use kernel_api::address::VirtAddr;
 mod cleanup;
 mod error;
 mod fault;
-mod fault_outcome;
 mod index;
 mod kind;
-mod memo;
 pub(crate) mod publication;
 mod reservation;
-pub(crate) mod source_mappings;
+pub(crate) mod source;
 mod state;
-mod supply;
-mod unpublish;
 
 use crate::machine::mmu::riscv::identity;
 
@@ -47,8 +44,7 @@ use crate::machine::mmu::riscv::synchronize;
 use crate::machine::mmu::riscv::table;
 
 pub use error::NestError;
-pub use fault::FaultKind;
-pub use fault_outcome::FaultOutcome;
+pub use fault::{FaultKind, FaultOutcome};
 pub use identity::Asid;
 pub use kind::SpaceKind;
 pub use mapping::Access;
@@ -467,7 +463,7 @@ impl Nest {
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
         // 首条 PTE 之前登记来源↔关系：撤页要按来源枚举全部关系，不能只看用户注册表。
-        source_mappings::register(&mapping.state.lock().source, mapping)?;
+        source::register(&mapping.state.lock().source, mapping)?;
         for run in mapping.state.lock().runs(start, &published) {
             let run = run?;
             state
@@ -638,6 +634,197 @@ impl Nest {
         drop(state);
         drop(lease);
         self.finish_invalidation()
+    }
+
+    pub(crate) fn memo_page(
+        &self,
+        mapping: &Arc<Mapping>,
+        page: usize,
+    ) -> Result<Option<Arc<Page>>, NestError> {
+        let state = self.ready_state()?;
+        self.ensure_owned(mapping, &state)?;
+        let inner = mapping.state.lock();
+        if let Some(memo) = inner.memo(page) {
+            return Ok(memo.page.clone());
+        }
+        Ok(inner
+            .published
+            .iter()
+            .find(|(index, _)| *index == page)
+            .map(|(_, publication)| publication.cell().clone()))
+    }
+
+    pub(crate) fn push_page(
+        self: &Arc<Self>,
+        mapping: &Arc<Mapping>,
+        address: VirtAddr,
+        page: &Arc<Page>,
+        change: &Change,
+    ) -> Result<(), NestError> {
+        self.finish_invalidation()?;
+        let mut state = self.ready_state()?;
+        self.ensure_owned(mapping, &state)?;
+        let mut inner = mapping.state.lock();
+        let index = mapping.page_index(address);
+        if inner.publishes(index) {
+            return Err(NestError::AlreadyMapped);
+        }
+        let range = inner
+            .active
+            .iter()
+            .find(|range| range.contains(address.as_usize()))
+            .ok_or(NestError::NoRegion)?;
+        let flags = mapping.leaf_flags(range.current);
+        let mut memo =
+            Publication::prepare(page, range.ceiling.contains(Access::WRITE), Some(change))?;
+        inner
+            .published
+            .try_reserve(1)
+            .map_err(|_| NestError::OutOfMemory)?;
+        state
+            .pending_mappings
+            .try_reserve(1)
+            .map_err(|_| NestError::OutOfMemory)?;
+        let physical = kernel_api::address::PhysAddr::from_raw(page.physical_address());
+        state
+            .root
+            .prepare_range_geometry(address, physical, PAGE_SIZE, self.geometry)?;
+        memo.publish();
+        state
+            .root
+            .map_range_prepared_geometry(address, physical, PAGE_SIZE, flags, self.geometry);
+        inner.publish(index, memo);
+        state.pending_mappings.push(mapping.clone());
+        state.mark_dirty(mapping.is_global());
+        drop(inner);
+        drop(state);
+        self.finish_invalidation()
+    }
+
+    pub(crate) fn associate(
+        &self,
+        mapping: &Arc<Mapping>,
+        index: usize,
+        expected: u64,
+        page: Arc<Page>,
+    ) -> Result<(), NestError> {
+        let state = self.ready_state()?;
+        self.ensure_owned(mapping, &state)?;
+        let mut inner = mapping.state.lock();
+        let address = mapping
+            .initial_start()
+            .get()
+            .checked_add(index.checked_mul(PAGE_SIZE).ok_or(NestError::NoRegion)?)
+            .ok_or(NestError::NoRegion)?;
+        if inner.range_at(address).is_none() {
+            return Err(NestError::NoRegion);
+        }
+        if inner.publishes(index) {
+            return Err(NestError::AlreadyMapped);
+        }
+        let memo = inner.memo_mut(index)?;
+        if memo.flight.is_some() {
+            return Err(NestError::Busy);
+        }
+        memo.associate(expected, page)
+    }
+    pub(crate) fn inspect_memo(
+        &self,
+        mapping: &Arc<Mapping>,
+        index: usize,
+    ) -> Result<kernel_api::model::cell::CellInfo, NestError> {
+        use kernel_api::model::cell::{CellInfo, CellState};
+        let inner = mapping.state.lock();
+        let address = mapping
+            .initial_start()
+            .get()
+            .checked_add(index.checked_mul(PAGE_SIZE).ok_or(NestError::NoRegion)?)
+            .ok_or(NestError::NoRegion)?;
+        if inner.range_at(address).is_none() {
+            return Err(NestError::NoRegion);
+        }
+        let memo = inner.memo(index);
+        let publication = inner
+            .published
+            .iter()
+            .find(|(p, _)| *p == index)
+            .map(|(_, p)| p);
+        let page = memo
+            .and_then(|m| m.page.as_ref())
+            .or_else(|| publication.map(|p| p.cell()));
+        let state = memo
+            .and_then(|m| m.flight)
+            .unwrap_or(if publication.is_some() {
+                CellState::Published
+            } else if page.is_some() {
+                CellState::Ready
+            } else {
+                CellState::Vacant
+            });
+        Ok(CellInfo {
+            generation: memo.map_or(1, |m| m.generation),
+            state,
+            page: page.map_or(0, |p| p.id().get() as u64),
+            frozen: page.is_some_and(|p| p.frozen()),
+            external: page
+                .is_some_and(|p| p.exposure() == crate::basis::cell::page::Exposure::External),
+            address: VirtAddr::new(address),
+            fault_cause: 0,
+            fault_address: 0,
+        })
+    }
+    /// Start a qualified logical transition; hardware operations hold no Mapping lock.
+    pub(crate) fn transition_memo(
+        &self,
+        mapping: &Arc<Mapping>,
+        index: usize,
+        expected: u64,
+        freeze: Arc<Change>,
+        publishing: bool,
+    ) -> Result<Arc<Page>, NestError> {
+        use kernel_api::model::cell::CellState;
+        let state = self.ready_state()?;
+        self.ensure_owned(mapping, &state)?;
+        let mut inner = mapping.state.lock();
+        let published = inner
+            .published
+            .iter()
+            .find(|(p, _)| *p == index)
+            .map(|(_, p)| p.cell().clone());
+        let memo = inner.memo_mut(index)?;
+        if memo.generation != expected || memo.flight.is_some() {
+            return Err(NestError::Busy);
+        }
+        let page = memo.page.clone().or(published).ok_or(NestError::Missing)?;
+        if !Arc::ptr_eq(&page, freeze.page()) {
+            return Err(NestError::Busy);
+        }
+        memo.generation = memo
+            .generation
+            .checked_add(1)
+            .ok_or(NestError::OutOfMemory)?;
+        memo.page = Some(page.clone());
+        memo.freeze = Some(crate::basis::cell::page::Freeze::new(freeze));
+        memo.flight = Some(if publishing {
+            CellState::Publishing
+        } else {
+            CellState::Retracting
+        });
+        Ok(page)
+    }
+    /// A failed pre-publication attempt remains Ready and keeps its freeze.
+    pub(crate) fn finish_memo(&self, mapping: &Arc<Mapping>, index: usize) {
+        if self.has_pending_invalidation() {
+            return;
+        }
+        let mut inner = mapping.state.lock();
+        let published = inner.publishes(index);
+        if let Ok(memo) = inner.memo_mut(index) {
+            memo.flight = None;
+            if published {
+                memo.freeze = None;
+            }
+        }
     }
 
     /// 让 `Flat` 物化该窗口的活动页，再在本关系发布。
@@ -950,6 +1137,100 @@ impl Nest {
                 occupancy.reclaim(ticket);
             }
         }
+        Ok(())
+    }
+
+    /// 撤下 `mapping` 在 `address` 上的 4KiB 映射，把它那一页的承载交给退休。
+    ///
+    /// - 内核空间的物理使用不由撤下本关系结清；全局条目不受 ASID 定向失效覆盖。
+    ///   两类都不参与移交，当场 `Pinned`。
+    /// - 先结清本 Nest 之前那次失效：旧 TLB 没确认就不再撤新的。
+    /// - 在 `Nest → Mapping` 同一个临界区里认这一页：只有真有一条发布记录才算这条
+    ///   关系握着它；没有记录（活动洞或本来就没发布）就没有可撤的映射，当场
+    ///   成功返回。真握着的话，它必须正是 `expected`——不是就在动任何 PTE 之前
+    ///   当场断言，不先撤再发现。
+    /// - 容量与大叶拆分都在撤下之前备齐，之后不再有可失败步骤。
+    /// - 承载只在 shootdown 成功之后随退休一起放掉；失败时这一页的退休责任
+    ///   留在本 Nest，由 `retry_invalidation` 继续。
+    pub(crate) fn unpublish_page(
+        self: &Arc<Self>,
+        mapping: &Arc<Mapping>,
+        address: VirtAddr,
+        expected: &Arc<Page>,
+    ) -> Result<(), NestError> {
+        if self.asid().is_kernel() || mapping.is_global() {
+            return Err(NestError::Pinned);
+        }
+        assert!(
+            address.offset() == 0,
+            "unpublish_page takes a page-aligned address"
+        );
+        assert!(
+            mapping
+                .reservation
+                .nest()
+                .is_some_and(|owner| core::ptr::eq(Arc::as_ptr(&owner), Arc::as_ptr(self))),
+            "unpublish_page requires the mapping's own live nest"
+        );
+        self.finish_invalidation()?;
+
+        let mut state = self.state.lock();
+        if !state.invalidation.is_clean() {
+            return Err(NestError::Shootdown);
+        }
+        let mut inner = mapping.state.lock();
+        let page = mapping.page_index(address);
+        let Some(at) = inner.published.iter().position(|(held, _)| *held == page) else {
+            return Ok(());
+        };
+        if state.phase.is_closed() {
+            return Err(NestError::Pinned);
+        }
+        // 核对物理 Page 实例，不能只比较 PA 或逻辑槽；检查先于任何 PTE 撤销。
+        if !Arc::ptr_eq(inner.published[at].1.cell(), expected) {
+            return Err(NestError::Busy);
+        }
+        debug_assert!(
+            inner.covers(address.as_usize(), address.as_usize()),
+            "a published mapping lies inside a live range"
+        );
+        // 提前备容量与几何：这一页可能只是大叶里的一格，先拆成 4KiB 再撤。
+        state
+            .retired_cells
+            .try_reserve(1)
+            .map_err(|_| NestError::OutOfMemory)?;
+        state
+            .pending_mappings
+            .try_reserve(1)
+            .map_err(|_| NestError::OutOfMemory)?;
+        {
+            let NestState {
+                root,
+                retired_tables,
+                ..
+            } = &mut *state;
+            root.prepare_geometry(address, PAGE_SIZE, self.geometry)?;
+            root.reserve_retired_tables(retired_tables)?;
+        }
+
+        // 过了这里只剩下已经定好的状态转移：PTE、发布记录与承载一起转入退休责任。
+        {
+            let NestState {
+                root,
+                retired_tables,
+                ..
+            } = &mut *state;
+            root.unmap_prepared_geometry(address, PAGE_SIZE, self.geometry);
+            root.reclaim_empty_tables(retired_tables);
+        }
+        state.pending_mappings.push(mapping.clone());
+        let (_, cell) = inner.published.remove(at);
+        state.retired_cells.push(cell.retire());
+        drop(inner);
+        state.mark_dirty(false);
+        drop(state);
+        // 退休的承载只在这次确认之后才随 `finish_invalidation` 放掉。
+        self.finish_invalidation()?;
         Ok(())
     }
 
@@ -1283,9 +1564,7 @@ impl Nest {
     fn is_closed(&self) -> bool {
         self.state.lock().phase.is_closed()
     }
-}
 
-impl Nest {
     /// 翻译里只取物理地址的那一面：权限位不外露。
     pub(crate) fn physical_at(&self, address: VirtAddr) -> Option<PhysAddr> {
         self.translate(address).map(|(physical, _)| physical)

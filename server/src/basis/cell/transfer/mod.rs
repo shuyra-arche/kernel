@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 use crate::basis::flat::FlatRange;
 use crate::basis::flat::transaction::Transaction;
-use crate::basis::nest::source_mappings;
+use crate::basis::nest::source;
 use kernel_api::address::PageIndex;
 use kernel_api::address::PageOffset;
 
@@ -75,7 +75,7 @@ impl Transfer {
             self.target_page,
             change,
             || {
-                source_mappings::candidates_over(&self.source, &self.target)
+                source::candidates_over(&self.source, &self.target)
                     .map_err(|_| TransferError::OutOfMemory)
             },
         );
@@ -91,7 +91,7 @@ impl Transfer {
         };
         // 占槽之后、不持任何 core 锁：候选是完整上界，这里按关系自己的窗口收回
         // 真正动过的那几条。
-        let affected = source_mappings::affected_over(
+        let affected = source::affected_over(
             candidates,
             &self.source,
             self.source_page,

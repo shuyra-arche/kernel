@@ -1,8 +1,7 @@
 mod access;
 mod active;
-mod protection;
+mod memo;
 mod range;
-mod run;
 mod runs;
 mod state;
 
@@ -22,12 +21,12 @@ use kernel_api::address::VirtAddr;
 
 pub use access::Access;
 pub use active::ActiveRange;
-pub(crate) use protection::Protection;
 pub(crate) use range::MappingRange;
+pub(crate) use state::Protection;
 
 use state::MappingState;
 
-use super::source_mappings;
+use super::source;
 
 /// Flat 来源在一个 Nest 中的地址投影：占用、逻辑权限与已发布页的保留记录。
 ///
@@ -55,7 +54,7 @@ impl core::fmt::Debug for Mapping {
 impl Drop for Mapping {
     fn drop(&mut self) {
         // 关系退场：来源↔关系的关联里不留死项；最后一条走了就把容量也交回。
-        source_mappings::forget();
+        source::forget();
     }
 }
 
@@ -224,15 +223,7 @@ impl Mapping {
             .iter()
             .any(|range| range.overlaps(lo, hi))
     }
-}
 
-pub(crate) struct MappingOperation<'a>(&'a core::sync::atomic::AtomicBool);
-impl Drop for MappingOperation<'_> {
-    fn drop(&mut self) {
-        self.0.store(false, core::sync::atomic::Ordering::Release);
-    }
-}
-impl Mapping {
     pub(crate) fn operation(&self) -> Option<MappingOperation<'_>> {
         self.operation
             .compare_exchange(
@@ -243,5 +234,12 @@ impl Mapping {
             )
             .ok()
             .map(|_| MappingOperation(&self.operation))
+    }
+}
+
+pub(crate) struct MappingOperation<'a>(&'a core::sync::atomic::AtomicBool);
+impl Drop for MappingOperation<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, core::sync::atomic::Ordering::Release);
     }
 }
