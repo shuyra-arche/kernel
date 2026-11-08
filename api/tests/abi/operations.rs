@@ -251,3 +251,21 @@ fn data_authority_uses_one_bit_and_retired_signal_slots_are_invalid() {
         assert!(PendInfo::from_words(bad).is_none());
     }
 }
+
+#[test]
+fn clock_scale_never_rounds_a_deadline_down_or_wraps() {
+    use core::num::NonZeroU64;
+    use kernel_api::model::clock::ClockSource;
+
+    let clock = ClockSource::new(13, NonZeroU64::new(3_000_000).unwrap());
+    assert_eq!(clock.nanos(12), 0);
+    assert_eq!(clock.deadline(334), 15);
+    assert!(clock.nanos(14) < 334);
+    assert!(clock.nanos(15) >= 334);
+    assert_eq!(clock.deadline(0), 13);
+    let edge = ClockSource::new(u64::MAX - 1, NonZeroU64::new(u64::MAX).unwrap());
+    assert_eq!(edge.duration_ticks(u128::MAX), u64::MAX);
+    assert_eq!(edge.deadline(u64::MAX), u64::MAX);
+    let slow = ClockSource::new(0, NonZeroU64::MIN);
+    assert_eq!(slow.nanos(u64::MAX), u64::MAX);
+}

@@ -2,6 +2,7 @@
 //! These values carry no allocation, cleanup, scheduling or execution policy.
 
 pub mod cell;
+pub mod clock;
 pub mod exit;
 pub mod identity;
 pub mod modifiable;

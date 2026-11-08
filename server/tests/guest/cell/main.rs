@@ -222,6 +222,8 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     pend::run();
     sign::run();
     room::run();
+    #[cfg(feature = "clock")]
+    room::counter::run();
     let _ = writeln!(Console, "PASS room-kernel atomic-wait=1 wake=1 deadline=1");
     let _ = writeln!(
         Console,

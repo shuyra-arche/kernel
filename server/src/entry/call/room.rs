@@ -21,6 +21,14 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             );
             Outcome::Resume
         }
+        RoomCall::ClockInfo => {
+            let Some(source) = crate::machine::clock::user_source() else {
+                return Outcome::fail(frame, RoomFail::Denied);
+            };
+            frame.gpr.set_x(Gprs::A1, source.boot_tick() as usize);
+            frame.gpr.set_x(Gprs::A2, source.hertz().get() as usize);
+            Outcome::Resume
+        }
         RoomCall::SleepUntil { at } => {
             drop(ident);
             match park_until::<RoomFail>(at) {

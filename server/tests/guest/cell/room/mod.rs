@@ -1,3 +1,6 @@
+#[cfg(feature = "clock")]
+pub(super) mod counter;
+
 use core::sync::atomic::{AtomicU32, Ordering};
 use kernel_api::{
     address::VirtAddr,

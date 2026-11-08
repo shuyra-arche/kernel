@@ -61,7 +61,7 @@ fn run(mode: &str) {
     }
     std::fs::create_dir_all(&evidence).unwrap();
     let mut guest_build = Command::new("cargo");
-    if io || context {
+    if io || context || clock {
         guest_build.args(["+nightly", "build", "--features", mode]);
     } else {
         guest_build.args(["+nightly", "build"]);
@@ -95,9 +95,6 @@ fn run(mode: &str) {
         ("debug", None, &[1, 4][..]),
         ("release", Some("--release"), &[4][..]),
     ] {
-        if clock && profile == "release" {
-            continue; // The comparator counters are debug-only.
-        }
         let mut build = Command::new("cargo");
         build.current_dir(&workspace).args([
             "+nightly",
@@ -143,11 +140,18 @@ fn run(mode: &str) {
             .chain((profile == "debug" && !io).then_some((4, "-split-memory")))
             .chain((profile == "debug" && mode != "io-exit").then_some((4, "-sparse-harts")));
         let cases: Vec<_> = if clock {
-            vec![
+            let mut cases = vec![
                 (4, "-sbi", "rv64,sstc=true"),
                 (4, "-sstc", "rv64,sstc=true"),
-                (4, "-no-sstc", "rv64,sstc=false"),
-            ]
+            ];
+            if profile == "debug" {
+                cases.extend([
+                    (4, "-fallback", "rv64,sstc=true"),
+                    (4, "-no-sstc", "rv64,sstc=false"),
+                    (4, "-sstc-trace", "rv64,sstc=true"),
+                ]);
+            }
+            cases
         } else if mixed {
             vec![(4, "-mixed-v", "rv64,v=true,vlen=128,elen=64")]
         } else if vector {
@@ -187,21 +191,26 @@ fn run(mode: &str) {
                 command.args(["-device", "edu,addr=1.0"]);
             }
             let trace_path = evidence.join(format!("{name}-migration.log"));
-            let symbols = if context && harts == 4 {
+            let symbols = if suffix == "-sstc-trace" {
+                super::context::trace_checkpoints(
+                    &mut command,
+                    &elf,
+                    &trace_path,
+                    &["clock_migration_checkpoint"],
+                )
+            } else if context && harts == 4 {
                 super::context::trace(&mut command, &elf, &trace_path, vector || mixed, mixed)
             } else {
                 Vec::new()
             };
-            if clock && suffix != "-sbi" {
+            if clock && suffix != "-fallback" {
                 let dtb = evidence.join(format!("{name}.dtb"));
-                super::clock::fixture(
-                    &qemu,
-                    &dtb,
-                    &kernel,
-                    cpu,
-                    harts,
-                    &["shuyra,supervisor-stimecmp"],
-                );
+                let permissions: &[_] = if suffix == "-sbi" {
+                    &["shuyra,user-time"]
+                } else {
+                    &["shuyra,user-time", "shuyra,supervisor-stimecmp"]
+                };
+                super::clock::fixture(&qemu, &dtb, &kernel, cpu, harts, permissions);
                 command.arg("-dtb").arg(dtb);
             }
             if suffix == "-absent-v" {
@@ -233,7 +242,15 @@ fn run(mode: &str) {
             let log = String::from_utf8_lossy(&output.stdout);
             assert!(output.status.success(), "{name}: {log}");
             if clock {
-                super::clock::verify(&log, suffix == "-sstc");
+                if profile == "debug" {
+                    super::clock::verify(&log, matches!(suffix, "-sstc" | "-sstc-trace"));
+                }
+                let fast = usize::from(suffix != "-fallback");
+                let expected = format!("PASS clock monotonic=1 fast={fast}");
+                assert!(log.contains(&expected), "{name}: {log}");
+                if !symbols.is_empty() {
+                    super::context::verify(&trace_path, &symbols, false);
+                }
             }
             if suffix == "-sparse-harts" {
                 assert!(

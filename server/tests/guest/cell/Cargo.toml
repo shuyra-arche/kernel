@@ -21,6 +21,7 @@ kernel-client = { path = "../../../../client" }
 panic = "abort"
 
 [features]
+clock = []
 context = []
 vector = ["context"]
 migration = ["vector"]

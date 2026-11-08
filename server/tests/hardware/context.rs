@@ -8,9 +8,6 @@ pub(super) fn trace(
     vector: bool,
     mixed: bool,
 ) -> Vec<(String, usize)> {
-    let symbols = Command::new("nm").arg(elf).output().expect("nm");
-    assert!(symbols.status.success());
-    let symbols = String::from_utf8(symbols.stdout).unwrap();
     let mut names = vec!["context_float_one", "context_float_two"];
     if vector {
         names.push("context_vector_one");
@@ -18,8 +15,21 @@ pub(super) fn trace(
             names.push("context_vector_two");
         }
     }
+    trace_checkpoints(command, elf, output, &names)
+}
+
+pub(super) fn trace_checkpoints(
+    command: &mut Command,
+    elf: &Path,
+    output: &Path,
+    names: &[&str],
+) -> Vec<(String, usize)> {
+    let symbols = Command::new("nm").arg(elf).output().expect("nm");
+    assert!(symbols.status.success());
+    let symbols = String::from_utf8(symbols.stdout).unwrap();
     let found: Vec<_> = names
-        .into_iter()
+        .iter()
+        .copied()
         .map(|name| {
             let line = symbols
                 .lines()

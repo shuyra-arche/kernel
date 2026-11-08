@@ -1,6 +1,6 @@
 //! Scheduling and monotonic time. All deadlines are absolute nanoseconds since boot.
 use crate::address::VirtAddr;
-use crate::model::wait::Wait;
+use crate::model::{clock::ClockSource, wait::Wait};
 pub type RoomResult<T> = Result<T, erra::Error<RoomFail>>;
 #[kernel_api_macros::envcall(class = 0, call = RoomCall)]
 pub mod operations {
@@ -42,5 +42,20 @@ pub mod operations {
     #[operation(slot = 4, output = u64, infallible)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Clock;
+
+    /// One-time discovery of a directly readable counter on every admitted Hart.
+    /// Denied means callers should read the existing Clock operation instead.
+    #[operation(slot = 5, output = super::ClockSource, error = RoomFail, reply = 3)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct ClockInfo;
 }
 pub use operations::{RoomCall, RoomFail};
+
+impl crate::abi::reply::FromTriple for ClockSource {
+    fn from_triple(_status: usize, boot_tick: usize, hertz: usize) -> Self {
+        Self::new(
+            boot_tick as u64,
+            core::num::NonZeroU64::new(hertz as u64).expect("zero clock frequency"),
+        )
+    }
+}

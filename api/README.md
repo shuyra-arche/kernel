@@ -77,7 +77,7 @@ capsules are rejected before launch. The resource ledger is version 3.
 | Share View | Create, Delete, Open, Shut |
 | Sign | Create, Delete, Listen, Trigger, Consume, Attach, Detach, Accord, Revoke, Return |
 | Unit | Create, Delete, Resume, Freeze, Stop, Exit, Finish, Inspect, Accord, Revoke, Return |
-| Room | Yield, SleepUntil, WaitValue, WakeValue, Clock |
+| Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo |
 | Debug | Put, Get |
 
 ### Cell contracts
@@ -212,6 +212,7 @@ Return operate on independent administrative authorities with revocable ancestry
 | Room SleepUntil | Executing Task; absolute monotonic ns | Resumes at/after the deadline; earlier wakes do not extend it |
 | Room WaitValue / WakeValue | Aligned accessible AtomicU32 in same address space | Atomic compare/enqueue or wake current waiters; no stored notification, recheck predicate |
 | Room Clock | Executing Task | Full-width monotonic ns observation |
+| Room ClockInfo | Direct counter authorized on all admitted Harts | Success returns status zero, boot tick and frequency in a0–a2. Fall back to Clock if unavailable. |
 | Debug Put / Get | Valid bounded caller buffer | Bounded diagnostic I/O, reports transferred length |
 
 Failures do not imply rollback of accepted asynchronous retirement. Query the
