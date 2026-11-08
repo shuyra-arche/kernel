@@ -14,15 +14,9 @@ mod edu;
 pub(crate) mod iommu;
 #[path = "../../../src/machine/iommu/riscv/mmio.rs"]
 mod mmio;
-#[path = "../../../src/entry/boot/devices/plan.rs"]
+#[path = "../../../src/entry/boot/devices/plan/mod.rs"]
 mod plan;
 mod pool;
-#[path = "../../../src/entry/boot/devices/ranges.rs"]
-mod ranges;
-#[path = "../../../src/entry/boot/devices/region.rs"]
-mod region;
-#[path = "../../../src/entry/boot/devices/reserved.rs"]
-mod reserved;
 
 mod basis {
     pub(crate) mod cell {

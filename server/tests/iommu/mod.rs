@@ -33,5 +33,5 @@ mod tree;
 mod pci_tests;
 // This host harness imports only the portable subset of this production module.
 #[allow(dead_code)]
-#[path = "../../src/machine/iommu/riscv/pci.rs"]
+#[path = "../../src/machine/iommu/riscv/pci/endpoint.rs"]
 mod pci;

@@ -1,12 +1,8 @@
 pub(crate) mod devices;
 pub(crate) mod error;
 mod init;
-pub(crate) mod initrd;
-mod iommu;
-mod pci;
 pub(crate) mod resources;
-mod stack;
-pub(crate) mod unit;
+mod space;
 
 pub use error::BootError;
 pub use error::MapOperation;
@@ -22,9 +18,7 @@ use riscv::register::satp;
 
 use crate::basis::flat::BorrowedRegion;
 use crate::basis::flat::Flat;
-use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
-use crate::basis::nest::ActiveRange;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
@@ -39,7 +33,6 @@ use crate::machine::image::ROOT_STACK_CANARY;
 use crate::machine::image::root_stack_base;
 use crate::machine::mmu::riscv::identity;
 use crate::machine::mmu::riscv::mode;
-use crate::machine::mmu::riscv::table::PteFlags;
 use crate::machine::switcher::context::TrapContext;
 use crate::machine::switcher::stack::arm_hart;
 use crate::machine::switcher::stack::boot_stack;
@@ -115,7 +108,7 @@ pub(crate) fn register_runtime_hooks() {
     crate::basis::unit::lifecycle::hook(EXIT_HOOKS);
 
     const SHUTDOWN_HOOKS: &[fn()] = &[
-        crate::entry::boot::iommu::shutdown,
+        devices::shutdown_iommu,
         crate::entry::report::shutdown::report,
         crate::basis::room::scheduler::rip,
         crate::machine::allocator::block::flush,
@@ -130,7 +123,7 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
     let blob: &'static [u8] =
         unsafe { ::core::slice::from_raw_parts(region.base as *const u8, region.size) };
     let capsule =
-        crate::entry::boot::initrd::entry_image(blob).ok_or(BootError::InvalidEntryImage {
+        kernel_api::boot::initrd::entry_image(blob).ok_or(BootError::InvalidEntryImage {
             base: region.base,
             size: region.size,
         })?;
@@ -270,27 +263,6 @@ fn map_borrowed(nest: &Arc<Nest>, physical: PhysAddr, size: usize) -> Result<Vir
     let reservation = nest.reserve(Placement::lowest(RegionId::Normal, size, PAGE_SIZE)?)?;
     let mapping = nest.attach(reservation, source, Access::READ, Access::READ)?;
     Ok(mapping.initial_start())
-}
-
-/// 启动静态挂载：按 `Exact` 在 `start` 登记真实占用，再把已备好的来源挂上去。
-///
-/// 活动形状在登记占用之前备齐；`Static` 区只有重叠检查、没有动态窗口，
-/// 所以这里不走窗口校验。
-fn attach_exact(
-    nest: &Arc<Nest>,
-    start: VirtAddr,
-    source: FlatRange,
-    access: Access,
-    attrs: PteFlags,
-) -> Result<(), NestError> {
-    let size = source
-        .page_count()
-        .checked_bytes()
-        .ok_or(NestError::NotAligned)?;
-    let active = ActiveRange::new(start, size, access, access)?;
-    let reservation = nest.reserve(Placement::exact(RegionId::Static, start, size)?)?;
-    nest.attach_shaped(reservation, source, attrs, &[active])?;
-    Ok(())
 }
 
 pub(crate) fn boot_harts() -> Result<(), BootError> {

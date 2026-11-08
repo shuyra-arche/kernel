@@ -2,9 +2,9 @@ use core::ptr::NonNull;
 
 use alloc::vec::Vec;
 
+use super::facts::{MAX_RESERVED, MachineFacts};
 use crate::machine::allocator::InitError;
 use crate::machine::allocator::Link;
-use crate::machine::allocator::MachineFacts;
 use kernel_api::model::cell::PAGE_SIZE;
 
 static STALE_RM: ::core::sync::atomic::AtomicUsize = ::core::sync::atomic::AtomicUsize::new(0);
@@ -102,8 +102,8 @@ impl FrameInner {
         base: usize,
         edge: usize,
         max_frame: usize,
-    ) -> [Option<(usize, usize)>; crate::machine::allocator::MAX_RESERVED] {
-        let mut out = [None; crate::machine::allocator::MAX_RESERVED];
+    ) -> [Option<(usize, usize)>; MAX_RESERVED] {
+        let mut out = [None; MAX_RESERVED];
         let mut n = 0;
         for r in facts.reserved.iter().flatten() {
             let (hs, he) = (r.base, r.base + r.size);

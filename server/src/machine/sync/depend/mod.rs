@@ -17,10 +17,6 @@ use crate::machine::hart;
 mod error;
 #[cfg(debug_assertions)]
 mod held;
-#[cfg(debug_assertions)]
-mod held_cell;
-#[cfg(debug_assertions)]
-mod held_set;
 mod level;
 #[cfg(debug_assertions)]
 pub(crate) mod verdict;
@@ -35,9 +31,7 @@ pub(crate) use verdict::strict;
 pub use error::DepInitError;
 
 #[cfg(debug_assertions)]
-use held_cell::HeldCell;
-#[cfg(debug_assertions)]
-use held_set::HeldSet;
+use held::{HeldCell, HeldSet};
 
 #[cfg(debug_assertions)]
 pub(crate) fn report(what: &'static str, lock: usize, caller: usize) -> ! {

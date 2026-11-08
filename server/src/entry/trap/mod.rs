@@ -1,5 +1,5 @@
-pub(crate) mod fault;
-pub(crate) mod fault_wait;
+mod fault;
+pub(crate) mod resources;
 
 use alloc::sync::Arc;
 use riscv::interrupt::Exception;
@@ -12,14 +12,10 @@ use riscv::register::sip;
 use riscv::register::stval;
 
 use crate::basis::nest::FaultOutcome;
-use crate::basis::nest::Nest;
-use crate::basis::room::Handoff;
 use crate::basis::room::conductor::identity::Identity;
 use crate::basis::room::conductor::identity::ident;
 use crate::basis::room::conductor::run::run;
 use crate::basis::room::deadline;
-use crate::basis::sign;
-use crate::basis::sign::WakeKey;
 use crate::basis::sign::redeem;
 use crate::basis::unit::space::Space;
 use crate::basis::unit::task::TaskIdent;
@@ -31,7 +27,6 @@ use crate::machine::switcher::context::TrapContext;
 use crate::putln;
 use kernel_api::address::VirtAddr as KVirt;
 
-pub(crate) mod resources;
 use crate::machine::switcher::stack::TRAP_STACK_CANARY;
 use crate::machine::switcher::stack::trap_stack_base;
 #[cfg(debug_assertions)]
@@ -237,7 +232,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                             fault.pc
                         );
                         drop(nest);
-                        return page_fault_killed(ident, tid, fault);
+                        return fault::killed(ident, tid, fault);
                     }
                 }
             }
@@ -247,10 +242,10 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                 // 绝不与真实资源失败混同。
                 FaultOutcome::Materialize => resume(frame as *mut TrapContext),
                 // 承载不在（墓碑或在途）：按这段关系整段等一次，醒后重试原指令。
-                FaultOutcome::Wait(mapping) => page_fault_wait(ident, fault, nest, mapping, frame),
+                FaultOutcome::Wait(mapping) => fault::wait(ident, fault, nest, mapping, frame),
                 FaultOutcome::Invalid => {
                     drop(nest);
-                    page_fault_killed(ident, tid, fault)
+                    fault::killed(ident, tid, fault)
                 }
             }
         }
@@ -289,64 +284,6 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
 fn resume(next: *mut TrapContext) -> *mut TrapContext {
     asid::occupy(Asid::from_raw(unsafe { (*next).user_satp.asid() }));
     next
-}
-
-/// 按这段关系整段等一次承载；登记与切换都不带着调用者的强引用。
-fn page_fault_wait(
-    ident: Option<Identity>,
-    fault: fault::PageFault,
-    nest: Arc<Nest>,
-    mapping: usize,
-    frame: &mut TrapContext,
-) -> *mut TrapContext {
-    // 登记失败要终止任务时，身份已经交出去了：先把这一 id 标量留下来。
-    let tid = ident.as_ref().map_or(0, Identity::task_id);
-    let (space, life) = {
-        let running = ident
-            .as_ref()
-            .and_then(Identity::live)
-            .expect("user page fault without running task");
-        (running.team.space.clone(), running.team.space.life())
-    };
-    let key = WakeKey::Mapping {
-        space: nest.asid(),
-        mapping,
-    };
-    let waiting = fault_wait::FaultWait::new(nest, fault.addr, fault.kind, mapping);
-    // 先放掉空间与身份，再进提交边界的 wait_until；等待捕获自己在其内部释放。
-    drop(space);
-    drop(ident);
-    match sign::wait_until::<kernel_api::abi::call::room::RoomFail, _>(
-        key,
-        life,
-        waiting,
-        fault_wait::FaultWait::ready,
-    ) {
-        Ok(Handoff::Resume(())) => resume(frame as *mut TrapContext),
-        Ok(Handoff::Switch(pa)) => pa as *mut TrapContext,
-        Err(resource) => {
-            log::error!("page fault wait could not be registered: {resource:?}");
-            page_fault_killed(None, tid, fault)
-        }
-    }
-}
-
-/// 按原样处置：记录真杀事件并终止这个任务。
-fn page_fault_killed(
-    ident: Option<Identity>,
-    tid: usize,
-    fault: fault::PageFault,
-) -> *mut TrapContext {
-    let cause_bits = scause::read().bits();
-    let stval_bits = stval::read();
-    log::error!(
-        "user page fault killed: {:?} at {:?} pc={:#x}",
-        fault.kind,
-        fault.addr,
-        fault.pc
-    );
-    putln!("user fault killed: tid={tid} cause={cause_bits} stval={stval_bits:#x}");
-    kill_fault(ident)
 }
 
 fn quit(ident: Option<Identity>, reason: usize) -> *mut TrapContext {

@@ -23,7 +23,7 @@ use crate::entry::report::backtrace;
 use crate::entry::report::backtrace::Backtrace;
 use crate::entry::report::backtrace::StackReader;
 use crate::entry::report::backtrace::WalkConfig;
-use crate::entry::report::report::Report;
+use crate::entry::report::record::Report;
 use crate::machine::switcher::context::Gprs;
 use crate::machine::switcher::context::TrapContext;
 use kernel_api::address::PAGE_SIZE;
@@ -363,7 +363,7 @@ pub fn dump(r: &mut Report) {
 #[macro_export]
 macro_rules! crash_scene {
     () => {{
-        let mut __r = $crate::entry::report::report::Report::default();
+        let mut __r = $crate::entry::report::record::Report::default();
         $crate::entry::report::scene::dump(&mut __r);
         let __sealed = __r.seal();
         let mut __sink = $crate::machine::console::Sink;

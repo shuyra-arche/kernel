@@ -10,7 +10,7 @@ use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::view::ViewKind;
 
-use super::gate;
+use super::authority;
 use super::outcome::Outcome;
 use super::outcome::answer;
 use super::outcome::ret_err;
@@ -35,7 +35,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: CloneCall, ident: Arc<Task
         CloneCall::Delete { token } => {
             answer(
                 frame,
-                super::seal::seal_resource(token, ViewKind::Clone).map_err(fail),
+                authority::seal_resource(token, ViewKind::Clone).map_err(fail),
             );
             Outcome::Resume
         }
@@ -88,8 +88,8 @@ fn pull(frame: &mut TrapContext, token: PendId, max_len: usize) -> Outcome {
 
 fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
     let task = current().running_task().ok_or(CloneFail::Denied)?;
-    let observed = gate::accede(token, Need::Read).map_err(fail)?;
-    gate::usable(&observed).map_err(fail)?;
+    let observed = authority::accede(token, Need::Read).map_err(fail)?;
+    authority::usable(&observed).map_err(fail)?;
     let meta = observed.view().clone_view().ok_or(CloneFail::Denied)?;
     let mut reading = view::clone::read(&meta)?;
     let len = reading.bytes.len();
@@ -146,8 +146,8 @@ fn with_clone<T>(
     need: Need,
     operation: impl FnOnce(&Arc<view::clone::CloneView>) -> Result<T, CloneFail>,
 ) -> Result<T, CloneFail> {
-    let pend = gate::accede(token, need).map_err(fail)?;
-    gate::usable(&pend).map_err(fail)?;
+    let pend = authority::accede(token, need).map_err(fail)?;
+    authority::usable(&pend).map_err(fail)?;
     let meta = pend.view().clone_view().ok_or(CloneFail::Denied)?;
     operation(&meta)
 }

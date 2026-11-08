@@ -1,9 +1,11 @@
+mod iommu;
+mod pci;
 mod plan;
-mod ranges;
-mod region;
-mod reserved;
 
-pub(crate) use reserved::discover as iommu_regions;
+use plan::reserved::discover as iommu_regions;
+
+pub(super) use iommu::{init as init_iommu, shutdown as shutdown_iommu};
+pub(super) use pci::init as init_pci;
 
 use crate::basis::nest::Access;
 use crate::basis::pend;
@@ -30,7 +32,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
         grant_region(registry, *region)?;
     }
     // Export each validated BAR through the ordinary View/Pend boot ledger.
-    let apertures = crate::machine::iommu::riscv::aperture::APERTURES.lock();
+    let apertures = crate::machine::iommu::riscv::pci::aperture::APERTURES.lock();
     for aperture in apertures.iter() {
         let source = aperture.source.clone();
         let size = source
@@ -66,7 +68,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     Ok(())
 }
 
-fn grant_region(registry: &mut Registry, region: region::Region) -> Result<(), PendFail> {
+fn grant_region(registry: &mut Registry, region: plan::region::Region) -> Result<(), PendFail> {
     let (base, size) = (region.base, region.size);
     let meta = view::share::region(base, size, TaskId::new(0))?;
     let source = meta.source();

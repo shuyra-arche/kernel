@@ -1,3 +1,7 @@
+mod facts;
+
+use facts::MachineFacts;
+
 use crate::machine::allocator::InitResult;
 use alloc::boxed::Box;
 use core::ptr::NonNull;
@@ -89,9 +93,9 @@ unsafe impl Allocator for FrameAllocator {
     }
 }
 
-fn machine_facts() -> super::MachineFacts {
+fn machine_facts() -> MachineFacts {
     let m = crate::machine::board::info();
-    super::MachineFacts {
+    MachineFacts {
         reserved: m
             .reserved
             .map(|r| r.map(|r| super::Region::new(r.base, r.size))),

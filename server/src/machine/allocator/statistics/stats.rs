@@ -5,21 +5,21 @@ use alloc::boxed::Box;
 
 use crate::machine::sync::OnceLock;
 
-#[cfg(debug_assertions)]
-use super::block_kinds::BLOCK_KIND_SHIFT;
-#[cfg(debug_assertions)]
-use super::block_kinds::block_kind_at;
-#[cfg(debug_assertions)]
-use super::block_kinds::note_block_kind;
-use super::error::Error;
-#[cfg(debug_assertions)]
-use super::frame_kinds::frame_kind_at;
-#[cfg(debug_assertions)]
-use super::frame_kinds::note_frame_kind;
+use super::Error;
 #[cfg(debug_assertions)]
 use super::kind::Kind;
 #[cfg(debug_assertions)]
-use super::kinds::Kinds;
+use super::kind::Kinds;
+#[cfg(debug_assertions)]
+use super::kind::block::BLOCK_KIND_SHIFT;
+#[cfg(debug_assertions)]
+use super::kind::block::block_kind_at;
+#[cfg(debug_assertions)]
+use super::kind::block::note_block_kind;
+#[cfg(debug_assertions)]
+use super::kind::frame::frame_kind_at;
+#[cfg(debug_assertions)]
+use super::kind::frame::note_frame_kind;
 #[cfg(debug_assertions)]
 use super::mark::current;
 

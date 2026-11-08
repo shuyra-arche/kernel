@@ -1,24 +1,22 @@
 //! Memory identities, ranges and placement descriptors.
 
 mod allocation;
-mod mapping_control;
-mod mapping_id;
-mod page_owner;
+mod mapping;
+mod object;
+mod owner;
 mod placement;
-mod placement_at;
-mod placement_error;
-mod reference_range;
-mod slot_id;
+mod range;
+mod slot;
 
 pub use allocation::Allocation;
-pub use mapping_control::MappingControl;
-pub use mapping_id::MappingId;
-pub use page_owner::PageOwner;
-pub use placement::Placement;
-pub use placement_at::PlacementAt;
-pub use placement_error::PlacementError;
-pub use reference_range::ReferenceRange;
-pub use slot_id::SlotId;
+pub use mapping::{MappingControl, MappingId, MappingTarget};
+pub use object::{
+    CellCreate, CellHandoff, CellInfo, CellObject, CellPosition, CellSource, CellState, CreatedCell,
+};
+pub use owner::PageOwner;
+pub use placement::{Placement, PlacementAt, PlacementError};
+pub use range::ReferenceRange;
+pub use slot::SlotId;
 
 /// 环境内存调用与装载格式使用的页粒度。
 pub use crate::address::PAGE_SIZE;
@@ -36,11 +34,3 @@ pub(crate) fn pages(offset: usize, count: usize) -> Option<()> {
     end.checked_mul(PAGE_SIZE)?;
     Some(())
 }
-
-mod mapping_target;
-pub use mapping_target::MappingTarget;
-
-mod object;
-pub use object::{
-    CellCreate, CellHandoff, CellInfo, CellObject, CellPosition, CellSource, CellState, CreatedCell,
-};
