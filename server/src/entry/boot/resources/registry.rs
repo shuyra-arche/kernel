@@ -18,7 +18,7 @@ impl Registry {
         // destroy them or inject synthetic hardware/fault notifications.
         use kernel_api::model::pend::{CloneRights, Operations, ShareRights};
         let mut limits = root.authority().limits();
-        limits.operations = match root.view().kind() {
+        limits.operations = match root.target().kind().expect("boot View resource") {
             kernel_api::model::view::ViewKind::Clone => {
                 Operations::Clone(CloneRights::PULL | CloneRights::PEEK)
             }
@@ -124,7 +124,7 @@ impl Frozen {
         for ((name, root), registration) in self.entries.into_iter().zip(registrations) {
             ledger.push(Entry::new(
                 name,
-                root.view().kind().into(),
+                root.target().kind().expect("validated View").into(),
                 root.token().get(),
             ));
             registration.publish();
@@ -161,7 +161,10 @@ fn valid(name: Name, pend_entry: &PendEntry) -> bool {
     let mut bytes = [0u8; kernel_api::boot::ledger::NAME_LEN];
     name.store(&mut bytes);
     Name::fetch(&bytes) == Some(name)
-        && name.kind() == pend_entry.view().kind().into()
+        && pend_entry
+            .target()
+            .kind()
+            .is_some_and(|kind| name.kind() == kind.into())
         && pend_entry.alive()
         && pend_entry.sire().is_none()
         && pend_entry.authority().modifiable().is_some()

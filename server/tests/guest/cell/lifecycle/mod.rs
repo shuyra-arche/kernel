@@ -8,7 +8,7 @@ use kernel_api::{
         wait::Wait,
     },
 };
-use kernel_client::call::{room, sign, unit};
+use kernel_client::call::{pend, room, sign, unit};
 pub(super) fn spawn(entry: usize) -> TaskId {
     let bytes = UnitCreate::Task {
         team: None,
@@ -35,7 +35,7 @@ pub(super) fn self_id() -> TaskId {
     id
 }
 pub(super) fn wait_task(id: TaskId) -> bool {
-    let token = sign::create().unwrap();
+    let token = sign::create(crate::license::get()).unwrap();
     let source = SignSource::Join {
         target: UnitTarget::Task(id),
     };
@@ -44,7 +44,7 @@ pub(super) fn wait_task(id: TaskId) -> bool {
     assert!(matches!(reply, SignReply::Source { source: found, fail: None } if found == source));
     sign::detach(token, source).unwrap();
     sign::delete(token).unwrap();
-    sign::return_(token).unwrap();
+    pend::return_(token).unwrap();
     inspect(UnitQuery::Target(UnitTarget::Task(id))).state == UnitState::Exited
 }
 pub(super) fn result(id: TaskId) -> (usize, usize) {

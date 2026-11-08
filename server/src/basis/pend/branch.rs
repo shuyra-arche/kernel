@@ -27,7 +27,7 @@ fn effective_window(
     ) {
         return Ok(pend_entry.authority().window());
     }
-    let meta = pend_entry.view().share_view().ok_or(PendFail::Denied)?;
+    let meta = pend_entry.target().share_view().ok_or(PendFail::Denied)?;
     let outer = pend_entry
         .authority()
         .window()
@@ -43,6 +43,7 @@ pub(crate) fn accord(
     limits: Limits,
     mark: Mark,
     requested: super::Window,
+    permit: Option<(PendId, kernel_api::model::pend::Operations)>,
 ) -> Result<usize, PendFail> {
     let subset = limits.modifiable;
     let target = dst.upgrade().ok_or(PendFail::Denied)?;
@@ -53,7 +54,7 @@ pub(crate) fn accord(
     if !observed.authority().limits().permits_child(limits) {
         return Err(PendFail::Denied);
     }
-    let share_view = observed.view().share_view();
+    let share_view = observed.target().share_view();
     let _operation = if let Some(meta) = &share_view {
         let operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
         Some(operation)
@@ -65,6 +66,11 @@ pub(crate) fn accord(
             let _commit = crate::basis::commit();
             if !super::live(caller) || !super::live(&target) {
                 return Err(PendFail::Dead);
+            }
+            if let Some((token, operation)) = permit {
+                if !super::locate(caller, token).is_some_and(|entry| entry.permits(operation)) {
+                    return Err(PendFail::Denied);
+                }
             }
             let pend_entry = super::locate(caller, src).ok_or(PendFail::Denied)?;
             if !pend_entry.alive() {
@@ -145,7 +151,7 @@ pub(crate) fn accord(
 pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<(), PendFail> {
     let range = limits.range;
     let observed = super::locate(task, token).ok_or(PendFail::Denied)?;
-    let share = observed.view().share_view();
+    let share = observed.target().share_view();
     let _operation = share
         .as_ref()
         .map(|meta| ShareOperation::acquire(meta).ok_or(PendFail::Busy))

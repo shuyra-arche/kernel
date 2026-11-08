@@ -205,7 +205,6 @@ pub(crate) fn hook(hooks: &'static [Hook]) {
 fn hooked(task: &Arc<Task>) {
     {
         let _commit = crate::basis::commit();
-        task.signs.clear(task.ident.id);
         task.administration.clear();
     }
     if let Some(hooks) = HOOKS.get() {

@@ -6,7 +6,7 @@ use kernel_api::address::VirtAddr;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::pend::PendInfo;
-use kernel_api::model::pend::{AccordRequest, AccordTarget, NarrowRequest, Target, ViewTarget};
+use kernel_api::model::pend::{AccordRequest, AccordTarget, NarrowRequest};
 
 use crate::basis::nest::Access;
 use crate::basis::pend;
@@ -54,6 +54,7 @@ fn accord(frame: &mut TrapContext, ident: &TaskIdent, request: VirtAddr) {
             request.limits,
             request.mark,
             pend::Window::Parent(request.limits.range),
+            None,
         )
     })();
     answer(frame, r);
@@ -84,7 +85,7 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
 
 fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendEntry) -> PendInfo {
     let mut limits = pend.authority().limits();
-    if let Some(meta) = pend.view().share_view() {
+    if let Some(meta) = pend.target().share_view() {
         let (offset, count) = pend.authority().window().unwrap_or((
             kernel_api::address::PageOffset::ZERO,
             meta.source().page_count(),
@@ -94,23 +95,19 @@ fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendEntry) -> 
             count: count.get(),
         };
     }
-    let id = kernel_api::model::view::ViewId::new(pend.view().id());
-    let target = Target::View(match pend.view().kind() {
-        kernel_api::model::view::ViewKind::Clone => ViewTarget::Clone(id),
-        kernel_api::model::view::ViewKind::Share => ViewTarget::Share(id),
-    });
+    let target = pend.target().identity();
     PendInfo {
         token: pend.token(),
         target,
         limits,
-        owner: pend.view().owner(),
+        owner: pend.target().owner(),
         lender: if pend.sire().is_some() {
             pend::vestor(task, pend.token()).unwrap_or(TaskId::new(0))
         } else {
             TaskId::new(0)
         },
         mark: pend.mark(),
-        status: if pend.view().alive() {
+        status: if pend.target().alive() {
             pend.authority().status()
         } else {
             kernel_api::model::pend::PendStatus::Dead

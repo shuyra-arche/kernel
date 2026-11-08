@@ -3,6 +3,7 @@
 #[cfg(feature = "context")]
 mod context;
 mod external;
+mod license;
 mod lifecycle;
 mod pend;
 mod room;
@@ -45,7 +46,7 @@ fn ptr(bytes: &[u8]) -> VirtAddr {
 }
 fn allocate(count: usize) -> SlotId {
     let spec = CellCreate::Slot(Allocation::new(count * 4096, 4096).unwrap()).to_bytes();
-    let made = cell::create(ptr(&spec)).unwrap();
+    let made = cell::create(crate::license::get(), ptr(&spec)).unwrap();
     let CreatedCell::Slot(slot) = made else {
         panic!("expected Slot")
     };
@@ -66,13 +67,14 @@ fn reserve(reference: SlotId, count: usize) -> (MappingId, VirtAddr) {
         },
     }
     .to_bytes();
-    let made = cell::create(ptr(&spec)).unwrap_or_else(|e| {
-        panic!(
-            "Memo create source={} count={} {e:?}",
-            reference.get(),
-            count
-        )
-    });
+    let made =
+        cell::create(kernel_api::model::identity::PendId::NONE, ptr(&spec)).unwrap_or_else(|e| {
+            panic!(
+                "Memo create source={} count={} {e:?}",
+                reference.get(),
+                count
+            )
+        });
     let CreatedCell::Memo { mapping, address } = made else {
         panic!("expected Memo")
     };
@@ -155,6 +157,7 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     } else if cfg!(feature = "io") {
         external::run(args, count);
     }
+    license::run();
     let _ = writeln!(Console, "START cell-kernel");
     let a = allocate(2);
     let b = allocate(2);

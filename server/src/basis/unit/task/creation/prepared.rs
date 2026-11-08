@@ -114,7 +114,6 @@ impl PreparedTask {
                     life: self.life.clone(),
                     state: self.state.clone(),
                     pend: Table::new(),
-                    signs: crate::basis::sign::Table::new(),
                     administration: crate::basis::unit::control::Table::new(),
                     heir: SpinLock::new(Vec::new()),
                     controls: SpinLock::new(Vec::new()),

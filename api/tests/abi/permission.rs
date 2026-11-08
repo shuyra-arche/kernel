@@ -8,6 +8,7 @@ use kernel_api::model::{
         PendInfo, PendRange, PendStatus, PortRights, ShareRights, Target, ViewTarget,
     },
     port::PortId,
+    sign::{SignId, SignRights},
     view::ViewId,
 };
 
@@ -23,6 +24,10 @@ fn grant(operations: Operations) -> Limits {
 #[test]
 fn each_operation_family_requires_its_own_target() {
     let kinds = [
+        (
+            Target::Sign(SignId::new(7)),
+            Operations::Sign(SignRights::LISTEN),
+        ),
         (Target::None, Operations::None(CreationRights::FLAT)),
         (
             Target::View(ViewTarget::Clone(ViewId::new(7))),
@@ -123,4 +128,28 @@ fn info_rejects_a_valid_permission_for_the_wrong_target() {
         ..info
     };
     assert_eq!(PendInfo::from_bytes(&forged.to_bytes()), None);
+}
+
+#[test]
+fn sign_permissions_are_control_rights_not_mutable_memory() {
+    let listen = grant(Operations::Sign(SignRights::LISTEN));
+    for invalid in [
+        Limits {
+            modifiable: Modifiable::Yes,
+            ..listen
+        },
+        Limits {
+            range: PendRange::Pages {
+                offset: 0,
+                count: 1,
+            },
+            ..listen
+        },
+    ] {
+        assert_eq!(Limits::of(invalid.words()), None);
+    }
+    let all = grant(Operations::Sign(SignRights::all()));
+    assert!(all.permits_child(listen));
+    assert!(!listen.permits_child(grant(Operations::Sign(SignRights::CONSUME))));
+    assert!(!listen.permits_child(grant(Operations::Sign(SignRights::DELETE))));
 }

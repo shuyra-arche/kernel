@@ -1,5 +1,6 @@
 //! Authorization identity is separate from the target object's identity.
 use super::Operations;
+use crate::model::sign::SignId;
 use crate::model::{flat::FlatId, nest::NestId, port::PortId, view::ViewId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -14,6 +15,7 @@ pub enum Target {
     Flat(FlatId),
     Nest(NestId),
     Port(PortId),
+    Sign(SignId),
 }
 impl Target {
     pub const fn words(self) -> [usize; 2] {
@@ -24,6 +26,7 @@ impl Target {
             Self::Flat(id) => [3, id.get()],
             Self::Nest(id) => [4, id.get()],
             Self::Port(id) => [5, id.get()],
+            Self::Sign(id) => [6, id.get()],
         }
     }
     pub fn of([kind, id]: [usize; 2]) -> Option<Self> {
@@ -39,6 +42,7 @@ impl Target {
             3 => Self::Flat(FlatId::new(id)?),
             4 => Self::Nest(NestId::new(id)?),
             5 => Self::Port(PortId::new(id)?),
+            6 => Self::Sign(SignId::new(id)),
             _ => return None,
         })
     }

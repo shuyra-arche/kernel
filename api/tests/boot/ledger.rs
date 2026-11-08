@@ -30,7 +30,7 @@ fn ledger(entries: &[Entry]) -> Vec<u8> {
 fn ledger_keeps_header_entry_offsets_and_reserved_bytes() {
     let bytes = ledger(&[entry()]);
     let mut expected = vec![0u8; 40];
-    expected[0] = 3; // version
+    expected[0] = 4; // version
     expected[4] = 1; // count
     expected[8] = 2; // Name::Page class, Dtb item 0
     expected[32] = 19; // token, after name/kind/seven reserved bytes
@@ -127,4 +127,27 @@ fn ledger_writer_distinguishes_used_length_from_buffer_capacity() {
     }
     assert_eq!(store_entries(&mut out, &[]), Some(Header::LEN));
     assert_eq!(Entries::new(&out[..Header::LEN]).unwrap().iter().count(), 0);
+}
+
+#[test]
+fn boot_creation_license_and_sign_are_pend_targets() {
+    use kernel_api::boot::ledger::{Call, Trap};
+    let values = [
+        Entry::new(Name::Call(Call::Create), ResourceKind::None, 31),
+        Entry::new(Name::Trap(Trap::SupervisorExternal), ResourceKind::Sign, 32),
+    ];
+    let bytes = ledger(&values);
+    assert_eq!(
+        Entries::new(&bytes).unwrap().iter().collect::<Vec<_>>(),
+        values
+    );
+    let mut stale = bytes.clone();
+    stale[..4].copy_from_slice(&3u32.to_le_bytes());
+    assert!(Entries::new(&stale).is_none());
+    let wrong = ledger(&[Entry::new(
+        Name::Call(Call::Create),
+        ResourceKind::Control,
+        31,
+    )]);
+    assert!(Entries::new(&wrong).is_none());
 }

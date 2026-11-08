@@ -56,7 +56,7 @@ fn target(actor: &Task, token: PendId, write: bool) -> Result<Arc<pend::PendEntr
     {
         return Err(CellFail::Denied);
     }
-    let view = entry.view().share_view().ok_or(CellFail::Denied)?;
+    let view = entry.target().share_view().ok_or(CellFail::Denied)?;
     if let Some((offset, count)) = entry.authority().window() {
         if offset.get() != 0 || count != view.source().page_count() {
             return Err(CellFail::Denied);
@@ -71,7 +71,11 @@ fn authorized<'a>(
     id: MappingId,
 ) -> Result<&'a mut Registration, CellFail> {
     let entry = target(actor, token, false)?;
-    let range = entry.view().share_view().ok_or(CellFail::Denied)?.source();
+    let range = entry
+        .target()
+        .share_view()
+        .ok_or(CellFail::Denied)?
+        .source();
     records
         .iter_mut()
         .find(|p| p.span.identity() == id.get() && p.source.same_range(&range))
@@ -93,7 +97,11 @@ pub(crate) fn create(
     {
         return Err(CellFail::Denied);
     }
-    let source = target.view().share_view().ok_or(CellFail::Denied)?.source();
+    let source = target
+        .target()
+        .share_view()
+        .ok_or(CellFail::Denied)?
+        .source();
     let access = if modifiable {
         Access::READ | Access::WRITE
     } else {
@@ -192,7 +200,7 @@ pub(crate) fn publish(
     expected: u64,
 ) -> Result<(), CellFail> {
     let target = target(actor, token, true)?;
-    let target_view = target.view().share_view().ok_or(CellFail::Denied)?;
+    let target_view = target.target().share_view().ok_or(CellFail::Denied)?;
     let _operation =
         crate::basis::view::share::ShareOperation::acquire(&target_view).ok_or(CellFail::Busy)?;
     let mut records = NESTS.lock();

@@ -26,16 +26,33 @@ pub(crate) fn grant_controls(target: &Task) -> Result<[Entry; CONTROL_ENTRIES], 
 }
 
 pub(crate) const SIGN_ENTRIES: usize = 1;
+pub(crate) const CALL_ENTRIES: usize = 1;
+pub(crate) fn grant_calls(target: &Task) -> Result<Entry, PendFail> {
+    use crate::basis::pend::{self, PendEntry, Target};
+    use kernel_api::model::{identity::Mark, modifiable::Modifiable};
+    let entry = PendEntry::try_new(
+        Target::None {
+            owner: target.ident.id,
+        },
+        Mark::NONE,
+        Modifiable::No,
+        None,
+    )?;
+    let token = entry.token();
+    pend::insert(target, entry)?;
+    Ok(Entry::new(
+        Name::Call(Call::Create),
+        ResourceKind::None,
+        token.get(),
+    ))
+}
 pub(crate) fn grant_sign(target: &Task) -> Result<Entry, PendFail> {
     let _commit = crate::basis::commit();
-    let id = target
-        .signs
-        .install(
-            interrupt::get().supervisor_external.clone(),
-            SignRights::LISTEN,
-            false,
-        )
-        .map_err(|_| PendFail::OutOfMemory)?;
+    let id = crate::basis::sign::endpoint::grant(
+        target,
+        interrupt::get().supervisor_external.clone(),
+        SignRights::LISTEN,
+    )?;
     Ok(Entry::new(
         Name::Trap(Trap::SupervisorExternal),
         ResourceKind::Sign,

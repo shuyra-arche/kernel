@@ -53,3 +53,9 @@ execute the named native-trap wrappers; RV64 compilation checks those wrappers.
 The Kernel guest suite also executes real traps for Cell, Pend, Sign, Unit and Room. See the API
 [compatibility notes](../api/README.md#source-migration-and-abi-compatibility)
 before updating a consumer's Kernel pin.
+
+ABI v3 creation calls take an explicit None-target Pend license. Sign handles are
+now PendIds; use Pend Accord/Narrow/Revoke/Return with Operations::Sign instead
+of the removed Sign authorization calls. SignId is descriptive only. Boot Ledger
+v4 provides Name::Call(Call::Create); managers must explicitly delegate creation
+permissions to new Tasks. Rebuild all users and capsule ABI declarations together.

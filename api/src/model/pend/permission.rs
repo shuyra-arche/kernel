@@ -2,6 +2,7 @@
 //! Distribution is independent of data mutability; narrowing cannot change a target's kind.
 use super::PendRange;
 use crate::model::modifiable::Modifiable;
+use crate::model::sign::SignRights;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -15,6 +16,9 @@ bitflags::bitflags! {
     pub struct CreationRights: u32 {
         const FLAT = 1;
         const NEST = 2;
+        const CLONE = 4;
+        const SHARE = 8;
+        const SIGN = 16;
     }
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct CloneRights: u32 {
@@ -68,6 +72,7 @@ pub enum Operations {
     Flat(FlatRights),
     Nest(NestRights),
     Port(PortRights),
+    Sign(SignRights),
 }
 
 impl Operations {
@@ -79,6 +84,7 @@ impl Operations {
             Self::Flat(r) => [3, r.bits() as usize],
             Self::Nest(r) => [4, r.bits() as usize],
             Self::Port(r) => [5, r.bits() as usize],
+            Self::Sign(r) => [6, r.bits() as usize],
         }
     }
     pub fn of([kind, bits]: [usize; 2]) -> Option<Self> {
@@ -90,6 +96,7 @@ impl Operations {
             3 => Self::Flat(FlatRights::from_bits(bits)?),
             4 => Self::Nest(NestRights::from_bits(bits)?),
             5 => Self::Port(PortRights::from_bits(bits)?),
+            6 => Self::Sign(SignRights::from_bits(bits)?),
             _ => return None,
         })
     }
@@ -145,7 +152,9 @@ impl Limits {
         result.valid().then_some(result)
     }
     pub fn valid(self) -> bool {
-        if matches!(self.operations, Operations::None(_)) && self.modifiable != Modifiable::No {
+        if matches!(self.operations, Operations::None(_) | Operations::Sign(_))
+            && self.modifiable != Modifiable::No
+        {
             return false;
         }
         match self.range {

@@ -1,8 +1,5 @@
 use kernel_api::model::identity::{PendId, TaskId, TeamId};
-use std::sync::{
-    Arc, Mutex, MutexGuard,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 pub(crate) struct SpinLock<T>(Mutex<T>);
 impl<T> SpinLock<T> {
@@ -40,7 +37,6 @@ pub(crate) struct Ident {
 }
 pub(crate) struct Task {
     pub(crate) ident: Ident,
-    pub(crate) signs: super::signs::Table,
     pub(crate) administration: super::control::Table,
 }
 impl Task {
@@ -54,41 +50,10 @@ impl Task {
                     creator: TaskId::new(0),
                 },
             },
-            signs: super::signs::Table::new(),
             administration: super::control::Table::new(),
         })
     }
     pub(crate) fn clan(&self, _: TeamId) -> Option<()> {
         None
     }
-}
-#[allow(dead_code)]
-pub(crate) enum WakeKey {
-    SignHandle { task: TaskId, token: usize },
-}
-pub(crate) mod endpoint {
-    use super::*;
-    pub(crate) struct Endpoint {
-        owner: TaskId,
-        active: AtomicBool,
-    }
-    impl Endpoint {
-        pub(crate) fn new(owner: TaskId) -> Arc<Self> {
-            Arc::new(Self {
-                owner,
-                active: AtomicBool::new(true),
-            })
-        }
-        pub(crate) fn alive(&self) -> bool {
-            self.active.load(Ordering::Acquire)
-        }
-        pub(crate) fn owner(&self) -> TaskId {
-            self.owner
-        }
-    }
-    pub(crate) fn seal(endpoint: &Endpoint) {
-        endpoint.active.store(false, Ordering::Release);
-    }
-    pub(crate) fn authority_changed(_: &Endpoint) {}
-    pub(crate) fn release_actor(_: &Endpoint, _: TaskId) {}
 }

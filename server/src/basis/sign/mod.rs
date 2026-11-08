@@ -1,10 +1,7 @@
 //! Control-flow endpoints, pending notifications, source routing and waiting.
 
 pub(crate) mod endpoint;
-mod table;
 mod wait;
-pub(crate) use table::Table;
-pub(crate) use table::delegate;
 
 use wait::holder::holders;
 use wait::site::SITE_SHARDS;

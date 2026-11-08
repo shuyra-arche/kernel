@@ -63,11 +63,11 @@ There are no compatibility aliases for retired operations.
 Rust callers now match `OutOfMemory` for allocation failures. Each domain uses
 its existing numeric ABI code for this variant.
 
-Call numbers are `(version << 48) | (domain << 32) | operation`; version is 1.
-Version zero and unknown versions are rejected before domain dispatch. All byte
+Call numbers are `(version << 48) | (domain << 32) | operation`; version is 3.
+Versions zero, one, two and unknown versions are rejected before domain dispatch. All byte
 descriptors use fixed little-endian 64-bit words and checked tags/reserved fields.
 Boot capsule format 2 declares the matching ABI in byte 11; old executable
-capsules are rejected before launch. The resource ledger is version 3.
+capsules are rejected before launch. The resource ledger is version 4.
 
 | Domain | Current operations |
 | --- | --- |
@@ -75,7 +75,7 @@ capsules are rejected before launch. The resource ledger is version 3.
 | Pend | Accord, Revoke, Narrow, Return, Inspect, Collect |
 | Clone View | Create, Delete, Push, Pull, Peek |
 | Share View | Create, Delete, Open, Shut |
-| Sign | Create, Delete, Listen, Trigger, Consume, Attach, Detach, Accord, Revoke, Return |
+| Sign | Create, Delete, Listen, Trigger, Consume, Attach, Detach |
 | Unit | Create, Delete, Resume, Freeze, Stop, Exit, Finish, Inspect, Accord, Revoke, Return |
 | Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo |
 | Debug | Put, Get |
@@ -92,7 +92,7 @@ observations confer access. The number zero is invalid for object identities.
 
 | Call | Authority and state | Effect and completion |
 | --- | --- | --- |
-| Create Slot | Calling Task; checked allocation geometry | Reserves lazy zeroed Slot capacity; a moved-out Slot never regenerates its Page |
+| Create Slot | None FLAT license; checked allocation geometry | Reserves lazy zeroed Slot capacity; a moved-out Slot never regenerates its Page |
 | Create Memo | Authorized Slot window or relative Pend window; destination control | Reserves address positions; Slot source starts Vacant, Pend source supplies Ready associations; never publishes |
 | Delete Slot | Calling Task's SlotId | Releases that owning handle; Memo and hardware responsibilities survive |
 | Delete Memo | Mapping controller, explicitly permitted Space members, or authorized I/O target controller | Requires all publication withdrawn and fenced; deletes associations and freezes; Busy preserves the record |
@@ -157,9 +157,17 @@ access before committing a smaller window, and refuses outstanding external
 responsibilities. The 112-byte PendInfo identifies its target and includes the
 effective permissions and source window. FlatId and NestId are stable object
 identities; they grant no access on their own.
-The target/permission vocabulary also reserves None, Flat, Nest and Port;
-runtime registration and calls for these targets are not yet implemented.
-Sign continues to use its existing handle table until the remaining #84 migration.
+None and Sign use the same Pend ledger and derivation tree as Views. The target
+vocabulary also reserves Flat, Nest and Port; runtime registration of these three
+is the remaining #83 work. None is object-free call permission: its Modifiable
+must be No, its range Inherit, and it permits only the listed CreationRights.
+The Kernel mints the initial None root for the bootstrap Task in Ledger
+`Name::Call(Call::Create)`. A new Task receives no implicit creation permission;
+its manager must explicitly Accord a subset before it invokes creation calls.
+None and Sign accept no page range. Sign also normalizes Modifiable to No;
+LISTEN/TRIGGER/CONSUME/ROUTE/DELETE control behavior without claiming data access.
+Operation bits are typed by target and mapped to the fixed ABI operations below;
+the caller cannot supply a different target or operation identity to bypass them.
 
 | Live View operation | Required operation permission | Additional condition |
 | --- | --- | --- |
@@ -190,11 +198,16 @@ and mapping alive through all waits. True requires rechecking the predicate.
 Sign retains one event with a non-wrapping sequence. Listen observes;
 Consume(sequence) rejects stale sequences and only clears that direct event.
 It does not acknowledge an IRQ, consume a Unit result or resolve a page fault.
-Attach watches authorized sources. Accord can only reduce rights; Revoke and
-Return invalidate the entire branch and wake listeners to revalidate. Delegation
-depth is bounded at 64; exhausted sequences/handles fail instead of wrapping.
-Delete requires endpoint ownership; returning an owner handle does not transfer
-ownership. Owner death still closes its endpoints.
+Attach watches authorized sources. Pend Accord reduces operation rights and
+Distributable; Pend Revoke/Return retire the entire branch and wake listeners.
+A listener racing retirement may observe Dead before table removal or Denied
+after removal. Neither result permits further access. SignId names the endpoint
+only; all Sign calls and SignSource::Sign take a Task-local PendId. Delete requires
+DELETE and closes the endpoint for every holder. Returning a branch revokes its
+descendants without closing another live branch's endpoint. Owner death closes
+owned endpoints. Routes belong to their destination Pend; removing ROUTE or
+returning that Pend removes its routes and preserves other branches' routes.
+Direct event sequences and public authority IDs never wrap or revive stale uses.
 
 Unit Create snapshots a 48-byte Team or Task descriptor. Tasks start dormant.
 Team creation requires Build authority; Supervisor creation additionally requires
@@ -215,19 +228,21 @@ Return operate on independent administrative authorities with revocable ancestry
 
 | Call | Required authority / state | Completion or retained effect |
 | --- | --- | --- |
-| View Create / Delete | Slot ownership to create Share; endpoint ownership to delete | Creates/retires View and root Pend; unfinished borrows prevent premature reclamation |
-| Clone Push | Live writable Pend, queue limits | Enqueues one copied message or fails; no implicit retry |
-| Clone Pull / Peek | Live readable Pend | Pull delivers message authority; Peek observes length/sender/count without consuming |
-| Share Open / Shut | Live readable/writable Pend matching requested access | Opens/closes this caller's access using the common Nest publication machinery; Shut neither returns Pend nor deletes View |
+| Clone Create | None CLONE license | New queue and root Pend |
+| Share Create | None SHARE license and authorized Slot/source window | New View root or narrower branch; source qualification and borrowing still apply |
+| Clone/Share Delete | Matching target DELETE | Closes object; unfinished borrows and hardware obligations remain |
+| Clone Push | Clone PUSH and Modifiable Yes; queue limits | Enqueues one copied message or fails; no implicit retry |
+| Clone Pull / Peek | Clone PULL / PEEK | Pull delivers message authority; Peek observes length/sender/count without consuming |
+| Share Open / Shut | Share OPEN / SHUT; range, Modifiable and borrowing | Opens/closes this caller's access using the common Nest publication machinery; Shut neither returns Pend nor deletes View |
 | Pend Accord | Delegable parent and non-expanding relative window/access | New local/remote branch; failed preparation does not publish partial authority |
 | Pend Revoke / Return | Direct grantor / holder | Retires branch; Busy keeps obligations and parent access suspended |
 | Pend Narrow | Holder; no live descendants or external obligations | Same identity with reduced access/window after old CPU withdrawal |
 | Pend Inspect / Collect | Caller-local table | Single/paged discovery; stable View identity allows comparison, never authorization |
-| Sign Create / Delete | Caller / endpoint owner | Creates/closes endpoint; listeners observe closure |
-| Sign Listen | LISTEN right; Poll/At/Infinite | Observes direct event or routed source; does not consume either |
-| Sign Trigger / Consume | TRIGGER / LISTEN right; empty/current sequence respectively | Sets a new sequenced event / clears exactly that event; stale consume fails |
-| Sign Attach / Detach | ROUTE right plus source observation authority | Adds/removes a route; readiness is revalidated while waiting |
-| Sign Accord / Revoke / Return | Holder with sufficient rights / direct grantor / holder | Reduced branch / subtree invalidation / relinquishment; wake forces permission revalidation |
+| Sign Create | None SIGN license | New endpoint and root Sign Pend |
+| Sign Delete | Sign DELETE | Closes endpoint and wakes all listeners |
+| Sign Listen | Sign LISTEN; Poll/At/Infinite | Observes direct event or routed source; does not consume either |
+| Sign Trigger / Consume | Sign TRIGGER / CONSUME; empty/current sequence respectively | Sets a new sequenced event / clears exactly that event; stale consume fails |
+| Sign Attach / Detach | Sign ROUTE plus source observation authority | Adds/removes a route; readiness is revalidated while waiting |
 | Unit Create | Own Team or controlled constructing child; Build for Team | Dormant Task or empty Team; explicit Resume begins execution |
 | Unit Delete | Authorized observer/manager and completed reclamation | Removes caller's Task record or retired Team; unfinished cleanup is not discarded |
 | Unit Resume / Freeze | Controller or ancestor manager | Admits/suspends execution; does not alter results or transfer authority |
@@ -253,7 +268,27 @@ Sign routing and Room Clock provide their retained core capabilities. Kernel
 crash backtraces and bounded Debug Put/Get remain available.
 
 Consumers must rebuild together with this API and regenerate capsules/ledgers.
-Upper-layer migration is outside this Kernel change.
+Provider and consumer revisions must move together. The following migration is
+incompatible with both v1 and the interim v2; old call numbers fail before dispatch.
+
+| Previous interface | ABI v3 / Ledger v4 | Consumer migration |
+| --- | --- | --- |
+| Clone/Share Create without permission | Leading `license: PendId` with None CLONE/SHARE | Read boot Create license or receive it through Pend Accord |
+| Sign Create returning SignId | None SIGN license; returns PendId | Use Pend Inspect for descriptive SignId |
+| Sign calls and SignSource::Sign using SignId | Same operations with Sign-target PendId | Resolve only the caller's actual Pend |
+| Sign Accord/Return/Revoke at slots 7–9 | Removed; use Pend Accord/Return/Revoke | Encode Sign operations in Limits; do not reinterpret old handles |
+| Cell Create | Leading license; Slot requires None FLAT | Supply explicit license for allocation; Memo authority comes from source/destination |
+| Separate Sign table | One Task Pend ledger | Collect includes None/Sign; inspect Target before using a token |
+| Pend descriptors in v1 | Target-tagged Limits, 88-byte Accord, 64-byte Narrow, 112-byte Info | Rebuild byte snapshots; unknown bits and mismatched target tags reject |
+| Boot interrupt handle in Ledger v3 | Sign-target Pend in Ledger v4 | Rebuild capsule ABI byte and ledger parser; cannot cast an old Sign handle |
+
+Room operations and bounded Debug Put/Get are inherent to the executing Task,
+subject to address access and counter capability checks. They need no None grant.
+Unit controls remain ControlId-based: Build/Guard and target/controller checks do
+not become creation licenses. Pend Inspect/Collect and Return are holder actions;
+Revoke is a direct-grantor action, avoiding recursive permission to surrender
+permission. Busy never removes a retained hardware obligation. This explicitly
+supersedes #14's former View-only Pend definition as recorded in #84.
 
 ## Verification
 

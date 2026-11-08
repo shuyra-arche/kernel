@@ -4,7 +4,9 @@ mod branch;
 mod ledger;
 mod source;
 mod state;
+mod target;
 mod window;
+pub(crate) use target::Target;
 
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

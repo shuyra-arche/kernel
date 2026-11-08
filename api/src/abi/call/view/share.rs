@@ -20,6 +20,7 @@ pub mod operations {
     #[operation(slot = 0, output = super::PendId, error = ShareFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Create {
+        pub license: super::PendId,
         pub reference: super::SlotId,
         pub modifiable: crate::model::modifiable::Modifiable,
     }

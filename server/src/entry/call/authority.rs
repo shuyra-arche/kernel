@@ -16,6 +16,23 @@ use crate::basis::pend::PendEntry;
 use crate::basis::room::conductor::current;
 use crate::basis::view::share::ShareOperation;
 
+/// The caller serializes this check with the operation's authority commit.
+/// A resource identity, or a Pend of another target, cannot substitute for it.
+pub(super) fn license(
+    task: &alloc::sync::Arc<crate::basis::unit::task::Task>,
+    token: PendId,
+    operation: kernel_api::model::pend::CreationRights,
+) -> Result<(), PendFail> {
+    if !pend::live(task) {
+        return Err(PendFail::Dead);
+    }
+    let record = pend::accede(task, token, Need::Read)?;
+    if !record.permits(Operations::None(operation)) {
+        return Err(PendFail::Denied);
+    }
+    Ok(())
+}
+
 pub(super) fn accede(token: PendId, need: Need) -> Result<alloc::sync::Arc<PendEntry>, PendFail> {
     let task = current().running_task().ok_or(PendFail::Denied)?;
     pend::accede(&task, token, need)
@@ -43,10 +60,10 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
     let (share_view, _operation) = {
         let _serial = me.pend.lock();
         let pend = pend::locate(&me, token).ok_or(PendFail::Denied)?;
-        if kind != pend.view().kind() {
+        if Some(kind) != pend.target().kind() {
             return Err(PendFail::Denied);
         }
-        let share_view = pend.view().share_view();
+        let share_view = pend.target().share_view();
         if !pend.alive()
             && !share_view
                 .as_ref()
@@ -60,7 +77,7 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         };
         // Closing may be retried through a still-live DELETE branch after the
         // target is sealed. An invalidated branch cannot regain authority here.
-        let cleanup = !pend.view().alive()
+        let cleanup = !pend.target().alive()
             && pend.authority().alive()
             && pend.authority().limits().operations.contains(operation);
         if !cleanup && !pend.permits(operation) {
@@ -72,7 +89,7 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
             None
         };
         let _commit = crate::basis::commit();
-        pend.view().seal();
+        pend.target().seal();
         (share_view, operation)
     };
     if let Some(share_view) = share_view {

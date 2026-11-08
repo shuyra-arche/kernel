@@ -56,7 +56,7 @@ pub(crate) fn source_key(
     )) {
         return None;
     }
-    let view = pend_entry.view();
+    let view = pend_entry.target();
     match source {
         SignSource::Clone { condition, .. } => {
             let meta = view.clone_view()?;
@@ -77,7 +77,7 @@ pub(crate) fn source_ready(pend_entry: &PendEntry, source: SignSource) -> Option
     )) {
         return None;
     }
-    let view = pend_entry.view();
+    let view = pend_entry.target();
     match source {
         SignSource::Clone { condition, .. } => Some(view.clone_view()?.ready(condition)),
         SignSource::Sign { .. }

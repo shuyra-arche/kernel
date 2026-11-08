@@ -51,7 +51,7 @@ fn narrow(
     pend::narrow(super::ptr(&bytes))
 }
 
-fn inspect(token: PendId) -> PendInfo {
+pub(super) fn inspect(token: PendId) -> PendInfo {
     let mut words = [0; PendInfo::WORDS];
     pend::inspect(token, VirtAddr::new(words.as_mut_ptr() as usize)).unwrap();
     PendInfo::from_words(words).unwrap()
@@ -74,7 +74,7 @@ extern "C" fn recipient() -> ! {
 pub(super) fn run() {
     permission::run();
     let reference = super::allocate(8);
-    let root = share_view::create(reference, Modifiable::Yes).unwrap();
+    let root = share_view::create(crate::license::get(), reference, Modifiable::Yes).unwrap();
     let (address, len) = share_view::open(root).unwrap();
     assert_eq!(len, 8 * 4096);
     super::write(address, 3 * 4096, 0x13579);
@@ -162,7 +162,8 @@ pub(super) fn run() {
             },
         }
         .to_bytes();
-        let made = cell::create(super::ptr(&spec)).unwrap();
+        let made =
+            cell::create(kernel_api::model::identity::PendId::NONE, super::ptr(&spec)).unwrap();
         let CreatedCell::Memo {
             mapping,
             address: _address,

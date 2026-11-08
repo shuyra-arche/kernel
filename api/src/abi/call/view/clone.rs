@@ -23,6 +23,7 @@ pub mod operations {
     #[operation(slot = 0, output = super::PendId, error = CloneFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Create {
+        pub license: super::PendId,
         pub mark: super::Mark,
         pub limits: super::CloneLimits,
     }

@@ -46,10 +46,6 @@ pub enum WakeKey {
         task: TaskId,
         token: usize,
     },
-    SignHandle {
-        task: TaskId,
-        token: usize,
-    },
     Sign {
         id: usize,
     },
@@ -88,9 +84,6 @@ impl WakeKey {
             }
             WakeKey::Inspect { task, token } => {
                 (task.get() as u64).wrapping_mul(0x2545_F491_4F6C_DD1D) ^ token as u64
-            }
-            WakeKey::SignHandle { task, token } => {
-                (task.get() as u64).wrapping_mul(0x517CC1B727220A95) ^ token as u64
             }
             WakeKey::Sign { id } => (id as u64).wrapping_mul(0x1656_67B1_9E37_79F9),
         }

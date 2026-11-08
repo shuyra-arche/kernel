@@ -5,7 +5,7 @@ pub(super) fn run() {
     use kernel_api::model::pend::{CloneRights, Distributable, Operations, ShareRights};
     use kernel_client::call::clone_view;
     let reference = super::super::allocate(1);
-    let root = share_view::create(reference, Modifiable::Yes).unwrap();
+    let root = share_view::create(crate::license::get(), reference, Modifiable::Yes).unwrap();
     let limits = Limits {
         operations: Operations::Share(ShareRights::OPEN | ShareRights::SHUT),
         modifiable: Modifiable::No,
@@ -94,13 +94,20 @@ pub(super) fn run() {
         },
     }
     .to_bytes();
-    assert!(kernel_client::call::cell::create(super::super::ptr(&bytes)).is_err());
+    assert!(
+        kernel_client::call::cell::create(
+            kernel_api::model::identity::PendId::NONE,
+            super::super::ptr(&bytes)
+        )
+        .is_err()
+    );
     share_view::open(root).unwrap();
     share_view::shut(root).unwrap();
     pend::return_(root).unwrap();
     super::super::delete(kernel_api::model::cell::CellObject::Slot(reference));
 
-    let root = clone_view::create(Mark::NONE, CloneLimits::default()).unwrap();
+    let root =
+        clone_view::create(crate::license::get(), Mark::NONE, CloneLimits::default()).unwrap();
     let bytes = AccordRequest {
         src: root,
         target: AccordTarget::Caller,

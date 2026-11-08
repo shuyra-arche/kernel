@@ -14,7 +14,7 @@ use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 use kernel_api::abi::call::sign::SignFail;
 use kernel_api::abi::reply::SignReply;
-use kernel_api::model::identity::TaskId;
+use kernel_api::model::identity::{PendId, TaskId};
 use kernel_api::model::sign::SignSource;
 use state::{Event, Rejection, State};
 
@@ -105,7 +105,7 @@ pub(crate) fn attach(meta: &Endpoint, route: Route) -> Result<(), SignFail> {
         let mut routes = meta.routes.lock();
         if routes
             .iter()
-            .any(|old| old.watches(route.actor, route.watch.source()))
+            .any(|old| old.watches(route.permit, route.watch.source()))
         {
             return Ok(());
         }
@@ -131,13 +131,13 @@ pub(crate) fn attach(meta: &Endpoint, route: Route) -> Result<(), SignFail> {
     sign::knock(key(meta), &meta.life());
     Ok(())
 }
-pub(crate) fn detach(meta: &Endpoint, actor: TaskId, source: SignSource) -> Result<(), SignFail> {
-    detach_where(meta, actor, |known| known == source)
+pub(crate) fn detach(meta: &Endpoint, permit: PendId, source: SignSource) -> Result<(), SignFail> {
+    detach_where(meta, permit, |known| known == source)
 }
 
 fn detach_where(
     meta: &Endpoint,
-    actor: TaskId,
+    permit: PendId,
     matches: impl Fn(SignSource) -> bool,
 ) -> Result<(), SignFail> {
     let _commit = crate::basis::commit();
@@ -148,7 +148,7 @@ fn detach_where(
         let mut routes = meta.routes.lock();
         routes
             .iter()
-            .position(|c| c.actor == actor && matches(c.watch.source()))
+            .position(|c| c.permit == permit && matches(c.watch.source()))
             .map(|at| routes.remove(at))
     };
     if let Some(route) = route {
@@ -215,9 +215,14 @@ fn apply(meta: &Endpoint, event: Event) -> Result<(), SignFail> {
     Ok(())
 }
 
-pub(crate) fn release_actor(meta: &Endpoint, actor: TaskId) {
-    while meta.routes.lock().iter().any(|route| route.actor == actor) {
-        if detach_where(meta, actor, |_| true).is_err() {
+pub(crate) fn release_authority(meta: &Endpoint, permit: PendId) {
+    while meta
+        .routes
+        .lock()
+        .iter()
+        .any(|route| route.permit == permit)
+    {
+        if detach_where(meta, permit, |_| true).is_err() {
             break;
         }
     }
@@ -227,4 +232,35 @@ pub(crate) fn release_actor(meta: &Endpoint, actor: TaskId) {
 pub(crate) fn authority_changed(meta: &Endpoint) {
     sign::signal(trigger_key(meta));
     sign::signal(key(meta));
+}
+
+/// Resolve only the caller's live Pend record. SignId is descriptive and is
+/// deliberately not accepted at this authorization boundary.
+pub(crate) fn authorized(
+    actor: &Arc<Task>,
+    token: PendId,
+    rights: kernel_api::model::sign::SignRights,
+) -> Result<Arc<Endpoint>, SignFail> {
+    use crate::basis::pend;
+    let record = pend::accede(actor, token, pend::Need::Read).map_err(codec::pend_fail)?;
+    if !record.permits(kernel_api::model::pend::Operations::Sign(rights)) {
+        return Err(SignFail::Denied);
+    }
+    record.target().sign().ok_or(SignFail::Denied)
+}
+
+pub(crate) fn grant(
+    actor: &Task,
+    endpoint: Arc<Endpoint>,
+    rights: kernel_api::model::sign::SignRights,
+) -> Result<PendId, kernel_api::abi::call::pend::PendFail> {
+    use crate::basis::pend::{self, PendEntry, Target};
+    use kernel_api::model::{identity::Mark, modifiable::Modifiable, pend::Operations};
+    let record = PendEntry::try_new(Target::Sign(endpoint), Mark::NONE, Modifiable::No, None)?;
+    let mut limits = record.authority().limits();
+    limits.operations = Operations::Sign(rights);
+    record.narrow(limits, None)?;
+    let token = record.token();
+    pend::insert(actor, record)?;
+    Ok(token)
 }

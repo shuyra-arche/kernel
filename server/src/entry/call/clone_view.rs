@@ -29,8 +29,12 @@ use kernel_api::address::VirtAddr as KVirt;
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: CloneCall, ident: Arc<TaskIdent>) -> Outcome {
     match call {
-        CloneCall::Create { mark, limits } => {
-            answer(frame, create(mark, limits).map_err(fail));
+        CloneCall::Create {
+            license,
+            mark,
+            limits,
+        } => {
+            answer(frame, create(license, mark, limits).map_err(fail));
             Outcome::Resume
         }
         CloneCall::Delete { token } => {
@@ -94,7 +98,7 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
     if !observed.permits(Operations::Clone(CloneRights::PULL)) {
         return Err(CloneFail::Denied);
     }
-    let meta = observed.view().clone_view().ok_or(CloneFail::Denied)?;
+    let meta = observed.target().clone_view().ok_or(CloneFail::Denied)?;
     let mut reading = view::clone::read(&meta)?;
     let len = reading.bytes.len();
     if len > max_len {
@@ -115,7 +119,7 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
             return Err(CloneFail::Dead);
         }
         let current = pend::locate(&task, token).ok_or(CloneFail::Denied)?;
-        if !current.view().same(observed.view())
+        if !current.target().same(observed.target())
             || !current.allows(Need::Read)
             || !current.permits(Operations::Clone(CloneRights::PULL))
         {
@@ -161,12 +165,18 @@ fn with_clone<T>(
     if !pend.permits(Operations::Clone(rights)) {
         return Err(CloneFail::Denied);
     }
-    let meta = pend.view().clone_view().ok_or(CloneFail::Denied)?;
+    let meta = pend.target().clone_view().ok_or(CloneFail::Denied)?;
     operation(&meta)
 }
 
-pub(crate) fn create(mark: Mark, limits: CloneLimits) -> Result<usize, PendFail> {
+pub(crate) fn create(license: PendId, mark: Mark, limits: CloneLimits) -> Result<usize, PendFail> {
     let task = current().running_task().ok_or(PendFail::Denied)?;
+    let _serial = task.pend.lock();
+    authority::license(
+        &task,
+        license,
+        kernel_api::model::pend::CreationRights::CLONE,
+    )?;
     if !limits.valid() {
         return Err(PendFail::Denied);
     }
@@ -174,7 +184,13 @@ pub(crate) fn create(mark: Mark, limits: CloneLimits) -> Result<usize, PendFail>
         .map_err(|_| PendFail::OutOfMemory)?;
     let pend = pend::PendEntry::try_new(View::Clone(meta), mark, Modifiable::Yes, None)?;
     let token = pend.token();
-    pend::insert(&task, pend)?;
+    let entry = Arc::try_new(pend).map_err(|_| PendFail::OutOfMemory)?;
+    let _commit = crate::basis::commit();
+    if !pend::live(&task) {
+        return Err(PendFail::Dead);
+    }
+    task.pend.prepare(entry)?.publish();
+    pend::changed(&task);
     Ok(token.get())
 }
 

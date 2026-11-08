@@ -42,7 +42,11 @@ fn check(entry: &RangeEntry, actor: &Arc<Task>) -> Result<(), CellFail> {
     }
     Ok(())
 }
-pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize, usize), CellFail> {
+pub(super) fn create(
+    license: kernel_api::model::identity::PendId,
+    at: KVirt,
+    ident: &Arc<TaskIdent>,
+) -> Result<(usize, usize, usize), CellFail> {
     let spec = CellCreate::from_bytes(&read_snapshot::<{ CellCreate::WIDTH }>(
         &ident.team.nest,
         at,
@@ -51,7 +55,7 @@ pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize,
     match spec {
         CellCreate::Slot(allocation) => Ok((
             0,
-            resolve_source(SourceSpec::Allocation(allocation), ident)?,
+            resolve_source(SourceSpec::Allocation(allocation), ident, Some(license))?,
             0,
         )),
         CellCreate::Memo {
@@ -81,6 +85,7 @@ pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize,
                             count,
                         },
                         ident,
+                        None,
                     )?;
                     let r = reference(id);
                     temporary = Some(r);
@@ -317,6 +322,7 @@ fn handoff_prepared(
                         count: 1,
                     },
                     ident,
+                    None,
                 )?;
                 let r = reference(id);
                 let result = with_mapping(team, mapping, ident, |_, entry| {

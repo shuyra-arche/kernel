@@ -473,7 +473,7 @@ impl SourceAuthorization {
             ))
             && Arc::ptr_eq(entry.authority(), &authority)
             && entry
-                .view()
+                .target()
                 .share_view()
                 .is_some_and(|view| Arc::ptr_eq(&view, &meta))
     }
