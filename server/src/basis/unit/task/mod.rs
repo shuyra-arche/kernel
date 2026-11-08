@@ -46,7 +46,6 @@ pub struct Task {
     pub(crate) life: Arc<Anchor>,
     pub(crate) state: Arc<SpinLock<TaskState>>,
     pub(crate) pend: Table,
-    pub(crate) signs: crate::basis::sign::Table,
     pub(crate) administration: crate::basis::unit::control::Table,
     pub(crate) heir: SpinLock<Vec<Arc<Team>>>,
     extensions: SpinLock<crate::metal::switcher::context::extension::ExtendedContext>,
@@ -437,7 +436,6 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         let _commit = commit();
-        self.signs.clear(self.ident.id);
         self.administration.clear();
         self.ident.team.node.clear(self.ident.id, None);
         self.ident.team.node.prune();

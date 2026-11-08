@@ -15,19 +15,19 @@ use alloc::sync::Weak;
 use core::time::Duration;
 use kernel_api::abi::call::sign::SignFail;
 use kernel_api::abi::reply::SignReply;
-use kernel_api::model::sign::SignId;
+use kernel_api::model::identity::PendId;
 use kernel_api::model::sign::SignRights;
 
 #[derive(Clone)]
 pub(crate) struct AwaitWait {
     pub group: Arc<Endpoint>,
-    pub token: SignId,
+    pub token: PendId,
     pub actor: Weak<Task>,
     pub deadline: Option<u64>,
 }
 
-fn inspect_key(actor: &Arc<Task>, token: SignId) -> WakeKey {
-    WakeKey::SignHandle {
+fn inspect_key(actor: &Arc<Task>, token: PendId) -> WakeKey {
+    WakeKey::Inspect {
         task: actor.ident.id,
         token: token.get(),
     }
@@ -36,7 +36,7 @@ fn inspect_key(actor: &Arc<Task>, token: SignId) -> WakeKey {
 impl AwaitWait {
     pub fn new(
         group: Arc<Endpoint>,
-        token: SignId,
+        token: PendId,
         actor: &Arc<Task>,
         wait: kernel_api::model::wait::Wait,
     ) -> Self {
@@ -75,7 +75,7 @@ impl AwaitWait {
 
     pub fn poll(&self) -> Result<SignReply, SignFail> {
         let actor = self.actor.upgrade().ok_or(SignFail::Denied)?;
-        let endpoint = actor.signs.get(self.token, SignRights::LISTEN)?;
+        let endpoint = super::authorized(&actor, self.token, SignRights::LISTEN)?;
         if !Arc::ptr_eq(&endpoint, &self.group) {
             return Err(SignFail::Denied);
         }

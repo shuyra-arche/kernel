@@ -27,7 +27,7 @@ use crate::basis::nest::NestError;
 // 一条一次分配、随关系退场就释放：整张关联没有全局容量高水位。
 
 struct Record {
-    source_id: usize,
+    source_id: kernel_api::model::flat::FlatId,
     mapping: Weak<Span>,
     next: Option<alloc::boxed::Box<Record>>,
 }

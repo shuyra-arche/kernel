@@ -98,7 +98,7 @@ fn three_word_returns_are_preserved() {
     reply((words[0], words[1], words[2]));
     assert_eq!(
         invoke(kernel_api::abi::call::sign::operations::Listen {
-            token: kernel_api::model::sign::SignId::new(token.get()),
+            token: token,
             wait: Wait::Infinite
         })
         .unwrap(),
@@ -248,6 +248,7 @@ fn cell_inspection_uses_an_output_snapshot_and_create_returns_identity() {
     called((2usize << 32) | 7, [0x4000, 0x5000, 0, 0, 0, 0]);
     reply((1, 23, 0x6000));
     let made = invoke(Create {
+        license: kernel_api::model::identity::PendId::mint(9),
         request: VirtAddr::new(0x4000),
     })
     .unwrap();
@@ -255,7 +256,7 @@ fn cell_inspection_uses_an_output_snapshot_and_create_returns_identity() {
         made,
         kernel_api::model::cell::CreatedCell::decode(1, 23, 0x6000).unwrap()
     );
-    called(2usize << 32, [0x4000, 0, 0, 0, 0, 0]);
+    called(2usize << 32, [9, 0x4000, 0, 0, 0, 0]);
 }
 
 #[test]

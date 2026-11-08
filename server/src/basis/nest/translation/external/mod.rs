@@ -1,6 +1,6 @@
 mod state;
 use super::super::address::{Layout, Placement};
-use super::super::{Access, IndexNode, Nest, NestError, NestId, Span};
+use super::super::{Access, IndexNode, Nest, NestError, Span};
 use super::{ClosePhase, NestState, Storage};
 use crate::basis::cell::page::{Change, Page};
 use crate::basis::flat::FlatRange;
@@ -36,7 +36,7 @@ impl Nest {
             return Err(NestError::NotAligned);
         }
         let nest = Arc::try_new(Self {
-            id: NestId::allocate()?,
+            id: super::super::next_id()?,
             cpu: None,
             life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
             mappings: super::super::authority::RangeRegistry::new(),

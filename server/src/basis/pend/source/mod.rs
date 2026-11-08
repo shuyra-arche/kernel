@@ -211,6 +211,11 @@ impl SourceAuthorization {
         }
         let (meta, _, authority) = self.root()?;
         self.modifiable()?;
+        if !authority.permits(kernel_api::model::pend::Operations::Share(
+            kernel_api::model::pend::ShareRights::ASSOCIATE,
+        )) {
+            return None;
+        }
         if !authority.contains(offset, count) {
             return None;
         }
@@ -463,10 +468,12 @@ impl SourceAuthorization {
         };
         entry.sire().is_none()
             && entry.alive()
-            && entry.authority().modifiable().is_some()
+            && entry.permits(kernel_api::model::pend::Operations::Share(
+                kernel_api::model::pend::ShareRights::ASSOCIATE,
+            ))
             && Arc::ptr_eq(entry.authority(), &authority)
             && entry
-                .view()
+                .target()
                 .share_view()
                 .is_some_and(|view| Arc::ptr_eq(&view, &meta))
     }

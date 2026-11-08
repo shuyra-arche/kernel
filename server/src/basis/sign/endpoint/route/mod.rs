@@ -20,13 +20,18 @@ pub(crate) use watch::Watch;
 #[derive(Clone)]
 pub(crate) struct Route {
     pub actor: TaskId,
+    pub permit: kernel_api::model::identity::PendId,
     pub keys: Arc<Vec<(WakeKey, Weak<Anchor>)>>,
     pub watch: Watch,
 }
 
 impl Route {
-    pub(super) fn watches(&self, actor: TaskId, source: SignSource) -> bool {
-        self.actor == actor && self.watch.source() == source
+    pub(super) fn watches(
+        &self,
+        permit: kernel_api::model::identity::PendId,
+        source: SignSource,
+    ) -> bool {
+        self.permit == permit && self.watch.source() == source
     }
 
     pub(super) fn covers(&self, key: WakeKey) -> bool {
@@ -35,14 +40,16 @@ impl Route {
 
     pub(super) fn poll(&self, actor: &Arc<Task>) -> Option<Option<SignEventFail>> {
         match &self.watch {
-            Watch::Direct { token } => match actor
-                .signs
-                .get(*token, kernel_api::model::sign::SignRights::LISTEN)
-            {
-                Ok(endpoint) => endpoint.ready().then_some(None),
-                Err(kernel_api::abi::call::sign::SignFail::Dead) => Some(Some(SignEventFail::Dead)),
-                Err(_) => Some(Some(SignEventFail::Denied)),
-            },
+            Watch::Direct { token } => {
+                match super::authorized(actor, *token, kernel_api::model::sign::SignRights::LISTEN)
+                {
+                    Ok(endpoint) => endpoint.ready().then_some(None),
+                    Err(kernel_api::abi::call::sign::SignFail::Dead) => {
+                        Some(Some(SignEventFail::Dead))
+                    }
+                    Err(_) => Some(Some(SignEventFail::Denied)),
+                }
+            }
             Watch::ExternalMapping {
                 token,
                 mapping,

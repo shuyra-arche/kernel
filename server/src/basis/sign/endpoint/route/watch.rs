@@ -12,7 +12,7 @@ use crate::basis::unit::task::Task;
 #[derive(Clone)]
 pub(crate) enum Watch {
     Direct {
-        token: kernel_api::model::sign::SignId,
+        token: kernel_api::model::identity::PendId,
     },
     ExternalMapping {
         token: kernel_api::model::identity::PendId,

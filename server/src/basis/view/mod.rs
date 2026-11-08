@@ -102,7 +102,20 @@ impl View {
             kernel_api::address::PageCount,
         )>,
     ) -> Result<Arc<Pend>, PendFail> {
-        let authority = Pend::try_new_window(modifiable, window)?;
+        let operations = match self {
+            View::Clone(_) => kernel_api::model::pend::Operations::Clone(
+                kernel_api::model::pend::CloneRights::all(),
+            ),
+            View::Share(_) => kernel_api::model::pend::Operations::Share(
+                kernel_api::model::pend::ShareRights::all(),
+            ),
+        };
+        let authority = Pend::try_new_window(
+            modifiable,
+            window,
+            operations,
+            kernel_api::model::pend::Distributable::Yes,
+        )?;
         if let View::Share(meta) = self {
             meta.register_pend(token, authority.clone())?;
         }

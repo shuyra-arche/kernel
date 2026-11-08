@@ -3,7 +3,6 @@
 use crate::address::VirtAddr;
 use crate::model::identity::PendId;
 use crate::model::identity::TaskId;
-use crate::model::modifiable::Modifiable;
 
 /// `PendFail` 的结果别名。
 pub type PendResult<T> = Result<T, erra::Error<PendFail>>;
@@ -37,9 +36,7 @@ pub mod operations {
     #[operation(slot = 16, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Narrow {
-        pub token: super::PendId,
-        pub subset: super::Modifiable,
-        pub range: crate::model::pend::PendRange,
+        pub request: super::VirtAddr,
     }
     #[operation(slot = 6, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +51,7 @@ pub mod operations {
     pub struct Return {
         pub token: super::PendId,
     }
-    /// Write eleven RV64 words (PendInfo) to buf. Closed resources can still be inspected.
+    /// Write fourteen RV64 words (PendInfo) to buf. Closed resources can still be inspected.
     #[operation(slot = 17, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Inspect {

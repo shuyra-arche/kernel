@@ -4,7 +4,9 @@ mod branch;
 mod ledger;
 mod source;
 mod state;
+mod target;
 mod window;
+pub(crate) use target::Target;
 
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -12,6 +14,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::{PageCount, PageOffset};
 pub(crate) use kernel_api::model::modifiable::Modifiable;
+use kernel_api::model::pend::{Distributable, Limits, Operations, PendRange};
 
 use crate::basis::unit::task::Task;
 use crate::metal::sync::SpinLock;
@@ -25,10 +28,6 @@ pub(crate) use ledger::{
 };
 pub(crate) use source::{ExternalBorrow, Geometry, Hold, HoldTable, SourceAuthorization};
 pub(crate) use window::Window;
-
-pub(crate) fn narrows(from: Modifiable, to: Modifiable) -> bool {
-    from.allows(to)
-}
 
 /// A Pend is the live access authority for one View range. Its parent obligation
 /// survives handle removal until CPU withdrawal and any external use are settled.
@@ -55,9 +54,11 @@ impl Pend {
     pub(crate) fn try_new_window(
         access: Modifiable,
         window: Option<(PageOffset, PageCount)>,
+        operations: Operations,
+        distributable: Distributable,
     ) -> Result<Arc<Self>, PendFail> {
         Arc::try_new(Self {
-            state: SpinLock::new(State::new(access)),
+            state: SpinLock::new(State::authorized(access, operations, distributable)),
             window: SpinLock::new(window),
             parent: SpinLock::new(None),
             external: AtomicUsize::new(0),
@@ -128,26 +129,60 @@ impl Pend {
         });
         Ok(())
     }
-    pub(crate) fn can_narrow(&self, access: Modifiable) -> Result<(), PendFail> {
+    pub(crate) fn limits(&self) -> Limits {
+        let state = self.state.lock();
+        let range = self
+            .window()
+            .map_or(PendRange::Inherit, |(offset, count)| PendRange::Pages {
+                offset: offset.get(),
+                count: count.get(),
+            });
+        Limits {
+            operations: state.operations,
+            modifiable: state.access,
+            distributable: state.distributable,
+            range,
+        }
+    }
+    pub(crate) fn permits(&self, operations: Operations) -> bool {
+        self.state.lock().permits(operations)
+    }
+    pub(crate) fn can_narrow(&self, limits: Limits) -> Result<(), PendFail> {
+        if !limits.valid() {
+            return Err(PendFail::Denied);
+        }
         let state = self.state.lock();
         if self.routing.load(Ordering::Acquire) {
             return Err(PendFail::Busy);
         }
         state
-            .transition(Event::Narrow(access))
+            .transition(Event::Limit {
+                access: limits.modifiable,
+                operations: limits.operations,
+                distributable: limits.distributable,
+            })
             .map(|_| ())
             .map_err(fail)
     }
     pub(crate) fn narrow(
         &self,
-        access: Modifiable,
+        limits: Limits,
         window: Option<(PageOffset, PageCount)>,
     ) -> Result<(), PendFail> {
+        if !limits.valid() {
+            return Err(PendFail::Denied);
+        }
         let mut state = self.state.lock();
         if self.routing.load(Ordering::Acquire) {
             return Err(PendFail::Busy);
         }
-        *state = state.transition(Event::Narrow(access)).map_err(fail)?;
+        *state = state
+            .transition(Event::Limit {
+                access: limits.modifiable,
+                operations: limits.operations,
+                distributable: limits.distributable,
+            })
+            .map_err(fail)?;
         *self.window.lock() = window;
         Ok(())
     }

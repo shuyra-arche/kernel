@@ -31,6 +31,7 @@ pub mod operations {
     #[operation(slot = 0, output = crate::model::cell::CreatedCell, error = CellFail, reply = 3)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Create {
+        pub license: crate::model::identity::PendId,
         pub request: super::VirtAddr,
     }
     /// Delete a CellObject. A published Memo must first be retracted and settled.

@@ -7,6 +7,7 @@
 
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::PendId;
+use kernel_api::model::pend::{CloneRights, Operations, ShareRights};
 use kernel_api::model::view::ViewKind;
 
 use crate::basis::pend;
@@ -14,6 +15,23 @@ use crate::basis::pend::Need;
 use crate::basis::pend::PendEntry;
 use crate::basis::room::conductor::current;
 use crate::basis::view::share::ShareOperation;
+
+/// The caller serializes this check with the operation's authority commit.
+/// A resource identity, or a Pend of another target, cannot substitute for it.
+pub(super) fn license(
+    task: &alloc::sync::Arc<crate::basis::unit::task::Task>,
+    token: PendId,
+    operation: kernel_api::model::pend::CreationRights,
+) -> Result<(), PendFail> {
+    if !pend::live(task) {
+        return Err(PendFail::Dead);
+    }
+    let record = pend::accede(task, token, Need::Read)?;
+    if !record.permits(Operations::None(operation)) {
+        return Err(PendFail::Denied);
+    }
+    Ok(())
+}
 
 pub(super) fn accede(token: PendId, need: Need) -> Result<alloc::sync::Arc<PendEntry>, PendFail> {
     let task = current().running_task().ok_or(PendFail::Denied)?;
@@ -35,17 +53,17 @@ pub(super) fn usable(pend: &PendEntry) -> Result<(), PendFail> {
 /// 要 shootdown，不能带着 pend 做。
 ///
 /// 关图失败（同步未确认 ⇒ `Busy`）时失活不回滚：这一枚还欠着关图，资源本身
-/// 已失活时**原属主**可以对同一枚仍在表里的 token 重发 Seal 把关闭补完；资源
-/// 仍活而这一枚的 Pend 已不答话，或换别的任务来，都照旧拒。
+/// 已失活时仍持有 DELETE 授权的分支可以重发 Seal 把关闭补完；资源
+/// 仍活而这一枚的 Pend 已不答话，或没有 DELETE 授权，都照旧拒。
 pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, PendFail> {
     let me = current().running_task().ok_or(PendFail::Denied)?;
     let (share_view, _operation) = {
         let _serial = me.pend.lock();
         let pend = pend::locate(&me, token).ok_or(PendFail::Denied)?;
-        if kind != pend.view().kind() {
+        if Some(kind) != pend.target().kind() {
             return Err(PendFail::Denied);
         }
-        let share_view = pend.view().share_view();
+        let share_view = pend.target().share_view();
         if !pend.alive()
             && !share_view
                 .as_ref()
@@ -53,12 +71,16 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         {
             return Err(PendFail::Dead);
         }
-        // 补关资格只给“来源本身已失活、还欠着关图”那一档，且按 View 自己记的
-        // 属主判：`PendEntry::owner()` 是 `alive().then(…)`，失活之后恒为 `None`，不给
-        // 这条例外就没有人能把上面的图接着关完。来源仍活那一档照旧按这一枚的
-        // 授权事实判——Pend 已不答话是授权失效，不是补关。两档都不恢复活权限。
-        let cleanup = !pend.view().alive() && pend.view().owner() == me.ident.id;
-        if pend.owner() != Some(me.ident.id) && !cleanup {
+        let operation = match kind {
+            ViewKind::Clone => Operations::Clone(CloneRights::DELETE),
+            ViewKind::Share => Operations::Share(ShareRights::DELETE),
+        };
+        // Closing may be retried through a still-live DELETE branch after the
+        // target is sealed. An invalidated branch cannot regain authority here.
+        let cleanup = !pend.target().alive()
+            && pend.authority().alive()
+            && pend.authority().limits().operations.contains(operation);
+        if !cleanup && !pend.permits(operation) {
             return Err(PendFail::Denied);
         }
         let operation = if let Some(p) = &share_view {
@@ -67,7 +89,7 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
             None
         };
         let _commit = crate::basis::commit();
-        pend.view().seal();
+        pend.target().seal();
         (share_view, operation)
     };
     if let Some(share_view) = share_view {

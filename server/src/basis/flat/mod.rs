@@ -37,6 +37,7 @@ use storage::slot::{self, Slot};
 /// 要么是分配器 RAM（页槽按需物化），要么是调用方仍保留的外部物理区间。
 /// 物化时机由调用方组合决定，来源本身不携带 eager / lazy 策略。
 pub struct Flat {
+    id: kernel_api::model::flat::FlatId,
     /// Recipient of future allocations; existing Cells retain their own owner.
     allocation_owner: Owner,
     page_count: PageCount,
@@ -90,7 +91,14 @@ impl Flat {
         transferable: bool,
         allocation_owner: Owner,
     ) -> Result<Arc<Self>, FlatError> {
+        static NEXT: crate::basis::name::Serial =
+            crate::basis::name::Serial::new(1, isize::MAX as usize);
+        let id = NEXT
+            .allocate()
+            .and_then(kernel_api::model::flat::FlatId::new)
+            .ok_or(FlatError::OutOfMemory)?;
         Arc::try_new(Self {
+            id,
             allocation_owner,
             page_count,
             state: SpinLock::new_level(Level::Flat, FlatState::new(source, transferable)),
@@ -104,6 +112,11 @@ impl Flat {
     /// “检查过资格”与“之后才发布全局映射”不会交错成半个结论。
     pub(super) fn mark_untransferable(&self) {
         self.state.lock().transferable = false;
+    }
+
+    /// Stable identity, independent of references, ranges and storage addresses.
+    pub fn id(&self) -> kernel_api::model::flat::FlatId {
+        self.id
     }
 
     /// 来源声明的逻辑页总数。

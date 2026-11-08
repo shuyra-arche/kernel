@@ -19,6 +19,7 @@ pub enum ResourceKind {
     Clone = 2,
     /// Kernel-minted execution, device or resource-management qualification.
     Control = 4,
+    None = 5,
 }
 
 impl ResourceKind {
@@ -29,6 +30,7 @@ impl ResourceKind {
             KIND_SIGN => Some(ResourceKind::Sign),
             KIND_HOLE => Some(ResourceKind::Clone),
             4 => Some(ResourceKind::Control),
+            5 => Some(ResourceKind::None),
             _ => None,
         }
     }

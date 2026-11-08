@@ -3,10 +3,52 @@ mod boundary;
 mod vector;
 use super::{Console, lifecycle};
 use core::fmt::Write;
-use core::sync::atomic::{AtomicUsize, Ordering};
-use kernel_api::{address::VirtAddr, model::unit::UnitTarget};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use kernel_api::{
+    address::VirtAddr,
+    model::{identity::TaskId, unit::UnitTarget},
+};
 use kernel_client::call::{room, unit};
 static STARTED: AtomicUsize = AtomicUsize::new(0);
+
+// Keep the four-Hart fixture runnable during context handoffs. Otherwise the
+// timer owner can repeatedly steal an expired worker before an idle destination
+// wakes: correct register preservation then provides no migration coverage.
+static LOAD_STOP: AtomicBool = AtomicBool::new(false);
+static LOAD_ENTERED: AtomicUsize = AtomicUsize::new(0);
+struct Load([TaskId; 4]);
+impl Load {
+    fn start() -> Self {
+        LOAD_STOP.store(false, Ordering::Release);
+        LOAD_ENTERED.store(0, Ordering::Release);
+        let tasks = core::array::from_fn(|_| {
+            let task = lifecycle::spawn(load_worker as *const () as usize);
+            unit::resume(UnitTarget::Task(task)).unwrap();
+            task
+        });
+        let deadline = room::clock() + 3_000_000_000;
+        while LOAD_ENTERED.load(Ordering::Acquire) != tasks.len() {
+            assert!(room::clock() < deadline, "load workers did not start");
+            room::yield_();
+        }
+        Self(tasks)
+    }
+    fn finish(self) {
+        LOAD_STOP.store(true, Ordering::Release);
+        for task in self.0 {
+            assert!(lifecycle::wait_task(task));
+            assert_eq!(lifecycle::result(task), (1, 0));
+            lifecycle::delete(task);
+        }
+    }
+}
+extern "C" fn load_worker() -> ! {
+    LOAD_ENTERED.fetch_add(1, Ordering::Release);
+    while !LOAD_STOP.load(Ordering::Acquire) {
+        room::yield_();
+    }
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
 
 #[repr(C, align(16))]
 struct Image {
@@ -49,7 +91,7 @@ fn worker(id: usize) -> ! {
         unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
         assert!(now - start < 30_000_000, "no timer preemption");
     }
-    for _ in 0..64 {
+    for turn in 0..64 {
         unsafe {
             if id == 1 {
                 context_float_one();
@@ -61,7 +103,10 @@ fn worker(id: usize) -> ! {
         assert_eq!(observed.regs, expected.regs);
         assert_eq!(observed.fcsr, expected.fcsr);
         room::yield_();
-        room::sleep_until(room::clock() + 1_000_000).unwrap();
+        // Avoid locking both workers to the same timer phase. Every checkpoint
+        // still verifies all registers; the host trace must prove actual migration.
+        let delay = 100_000 + ((turn * 17 + id * 11) % 29) as u64 * 100_000;
+        room::sleep_until(room::clock() + delay).unwrap();
     }
     unsafe { save(&mut observed) };
     assert_eq!(observed.regs, expected.regs);
@@ -74,6 +119,7 @@ pub(super) fn run() {
     vector::run();
     #[cfg(feature = "migration")]
     vector::migration();
+    let load = Load::start();
     let tasks = [
         lifecycle::spawn(one as *const () as usize),
         lifecycle::spawn(two as *const () as usize),
@@ -86,6 +132,7 @@ pub(super) fn run() {
         assert_eq!(lifecycle::result(task), (1, 0));
         lifecycle::delete(task);
     }
+    load.finish();
     boundary::run();
     writeln!(
         Console,

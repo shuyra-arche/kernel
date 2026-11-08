@@ -91,8 +91,6 @@ fn every_operation_keeps_its_published_slot() {
     assert_eq!(<kernel_api::abi::call::sign::operations::Consume as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (11usize << 32) | 4);
     assert_eq!(<kernel_api::abi::call::sign::operations::Attach as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (11usize << 32) | 5);
     assert_eq!(<kernel_api::abi::call::sign::operations::Detach as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (11usize << 32) | 6);
-    assert_eq!(<kernel_api::abi::call::sign::operations::Accord as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (11usize << 32) | 7);
-    assert_eq!(<kernel_api::abi::call::sign::operations::Return as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (11usize << 32) | 8);
 }
 
 #[test]

@@ -40,16 +40,17 @@ fn capsule_preserves_entry_and_region_layout() {
 #[test]
 fn capsule_rejects_invalid_execute_permissions_ranges_and_payloads() {
     for (offset, value, width) in [
-        (8, 1, 2),                           // retired capsule format
-        (11, 0, 1),                          // retired kernel ABI
-        (11, 2, 1),                          // future kernel ABI
-        (16, 0x3000, 8),                     // entry outside executable region
-        (HEADER + 32, 7, 4),                 // writable executable region
-        (HEADER + 36, 1, 4),                 // nonzero reserved field
-        (HEADER + 8, u64::MAX, 8),           // overflowing virtual span
-        (HEADER + 16, 2, 8),                 // data exceeds mapped pages
-        (HEADER + 24, (PAGE * 2) as u64, 8), // payload outside image
-        (HEADER + 24, HEADER as u64, 8),     // payload points into header
+        (8, 1, 2),                                      // retired capsule format
+        (11, 0, 1),                                     // retired kernel ABI
+        (11, (kernel_api::abi::VERSION + 1) as u64, 1), // future kernel ABI
+        (11, 1, 1),                                     // retired descriptor layout
+        (16, 0x3000, 8),                                // entry outside executable region
+        (HEADER + 32, 7, 4),                            // writable executable region
+        (HEADER + 36, 1, 4),                            // nonzero reserved field
+        (HEADER + 8, u64::MAX, 8),                      // overflowing virtual span
+        (HEADER + 16, 2, 8),                            // data exceeds mapped pages
+        (HEADER + 24, (PAGE * 2) as u64, 8),            // payload outside image
+        (HEADER + 24, HEADER as u64, 8),                // payload points into header
     ] {
         let mut bytes = capsule();
         number(&mut bytes, offset, value, width);

@@ -15,24 +15,17 @@ mod ledger;
 #[allow(dead_code, unused_imports)]
 #[path = "../../src/basis/name/mod.rs"]
 mod name;
-#[allow(dead_code)]
-#[path = "../../src/basis/sign/table.rs"]
-mod signs;
 mod support;
 use kernel_api::{
-    abi::call::{sign::SignFail, unit::UnitFail},
-    model::{
-        identity::{PendId, TaskId},
-        sign::SignRights,
-        unit::ControlKind,
-    },
+    abi::call::unit::UnitFail,
+    model::{identity::PendId, unit::ControlKind},
 };
 use std::sync::Arc;
 use support::Task;
 mod task {
     pub(crate) use crate::support::Task;
 }
-use support::{HoldTable, PendEntry, WakeKey, endpoint};
+use support::{HoldTable, PendEntry};
 
 mod basis {
     pub(crate) use crate::name;
@@ -57,7 +50,6 @@ mod metal {
         pub(crate) use crate::support::{SpinLock, spin};
     }
 }
-fn wipe(_key: WakeKey) {}
 
 #[test]
 fn unpublished_pend_rolls_back_and_keeps_one_record_on_publish() {
@@ -137,82 +129,4 @@ fn control_reuse_does_not_revive_revoked_descendants_or_cross_tables() {
     );
     a.administration.clear();
     assert!(!b.administration.allows(ControlKind::Build));
-}
-
-#[test]
-fn sign_release_reuse_and_close_have_distinct_lifetimes() {
-    let a = Task::new(10);
-    let b = Task::new(20);
-    let endpoint = endpoint::Endpoint::new(a.ident.id);
-    let root = a
-        .signs
-        .install(endpoint.clone(), SignRights::all(), true)
-        .unwrap();
-    let child = signs::delegate(&a, &b, root, SignRights::all()).unwrap();
-    let leaf = signs::delegate(&b, &a, child, SignRights::LISTEN).unwrap();
-    assert!(matches!(
-        b.signs.get(root, SignRights::LISTEN),
-        Err(SignFail::Denied)
-    ));
-    b.signs.release(b.ident.id, child).unwrap();
-    let replacement = signs::delegate(&a, &b, root, SignRights::TRIGGER).unwrap();
-    assert!(matches!(
-        a.signs.get(leaf, SignRights::LISTEN),
-        Err(SignFail::Dead)
-    ));
-    assert!(matches!(
-        b.signs.get(child, SignRights::TRIGGER),
-        Err(SignFail::Denied)
-    ));
-    assert!(matches!(
-        b.signs.get(replacement, SignRights::LISTEN),
-        Err(SignFail::Denied)
-    ));
-    assert!(b.signs.get(replacement, SignRights::TRIGGER).is_ok());
-    assert!(endpoint.alive());
-    assert_eq!(
-        b.signs.close(b.ident.id, replacement),
-        Err(SignFail::Denied)
-    );
-    a.signs.revoke(root, &b.signs, replacement).unwrap();
-    assert!(matches!(
-        b.signs.get(replacement, SignRights::TRIGGER),
-        Err(SignFail::Dead)
-    ));
-    a.signs.release(a.ident.id, root).unwrap();
-    assert!(endpoint.alive());
-    // Owned endpoint retention survives ordinary handle removal until owner exit.
-    a.signs.clear(a.ident.id);
-    assert!(!endpoint.alive());
-}
-
-#[test]
-fn failed_owned_sign_install_does_not_leave_an_owner_record() {
-    let table = signs::Table::new();
-    let actor = TaskId::new(40);
-    let endpoint = endpoint::Endpoint::new(actor);
-    // Authority, owned list, then index/arena storage: fail each allocating stage.
-    for fail in 0..4 {
-        let table = signs::Table::new();
-        assert!(
-            allocation::fail_after(fail, || table.install(
-                endpoint.clone(),
-                SignRights::all(),
-                true
-            ))
-            .is_err()
-        );
-        table.clear(actor);
-        assert!(endpoint.alive());
-    }
-    let id = table
-        .install(endpoint.clone(), SignRights::all(), true)
-        .unwrap();
-    table.close(actor, id).unwrap();
-    assert!(!endpoint.alive());
-    assert!(matches!(
-        table.get(id, SignRights::LISTEN),
-        Err(SignFail::Dead)
-    ));
-    table.release(actor, id).unwrap();
 }

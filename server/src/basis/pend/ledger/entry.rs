@@ -7,9 +7,9 @@ use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 
-use crate::basis::pend::narrows;
+use crate::basis::pend::Target;
 use crate::basis::unit::task::Task;
-use crate::basis::view::View;
+use kernel_api::model::pend::{Limits, Operations};
 
 use crate::basis::pend::{Modifiable, Need};
 
@@ -20,7 +20,7 @@ pub(crate) struct PendEntry {
     mark: Mark,
     sire: Option<PendId>,
     lord: Weak<Task>,
-    meta: View,
+    meta: Target,
 }
 
 impl PendEntry {
@@ -49,10 +49,6 @@ impl PendEntry {
         self.mark
     }
 
-    pub(crate) fn owner(&self) -> Option<TaskId> {
-        self.alive().then(|| self.meta.owner())
-    }
-
     pub(crate) fn alive(&self) -> bool {
         self.meta.alive() && self.authority.alive()
     }
@@ -63,7 +59,11 @@ impl PendEntry {
             .is_some_and(|access| need.allowed_by(access))
     }
 
-    pub(crate) fn view(&self) -> &View {
+    pub(crate) fn permits(&self, operations: Operations) -> bool {
+        self.alive() && self.authority.permits(operations)
+    }
+
+    pub(crate) fn target(&self) -> &Target {
         &self.meta
     }
 
@@ -71,25 +71,27 @@ impl PendEntry {
     pub(crate) fn vest_window(
         &self,
         mark: Mark,
-        modifiable: Modifiable,
+        limits: Limits,
         window: Option<(
             kernel_api::address::PageOffset,
             kernel_api::address::PageCount,
         )>,
     ) -> Result<PendEntry, kernel_api::abi::call::pend::PendFail> {
-        PendEntry::try_new_window(
+        let entry = PendEntry::try_new_window(
             self.meta.clone(),
             mark,
-            modifiable,
+            limits.modifiable,
             Some(self.token),
             window,
-        )
+        )?;
+        entry.authority.narrow(limits, window)?;
+        Ok(entry)
     }
 }
 
 impl PendEntry {
     pub(crate) fn try_new(
-        meta: View,
+        meta: impl Into<Target>,
         mark: Mark,
         modifiable: Modifiable,
         sire: Option<PendId>,
@@ -99,7 +101,7 @@ impl PendEntry {
 
     /// 带**有效窗口**的一枚：窗口相对来源起点，只在建这一枚时给定。
     pub(crate) fn try_new_window(
-        meta: View,
+        meta: impl Into<Target>,
         mark: Mark,
         modifiable: Modifiable,
         sire: Option<PendId>,
@@ -108,6 +110,7 @@ impl PendEntry {
             kernel_api::address::PageCount,
         )>,
     ) -> Result<PendEntry, kernel_api::abi::call::pend::PendFail> {
+        let meta = meta.into();
         let token = next_id()?;
         Ok(PendEntry {
             released: core::sync::atomic::AtomicBool::new(false),
@@ -131,6 +134,7 @@ impl PendEntry {
 
     pub(crate) fn invalidate(&self) {
         self.authority.invalidate();
+        self.meta.changed(self.token, false);
     }
 
     pub(crate) fn parent(&mut self, token: PendId, task: Weak<Task>) {
@@ -140,7 +144,7 @@ impl PendEntry {
 
     pub(crate) fn narrow(
         &self,
-        subset: Modifiable,
+        limits: Limits,
         window: Option<(
             kernel_api::address::PageOffset,
             kernel_api::address::PageCount,
@@ -149,10 +153,16 @@ impl PendEntry {
         if !self.alive() {
             return Err(kernel_api::abi::call::pend::PendFail::Dead);
         }
-        if !narrows(self.modifiable(), subset) {
-            return Err(kernel_api::abi::call::pend::PendFail::Denied);
-        }
-        self.authority.narrow(subset, window)
+        self.authority.narrow(limits, window)?;
+        self.meta.changed(
+            self.token,
+            limits
+                .operations
+                .contains(kernel_api::model::pend::Operations::Sign(
+                    kernel_api::model::sign::SignRights::ROUTE,
+                )),
+        );
+        Ok(())
     }
 }
 

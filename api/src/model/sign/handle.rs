@@ -1,7 +1,7 @@
 use crate::abi::register::{Decode, Wire};
 use crate::abi::reply::FromPair;
 
-/// A Sign handle is resolved only in the calling Task's table.
+/// Descriptive identity of an endpoint. Calls require a PendId, never this identity.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SignId(usize);
@@ -37,10 +37,12 @@ impl FromPair for SignId {
 bitflags::bitflags! {
     /// Independent control-flow authority; no Page access or Unit control follows.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct SignRights: u8 {
+    pub struct SignRights: u32 {
         const LISTEN = 1;
         const TRIGGER = 2;
         const ROUTE = 4;
+        const CONSUME = 8;
+        const DELETE = 16;
     }
 }
 
@@ -50,7 +52,7 @@ impl Wire for SignRights {
         (self.bits() as usize).pack(words, at);
     }
     fn unpack(words: &[usize; 6], at: &mut usize) -> Result<Self, Decode> {
-        let bits = u8::try_from(usize::unpack(words, at)?).map_err(|_| Decode::Invalid)?;
+        let bits = u32::try_from(usize::unpack(words, at)?).map_err(|_| Decode::Invalid)?;
         Self::from_bits(bits)
             .filter(|rights| !rights.is_empty())
             .ok_or(Decode::Invalid)

@@ -204,7 +204,7 @@ pub(super) fn cull(
             .try_reserve(tasks.len())
             .map_err(|_| PendFail::OutOfMemory)?;
         let root = super::locate(task, token).ok_or(PendFail::Denied)?;
-        let share_view = root.view().share_view();
+        let share_view = root.target().share_view();
         let _operation = match &share_view {
             Some(meta) => {
                 let operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
@@ -232,7 +232,6 @@ pub(super) fn cull(
                 for (holder, token) in &nodes {
                     super::locate(holder, *token)
                         .ok_or(PendFail::Busy)?
-                        .authority()
                         .invalidate();
                 }
                 Ok(())
@@ -300,7 +299,7 @@ fn reap(task: &Arc<Task>, token: PendId) -> Result<Option<Arc<PendEntry>>, PendF
     {
         return Ok(None);
     }
-    let share_view = pend_entry.view().share_view();
+    let share_view = pend_entry.target().share_view();
     let _operation = match &share_view {
         Some(meta) => {
             let operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
@@ -400,7 +399,7 @@ fn seal_owned(task: &Task) {
                 .entries
                 .lock()
                 .iter()
-                .filter(|pend_entry| pend_entry.view().owner() == task.ident.id)
+                .filter(|pend_entry| pend_entry.target().owner() == task.ident.id)
                 .filter(|pend_entry| pend_entry.token().get() > after)
                 .min_by_key(|pend_entry| pend_entry.token().get())
                 .cloned()
@@ -409,6 +408,6 @@ fn seal_owned(task: &Task) {
             break;
         };
         after = pend_entry.token().get();
-        pend_entry.view().seal();
+        pend_entry.target().seal();
     }
 }

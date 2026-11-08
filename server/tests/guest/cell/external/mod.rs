@@ -59,7 +59,7 @@ pub(super) fn run(at: usize, count: usize) {
         },
     }
     .to_bytes();
-    let made = cell::create(super::ptr(&spec)).unwrap();
+    let made = cell::create(kernel_api::model::identity::PendId::NONE, super::ptr(&spec)).unwrap();
     let CreatedCell::Memo {
         mapping,
         address: _address,
@@ -153,7 +153,7 @@ extern "C" fn publisher() -> ! {
         },
     }
     .to_bytes();
-    let made = cell::create(super::ptr(&spec)).unwrap();
+    let made = cell::create(kernel_api::model::identity::PendId::NONE, super::ptr(&spec)).unwrap();
     let CreatedCell::Memo {
         mapping,
         address: _address,
@@ -203,13 +203,23 @@ pub(super) fn death(at: usize, count: usize) {
             .unwrap()
             .handle(),
     );
+    assert!(share_view::delete(root).is_err());
     let task = super::lifecycle::spawn(publisher as *const () as usize);
+    crate::license::delegate(task);
     let request = AccordRequest {
         src: root,
         target: AccordTarget::Task(task),
-        subset: Modifiable::Yes,
+        limits: kernel_api::model::pend::Limits {
+            operations: kernel_api::model::pend::Operations::Share(
+                kernel_api::model::pend::ShareRights::OPEN
+                    | kernel_api::model::pend::ShareRights::SHUT
+                    | kernel_api::model::pend::ShareRights::ASSOCIATE,
+            ),
+            modifiable: Modifiable::Yes,
+            distributable: kernel_api::model::pend::Distributable::Yes,
+            range: PendRange::Inherit,
+        },
         mark: Mark::NONE,
-        range: PendRange::Inherit,
     }
     .to_bytes();
     let token = pend::accord(super::ptr(&request)).unwrap();

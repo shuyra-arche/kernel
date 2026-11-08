@@ -1,6 +1,7 @@
 //! Pure borrow decisions. Hardware withdrawal must complete before Borrow or Settle
 //! is committed; failure retains the previous obligation and never resumes a parent.
 use kernel_api::model::modifiable::Modifiable;
+use kernel_api::model::pend::{CreationRights, Distributable, Operations};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     Active,
@@ -10,6 +11,8 @@ pub(crate) enum Phase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct State {
     pub(crate) access: Modifiable,
+    pub(crate) operations: Operations,
+    pub(crate) distributable: Distributable,
     pub(crate) phase: Phase,
     readers: usize,
     writer: bool,
@@ -19,6 +22,11 @@ pub(crate) enum Event {
     Borrow(Modifiable),
     Return(Modifiable),
     Narrow(Modifiable),
+    Limit {
+        access: Modifiable,
+        operations: Operations,
+        distributable: Distributable,
+    },
     Retire,
     Settle,
     Cancel,
@@ -33,10 +41,26 @@ impl State {
     pub(crate) const fn new(access: Modifiable) -> Self {
         Self {
             access,
+            operations: Operations::None(CreationRights::empty()),
+            distributable: Distributable::No,
             phase: Phase::Active,
             readers: 0,
             writer: false,
         }
+    }
+    pub(crate) fn authorized(
+        access: Modifiable,
+        operations: Operations,
+        distributable: Distributable,
+    ) -> Self {
+        Self {
+            operations,
+            distributable,
+            ..Self::new(access)
+        }
+    }
+    pub(crate) fn permits(self, operations: Operations) -> bool {
+        self.usable() && self.operations.contains(operations)
     }
     pub(crate) fn usable(self) -> bool {
         self.phase == Phase::Active
@@ -83,6 +107,21 @@ impl State {
                         next.readers = next.readers.checked_add(1).ok_or(Failure::Busy)?
                     }
                 }
+            }
+            Event::Limit {
+                access,
+                operations,
+                distributable,
+            } => {
+                if !next.operations.contains(operations)
+                    || (next.distributable == Distributable::No
+                        && distributable == Distributable::Yes)
+                {
+                    return Err(Failure::Denied);
+                }
+                next = next.transition(Event::Narrow(access))?;
+                next.operations = operations;
+                next.distributable = distributable;
             }
             Event::Narrow(access) => {
                 if next.phase != Phase::Active {

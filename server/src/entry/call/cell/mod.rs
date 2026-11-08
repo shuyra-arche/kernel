@@ -44,8 +44,8 @@ use super::outcome::answer;
 
 mod object;
 pub(super) fn dispatch(frame: &mut TrapContext, call: CellCall, ident: &Arc<TaskIdent>) {
-    if let CellCall::Create { request } = call {
-        match object::create(request, ident) {
+    if let CellCall::Create { license, request } = call {
+        match object::create(license, request, ident) {
             Ok((kind, id, address)) => {
                 use crate::metal::switcher::context::Gprs;
                 frame.gpr.set_x(Gprs::A0, kind);
@@ -430,13 +430,23 @@ enum SourceSpec {
     },
 }
 /// Internal authority resolution. The public lifecycle is Cell Create/Delete.
-fn resolve_source(source: SourceSpec, ident: &Arc<TaskIdent>) -> Result<usize, CellFail> {
+fn resolve_source(
+    source: SourceSpec,
+    ident: &Arc<TaskIdent>,
+    license: Option<kernel_api::model::identity::PendId>,
+) -> Result<usize, CellFail> {
     let task = caller(ident).ok_or(CellFail::Denied)?;
     let _serial = task.pend.lock();
     // Authority resolution and handle registration share the commit boundary.
     let _commit = crate::basis::commit();
     let (authorization, offset, count, ceiling, branch) = match source {
         SourceSpec::Allocation(allocation) => {
+            super::authority::license(
+                &task,
+                license.ok_or(CellFail::Denied)?,
+                kernel_api::model::pend::CreationRights::FLAT,
+            )
+            .map_err(source_fail)?;
             if allocation.align != PAGE_SIZE {
                 return Err(CellFail::NotAligned);
             }
@@ -459,10 +469,12 @@ fn resolve_source(source: SourceSpec, ident: &Arc<TaskIdent>) -> Result<usize, C
             // 从 Share 的某一枚 PendEntry 取得：撤销边与上限按**这一枚**的子 Pend 算，
             // 不因同 Flat、共享根资格就并到根上去。
             let pend = crate::basis::pend::locate(&task, token).ok_or(CellFail::Denied)?;
-            if !pend.alive() {
+            if !pend.permits(kernel_api::model::pend::Operations::Share(
+                kernel_api::model::pend::ShareRights::ASSOCIATE,
+            )) {
                 return Err(CellFail::Denied);
             }
-            let meta = pend.view().share_view().ok_or(CellFail::Denied)?;
+            let meta = pend.target().share_view().ok_or(CellFail::Denied)?;
             if !pend.modifiable().allows(Modifiable::No) {
                 return Err(CellFail::Denied);
             }
@@ -529,8 +541,9 @@ fn resolve_source(source: SourceSpec, ident: &Arc<TaskIdent>) -> Result<usize, C
                 let token = branch.unwrap_or(root_token);
                 let pend = crate::basis::pend::locate(&task, token).ok_or(CellFail::Denied)?;
                 let authority = meta.authority(token).ok_or(CellFail::Denied)?;
-                if !pend.alive()
-                    || !pend.modifiable().allows(Modifiable::No)
+                if !pend.permits(kernel_api::model::pend::Operations::Share(
+                    kernel_api::model::pend::ShareRights::ASSOCIATE,
+                )) || !pend.modifiable().allows(Modifiable::No)
                     || !Arc::ptr_eq(pend.authority(), &authority)
                 {
                     return Err(CellFail::Denied);

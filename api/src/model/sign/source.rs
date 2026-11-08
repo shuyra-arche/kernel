@@ -1,6 +1,5 @@
 use crate::abi::register::{Decode, Wire};
 
-use super::SignId;
 use crate::model::clone_view::CloneCondition;
 use crate::model::identity::PendId;
 use crate::model::identity::TaskId;
@@ -24,7 +23,7 @@ pub enum SignSource {
         condition: CloneCondition,
     },
     Sign {
-        token: SignId,
+        token: PendId,
     },
     Join {
         target: UnitTarget,
@@ -92,7 +91,7 @@ impl SignSource {
                 token: PendId::new(token),
             }),
             [6, token, 0] if token != 0 => Some(Self::Sign {
-                token: SignId::new(token),
+                token: PendId::new(token),
             }),
             _ => None,
         }

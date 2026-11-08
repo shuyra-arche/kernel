@@ -74,7 +74,11 @@ impl ExternalBorrow {
         let (loan, parent, observer) = if let Some((meta, root, authority)) = source.root() {
             let (token, authority) = hold.branch().unwrap_or((root, &authority));
             let entry = pend::locate(task, token).ok_or(PendFail::Denied)?;
-            if !entry.alive() || !Arc::ptr_eq(entry.authority(), authority) || source.revoked() {
+            if !entry.permits(kernel_api::model::pend::Operations::Share(
+                kernel_api::model::pend::ShareRights::ASSOCIATE,
+            )) || !Arc::ptr_eq(entry.authority(), authority)
+                || source.revoked()
+            {
                 return Err(PendFail::Denied);
             }
             let _operation = ShareOperation::acquire(&meta).ok_or(PendFail::Busy)?;
@@ -86,7 +90,14 @@ impl ExternalBorrow {
             if authority.configured() == Modifiable::Yes && meta.pending_maps(token) {
                 return Err(PendFail::Busy);
             }
-            let loan = Pend::try_new_window(access, Some(hold.window()))?;
+            let loan = Pend::try_new_window(
+                access,
+                Some(hold.window()),
+                kernel_api::model::pend::Operations::None(
+                    kernel_api::model::pend::CreationRights::empty(),
+                ),
+                kernel_api::model::pend::Distributable::No,
+            )?;
             authority.borrow_external(&loan)?;
             (
                 Some(loan),

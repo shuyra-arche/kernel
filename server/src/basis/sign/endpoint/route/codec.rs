@@ -51,7 +51,12 @@ pub(crate) fn source_key(
     pend_entry: &PendEntry,
     source: SignSource,
 ) -> Option<(WakeKey, Weak<Anchor>)> {
-    let view = pend_entry.view();
+    if !pend_entry.permits(kernel_api::model::pend::Operations::Clone(
+        kernel_api::model::pend::CloneRights::PEEK,
+    )) {
+        return None;
+    }
+    let view = pend_entry.target();
     match source {
         SignSource::Clone { condition, .. } => {
             let meta = view.clone_view()?;
@@ -67,7 +72,12 @@ pub(crate) fn source_key(
 
 /// 这份 source 此刻是否已就绪：问它自己的资源机制。
 pub(crate) fn source_ready(pend_entry: &PendEntry, source: SignSource) -> Option<bool> {
-    let view = pend_entry.view();
+    if !pend_entry.permits(kernel_api::model::pend::Operations::Clone(
+        kernel_api::model::pend::CloneRights::PEEK,
+    )) {
+        return None;
+    }
+    let view = pend_entry.target();
     match source {
         SignSource::Clone { condition, .. } => Some(view.clone_view()?.ready(condition)),
         SignSource::Sign { .. }

@@ -1,10 +1,14 @@
+mod permission;
+
 use kernel_api::{
     abi::call::pend::PendFail,
     address::VirtAddr,
     model::{
         identity::{Mark, PendId, TaskId},
         modifiable::Modifiable,
-        pend::{AccordRequest, AccordTarget, PendInfo, PendRange, PendStatus},
+        pend::{
+            AccordRequest, AccordTarget, Limits, NarrowRequest, PendInfo, PendRange, PendStatus,
+        },
         unit::UnitTarget,
     },
 };
@@ -19,15 +23,35 @@ fn accord(
     let bytes = AccordRequest {
         src,
         target,
-        subset,
+        limits: Limits {
+            modifiable: subset,
+            range,
+            ..inspect(src).limits
+        },
         mark: Mark::NONE,
-        range,
     }
     .to_bytes();
     pend::accord(VirtAddr::new(bytes.as_ptr() as usize))
 }
 
-fn inspect(token: PendId) -> PendInfo {
+fn narrow(
+    token: PendId,
+    modifiable: Modifiable,
+    range: PendRange,
+) -> kernel_api::abi::call::pend::PendResult<()> {
+    let bytes = NarrowRequest {
+        token,
+        limits: Limits {
+            modifiable,
+            range,
+            ..inspect(token).limits
+        },
+    }
+    .to_bytes();
+    pend::narrow(super::ptr(&bytes))
+}
+
+pub(super) fn inspect(token: PendId) -> PendInfo {
     let mut words = [0; PendInfo::WORDS];
     pend::inspect(token, VirtAddr::new(words.as_mut_ptr() as usize)).unwrap();
     PendInfo::from_words(words).unwrap()
@@ -48,8 +72,9 @@ extern "C" fn recipient() -> ! {
 }
 
 pub(super) fn run() {
+    permission::run();
     let reference = super::allocate(8);
-    let root = share_view::create(reference, Modifiable::Yes).unwrap();
+    let root = share_view::create(crate::license::get(), reference, Modifiable::Yes).unwrap();
     let (address, len) = share_view::open(root).unwrap();
     assert_eq!(len, 8 * 4096);
     super::write(address, 3 * 4096, 0x13579);
@@ -71,7 +96,7 @@ pub(super) fn run() {
     .unwrap();
     assert_eq!(inspect(root).status, PendStatus::Suspended);
     assert_ne!(child, leaf);
-    assert_eq!(inspect(child).view, inspect(leaf).view);
+    assert_eq!(inspect(child).target, inspect(leaf).target);
     assert_eq!(
         accord(
             child,
@@ -137,7 +162,8 @@ pub(super) fn run() {
             },
         }
         .to_bytes();
-        let made = cell::create(super::ptr(&spec)).unwrap();
+        let made =
+            cell::create(kernel_api::model::identity::PendId::NONE, super::ptr(&spec)).unwrap();
         let CreatedCell::Memo {
             mapping,
             address: _address,
@@ -195,19 +221,19 @@ pub(super) fn run() {
     super::lifecycle::delete(task);
     assert_eq!(inspect(root).status, PendStatus::Suspended);
     assert_eq!(
-        pend::narrow(child, Modifiable::No, PendRange::pages(1, 1).unwrap())
+        narrow(child, Modifiable::No, PendRange::pages(1, 1).unwrap())
             .unwrap_err()
             .source,
         PendFail::Busy
     );
     pend::return_(leaf).unwrap();
-    pend::narrow(child, Modifiable::No, PendRange::pages(1, 1).unwrap()).unwrap();
-    assert_eq!(inspect(child).range, PendRange::pages(3, 1).unwrap());
+    narrow(child, Modifiable::No, PendRange::pages(1, 1).unwrap()).unwrap();
+    assert_eq!(inspect(child).limits.range, PendRange::pages(3, 1).unwrap());
     let (narrowed, len) = share_view::open(child).unwrap();
     assert_eq!(len, 4096);
     assert_eq!(super::read(narrowed, 0), 0x13579);
     assert_eq!(
-        pend::narrow(child, Modifiable::No, PendRange::pages(0, 2).unwrap())
+        narrow(child, Modifiable::No, PendRange::pages(0, 2).unwrap())
             .unwrap_err()
             .source,
         PendFail::Denied

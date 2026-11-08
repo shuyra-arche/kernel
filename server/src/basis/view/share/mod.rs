@@ -405,7 +405,11 @@ pub(crate) fn open(
     // 做完——与已分出的子段、与别人的独立持有都不相交才继续，不隐式裁剪；
     // 复用旧关系的那一路也过同一道门。
     let _commit = crate::basis::commit();
-    if !meta.alive() || authority.modifiable().is_none() {
+    if !meta.alive()
+        || !authority.permits(kernel_api::model::pend::Operations::Share(
+            kernel_api::model::pend::ShareRights::OPEN,
+        ))
+    {
         return Err(PendFail::Dead);
     }
     if let Some(authorization) = &authorization {
