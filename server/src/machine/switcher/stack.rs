@@ -65,6 +65,7 @@ pub(crate) fn set_boot_stacks(boot_stacks: Vec<Page>) {
 }
 
 pub fn arm_hart() {
+    crate::machine::clock::timer::initialize();
     unsafe {
         stvec::write(stvec::Stvec::new(alltraps_va(), stvec::TrapMode::Direct));
         let scr = crate::machine::hart::hart_frame().as_usize();

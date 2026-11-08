@@ -201,4 +201,5 @@ mod memory;
 
 mod harts;
 
+mod clock;
 mod context;

@@ -29,6 +29,13 @@ pub(crate) fn report() {
         "timer: late_n={late_n} late_max_ms={max_ms} late_avg_ms={avg_ms} late_max_tick={late_max} traps={} tocks={tocks} mutes={mutes} remote_rearms={remote_rearms}",
         deadline::ticks()
     );
+    #[cfg(debug_assertions)]
+    {
+        let ([(sbi, sbi_ticks), (sstc, sstc_ticks)], skipped) = clock::timer::measures();
+        putln!(
+            "timer-program: sbi={sbi} sbi_ticks={sbi_ticks} sstc={sstc} sstc_ticks={sstc_ticks} skipped={skipped}"
+        );
+    }
     let (held, starved, blocked, nudged) = crate::basis::unit::lifecycle::branch_stats();
     putln!("doom: held={held} starved={starved} blocked={blocked} nudged={nudged}");
     let (kicks, fallback) = scheduler::kick_stats();

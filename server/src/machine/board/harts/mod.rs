@@ -37,6 +37,7 @@ pub struct HartInfo {
     cpus: [Cpu; CAPACITY],
     float: [u64; CAPACITY / 64],
     vector: [u64; CAPACITY / 64],
+    sstc: [u64; CAPACITY / 64],
     pub count: usize,
     pub hertz: usize,
     pub(crate) common: Capability,
@@ -73,6 +74,7 @@ impl HartInfo {
             }; CAPACITY],
             float: [0; CAPACITY / 64],
             vector: [0; CAPACITY / 64],
+            sstc: [0; CAPACITY / 64],
             count: 0,
             hertz,
             common: Capability::ceiling(),
@@ -109,6 +111,9 @@ impl HartInfo {
             if caps.vector() {
                 result.vector[result.count / 64] |= 1 << (result.count % 64);
             }
+            if caps.sstc() {
+                result.sstc[result.count / 64] |= 1 << (result.count % 64);
+            }
             result.count += 1;
         }
         let boot_slot = result.cpus[..result.count]
@@ -116,17 +121,13 @@ impl HartInfo {
             .position(|cpu| cpu.id == boot)
             .ok_or(HartError::Boot(boot.get()))?;
         result.cpus.swap(0, boot_slot);
-        let first = result.floating(HartId::new(0));
-        let boot = result.floating(HartId::new(boot_slot));
-        if first != boot {
-            result.float[0] ^= 1;
-            result.float[boot_slot / 64] ^= 1 << (boot_slot % 64);
-        }
-        let first = result.vector(HartId::new(0));
-        let boot = result.vector(HartId::new(boot_slot));
-        if first != boot {
-            result.vector[0] ^= 1;
-            result.vector[boot_slot / 64] ^= 1 << (boot_slot % 64);
+        for bitmap in [&mut result.float, &mut result.vector, &mut result.sstc] {
+            let first = bitmap[0] & 1;
+            let boot = bitmap[boot_slot / 64] >> (boot_slot % 64) & 1;
+            if first != boot {
+                bitmap[0] ^= 1;
+                bitmap[boot_slot / 64] ^= 1 << (boot_slot % 64);
+            }
         }
         Ok(result)
     }
@@ -137,6 +138,10 @@ impl HartInfo {
         self.cpus[..self.count]
             .iter()
             .find_map(|cpu| (cpu.node == node.name.as_ptr() as usize).then_some(cpu.id))
+    }
+
+    pub(crate) fn sstc(&self, slot: HartId) -> bool {
+        self.sstc[slot.get() / 64] & (1 << (slot.get() % 64)) != 0
     }
 
     pub(crate) fn vector(&self, slot: HartId) -> bool {

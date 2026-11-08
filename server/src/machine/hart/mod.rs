@@ -22,7 +22,6 @@ static ONLINE: [AtomicUsize; MAX_HART_SLOTS / usize::BITS as usize] =
 
 pub(crate) fn mark_online() {
     crate::machine::switcher::context::extension::hardware::initialize();
-    crate::machine::clock::timer::initialize();
     let (word, bit) = hart_id().bit();
     ONLINE[word].fetch_or(bit, Ordering::Release);
 }

@@ -33,11 +33,16 @@ fn extension(name: &str) -> u16 {
         "zicsr" => 64,
         "zifencei" => 128,
         "zicntr" => 256,
+        "sstc" => 2048,
         _ => 0,
     }
 }
 
 impl Capability {
+    pub(crate) fn sstc(self) -> bool {
+        self.isa & 2048 != 0
+    }
+
     pub(crate) fn vector(self) -> bool {
         self.isa & 1024 != 0
     }
