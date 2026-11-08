@@ -94,3 +94,18 @@ fn every_operation_keeps_its_published_slot() {
     assert_eq!(<kernel_api::abi::call::sign::operations::Accord as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (11usize << 32) | 7);
     assert_eq!(<kernel_api::abi::call::sign::operations::Return as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (11usize << 32) | 8);
 }
+
+#[test]
+fn clock_metadata_uses_an_additive_slot_and_two_full_width_values() {
+    use kernel_api::abi::{
+        call::room::operations::ClockInfo,
+        operation::{KernelCall, RegisterCall},
+    };
+
+    assert_eq!(ClockInfo::SLOT, kernel_api::abi::PREFIX | 5);
+    let clock = ClockInfo::decode_return((0, usize::MAX, 10_000_000)).unwrap();
+    assert_eq!(clock.boot_tick(), usize::MAX as u64);
+    assert_eq!(clock.hertz().get(), 10_000_000);
+    // Older providers report Unknown (-1), so Client can fall back to Clock.
+    assert!(ClockInfo::decode_return((usize::MAX, 0, 0)).is_err());
+}

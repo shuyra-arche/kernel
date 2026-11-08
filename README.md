@@ -196,6 +196,14 @@ otherwise uses SBI. The ISA bit by itself is insufficient. Debug shutdown
 reports comparator writes, avoided writes, measured programming ticks and
 observed deadline lateness.
 
+Trusted boot firmware can also provide the empty `/chosen/shuyra,user-time`
+property when every admitted Hart exposes the same synchronized RV64 `time`
+counter to both S- and U-mode, subject to `scounteren.TM`. Kernel advertises
+`Room.ClockInfo` only after every admitted Hart has accepted that bit. Client
+callers can cache the source in `room::MonotonicClock`, which falls back to
+`Room.Clock` if discovery fails. Both paths use the same boot tick and scale.
+No shared metadata page is needed.
+
 ## External access
 
 External access is an address projection, not a separate device work object.

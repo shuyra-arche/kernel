@@ -5,29 +5,29 @@ pub(crate) mod timer;
 pub use error::ClockError;
 pub use instant::Instant;
 
-use ::core::sync::atomic::{AtomicU64, Ordering};
+use ::core::num::NonZeroU64;
+use ::core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use ::core::time::Duration;
 
-use riscv::register::time;
+use kernel_api::model::clock::ClockSource;
+use riscv::register::{scounteren, time};
 
 use crate::machine::board;
 use crate::machine::sync::OnceLock;
 
 const NANOS_PER_SEC: u128 = 1_000_000_000;
 
-static HERTZ: OnceLock<u64> = OnceLock::new();
-static CYCLE: AtomicU64 = AtomicU64::new(0);
+static CLOCK: OnceLock<ClockSource> = OnceLock::new();
+static USER_TIME: AtomicBool = AtomicBool::new(false);
+static USER_TIME_HARTS: AtomicUsize = AtomicUsize::new(0);
 
 pub fn init() -> Result<(), ClockError> {
-    let hertz = board::info().hart.hertz;
-    if hertz == 0 {
-        return Err(ClockError::NoTimebase);
-    }
-    HERTZ
-        .set(hertz as u64)
+    let hertz = NonZeroU64::new(board::info().hart.hertz as u64).ok_or(ClockError::NoTimebase)?;
+    CLOCK
+        .set(ClockSource::new(time::read() as u64, hertz))
         .map_err(|_| ClockError::AlreadyInit)?;
-    CYCLE.store(time::read() as u64, Ordering::Relaxed);
     timer::configure(firmware_allows("shuyra,supervisor-stimecmp"));
+    USER_TIME.store(firmware_allows("shuyra,user-time"), Ordering::Release);
     Ok(())
 }
 
@@ -42,8 +42,22 @@ fn firmware_allows(name: &str) -> bool {
     matches!(board::tree::property(chosen, name), Ok(Some([])))
 }
 
-fn hertz() -> u64 {
-    HERTZ.get().copied().expect("clock not initialized")
+pub(crate) fn initialize_hart() {
+    timer::initialize();
+    if USER_TIME.load(Ordering::Acquire) {
+        unsafe { scounteren::set_tm() };
+        if scounteren::read().tm() {
+            USER_TIME_HARTS.fetch_add(1, Ordering::Release);
+        }
+    }
+}
+
+pub(crate) fn user_source() -> Option<ClockSource> {
+    (USER_TIME_HARTS.load(Ordering::Acquire) == crate::machine::hart::hart_count()).then(source)
+}
+
+fn source() -> ClockSource {
+    *CLOCK.get().expect("clock not initialized")
 }
 
 pub fn now() -> Instant {
@@ -51,22 +65,19 @@ pub fn now() -> Instant {
 }
 
 pub(crate) fn uptime_ticks() -> u64 {
-    (time::read() as u64).saturating_sub(CYCLE.load(Ordering::Relaxed))
+    (time::read() as u64).saturating_sub(source().boot_tick())
 }
 
 pub fn uptime() -> Duration {
-    ticks_to_duration(uptime_ticks())
+    Duration::from_nanos(source().nanos(now().as_ticks()))
 }
 
 pub(crate) fn ticks_to_duration(ticks: u64) -> Duration {
-    let ns = (ticks as u128).saturating_mul(NANOS_PER_SEC) / hertz() as u128;
-    Duration::from_nanos(ns.min(u64::MAX as u128) as u64)
+    Duration::from_nanos(source().ticks_to_nanos(ticks))
 }
 
 pub(crate) fn duration_to_ticks(d: Duration) -> u64 {
-    let ns = d.as_nanos();
-    let t = ns.saturating_mul(hertz() as u128).div_ceil(NANOS_PER_SEC);
-    t.min(u64::MAX as u128) as u64
+    source().duration_ticks(d.as_nanos())
 }
 
 /// Convert an absolute ABI deadline once, rounding up to prevent early wakeups.
@@ -75,19 +86,14 @@ pub(crate) fn deadline(wait: kernel_api::model::wait::Wait) -> Option<u64> {
     match wait {
         Wait::Infinite => None,
         Wait::Poll => Some(now().as_ticks()),
-        Wait::At(ns) => {
-            let ticks = (ns as u128 * hertz() as u128)
-                .div_ceil(NANOS_PER_SEC)
-                .min(u64::MAX as u128) as u64;
-            Some(CYCLE.load(Ordering::Relaxed).saturating_add(ticks))
-        }
+        Wait::At(ns) => Some(source().deadline(ns)),
     }
 }
 pub(crate) fn remaining(at: Option<u64>) -> Duration {
     at.map_or(Duration::MAX, |at| {
         Duration::from_nanos(
             ((at.saturating_sub(now().as_ticks()) as u128 * NANOS_PER_SEC)
-                .div_ceil(hertz() as u128))
+                .div_ceil(source().hertz().get() as u128))
             .min(u64::MAX as u128) as u64,
         )
     })
