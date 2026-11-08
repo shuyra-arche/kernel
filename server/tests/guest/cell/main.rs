@@ -1,5 +1,7 @@
 #![no_std]
 #![no_main]
+#[cfg(feature = "context")]
+mod context;
 mod external;
 mod lifecycle;
 mod pend;
@@ -146,6 +148,8 @@ fn write(address: VirtAddr, offset: usize, value: usize) {
 }
 #[unsafe(no_mangle)]
 extern "C" fn run(args: usize, count: usize) -> ! {
+    #[cfg(feature = "context")]
+    context::run();
     if cfg!(feature = "io-exit") {
         external::death(args, count);
     } else if cfg!(feature = "io") {

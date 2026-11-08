@@ -118,6 +118,9 @@ impl PreparedTask {
                     administration: crate::basis::unit::control::Table::new(),
                     heir: SpinLock::new(Vec::new()),
                     controls: SpinLock::new(Vec::new()),
+                    extensions: SpinLock::new(
+                        crate::machine::switcher::context::extension::ExtendedContext::new(),
+                    ),
                 });
             let task = unsafe { slot.assume_init() };
             let mut member = member;

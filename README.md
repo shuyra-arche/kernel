@@ -126,6 +126,20 @@ Inspect observes results repeatedly; Delete requires reclamation and removes the
 caller's retained record. Sign routes completion without consuming results.
 Team Finish permanently closes admission. Membership never grants peer control.
 
+## Task register state
+
+Tasks allocate a private FLEN=64 image on first use of a supported F/D instruction
+or floating-point CSR. All 32 registers and `fcsr` are initialized, saved before
+scheduling/blocking/exit and restored at the final return to the Task. Ordinary
+Kernel execution keeps FS/VS disabled; only the scoped register assembly enables
+FS. The fixed trap frame and one-page trampoline remain unchanged in layout.
+
+The existing boot baseline requires RV64GC, so F-only hardware is not admitted.
+A CPU advertising Q cannot enable a 64-bit Task image. Queue placement and stealing
+use one compatibility check, preserving the image independently of the Hart.
+This is a correctness-first full save/restore path; Dirty-state optimization is
+not enabled. RVV state support is tracked separately in #28.
+
 ## External access
 
 External access is an address projection, not a separate device work object.

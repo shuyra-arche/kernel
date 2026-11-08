@@ -49,6 +49,7 @@ pub struct Task {
     pub(crate) signs: crate::basis::sign::Table,
     pub(crate) administration: crate::basis::unit::control::Table,
     pub(crate) heir: SpinLock<Vec<Arc<Team>>>,
+    extensions: SpinLock<crate::machine::switcher::context::extension::ExtendedContext>,
     controls: SpinLock<Vec<(Weak<crate::basis::nest::Nest>, usize)>>,
 }
 
@@ -60,6 +61,45 @@ unsafe impl Send for Task {}
 unsafe impl Sync for Task {}
 
 impl Task {
+    pub(crate) fn execution_capability(
+        hart: HartId,
+    ) -> crate::machine::switcher::context::extension::Capability {
+        crate::machine::switcher::context::extension::Capability {
+            float: crate::machine::board::info().hart.floating(hart),
+        }
+    }
+
+    pub(crate) fn can_run_on(&self, hart: HartId) -> bool {
+        self.extensions
+            .lock()
+            .compatible(Self::execution_capability(hart))
+    }
+
+    /// Called before publishing any waiting/ready/terminal transition.
+    pub(crate) unsafe fn capture_extensions(&self, status: usize) {
+        unsafe { self.extensions.lock().capture(status) };
+    }
+
+    pub(crate) unsafe fn restore_extensions(&self, status: &mut usize) {
+        assert!(
+            self.can_run_on(crate::machine::hart::hart_id()),
+            "incompatible execution Hart"
+        );
+        unsafe { self.extensions.lock().restore(status) };
+    }
+
+    pub(crate) fn enable_extension(
+        &self,
+        instruction: u32,
+        status: &mut usize,
+    ) -> Result<bool, ()> {
+        self.extensions.lock().enable(
+            instruction,
+            status,
+            Self::execution_capability(crate::machine::hart::hart_id()),
+        )
+    }
+
     pub(crate) fn transform_checked(&self, next: TaskState) {
         self.state.lock().transform(next);
     }

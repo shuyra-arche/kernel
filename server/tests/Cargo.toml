@@ -67,3 +67,7 @@ path = "registration/mod.rs"
 name = "ticket-storage"
 path = "name/cost.rs"
 harness = false
+
+[[test]]
+name = "context"
+path = "context/mod.rs"

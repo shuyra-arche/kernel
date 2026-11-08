@@ -21,5 +21,6 @@ kernel-client = { path = "../../../../client" }
 panic = "abort"
 
 [features]
+context = []
 io = []
 io-exit = ["io"]
