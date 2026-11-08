@@ -1,5 +1,6 @@
 use crate::metal::hart::{self, HartId};
-use sbi::{IpiCall, ecall::SArgs, fid::Ipi};
+use crate::metal::riscv::sbi;
+use sbi::{Ipi, IpiCall, ecall::SArgs};
 
 /// Order the local clear before the caller inspects its work queues. A sender
 /// racing that snapshot either publishes visible work or leaves an interrupt.

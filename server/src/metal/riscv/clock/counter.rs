@@ -1,8 +1,9 @@
+use crate::metal::riscv::sbi;
 #[cfg(debug_assertions)]
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use riscv::register::{scounteren, time};
-use sbi::{TimerCall, ecall::SArgs, fid::Timer};
+use sbi::{Timer, TimerCall, ecall::SArgs};
 
 use crate::metal::generic::clock::{Comparator, Compare};
 

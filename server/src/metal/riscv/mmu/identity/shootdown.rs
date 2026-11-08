@@ -1,6 +1,6 @@
-use sbi;
+use crate::metal::riscv::sbi;
+use sbi::Rfence;
 use sbi::ecall::SArgs;
-use sbi::fid;
 
 use crate::basis::nest::NestError;
 use crate::metal::hart;
@@ -47,9 +47,9 @@ pub fn shootdown(asid: Asid) -> Result<(), Deaf> {
 
     let me = hart::hart_id();
     let operation = if asid.is_kernel() {
-        fid::Rfence::RemoteSfenceVma
+        Rfence::RemoteSfenceVma
     } else {
-        fid::Rfence::RemoteSfenceVmaAsid
+        Rfence::RemoteSfenceVmaAsid
     };
     for slot in (0..hart::hart_count()).map(hart::HartId::new) {
         if slot == me {
@@ -94,7 +94,7 @@ pub fn sync_instructions() -> Result<(), NestError> {
     for slot in (0..hart::hart_count()).map(hart::HartId::new) {
         if slot != me && lease(slot).is_some() {
             let (mask, base) = hart::firmware(slot).target();
-            sbi::RfenceCall::new(sbi::fid::Rfence::RemoteFenceI)
+            sbi::RfenceCall::new(sbi::Rfence::RemoteFenceI)
                 .args(SArgs {
                     a0: mask,
                     a1: base,
