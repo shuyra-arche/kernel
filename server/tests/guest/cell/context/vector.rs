@@ -67,7 +67,7 @@ fn worker(id: usize, barrier: bool) -> ! {
             assert!(now - start < 30_000_000, "no vector timer preemption");
         }
     }
-    for _ in 0..if barrier { 64 } else { 16 } {
+    for turn in 0..if barrier { 64 } else { 128 } {
         unsafe {
             if id == 1 {
                 context_vector_one();
@@ -79,7 +79,15 @@ fn worker(id: usize, barrier: bool) -> ! {
         assert_eq!(&observed[..bytes * 4], &expected[..bytes * 4]);
         assert_eq!(controls, wanted);
         room::yield_();
-        room::sleep_until(room::clock() + 1_000_000).unwrap();
+        // Vary wakeup phase against the runnable load and each Hart's timer.
+        // A fixed interval can repeatedly return to one Hart and never exercise
+        // a migration, even though all compatible destinations are admitted.
+        let delay = if barrier {
+            1_000_000
+        } else {
+            100_000 + (turn * 7919 % 29) * 100_000
+        };
+        room::sleep_until(room::clock() + delay).unwrap();
     }
     unsafe { save(observed.as_mut_ptr(), controls.as_mut_ptr(), bytes) };
     assert_eq!(&observed[..bytes * 4], &expected[..bytes * 4]);

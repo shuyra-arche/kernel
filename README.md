@@ -159,18 +159,20 @@ trap-based configuration emulation are not provided.
 Compatibility is checked at placement, dequeue/steal and final return. Placement
 rotates directly within compatible idle Harts, with compatible nonlocal Harts as
 the busy fallback. Gaps in the capability set do not bias the destination.
-Execution ownership is asserted at save/restore. Once a Task has detached and entered termination, its optional
-register images are released before asynchronous memory cleanup or retained
-results finish; no Hart retains an image pointer.
+Execution ownership is asserted at save/restore. Once a Task has detached and
+entered termination, its optional register images are released before asynchronous
+memory cleanup or retained results finish; no Hart retains an image pointer.
 
 The context guest checks illegal instructions, stopped running/waiting Tasks
 and fresh state after repeated exits. QEMU checkpoint traces establish that each
 register-bearing Task actually runs on multiple Harts. A four-Hart fixture declares
 V only on physical Harts 0/1 and checks that vector execution visits both and never
-2/3. Runnable load keeps eligible Harts active during the migration handoffs;
-The fixture retains QEMU's normal multithreaded execution. Mismatched VLEN/SEW
-rejection and allocation-failure rollback are checked by Host tests; QEMU runs 128/256 separately, not heterogeneous physical VLEN. Physical
-hardware and measured Dirty-state optimization remain outside this verification.
+2/3. Runnable load keeps eligible Harts active during 128 handoffs with varied
+wakeup intervals, avoiding a fixed timer phase that can repeatedly select the
+same Hart. The fixture retains QEMU's normal multithreaded execution. Mismatched
+VLEN/SEW rejection and allocation-failure rollback are checked by Host tests;
+QEMU runs 128/256 separately, not heterogeneous physical VLEN. Physical hardware
+and measured Dirty-state optimization remain outside this verification.
 
 ## External access
 
