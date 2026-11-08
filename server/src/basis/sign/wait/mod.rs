@@ -62,7 +62,7 @@ impl Iterator for Unchain {
     }
 }
 
-fn rise<I: IntoIterator<Item = Arc<Task>>>(tasks: I) -> usize {
+fn rise(tasks: impl IntoIterator<Item = Arc<Task>>, place: impl Fn(Arc<Task>)) -> usize {
     let mut woke = 0;
     for task in tasks {
         let _commit = crate::basis::commit();
@@ -76,7 +76,7 @@ fn rise<I: IntoIterator<Item = Arc<Task>>>(tasks: I) -> usize {
         if !Task::rise(&t) {
             continue;
         }
-        launch(t);
+        place(t);
         woke += 1;
     }
     woke
@@ -152,7 +152,7 @@ pub(crate) fn wipe(key: WakeKey) -> usize {
         }
         None => None,
     };
-    rise(Unchain::new(chain))
+    rise(Unchain::new(chain), launch)
 }
 
 pub(crate) fn knock(key: WakeKey, life: &Weak<Anchor>) -> usize {
@@ -182,7 +182,7 @@ pub(crate) fn knock(key: WakeKey, life: &Weak<Anchor>) -> usize {
         chain
     };
     fan_out(&fwd);
-    rise(Unchain::new(chain))
+    rise(Unchain::new(chain), launch)
 }
 
 pub(crate) fn forward(
@@ -222,7 +222,7 @@ pub(crate) fn signal(key: WakeKey) -> usize {
         chain
     };
     fan_out(&fwd);
-    rise(Unchain::new(chain))
+    rise(Unchain::new(chain), launch)
 }
 
 pub(crate) fn wipe_space(space: NestId) -> usize {
@@ -245,7 +245,7 @@ pub(crate) fn wipe_space(space: NestId) -> usize {
                 key.and_then(|key| sites.remove(&key))
             };
             let Some(mut site) = taken else { break };
-            woken += rise(Unchain::new(site.chain.take()));
+            woken += rise(Unchain::new(site.chain.take()), launch);
         }
     }
     woken
@@ -270,7 +270,7 @@ pub(crate) fn wake_counted(key: WakeKey, all: bool) -> usize {
     let mut count = 0;
     for task in Unchain::new(chain) {
         count += 1;
-        rise(core::iter::once(task));
+        rise(core::iter::once(task), launch);
     }
     count
 }
@@ -286,7 +286,7 @@ pub fn wake(key: WakeKey, life: &Weak<Anchor>) -> bool {
         if Anchor::dead(life) {
             let chain = sites.remove(&key).and_then(|mut site| site.chain.take());
             drop(sites);
-            rise(Unchain::new(chain));
+            rise(Unchain::new(chain), launch);
             return false;
         } else {
             let mut beacon_only = false;
@@ -314,7 +314,7 @@ pub fn wake(key: WakeKey, life: &Weak<Anchor>) -> bool {
     fan_out(&fwd);
     let Some(task) = popped else { return false };
     void(task.wait_ticket());
-    rise(core::iter::once(task));
+    rise(core::iter::once(task), launch);
     true
 }
 
@@ -347,7 +347,10 @@ pub fn redeem() -> bool {
         woken += 1;
     }
     let _ = woken;
-    rise(tasks.iter_mut().filter_map(Option::take)) > 0
+    rise(
+        tasks.iter_mut().filter_map(Option::take),
+        crate::basis::room::scheduler::launch_expired,
+    ) > 0
 }
 
 pub(crate) fn requeue<E: Copy>(

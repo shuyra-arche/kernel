@@ -64,7 +64,13 @@ fn schedulers() -> &'static [Conductor] {
 
 /// 把一枚就绪任务放到挑中的那颗核上。
 pub(crate) fn launch(task: Arc<Task>) {
-    kick(pick(|candidate| task.can_run_on(candidate)), task);
+    kick(pick(|candidate| task.can_run_on(candidate), true), task);
+}
+
+pub(crate) fn launch_expired(task: Arc<Task>) {
+    // Expiry always runs on the boot Hart. Excluding it when all compatible
+    // Harts are busy would pin a Task compatible with only two Harts.
+    kick(pick(|candidate| task.can_run_on(candidate), false), task);
 }
 
 /// 把一枚就绪任务放到指定核上：接进它那张饥饿队列，必要时叫醒它。

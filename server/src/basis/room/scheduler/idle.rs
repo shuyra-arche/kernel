@@ -47,7 +47,7 @@ pub(super) fn waiting(hart: HartId) -> bool {
 
 /// Rotate within eligible Harts, preferring idle destinations. A sparse
 /// capability set must not inherit the gaps or bias of the physical bitmap.
-pub(super) fn pick(compatible: impl Fn(HartId) -> bool) -> HartId {
+pub(super) fn pick(compatible: impl Fn(HartId) -> bool, prefer_remote: bool) -> HartId {
     let cursor = PICK_CURSOR.fetch_add(1, Ordering::Relaxed);
     let n = hart::hart_count();
     let me = hart::hart_id();
@@ -67,14 +67,16 @@ pub(super) fn pick(compatible: impl Fn(HartId) -> bool) -> HartId {
         // Idle flags can change between passes; compatibility is stable while
         // the Task is off-Hart. Continue with the complete eligible set.
     }
-    let others = eligible().filter(|candidate| *candidate != me).count();
-    if others != 0 {
-        return eligible()
-            .filter(|candidate| *candidate != me)
-            .nth(cursor % others)
-            .unwrap();
+    if prefer_remote {
+        let remote = || eligible().filter(|candidate| *candidate != me);
+        let count = remote().count();
+        if count != 0 {
+            return remote().nth(cursor % count).unwrap();
+        }
     }
-    eligible().next().expect("Task has no compatible Hart")
+    let count = eligible().count();
+    assert!(count != 0, "Task has no compatible Hart");
+    eligible().nth(cursor % count).unwrap()
 }
 
 /// 把所有睡着的核都叫一遍（停机之前用）。
