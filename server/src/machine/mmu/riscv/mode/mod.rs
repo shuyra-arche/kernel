@@ -1,11 +1,7 @@
 use riscv::register::satp;
 
-use crate::machine::image;
+use crate::machine::board::{self, harts::Paging};
 use crate::machine::sync::OnceLock;
-use kernel_api::address::PAGE_SHIFT;
-
-use crate::machine::mmu::riscv::table::PteFlags;
-use crate::machine::mmu::riscv::table::TableNode;
 use kernel_api::address::VirtAddr;
 
 mod error;
@@ -17,22 +13,19 @@ pub use geometry::geometry;
 
 static MODE: OnceLock<satp::Mode> = OnceLock::new();
 
-pub fn detect() -> Result<satp::Mode, SatpError> {
-    for candidate in [satp::Mode::Sv57, satp::Mode::Sv48, satp::Mode::Sv39] {
-        match try_mode(candidate) {
-            Ok(()) => {
-                MODE.set(candidate).expect("mode: detect is single-shot");
-                return Ok(candidate);
-            }
-            Err(SatpError::Unsupported) => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Err(SatpError::Unsupported)
+/// Policy: use the largest mode common to every admitted hart. Sv57 implies
+/// Sv48, which implies Sv39. No temporary page table or satp probe is needed.
+pub fn init() -> Result<(), SatpError> {
+    let mode = match board::info().hart.common.paging {
+        Paging::Sv39 => satp::Mode::Sv39,
+        Paging::Sv48 => satp::Mode::Sv48,
+        Paging::Sv57 => satp::Mode::Sv57,
+    };
+    MODE.set(mode).map_err(|_| SatpError::AlreadyInit)
 }
 
 pub fn mode() -> satp::Mode {
-    *MODE.get().unwrap_or(&satp::Mode::Sv39)
+    *MODE.get().expect("page table mode not initialized")
 }
 
 pub fn levels() -> usize {
@@ -45,38 +38,4 @@ pub fn lower() -> VirtAddr {
 
 pub fn upper() -> VirtAddr {
     VirtAddr::wrap(1usize << geometry(mode()).split_bit())
-}
-
-fn try_mode(candidate: satp::Mode) -> Result<(), SatpError> {
-    let geo = geometry(candidate);
-    let mut root = TableNode::root().map_err(|_| SatpError::OutOfMemory)?;
-    unsafe extern "C" {
-        static _kernel_base: u8;
-    }
-    let range = ((&raw const _kernel_base).addr(), image::root_stack_edge());
-    let mut va = range.0 & !(kernel_api::address::PAGE_SIZE - 1);
-    while va < range.1 {
-        let ppn = (va >> PAGE_SHIFT) as u64;
-        let leaf = root
-            .walk_mut(VirtAddr::wrap(va), true, geo.levels as usize)
-            .map_err(|_| SatpError::OutOfMemory)?;
-        leaf.set(ppn, PteFlags::V | PteFlags::R | PteFlags::W | PteFlags::X);
-        va += kernel_api::address::PAGE_SIZE;
-    }
-    let ppn = root.ppn();
-    unsafe {
-        satp::set(candidate, 0, ppn);
-        core::arch::asm!("sfence.vma");
-    }
-    let got = satp::read().mode();
-    unsafe {
-        satp::set(satp::Mode::Bare, 0, 0);
-        core::arch::asm!("sfence.vma");
-    }
-    drop(root);
-    if got == candidate {
-        Ok(())
-    } else {
-        Err(SatpError::Unsupported)
-    }
 }

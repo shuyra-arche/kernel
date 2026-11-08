@@ -18,7 +18,9 @@ pub struct PerHart {
     pub scheduler: AtomicPtr<()>,
     pub lease: AtomicUsize,
     pub(crate) instruction_sync: AtomicUsize,
-    _pad: [usize; 3],
+    firmware: AtomicUsize,
+    boot_stack: AtomicUsize,
+    _pad: usize,
 }
 
 impl PerHart {
@@ -29,7 +31,9 @@ impl PerHart {
             scheduler: AtomicPtr::new(::core::ptr::null_mut()),
             lease: AtomicUsize::new(crate::machine::mmu::riscv::identity::vacant()),
             instruction_sync: AtomicUsize::new(1),
-            _pad: [0; 3],
+            firmware: AtomicUsize::new(0),
+            boot_stack: AtomicUsize::new(0),
+            _pad: 0,
         }
     }
 }
@@ -89,5 +93,18 @@ const _: () = {
     assert!(::core::mem::offset_of!(PerHart, scheduler) == 0x10);
     assert!(::core::mem::offset_of!(PerHart, lease) == 0x18);
     assert!(::core::mem::offset_of!(PerHart, instruction_sync) == 0x20);
+    assert!(::core::mem::offset_of!(PerHart, firmware) == 0x28);
+    assert!(::core::mem::offset_of!(PerHart, boot_stack) == 0x30);
     assert!(::core::mem::size_of::<PerHart>() == 64);
 };
+
+/// Publish the checked dense slot and physical stack before SBI starts this hart.
+/// The opaque SBI argument is this record's physical pointer, never a hart number.
+pub(crate) fn prepare_boot(slot: HartId, stack: usize) -> usize {
+    let record = &PER_HART[slot.get()];
+    record
+        .firmware
+        .store(super::firmware(slot).get(), Ordering::Relaxed);
+    record.boot_stack.store(stack, Ordering::Release);
+    per_hart_ptr(slot)
+}

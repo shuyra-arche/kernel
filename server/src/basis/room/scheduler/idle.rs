@@ -81,28 +81,20 @@ pub(super) fn pick() -> HartId {
 
 /// 把所有睡着的核都叫一遍（停机之前用）。
 pub(crate) fn yell() {
-    for (w, word) in WAITING.iter().enumerate() {
-        let waiting = word.load(Ordering::Acquire);
-        if waiting == 0 {
-            continue;
+    for slot in (0..hart::hart_count()).map(HartId::new) {
+        if waiting(slot) {
+            nudge(slot);
         }
-        let _ = sbi::IpiCall::new(fid::Ipi::SendIpi)
-            .args(SArgs {
-                a0: waiting,
-                a1: w * (usize::BITS as usize),
-                ..Default::default()
-            })
-            .call();
     }
 }
 
 /// 叫醒指定的那一核：它得重新看一眼自己手上的活。
 pub(crate) fn nudge(hart: HartId) {
-    let (word, bit) = hart.bit();
+    let (mask, base) = crate::machine::hart::firmware(hart).target();
     let _ = sbi::IpiCall::new(fid::Ipi::SendIpi)
         .args(SArgs {
-            a0: bit,
-            a1: word * (usize::BITS as usize),
+            a0: mask,
+            a1: base,
             ..Default::default()
         })
         .call();

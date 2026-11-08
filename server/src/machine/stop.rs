@@ -49,19 +49,11 @@ pub(crate) fn alarm() -> bool {
 
 pub(crate) fn broadcast() {
     let me = hart::hart_id();
-    let n = hart::hart_count();
-    for w in 0..n.div_ceil(usize::BITS as usize) {
-        let base = w * (usize::BITS as usize);
-        let hi = (base + (usize::BITS as usize)).min(n).saturating_sub(base);
-        let mut mask = 0usize;
-        for b in 0..hi {
-            if hart::HartId::new(base + b) != me {
-                mask |= 1usize << b;
-            }
-        }
-        if mask == 0 {
+    for slot in (0..hart::hart_count()).map(hart::HartId::new) {
+        if slot == me {
             continue;
         }
+        let (mask, base) = hart::firmware(slot).target();
         let _ = sbi::IpiCall::new(fid::Ipi::SendIpi)
             .args(SArgs {
                 a0: mask,

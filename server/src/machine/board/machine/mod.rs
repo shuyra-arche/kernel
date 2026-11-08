@@ -1,19 +1,18 @@
 use super::memory::Memory;
 use super::{MachineError, Region};
-use crate::machine::hart::HartId;
+use crate::machine::hart::FirmwareId;
 use crate::machine::image::root_stack_edge;
 
-mod hart_info;
-use hart_info::HartInfo;
+use super::harts::HartInfo;
 
 #[derive(Debug)]
 pub struct Machine {
-    pub hart: HartInfo,
+    pub hart: &'static HartInfo,
     pub memory: Memory,
 }
 
 impl Machine {
-    pub(super) fn parse(dtp: usize, boot: HartId) -> Result<Self, MachineError> {
+    pub(super) fn parse(dtp: usize, boot: FirmwareId) -> Result<Self, MachineError> {
         // Firmware supplies a readable FDT blob. Validate its structure and all
         // memory facts before any iterator, allocation or secondary-hart work.
         let fdt =
@@ -25,7 +24,7 @@ impl Machine {
         let base = (&raw const _kernel_base).addr();
         let kernel = Region::new(base, root_stack_edge() - base);
         let memory = Memory::parse(bytes, dtp, kernel).map_err(MachineError::Memory)?;
-        let hart = HartInfo::parse(&fdt, boot)?;
+        let hart = super::admit_harts(&fdt, boot)?;
         Ok(Self { hart, memory })
     }
 

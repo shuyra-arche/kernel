@@ -46,37 +46,31 @@ pub fn shootdown(asid: Asid) -> Result<(), Deaf> {
     unsafe { flush(asid) };
 
     let me = hart::hart_id();
-    let mut mask = 0usize;
-    for hart in (0..hart::hart_count()).map(crate::machine::hart::HartId::new) {
-        if hart == me {
-            continue;
-        }
-        if (asid.is_kernel() && crate::machine::hart::online(hart)) || lease(hart) == Some(asid) {
-            let (_, bit) = hart.bit();
-            mask |= bit;
-        }
-    }
-
-    if mask == 0 {
-        return Ok(());
-    }
-
     let operation = if asid.is_kernel() {
         fid::Rfence::RemoteSfenceVma
     } else {
         fid::Rfence::RemoteSfenceVmaAsid
     };
-    let r = sbi::RfenceCall::new(operation)
-        .args(SArgs {
-            a0: mask,
-            a1: 0,
-            a2: 0,
-            a3: 0,
-            a4: asid.get(),
-            ..Default::default()
-        })
-        .call();
-    r.map(|_| ()).map_err(|_| Deaf { asid })
+    for slot in (0..hart::hart_count()).map(hart::HartId::new) {
+        if slot == me {
+            continue;
+        }
+        if (asid.is_kernel() && hart::online(slot)) || lease(slot) == Some(asid) {
+            let (mask, base) = hart::firmware(slot).target();
+            sbi::RfenceCall::new(operation)
+                .args(SArgs {
+                    a0: mask,
+                    a1: base,
+                    a2: 0,
+                    a3: 0,
+                    a4: asid.get(),
+                    ..Default::default()
+                })
+                .call()
+                .map_err(|_| Deaf { asid })?;
+        }
+    }
+    Ok(())
 }
 
 /// 本 hart 直接失效该 ASID 的 TLB（shootdown 的本地一半）。
@@ -97,19 +91,18 @@ pub fn sync_instructions() -> Result<(), NestError> {
     hart::request_instruction_sync();
     unsafe { core::arch::asm!("fence rw, rw", "fence.i", options(nostack)) };
     let me = hart::hart_id();
-    let mut mask = 0usize;
-    for h in (0..hart::hart_count()).map(hart::HartId::new) {
-        if h != me && lease(h).is_some() {
-            mask |= h.bit().1;
+    for slot in (0..hart::hart_count()).map(hart::HartId::new) {
+        if slot != me && lease(slot).is_some() {
+            let (mask, base) = hart::firmware(slot).target();
+            sbi::RfenceCall::new(sbi::fid::Rfence::RemoteFenceI)
+                .args(SArgs {
+                    a0: mask,
+                    a1: base,
+                    ..Default::default()
+                })
+                .call()
+                .map_err(|_| NestError::NoRegion)?;
         }
     }
-    sbi::RfenceCall::new(sbi::fid::Rfence::RemoteFenceI)
-        .args(SArgs {
-            a0: mask,
-            a1: 0,
-            ..Default::default()
-        })
-        .call()
-        .map(|_| ())
-        .map_err(|_| NestError::NoRegion)
+    Ok(())
 }

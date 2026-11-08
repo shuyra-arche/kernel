@@ -4,10 +4,8 @@ use fack::prelude::Error;
 pub enum MachineError {
     #[error("invalid device tree: {0}")]
     DeviceTree(fdt::FdtError),
-    #[error("device tree has no /cpus node")]
-    MissingCpus,
     #[error("invalid boot memory: {0}")]
     Memory(super::memory::MemoryError),
-    #[error("invalid hart topology: count={count}, boot={boot}")]
-    Harts { count: usize, boot: usize },
+    #[error("invalid CPU facts: {0}")]
+    Harts(super::harts::HartError),
 }

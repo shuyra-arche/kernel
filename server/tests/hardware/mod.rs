@@ -198,3 +198,5 @@ mod image;
 mod kernel;
 
 mod memory;
+
+mod harts;

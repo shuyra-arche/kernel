@@ -70,7 +70,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     }
     let route = crate::machine::iommu::riscv::interrupt::plan::Plan::discover(
         &tree,
-        crate::machine::hart::hart_id().get(),
+        crate::machine::hart::firmware_id().get(),
         regions[0].base,
     )
     .map_err(|_| PendFail::Denied)?;
