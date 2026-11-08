@@ -112,7 +112,7 @@ impl<H: Hardware> Registry<H> {
     }
 
     /// Kernel-only queue observation; an exited Unit cannot prevent draining.
-    pub(crate) fn fault(&mut self, id: DomainId) -> Result<Option<super::riscv::Fault>, Error> {
+    pub(crate) fn fault(&mut self, id: DomainId) -> Result<Option<super::Fault>, Error> {
         self.entries
             .iter_mut()
             .find(|entry| entry.id == id)

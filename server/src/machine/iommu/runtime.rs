@@ -9,7 +9,7 @@ use crate::machine::iommu::retirement::Registry;
 use crate::machine::sync::SpinLock;
 use alloc::boxed::Box;
 
-type Backend = Box<dyn Hardware + Send>;
+pub(crate) type Backend = Box<dyn Hardware + Send>;
 static DOMAINS: SpinLock<Registry<Backend>> = SpinLock::new(Registry::new());
 
 pub(crate) fn install(owner: &Admission, hardware: Backend) -> Result<DomainId, (Error, Backend)> {
@@ -39,7 +39,7 @@ pub(crate) fn completion(id: DomainId) -> Option<crate::machine::iommu::retireme
     DOMAINS.lock().completion(id)
 }
 
-pub(crate) fn fault(id: DomainId) -> Result<Option<crate::machine::iommu::riscv::Fault>, Error> {
+pub(crate) fn fault(id: DomainId) -> Result<Option<crate::machine::iommu::Fault>, Error> {
     DOMAINS.lock().fault(id)
 }
 

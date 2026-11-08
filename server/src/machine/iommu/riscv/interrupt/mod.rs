@@ -2,8 +2,8 @@
 //! Engine; neither a claim nor completion of an IRQ settles a memory obligation.
 pub(crate) mod plan;
 use crate::machine::hart;
-use crate::machine::interrupt::{Claim, Controller, Irq, plic::Plic};
-use crate::machine::sync::OnceLock;
+use crate::machine::interrupt::{self, Claim, Controller, External, Irq, plic::Plic};
+use alloc::boxed::Box;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 use plan::Plan;
@@ -14,7 +14,6 @@ struct Route<C> {
     hart: hart::HartId,
     queues: [Irq; 3],
 }
-static ROUTE: OnceLock<Route<Plic>> = OnceLock::new();
 static CQ: AtomicUsize = AtomicUsize::new(0);
 static FQ: AtomicUsize = AtomicUsize::new(0);
 static PQ: AtomicUsize = AtomicUsize::new(0);
@@ -23,48 +22,38 @@ static MASKED: AtomicUsize = AtomicUsize::new(0);
 /// Plan was validated against trusted QEMU DTB; base maps that whole PLIC and
 /// its aliases are withheld. Firmware owns M contexts; Kernel owns S contexts.
 pub(crate) unsafe fn install(base: usize, plan: Plan) -> Result<(), ()> {
-    if ROUTE.get().is_some() {
+    if interrupt::external().is_some() {
         return Err(());
     }
-    let controller = unsafe {
-        Plic::install(
-            base,
-            plan.base,
-            &plan.contexts,
-            plan.selected,
-            plan.sources,
-            plan.queues,
-        )
-    };
+    let controller = unsafe { Plic::new(base, plan.base, plan.selected) };
     let queues = plan.queues.map(|line| controller.irq(line));
-    ROUTE
-        .set(Route {
-            controller,
-            physical: plan.base,
-            size: plan.size,
-            hart: hart::hart_id(),
-            queues,
-        })
-        .map_err(|_| ())?;
+    let route = Box::try_new(Route {
+        controller,
+        physical: plan.base,
+        size: plan.size,
+        hart: hart::hart_id(),
+        queues,
+    })
+    .map_err(|_| ())?;
+    unsafe {
+        route
+            .controller
+            .configure(&plan.contexts, plan.sources, plan.queues)
+    };
+    interrupt::install_external(route)?;
     MASKED.store(7, Ordering::Release);
-    rearm();
+    interrupt::external()
+        .expect("installed IOMMU route")
+        .rearm();
     Ok(())
 }
-/// Finish the claim and mask the line. Bounded bottom-half work drains or
-/// observes queues before rearming it.
-pub(crate) fn handle() -> bool {
-    let Some(route) = ROUTE.get() else {
-        return false;
-    };
-    if hart::hart_id() != route.hart {
-        return false;
-    }
-    route.handle();
-    true
-}
 
-impl<C: Controller> Route<C> {
-    fn handle(&self) {
+impl<C: Controller + Send + Sync> External for Route<C> {
+    /// Finish each claim and mask the line until bounded deferred work runs.
+    fn handle(&self) -> bool {
+        if hart::hart_id() != self.hart {
+            return false;
+        }
         for _ in 0..4 {
             let Some(claim) = self.controller.claim() else {
                 break;
@@ -75,27 +64,29 @@ impl<C: Controller> Route<C> {
                 MASKED.fetch_or(1 << index, Ordering::Release);
             }
         }
+        true
+    }
+
+    fn rearm(&self) {
+        // Only the routed Hart changes enable words.
+        if hart::hart_id() != self.hart {
+            return;
+        }
+        let masked = MASKED.swap(0, Ordering::AcqRel);
+        for (index, irq) in self.queues.iter().enumerate() {
+            if masked & (1 << index) != 0 {
+                self.controller.unmask(*irq);
+            }
+        }
+    }
+
+    fn overlaps(&self, base: usize, end: usize) -> bool {
+        base < self.physical + self.size && self.physical < end
     }
 }
 
-pub(crate) fn rearm() {
-    let Some(route) = ROUTE.get() else {
-        return;
-    };
-    // Only the routed hart changes enable words; other harts can progress data.
-    if hart::hart_id() != route.hart {
-        return;
-    }
-    let masked = MASKED.swap(0, Ordering::AcqRel);
-    for (index, irq) in route.queues.iter().enumerate() {
-        if masked & (1 << index) == 0 {
-            continue;
-        }
-        route.controller.unmask(*irq);
-    }
-}
 pub(crate) fn report() {
-    if ROUTE.get().is_some() {
+    if interrupt::external().is_some() {
         crate::machine::console::_write(format_args!(
             "iommu-irqs: cq={} fq={} pq={}\n",
             CQ.load(Ordering::Relaxed),
@@ -103,10 +94,4 @@ pub(crate) fn report() {
             PQ.load(Ordering::Relaxed)
         ));
     }
-}
-
-pub(crate) fn overlaps(base: usize, end: usize) -> bool {
-    ROUTE
-        .get()
-        .is_some_and(|route| base < route.physical + route.size && route.physical < end)
 }

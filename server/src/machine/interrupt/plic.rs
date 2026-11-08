@@ -12,14 +12,18 @@ impl Plic {
     /// # Safety
     /// The mapping covers the validated controller and all passed S-mode
     /// contexts. Kernel owns these contexts and the supplied interrupt lines.
-    pub(crate) unsafe fn install(
-        base: usize,
-        physical: usize,
-        contexts: &[usize],
-        selected: usize,
-        sources: usize,
-        lines: [u32; 3],
-    ) -> Self {
+    pub(crate) unsafe fn new(base: usize, physical: usize, context: usize) -> Self {
+        Self {
+            base,
+            physical,
+            context,
+        }
+    }
+
+    /// # Safety
+    /// These contexts and lines were validated within the owned mapping.
+    pub(crate) unsafe fn configure(&self, contexts: &[usize], sources: usize, lines: [u32; 3]) {
+        let base = self.base;
         for context in contexts {
             for word in 0..=sources / 32 {
                 write(base, 0x2000 + context * 0x80 + word * 4, 0);
@@ -28,11 +32,6 @@ impl Plic {
         }
         for line in lines {
             write(base, line as usize * 4, 1);
-        }
-        Self {
-            base,
-            physical,
-            context: selected,
         }
     }
 

@@ -1,12 +1,12 @@
 //! One-shot, one-device IoSpace backend. IoSpace alone holds the data obligation;
 //! Domain holds translation metadata and Engine holds its private queues.
 use super::super::BatchId;
+use super::super::Fault;
 use super::super::Hardware;
 use super::super::HardwareError;
 use super::super::Projection;
 use super::Engine;
 use super::EngineError;
-use super::Fault;
 use super::Phase;
 use super::domain::Domain;
 use super::domain::DomainPhase;

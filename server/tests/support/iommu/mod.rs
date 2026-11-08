@@ -1,6 +1,8 @@
 //! Test-only assembly of production portable modules; no substitute implementation.
 #[path = "../../../src/machine/iommu/error.rs"]
 pub(crate) mod error;
+#[path = "../../../src/machine/iommu/fault.rs"]
+mod fault;
 #[path = "../../../src/machine/iommu/hardware.rs"]
 pub(crate) mod hardware;
 #[path = "../../../src/machine/iommu/identity.rs"]
@@ -16,3 +18,5 @@ pub(crate) use identity::{BatchId, BindingId};
 #[cfg(test)]
 pub(crate) use space::Phase;
 pub(crate) use space::{IoSpace, Life, Projection};
+
+pub(crate) use fault::Fault;

@@ -1,7 +1,7 @@
 mod binding;
 mod phase;
 
-use super::{BatchId, BindingId, Error, Hardware, riscv};
+use super::{BatchId, BindingId, Error, Hardware};
 use binding::Binding;
 use phase::Event;
 
@@ -160,7 +160,7 @@ impl<H: Hardware> IoSpace<H> {
         }
     }
 
-    pub(crate) fn fault(&mut self) -> Result<Option<riscv::Fault>, Error> {
+    pub(crate) fn fault(&mut self) -> Result<Option<super::Fault>, Error> {
         self.hardware
             .as_mut()
             .expect("live space")

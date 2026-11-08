@@ -9,9 +9,8 @@ pub(crate) mod domain;
 mod engine;
 pub(crate) mod topology;
 
-pub(crate) use engine::{Engine, EngineError, Fault, Phase, fence_complete, registers};
+pub(crate) use engine::{Engine, EngineError, Phase, fence_complete, registers};
 
 pub(crate) mod interrupt;
 pub(crate) mod mmio;
 pub(crate) mod pci;
-pub(crate) mod retirement;

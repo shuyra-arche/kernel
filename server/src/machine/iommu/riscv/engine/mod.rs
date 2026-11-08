@@ -6,7 +6,7 @@ mod phase;
 pub(crate) mod registers;
 
 pub(crate) use command::{Command, fence_complete};
-pub(crate) use fault::Fault;
+
 pub(crate) use phase::Phase;
 
 use crate::basis::cell::page::Page;
@@ -312,7 +312,7 @@ impl<R: Registers> Engine<R> {
         Ok(true)
     }
 
-    pub(crate) fn fault(&mut self) -> Result<Option<super::Fault>, EngineError> {
+    pub(crate) fn fault(&mut self) -> Result<Option<super::super::Fault>, EngineError> {
         if matches!(self.phase, Phase::Prepared | Phase::Closed | Phase::Failed) {
             return Err(EngineError::State);
         }
@@ -341,7 +341,7 @@ impl<R: Registers> Engine<R> {
         };
         self.registers.sync();
         self.registers.write32(FQH, (head + 1) & 127);
-        Ok(Some(super::Fault::decode(words)))
+        Ok(Some(fault::decode(words)))
     }
 
     pub(crate) fn stop(&mut self) -> Result<(), EngineError> {

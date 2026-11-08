@@ -7,10 +7,12 @@ use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
 use crate::basis::unit::team::kernel;
 use crate::machine::board;
+use crate::machine::iommu::aperture::{APERTURES, Aperture};
 use crate::machine::iommu::riscv::pci::Ecam;
 use crate::machine::iommu::riscv::pci::Endpoint;
-use crate::machine::iommu::riscv::pci::aperture::{APERTURES, Aperture, QuiescenceStatus};
+use crate::machine::iommu::riscv::pci::aperture::{PciPort, QuiescenceStatus};
 use crate::machine::iommu::riscv::topology::Topology;
+use alloc::boxed::Box;
 use board::tree::{self, mmio, property, scalar};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
@@ -50,7 +52,7 @@ pub(in super::super) fn init(route: PciRoute) -> Result<(), PendFail> {
         .map_err(|_| PendFail::Denied)?
         .device();
     let (start, end) = bar_window(&tree, route.host)?;
-    if crate::machine::iommu::riscv::interrupt::overlaps(start, end)
+    if crate::machine::interrupt::external().is_some_and(|route| route.overlaps(start, end))
         || topology
             .configurations()
             .any(|(base, size)| start < base + size && base < end)
@@ -67,7 +69,7 @@ pub(in super::super) fn init(route: PciRoute) -> Result<(), PendFail> {
     let config_offset = usize::from(route.requester) * PAGE_SIZE;
     let config_va = mapped(route.host + config_offset, PAGE_SIZE)?;
     let config = unsafe { Ecam::new(config_va) };
-    let mut endpoint = Endpoint::discover(config).map_err(|_| PendFail::Denied)?;
+    let endpoint = Endpoint::discover(config).map_err(|_| PendFail::Denied)?;
     let size = endpoint.size();
     if endpoint.identity() != route.identity
         || route.bar < start
@@ -85,17 +87,23 @@ pub(in super::super) fn init(route: PciRoute) -> Result<(), PendFail> {
         .map_err(|_| PendFail::OutOfMemory)?
         .whole();
     // Only the validated BAR is exported. Config and IOMMU registers stay private.
-    unsafe { endpoint.place(route.bar) }.map_err(|_| PendFail::Denied)?;
-    endpoint.decode().map_err(|_| PendFail::Denied)?;
-    apertures.push(Aperture {
+    let mut port = Box::try_new(PciPort {
         host: route.host,
         rid: route.requester,
-        did,
-        port: endpoint,
+        endpoint,
         config: config_va,
         quiescence: route.quiescence,
-        source,
         used: false,
+    })
+    .map_err(|_| PendFail::OutOfMemory)?;
+    unsafe { port.endpoint.place(route.bar) }.map_err(|_| PendFail::Denied)?;
+    port.endpoint.decode().map_err(|_| PendFail::Denied)?;
+    let base = port.endpoint.base();
+    apertures.push(Aperture {
+        base,
+        did,
+        port,
+        source,
     });
     log::info!("iommu: {} trusted platform apertures", apertures.len());
     Ok(())

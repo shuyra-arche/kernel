@@ -1,7 +1,7 @@
 use super::BatchId;
+use super::Fault;
 use super::HardwareError;
 use super::Projection;
-use super::riscv::Fault;
 
 /// 只能由 Kernel 安装的单一设备保护域适配器，不接受 Unit 提供的完成回调。
 /// 每个方法是有界进度步骤；错误允许已经产生部分硬件效果。
@@ -29,6 +29,7 @@ pub(crate) unsafe trait Hardware {
     fn revoke(&mut self, projection: Projection) -> Result<(), HardwareError>;
     fn fence(&mut self, projection: Projection, batch: BatchId) -> Result<(), HardwareError>;
     fn observe(&mut self, batch: BatchId) -> Result<Option<BatchId>, HardwareError>;
+    /// Diagnostic evidence. A fault or an interrupt never completes a batch.
     fn fault(&mut self) -> Result<Option<Fault>, HardwareError> {
         Ok(None)
     }

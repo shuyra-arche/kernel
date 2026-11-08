@@ -4,10 +4,10 @@
 //! Translation withdrawal and platform reclamation proof remain separate steps.
 mod phase;
 
+use super::super::Fault;
 use super::super::Projection;
 use super::Engine;
 use super::EngineError;
-use super::Fault;
 use super::Phase;
 use super::registers::CAP;
 use super::registers::FCTL;

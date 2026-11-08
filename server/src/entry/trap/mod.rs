@@ -110,7 +110,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
             }
         }
         TrapEvent::External => {
-            if crate::machine::iommu::riscv::interrupt::handle() {
+            if interrupt::external().is_some_and(|route| route.handle()) {
                 crate::basis::cell::projection::maintain();
             } else if crate::basis::room::interrupt::deliver_external(false) {
                 interrupt::disable_external();

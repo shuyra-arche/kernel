@@ -97,7 +97,9 @@ fn wait() -> usize {
         };
         deadline::arm(fallback);
         interrupt::enable_external();
-        if interrupt::external_pending() && !crate::machine::iommu::riscv::interrupt::handle() {
+        if interrupt::external_pending()
+            && !interrupt::external().is_some_and(|route| route.handle())
+        {
             crate::basis::room::interrupt::deliver_external(true);
         }
         // Let notified remote Harts receive the Tasks just placed there
