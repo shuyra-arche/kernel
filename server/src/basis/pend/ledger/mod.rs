@@ -2,47 +2,21 @@
 
 mod cleanup;
 mod entry;
+mod table;
+pub(crate) use table::Table;
 
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::Ordering;
 
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::PendId;
 
 use crate::basis::unit::task::Task;
-use crate::machine::sync::SpinLock;
 
 use super::{HoldTable, live};
 pub(crate) use cleanup::{doom, retire, return_, revoke};
 pub(crate) use entry::{PendEntry, accede, locate, vestor};
-
-/// 一个任务的能力账本：登记表（`serial`）下挂它持有的 pend_entry、它替子任务记住的
-/// 父子对（`heirs`）与来源引用（`references`）；
-/// `version` 是乐观校验用的抄本号。
-pub(crate) struct Table {
-    serial: SpinLock<()>,
-    pub(crate) version: AtomicUsize,
-    pub(crate) entries: SpinLock<Vec<Arc<PendEntry>>>,
-    pub(crate) heirs: SpinLock<Vec<(PendId, Weak<Task>, PendId)>>,
-    pub(crate) references: HoldTable,
-}
-
-impl Table {
-    pub(crate) fn new() -> Self {
-        Self {
-            serial: SpinLock::new(()),
-            version: AtomicUsize::new(0),
-            entries: SpinLock::new(Vec::new()),
-            heirs: SpinLock::new(Vec::new()),
-            references: HoldTable::new(),
-        }
-    }
-
-    pub(crate) fn lock(&self) -> crate::machine::sync::spin::SpinLockGuard<'_, ()> {
-        self.serial.lock()
-    }
-}
 
 const RETRIES: usize = 8;
 
@@ -166,10 +140,8 @@ pub(crate) fn insert(task: &Task, pend_entry: PendEntry) -> Result<(), PendFail>
     if !live(task) {
         return Err(PendFail::Dead);
     }
-    let mut entries = task.pend.entries.lock();
-    entries.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
     let pend_entry = Arc::try_new(pend_entry).map_err(|_| PendFail::OutOfMemory)?;
-    entries.push(pend_entry);
+    task.pend.prepare(pend_entry)?.publish();
     changed(task);
     Ok(())
 }

@@ -129,11 +129,7 @@ pub(crate) fn create_share(
             }
         }
         meta.reserve_records(inputs.len())?;
-        task.pend
-            .entries
-            .lock()
-            .try_reserve(1)
-            .map_err(|_| PendFail::OutOfMemory)?;
+        let registration = task.pend.prepare(pend.clone())?;
 
         let _commit = crate::basis::commit();
         let _publication = authorization.begin_withdraw()?;
@@ -149,14 +145,9 @@ pub(crate) fn create_share(
             if modifiable == Modifiable::No {
                 meta.close_maps(Some(token))?;
             }
-            let mut entries = task.pend.entries.lock();
-            assert!(
-                entries.len() < entries.capacity(),
-                "reserved root PendEntry slot"
-            );
             meta.commit_source();
             authorization.consume();
-            entries.push(pend);
+            registration.publish();
             pend::changed(task);
             Ok(token)
         })();

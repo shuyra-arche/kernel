@@ -1,5 +1,10 @@
 extern crate alloc;
+mod allocation;
+mod arena;
 mod generation;
+mod registry;
+use arena::{Arena, Key};
+use generation::Generation;
 #[path = "../../src/basis/name/recycle.rs"]
 mod recycle;
 #[path = "../../src/basis/name/serial.rs"]

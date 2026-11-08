@@ -152,10 +152,10 @@ fn relations_match(tasks: &[(Arc<Task>, usize)], nodes: &[(Arc<Task>, PendId)]) 
 pub(super) fn take(task: &Task, token: PendId) -> Option<Arc<PendEntry>> {
     let pend_entry = {
         let mut entries = task.pend.entries.lock();
-        let at = entries.iter().position(|p| p.token() == token)?;
-        entries.remove(at)
+        // Invalidate the single live record before making its slot reusable.
+        entries.get(token)?.invalidate();
+        entries.remove(token)?
     };
-    pend_entry.invalidate();
     debug_assert!(
         !pend_entry.alive(),
         "shared record must lose authority on removal"
@@ -373,7 +373,13 @@ pub(crate) fn doom(task: &Arc<Task>) {
 /// Bounded cleanup continuation retained by Kernel after execution has ended.
 pub(crate) fn retire(task: &Arc<Task>) -> Result<(), PendFail> {
     for _ in 0..16 {
-        let token = task.pend.entries.lock().first().map(|entry| entry.token());
+        let token = task
+            .pend
+            .entries
+            .lock()
+            .iter()
+            .next()
+            .map(|entry| entry.token());
         let Some(token) = token else {
             return Ok(());
         };

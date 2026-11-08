@@ -1,9 +1,9 @@
+use crate::basis::name::{Registry, Serial};
 use crate::basis::unit::task::Task;
 use crate::machine::sync::SpinLock;
 use alloc::sync::Arc;
-use alloc::vec::Vec;
+use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
-use core::sync::atomic::{AtomicBool, AtomicUsize};
 use kernel_api::abi::call::unit::UnitFail;
 use kernel_api::model::unit::ControlId;
 use kernel_api::model::unit::ControlKind;
@@ -27,17 +27,15 @@ impl Authority {
         }
     }
 }
-#[derive(Clone)]
 struct Entry {
-    id: ControlId,
     kind: ControlKind,
     delegable: bool,
     authority: Arc<Authority>,
 }
-pub(crate) struct Table(SpinLock<Vec<Entry>>);
+pub(crate) struct Table(SpinLock<Registry<ControlId, Entry>>);
 impl Table {
     pub(crate) fn new() -> Self {
-        Self(SpinLock::new(Vec::new()))
+        Self(SpinLock::new(Registry::default()))
     }
     /// Only boot minting or checked delegation installs an entry.
     pub(crate) fn install(
@@ -63,21 +61,22 @@ impl Table {
             depth,
         })
         .map_err(|_| UnitFail::OutOfMemory)?;
-        static NEXT: AtomicUsize = AtomicUsize::new(1);
+        static NEXT: Serial = Serial::new(1, isize::MAX as usize - 1);
         let id = NEXT
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
-                (id < isize::MAX as usize).then_some(id + 1)
-            })
+            .allocate()
             .map(ControlId::new)
+            .ok_or(UnitFail::OutOfMemory)?;
+        self.0
+            .lock()
+            .insert(
+                id,
+                Entry {
+                    kind,
+                    delegable,
+                    authority,
+                },
+            )
             .map_err(|_| UnitFail::OutOfMemory)?;
-        let mut entries = self.0.lock();
-        entries.try_reserve(1).map_err(|_| UnitFail::OutOfMemory)?;
-        entries.push(Entry {
-            id,
-            kind,
-            delegable,
-            authority,
-        });
         Ok(id)
     }
     pub(crate) fn allows(&self, kind: ControlKind) -> bool {
@@ -89,20 +88,18 @@ impl Table {
     pub(crate) fn matches(&self, id: ControlId, kind: ControlKind) -> bool {
         self.0
             .lock()
-            .iter()
-            .any(|entry| entry.id == id && entry.kind == kind && entry.authority.alive())
+            .get(id)
+            .is_some_and(|entry| entry.kind == kind && entry.authority.alive())
     }
     pub(crate) fn release(&self, id: ControlId) -> Result<(), UnitFail> {
         let mut entries = self.0.lock();
-        let at = entries
-            .iter()
-            .position(|entry| entry.id == id)
-            .ok_or(UnitFail::Denied)?;
         entries
-            .remove(at)
+            .get(id)
+            .ok_or(UnitFail::Denied)?
             .authority
             .active
             .store(false, Ordering::Release);
+        entries.remove(id).expect("registered Control");
         Ok(())
     }
     pub(crate) fn revoke(
@@ -114,15 +111,12 @@ impl Table {
         let authority = self
             .0
             .lock()
-            .iter()
-            .find(|entry| entry.id == id && entry.authority.alive())
+            .get(id)
+            .filter(|entry| entry.authority.alive())
             .map(|entry| entry.authority.clone())
             .ok_or(UnitFail::Denied)?;
         let entries = target.0.lock();
-        let child = entries
-            .iter()
-            .find(|entry| entry.id == branch)
-            .ok_or(UnitFail::Denied)?;
+        let child = entries.get(branch).ok_or(UnitFail::Denied)?;
         if !child
             .authority
             .parent
@@ -136,7 +130,7 @@ impl Table {
     }
     pub(crate) fn clear(&self) {
         let entries = core::mem::take(&mut *self.0.lock());
-        for entry in entries {
+        for entry in entries.into_values() {
             entry.authority.active.store(false, Ordering::Release);
         }
     }
@@ -154,18 +148,15 @@ pub(crate) fn delegate(
     if !super::adjacent(caller, target) {
         return Err(UnitFail::Denied);
     }
-    let entry = caller
-        .administration
-        .0
-        .lock()
-        .iter()
-        .find(|entry| entry.id == id)
-        .cloned()
-        .ok_or(UnitFail::Denied)?;
-    if !entry.delegable || !entry.authority.alive() {
-        return Err(UnitFail::Denied);
-    }
+    let (kind, authority) = {
+        let entries = caller.administration.0.lock();
+        let entry = entries.get(id).ok_or(UnitFail::Denied)?;
+        if !entry.delegable || !entry.authority.alive() {
+            return Err(UnitFail::Denied);
+        }
+        (entry.kind, entry.authority.clone())
+    };
     target
         .administration
-        .insert(entry.kind, delegable, Some(entry.authority))
+        .insert(kind, delegable, Some(authority))
 }

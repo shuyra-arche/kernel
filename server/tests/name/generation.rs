@@ -1,5 +1,9 @@
 include!("../../src/basis/name/generation.rs");
 
+pub(super) fn last() -> Generation {
+    Generation(u64::MAX)
+}
+
 #[test]
 fn generations_never_wrap_into_a_stale_revision() {
     assert_eq!(Generation::first().get(), 1);

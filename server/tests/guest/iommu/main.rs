@@ -21,9 +21,12 @@ mod pool;
 #[path = "../../../src/basis/cell/projection/admission.rs"]
 pub(crate) mod admission;
 
-#[allow(dead_code, unused_imports)]
-#[path = "../../../src/basis/name/mod.rs"]
-mod name;
+// This hardware-only harness needs serial identities, not registration tables.
+#[path = "../../../src/basis/name/serial.rs"]
+mod serial;
+mod name {
+    pub(crate) use crate::serial::Serial;
+}
 
 mod basis {
     pub(crate) use crate::name;

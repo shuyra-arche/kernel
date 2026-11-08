@@ -61,7 +61,7 @@ pub(crate) fn accord(
         None
     };
     let token = with_pair_uncommitted(caller, &target, || {
-        let (pend_entry, granted) = {
+        let (pend_entry, granted, registration) = {
             let _commit = crate::basis::commit();
             if !super::live(caller) || !super::live(&target) {
                 return Err(PendFail::Dead);
@@ -100,13 +100,8 @@ pub(crate) fn accord(
                 .lock()
                 .try_reserve(1)
                 .map_err(|_| PendFail::OutOfMemory)?;
-            target
-                .pend
-                .entries
-                .lock()
-                .try_reserve(1)
-                .map_err(|_| PendFail::OutOfMemory)?;
-            (pend_entry, granted)
+            let registration = target.pend.prepare(granted.clone())?;
+            (pend_entry, granted, registration)
         };
         // Prepared metadata and table capacity cannot fail after withdrawal. The
         // source/recipient tables stay locked, but remote TLB completion never
@@ -127,7 +122,7 @@ pub(crate) fn accord(
             pend_entry.authority().borrow(granted.authority())?;
         }
         insert_heir(caller, src, Arc::downgrade(&target), token);
-        target.pend.entries.lock().push(granted);
+        registration.publish();
         super::changed(caller);
         if !Arc::ptr_eq(caller, &target) {
             super::changed(&target);
@@ -205,11 +200,8 @@ pub(crate) fn reduce(
             .as_ref()
             .map(|source| source.begin_withdraw())
             .transpose()?;
-        let mut entries = task.pend.entries.lock();
-        let entry = entries
-            .iter_mut()
-            .find(|entry| entry.token() == token)
-            .ok_or(PendFail::Denied)?;
+        let entries = task.pend.entries.lock();
+        let entry = entries.get(token).ok_or(PendFail::Denied)?;
         entry.narrow(subset, window)?;
         super::changed(task);
     }

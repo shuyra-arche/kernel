@@ -85,22 +85,32 @@ impl Frozen {
                 value: self,
             });
         }
-        let mut entries = target.pend.entries.lock();
-        if entries.try_reserve(self.entries.len()).is_err() {
+        let mut registrations = Vec::new();
+        if registrations.try_reserve_exact(self.entries.len()).is_err() {
             return Err(Failure {
                 reason: PendFail::OutOfMemory,
                 value: self,
             });
         }
-        for (name, root) in self.entries {
+        for (_, root) in &self.entries {
+            match target.pend.prepare(root.clone()) {
+                Ok(registration) => registrations.push(registration),
+                Err(reason) => {
+                    return Err(Failure {
+                        reason,
+                        value: self,
+                    });
+                }
+            }
+        }
+        for ((name, root), registration) in self.entries.into_iter().zip(registrations) {
             ledger.push(Entry::new(
                 name,
                 root.view().kind().into(),
                 root.token().get(),
             ));
-            entries.push(root);
+            registration.publish();
         }
-        drop(entries);
         pend::changed(target);
         drop(commit);
         drop(closed);

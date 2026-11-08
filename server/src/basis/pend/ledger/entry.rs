@@ -177,7 +177,7 @@ fn next_id() -> Result<PendId, kernel_api::abi::call::pend::PendFail> {
 
 pub(crate) fn locate(task: &Task, token: PendId) -> Option<Arc<PendEntry>> {
     let entries = task.pend.entries.lock();
-    entries.iter().find(|p| p.token() == token).cloned()
+    entries.get(token).cloned()
 }
 
 pub(crate) fn vestor(task: &Arc<Task>, token: PendId) -> Option<TaskId> {

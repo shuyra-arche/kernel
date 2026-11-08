@@ -3,7 +3,7 @@ use crate::abi::reply::FromPair;
 
 /// Task-local administrative qualification; never a memory borrow or event right.
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ControlId(usize);
 impl ControlId {
     pub const NONE: Self = Self(0);
