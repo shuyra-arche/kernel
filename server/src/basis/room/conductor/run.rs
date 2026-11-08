@@ -98,8 +98,8 @@ fn wait() -> Option<usize> {
         }
         beacon::idle(me);
 
-        let device_pending = crate::basis::unit::space::mapping::external::maintain();
-        let fallback = if beacon::shutting_down() || device_pending {
+        let external_pending = crate::basis::cell::projection::maintain();
+        let fallback = if beacon::shutting_down() || external_pending {
             BEACON_TICK
         } else {
             WFI_FAR

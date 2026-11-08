@@ -5,30 +5,29 @@ use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
 
-use crate::basis::nest::Mapping;
+use super::Mapping;
 use crate::basis::pend::SourceAuthorization;
+use crate::basis::room::scheduler::roster;
 use crate::machine::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::cell::MappingControl;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 
-use super::Space;
-
-pub(crate) mod external;
+use super::super::Nest;
 
 // 目标空间与来源记录共享的 CPU 关系身份；不持帧，也不授予视图控制权。
 
 pub(crate) struct MappingBinding {
     id: usize,
-    space: Weak<Space>,
+    nest: Weak<Nest>,
 }
 
 impl MappingBinding {
-    pub(crate) fn new(id: usize, space: &Arc<Space>) -> Result<Arc<Self>, PendFail> {
+    pub(crate) fn new(id: usize, nest: &Arc<Nest>) -> Result<Arc<Self>, PendFail> {
         Arc::try_new(Self {
             id,
-            space: Arc::downgrade(space),
+            nest: Arc::downgrade(nest),
         })
         .map_err(|_| PendFail::OoM)
     }
@@ -37,8 +36,8 @@ impl MappingBinding {
         self.id
     }
 
-    pub(crate) fn space(&self) -> &Weak<Space> {
-        &self.space
+    pub(crate) fn nest(&self) -> &Weak<Nest> {
+        &self.nest
     }
 }
 
@@ -103,34 +102,34 @@ impl MappingRegistry {
     pub(crate) fn claim(
         &self,
         id: usize,
-        space: &Arc<Space>,
+        nest: &Arc<Nest>,
         controller: TaskId,
         scope: MappingControl,
         source: Arc<SourceAuthorization>,
         branch: Option<PendId>,
     ) -> Result<(), PendFail> {
         let control = MappingControlRecord::new(controller, scope, branch)?;
-        self.claim_entry(id, space, source, Some(control))
+        self.claim_entry(id, nest, source, Some(control))
     }
 
     pub(crate) fn claim_mapping(
         &self,
         id: usize,
-        space: &Arc<Space>,
+        nest: &Arc<Nest>,
         source: Arc<SourceAuthorization>,
     ) -> Result<(), PendFail> {
-        self.claim_entry(id, space, source, None)
+        self.claim_entry(id, nest, source, None)
     }
 
     fn claim_entry(
         &self,
         id: usize,
-        space: &Arc<Space>,
+        nest: &Arc<Nest>,
         source: Arc<SourceAuthorization>,
         control: Option<Arc<MappingControlRecord>>,
     ) -> Result<(), PendFail> {
         let _commit = crate::basis::commit();
-        let binding = MappingBinding::new(id, space)?;
+        let binding = MappingBinding::new(id, nest)?;
         {
             let mut entries = self.entries.lock();
             if entries.iter().any(|entry| entry.binding.id() == id) {
@@ -186,17 +185,13 @@ impl MappingRegistry {
     /// 取出下一笔 CPU 关系已结清的登记；占用身份与全空间关闭由 Nest 判定。
     ///
     /// 在途槽同样适用：发布失败的清理链走完后，它也要退表并释放 controller。
-    pub(crate) fn take_settled(&self, nest: &crate::basis::nest::Nest) -> Option<MappingEntry> {
+    pub(crate) fn take_settled(&self, nest: &Nest) -> Option<MappingEntry> {
         let mut entries = self.entries.lock();
         let at = entries
             .iter()
             .position(|entry| nest.settled(entry.binding.id()))?;
         Some(entries.remove(at))
     }
-
-    /// 分支改指：只改这一份来源自己那些仍带着被忘掉那枚 token 的记录。
-    ///
-    /// 授权快照与控制身份都不动——这里只改历史分支索引。
 
     /// 一份来源名下已登记的项（撤销时取出，在锁外关）。
     pub(crate) fn owned_by(
@@ -220,3 +215,43 @@ impl MappingRegistry {
 
 unsafe impl Send for MappingRegistry {}
 unsafe impl Sync for MappingRegistry {}
+
+impl Nest {
+    /// 一段登记结清后的**唯一收尾**：源侧成员与 Registry 项一起撤，
+    /// 最后按登记身份放掉 controller；取出的 entry 在 Registry 锁外放掉它
+    /// 持有的关系与来源授权。
+    fn settle(entry: MappingEntry) {
+        let id = entry.binding.id();
+        entry.source.release_binding(&entry.binding);
+        if let Some(control) = &entry.control
+            && control.scope() == kernel_api::model::cell::MappingControl::Caller
+        {
+            let (controller, _) = control.control();
+            if let Some(task) = roster::muster(controller).and_then(|task| task.upgrade()) {
+                task.release_control(id);
+            }
+        }
+    }
+
+    /// 一段已结清登记的收尾入口：在途（未提交）与已提交同样适用。
+    ///
+    /// Registry 项与源侧成员在同一个 work 提交段里一起撤；没结清就什么都不撤，
+    /// 留给既有重试。
+    pub(crate) fn retire_mapping(&self, id: usize) {
+        let _commit = crate::basis::commit();
+        if !self.settled(id) {
+            return;
+        }
+        if let Some(entry) = self.mappings.retire(id) {
+            Self::settle(entry);
+        }
+    }
+
+    /// 把一个空间里已结清的登记都收掉；同样一条收尾，不再重复一份解除动作。
+    pub(crate) fn reap_mappings(&self) {
+        let _commit = crate::basis::commit();
+        while let Some(entry) = self.mappings.take_settled(self) {
+            Self::settle(entry);
+        }
+    }
+}

@@ -18,9 +18,9 @@ use core::sync::atomic::Ordering;
 
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
+use crate::basis::nest::Nest;
+use crate::basis::nest::mapping::MappingBinding;
 use crate::basis::pend::Pend;
-use crate::basis::unit::space::MappingBinding;
-use crate::basis::unit::space::Space;
 use crate::basis::view::share::ShareView;
 use crate::machine::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
@@ -114,7 +114,7 @@ pub(crate) struct SourceAuthorization {
     /// 未结 CPU 关系：包含显式 Attach 控制与资源 Open 映射。
     ///
     /// 成员与 Registry 项是同一个 `Arc<MappingBinding>`，所以“还欠着谁”只有这一份
-    /// 事实：只有显式结清（`Space::retire_mapping` / `reap_mappings`）才撒下成员，
+    /// 事实：只有显式结清（`Nest::retire_mapping` / `reap_mappings`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
     bindings: SpinLock<Vec<Arc<MappingBinding>>>,
     phase: SpinLock<Phase>,
@@ -163,8 +163,8 @@ impl SourceAuthorization {
         let gate = self.revoked.lock();
         if *gate
             || self.bindings.lock().iter().any(|binding| {
-                binding.space().upgrade().is_none_or(|space| {
-                    space.nest.has_pending_invalidation()
+                binding.nest().upgrade().is_none_or(|space| {
+                    space.has_pending_invalidation()
                         || space.mappings.registered(binding.id()).is_none_or(|entry| {
                             entry
                                 .mapping()
@@ -340,7 +340,7 @@ impl SourceAuthorization {
         self.bindings.lock().push(binding);
     }
 
-    /// 撒下一条成员：这份绑定已结清（`Space::retire_mapping` / `reap_mappings` 的唯一收尾）。
+    /// 撒下一条成员：这份绑定已结清（`Nest::retire_mapping` / `reap_mappings` 的唯一收尾）。
     ///
     /// 最后一条成员撤下就是显式的“结清”事件：来源不再占着任何东西时顺带向上收尾，
     /// 不在 `Drop` 里猜。
@@ -393,15 +393,15 @@ impl SourceAuthorization {
 
     /// 这份来源登过关系的目标空间：由成员快照派生并去重。
     ///
-    /// 先在源锁下克隆成员再放锁升级：最后一份 `Space` 强引用不在源锁里析构。
-    pub(crate) fn spaces(&self) -> Result<Vec<Arc<Space>>, PendFail> {
+    /// 先在源锁下克隆成员再放锁升级：最后一份 `Nest` 强引用不在源锁里析构。
+    pub(crate) fn spaces(&self) -> Result<Vec<Arc<Nest>>, PendFail> {
         let members = self.bindings()?;
         let mut spaces = Vec::new();
         spaces
             .try_reserve(members.len())
             .map_err(|_| PendFail::OoM)?;
         for binding in &members {
-            if let Some(space) = binding.space().upgrade()
+            if let Some(space) = binding.nest().upgrade()
                 && !spaces.iter().any(|held| Arc::ptr_eq(held, &space))
             {
                 spaces.push(space);

@@ -1,10 +1,9 @@
 //! 地址选择与占用：窗口只是选址范围，占用是全局单一事实。
 
-mod placement;
-pub(crate) use placement::{Placement, PlacementAt};
+use super::placement::{Placement, PlacementAt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ZoneError {
+pub(crate) enum AddressError {
     OutOfMemory,
     NotAligned,
     NoRegion,
@@ -49,18 +48,16 @@ struct Window {
 /// 窗口只决定 `Lowest` / `Highest` 的选址范围；占用本身是一份全局有序表，
 /// 固定的 `Exact` 跨度与动态选择走同一份重叠检查。
 /// 端点按最后一个字节（含）表示，因此 `usize::MAX` 结尾的固定跨度也合法。
-pub(crate) struct Zone<C> {
+pub(crate) struct Occupancy {
     windows: Vec<Window>,
     slots: Vec<Slot>,
-    cleanups: Vec<(usize, C)>,
 }
 
-impl<C> Zone<C> {
+impl Occupancy {
     pub(crate) const fn new() -> Self {
         Self {
             windows: Vec::new(),
             slots: Vec::new(),
-            cleanups: Vec::new(),
         }
     }
 
@@ -72,29 +69,29 @@ impl<C> Zone<C> {
         id: RegionId,
         base: usize,
         last: usize,
-    ) -> Result<(), ZoneError> {
+    ) -> Result<(), AddressError> {
         if base > last
             || id == RegionId::Static
             || self.windows.iter().any(|window| window.id == id)
         {
-            return Err(ZoneError::NoRegion);
+            return Err(AddressError::NoRegion);
         }
         self.windows
             .try_reserve(1)
-            .map_err(|_| ZoneError::OutOfMemory)?;
+            .map_err(|_| AddressError::OutOfMemory)?;
         self.windows.push(Window { id, base, last });
         Ok(())
     }
 
     /// 抬高已有窗口的选址下界；已登记的占用留在表里。
-    pub(crate) fn advance(&mut self, id: RegionId, base: usize) -> Result<(), ZoneError> {
+    pub(crate) fn advance(&mut self, id: RegionId, base: usize) -> Result<(), AddressError> {
         let window = self
             .windows
             .iter_mut()
             .find(|window| window.id == id)
-            .ok_or(ZoneError::NoRegion)?;
+            .ok_or(AddressError::NoRegion)?;
         if base < window.base || base > window.last {
-            return Err(ZoneError::NoRegion);
+            return Err(AddressError::NoRegion);
         }
         window.base = base;
         Ok(())
@@ -102,7 +99,7 @@ impl<C> Zone<C> {
 
     /// 按 `placement` 选段并登记占用：不分配数据、不发布 PTE。
     /// 返回选中的起点与占用身份（generation）。
-    pub(crate) fn reserve(&mut self, placement: Placement) -> Result<(usize, usize), ZoneError> {
+    pub(crate) fn reserve(&mut self, placement: Placement) -> Result<(usize, usize), AddressError> {
         let size = placement.size();
         let region = placement.region();
         let start = match placement.at() {
@@ -118,7 +115,7 @@ impl<C> Zone<C> {
                             .is_some_and(|gap| gap >= size - 1)
                             .then_some(at)
                     })
-                    .ok_or(ZoneError::OutOfMemory)?
+                    .ok_or(AddressError::OutOfMemory)?
             }
             PlacementAt::Highest => {
                 let window = self.window(region)?;
@@ -129,20 +126,20 @@ impl<C> Zone<C> {
                         let at = hi.checked_sub(size - 1)?;
                         (at >= lo).then_some(at)
                     })
-                    .ok_or(ZoneError::OutOfMemory)?
+                    .ok_or(AddressError::OutOfMemory)?
             }
         };
-        let last = start.checked_add(size - 1).ok_or(ZoneError::NoRegion)?;
+        let last = start.checked_add(size - 1).ok_or(AddressError::NoRegion)?;
         let id = self.insert(region, start, last)?;
         Ok((start, id))
     }
 
-    fn window(&self, id: RegionId) -> Result<Window, ZoneError> {
+    fn window(&self, id: RegionId) -> Result<Window, AddressError> {
         self.windows
             .iter()
             .copied()
             .find(|window| window.id == id)
-            .ok_or(ZoneError::NoRegion)
+            .ok_or(AddressError::NoRegion)
     }
 
     /// 窗口 `[base, last]` 是否含住 `[start, last]`。
@@ -152,11 +149,11 @@ impl<C> Zone<C> {
     }
 
     /// 窗口内未被占用的区间（含端点），按地址升序。
-    fn free_spans(&self, window: Window) -> Result<Vec<(usize, usize)>, ZoneError> {
+    fn free_spans(&self, window: Window) -> Result<Vec<(usize, usize)>, AddressError> {
         let mut spans = Vec::new();
         spans
             .try_reserve(self.slots.len().saturating_add(1))
-            .map_err(|_| ZoneError::OutOfMemory)?;
+            .map_err(|_| AddressError::OutOfMemory)?;
         let mut at = window.base;
         for slot in &self.slots {
             if slot.last < at {
@@ -179,16 +176,21 @@ impl<C> Zone<C> {
         Ok(spans)
     }
 
-    fn insert(&mut self, region: RegionId, start: usize, last: usize) -> Result<usize, ZoneError> {
+    fn insert(
+        &mut self,
+        region: RegionId,
+        start: usize,
+        last: usize,
+    ) -> Result<usize, AddressError> {
         let at = self.slots.partition_point(|slot| slot.start < start);
         if (at > 0 && self.slots[at - 1].last >= start)
             || (at < self.slots.len() && self.slots[at].start <= last)
         {
-            return Err(ZoneError::NoRegion);
+            return Err(AddressError::NoRegion);
         }
         self.slots
             .try_reserve(1)
-            .map_err(|_| ZoneError::OutOfMemory)?;
+            .map_err(|_| AddressError::OutOfMemory)?;
         let id = next_id()?;
         self.slots.insert(
             at,
@@ -210,14 +212,14 @@ impl<C> Zone<C> {
         last: usize,
         reservation_id: usize,
         left_size: usize,
-    ) -> Result<(usize, usize, usize), ZoneError> {
+    ) -> Result<(usize, usize, usize), AddressError> {
         let size = last - start + 1;
         if left_size == 0
             || left_size >= size
             || !left_size.is_multiple_of(PAGE_SIZE)
             || !size.is_multiple_of(PAGE_SIZE)
         {
-            return Err(ZoneError::NotAligned);
+            return Err(AddressError::NotAligned);
         }
         let at = self
             .slots
@@ -228,10 +230,10 @@ impl<C> Zone<C> {
                     && slot.ticket == 0
                     && slot.id == reservation_id
             })
-            .ok_or(ZoneError::NoRegion)?;
+            .ok_or(AddressError::NoRegion)?;
         self.slots
             .try_reserve(1)
-            .map_err(|_| ZoneError::OutOfMemory)?;
+            .map_err(|_| AddressError::OutOfMemory)?;
         let right = start + left_size;
         let left_id = next_id()?;
         let right_id = next_id()?;
@@ -266,35 +268,10 @@ impl<C> Zone<C> {
         }) {
             Some(at) => {
                 self.slots.remove(at);
-                self.cleanups.retain(|(id, _)| *id != reservation_id);
                 true
             }
             None => false,
         }
-    }
-
-    /// 发布前先预留该 generation 的清理载荷：失败时不进入发布。
-    pub(crate) fn prepare_cleanup(
-        &mut self,
-        reservation_id: usize,
-        cleanup: impl FnOnce() -> Result<C, ZoneError>,
-    ) -> Result<(), ZoneError> {
-        if self.cleanups.iter().any(|(id, _)| *id == reservation_id) {
-            return Ok(());
-        }
-        self.cleanups
-            .try_reserve(1)
-            .map_err(|_| ZoneError::OutOfMemory)?;
-        let node = cleanup()?;
-        self.cleanups.push((reservation_id, node));
-        Ok(())
-    }
-
-    pub(crate) fn take_cleanup(&mut self, reservation_id: usize) -> Option<C> {
-        self.cleanups
-            .iter()
-            .position(|(id, _)| *id == reservation_id)
-            .map(|at| self.cleanups.swap_remove(at).1)
     }
 
     /// 该 generation 是否还在占用表里。
@@ -311,11 +288,11 @@ impl<C> Zone<C> {
         start: usize,
         last: usize,
         reservation_id: usize,
-    ) -> Result<Vec<(usize, usize, usize)>, ZoneError> {
+    ) -> Result<Vec<(usize, usize, usize)>, AddressError> {
         let mut pieces = Vec::new();
         pieces
             .try_reserve(self.slots.len())
-            .map_err(|_| ZoneError::OutOfMemory)?;
+            .map_err(|_| AddressError::OutOfMemory)?;
         let mut at = start;
         for slot in &self.slots {
             if slot.last < at {
@@ -325,7 +302,7 @@ impl<C> Zone<C> {
                 break;
             }
             if slot.id != reservation_id || slot.start > at {
-                return Err(ZoneError::NoRegion);
+                return Err(AddressError::NoRegion);
             }
             let hi = slot.last.min(last);
             pieces.push((at, hi, slot.ticket));
@@ -334,18 +311,18 @@ impl<C> Zone<C> {
             }
             at = hi + 1;
         }
-        Err(ZoneError::NoRegion)
+        Err(AddressError::NoRegion)
     }
 
     /// 该 generation 名下仍在退休中的跨度（含票），按地址升序。
     pub(crate) fn retired_of(
         &self,
         reservation_id: usize,
-    ) -> Result<Vec<(usize, usize, usize)>, ZoneError> {
+    ) -> Result<Vec<(usize, usize, usize)>, AddressError> {
         let mut retired = Vec::new();
         retired
             .try_reserve(self.slots.len())
-            .map_err(|_| ZoneError::OutOfMemory)?;
+            .map_err(|_| AddressError::OutOfMemory)?;
         retired.extend(
             self.slots
                 .iter()
@@ -355,10 +332,10 @@ impl<C> Zone<C> {
         Ok(retired)
     }
 
-    pub(crate) fn reserve_cuts(&mut self, count: usize) -> Result<(), ZoneError> {
+    pub(crate) fn reserve_cuts(&mut self, count: usize) -> Result<(), AddressError> {
         self.slots
             .try_reserve(count)
-            .map_err(|_| ZoneError::OutOfMemory)
+            .map_err(|_| AddressError::OutOfMemory)
     }
 
     /// 把 `[start, last]` 内的占用切成带退休票的段：占位仍留着，但在票结算前不可复用。
@@ -421,27 +398,17 @@ impl<C> Zone<C> {
         ticket
     }
 
-    /// 结算一票退休：移走带票的占位；该 generation 的最后一段消失时一并解除清理预留。
+    /// 结算一票退休：同步完成后移走这张票占用的地址。
     pub(crate) fn reclaim(&mut self, ticket: usize) {
-        let removed = self
-            .slots
-            .iter()
-            .find(|slot| slot.ticket == ticket)
-            .map(|slot| slot.id);
         self.slots.retain(|slot| slot.ticket != ticket);
-        if let Some(reservation_id) = removed
-            && !self.slots.iter().any(|slot| slot.id == reservation_id)
-        {
-            self.cleanups.retain(|(id, _)| *id != reservation_id);
-        }
     }
 }
 
-fn next_id() -> Result<usize, ZoneError> {
+fn next_id() -> Result<usize, AddressError> {
     static NEXT: AtomicUsize = AtomicUsize::new(1);
     NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
         id.checked_add(1)
             .filter(|next| *next <= isize::MAX as usize)
     })
-    .map_err(|_| ZoneError::OutOfMemory)
+    .map_err(|_| AddressError::OutOfMemory)
 }

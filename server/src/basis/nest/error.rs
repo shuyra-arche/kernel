@@ -57,13 +57,13 @@ impl From<FlatError> for NestError {
     }
 }
 
-impl From<crate::basis::zone::ZoneError> for NestError {
-    fn from(error: crate::basis::zone::ZoneError) -> Self {
-        use crate::basis::zone::ZoneError;
+impl From<super::address::AddressError> for NestError {
+    fn from(error: super::address::AddressError) -> Self {
+        use super::address::AddressError;
         match error {
-            ZoneError::OutOfMemory => Self::OutOfMemory,
-            ZoneError::NotAligned => Self::NotAligned,
-            ZoneError::NoRegion => Self::NoRegion,
+            AddressError::OutOfMemory => Self::OutOfMemory,
+            AddressError::NotAligned => Self::NotAligned,
+            AddressError::NoRegion => Self::NoRegion,
         }
     }
 }

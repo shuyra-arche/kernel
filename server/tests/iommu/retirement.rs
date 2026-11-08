@@ -5,9 +5,9 @@ use super::hardware::Trace;
 use super::iommu::BatchId;
 use super::iommu::Error;
 use super::iommu::HardwareError;
-use super::iommu::retirement::Owner;
 use super::iommu::retirement::Registry;
 use super::support::Pool;
+use crate::admission::Admission;
 use crate::cell::Owner as PageOwner;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -32,7 +32,7 @@ fn latest(trace: &Arc<Mutex<Trace>>) -> BatchId {
 #[test]
 fn owner_exit_needs_no_record_transfer_and_failed_domain_does_not_block_another() {
     let mut registry = Registry::new();
-    let owner = Owner::new().unwrap();
+    let owner = Admission::new().unwrap();
     let pools = [Pool::new(0), Pool::new(0)];
     let mut traces = Vec::new();
     let mut ids = Vec::new();
@@ -110,8 +110,8 @@ fn owner_exit_needs_no_record_transfer_and_failed_domain_does_not_block_another(
 #[test]
 fn owner_and_domain_identity_cannot_be_reused_as_authority() {
     let mut registry = Registry::new();
-    let owner = Owner::new().unwrap();
-    let other = Owner::new().unwrap();
+    let owner = Admission::new().unwrap();
+    let other = Admission::new().unwrap();
     let (hardware, trace) = Scripted::new();
     let id = registry
         .attach(&owner, hardware)
@@ -155,7 +155,7 @@ fn owner_and_domain_identity_cannot_be_reused_as_authority() {
 #[test]
 fn publication_admitted_before_concurrent_exit_remains_in_kernel_custody() {
     let mut registry = Registry::new();
-    let owner = Owner::new().unwrap();
+    let owner = Admission::new().unwrap();
     let (hardware, trace) = Scripted::new();
     let id = registry
         .attach(&owner, hardware)
@@ -195,7 +195,7 @@ fn publication_admitted_before_concurrent_exit_remains_in_kernel_custody() {
 #[test]
 fn explicit_close_settles_only_its_receipt_without_requiring_owner_exit() {
     let mut registry = Registry::new();
-    let owner = Owner::new().unwrap();
+    let owner = Admission::new().unwrap();
     let (hardware, trace) = Scripted::new();
     let id = registry
         .attach(&owner, hardware)

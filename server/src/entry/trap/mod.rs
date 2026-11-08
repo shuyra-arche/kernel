@@ -12,12 +12,12 @@ use riscv::register::sip;
 use riscv::register::stval;
 
 use crate::basis::nest::FaultOutcome;
+use crate::basis::nest::Nest;
 use crate::basis::room::conductor::identity::Identity;
 use crate::basis::room::conductor::identity::ident;
 use crate::basis::room::conductor::run::run;
 use crate::basis::room::deadline;
 use crate::basis::sign::redeem;
-use crate::basis::unit::space::Space;
 use crate::basis::unit::task::TaskIdent;
 use crate::machine::hart;
 use crate::machine::hart::HartId;
@@ -41,7 +41,7 @@ pub(crate) fn persist(frame: &TrapContext) -> bool {
     let Some(task) = i.live() else {
         return false;
     };
-    if !task.team.space.nest.asid().is_kernel() {
+    if !task.team.nest.asid().is_kernel() {
         return false;
     }
     let Some(pa) = i.trap() else {
@@ -134,7 +134,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
     let next: *mut TrapContext = match trap {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             deadline::tick();
-            crate::basis::unit::space::mapping::external::maintain();
+            crate::basis::cell::projection::maintain();
             unsafe {
                 sie::set_sext();
             }
@@ -172,7 +172,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
         }
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
             if crate::machine::iommu::riscv::interrupt::handle() {
-                crate::basis::unit::space::mapping::external::maintain();
+                crate::basis::cell::projection::maintain();
             } else {
                 let result = crate::basis::sign::endpoint::trigger(
                     &crate::basis::room::interrupt::get().supervisor_external,
@@ -215,7 +215,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
                     .as_ref()
                     .and_then(Identity::live)
                     .expect("user page fault without running task");
-                (running.id.get(), running.team.space.nest.clone())
+                (running.id.get(), running.team.nest.clone())
             };
             // 先纯探一次：不动页表就能判明该重试、该物化、该等还是不该续。
             let mut outcome = nest.probe_fault(fault.addr, fault.kind);
@@ -320,8 +320,8 @@ pub(crate) fn envcall(
     let Some(Identity::Live(ident)) = ident else {
         panic!("envcall without running task");
     };
-    let space = &ident.team.space;
-    if let Err(resource) = space.nest.retry_invalidation() {
+    let space = &ident.team.nest;
+    if let Err(resource) = space.retry_invalidation() {
         log::error!("envcall: the address space cannot settle its sync: {resource:?}");
         doom(
             Some(&ident),
@@ -362,7 +362,7 @@ pub(crate) fn envcall(
 ///
 /// 首字节读不出来就是**不知道**，交 `None`，不凭空造一个长度。客人的正文只要
 /// 在跑就读得出来（这条 `ebreak` 刚执行过）；读不出来是这份地址空间的失败。
-fn instr_len(space: &Space, sepc: KVirt) -> Option<usize> {
+fn instr_len(space: &Nest, sepc: KVirt) -> Option<usize> {
     let byte = space.instruction_byte(sepc)?;
     Some(if byte & 0b11 == 0b11 { 4 } else { 2 })
 }

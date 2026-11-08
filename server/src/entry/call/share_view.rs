@@ -175,7 +175,7 @@ fn open_resource(ident: Arc<TaskIdent>, token: PendId) -> Result<(usize, usize),
     authority::usable(&pend)?;
     let p = pend.view().share_view().ok_or(PendFail::Denied)?;
     let access = subset_to_access(pend.modifiable())?;
-    view::share::open(&p, token, &ident.team.space, access)
+    view::share::open(&p, token, &ident.team.nest, access)
 }
 
 fn shut_resource(token: PendId) -> Result<usize, PendFail> {

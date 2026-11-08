@@ -1,6 +1,6 @@
-//! The memory condition belongs to Space; Sign owns only its wait registration.
-use super::Space;
-use crate::basis::nest::NestError;
+//! The memory condition belongs to Nest; Sign owns only its wait registration.
+use super::Nest;
+use super::NestError;
 use crate::basis::room::Handoff;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
@@ -14,7 +14,7 @@ use kernel_api::abi::call::room::RoomFail;
 use kernel_api::address::VirtAddr;
 
 pub(crate) fn wait_value(
-    space: Arc<Space>,
+    space: Arc<Nest>,
     address: VirtAddr,
     expected: u32,
     wait: kernel_api::model::wait::Wait,
@@ -22,7 +22,7 @@ pub(crate) fn wait_value(
     let deadline = clock::deadline(wait);
     let blocked = {
         let _commit = crate::basis::commit();
-        let value = space.nest.load_u32(address).map_err(|error| match error {
+        let value = space.load_u32(address).map_err(|error| match error {
             NestError::Busy | NestError::Missing => RoomFail::Busy,
             _ => RoomFail::Denied,
         })?;
@@ -33,7 +33,7 @@ pub(crate) fn wait_value(
             return Ok(Handoff::Resume(false));
         }
         let key = WakeKey::Value {
-            space: space.nest.asid(),
+            space: space.asid(),
             address: address.as_usize(),
         };
         let life = space.life();

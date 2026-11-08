@@ -1,4 +1,5 @@
 pub(crate) mod page;
+pub(crate) mod projection;
 pub(crate) mod transfer;
 
 use self::page::{InternalPage, Owner, Page, PageError};

@@ -3,7 +3,6 @@
 pub(crate) mod cell;
 pub(crate) mod flat;
 pub(crate) mod nest;
-pub(crate) mod zone;
 
 pub(crate) mod pend;
 pub(crate) mod sign;

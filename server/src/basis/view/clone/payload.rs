@@ -3,9 +3,9 @@ use crate::basis::cell::page::Owner;
 use crate::basis::flat::Flat;
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
+use crate::basis::nest::Nest;
 use crate::basis::pend::PendEntry;
 use crate::basis::pend::SourceAuthorization;
-use crate::basis::unit::space::Space;
 use crate::basis::view::ShareView;
 use crate::basis::view::View;
 use alloc::sync::Arc;
@@ -26,7 +26,7 @@ pub(crate) struct Payload {
 }
 impl Payload {
     pub(crate) fn capture(
-        space: &Space,
+        space: &Nest,
         address: usize,
         len: usize,
     ) -> Result<Arc<Self>, CloneFail> {

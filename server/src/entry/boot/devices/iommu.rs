@@ -83,7 +83,7 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     }
     *storage = Some(Controllers::new(topology).map_err(|_| PendFail::OoM)?);
     let controllers = storage.as_mut().expect("installed controller registry");
-    let nest = &kernel().ok_or(PendFail::Denied)?.space.nest;
+    let nest = &kernel().ok_or(PendFail::Denied)?.nest;
     for region in regions {
         // MMIO remains a borrowed physical range, not an allocator-owned Page.
         // The mapping stays in the Kernel Nest for the lifetime of the engine.

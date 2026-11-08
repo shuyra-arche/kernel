@@ -5,11 +5,12 @@ use kernel_api::abi::call::unit::UnitFail;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
 
+use crate::basis::cell::projection::Admission;
 use crate::basis::commit;
+use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::room::scheduler;
 use crate::basis::unit::life::TeamLife;
-use crate::basis::unit::space::Space;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskBuilder;
 use crate::basis::unit::task::TaskState;
@@ -33,7 +34,8 @@ pub(crate) const MAX_CHILDREN: usize = 1024;
 
 /// 一个团队：地址空间、身份与家长，加状态机（`TeamState`）与成员表（`Tasks`）。
 pub struct Team {
-    pub(crate) space: Arc<Space>,
+    pub(crate) nest: Arc<Nest>,
+    pub(crate) external: Admission,
     pub(crate) id: TeamId,
     pub(crate) cells: crate::basis::cell::page::Owner,
     pub(crate) sire: TaskWeak,
@@ -119,10 +121,10 @@ impl Team {
             if !self.all_reaped() {
                 return Err(NestError::NoRegion);
             }
-            // CPU/task cleanup may fail later. DMA retirement must not depend
+            // CPU/task cleanup may fail later. External retirement must not depend
             // on those steps succeeding or on this Team being dropped.
             self.cells.close();
-            self.space.dma.close();
+            self.external.close();
             self.life.visit(&mut |node| {
                 let mut state = node.state.lock();
                 if !state.terminal() {
@@ -140,7 +142,7 @@ impl Team {
                 task.retire()?;
             }
         }
-        self.space.retire()
+        self.nest.retire()
     }
 
     pub(crate) fn prune_tasks(&self) {
@@ -259,8 +261,8 @@ pub(crate) fn spawn(
     // 入口的前两个字节都要取得到：取不到就拒收。
     let entry = crate::machine::mmu::riscv::canonical(entry_va);
     if !entry_va.is_multiple_of(2)
-        || target.space.instruction_byte(entry).is_none()
-        || target.space.instruction_byte(entry + 1).is_none()
+        || target.nest.instruction_byte(entry).is_none()
+        || target.nest.instruction_byte(entry + 1).is_none()
     {
         return Err(UnitFail::BadEntry);
     }

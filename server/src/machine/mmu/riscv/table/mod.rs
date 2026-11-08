@@ -25,7 +25,7 @@ pub(crate) static TABLE_LIVE: core::sync::atomic::AtomicUsize =
 
 #[derive(Debug)]
 pub(crate) struct TableNode {
-    page: Box<PageTable, &'static dyn Allocator>,
+    page: Box<PageTable, &'static (dyn Allocator + Sync)>,
     children: Vec<(usize, TableNode)>,
 }
 

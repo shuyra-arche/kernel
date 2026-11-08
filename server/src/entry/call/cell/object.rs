@@ -1,13 +1,13 @@
 use super::*;
 use crate::basis::cell::page::Page;
-use crate::basis::unit::space::mapping::external;
+use crate::basis::cell::projection;
 use kernel_api::model::cell::*;
 fn reference(id: usize) -> SlotId {
     SlotId::from_bytes(&(id as u64).to_le_bytes()).unwrap()
 }
 fn position(at: KVirt, ident: &Arc<TaskIdent>) -> Result<CellPosition, CellFail> {
     CellPosition::from_bytes(&read_snapshot::<{ CellPosition::WIDTH }>(
-        &ident.team.space,
+        &ident.team.nest,
         at,
     )?)
     .ok_or(CellFail::NotAligned)
@@ -41,7 +41,7 @@ fn check(entry: &MappingEntry, actor: &Arc<Task>) -> Result<(), CellFail> {
 }
 pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize, usize), CellFail> {
     let spec = CellCreate::from_bytes(&read_snapshot::<{ CellCreate::WIDTH }>(
-        &ident.team.space,
+        &ident.team.nest,
         at,
     )?)
     .ok_or(CellFail::NotAligned)?;
@@ -115,7 +115,7 @@ pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize,
                         .get(range.reference.get())
                         .ok_or(CellFail::Denied)?;
                     Ok((
-                        external::create(&actor, token, hold, address.get(), access == 6)?,
+                        projection::create(&actor, token, hold, address.get(), access == 6)?,
                         address.get(),
                     ))
                 })(),
@@ -151,7 +151,7 @@ pub(super) fn create(at: KVirt, ident: &Arc<TaskIdent>) -> Result<(usize, usize,
                         }
                         MappingTarget::Io(token) => {
                             if let Some(actor) = caller(ident) {
-                                let _ = external::delete(&actor, token, mapping);
+                                let _ = projection::delete(&actor, token, mapping);
                             }
                         }
                     }
@@ -212,7 +212,7 @@ fn source(pos: CellPosition, ident: &Arc<TaskIdent>) -> Result<(FlatRange, Arc<P
             if pos.page != 0 {
                 return Err(CellFail::NoRegion);
             }
-            external::page(&actor, token, mapping, pos.generation)
+            projection::page(&actor, token, mapping, pos.generation)
         }
     }
 }
@@ -251,8 +251,8 @@ fn inspect(pos: CellPosition, ident: &Arc<TaskIdent>) -> Result<CellInfo, CellFa
         } => with_mapping(team, mapping, ident, |target, entry| {
             let range = index(entry, pos.page)?;
             // Observation remains available while a remote hart has yet to fence.
-            let _ = target.space.nest.retry_invalidation();
-            target.space.nest.finish_memo(range.mapping(), pos.page);
+            let _ = target.nest.retry_invalidation();
+            target.nest.finish_memo(range.mapping(), pos.page);
             Ok(range.mapping().inspect_memo(pos.page)?)
         }),
         CellObject::Memo {
@@ -262,7 +262,7 @@ fn inspect(pos: CellPosition, ident: &Arc<TaskIdent>) -> Result<CellInfo, CellFa
             if pos.page != 0 {
                 return Err(CellFail::NoRegion);
             }
-            external::snapshot(&actor, token, mapping)
+            projection::snapshot(&actor, token, mapping)
         }
     }
 }
@@ -343,7 +343,7 @@ fn handoff_prepared(
                 let (r, page) = {
                     let _serial = actor.pend.lock();
                     let (hold, page) =
-                        external::owning_hold(&actor, token, mapping, spec.source.generation)?;
+                        projection::owning_hold(&actor, token, mapping, spec.source.generation)?;
                     let (offset, count) = hold.window();
                     let id = actor
                         .pend
@@ -384,7 +384,7 @@ fn handoff_prepared(
                     .map(|(meta, _, _)| ShareOperation::acquire(meta).ok_or(CellFail::Busy))
                     .transpose()?;
                 check(entry, &actor)?;
-                target.space.nest.associate(
+                target.nest.associate(
                     selected.mapping(),
                     spec.target.page,
                     spec.target.generation,
@@ -406,7 +406,7 @@ fn handoff_prepared(
             };
             let _serial = actor.pend.lock();
             let _commit = crate::basis::commit();
-            external::associate(&actor, token, mapping, spec.target.generation, &from, page)?;
+            projection::associate(&actor, token, mapping, spec.target.generation, &from, page)?;
             Ok(0)
         }
     }
@@ -424,8 +424,8 @@ fn publication(
         } => with_mapping(team, mapping, ident, |target, entry| {
             check(entry, &actor)?;
             let selected = index(entry, pos.page)?;
-            target.space.nest.retry_invalidation()?;
-            target.space.nest.finish_memo(selected.mapping(), pos.page);
+            target.nest.retry_invalidation()?;
+            target.nest.finish_memo(selected.mapping(), pos.page);
             let info = selected.mapping().inspect_memo(pos.page)?;
             if info.generation != pos.generation {
                 return Err(CellFail::Busy);
@@ -462,7 +462,7 @@ fn publication(
                     .map_err(source_fail)?;
             }
             let result = (|| {
-                target.space.nest.transition_memo(
+                target.nest.transition_memo(
                     selected.mapping(),
                     pos.page,
                     pos.generation,
@@ -470,14 +470,14 @@ fn publication(
                     publishing,
                 )?;
                 if publishing {
-                    target.space.nest.push_page(
+                    target.nest.push_page(
                         selected.mapping(),
                         KVirt::new(selected.window().0),
                         &page,
                         &permit,
                     )
                 } else {
-                    target.space.nest.unpublish_page(
+                    target.nest.unpublish_page(
                         selected.mapping(),
                         KVirt::new(selected.window().0),
                         &page,
@@ -486,7 +486,7 @@ fn publication(
             })();
             let valid = entry.source.branch_check(authority.as_deref(), need) && pend::live(&actor);
             if publishing && !valid {
-                let _ = target.space.nest.unpublish_page(
+                let _ = target.nest.unpublish_page(
                     selected.mapping(),
                     KVirt::new(selected.window().0),
                     &page,
@@ -495,7 +495,7 @@ fn publication(
             if publishing {
                 entry.source.leave_publish(flight);
             }
-            target.space.nest.finish_memo(selected.mapping(), pos.page);
+            target.nest.finish_memo(selected.mapping(), pos.page);
             if !valid {
                 return Err(CellFail::Denied);
             }
@@ -518,9 +518,9 @@ fn publication(
             let _serial = actor.pend.lock();
             let _commit = crate::basis::commit();
             if publishing {
-                external::publish(&actor, token, mapping, pos.generation)?;
+                projection::publish(&actor, token, mapping, pos.generation)?;
             } else {
-                external::retract(&actor, token, mapping, pos.generation)?;
+                projection::retract(&actor, token, mapping, pos.generation)?;
             }
             Ok(0)
         }
@@ -532,7 +532,7 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
         CellCall::Create { .. } => unreachable!(),
         CellCall::Push { request } | CellCall::Pull { request } => handoff(
             CellHandoff::from_bytes(&read_snapshot::<{ CellHandoff::WIDTH }>(
-                &ident.team.space,
+                &ident.team.nest,
                 request,
             )?)
             .ok_or(CellFail::NotAligned)?,
@@ -542,7 +542,7 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
         CellCall::Retract { position: at } => publication(position(at, ident)?, false, ident),
         CellCall::Inspect { position: at, out } => {
             let info = inspect(position(at, ident)?, ident)?;
-            if !ident.team.space.copy_out(&info.to_bytes(), out) {
+            if !ident.team.nest.copy_out(&info.to_bytes(), out) {
                 return Err(CellFail::Denied);
             }
             Ok(0)
@@ -565,12 +565,12 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
             let actor = caller(ident).ok_or(CellFail::Denied)?;
             with_mapping(team, mapping, ident, |target, entry| {
                 check(entry, &actor)?;
-                target.space.nest.retry_invalidation()?;
+                target.nest.retry_invalidation()?;
                 let selected = index(entry, pos.page)?;
                 let mapping = selected.mapping();
-                target.space.nest.finish_memo(mapping, pos.page);
+                target.nest.finish_memo(mapping, pos.page);
                 mapping.advance_memo(pos.page, pos.generation)?;
-                target.space.access(selected, access)?;
+                target.nest.set_access(selected, access)?;
                 if access.contains(Access::EXECUTE) {
                     identity::sync_instructions()?;
                 }
@@ -579,7 +579,7 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
         }
         CellCall::Delete { object: at } => {
             let object = CellObject::from_bytes(&read_snapshot::<{ CellObject::WIDTH }>(
-                &ident.team.space,
+                &ident.team.nest,
                 at,
             )?)
             .ok_or(CellFail::NotAligned)?;
@@ -589,14 +589,14 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
                     target: MappingTarget::Cpu(team),
                     mapping,
                 } => with_mapping(team, mapping, ident, |target, entry| {
-                    target.space.nest.retry_invalidation()?;
+                    target.nest.retry_invalidation()?;
                     let relation = entry.mapping().ok_or(CellFail::Denied)?;
                     if !relation.state.lock().published.is_empty() {
                         return Err(CellFail::Busy);
                     }
-                    target.space.withdraw(relation.whole())?;
-                    if target.space.nest.settled(mapping.get()) {
-                        target.space.retire_mapping(mapping.get());
+                    target.nest.detach(relation.whole())?;
+                    if target.nest.settled(mapping.get()) {
+                        target.nest.retire_mapping(mapping.get());
                     }
                     Ok(0)
                 }),
@@ -607,7 +607,7 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
                     let actor = caller(ident).ok_or(CellFail::Denied)?;
                     let _serial = actor.pend.lock();
                     let _commit = crate::basis::commit();
-                    external::delete(&actor, token, mapping)?;
+                    projection::delete(&actor, token, mapping)?;
                     Ok(0)
                 }
             }

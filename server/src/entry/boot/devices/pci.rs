@@ -18,7 +18,7 @@ use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PhysAddr;
 
 pub(super) fn mapped(base: usize, size: usize) -> Result<usize, PendFail> {
-    let nest = &kernel().ok_or(PendFail::Denied)?.space.nest;
+    let nest = &kernel().ok_or(PendFail::Denied)?.nest;
     let borrowed = unsafe { BorrowedRegion::new(PhysAddr::from_raw(base), size) }
         .map_err(|_| PendFail::Denied)?;
     let source = Flat::from_region(borrowed)

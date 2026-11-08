@@ -60,13 +60,13 @@ fn push(
         if len == 0
             || !ident
                 .team
-                .space
+                .nest
                 .validate_access(KVirt::wrap(msg), len, Access::READ)
         {
             return Err(CloneFail::Denied);
         }
         let reservation = view::clone::reserve_len(meta, len)?;
-        let bytes = view::clone::payload::Payload::capture(&ident.team.space, msg, len)?;
+        let bytes = view::clone::payload::Payload::capture(&ident.team.nest, msg, len)?;
         reservation.commit(bytes, me)
     });
     answer(frame, r.map(|()| 0));

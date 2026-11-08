@@ -1,5 +1,5 @@
 use crate::basis::nest::Access;
-use crate::basis::unit::space::Space;
+use crate::basis::nest::Nest;
 use crate::basis::unit::task::TaskIdent;
 use crate::machine::switcher::context::Gprs;
 use crate::machine::switcher::context::TrapContext;
@@ -18,8 +18,8 @@ pub(super) fn put(frame: &mut TrapContext, ident: &TaskIdent, buf: usize, len: u
     }
     let n = len.min(DBCN_MAX);
     let mut text = [0u8; DBCN_MAX];
-    let space = &ident.team.space;
-    if !Space::user_range(KVirt::wrap(buf), len) || !space.copy_in(&mut text[..n], KVirt::wrap(buf))
+    let space = &ident.team.nest;
+    if !Nest::user_range(KVirt::wrap(buf), len) || !space.copy_in(&mut text[..n], KVirt::wrap(buf))
     {
         ret_err(frame, DebugFail::Denied);
         return;
@@ -36,7 +36,7 @@ pub(super) fn get(frame: &mut TrapContext, ident: &TaskIdent, buf: usize, len: u
     }
     if !ident
         .team
-        .space
+        .nest
         .validate_access(KVirt::wrap(buf), len, Access::WRITE)
     {
         ret_err(frame, DebugFail::Denied);
@@ -54,7 +54,7 @@ pub(super) fn get(frame: &mut TrapContext, ident: &TaskIdent, buf: usize, len: u
         frame.gpr.set_x(Gprs::A0, 0);
         return;
     }
-    let space = &ident.team.space;
+    let space = &ident.team.nest;
     if !space.copy_out(&stage[..n], KVirt::wrap(buf)) {
         ret_err(frame, DebugFail::Denied);
         return;

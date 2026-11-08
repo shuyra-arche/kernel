@@ -17,8 +17,7 @@ use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionId;
 use crate::basis::nest::Reservation;
-use crate::basis::unit::space::Space;
-use crate::basis::unit::space::SpaceBuilder;
+use crate::basis::nest::SpaceKind;
 use crate::machine::mmu::riscv::table::PteFlags;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
@@ -35,13 +34,13 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
     for i in 0..capsule.count {
         let region = capsule.region(i).ok_or(NestError::NoRegion)?;
         let size = region.pages.checked_mul(PAGE).ok_or(NestError::NoRegion)?;
-        if !Space::user_range(VirtAddr::wrap(region.va), size) {
+        if !Nest::user_range(VirtAddr::wrap(region.va), size) {
             return Err(NestError::NoRegion);
         }
         image_end = image_end.max(region.va.checked_add(size).ok_or(NestError::NoRegion)?);
     }
-    let team = TeamBuilder::new(SpaceBuilder::supervisor().build()?).spawn()?;
-    let nest = &team.space.nest;
+    let team = TeamBuilder::new(SpaceKind::Supervisor).spawn()?;
+    let nest = &team.nest;
     for i in 0..capsule.count {
         let region = capsule.region(i).ok_or(NestError::NoRegion)?;
         let size = region.pages.checked_mul(PAGE).ok_or(NestError::NoRegion)?;

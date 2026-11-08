@@ -48,7 +48,7 @@ impl Change {
         if modifiable && self.freezes.load(Ordering::Acquire) > 1 {
             return Err(RetainError::Busy);
         }
-        Retention::during(self, Kind::Device, modifiable)
+        Retention::during(self, Kind::External, modifiable)
     }
 }
 impl Drop for Change {

@@ -1,9 +1,12 @@
 mod access;
+mod control;
+pub(crate) use control::{MappingBinding, MappingEntry, MappingRegistry};
 pub(in crate::basis::nest) mod publication;
 mod range;
 pub(crate) mod source;
 mod state;
 
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -109,6 +112,20 @@ impl Mapping {
                 Err(NestError::OutOfMemory)
             }
         }
+    }
+
+    pub(super) fn prepare_cleanup(&self) -> Result<(), NestError> {
+        let mut state = self.state.lock();
+        if state.cleanup.is_none() {
+            state.cleanup = Some(
+                Box::try_new(super::CleanupNode::empty()).map_err(|_| NestError::OutOfMemory)?,
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn take_cleanup(&self) -> Option<Box<super::CleanupNode>> {
+        self.state.lock().cleanup.take()
     }
 
     pub fn initial_start(&self) -> VirtAddr {

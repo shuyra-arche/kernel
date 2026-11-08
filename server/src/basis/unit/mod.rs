@@ -1,7 +1,6 @@
 pub(crate) mod control;
 pub(crate) mod life;
 pub(crate) mod lifecycle;
-pub mod space;
 pub(crate) mod task;
 pub(crate) mod team;
 

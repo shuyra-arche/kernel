@@ -33,10 +33,9 @@ The reconstruction is tracked in [#14](https://github.com/shuyra-arche/kernel/is
 | Element | Responsibility |
 | --- | --- |
 | Cell | A range of Slots (Flat) or Memos (Nest), with position-based Page operations |
-| Page | Unique physical identity, ownership epoch and CPU/device reclamation obligations |
+| Page | Unique physical identity, ownership epoch and CPU and external access obligations |
 | Flat | Logical backing slots, residency and movement of existing Pages |
 | Nest / Mapping / Memo | CPU address relations and explicit per-position publication state |
-| Zone | Address windows, occupancy generations and retirement tickets |
 | View | Clone payload delivery or Share access to whole Cells |
 | Pend | Access authority, Modifiable and the explicit borrow tree |
 | Sign | Retained events, source observation, routing and waiting |
@@ -46,13 +45,14 @@ Managed Pages are currently 4 KiB RAM allocations. Flat slots and Memos retain
 that same Page; they do not create another owner. A Team ownership epoch closes
 at retirement, transferring residual responsibilities to Kernel without changing
 Page identity or discharging hardware access. Reallocation requires all holders
-released and all CPU/device obligations safely settled. Failed or abandoned
+released and all CPU and external obligations safely settled. Failed or abandoned
 published obligations retain the allocation. `BorrowedRegion` represents trusted
 external ranges without inventing duplicate managed Page identities.
 
-`basis` contains `cell`, `flat`, `nest`, `zone`, `view`, `pend`, `sign`, `unit`
-and `room`. Flat and Nest are peers. Zone owns the actual address occupancy
-algorithm; it does not contain Nest. The allocator implementation and its
+`basis` contains `cell`, `flat`, `nest`, `view`, `pend`, `sign`, `unit`
+and `room`. Flat and Nest are peers. Each Team holds its Nest directly. Nest owns address
+windows, reservations and retirement tickets. Occupancy releases an address
+only after the covering translation invalidation has completed. The allocator implementation and its
 instances live together in `machine/allocator`; there is no allocator adapter
 package. `api::address` owns address/page-coordinate types; machine-dependent
 canonicalization stays in the CPU MMU backend.
@@ -67,14 +67,14 @@ not a fault that silently follows the newest Slot Page.
 
 Retract closes Page admission before withdrawing hardware and keeps a freeze in
 the logical Memo after fencing. Another Memo cannot bypass that freeze to open a
-conflicting writer. Read-only DMA can preserve the snapshot. Non-wrapping Memo
+conflicting writer. Read-only external access can preserve the snapshot. Non-wrapping Memo
 generations reject stale publication, replacement and protection. Delete and
 replacement explicitly release that object's freeze; historical references do
 not keep deleted freezes alive. Begin/End and public change receipts are gone.
 
 Swap policy remains a Page-service responsibility. Kernel supplies stable Memo
 identity, exact Page association, freezing, ownership movement and trusted
-retirement. `Internal` / `External` describe absence/presence of retained device
+retirement. `Internal` / `External` describe absence/presence of retained external
 access obligations independently of ownership, Slot location or CPU mappings.
 See [the ABI contracts](api/README.md#cell-contracts) for the full endpoint matrix.
 
@@ -119,7 +119,7 @@ Inspect observes results repeatedly; Delete requires reclamation and removes the
 caller's retained record. Sign routes completion without consuming results.
 Team Finish permanently closes admission. Membership never grants peer control.
 
-## DMA boundary
+## External access
 
 External access is an address projection, not a separate device work object.
 There is no DeviceCall, Device administrative qualification or work/device.
@@ -130,15 +130,14 @@ reads or writes.
 Cell Memo creation selects MappingTarget::Cpu(TeamId) or Io(PendId). The I/O
 Pend identifies a platform-bound MMIO View; a numeric address or ordinary RAM
 View cannot mint a route. Source Cells use the existing Pend borrow tree and
-Flat residency. Nest IoSpace retains mapping and fence obligations. Inspect
+Flat residency. The IOMMU backend retains translation and fence obligations. Inspect
 returns mapping state and the first fault; Sign routes MappingRetired and
 MappingFault for that exact MappingId, rechecking target authority. Parent
 holders may observe while lending, but cannot use a suspended Pend to publish.
 
-External projection records in Unit Space join Pend obligations to Nest
-completion. They survive execution exit; source revocation, target revocation,
-explicit Retract and creator exit all close admission. A live I/O projection
-retains a routing obligation on its target Pend: ordinary BAR access remains
+Cell projection records join Pend obligations to trusted backend completion.
+They survive execution exit. Source or target revocation, explicit Retract and
+creator exit all close admission. A live I/O projection retains a routing obligation on its target Pend: ordinary BAR access remains
 available, while reborrowing or narrowing waits for hardware settlement. Cells remain External
 until the matching trusted completion settles. Notifications run after commit
 and registry locks are released. An interrupt or business completion is never a

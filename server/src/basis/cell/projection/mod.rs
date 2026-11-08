@@ -1,3 +1,8 @@
+//! Page projections with external access obligations. Pend authorizes the borrow;
+//! the trusted backend issues the receipt that lets the Kernel settle it.
+pub(crate) mod admission;
+pub(crate) use admission::Admission;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(usize)]
 enum MappingState {
@@ -15,8 +20,6 @@ struct MappingInfo {
     fault_address: usize,
 }
 
-// Kernel-retained external address projections. The records join a Pend borrow
-// to a Nest IoSpace completion; they contain no device ownership or BAR operations.
 use crate::basis::flat::FlatRange;
 use crate::basis::pend;
 use crate::basis::pend::ExternalBorrow;
@@ -279,7 +282,7 @@ pub(crate) fn publish(
         .authority()
         .retain_route()
         .map_err(|_| CellFail::Busy)?;
-    let platform = match aperture::bind(&r.source, &actor.ident.team.space.dma) {
+    let platform = match aperture::bind(&r.source, &actor.ident.team.external) {
         Ok(p) => p,
         Err(e) => {
             unsafe { target.authority().release_route() };
@@ -293,7 +296,7 @@ pub(crate) fn publish(
     r.generation = next;
     r.freeze = Some(crate::basis::cell::page::Freeze::new(change.clone()));
     r.info.state = MappingState::Publishing;
-    let result = retirement::with_space(&actor.ident.team.space.dma, domain, |space| {
+    let result = retirement::with_space(&actor.ident.team.external, domain, |space| {
         let borrow = r.borrow.as_mut().unwrap();
         let binding =
             unsafe { space.register_during(borrow.cell(), r.iova, r.modifiable, Some(&change)) }?;
@@ -387,7 +390,7 @@ fn advance(record: &mut Projection) -> [Option<(TaskId, PendId)>; 2] {
     let actor = record.actor.upgrade();
     let invalid = actor
         .as_ref()
-        .is_none_or(|a| a.dead() || a.ident.team.space.dma.closed())
+        .is_none_or(|a| a.dead() || a.ident.team.external.closed())
         || record
             .target
             .as_ref()
@@ -419,7 +422,7 @@ fn advance(record: &mut Projection) -> [Option<(TaskId, PendId)>; 2] {
     if record.info.state == MappingState::Publishing {
         if let (Some(actor), Some(binding)) = (actor.as_ref(), record.binding) {
             let ready = retirement::with_space(
-                &actor.ident.team.space.dma,
+                &actor.ident.team.external,
                 record.platform.as_ref().unwrap().domain,
                 |space| match space.phase(binding)? {
                     Phase::Publishing => space.ready(binding),

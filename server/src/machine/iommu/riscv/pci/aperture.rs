@@ -7,12 +7,12 @@ use super::Endpoint;
 use super::config;
 use super::config::Ecam;
 use crate::basis::cell::page::Owner as PageOwner;
+use crate::basis::cell::projection::Admission;
 use crate::basis::flat::FlatRange;
 use crate::machine::iommu::Error;
 use crate::machine::iommu::HardwareError;
 use crate::machine::iommu::retirement::Completion;
 use crate::machine::iommu::retirement::DomainId;
-use crate::machine::iommu::retirement::Owner;
 use crate::machine::iommu::riscv::adapter::Quiescence;
 use crate::machine::sync::SpinLock;
 use alloc::boxed::Box;
@@ -52,7 +52,10 @@ unsafe impl Quiescence for QemuCompletion {
         }
     }
 }
-pub(crate) fn bind(source: &FlatRange, owner: &Owner) -> Result<Binding, Error> {
+pub(crate) fn bind(source: &FlatRange, owner: &Admission) -> Result<Binding, Error> {
+    if owner.closed() {
+        return Err(Error::Closed);
+    }
     let mut ports = APERTURES.lock();
     let (port, entry) = ports
         .iter_mut()

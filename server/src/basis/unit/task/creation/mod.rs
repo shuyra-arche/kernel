@@ -5,11 +5,11 @@ use core::mem::MaybeUninit;
 
 use crate::basis::flat::Flat;
 use crate::basis::nest::Access;
+use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionId;
 use crate::basis::unit::life::Life;
-use crate::basis::unit::space::Space;
 use crate::basis::unit::team::Team;
 use crate::basis::unit::team::kernel;
 use crate::machine::layout::HART_FRAME_BASE;
@@ -34,12 +34,11 @@ mod prepared;
 use self::prepared::PreparedTask;
 use super::TaskState;
 
-fn write_args(space: &Space, at: VirtAddr, args: &[usize]) {
+fn write_args(space: &Nest, at: VirtAddr, args: &[usize]) {
     let mut done = 0usize;
     while done < args.len() {
         let va = at + done * size_of::<usize>();
         let pa = space
-            .nest
             .physical_at(va)
             .expect("stack page materialized before args write");
         let page_rest = PAGE_SIZE - (va.as_usize() % PAGE_SIZE);
@@ -118,12 +117,12 @@ impl TaskBuilder {
         let id = next_id()?;
 
         let mut memory = TaskMemory {
-            space: self.team.space.clone(),
+            nest: self.team.nest.clone(),
             stack: None,
             frame: None,
             guard: None,
         };
-        let nest = &self.team.space.nest;
+        let nest = &self.team.nest;
         // 栈主体页先备齐，再登记占用：来源准备失败不留无人持有的地址。
         let mut indexed = Vec::new();
         indexed
@@ -170,20 +169,19 @@ impl TaskBuilder {
         let args_at = stack_body_top - count * size_of::<usize>();
         if count > 0 {
             write_args(
-                &self.team.space,
+                &self.team.nest,
                 crate::machine::mmu::riscv::canonical(args_at),
                 &self.args,
             );
         }
         let sp = VirtAddr::wrap(args_at & !0xF);
 
-        let satp = self.team.space.nest.satp();
-        let spp = self.team.space.kind().spp();
+        let satp = self.team.nest.satp();
+        let spp = self.team.nest.kind().spp();
         let frame = unsafe { &mut *(frame_pa.as_usize() as *mut TrapContext) };
         unsafe {
             let ktc = kernel()
                 .expect("kernel team not initialized")
-                .space
                 .nest
                 .physical_at(HART_FRAME_BASE)
                 .expect("kernel frame not mapped")
