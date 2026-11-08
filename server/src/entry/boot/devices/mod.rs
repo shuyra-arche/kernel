@@ -69,7 +69,10 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     Ok(())
 }
 
-fn grant_region(registry: &mut Registry, region: plan::region::Region) -> Result<(), PendFail> {
+fn grant_region(
+    registry: &mut Registry,
+    region: board::tree::mmio::Region,
+) -> Result<(), PendFail> {
     let (base, size) = (region.base, region.size);
     let meta = view::share::region(base, size, TaskId::new(0))?;
     let source = meta.source();

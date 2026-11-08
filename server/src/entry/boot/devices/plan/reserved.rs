@@ -2,7 +2,8 @@ use alloc::vec::Vec;
 use fdt::node::FdtNode;
 use kernel_api::abi::call::pend::PendFail;
 
-use super::region::Region;
+use crate::machine::board::tree::{self, mmio};
+use mmio::Region;
 
 /// Platform IOMMU control pages never become externally grantable boot resources.
 /// This discovers authority boundaries only; it neither starts nor settles DMA.
@@ -68,7 +69,7 @@ pub(super) fn interrupts(fdt: &fdt::Fdt) -> Result<Vec<Region>, PendFail> {
 /// The hardware consumers still require identity coordinates; decode and check
 /// their byte/page geometry through the same path as ordinary MMIO admission.
 pub(super) fn node_regions(fdt: &fdt::Fdt, node: FdtNode) -> Result<Vec<Region>, PendFail> {
-    let parent = super::address::parent(fdt, node).ok_or(PendFail::Denied)?;
-    super::address::identity_path(fdt, parent)?;
-    super::address::regions(fdt, node)
+    let parent = tree::parent(fdt, node).ok_or(PendFail::Denied)?;
+    mmio::identity_path(fdt, parent)?;
+    Ok(mmio::regions(fdt, node)?)
 }

@@ -1,13 +1,22 @@
 use crate::machine::iommu::riscv::topology::Topology;
 use alloc::vec::Vec;
+use fdt::{Fdt, node::FdtNode};
 use kernel_api::abi::call::pend::PendFail;
 
-mod address;
+use crate::machine::board::tree::{self, mmio as address};
 mod ranges;
-pub(super) mod region;
 pub(super) mod reserved;
 
-use region::Region;
+use address::Region;
+
+impl From<tree::Error> for PendFail {
+    fn from(error: tree::Error) -> Self {
+        match error {
+            tree::Error::Description => Self::Denied,
+            tree::Error::OutOfMemory => Self::OutOfMemory,
+        }
+    }
+}
 
 /// Pure boot admission. No authority is published until the whole plan succeeds.
 pub(super) struct Plan {
@@ -62,10 +71,10 @@ impl Plan {
             authorities: Vec::new(),
         };
         for node in fdt.all_nodes() {
-            if !address::enabled(fdt, node)? || !address::ordinary(fdt, node)? {
+            if !tree::enabled(fdt, node)? || !ordinary(fdt, node)? {
                 continue;
             }
-            if address::property(node, "reg")?.is_some() {
+            if tree::property(node, "reg")?.is_some() {
                 for region in address::regions(fdt, node)? {
                     plan.offer(region.base, region.size, &reserved)?;
                 }
@@ -108,5 +117,26 @@ impl Plan {
             .map_err(|_| PendFail::OutOfMemory)?;
         self.authorities.push(region);
         Ok(())
+    }
+}
+
+/// CPU IDs, reserved-memory and PCI child encodings are not ordinary MMIO.
+/// A bus with zero size cells describes identifiers, not memory apertures.
+fn ordinary<'b, 'a>(fdt: &'b Fdt<'a>, node: FdtNode<'b, 'a>) -> Result<bool, PendFail> {
+    let mut current = node;
+    loop {
+        if matches!(
+            current.name.split('@').next(),
+            Some("cpus" | "reserved-memory" | "memory")
+        ) {
+            return Ok(false);
+        }
+        let Some(bus) = tree::parent(fdt, current) else {
+            return Ok(true);
+        };
+        if ranges::is_pci_host(bus) || tree::cells(bus, "#size-cells", 1)? == 0 {
+            return Ok(false);
+        }
+        current = bus;
     }
 }

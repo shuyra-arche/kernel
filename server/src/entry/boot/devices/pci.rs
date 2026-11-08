@@ -11,6 +11,7 @@ use crate::machine::iommu::riscv::pci::Ecam;
 use crate::machine::iommu::riscv::pci::Endpoint;
 use crate::machine::iommu::riscv::pci::aperture::{APERTURES, Aperture, QuiescenceStatus};
 use crate::machine::iommu::riscv::topology::Topology;
+use board::tree::{self, mmio, property, scalar};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
 
@@ -102,34 +103,31 @@ pub(in super::super) fn init(route: PciRoute) -> Result<(), PendFail> {
 
 /// Identity-translated 32-bit MMIO window on a bus-zero ECAM host.
 fn bar_window(tree: &fdt::Fdt, host: usize) -> Result<(usize, usize), PendFail> {
-    let node = tree
-        .all_nodes()
-        .find(|n| {
-            n.property("iommu-map").is_some()
-                && n.reg().is_some_and(|mut r| {
-                    r.next().is_some_and(|r| r.starting_address.addr() == host)
-                })
-        })
-        .ok_or(PendFail::Denied)?;
-    let first_bus = node
-        .property("bus-range")
-        .and_then(|p| p.value.get(..4))
-        .ok_or(PendFail::Denied)?;
+    let mut selected = None;
+    for node in tree.all_nodes() {
+        if property(node, "iommu-map")?.is_some() && mmio::single(tree, node)?.base == host {
+            if selected.replace(node).is_some() {
+                return Err(PendFail::Denied);
+            }
+        }
+    }
+    let node = selected.ok_or(PendFail::Denied)?;
+    let bus = property(node, "bus-range")?.ok_or(PendFail::Denied)?;
+    if bus.len() != 8 {
+        return Err(PendFail::Denied);
+    }
+    let first_bus = &bus[..4];
     if first_bus != [0, 0, 0, 0] {
         return Err(PendFail::Denied);
     }
-    let cells = |n: fdt::node::FdtNode, key| n.property(key).and_then(|p| p.as_usize());
-    let parent = tree
-        .all_nodes()
-        .find(|p| p.children().any(|c| core::ptr::eq(c.name, node.name)))
-        .ok_or(PendFail::Denied)?;
-    if cells(node, "#address-cells") != Some(3)
-        || cells(node, "#size-cells") != Some(2)
-        || cells(parent, "#address-cells") != Some(2)
+    let parent = tree::parent(tree, node).ok_or(PendFail::Denied)?;
+    if scalar(node, "#address-cells")? != Some(3)
+        || scalar(node, "#size-cells")? != Some(2)
+        || scalar(parent, "#address-cells")? != Some(2)
     {
         return Err(PendFail::Denied);
     }
-    let ranges = node.property("ranges").ok_or(PendFail::Denied)?.value;
+    let ranges = property(node, "ranges")?.ok_or(PendFail::Denied)?;
     if !ranges.len().is_multiple_of(28) {
         return Err(PendFail::Denied);
     }

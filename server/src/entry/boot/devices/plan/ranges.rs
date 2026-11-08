@@ -1,3 +1,4 @@
+use crate::machine::board::tree::{self, mmio};
 use kernel_api::abi::call::pend::PendFail;
 
 /// 是不是 PCI 宿主：`device_type` 必须**正好**是 `pci`。
@@ -69,16 +70,16 @@ pub(crate) fn memory_windows(
     fdt: &fdt::Fdt,
     node: fdt::node::FdtNode,
 ) -> Result<alloc::vec::Vec<(usize, usize)>, PendFail> {
-    let Some(ranges) = super::address::property(node, "ranges")? else {
+    let Some(ranges) = tree::property(node, "ranges")? else {
         return Ok(alloc::vec::Vec::new());
     };
-    let child = super::address::cells(node, "#address-cells", 0)?;
-    let size = super::address::cells(node, "#size-cells", 0)?;
-    let parent = super::address::parent(fdt, node).ok_or(PendFail::Denied)?;
-    let addresses = super::address::cells(parent, "#address-cells", 0)?;
+    let child = tree::cells(node, "#address-cells", 0)?;
+    let size = tree::cells(node, "#size-cells", 0)?;
+    let parent = tree::parent(fdt, node).ok_or(PendFail::Denied)?;
+    let addresses = tree::cells(parent, "#address-cells", 0)?;
     let mut windows = ranges_windows(ranges, child, addresses, size)?;
     for (base, size) in &mut windows {
-        let physical = super::address::physical(fdt, parent, *base, *size)?;
+        let physical = mmio::physical(fdt, parent, *base, *size)?;
         *base = physical.base;
         *size = physical.size;
     }

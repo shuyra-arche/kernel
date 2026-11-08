@@ -190,6 +190,10 @@ fn progress(engine: &mut Engine<mmio::Mmio>, target: Phase) {
     panic!("engine deadline: {:?}", engine.phase());
 }
 
+#[allow(dead_code)]
+#[path = "../../../src/machine/board/tree/mod.rs"]
+pub(crate) mod description;
 mod machine {
+    pub(crate) mod board { pub(crate) use crate::description as tree; }
     pub(crate) use crate::iommu;
 }

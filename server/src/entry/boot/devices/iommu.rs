@@ -35,14 +35,6 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     }) {
         return Err(PendFail::Denied);
     }
-    for node in tree.all_nodes().filter(|n| {
-        n.compatible()
-            .is_some_and(|c| c.all().any(|s| s == "riscv,iommu"))
-    }) {
-        if node.reg().is_none_or(|r| r.count() != 1) {
-            return Err(PendFail::Denied);
-        }
-    }
     let dram = board::info().memory.envelope();
     let edge = dram.base.checked_add(dram.size).ok_or(PendFail::Denied)?;
     for (index, region) in regions.iter().enumerate() {
@@ -70,7 +62,8 @@ pub(in super::super) fn init() -> Result<(), PendFail> {
     }
     let route = crate::machine::iommu::riscv::interrupt::plan::Plan::discover(
         &tree,
-        crate::machine::hart::firmware_id().get(),
+        board::info().hart,
+        crate::machine::hart::hart_id(),
         regions[0].base,
     )
     .map_err(|_| PendFail::Denied)?;
