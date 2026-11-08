@@ -2,8 +2,6 @@ use crate::basis::nest::Mapping;
 use crate::basis::nest::Nest;
 use crate::basis::nest::Reservation;
 use alloc::sync::Arc;
-use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::Ordering;
 
 use kernel_api::model::identity::TaskId;
 
@@ -12,15 +10,11 @@ use crate::basis::unit::team::Team;
 use crate::machine::sync::SpinLock;
 use kernel_api::address::PhysAddr;
 
-static NEXT: AtomicUsize = AtomicUsize::new(1);
+static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, isize::MAX as usize);
 
-/// 下一个任务号：到 `isize::MAX` 就不再发新号（既有回绕口径）。
+/// 下一个任务号：到 `isize::MAX` 就不再发新号（永久耗尽，不回绕）。
 pub(crate) fn next_id() -> Result<TaskId, NestError> {
-    let id = NEXT
-        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
-            (id < isize::MAX as usize).then_some(id + 1)
-        })
-        .map_err(|_| NestError::OutOfMemory)?;
+    let id = NEXT.allocate().ok_or(NestError::OutOfMemory)?;
     Ok(TaskId::new(id))
 }
 

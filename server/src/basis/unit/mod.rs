@@ -1,5 +1,5 @@
+pub(crate) mod anchor;
 pub(crate) mod control;
-pub(crate) mod life;
 pub(crate) mod lifecycle;
 pub(crate) mod task;
 pub(crate) mod team;

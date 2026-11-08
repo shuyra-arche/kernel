@@ -96,7 +96,8 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
     if len > max_len {
         return Err(CloneFail::Denied);
     }
-    let delivered = reading.bytes.prepare(task.ident.id).map_err(fail)?;
+    let delivered = alloc::sync::Arc::try_new(reading.bytes.prepare(task.ident.id).map_err(fail)?)
+        .map_err(|_| CloneFail::OutOfMemory)?;
     let outcome = PullOutcome {
         token: delivered.token(),
         len,

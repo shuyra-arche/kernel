@@ -114,6 +114,7 @@ pub(crate) fn create_share(
         }
         let pend =
             pend::PendEntry::try_new(View::Share(meta.clone()), Mark::NONE, modifiable, None)?;
+        let pend = Arc::try_new(pend).map_err(|_| PendFail::OutOfMemory)?;
         let token = pend.token();
         let mut inputs = Vec::new();
         for space in authorization.spaces()? {

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
 
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::machine::sync::SpinLock;
 
 pub(crate) mod exit;
@@ -14,18 +14,18 @@ pub(super) use exit::ExitPolicy;
 pub(super) use state::TeamStage;
 pub(crate) use state::{TeamPhase, TeamState};
 
-pub(crate) struct TeamLife {
+pub(crate) struct TeamNode {
     pub id: TeamId,
     pub owner: TaskId,
-    pub parent: Option<Arc<TeamLife>>,
-    pub state: Arc<SpinLock<TeamState>>,
-    pub tasks: Arc<SpinLock<Vec<Arc<Member>>>>,
-    pub children: SpinLock<Vec<Arc<TeamLife>>>,
-    pub life: Arc<Life>,
+    pub parent: Option<Arc<TeamNode>>,
+    pub state: SpinLock<TeamState>,
+    pub tasks: SpinLock<Vec<Arc<Member>>>,
+    pub children: SpinLock<Vec<Arc<TeamNode>>>,
+    pub life: Arc<Anchor>,
     pub(crate) exit: ExitPolicy,
 }
 
-impl TeamLife {
+impl TeamNode {
     pub(crate) fn protected(&self) -> bool {
         self.exit.protected() || self.parent.as_ref().is_some_and(|p| p.protected())
     }
@@ -46,17 +46,16 @@ impl TeamLife {
     pub fn member(&self, id: TaskId) -> Option<Arc<Member>> {
         self.tasks.lock().iter().find(|m| m.id == id).cloned()
     }
-    pub fn visit(&self, run: &mut impl FnMut(&TeamLife)) {
+    pub fn visit(&self, run: &mut impl FnMut(&TeamNode)) {
         run(self);
         let mut after = 0;
         loop {
-            let child = self
-                .children
-                .lock()
-                .iter()
-                .filter(|c| c.id.get() > after)
-                .min_by_key(|c| c.id.get())
-                .cloned();
+            let child = {
+                let children = self.children.lock();
+                children
+                    .get(children.partition_point(|c| c.id.get() <= after))
+                    .cloned()
+            };
             let Some(child) = child else { break };
             after = child.id.get();
             child.visit(run);

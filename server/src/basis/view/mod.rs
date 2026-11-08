@@ -3,8 +3,6 @@ pub mod share;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
-use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::Ordering;
 
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::PendId;
@@ -13,18 +11,15 @@ use kernel_api::model::modifiable::Modifiable;
 use kernel_api::model::view::ViewKind;
 
 use crate::basis::pend::Pend;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 
 pub(crate) use clone::CloneView;
 pub(crate) use share::ShareView;
 
 pub(crate) fn next_id() -> Result<usize, PendFail> {
-    static NEXT: AtomicUsize = AtomicUsize::new(1);
-    NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
-        id.checked_add(1)
-            .filter(|next| *next <= isize::MAX as usize)
-    })
-    .map_err(|_| PendFail::OutOfMemory)
+    static NEXT: crate::basis::name::Serial =
+        crate::basis::name::Serial::new(1, isize::MAX as usize);
+    NEXT.allocate().ok_or(PendFail::OutOfMemory)
 }
 
 #[derive(Clone)]
@@ -55,7 +50,7 @@ impl View {
         }
     }
 
-    pub(crate) fn life(&self) -> Weak<Life> {
+    pub(crate) fn life(&self) -> Weak<Anchor> {
         match self {
             View::Clone(meta) => meta.life(),
             View::Share(meta) => meta.life(),

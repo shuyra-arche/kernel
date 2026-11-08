@@ -2,14 +2,14 @@ use alloc::sync::Arc;
 use alloc::sync::Weak;
 
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::life::Life;
-use crate::basis::unit::life::TeamLife;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::team::Member;
+use crate::basis::unit::team::TeamNode;
 
 #[derive(Clone)]
 pub(crate) enum JoinTarget {
     Task(Arc<Member>),
-    Team(Arc<TeamLife>),
+    Team(Arc<TeamNode>),
 }
 
 impl JoinTarget {
@@ -27,7 +27,7 @@ impl JoinTarget {
         }
     }
 
-    pub(crate) fn life(&self) -> Weak<Life> {
+    pub(crate) fn life(&self) -> Weak<Anchor> {
         match self {
             Self::Task(member) => Arc::downgrade(&member.life),
             Self::Team(team) => Arc::downgrade(&team.life),

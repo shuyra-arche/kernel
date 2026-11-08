@@ -4,11 +4,11 @@ use super::lifecycle::{ExitPolicy, TeamStage, TeamState};
 use super::membership::Tasks;
 use crate::basis::commit;
 use crate::basis::flat::{BorrowedRegion, Flat};
-use crate::basis::nest::{Access, ActiveRange, Placement, RegionKind};
-use crate::basis::unit::life::Life;
-use crate::basis::unit::life::TeamLife;
+use crate::basis::nest::{Access, ActiveRange, Placement};
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
+use crate::basis::unit::team::TeamNode;
 use crate::machine::mmu::riscv::table::PteFlags;
 use crate::machine::sync::Level;
 use crate::machine::sync::OnceLock;
@@ -16,8 +16,6 @@ use crate::machine::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
-use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::Ordering;
 use kernel_api::address::{PAGE_SIZE, VirtAddr};
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
@@ -87,15 +85,11 @@ impl TeamBuilder {
     }
 }
 
-static NEXT: AtomicUsize = AtomicUsize::new(1);
+static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, isize::MAX as usize);
 
-/// 下一个团队号：到 `isize::MAX` 就不再发新号（既有回绕口径）。
+/// 下一个团队号：到 `isize::MAX` 就不再发新号（永久耗尽，不回绕）。
 pub(crate) fn next_id() -> Result<TeamId, NestError> {
-    let id = NEXT
-        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
-            (id < isize::MAX as usize).then_some(id + 1)
-        })
-        .map_err(|_| NestError::OutOfMemory)?;
+    let id = NEXT.allocate().ok_or(NestError::OutOfMemory)?;
     Ok(TeamId::new(id))
 }
 
@@ -107,28 +101,26 @@ pub(crate) fn make_team(
     creator: TaskId,
     constructing: bool,
 ) -> Result<Arc<Team>, NestError> {
-    let parent = sire.as_ref().map(|task| task.ident.team.life.clone());
+    let parent = sire.as_ref().map(|task| task.ident.team.node.clone());
     let owner = sire.as_ref().map_or(TaskId::new(0), |task| task.ident.id);
     let id = next_id()?;
-    let state = Arc::try_new(SpinLock::new_level(
+    let state = SpinLock::new_level(
         Level::UnitState,
         TeamState::new(if constructing {
             TeamStage::Constructing
         } else {
             TeamStage::Ready { default_entry: 0 }
         }),
-    ))
-    .map_err(|_| NestError::OutOfMemory)?;
-    let tasks = Arc::try_new(SpinLock::new_level(Level::TeamTasks, Vec::new()))
-        .map_err(|_| NestError::OutOfMemory)?;
-    let life = Arc::try_new(TeamLife {
+    );
+    let tasks = SpinLock::new_level(Level::TeamTasks, Vec::new());
+    let life = Arc::try_new(TeamNode {
         id,
         owner,
         parent: parent.clone(),
-        state: state.clone(),
-        tasks: tasks.clone(),
+        state,
+        tasks,
         children: SpinLock::new(Vec::new()),
-        life: Life::try_new().map_err(|_| NestError::OutOfMemory)?,
+        life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
         exit: ExitPolicy::new(),
     })
     .map_err(|_| NestError::OutOfMemory)?;
@@ -142,17 +134,15 @@ pub(crate) fn make_team(
         sire: sire.as_ref().map_or_else(TaskWeak::empty, |task| {
             TaskWeak::stored(Arc::downgrade(task), Origin::Sire)
         }),
-        state,
         tasks: Tasks {
-            members: tasks,
             held: SpinLock::new_level(Level::L3, Vec::new()),
         },
-        life: life.clone(),
+        node: life.clone(),
         operation: SpinLock::new(()),
     })
     .map_err(|_| NestError::OutOfMemory)?;
     if let Some(sire) = sire {
-        let parent = &sire.ident.team.life;
+        let parent = &sire.ident.team.node;
         {
             let mut children = parent.children.lock();
             if children.len() >= MAX_CHILDREN {
@@ -187,7 +177,8 @@ pub(crate) fn make_team(
         if heirs.len() == heirs.capacity() {
             return Err(NestError::OutOfMemory);
         }
-        children.push(life);
+        let at = children.partition_point(|node| node.id.get() < life.id.get());
+        children.insert(at, life);
         heirs.push(team.clone());
     }
     Ok(team)
@@ -225,8 +216,7 @@ fn seed_trampoline(target: &Arc<Nest>, source: &Nest) -> Result<(), NestError> {
     let attrs = flags & (PteFlags::U | PteFlags::G | PteFlags::A | PteFlags::D);
     // 活动形状与来源都在登记占用之前备好：准备失败不放下一笔无人持有的占用。
     let active = ActiveRange::new(TRAMPOLINE, PAGE_SIZE, access, access)?;
-    let reservation =
-        target.reserve(Placement::exact(RegionKind::Static, TRAMPOLINE, PAGE_SIZE)?)?;
+    let reservation = target.reserve(Placement::fixed(TRAMPOLINE, PAGE_SIZE)?)?;
     target.attach_shaped(reservation, source_range, attrs, &[active])?;
     Ok(())
 }

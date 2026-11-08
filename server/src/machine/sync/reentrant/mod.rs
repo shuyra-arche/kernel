@@ -23,6 +23,7 @@ pub struct RelLock<T: ?Sized> {
     data: UnsafeCell<T>,
 }
 
+// Guards remain on their owning hart; recursive guards expose only shared access.
 unsafe impl<T: ?Sized + Send> Sync for RelLock<T> {}
 
 impl<T> RelLock<T> {
@@ -77,12 +78,18 @@ impl<T: ?Sized> RelLock<T> {
                     break;
                 }
                 Err(cur) if Owner::from_word(cur) == me => {
-                    unsafe { *self.count.get() += 1 };
+                    unsafe {
+                        *self.count.get() = (*self.count.get())
+                            .checked_add(1)
+                            .expect("recursion overflow")
+                    };
                     break;
                 }
                 Err(_) => {
-                    crate::machine::stop::hush();
-                    ::core::hint::spin_loop();
+                    while self.owner.load(Ordering::Relaxed) != Owner::FREE.word() {
+                        crate::machine::stop::hush();
+                        ::core::hint::spin_loop();
+                    }
                 }
             }
         }

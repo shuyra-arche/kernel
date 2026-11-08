@@ -1,4 +1,3 @@
-pub mod bitmap;
 pub mod block;
 pub mod bump;
 pub mod frame;

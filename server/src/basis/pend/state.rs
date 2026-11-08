@@ -21,6 +21,7 @@ pub(crate) enum Event {
     Narrow(Modifiable),
     Retire,
     Settle,
+    Cancel,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Failure {
@@ -50,7 +51,12 @@ impl State {
                     next.phase = Phase::Retiring;
                 }
             }
-            Event::Settle => {
+            Event::Settle | Event::Cancel => {
+                match (event, next.phase) {
+                    (Event::Settle, Phase::Retiring | Phase::Dead)
+                    | (Event::Cancel, Phase::Active) => {}
+                    _ => return Err(Failure::Denied),
+                }
                 if next.readers != 0 || next.writer {
                     return Err(Failure::Busy);
                 }

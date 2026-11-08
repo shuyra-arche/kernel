@@ -54,7 +54,7 @@ pub(crate) fn ticks_to_duration(ticks: u64) -> Duration {
 
 pub(crate) fn duration_to_ticks(d: Duration) -> u64 {
     let ns = d.as_nanos();
-    let t = ns.saturating_mul(hertz() as u128) / NANOS_PER_SEC;
+    let t = ns.saturating_mul(hertz() as u128).div_ceil(NANOS_PER_SEC);
     t.min(u64::MAX as u128) as u64
 }
 

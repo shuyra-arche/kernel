@@ -47,19 +47,26 @@ pub(super) fn run(at: usize, count: usize) {
     super::write(address, 0, 0x5a5a5a5a);
     super::retract(cpu, 0);
     let spec = CellCreate::Memo {
-        target: MappingTarget::Io(token),
         source: CellSource::Slot(ReferenceRange {
             reference: slot,
             offset: 0,
             count: 1,
         }),
-        placement: Placement::exact(VirtAddr::new(0x400000), 4096).unwrap(),
-        access: 2,
-        control: MappingControl::Caller,
+        destination: MemoDestination::External {
+            authority: token,
+            address: VirtAddr::new(0x400000),
+            access: kernel_api::model::modifiable::Modifiable::No,
+        },
     }
     .to_bytes();
     let made = cell::create(super::ptr(&spec)).unwrap();
-    let mapping = MappingId::from_bytes(&made.id.to_le_bytes()).unwrap();
+    let CreatedCell::Memo {
+        mapping,
+        address: _address,
+    } = made
+    else {
+        panic!("expected Memo")
+    };
     let pos = CellPosition {
         object: CellObject::Memo {
             target: MappingTarget::Io(token),
@@ -134,19 +141,26 @@ extern "C" fn publisher() -> ! {
     let (bar, _) = share_view::open(token).unwrap();
     let slot = super::allocate(1);
     let spec = CellCreate::Memo {
-        target: MappingTarget::Io(token),
         source: CellSource::Slot(ReferenceRange {
             reference: slot,
             offset: 0,
             count: 1,
         }),
-        placement: Placement::exact(VirtAddr::new(0x400000), 4096).unwrap(),
-        access: 2,
-        control: MappingControl::Caller,
+        destination: MemoDestination::External {
+            authority: token,
+            address: VirtAddr::new(0x400000),
+            access: kernel_api::model::modifiable::Modifiable::No,
+        },
     }
     .to_bytes();
     let made = cell::create(super::ptr(&spec)).unwrap();
-    let mapping = MappingId::from_bytes(&made.id.to_le_bytes()).unwrap();
+    let CreatedCell::Memo {
+        mapping,
+        address: _address,
+    } = made
+    else {
+        panic!("expected Memo")
+    };
     let pos = CellPosition {
         object: CellObject::Memo {
             target: MappingTarget::Io(token),

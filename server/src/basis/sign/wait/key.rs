@@ -3,23 +3,23 @@ use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
 use kernel_api::model::view::ViewKind;
 
-use crate::basis::nest::Asid;
+use crate::basis::nest::NestId;
 
 /// 等待位的键。
 ///
 /// `Mapping` 是内部键：同一段关系上不同页的等待者按整段一起放行，醒后各自重查；
-/// 空间清场按 ASID 一并清掉 `Value` 与 `Mapping`。
+/// 空间清场按 NestId 一并清掉 `Value` 与 `Mapping`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WakeKey {
     ExternalMapping {
         id: usize,
     },
     Mapping {
-        space: Asid,
+        space: NestId,
         mapping: usize,
     },
     Value {
-        space: Asid,
+        space: NestId,
         address: usize,
     },
     Clone {

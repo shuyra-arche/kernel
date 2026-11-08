@@ -11,3 +11,7 @@ pub(crate) mod topology;
 #[cfg(test)]
 pub(crate) use engine::Command;
 pub(crate) use engine::{Engine, EngineError, Fault, Phase, fence_complete, registers};
+
+#[cfg(test)]
+#[path = "../../iommu/domain.rs"]
+mod transitions;

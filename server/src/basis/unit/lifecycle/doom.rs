@@ -2,10 +2,10 @@ use super::reap::reap;
 use crate::basis::room::counter::Counter;
 use crate::basis::room::scheduler::roster::muster;
 use crate::basis::sign;
-use crate::basis::unit::life::TeamLife;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskExitCause;
 use crate::basis::unit::team::Team;
+use crate::basis::unit::team::TeamNode;
 use alloc::sync::Arc;
 use kernel_api::model::identity::TaskId;
 static CULL_HELD: Counter = Counter::new();
@@ -48,18 +48,17 @@ fn suspend(task: &Arc<Task>, cause: TaskExitCause, reason: usize) -> bool {
     task.state.lock().doom(None, cause, reason);
     true
 }
-fn cull_life(root: &TeamLife, cause: TaskExitCause, reason: usize) {
+fn cull_life(root: &TeamNode, cause: TaskExitCause, reason: usize) {
     root.doom();
     root.visit(&mut |node| {
         let mut after = 0;
         loop {
-            let member = node
-                .tasks
-                .lock()
-                .iter()
-                .filter(|m| m.id.get() > after)
-                .min_by_key(|m| m.id.get())
-                .cloned();
+            let member = {
+                let tasks = node.tasks.lock();
+                tasks
+                    .get(tasks.partition_point(|m| m.id.get() <= after))
+                    .cloned()
+            };
             let Some(member) = member else { break };
             after = member.id.get();
             if let Some(task) = member.task.upgrade() {
@@ -72,7 +71,7 @@ fn cull_life(root: &TeamLife, cause: TaskExitCause, reason: usize) {
 }
 pub(crate) fn cull(roots: &[Arc<Team>], reason: usize) {
     for root in roots {
-        cull_life(&root.life, TaskExitCause::Slay, reason);
+        cull_life(&root.node, TaskExitCause::Slay, reason);
     }
 }
 pub(crate) fn doom(task: &Arc<Task>) {
@@ -81,9 +80,9 @@ pub(crate) fn doom(task: &Arc<Task>) {
         at += 1;
         {
             let _commit = crate::basis::commit();
-            child.life.clear(task.ident.id, None);
+            child.node.clear(task.ident.id, None);
         }
-        cull_life(&child.life, TaskExitCause::Cascade, super::EXIT_CASCADE);
+        cull_life(&child.node, TaskExitCause::Cascade, super::EXIT_CASCADE);
     }
 }
 pub(crate) fn take_doomed(tid: TaskId) -> Option<usize> {

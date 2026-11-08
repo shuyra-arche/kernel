@@ -11,11 +11,11 @@ use kernel_api::model::view::ViewKind;
 
 use crate::basis::pend;
 use crate::basis::pend::Need;
-use crate::basis::pend::PendSnapshot;
+use crate::basis::pend::PendEntry;
 use crate::basis::room::conductor::current;
 use crate::basis::view::share::ShareOperation;
 
-pub(super) fn accede(token: PendId, need: Need) -> Result<PendSnapshot, PendFail> {
+pub(super) fn accede(token: PendId, need: Need) -> Result<alloc::sync::Arc<PendEntry>, PendFail> {
     let task = current().running_task().ok_or(PendFail::Denied)?;
     pend::accede(&task, token, need)
 }
@@ -23,7 +23,7 @@ pub(super) fn accede(token: PendId, need: Need) -> Result<PendSnapshot, PendFail
 /// 取到的这一枚此刻是否还能承载这次操作。
 ///
 /// 交出中的不算可用；遗留的 heir 关系顺手清掉，让这一枚回到可操作状态。
-pub(super) fn usable(pend: &PendSnapshot) -> Result<(), PendFail> {
+pub(super) fn usable(pend: &PendEntry) -> Result<(), PendFail> {
     pend::available(pend)
 }
 

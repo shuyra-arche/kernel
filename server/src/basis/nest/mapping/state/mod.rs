@@ -117,7 +117,7 @@ impl MappingState {
             .and_then(|m| m.page.as_ref())
             .or_else(|| publication.map(|p| p.cell()));
         let state = memo
-            .and_then(|m| m.flight)
+            .and_then(|m| m.flight.map(|flight| flight.observation()))
             .unwrap_or(if publication.is_some() {
                 CellState::Published
             } else if page.is_some() {
@@ -126,7 +126,7 @@ impl MappingState {
                 CellState::Vacant
             });
         Ok(CellInfo {
-            generation: memo.map_or(1, |m| m.generation),
+            generation: memo.map_or(1, |m| m.generation.get()),
             state,
             page: page.map_or(0, |p| p.id().get() as u64),
             frozen: page.is_some_and(|p| p.frozen()),

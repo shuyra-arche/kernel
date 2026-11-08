@@ -15,4 +15,5 @@ pub(crate) enum AddressError {
     OutOfMemory,
     NotAligned,
     NoRegion,
+    Occupied,
 }

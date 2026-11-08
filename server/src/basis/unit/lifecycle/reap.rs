@@ -70,7 +70,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
         if task
             .ident
             .team
-            .life
+            .node
             .tasks
             .lock()
             .iter()
@@ -87,7 +87,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
         task.transform_checked(TaskState::reaped(cause, reason));
     }
     sign::signal(WakeKey::Task { id: task.ident.id });
-    task.ident.team.life.notify();
+    task.ident.team.node.notify();
     HUSKS.lock().push(task);
 }
 
@@ -123,7 +123,7 @@ pub fn quit() -> usize {
         exited
             .ident
             .team
-            .life
+            .node
             .member(tid)
             .and_then(|m| m.receipts.lock().first().map(|r| r.owner))
     };
@@ -179,7 +179,7 @@ pub(crate) fn bury() {
             HUSKS.lock().push(z);
             break;
         }
-        if let Some(member) = z.ident.team.life.member(z.ident.id) {
+        if let Some(member) = z.ident.team.node.member(z.ident.id) {
             member
                 .reclaimed
                 .store(true, core::sync::atomic::Ordering::Release);

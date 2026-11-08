@@ -594,8 +594,9 @@ fn release(
 /// 同号的另一域条目删掉（反向也一样）。号到符号上界就到：明确失败，不 panic。
 fn next_flight_key() -> Result<usize, CellFail> {
     const FLIGHT_DOMAIN: usize = 1 << (usize::BITS - 1);
-    static NEXT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(1);
-    crate::machine::sync::next_id(&NEXT)
+    static NEXT: crate::basis::name::Serial =
+        crate::basis::name::Serial::new(1, isize::MAX as usize);
+    NEXT.allocate()
         .map(|id| FLIGHT_DOMAIN | id)
         .ok_or(CellFail::OutOfMemory)
 }

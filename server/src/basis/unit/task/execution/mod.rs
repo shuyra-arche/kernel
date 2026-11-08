@@ -103,16 +103,8 @@ impl fmt::Debug for TaskAxis {
 // Pure execution-control decisions. Queue, hart and notification effects are
 // applied by Task while holding the work commit boundary.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Phase {
-    Held,
-    Ready,
-    Running,
-    Waiting,
-    Parked,
-    Terminating,
-    Finished,
-}
+mod phase;
+pub(crate) use phase::Phase;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Control {
@@ -254,21 +246,28 @@ impl TaskState {
     }
 
     pub(crate) fn doom(&mut self, hart: Option<HartId>, cause: TaskExitCause, reason: usize) {
-        self.axis = TaskAxis::Doomed {
+        if let Some((old_cause, old_reason)) = self.dying() {
+            assert_eq!(
+                (cause, reason),
+                (old_cause, old_reason),
+                "exit cause is immutable"
+            );
+        }
+        self.set_axis(TaskAxis::Doomed {
             hart,
             cause,
             reason,
-        };
+        });
         self.paused = false;
     }
 
     pub(crate) fn block(&mut self, key: WakeKey, ticket: Ticket, wait: Option<WaitCall>) {
-        self.axis = TaskAxis::Waiting {
+        self.set_axis(TaskAxis::Waiting {
             key,
             ticket,
             next: None,
             wait,
-        };
+        });
     }
 
     pub(crate) fn paused(&self) -> bool {
@@ -375,26 +374,47 @@ impl TaskState {
 
     /// 换轴：只有既有的合法边（见矩阵）才允许，且新轴不得带着入链载荷。
     pub(crate) fn transform(&mut self, next: TaskState) {
-        let legal = match (&self.axis, &next.axis) {
-            (TaskAxis::Held, TaskAxis::Ready { .. })
-            | (TaskAxis::Ready { .. }, TaskAxis::OnHart { .. })
-            | (TaskAxis::OnHart { .. }, TaskAxis::Ready { .. })
-            | (TaskAxis::Doomed { .. }, TaskAxis::Reaped { .. }) => true,
-            (old, TaskAxis::Doomed { .. }) => {
-                !matches!(old, TaskAxis::Doomed { .. } | TaskAxis::Reaped { .. })
-            }
-            _ => false,
-        };
-        assert!(legal, "illegal task state transition");
-        debug_assert!(
-            next.axis.unlinked(),
-            "transform_checked: 入链载荷非空（有人没先摘链）"
-        );
-        *self = next;
+        self.set_axis(next.axis);
+        self.paused = next.paused;
     }
 
     pub(crate) fn control(&self) -> Control {
-        let phase = match self.axis {
+        Control {
+            phase: self.axis.phase(),
+            paused: self.paused,
+        }
+    }
+
+    fn set_axis(&mut self, axis: TaskAxis) {
+        assert!(
+            self.axis.phase().allows(axis.phase()),
+            "illegal task lifecycle transition"
+        );
+        assert!(
+            self.axis.unlinked() && axis.unlinked(),
+            "transition requires detached chain"
+        );
+        if let TaskAxis::Waiting { wait, .. } = &self.axis {
+            assert!(
+                wait.is_none(),
+                "consume or cancel continuation before transition"
+            );
+        }
+        if let Some(old) = self.dying() {
+            let (TaskAxis::Doomed { cause, reason, .. } | TaskAxis::Reaped { cause, reason, .. }) =
+                &axis
+            else {
+                unreachable!()
+            };
+            assert_eq!(old, (*cause, *reason), "exit cause is immutable");
+        }
+        self.axis = axis;
+    }
+}
+
+impl TaskAxis {
+    fn phase(&self) -> Phase {
+        match self {
             TaskAxis::Held => Phase::Held,
             TaskAxis::Ready { .. } => Phase::Ready,
             TaskAxis::OnHart { .. } => Phase::Running,
@@ -402,13 +422,10 @@ impl TaskState {
             TaskAxis::Parked => Phase::Parked,
             TaskAxis::Doomed { .. } => Phase::Terminating,
             TaskAxis::Reaped { .. } => Phase::Finished,
-        };
-        Control {
-            phase,
-            paused: self.paused,
         }
     }
-
+}
+impl TaskState {
     /// Publish a decision only against the state from which it was computed.
     /// The caller holds the commit boundary through the external effect.
     pub(crate) fn apply_control(&mut self, transition: Transition) {
@@ -420,7 +437,7 @@ impl TaskState {
         if transition.after.phase != transition.before.phase {
             assert_eq!(transition.before.phase, Phase::Parked);
             assert_eq!(transition.after.phase, Phase::Ready);
-            self.axis = TaskAxis::Ready { next: None };
+            self.set_axis(TaskAxis::Ready { next: None });
         }
         self.paused = transition.after.paused;
     }
@@ -428,16 +445,16 @@ impl TaskState {
     /// 停泊：暂停中的任务摆成就绪（等人把它捞走），否则进泊位。
     pub(crate) fn park(&mut self) {
         let paused = self.paused;
-        self.axis = if paused {
+        self.set_axis(if paused {
             TaskAxis::Ready { next: None }
         } else {
             TaskAxis::Parked
-        };
+        });
     }
 
     /// 升起：轴摆成就绪，回答「暂停」是否还挂着（挂着就由调用方送去泊位）。
     pub(crate) fn rise(&mut self) -> bool {
-        self.axis = TaskAxis::Ready { next: None };
+        self.set_axis(TaskAxis::Ready { next: None });
         self.paused
     }
 }

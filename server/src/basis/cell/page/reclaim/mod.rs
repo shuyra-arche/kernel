@@ -32,11 +32,25 @@ pub(crate) enum RetainError {
 }
 
 #[derive(Clone, Copy)]
+enum Admission {
+    Ordinary,
+    Changing,
+}
+use kernel_api::model::modifiable::Modifiable;
+
+#[derive(Clone, Copy)]
 enum Event {
-    Register(Kind, bool, bool),
+    Register {
+        kind: Kind,
+        access: Modifiable,
+        admission: Admission,
+    },
     Begin,
     End,
-    Discharge(Kind, bool),
+    Discharge {
+        kind: Kind,
+        access: Modifiable,
+    },
     Abandon,
 }
 
@@ -52,7 +66,7 @@ struct State {
 impl State {
     fn transition(self, event: Event) -> Result<Self, RetainError> {
         match event {
-            Event::Register(..) if self.quarantined => Err(RetainError::Quarantined),
+            Event::Register { .. } if self.quarantined => Err(RetainError::Quarantined),
             Event::Begin if self.quarantined => Err(RetainError::Quarantined),
             Event::Begin if self.changing => Err(RetainError::Busy),
             Event::Begin => Ok(Self {
@@ -64,11 +78,16 @@ impl State {
                 changing: false,
                 ..self
             }),
-            Event::Register(_, _, privileged) if self.changing && !privileged => {
-                Err(RetainError::Busy)
-            }
-            Event::Register(_, _, true) if !self.changing => Err(RetainError::Unbalanced),
-            Event::Register(kind, modifiable, _) => {
+            Event::Register {
+                admission: Admission::Ordinary,
+                ..
+            } if self.changing => Err(RetainError::Busy),
+            Event::Register {
+                admission: Admission::Changing,
+                ..
+            } if !self.changing => Err(RetainError::Unbalanced),
+            Event::Register { kind, access, .. } => {
+                let modifiable = access == Modifiable::Yes;
                 if self.modifiable || (modifiable && (self.cpu != 0 || self.external != 0)) {
                     return Err(RetainError::Borrowed);
                 }
@@ -81,7 +100,8 @@ impl State {
                     ..self.with_uses(kind, uses + 1)
                 })
             }
-            Event::Discharge(kind, modifiable) => {
+            Event::Discharge { kind, access } => {
+                let modifiable = access == Modifiable::Yes;
                 if modifiable != self.modifiable {
                     return Err(RetainError::Unbalanced);
                 }
@@ -160,10 +180,18 @@ impl Reclaim {
     }
 
     pub(super) fn register(&self, kind: Kind, modifiable: bool) -> Result<(), RetainError> {
-        self.apply(Event::Register(kind, modifiable, false))
+        self.apply(Event::Register {
+            kind,
+            access: mode(modifiable),
+            admission: Admission::Ordinary,
+        })
     }
     pub(super) fn register_during(&self, kind: Kind, modifiable: bool) -> Result<(), RetainError> {
-        self.apply(Event::Register(kind, modifiable, true))
+        self.apply(Event::Register {
+            kind,
+            access: mode(modifiable),
+            admission: Admission::Changing,
+        })
     }
     pub(super) fn begin(&self) -> Result<(), RetainError> {
         self.apply(Event::Begin)
@@ -179,8 +207,11 @@ impl Reclaim {
         State::decode(self.0.load(Ordering::Acquire)).changing
     }
     pub(super) fn discharge(&self, kind: Kind, modifiable: bool) {
-        self.apply(Event::Discharge(kind, modifiable))
-            .expect("a retention discharges exactly one registered use");
+        self.apply(Event::Discharge {
+            kind,
+            access: mode(modifiable),
+        })
+        .expect("a retention discharges exactly one registered use");
     }
     pub(super) fn abandon(&self) {
         self.apply(Event::Abandon)
@@ -196,5 +227,13 @@ impl Reclaim {
         } else {
             Exposure::External
         }
+    }
+}
+
+fn mode(writable: bool) -> Modifiable {
+    if writable {
+        Modifiable::Yes
+    } else {
+        Modifiable::No
     }
 }

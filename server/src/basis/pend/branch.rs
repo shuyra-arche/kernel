@@ -6,7 +6,7 @@ use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 
 use super::Modifiable;
-use super::PendSnapshot;
+use super::PendEntry;
 use super::ledger::{insert_heir, with_pair_uncommitted};
 use crate::basis::pend::narrows;
 use crate::basis::sign;
@@ -19,7 +19,7 @@ use kernel_api::model::pend::PendRange;
 
 /// Resolve the window while the source/target transaction locks are held.
 fn effective_window(
-    pend_entry: &PendSnapshot,
+    pend_entry: &PendEntry,
     requested: super::Window,
 ) -> Result<Option<(PageOffset, PageCount)>, PendFail> {
     if matches!(
@@ -93,6 +93,7 @@ pub(crate) fn accord(
             }
             let mut granted = pend_entry.vest_window(mark, subset, window)?;
             granted.parent(src, Arc::downgrade(caller));
+            let granted = Arc::try_new(granted).map_err(|_| PendFail::OutOfMemory)?;
             caller
                 .pend
                 .heirs

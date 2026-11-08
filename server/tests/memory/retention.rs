@@ -228,3 +228,26 @@ fn competing_writers_have_exactly_one_winner_before_any_publication() {
     assert_eq!(winners, 1);
     assert!(cell.allows_return());
 }
+
+#[test]
+fn publication_cannot_complete_or_retire_an_unpublished_preparation() {
+    use super::memo::Publication;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let pool = Pool::new(0);
+    let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let mut prepared = Publication::prepare(&page, false, None).unwrap();
+    assert!(catch_unwind(AssertUnwindSafe(|| prepared.complete())).is_err());
+    assert!(matches!(prepared, Publication::Prepared(_)));
+    drop(prepared);
+    assert!(page.allows_return());
+    let prepared = Publication::prepare(&page, false, None).unwrap();
+    assert!(catch_unwind(AssertUnwindSafe(|| prepared.retire())).is_err());
+    assert!(page.allows_return());
+    let mut published = Publication::prepare(&page, false, None).unwrap();
+    published.publish();
+    assert!(catch_unwind(AssertUnwindSafe(|| published.publish())).is_err());
+    published.complete();
+    // No hardware mapping exists in this host bookkeeping test.
+    unsafe { published.retire().settle() };
+    assert!(page.allows_return());
+}

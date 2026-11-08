@@ -64,6 +64,7 @@ impl From<super::address::AddressError> for NestError {
             AddressError::OutOfMemory => Self::OutOfMemory,
             AddressError::NotAligned => Self::NotAligned,
             AddressError::NoRegion => Self::NoRegion,
+            AddressError::Occupied => Self::AlreadyMapped,
         }
     }
 }

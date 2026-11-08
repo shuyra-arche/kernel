@@ -124,19 +124,27 @@ pub(super) fn run() {
         use kernel_api::model::{cell::*, identity::TeamId};
         use kernel_client::call::cell;
         let spec = CellCreate::Memo {
-            target: MappingTarget::Cpu(TeamId::new(0)),
             source: CellSource::Pend {
                 token: leaf,
                 offset: 0,
                 count: 1,
             },
-            placement: Placement::lowest(4096).unwrap(),
-            access: 2,
-            control: MappingControl::Caller,
+            destination: MemoDestination::Internal {
+                team: TeamId::new(0),
+                placement: Placement::lowest(4096).unwrap(),
+                access: 2,
+                control: MappingControl::Caller,
+            },
         }
         .to_bytes();
         let made = cell::create(super::ptr(&spec)).unwrap();
-        let mapping = MappingId::from_bytes(&made.id.to_le_bytes()).unwrap();
+        let CreatedCell::Memo {
+            mapping,
+            address: _address,
+        } = made
+        else {
+            panic!("expected Memo")
+        };
         assert_eq!(
             super::info(super::raw_memo(mapping, 0)).state,
             CellState::Ready
@@ -149,7 +157,7 @@ pub(super) fn run() {
         .to_bytes();
         assert!(cell::pull(super::ptr(&spec)).is_err());
         super::publish(mapping, 0);
-        assert_eq!(super::read(made.address, 0), 0x13579);
+        assert_eq!(super::read(_address, 0), 0x13579);
         super::retract(mapping, 0);
         super::delete(super::raw_memo(mapping, 0).object);
         super::delete(CellObject::Slot(empty));

@@ -13,7 +13,7 @@ use crate::basis::pend::Table;
 use crate::basis::room::scheduler;
 use crate::basis::sign::Ticket;
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::team::Team;
 use crate::basis::unit::team::TeamPhase;
@@ -43,7 +43,7 @@ pub(crate) const MAX_ARGS: usize = 64;
 /// 账本（`Pend`）的组合，加上它作为家长持有的子团队表。
 pub struct Task {
     pub(crate) ident: Arc<TaskIdent>,
-    pub(crate) life: Arc<Life>,
+    pub(crate) life: Arc<Anchor>,
     pub(crate) state: Arc<SpinLock<TaskState>>,
     pub(crate) pend: Table,
     pub(crate) signs: crate::basis::sign::Table,
@@ -52,7 +52,12 @@ pub struct Task {
     controls: SpinLock<Vec<(Weak<crate::basis::nest::Nest>, usize)>>,
 }
 
+// Kernel Tasks may migrate between harts. Mutable state is behind SpinLock or
+// atomics; trap-frame access is serialized by execution ownership and COMMIT.
+// API PendId's !Send marker in the ledger describes user-thread ownership, not
+// kernel storage. No guard or unsynchronized mutable reference leaves a Task.
 unsafe impl Send for Task {}
+unsafe impl Sync for Task {}
 
 impl Task {
     pub(crate) fn transform_checked(&self, next: TaskState) {
@@ -136,7 +141,7 @@ impl Task {
         if !task.held() || !task.ident.team.release_held(task) {
             return Err(UnitFail::Denied);
         }
-        *task.state.lock() = TaskState::ready();
+        task.state.lock().transform(TaskState::ready());
         scheduler::launch(task.clone());
         Ok(())
     }
@@ -216,9 +221,9 @@ impl Task {
             let at = heirs.iter().position(|t| t.id == team)?;
             heirs.remove(at)
         };
-        child.state.lock().phase = TeamPhase::Ousted;
-        child.life.clear(self.ident.id, Some(team));
-        let mut root = child.life.clone();
+        child.node.state.lock().phase = TeamPhase::Ousted;
+        child.node.clear(self.ident.id, Some(team));
+        let mut root = child.node.clone();
         while let Some(parent) = &root.parent {
             root = parent.clone();
         }
@@ -336,7 +341,7 @@ impl Task {
         let mut index = 0;
         while let Some(root) = self.heir_node(index) {
             index += 1;
-            root.life.visit(&mut |node| {
+            root.node.visit(&mut |node| {
                 if node.id != id {
                     return;
                 }
@@ -358,10 +363,10 @@ impl Task {
                     });
             });
         }
-        found.filter(|team| !team.state.lock().phase.ousted())
+        found.filter(|team| !team.node.state.lock().phase.ousted())
     }
 
-    pub(crate) fn life(&self) -> Weak<Life> {
+    pub(crate) fn life(&self) -> Weak<Anchor> {
         Arc::downgrade(&self.life)
     }
 }
@@ -371,11 +376,11 @@ impl Drop for Task {
         let _commit = commit();
         self.signs.clear(self.ident.id);
         self.administration.clear();
-        self.ident.team.life.clear(self.ident.id, None);
-        self.ident.team.life.prune();
+        self.ident.team.node.clear(self.ident.id, None);
+        self.ident.team.node.prune();
         for child in self.heir.lock().iter() {
-            child.life.clear(self.ident.id, None);
-            child.life.prune();
+            child.node.clear(self.ident.id, None);
+            child.node.prune();
         }
         for pend_entry in self.pend.entries.lock().iter() {
             pend_entry.invalidate();

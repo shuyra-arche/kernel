@@ -18,7 +18,7 @@ use kernel_api::model::identity::TaskId;
 use crate::basis::pend::Need;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 
 use queue::Pending;
 use queue::Queue;
@@ -28,7 +28,7 @@ pub(crate) use queue::{peek, read, reserve_len};
 
 pub struct CloneView {
     pub(crate) id: usize,
-    life: Arc<Life>,
+    life: Arc<Anchor>,
     owner: TaskId,
     pending: SpinLock<Pending>,
     limits: CloneLimits,
@@ -44,7 +44,7 @@ impl CloneView {
         owner: TaskId,
         limits: CloneLimits,
     ) -> Result<Arc<Self>, crate::basis::nest::NestError> {
-        let life = Life::try_new()?;
+        let life = Anchor::try_new()?;
         Arc::try_new(Self {
             id: super::next_id().map_err(|_| crate::basis::nest::NestError::OutOfMemory)?,
             life,
@@ -56,7 +56,7 @@ impl CloneView {
         .map_err(|_| crate::basis::nest::NestError::OutOfMemory)
     }
 
-    pub(crate) fn life(&self) -> Weak<Life> {
+    pub(crate) fn life(&self) -> Weak<Anchor> {
         Arc::downgrade(&self.life)
     }
 

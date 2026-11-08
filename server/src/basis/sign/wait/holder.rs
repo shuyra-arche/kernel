@@ -1,6 +1,4 @@
 use alloc::sync::Arc;
-use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::Ordering;
 
 use hashbrown::HashMap;
 
@@ -18,9 +16,9 @@ use super::key::WakeKey;
 pub struct Ticket(pub(super) u64);
 
 impl Ticket {
-    pub(super) fn next_id() -> Ticket {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        Ticket(NEXT.fetch_add(1, Ordering::Relaxed) as u64)
+    pub(super) fn next_id() -> Option<Ticket> {
+        static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, usize::MAX);
+        NEXT.allocate().map(|id| Ticket(id as u64))
     }
 
     pub(super) fn raw(self) -> u64 {

@@ -20,8 +20,8 @@ use state::{Event, Failure, Phase, State};
 
 pub(crate) use branch::{accord, reduce};
 pub(crate) use ledger::{
-    PendEntry, PendSnapshot, Table, accede, available, changed, doom, insert, locate, notify,
-    retire, return_, revoke, vestor,
+    PendEntry, Table, accede, available, changed, doom, insert, locate, notify, retire, return_,
+    revoke, vestor,
 };
 pub(crate) use source::{ExternalBorrow, Geometry, Hold, HoldTable, SourceAuthorization};
 pub(crate) use window::Window;
@@ -32,10 +32,21 @@ pub(crate) fn narrows(from: Modifiable, to: Modifiable) -> bool {
 
 /// A Pend is the live access authority for one View range. Its parent obligation
 /// survives handle removal until CPU withdrawal and any external use are settled.
+#[derive(Clone, Copy)]
+enum BorrowKind {
+    Internal,
+    External,
+}
+struct ParentBorrow {
+    parent: Arc<Pend>,
+    access: Modifiable,
+    kind: BorrowKind,
+}
+
 pub(crate) struct Pend {
     state: SpinLock<State>,
     window: SpinLock<Option<(PageOffset, PageCount)>>,
-    parent: SpinLock<Option<(Arc<Pend>, Modifiable, bool)>>,
+    parent: SpinLock<Option<ParentBorrow>>,
     external: AtomicUsize,
     routing: AtomicBool,
 }
@@ -66,8 +77,9 @@ impl Pend {
     pub(crate) fn configured(&self) -> Modifiable {
         self.state.lock().access
     }
+    /// A retained retiring object carries obligations, but no live registration.
     pub(crate) fn alive(&self) -> bool {
-        self.state.lock().phase != Phase::Dead
+        self.state.lock().phase == Phase::Active
     }
     pub(crate) fn status(&self) -> kernel_api::model::pend::PendStatus {
         use kernel_api::model::pend::PendStatus;
@@ -94,22 +106,26 @@ impl Pend {
             .map_err(fail)
     }
     pub(crate) fn borrow(self: &Arc<Self>, child: &Arc<Self>) -> Result<(), PendFail> {
-        self.borrow_kind(child, false)
+        self.borrow_kind(child, BorrowKind::Internal)
     }
     pub(crate) fn borrow_external(self: &Arc<Self>, child: &Arc<Self>) -> Result<(), PendFail> {
-        self.borrow_kind(child, true)
+        self.borrow_kind(child, BorrowKind::External)
     }
-    fn borrow_kind(self: &Arc<Self>, child: &Arc<Self>, external: bool) -> Result<(), PendFail> {
+    fn borrow_kind(self: &Arc<Self>, child: &Arc<Self>, kind: BorrowKind) -> Result<(), PendFail> {
         let access = child.configured();
         let mut state = self.state.lock();
         if self.routing.load(Ordering::Acquire) {
             return Err(PendFail::Busy);
         }
         *state = state.transition(Event::Borrow(access)).map_err(fail)?;
-        if external {
+        if matches!(kind, BorrowKind::External) {
             self.external.fetch_add(1, Ordering::Release);
         }
-        *child.parent.lock() = Some((self.clone(), access, external));
+        *child.parent.lock() = Some(ParentBorrow {
+            parent: self.clone(),
+            access,
+            kind,
+        });
         Ok(())
     }
     pub(crate) fn can_narrow(&self, access: Modifiable) -> Result<(), PendFail> {
@@ -165,15 +181,29 @@ impl Pend {
     }
     /// Only after actual mapping withdrawal. Drop deliberately does not call this.
     pub(crate) fn settle(&self) -> Result<(), PendFail> {
+        self.finish(Event::Settle)
+    }
+    /// # Safety
+    /// This child has never authorized a published hardware access. Only the
+    /// unpublished ExternalBorrow rollback owns this proof.
+    pub(in crate::basis::pend) unsafe fn cancel_unpublished(&self) -> Result<(), PendFail> {
+        self.finish(Event::Cancel)
+    }
+    fn finish(&self, event: Event) -> Result<(), PendFail> {
+        let mut state = self.state.lock();
         if self.routing.load(Ordering::Acquire) {
             return Err(PendFail::Busy);
         }
-        let mut state = self.state.lock();
-        *state = state.transition(Event::Settle).map_err(fail)?;
+        *state = state.transition(event).map_err(fail)?;
         drop(state);
-        if let Some((parent, access, external)) = self.parent.lock().take() {
+        if let Some(ParentBorrow {
+            parent,
+            access,
+            kind,
+        }) = self.parent.lock().take()
+        {
             let mut state = parent.state.lock();
-            if external {
+            if matches!(kind, BorrowKind::External) {
                 parent.external.fetch_sub(1, Ordering::Release);
             }
             *state = state

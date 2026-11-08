@@ -10,10 +10,8 @@ use crate::basis::commit;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::room::scheduler;
-use crate::basis::unit::life::TeamLife;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskBuilder;
-use crate::basis::unit::task::TaskState;
 use crate::basis::unit::task::TaskWeak;
 use crate::machine::sync::SpinLock;
 use crate::machine::sync::SpinLockGuard;
@@ -25,7 +23,7 @@ mod membership;
 
 pub(crate) use builder::{TeamBuilder, init_kernel, kernel};
 pub(crate) use lifecycle::exit;
-pub(crate) use lifecycle::{TeamPhase, TeamState};
+pub(crate) use lifecycle::{TeamNode, TeamPhase};
 pub(crate) use membership::{Member, Receipt, Tasks};
 
 pub(crate) const MAX_DEPTH: usize = 32;
@@ -40,9 +38,8 @@ pub struct Team {
     pub(crate) cells: crate::basis::cell::page::Owner,
     pub(crate) sire: TaskWeak,
     pub(crate) creator: TaskId,
-    pub(crate) state: Arc<SpinLock<TeamState>>,
     pub(crate) tasks: Tasks,
-    pub(crate) life: Arc<TeamLife>,
+    pub(crate) node: Arc<TeamNode>,
     operation: SpinLock<()>,
 }
 
@@ -56,9 +53,9 @@ impl Team {
 
     pub(crate) fn debark(&self) -> Result<(), UnitFail> {
         let _commit = commit();
-        self.state.lock().debark()?;
+        self.node.state.lock().debark()?;
         let mut running = false;
-        self.life.visit(&mut |node| {
+        self.node.visit(&mut |node| {
             for member in node.tasks.lock().iter() {
                 let hart = member.state.lock().on_hart();
                 if let Some(hart) = hart {
@@ -75,8 +72,8 @@ impl Team {
 
     pub(crate) fn embark(&self) -> Result<(), UnitFail> {
         let _commit = commit();
-        self.state.lock().embark()?;
-        self.life.visit(&mut |node| {
+        self.node.state.lock().embark()?;
+        self.node.visit(&mut |node| {
             if node.paused() {
                 return;
             }
@@ -89,7 +86,7 @@ impl Team {
                     continue;
                 };
                 if task.parked() {
-                    *task.state.lock() = TaskState::ready();
+                    task.state.lock().rise();
                     task.ident.team.release_held(&task);
                     scheduler::launch(task);
                 }
@@ -99,15 +96,15 @@ impl Team {
     }
 
     pub(crate) fn paused(&self) -> bool {
-        self.life.paused()
+        self.node.paused()
     }
 
     pub(crate) fn ready(&self) -> bool {
-        self.state.lock().ready()
+        self.node.state.lock().ready()
     }
 
     pub(crate) fn constructing(&self) -> bool {
-        self.state.lock().constructing()
+        self.node.state.lock().constructing()
     }
 
     pub(crate) fn operation(&self) -> Option<SpinLockGuard<'_, ()>> {
@@ -125,7 +122,7 @@ impl Team {
             // on those steps succeeding or on this Team being dropped.
             self.cells.close();
             self.external.close();
-            self.life.visit(&mut |node| {
+            self.node.visit(&mut |node| {
                 let mut state = node.state.lock();
                 if !state.terminal() {
                     state.phase = TeamPhase::Doomed;
@@ -147,22 +144,22 @@ impl Team {
 
     pub(crate) fn prune_tasks(&self) {
         let _commit = commit();
-        self.life.prune();
+        self.node.prune();
     }
 
     /// Fix the completion cohort: existing members keep their execution states,
     /// while new members and descendant Teams can no longer enter this subtree.
     pub(crate) fn finish(&self) {
         let _commit = commit();
-        self.life.visit(&mut |node| {
+        self.node.visit(&mut |node| {
             let mut state = node.state.lock();
             state.admission = state.admission.finish();
         });
-        self.life.notify();
+        self.node.notify();
     }
 
     pub(crate) fn all_reaped(&self) -> bool {
-        self.life.all_reaped()
+        self.node.all_reaped()
     }
 
     pub fn task(self: &Arc<Self>) -> TaskBuilder {
@@ -174,11 +171,11 @@ impl Team {
     }
 
     pub(crate) fn default_entry(&self) -> usize {
-        self.state.lock().default_entry()
+        self.node.state.lock().default_entry()
     }
 
     pub(crate) fn set_default_entry(&self, va: usize) {
-        self.state.lock().set_default_entry(va);
+        self.node.state.lock().set_default_entry(va);
     }
 
     pub(crate) fn sire(&self) -> Option<TaskId> {
@@ -194,7 +191,7 @@ impl Team {
     /// 按家长号合并；深度超限或撞上已关的节点即拒绝。
     pub(crate) fn receipts(&self) -> Result<Vec<Receipt>, NestError> {
         let mut receipts: Vec<Receipt> = Vec::new();
-        let mut node = Some(&*self.life);
+        let mut node = Some(&*self.node);
         let mut depth = 0;
         while let Some(here) = node {
             depth += 1;
@@ -228,9 +225,9 @@ impl Drop for Team {
     fn drop(&mut self) {
         self.cells.close();
         let _commit = commit();
-        self.state.lock().phase = TeamPhase::Ousted;
-        self.life.prune();
-        if let Some(parent) = &self.life.parent {
+        self.node.state.lock().phase = TeamPhase::Ousted;
+        self.node.prune();
+        if let Some(parent) = &self.node.parent {
             parent.prune();
         }
     }
@@ -298,11 +295,11 @@ pub(crate) fn oust(me: &Arc<Task>, id: TeamId) -> Result<(), UnitFail> {
     }
     let retired = {
         let _commit = commit();
-        child.state.lock().phase = TeamPhase::Ousted;
-        child.life.clear(me.ident.id, None);
+        child.node.state.lock().phase = TeamPhase::Ousted;
+        child.node.clear(me.ident.id, None);
         let sire = child.sire.upgrade();
         let detached = sire.as_ref().and_then(|sire| sire.oust(id));
-        child.life.prune();
+        child.node.prune();
         (sire, detached)
     };
     drop(operation);

@@ -2,8 +2,6 @@
 //! 含尾区间允许占用延伸到 usize::MAX；退役中的区间继续占位，直到票结算。
 
 use alloc::vec::Vec;
-use core::sync::atomic::AtomicUsize;
-use core::sync::atomic::Ordering;
 
 use kernel_api::address::PAGE_SIZE;
 
@@ -64,7 +62,7 @@ impl Occupancy {
         if (at > 0 && self.spans[at - 1].last >= start)
             || (at < self.spans.len() && self.spans[at].start <= last)
         {
-            return Err(AddressError::NoRegion);
+            return Err(AddressError::Occupied);
         }
         self.spans
             .try_reserve(1)
@@ -213,10 +211,15 @@ impl Occupancy {
     }
 
     /// 把 `[start, last]` 内的占用切成带退休票的段：占位仍留着，但在票结算前不可复用。
-    pub(crate) fn retire(&mut self, start: usize, last: usize, reservation_id: usize) -> usize {
-        static NEXT: AtomicUsize = AtomicUsize::new(1);
-        let ticket = NEXT.fetch_add(1, Ordering::Relaxed);
-        assert_ne!(ticket, 0, "address retirement exhausted");
+    pub(crate) fn retire(
+        &mut self,
+        start: usize,
+        last: usize,
+        reservation_id: usize,
+    ) -> Result<usize, AddressError> {
+        static NEXT: crate::basis::name::Serial =
+            crate::basis::name::Serial::new(1, isize::MAX as usize);
+        let ticket = NEXT.allocate().ok_or(AddressError::OutOfMemory)?;
         let mut i = 0;
         while i < self.spans.len() {
             let slot = self.spans[i];
@@ -266,7 +269,7 @@ impl Occupancy {
                 i += 1;
             }
         }
-        ticket
+        Ok(ticket)
     }
 
     /// 结算一票退休：同步完成后移走这张票占用的地址。
@@ -276,10 +279,7 @@ impl Occupancy {
 }
 
 fn next_id() -> Result<usize, AddressError> {
-    static NEXT: AtomicUsize = AtomicUsize::new(1);
-    NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
-        id.checked_add(1)
-            .filter(|next| *next <= isize::MAX as usize)
-    })
-    .map_err(|_| AddressError::OutOfMemory)
+    static NEXT: crate::basis::name::Serial =
+        crate::basis::name::Serial::new(1, isize::MAX as usize);
+    NEXT.allocate().ok_or(AddressError::OutOfMemory)
 }

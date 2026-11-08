@@ -161,6 +161,11 @@ impl<R: Registers> Domain<R> {
         self.phase
     }
 
+    fn fail(&mut self) {
+        self.advance(Event::Fail)
+            .expect("failure transition is total");
+    }
+
     fn advance(&mut self, event: Event) -> Result<(), EngineError> {
         self.phase = self.phase.next(event).ok_or(EngineError::State)?;
         Ok(())
@@ -179,7 +184,7 @@ impl<R: Registers> Domain<R> {
         match self.engine.invalidate_directory() {
             Ok(batch) => self.advance(Event::Start(batch))?,
             Err(error) => {
-                self.phase = DomainPhase::Failed;
+                self.fail();
                 return Err(error);
             }
         }
@@ -193,7 +198,7 @@ impl<R: Registers> Domain<R> {
         match self.engine.invalidate_directory() {
             Ok(batch) => self.advance(Event::Submitted(batch)),
             Err(error) => {
-                self.phase = DomainPhase::Failed;
+                self.fail();
                 Err(error)
             }
         }
@@ -203,15 +208,14 @@ impl<R: Registers> Domain<R> {
         self.advance(Event::Close)?;
         // Withdrawal has completed, but every table remains retained; IoSpace keeps the payload.
         if let Err(error) = unsafe { self.engine.directory(0) } {
-            self.phase = DomainPhase::Failed;
+            self.fail();
             return Err(error);
         }
         Ok(())
     }
 
     pub(crate) fn step(&mut self) -> Result<DomainPhase, EngineError> {
-        self.progress()
-            .inspect_err(|_| self.phase = DomainPhase::Failed)?;
+        self.progress().inspect_err(|_| self.fail())?;
         Ok(self.phase)
     }
 
@@ -257,9 +261,7 @@ impl<R: Registers> Domain<R> {
     }
 
     pub(crate) fn fault(&mut self) -> Result<Option<Fault>, EngineError> {
-        self.engine
-            .fault()
-            .inspect_err(|_| self.phase = DomainPhase::Failed)
+        self.engine.fault().inspect_err(|_| self.fail())
     }
 
     /// Closed means translation/queue teardown only. It does NOT itself prove

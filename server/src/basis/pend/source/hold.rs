@@ -5,7 +5,6 @@
 use crate::machine::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::AtomicUsize;
 use kernel_api::abi::call::pend::PendFail;
 
 use crate::basis::flat::FlatRange;
@@ -108,8 +107,9 @@ pub(crate) struct HoldTable {
 
 /// 铸一个全局唯一的引用号；耗尽（或超出符号上界）即明确失败，不回收旧号。
 fn next_id() -> Result<usize, PendFail> {
-    static NEXT: AtomicUsize = AtomicUsize::new(1);
-    crate::machine::sync::next_id(&NEXT).ok_or(PendFail::OutOfMemory)
+    static NEXT: crate::basis::name::Serial =
+        crate::basis::name::Serial::new(1, isize::MAX as usize);
+    NEXT.allocate().ok_or(PendFail::OutOfMemory)
 }
 
 impl HoldTable {

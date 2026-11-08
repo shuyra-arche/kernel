@@ -7,9 +7,9 @@ use kernel_api::model::identity::PendId;
 use kernel_api::model::sign::SignSource;
 
 use crate::basis::pend::Need;
-use crate::basis::pend::PendSnapshot;
+use crate::basis::pend::PendEntry;
 use crate::basis::sign::WakeKey;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::view::clone;
 
 /// 权柄轴的失败折成组这一域的操作词汇。
@@ -48,9 +48,9 @@ pub(crate) fn source_watch(source: SignSource) -> Option<(PendId, Need)> {
 
 /// 这份 source 落在哪个资源的哪条通知位上；不是这一族的资源就没有键。
 pub(crate) fn source_key(
-    pend_entry: &PendSnapshot,
+    pend_entry: &PendEntry,
     source: SignSource,
-) -> Option<(WakeKey, Weak<Life>)> {
+) -> Option<(WakeKey, Weak<Anchor>)> {
     let view = pend_entry.view();
     match source {
         SignSource::Clone { condition, .. } => {
@@ -66,7 +66,7 @@ pub(crate) fn source_key(
 }
 
 /// 这份 source 此刻是否已就绪：问它自己的资源机制。
-pub(crate) fn source_ready(pend_entry: &PendSnapshot, source: SignSource) -> Option<bool> {
+pub(crate) fn source_ready(pend_entry: &PendEntry, source: SignSource) -> Option<bool> {
     let view = pend_entry.view();
     match source {
         SignSource::Clone { condition, .. } => Some(view.clone_view()?.ready(condition)),

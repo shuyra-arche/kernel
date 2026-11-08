@@ -1,4 +1,5 @@
 use ::core::fmt;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::boot::ledger::{Entry, Name};
@@ -8,7 +9,7 @@ use crate::basis::unit::task::Task;
 
 #[derive(Default)]
 pub(crate) struct Registry {
-    entries: Vec<(Name, PendEntry)>,
+    entries: Vec<(Name, Arc<PendEntry>)>,
 }
 
 impl Registry {
@@ -26,6 +27,20 @@ impl Registry {
                 value: (name, root),
             });
         }
+        let mut shared = match Arc::<PendEntry>::try_new_uninit() {
+            Ok(shared) => shared,
+            Err(_) => {
+                return Err(Failure {
+                    reason: PendFail::OutOfMemory,
+                    value: (name, root),
+                });
+            }
+        };
+        Arc::get_mut(&mut shared)
+            .expect("private registration")
+            .write(root);
+        // SAFETY: the unique allocation was initialized above.
+        let root = unsafe { shared.assume_init() };
         self.entries.push((name, root));
         Ok(())
     }
@@ -47,7 +62,7 @@ impl Registry {
 }
 
 pub(crate) struct Frozen {
-    entries: Vec<(Name, PendEntry)>,
+    entries: Vec<(Name, Arc<PendEntry>)>,
 }
 
 impl Frozen {

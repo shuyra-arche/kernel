@@ -15,7 +15,7 @@ use crate::machine::sync::SpinLock;
 
 use super::{HoldTable, live};
 pub(crate) use cleanup::{doom, retire, return_, revoke};
-pub(crate) use entry::{PendEntry, PendSnapshot, accede, locate, vestor};
+pub(crate) use entry::{PendEntry, accede, locate, vestor};
 
 /// 一个任务的能力账本：登记表（`serial`）下挂它持有的 pend_entry、它替子任务记住的
 /// 父子对（`heirs`）与来源引用（`references`）；
@@ -23,7 +23,7 @@ pub(crate) use entry::{PendEntry, PendSnapshot, accede, locate, vestor};
 pub(crate) struct Table {
     serial: SpinLock<()>,
     pub(crate) version: AtomicUsize,
-    pub(crate) entries: SpinLock<Vec<PendEntry>>,
+    pub(crate) entries: SpinLock<Vec<Arc<PendEntry>>>,
     pub(crate) heirs: SpinLock<Vec<(PendId, Weak<Task>, PendId)>>,
     pub(crate) references: HoldTable,
 }
@@ -47,7 +47,10 @@ impl Table {
 const RETRIES: usize = 8;
 
 pub(crate) fn changed(task: &Task) {
-    task.pend.version.fetch_add(1, Ordering::Relaxed);
+    let _ = task
+        .pend
+        .version
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1));
 }
 
 pub(super) fn with_pair<T>(a: &Task, b: &Task, run: impl FnOnce() -> T) -> T {
@@ -100,7 +103,7 @@ pub(super) fn observe(
     remember(tasks, task, version)
 }
 
-pub(crate) fn available(pend_entry: &PendSnapshot) -> Result<(), PendFail> {
+pub(crate) fn available(pend_entry: &PendEntry) -> Result<(), PendFail> {
     if pend_entry.authority().modifiable().is_none() {
         return Err(PendFail::HandedOver);
     }
@@ -126,10 +129,9 @@ pub(super) fn with_tasks_checked<T>(
         guards.push(task.pend.lock());
     }
     let commit = crate::basis::commit();
-    let valid = tasks
-        .iter()
-        .all(|(task, version)| task.pend.version.load(Ordering::Relaxed) == *version)
-        || validate();
+    let valid = tasks.iter().all(|(task, version)| {
+        *version != usize::MAX && task.pend.version.load(Ordering::Relaxed) == *version
+    }) || validate();
     let result = if valid {
         Ok(run())
     } else {
@@ -166,6 +168,7 @@ pub(crate) fn insert(task: &Task, pend_entry: PendEntry) -> Result<(), PendFail>
     }
     let mut entries = task.pend.entries.lock();
     entries.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+    let pend_entry = Arc::try_new(pend_entry).map_err(|_| PendFail::OutOfMemory)?;
     entries.push(pend_entry);
     changed(task);
     Ok(())

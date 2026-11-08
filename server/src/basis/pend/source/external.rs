@@ -27,6 +27,10 @@ pub(crate) struct ExternalBorrow {
         kernel_api::model::identity::PendId,
     )>,
 }
+// The borrow owns its resources and moves between cleanup harts under COMMIT.
+// The observer PendId is notification metadata, not transferable user authority.
+unsafe impl Send for ExternalBorrow {}
+
 impl ExternalBorrow {
     /// Caller holds the work commit boundary and the live Task's Pend table lock.
     pub(crate) fn prepare(
@@ -136,6 +140,12 @@ impl ExternalBorrow {
         if self.loan.is_none() {
             assert_eq!(self.cell.exposure(), Exposure::Internal);
         }
+        if let Some(loan) = self.loan.take() {
+            loan.invalidate();
+            loan.settle().expect("settled device leaf has no children");
+            // Root loans never acquired the private-source external flag.
+            self.source = None;
+        }
         self.published = false;
         self.observer
     }
@@ -148,7 +158,9 @@ impl Drop for ExternalBorrow {
             core::mem::forget(self.loan.take());
             core::mem::forget(self.parent.take());
         } else if let Some(loan) = self.loan.take() {
-            loan.settle().expect("settled device leaf has no children");
+            // SAFETY: a published borrow takes the fail-closed branch above;
+            // trusted settlement already consumed its loan in settle().
+            unsafe { loan.cancel_unpublished() }.expect("unpublished device leaf has no children");
         } else if let Some(source) = self.source.take() {
             source.end_external();
         }

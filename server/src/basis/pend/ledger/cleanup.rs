@@ -12,7 +12,7 @@ use crate::basis::unit::task::Task;
 use crate::basis::view::share::ShareOperation;
 
 pub(crate) struct Cleanup {
-    removed: Vec<PendEntry>,
+    removed: Vec<Arc<PendEntry>>,
     tasks: Vec<TaskId>,
 }
 
@@ -28,13 +28,14 @@ impl Cleanup {
 }
 
 /// 在 pend、commit 与 ShareOperation 锁外通知并释放已摘取的 PendEntry。
-fn settle(tasks: &[TaskId], pend_entry: PendEntry) {
+fn settle(tasks: &[TaskId], pend_entry: Arc<PendEntry>) {
     // Publish the returned borrow before waking observers. Waking first can let
     // an observer re-park on Suspended and miss the only completion notification.
     pend_entry
         .authority()
         .settle()
         .expect("children settled before parent");
+    pend_entry.release();
     for task in tasks {
         super::notify(*task, pend_entry.token());
     }
@@ -148,13 +149,17 @@ fn relations_match(tasks: &[(Arc<Task>, usize)], nodes: &[(Arc<Task>, PendId)]) 
     true
 }
 
-pub(super) fn take(task: &Task, token: PendId) -> Option<PendEntry> {
+pub(super) fn take(task: &Task, token: PendId) -> Option<Arc<PendEntry>> {
     let pend_entry = {
         let mut entries = task.pend.entries.lock();
         let at = entries.iter().position(|p| p.token() == token)?;
         entries.remove(at)
     };
     pend_entry.invalidate();
+    debug_assert!(
+        !pend_entry.alive(),
+        "shared record must lose authority on removal"
+    );
     if let (Some(parent), Some(lord)) = (pend_entry.sire(), pend_entry.lord().upgrade()) {
         super::remove_heir(&lord, parent, token);
         super::changed(&lord);
@@ -277,7 +282,7 @@ pub(super) fn cull(
 
 /// 同一提交边界内摘取无父、无后代且无映射的本地根；其他结构返回 None。
 /// 其他 Nest 的退休票继续持帧，不以本 Share 的映射账为空证明全局结清。
-fn reap(task: &Arc<Task>, token: PendId) -> Result<Option<PendEntry>, PendFail> {
+fn reap(task: &Arc<Task>, token: PendId) -> Result<Option<Arc<PendEntry>>, PendFail> {
     let _pend = task.pend.lock();
     let _commit = crate::basis::commit();
     let Some(pend_entry) = super::locate(task, token) else {
@@ -392,7 +397,7 @@ fn seal_owned(task: &Task) {
                 .filter(|pend_entry| pend_entry.view().owner() == task.ident.id)
                 .filter(|pend_entry| pend_entry.token().get() > after)
                 .min_by_key(|pend_entry| pend_entry.token().get())
-                .map(|p| p.snapshot())
+                .cloned()
         };
         let Some(pend_entry) = pend_entry else {
             break;

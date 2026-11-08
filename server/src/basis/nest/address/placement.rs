@@ -16,7 +16,7 @@ pub(crate) enum PlacementAt {
 /// 跨度非零且按页；`Exact` 的起点必须按页且满足对齐。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Placement {
-    region: RegionKind,
+    region: Option<RegionKind>,
     size: usize,
     align: usize,
     at: PlacementAt,
@@ -38,7 +38,7 @@ impl Placement {
             return Err(AddressError::NotAligned);
         }
         Ok(Self {
-            region,
+            region: Some(region),
             size,
             align,
             at,
@@ -68,7 +68,20 @@ impl Placement {
         Self::new(region, size, PAGE_SIZE, PlacementAt::Exact(start))
     }
 
-    pub(crate) fn region(self) -> RegionKind {
+    /// Fixed reservation outside the dynamic window policy.
+    pub(crate) fn fixed(start: VirtAddr, size: usize) -> Result<Self, AddressError> {
+        if size == 0 || !size.is_multiple_of(PAGE_SIZE) || start.offset() != 0 {
+            return Err(AddressError::NotAligned);
+        }
+        Ok(Self {
+            region: None,
+            size,
+            align: PAGE_SIZE,
+            at: PlacementAt::Exact(start),
+        })
+    }
+
+    pub(crate) fn region(self) -> Option<RegionKind> {
         self.region
     }
 

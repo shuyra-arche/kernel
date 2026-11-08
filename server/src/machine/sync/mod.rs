@@ -2,12 +2,10 @@ mod depend;
 mod once;
 mod pair;
 pub(crate) mod reentrant;
-mod serial;
 pub(crate) mod spin;
 mod trap;
 
 pub(crate) use pair::with_pair;
-pub(crate) use serial::next_id;
 
 #[cfg(debug_assertions)]
 macro_rules! depend_enter {

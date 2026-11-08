@@ -171,11 +171,7 @@ pub fn init() -> NestResult<()> {
                     failed = Some(error);
                     break;
                 }
-                let lower = nest.reserve(Placement::exact(
-                    RegionKind::Static,
-                    segment.lower.start,
-                    segment.size,
-                )?);
+                let lower = nest.reserve(Placement::fixed(segment.lower.start, segment.size)?);
                 let lower = match lower {
                     Ok(reservation) => reservation,
                     Err(error) => {
@@ -268,7 +264,7 @@ fn attach_exact(
         .checked_bytes()
         .ok_or(NestError::NotAligned)?;
     let active = ActiveRange::new(start, size, access, access)?;
-    let reservation = nest.reserve(Placement::exact(RegionKind::Static, start, size)?)?;
+    let reservation = nest.reserve(Placement::fixed(start, size)?)?;
     nest.attach_shaped(reservation, source, attrs, &[active])?;
     Ok(())
 }

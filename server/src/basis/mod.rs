@@ -2,6 +2,7 @@
 
 pub(crate) mod cell;
 pub(crate) mod flat;
+pub(crate) mod name;
 pub(crate) mod nest;
 
 pub(crate) mod pend;

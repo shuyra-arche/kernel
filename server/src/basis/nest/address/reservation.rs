@@ -10,7 +10,7 @@ use kernel_api::address::VirtAddr;
 /// 它不参与内存回收的所有权判定；占用表里的 generation 才是回收凭证。
 pub struct Reservation {
     nest: Weak<Nest>,
-    region: RegionKind,
+    region: Option<RegionKind>,
     start: VirtAddr,
     size: usize,
     id: usize,
@@ -29,7 +29,7 @@ impl core::fmt::Debug for Reservation {
 impl Reservation {
     pub(crate) fn new(
         nest: Weak<Nest>,
-        region: RegionKind,
+        region: Option<RegionKind>,
         start: VirtAddr,
         size: usize,
         id: usize,
@@ -51,7 +51,7 @@ impl Reservation {
         self.size
     }
 
-    pub fn region(&self) -> RegionKind {
+    pub fn region(&self) -> Option<RegionKind> {
         self.region
     }
 

@@ -178,7 +178,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                     let member = me
                         .ident
                         .team
-                        .life
+                        .node
                         .member(me.ident.id)
                         .expect("published Task member");
                     *member.result.lock() = Some(value as usize);
@@ -293,7 +293,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
             }
             if guard != ControlId::NONE
                 && (!me.administration.matches(guard, ControlKind::Guard)
-                    || me.ident.team.life.protected())
+                    || me.ident.team.node.protected())
             {
                 return Err(UnitFail::Denied);
             }
@@ -306,7 +306,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
             .map_err(map_err)?;
             // New empty Team: guard selection is immutable and cannot race a member exit.
             if guard != ControlId::NONE {
-                crate::basis::unit::team::exit::arm(&team.life, me.ident.id)
+                crate::basis::unit::team::exit::arm(&team.node, me.ident.id)
                     .expect("new empty guarded Team");
             }
             Ok(UnitTarget::Team(team.id))

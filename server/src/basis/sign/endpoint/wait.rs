@@ -6,7 +6,7 @@ use crate::basis::sign::WakeKey;
 use crate::basis::sign::block_with_call;
 use crate::basis::sign::finish_block;
 use crate::basis::sign::requeue;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Resumption;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::WaitCall;
@@ -69,7 +69,7 @@ impl AwaitWait {
         key(&self.group)
     }
 
-    pub fn life(&self) -> Weak<Life> {
+    pub fn life(&self) -> Weak<Anchor> {
         self.group.life()
     }
 

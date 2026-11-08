@@ -13,7 +13,12 @@ pub(crate) mod iommu;
 #[path = "../../src/basis/cell/projection/admission.rs"]
 pub(crate) mod admission;
 
+#[allow(dead_code, unused_imports)]
+#[path = "../../src/basis/name/mod.rs"]
+mod name;
+
 mod basis {
+    pub(crate) use crate::name;
     pub(crate) mod cell {
         pub(crate) use crate::cell as page;
         pub(crate) mod projection {

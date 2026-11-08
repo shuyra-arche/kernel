@@ -8,12 +8,12 @@ use alloc::sync::Arc;
 use alloc::sync::Weak;
 use core::time::Duration;
 
-use crate::basis::nest::Asid;
+use crate::basis::nest::NestId;
 use crate::basis::room::conductor::current;
 use crate::basis::room::conductor::run::run;
 use crate::basis::room::deadline;
 use crate::basis::room::scheduler::launch;
-use crate::basis::unit::life::Life;
+use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Resumption;
 use crate::basis::unit::task::Task;
 use crate::machine::clock;
@@ -117,7 +117,7 @@ pub fn park_until<E: WaitFail>(at: u64) -> Result<Option<usize>, E> {
 /// 醒后不在这里重查：调用方按原样重试那条指令，重查由下一次谓词完成。
 pub(crate) fn wait_until<E, C>(
     key: WakeKey,
-    life: Weak<Life>,
+    life: Weak<Anchor>,
     context: C,
     ready: fn(&C) -> bool,
 ) -> Result<Handoff<()>, E>
@@ -155,7 +155,7 @@ pub(crate) fn wipe(key: WakeKey) -> usize {
     rise(Unchain::new(chain))
 }
 
-pub(crate) fn knock(key: WakeKey, life: &Weak<Life>) -> usize {
+pub(crate) fn knock(key: WakeKey, life: &Weak<Anchor>) -> usize {
     let _commit = crate::basis::commit();
     let mut fwd = Fwd::empty();
     let chain = {
@@ -170,7 +170,7 @@ pub(crate) fn knock(key: WakeKey, life: &Weak<Life>) -> usize {
                 chain
             }
             None => {
-                if !Life::dead(life)
+                if !Anchor::dead(life)
                     && let Ok(site) = Site::ensure(&mut sites, key, life)
                 {
                     site.pend = true;
@@ -187,9 +187,9 @@ pub(crate) fn knock(key: WakeKey, life: &Weak<Life>) -> usize {
 
 pub(crate) fn forward(
     key: WakeKey,
-    life: Weak<Life>,
+    life: Weak<Anchor>,
     endpoint: usize,
-    endpoint_life: Weak<Life>,
+    endpoint_life: Weak<Anchor>,
 ) -> Result<(), ()> {
     let mut sites = sites(key).lock();
     let site = Site::ensure(&mut sites, key, &life)?;
@@ -225,7 +225,7 @@ pub(crate) fn signal(key: WakeKey) -> usize {
     rise(Unchain::new(chain))
 }
 
-pub(crate) fn wipe_space(space: Asid) -> usize {
+pub(crate) fn wipe_space(space: NestId) -> usize {
     let _commit = crate::basis::commit();
     let mut woken = 0usize;
     for shard in 0..SITE_SHARDS {
@@ -275,7 +275,7 @@ pub(crate) fn wake_counted(key: WakeKey, all: bool) -> usize {
     count
 }
 
-pub fn wake(key: WakeKey, life: &Weak<Life>) -> bool {
+pub fn wake(key: WakeKey, life: &Weak<Anchor>) -> bool {
     let _commit = crate::basis::commit();
     debug_assert!(
         !matches!(key, WakeKey::Sign { .. }),
@@ -283,7 +283,7 @@ pub fn wake(key: WakeKey, life: &Weak<Life>) -> bool {
     );
     let (popped, fwd) = {
         let mut sites = sites(key).lock();
-        if Life::dead(life) {
+        if Anchor::dead(life) {
             let chain = sites.remove(&key).and_then(|mut site| site.chain.take());
             drop(sites);
             rise(Unchain::new(chain));
@@ -350,7 +350,7 @@ pub fn redeem() -> bool {
 pub(crate) fn requeue<E: Copy>(
     task: &Arc<Task>,
     key: WakeKey,
-    life: Weak<Life>,
+    life: Weak<Anchor>,
     dur: Duration,
     call: WaitCall,
     oom: E,
@@ -359,7 +359,7 @@ pub(crate) fn requeue<E: Copy>(
         let mut table = sites(key).lock();
         Site::ensure(&mut table, key, &life).map_err(|()| oom)?;
     }
-    let ticket = Ticket::next_id();
+    let ticket = Ticket::next_id().ok_or(oom)?;
     if let Some(at) = call.deadline(dur) {
         hold(ticket, key, task).map_err(|_| oom)?;
         if deadline::tock(ticket.raw(), at).is_err() {

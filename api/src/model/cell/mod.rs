@@ -9,7 +9,7 @@ mod placement;
 mod slot;
 
 pub use allocation::Allocation;
-pub use creation::{CellCreate, CellSource, CreatedCell};
+pub use creation::{CellCreate, CellSource, CreatedCell, MemoDestination};
 pub use info::{CellInfo, CellState};
 pub use mapping::{MappingControl, MappingId, MappingTarget};
 pub use object::{CellHandoff, CellObject, CellPosition};
