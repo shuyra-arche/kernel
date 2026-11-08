@@ -15,7 +15,7 @@ use crate::basis::view::clone_view;
 /// 权柄轴的失败折成组这一域的操作词汇。
 pub(crate) fn pend_fail(error: PendFail) -> SignFail {
     match error {
-        PendFail::Denied | PendFail::NotAligned => SignFail::Denied,
+        PendFail::Denied | PendFail::NotAligned | PendFail::Invalid => SignFail::Denied,
         PendFail::Dead => SignFail::Dead,
         PendFail::OoM => SignFail::OoM,
         PendFail::HandedOver => SignFail::HandedOver,
@@ -26,7 +26,7 @@ pub(crate) fn pend_fail(error: PendFail) -> SignFail {
 /// 事件面上的权柄失败：与操作面分开，失权、死亡与交接各自保留一格。
 pub(crate) fn event_fail(error: PendFail) -> SignEventFail {
     match error {
-        PendFail::Denied | PendFail::NotAligned => SignEventFail::Denied,
+        PendFail::Denied | PendFail::NotAligned | PendFail::Invalid => SignEventFail::Denied,
         PendFail::Dead => SignEventFail::Dead,
         PendFail::OoM => SignEventFail::OoM,
         PendFail::HandedOver => SignEventFail::HandedOver,

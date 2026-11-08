@@ -82,8 +82,16 @@ pub(crate) fn create_share(
             return Err(PendFail::Denied);
         }
         let (parent, _) = hold.branch().ok_or(PendFail::Denied)?;
-        return pend::derive(task, parent, requested, Mark::NONE, Some(hold.window()))
-            .map(PendId::mint);
+        let (offset, count) = hold.window();
+        return pend::accord(
+            task,
+            parent,
+            &Arc::downgrade(task),
+            requested,
+            Mark::NONE,
+            pend::Window::Source(offset, count),
+        )
+        .map(PendId::mint);
     };
     let _serial = task.pend.lock();
     // 只能从**私有根**铸新根：子 PendEntry / Share 派生 / 借用都不产生新根资格。
@@ -187,7 +195,7 @@ fn shut_resource(token: PendId) -> Result<usize, PendFail> {
 
 fn fail(error: PendFail) -> ShareFail {
     match error {
-        PendFail::Denied => ShareFail::Denied,
+        PendFail::Denied | PendFail::Invalid => ShareFail::Denied,
         PendFail::NotAligned => ShareFail::NotAligned,
         PendFail::Dead => ShareFail::Dead,
         PendFail::OoM => ShareFail::OoM,

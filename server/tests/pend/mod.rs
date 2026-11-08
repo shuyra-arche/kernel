@@ -1,5 +1,8 @@
+mod ranges;
 #[path = "../../src/basis/pend/state.rs"]
 mod state;
+#[path = "../../src/basis/pend/window.rs"]
+mod window;
 use kernel_api::model::modifiable::Modifiable::No;
 use kernel_api::model::modifiable::Modifiable::Yes;
 use state::Event::*;

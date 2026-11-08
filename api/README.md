@@ -72,6 +72,26 @@ This is an intentional model/ABI break with no legacy aliases:
 | All boot entries typed as data authority | Ledger version 2, ResourceKind-qualified raw handles |
 | Implicit writable bootstrap handoff | Spawn execution, then explicit Pend Accord before starting the child |
 | Implicit same-Team control | Explicit Task controller; membership does not grant peer control |
+| Pend Derive and four-register Accord | Accord with a caller-memory request and explicit Caller / Task target |
+| Pend Release with a one-choice mode | Pend Return; no release-mode parameter |
+| Pend Same | Compare PendInfo.view from Inspect / Collect; this tests View identity only |
+
+Pend Accord slot 14 takes a pointer to one 64-byte `AccordRequest`, encoded by
+`to_bytes`. Server copies and validates it once before checking authority. The
+descriptor contains source Pend, target, Modifiable, mark and PendRange. A Pages
+offset is relative to the **parent's effective window**, including for nested
+derivations; Inherit preserves that window. Explicit ranges require a Share View.
+Caller and Task targets use the same permission, adjacency and borrow checks.
+Malformed descriptors return Invalid; unreadable memory or unauthorized requests
+return Denied. A zero mark inherits the parent mark.
+
+Pend Return slot 15 retires the holder's branch and its descendants. Revoke uses
+the grantor's authority to retire a target branch. Both return the parent borrow
+only after descendants and CPU/device access settle; Busy retains the cleanup
+responsibility for retry. Pend slots 4, 7, 10 and 13 are retired and rejected.
+Inspect and Collect retain their eight-word PendInfo layout, including ViewId and
+status; matching ViewId does not imply matching permissions or ranges. Narrow
+currently narrows Modifiable only. Share Open/Shut and Debug Put/Get are retained.
 
 Cell operations use `abi::call::cell::CellCall` and `model::cell`; the old
 MemoryCall/model::memory paths are removed. VirtAddr moves from model::identity

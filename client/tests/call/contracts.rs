@@ -263,3 +263,33 @@ fn external_mapping_inspection_preserves_target_authority_and_fault_receipt() {
         [(1usize << (usize::BITS - 1)) | 17, 23, 0, 0, 0, 0],
     );
 }
+
+#[test]
+fn pend_accord_returns_the_new_identity_and_return_preserves_busy() {
+    use kernel_api::{
+        abi::call::pend::{
+            PendFail,
+            operations::{Accord, Return},
+        },
+        address::VirtAddr,
+    };
+    reply((91, 0, 0));
+    assert_eq!(
+        invoke(Accord {
+            request: VirtAddr::new(0x4000)
+        })
+        .unwrap(),
+        PendId::mint(91)
+    );
+    called((7usize << 32) | 14, [0x4000, 0, 0, 0, 0, 0]);
+    reply(((-6isize) as usize, 0, 0));
+    assert_eq!(
+        invoke(Return {
+            token: PendId::mint(91)
+        })
+        .unwrap_err()
+        .source,
+        PendFail::Busy
+    );
+    called((7usize << 32) | 15, [91, 0, 0, 0, 0, 0]);
+}

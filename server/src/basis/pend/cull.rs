@@ -315,7 +315,7 @@ fn reap(task: &Arc<Task>, token: PendId) -> Result<Option<PendEntry>, PendFail> 
     Ok(Some(take(task, token).ok_or(PendFail::Denied)?))
 }
 
-pub(crate) fn release(task: &Arc<Task>, token: PendId) -> Result<usize, PendFail> {
+pub(crate) fn return_(task: &Arc<Task>, token: PendId) -> Result<usize, PendFail> {
     for _ in 0..super::RETRIES {
         match reap(task, token) {
             Ok(Some(pend_entry)) => {

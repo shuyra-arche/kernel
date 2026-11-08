@@ -78,7 +78,7 @@ fn every_operation_keeps_its_published_slot() {
     );
     assert_eq!(
         <kernel_api::abi::call::pend::operations::Accord as kernel_api::abi::operation::RegisterCall>::SLOT,
-        30064771076u64 as usize
+        30064771086u64 as usize
     );
     assert_eq!(
         <kernel_api::abi::call::pend::operations::Narrow as kernel_api::abi::operation::RegisterCall>::SLOT,
@@ -89,8 +89,8 @@ fn every_operation_keeps_its_published_slot() {
         30064771078u64 as usize
     );
     assert_eq!(
-        <kernel_api::abi::call::pend::operations::Release as kernel_api::abi::operation::RegisterCall>::SLOT,
-        30064771079u64 as usize
+        <kernel_api::abi::call::pend::operations::Return as kernel_api::abi::operation::RegisterCall>::SLOT,
+        30064771087u64 as usize
     );
     assert_eq!(
         <kernel_api::abi::call::pend::operations::Inspect as kernel_api::abi::operation::RegisterCall>::SLOT,
@@ -99,14 +99,6 @@ fn every_operation_keeps_its_published_slot() {
     assert_eq!(
         <kernel_api::abi::call::pend::operations::Collect as kernel_api::abi::operation::RegisterCall>::SLOT,
         30064771081u64 as usize
-    );
-    assert_eq!(
-        <kernel_api::abi::call::pend::operations::Same as kernel_api::abi::operation::RegisterCall>::SLOT,
-        30064771082u64 as usize
-    );
-    assert_eq!(
-        <kernel_api::abi::call::pend::operations::Derive as kernel_api::abi::operation::RegisterCall>::SLOT,
-        30064771085u64 as usize
     );
     assert_eq!(
         <kernel_api::abi::call::share_view::operations::Unseal as kernel_api::abi::operation::RegisterCall>::SLOT,

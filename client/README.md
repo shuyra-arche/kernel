@@ -29,6 +29,13 @@ directly; callers provide a valid note buffer and obey `abi::call::room::NOTE_MA
 The old root `room::park(Duration)` and `room::reap(reason, Option<&str>)` adapters
 have been removed.
 
+`call::pend::accord(request)` takes the address of `AccordRequest::to_bytes()`;
+keep that 64-byte buffer readable until the call returns. Use AccordTarget::Caller
+for local derivation or AccordTarget::Task for delegation. PendRange offsets are
+relative to the parent window. `call::pend::return_(token)` relinquishes the
+holder's branch through Kernel retirement; Busy means cleanup is still pending.
+The old `derive`, `same`, `release` and ReleaseMode interfaces are removed.
+
 ```sh
 cargo check --locked -p kernel-client --target riscv64gc-unknown-none-elf
 cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu

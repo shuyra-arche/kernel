@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+mod pend;
 use core::fmt::Write;
 use kernel_api::{
     address::VirtAddr,
@@ -194,5 +195,10 @@ extern "C" fn run() -> ! {
     .unwrap();
     cell::release(a).unwrap();
     let _ = writeln!(Console, "PASS cell-kernel swap=1 cleanup=1");
+    pend::run();
+    let _ = writeln!(
+        Console,
+        "PASS pend-kernel range=1 return=1 inspect=1 collect=1"
+    );
     unit::return_(0)
 }

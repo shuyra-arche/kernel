@@ -115,6 +115,7 @@ fn cell_calls_run_through_the_real_kernel_and_cpu_mmu() {
             for marker in [
                 "PASS cell-kernel movement=1 memo=1 receipt=1",
                 "PASS cell-kernel swap=1 cleanup=1",
+                "PASS pend-kernel range=1 return=1 inspect=1 collect=1",
                 "task: all tasks exited",
             ] {
                 assert!(log.contains(marker), "{name}: {log}");

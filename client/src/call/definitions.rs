@@ -78,31 +78,24 @@ typed_calls! {
         fallible fn end(change: usize) -> Result<(), erra::Error<CellFail>> = op::End { change };
     }
     pend [
-        model::pend::PendRange,
-        model::identity::Mark,
         model::modifiable::Modifiable,
         abi::call::pend::PendFail,
         model::identity::PendId,
-        model::pend::ReleaseMode,
         model::identity::TaskId,
         address::VirtAddr,
     ] {
-        fallible fn accord(src: PendId, dst: TaskId, subset: Modifiable, mark: Mark) -> Result<PendId, erra::Error<PendFail>> =
-            op::Accord { src, dst, subset, mark };
+        fallible fn accord(request: VirtAddr) -> Result<PendId, erra::Error<PendFail>> =
+            op::Accord { request };
         fallible fn narrow(token: PendId, subset: Modifiable) -> Result<(), erra::Error<PendFail>> =
             op::Narrow { token, subset };
         fallible fn revoke(dst: TaskId, token: PendId) -> Result<(), erra::Error<PendFail>> =
             op::Revoke { dst, token };
-        fallible fn release(token: PendId, mode: ReleaseMode) -> Result<(), erra::Error<PendFail>> =
-            op::Release { token, mode };
+        fallible fn return_(token: PendId) -> Result<(), erra::Error<PendFail>> =
+            op::Return { token };
         fallible fn inspect(token: PendId, buf: VirtAddr) -> Result<(), erra::Error<PendFail>> =
             op::Inspect { token, buf };
         fallible fn collect(after: PendId, buf: VirtAddr, capacity: usize) -> Result<usize, erra::Error<PendFail>> =
             op::Collect { after, buf, capacity };
-        fallible fn same(a: PendId, b: PendId) -> Result<bool, erra::Error<PendFail>> =
-            op::Same { a, b };
-        fallible fn derive(src: PendId, subset: Modifiable, mark: Mark, range: PendRange) -> Result<PendId, erra::Error<PendFail>> =
-            op::Derive { src, subset, mark, range };
     }
     share_view [
         model::modifiable::Modifiable,

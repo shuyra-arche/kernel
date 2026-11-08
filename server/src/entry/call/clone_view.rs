@@ -196,7 +196,7 @@ pub(crate) fn create(mark: Mark, limits: CloneLimits) -> Result<usize, PendFail>
 
 fn fail(error: PendFail) -> CloneFail {
     match error {
-        PendFail::Denied | PendFail::NotAligned => CloneFail::Denied,
+        PendFail::Denied | PendFail::NotAligned | PendFail::Invalid => CloneFail::Denied,
         PendFail::Dead => CloneFail::Dead,
         PendFail::OoM => CloneFail::OoM,
         PendFail::HandedOver => CloneFail::HandedOver,
