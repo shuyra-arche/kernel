@@ -235,6 +235,16 @@ impl Mapping {
             .ok()
             .map(|_| MappingOperation(&self.operation))
     }
+    pub(crate) fn advance_memo(&self, index: usize, expected: u64) -> Result<(), NestError> {
+        self.state.lock().memo_mut(index)?.advance(expected)
+    }
+
+    pub(crate) fn inspect_memo(
+        &self,
+        index: usize,
+    ) -> Result<kernel_api::model::cell::CellInfo, NestError> {
+        self.state.lock().inspect_memo(self.initial_start(), index)
+    }
 }
 
 pub(crate) struct MappingOperation<'a>(&'a core::sync::atomic::AtomicBool);

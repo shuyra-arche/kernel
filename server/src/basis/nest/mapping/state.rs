@@ -1,6 +1,8 @@
 use super::Access;
+use crate::basis::cell::page::{Change, Page};
 use crate::basis::nest::NestError;
 use crate::basis::nest::publication::Publication;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
@@ -36,7 +38,7 @@ pub(crate) struct MappingState {
     pub(crate) source: FlatRange,
     pub(crate) published: Vec<(usize, Publication)>,
     pub(crate) explicit: bool,
-    pub(crate) memos: Vec<(usize, Memo)>,
+    memos: Vec<(usize, Memo)>,
 }
 
 impl MappingState {
@@ -56,7 +58,7 @@ impl MappingState {
             .find(|(index, _)| *index == page)
             .map(|(_, memo)| memo)
     }
-    pub(crate) fn memo_mut(
+    pub(super) fn memo_mut(
         &mut self,
         page: usize,
     ) -> Result<&mut Memo, crate::basis::nest::NestError> {
@@ -69,6 +71,100 @@ impl MappingState {
         self.memos.push((page, Memo::vacant()));
         Ok(&mut self.memos.last_mut().unwrap().1)
     }
+    pub(crate) fn memo_page(&self, page: usize) -> Option<Arc<Page>> {
+        if let Some(memo) = self.memo(page) {
+            return memo.page.clone();
+        }
+        self.published
+            .iter()
+            .find(|(index, _)| *index == page)
+            .map(|(_, publication)| publication.cell().clone())
+    }
+
+    pub(crate) fn associate(
+        &mut self,
+        base: VirtAddr,
+        index: usize,
+        expected: u64,
+        page: Arc<Page>,
+    ) -> Result<(), NestError> {
+        self.memo_address(base, index)?;
+        if self.publishes(index) {
+            return Err(NestError::AlreadyMapped);
+        }
+        self.memo_mut(index)?.associate(expected, page)
+    }
+
+    pub(crate) fn inspect_memo(
+        &self,
+        base: VirtAddr,
+        index: usize,
+    ) -> Result<kernel_api::model::cell::CellInfo, NestError> {
+        use kernel_api::model::cell::{CellInfo, CellState};
+        let address = self.memo_address(base, index)?;
+        let memo = self.memo(index);
+        let publication = self
+            .published
+            .iter()
+            .find(|(p, _)| *p == index)
+            .map(|(_, p)| p);
+        let page = memo
+            .and_then(|m| m.page.as_ref())
+            .or_else(|| publication.map(|p| p.cell()));
+        let state = memo
+            .and_then(|m| m.flight)
+            .unwrap_or(if publication.is_some() {
+                CellState::Published
+            } else if page.is_some() {
+                CellState::Ready
+            } else {
+                CellState::Vacant
+            });
+        Ok(CellInfo {
+            generation: memo.map_or(1, |m| m.generation),
+            state,
+            page: page.map_or(0, |p| p.id().get() as u64),
+            frozen: page.is_some_and(|p| p.frozen()),
+            external: page
+                .is_some_and(|p| p.exposure() == crate::basis::cell::page::Exposure::External),
+            address: VirtAddr::new(address),
+            fault_cause: 0,
+            fault_address: 0,
+        })
+    }
+
+    pub(crate) fn transition_memo(
+        &mut self,
+        index: usize,
+        expected: u64,
+        freeze: Arc<Change>,
+        publishing: bool,
+    ) -> Result<Arc<Page>, NestError> {
+        let published = self
+            .published
+            .iter()
+            .find(|(p, _)| *p == index)
+            .map(|(_, p)| p.cell().clone());
+        self.memo_mut(index)?
+            .transition(expected, published, freeze, publishing)
+    }
+
+    pub(crate) fn finish_memo(&mut self, index: usize) {
+        let published = self.publishes(index);
+        if let Ok(memo) = self.memo_mut(index) {
+            memo.finish(published);
+        }
+    }
+
+    fn memo_address(&self, base: VirtAddr, index: usize) -> Result<usize, NestError> {
+        let address = base
+            .get()
+            .checked_add(index.checked_mul(PAGE_SIZE).ok_or(NestError::NoRegion)?)
+            .ok_or(NestError::NoRegion)?;
+        self.range_at(address).ok_or(NestError::NoRegion)?;
+        Ok(address)
+    }
+
     /// 活动区间是否连续覆盖 [lo, hi]。
     pub(crate) fn covers(&self, lo: usize, hi: usize) -> bool {
         ActiveRange::cover(&self.active, lo, hi)

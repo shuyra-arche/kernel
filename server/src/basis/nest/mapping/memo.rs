@@ -1,12 +1,12 @@
 //! A stable logical position. Hardware publication lives in Publication separately.
 use super::super::NestError;
-use crate::basis::cell::page::{Freeze, Page};
+use crate::basis::cell::page::{Change, Freeze, Page};
 use alloc::sync::Arc;
 pub(crate) struct Memo {
     pub(crate) generation: u64,
     pub(crate) page: Option<Arc<Page>>,
     /// Retraction closes admission before removing PTEs; Ready keeps this freeze.
-    pub(crate) freeze: Option<Freeze>,
+    freeze: Option<Freeze>,
     pub(crate) flight: Option<kernel_api::model::cell::CellState>,
 }
 impl Memo {
@@ -19,7 +19,7 @@ impl Memo {
         }
     }
     pub(crate) fn associate(&mut self, expected: u64, page: Arc<Page>) -> Result<(), NestError> {
-        if self.generation != expected {
+        if self.flight.is_some() || self.generation != expected {
             return Err(NestError::Busy);
         }
         let next = self
@@ -30,5 +30,52 @@ impl Memo {
         self.freeze = None;
         self.generation = next;
         Ok(())
+    }
+
+    pub(super) fn advance(&mut self, expected: u64) -> Result<(), NestError> {
+        if self.generation != expected || self.flight.is_some() {
+            return Err(NestError::Busy);
+        }
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(NestError::OutOfMemory)?;
+        Ok(())
+    }
+
+    pub(super) fn transition(
+        &mut self,
+        expected: u64,
+        published: Option<Arc<Page>>,
+        freeze: Arc<Change>,
+        publishing: bool,
+    ) -> Result<Arc<Page>, NestError> {
+        use kernel_api::model::cell::CellState;
+        if self.generation != expected || self.flight.is_some() {
+            return Err(NestError::Busy);
+        }
+        let page = self.page.clone().or(published).ok_or(NestError::Missing)?;
+        if !Arc::ptr_eq(&page, freeze.page()) {
+            return Err(NestError::Busy);
+        }
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(NestError::OutOfMemory)?;
+        self.page = Some(page.clone());
+        self.freeze = Some(Freeze::new(freeze));
+        self.flight = Some(if publishing {
+            CellState::Publishing
+        } else {
+            CellState::Retracting
+        });
+        Ok(page)
+    }
+
+    pub(super) fn finish(&mut self, published: bool) {
+        self.flight = None;
+        if published {
+            self.freeze = None;
+        }
     }
 }
