@@ -1,5 +1,9 @@
 //! Task-owned optional architectural state. No register image belongs to a Hart.
 mod float;
+#[cfg(target_arch = "riscv64")]
+pub(crate) mod hardware;
+mod vector;
+pub(crate) use vector::Shape;
 pub(crate) mod instruction;
 
 use alloc::boxed::Box;
@@ -10,20 +14,29 @@ use float::Float;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Capability {
     pub float: bool,
+    pub vector: Option<Shape>,
 }
 
 #[derive(Default)]
 pub(crate) struct ExtendedContext {
     float: Option<Box<Float>>,
+    vector: Option<vector::Vector>,
 }
 
 impl ExtendedContext {
     pub(crate) const fn new() -> Self {
-        Self { float: None }
+        Self {
+            float: None,
+            vector: None,
+        }
     }
 
     pub(crate) fn compatible(&self, target: Capability) -> bool {
-        self.float.is_none() || target.float
+        (self.float.is_none() || target.float)
+            && self
+                .vector
+                .as_ref()
+                .is_none_or(|image| Some(image.shape()) == target.vector)
     }
 
     /// Commit only after allocation succeeds; failure leaves an unused context.
@@ -33,20 +46,47 @@ impl ExtendedContext {
         status: &mut usize,
         caps: Capability,
     ) -> Result<bool, ()> {
-        if *status & FLOAT_MASK != 0 || !caps.float || !instruction::float(instruction) {
+        let vector_use = instruction::vector(instruction);
+        let float_use = instruction::float(instruction) || instruction::vector_float(instruction);
+        let need_vector = vector_use && *status & VECTOR_MASK == 0;
+        let need_float = float_use && *status & FLOAT_MASK == 0;
+        if (!need_vector && !need_float)
+            || (vector_use && caps.vector.is_none())
+            || (need_float && !caps.float)
+            || (need_float && self.float.is_some())
+            || (need_vector && self.vector.is_some())
+        {
             return Ok(false);
         }
-        if self.float.is_some() {
-            return Ok(false);
+        // Both allocations precede publication. Failure cannot leave half an
+        // enabled vector-floating instruction or modify the saved status.
+        let float = if need_float {
+            Some(Box::try_new(Float::zero()).map_err(|_| ())?)
+        } else {
+            None
+        };
+        let vector = if need_vector {
+            Some(vector::Vector::new(caps.vector.unwrap())?)
+        } else {
+            None
+        };
+        if let Some(image) = float {
+            self.float = Some(image);
+            *status |= FLOAT_CLEAN;
         }
-        let image = Box::try_new(Float::zero()).map_err(|_| ())?;
-        self.float = Some(image);
-        *status = (*status & !FLOAT_MASK) | FLOAT_CLEAN;
+        if let Some(image) = vector {
+            self.vector = Some(image);
+            *status |= VECTOR_CLEAN;
+        }
         Ok(true)
     }
 
     #[cfg(target_arch = "riscv64")]
     pub(crate) unsafe fn capture(&mut self, status: usize) {
+        if status & VECTOR_MASK != 0 {
+            let image = self.vector.as_mut().expect("enabled VS without Task image");
+            unsafe { image.capture() };
+        }
         if status & FLOAT_MASK != 0 {
             let image = self.float.as_mut().expect("enabled FS without Task image");
             unsafe { image.capture() };
@@ -55,7 +95,11 @@ impl ExtendedContext {
 
     #[cfg(target_arch = "riscv64")]
     pub(crate) unsafe fn restore(&self, status: &mut usize) {
-        *status &= !FLOAT_MASK;
+        *status &= !(FLOAT_MASK | VECTOR_MASK);
+        if let Some(image) = &self.vector {
+            unsafe { image.restore() };
+            *status |= VECTOR_CLEAN;
+        }
         if let Some(image) = &self.float {
             unsafe { image.restore() };
             *status |= FLOAT_CLEAN;
@@ -65,3 +109,6 @@ impl ExtendedContext {
 
 const FLOAT_MASK: usize = 3 << 13;
 const FLOAT_CLEAN: usize = 2 << 13;
+
+const VECTOR_MASK: usize = 3 << 9;
+const VECTOR_CLEAN: usize = 2 << 9;

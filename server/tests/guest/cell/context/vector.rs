@@ -1,0 +1,156 @@
+use super::{Console, lifecycle};
+use core::{
+    fmt::Write,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+use kernel_api::{
+    address::VirtAddr,
+    model::{
+        exit::EXIT_FAULT,
+        unit::{ExitCause, UnitQuery, UnitTarget},
+    },
+};
+use kernel_client::call::{room, unit};
+static STARTED: AtomicUsize = AtomicUsize::new(0);
+extern "C" fn probe() -> ! {
+    let bytes: usize;
+    unsafe { core::arch::asm!("csrr {}, vlenb", out(reg) bytes) };
+    unit::exit(bytes as u64, 0, VirtAddr::new(0), 0)
+}
+extern "C" fn one() -> ! {
+    worker(1)
+}
+extern "C" fn two() -> ! {
+    worker(2)
+}
+fn worker(id: usize) -> ! {
+    let bytes: usize;
+    unsafe { core::arch::asm!("csrr {}, vlenb", out(reg) bytes) };
+    assert!(matches!(bytes, 16 | 32));
+    let mut expected = [0u64; 128];
+    let mut observed = [0u64; 128];
+    let mut controls = [0usize; 4];
+    unsafe { save(observed.as_mut_ptr(), controls.as_mut_ptr(), bytes) };
+    assert_eq!(observed, [0; 128]);
+    assert_eq!(controls, [0, 0, 1usize << 63, 0]);
+    for (i, word) in expected[..bytes * 4].iter_mut().enumerate() {
+        *word = (id as u64 * 0x1111111111111111) ^ (i as u64 * 0x1020304050607);
+    }
+    let wanted = [id, id + 3, 0, id]; // nonzero vstart, vl, e8/m1/tu/mu, vcsr
+    unsafe { load(expected.as_ptr(), wanted.as_ptr(), bytes) };
+    STARTED.fetch_or(1 << id, Ordering::Release);
+    let start: u64;
+    unsafe { core::arch::asm!("rdtime {}", out(reg) start) };
+    while STARTED.load(Ordering::Acquire) != 6 {
+        let now: u64;
+        unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
+        assert!(now - start < 30_000_000, "no vector timer preemption");
+    }
+    for _ in 0..16 {
+        unsafe { save(observed.as_mut_ptr(), controls.as_mut_ptr(), bytes) };
+        assert_eq!(&observed[..bytes * 4], &expected[..bytes * 4]);
+        assert_eq!(controls, wanted);
+        room::yield_();
+        room::sleep_until(room::clock() + 1_000_000).unwrap();
+    }
+    unsafe { save(observed.as_mut_ptr(), controls.as_mut_ptr(), bytes) };
+    assert_eq!(&observed[..bytes * 4], &expected[..bytes * 4]);
+    assert_eq!(controls, wanted);
+    // A vector floating instruction must also lazily acquire FS, even after VS.
+    unsafe {
+        core::arch::asm!(
+            ".option push",
+            ".option arch, +v",
+            "csrw vstart, zero",
+            "vsetivli zero, 4, e32, m1, tu, mu",
+            "vfadd.vv v0, v0, v0",
+            ".option pop"
+        );
+    }
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
+
+pub(super) fn run() {
+    let probe = lifecycle::spawn(probe as *const () as usize);
+    unit::resume(UnitTarget::Task(probe)).unwrap();
+    assert!(lifecycle::wait_task(probe));
+    let info = lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(probe)));
+    lifecycle::delete(probe);
+    if info.exit == Some((ExitCause::Fault, EXIT_FAULT as u64)) {
+        writeln!(Console, "PASS context vector-absent=1").unwrap();
+        return;
+    }
+    let bytes = info.result.unwrap() as usize;
+    assert!(matches!(bytes, 16 | 32));
+    let tasks = [
+        lifecycle::spawn(one as *const () as usize),
+        lifecycle::spawn(two as *const () as usize),
+    ];
+    for task in tasks {
+        unit::resume(UnitTarget::Task(task)).unwrap();
+    }
+    for task in tasks {
+        assert!(lifecycle::wait_task(task));
+        assert_eq!(lifecycle::result(task), (1, 0));
+        lifecycle::delete(task);
+    }
+    let message = if bytes == 16 {
+        "PASS context vector=32 vlenb=16 controls=4 vstart=1 preempt=1 block=1\n"
+    } else {
+        "PASS context vector=32 vlenb=32 controls=4 vstart=1 preempt=1 block=1\n"
+    };
+    Console.write_str(message).unwrap();
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn save(_data: *mut u64, _control: *mut usize, _bytes: usize) {
+    core::arch::naked_asm!(
+        ".option push",
+        ".option arch, +v",
+        "csrr t0, vstart",
+        "sd t0, 0(a1)",
+        "csrr t1, vl",
+        "sd t1, 8(a1)",
+        "csrr t1, vtype",
+        "sd t1, 16(a1)",
+        "csrr t1, vcsr",
+        "sd t1, 24(a1)",
+        "csrw vstart, zero",
+        "slli a2, a2, 3",
+        "vs8r.v v0, (a0)",
+        "add a0, a0, a2",
+        "vs8r.v v8, (a0)",
+        "add a0, a0, a2",
+        "vs8r.v v16, (a0)",
+        "add a0, a0, a2",
+        "vs8r.v v24, (a0)",
+        "csrw vstart, t0",
+        "ret",
+        ".option pop",
+    );
+}
+#[unsafe(naked)]
+unsafe extern "C" fn load(_data: *const u64, _control: *const usize, _bytes: usize) {
+    core::arch::naked_asm!(
+        ".option push",
+        ".option arch, +v",
+        "csrw vstart, zero",
+        "slli a2, a2, 3",
+        "vl8re8.v v0, (a0)",
+        "add a0, a0, a2",
+        "vl8re8.v v8, (a0)",
+        "add a0, a0, a2",
+        "vl8re8.v v16, (a0)",
+        "add a0, a0, a2",
+        "vl8re8.v v24, (a0)",
+        "ld t0, 8(a1)",
+        "ld t1, 16(a1)",
+        "vsetvl zero, t0, t1",
+        "ld t0, 24(a1)",
+        "csrw vcsr, t0",
+        "ld t0, 0(a1)",
+        "csrw vstart, t0",
+        "ret",
+        ".option pop",
+    );
+}

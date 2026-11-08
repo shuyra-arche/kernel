@@ -1,16 +1,32 @@
+#[cfg(feature = "vector")]
+mod vector;
+use super::{Console, lifecycle};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use kernel_api::{address::VirtAddr, model::unit::UnitTarget};
 use kernel_client::call::{room, unit};
-use super::{Console, lifecycle};
 static STARTED: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C, align(16))]
-struct Image { regs: [u64; 32], fcsr: u64 }
-impl Image { fn zero() -> Self { Self { regs: [0; 32], fcsr: 0 } } }
+struct Image {
+    regs: [u64; 32],
+    fcsr: u64,
+}
+impl Image {
+    fn zero() -> Self {
+        Self {
+            regs: [0; 32],
+            fcsr: 0,
+        }
+    }
+}
 
-extern "C" fn one() -> ! { worker(1) }
-extern "C" fn two() -> ! { worker(2) }
+extern "C" fn one() -> ! {
+    worker(1)
+}
+extern "C" fn two() -> ! {
+    worker(2)
+}
 fn worker(id: usize) -> ! {
     let mut observed = Image::zero();
     // First use is a read, so a prior Task's hardware contents cannot hide.
@@ -46,21 +62,34 @@ fn worker(id: usize) -> ! {
 }
 
 pub(super) fn run() {
-    let tasks = [lifecycle::spawn(one as *const () as usize), lifecycle::spawn(two as *const () as usize)];
-    for task in tasks { unit::resume(UnitTarget::Task(task)).unwrap(); }
+    #[cfg(feature = "vector")]
+    vector::run();
+    let tasks = [
+        lifecycle::spawn(one as *const () as usize),
+        lifecycle::spawn(two as *const () as usize),
+    ];
+    for task in tasks {
+        unit::resume(UnitTarget::Task(task)).unwrap();
+    }
     for task in tasks {
         assert!(lifecycle::wait_task(task));
         assert_eq!(lifecycle::result(task), (1, 0));
         lifecycle::delete(task);
     }
-    writeln!(Console, "PASS context float=32 fcsr=1 initial=1 preempt=1 block=1").unwrap();
+    writeln!(
+        Console,
+        "PASS context float=32 fcsr=1 initial=1 preempt=1 block=1"
+    )
+    .unwrap();
 }
 
 #[unsafe(naked)]
 unsafe extern "C" fn save(_image: *mut Image) {
     core::arch::naked_asm!(
-        ".option push", ".option arch, +d",
-        "frcsr t0", "sd t0, 256(a0)",
+        ".option push",
+        ".option arch, +d",
+        "frcsr t0",
+        "sd t0, 256(a0)",
         "fsd f0, 0(a0)",
         "fsd f1, 8(a0)",
         "fsd f2, 16(a0)",
@@ -93,14 +122,16 @@ unsafe extern "C" fn save(_image: *mut Image) {
         "fsd f29, 232(a0)",
         "fsd f30, 240(a0)",
         "fsd f31, 248(a0)",
-        "ret", ".option pop",
+        "ret",
+        ".option pop",
     );
 }
 
 #[unsafe(naked)]
 unsafe extern "C" fn load(_image: *const Image) {
     core::arch::naked_asm!(
-        ".option push", ".option arch, +d",
+        ".option push",
+        ".option arch, +d",
         "fld f0, 0(a0)",
         "fld f1, 8(a0)",
         "fld f2, 16(a0)",
@@ -133,7 +164,9 @@ unsafe extern "C" fn load(_image: *const Image) {
         "fld f29, 232(a0)",
         "fld f30, 240(a0)",
         "fld f31, 248(a0)",
-        "ld t0, 256(a0)", "fscsr t0",
-        "ret", ".option pop",
+        "ld t0, 256(a0)",
+        "fscsr t0",
+        "ret",
+        ".option pop",
     );
 }
