@@ -25,6 +25,12 @@ fn run(mode: &str) {
         .unwrap();
     let guest = workspace.join("server/tests/guest/cell");
     let target = guest.join("target");
+    let fixture = workspace.join("server/tests/platform/qemu/Cargo.toml");
+    let (kernel_target, binary) = if io {
+        (target.join("platform"), "shuyra-qemu")
+    } else {
+        (workspace.join("target"), "shuyra")
+    };
     let evidence = target.join("evidence").join(mode);
     if evidence.exists() {
         std::fs::remove_dir_all(&evidence).unwrap();
@@ -70,14 +76,14 @@ fn run(mode: &str) {
             "+nightly",
             "build",
             "--locked",
-            "-p",
-            "kernel",
             "--target",
             "riscv64gc-unknown-none-elf",
         ]);
-        build.env("CARGO_TARGET_DIR", workspace.join("target"));
+        build.env("CARGO_TARGET_DIR", &kernel_target);
         if io {
-            build.args(["--features", "qemu-edu-dma"]);
+            build.arg("--manifest-path").arg(&fixture);
+        } else {
+            build.args(["-p", "kernel"]);
         }
         if let Some(extra) = extra {
             build.arg(extra);
@@ -93,9 +99,7 @@ fn run(mode: &str) {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let kernel = workspace.join(format!(
-            "target/riscv64gc-unknown-none-elf/{profile}/shuyra"
-        ));
+        let kernel = kernel_target.join(format!("riscv64gc-unknown-none-elf/{profile}/{binary}"));
         let hashes = Command::new("sha256sum")
             .args([&kernel, &elf, &initrd])
             .output()

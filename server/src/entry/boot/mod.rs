@@ -4,11 +4,13 @@ mod init;
 pub(crate) mod resources;
 mod space;
 
+pub use crate::machine::iommu::riscv::pci::{Ecam as PciConfig, aperture::QuiescenceStatus};
+pub use devices::PciRoute;
 pub use error::BootError;
 pub use error::MapOperation;
 pub use error::ResourceOperation;
 pub use error::fail;
-pub use init::init;
+pub use init::{init, init_with_pci};
 
 use ::core::arch::global_asm;
 

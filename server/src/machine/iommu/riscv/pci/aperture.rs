@@ -4,7 +4,6 @@
 use super::super::controllers::CONTROLLERS;
 use super::super::retirement;
 use super::Endpoint;
-use super::config;
 use super::config::Ecam;
 use crate::basis::cell::page::Owner as PageOwner;
 use crate::basis::cell::projection::Admission;
@@ -24,6 +23,7 @@ pub(crate) struct Aperture {
     pub did: u32,
     pub port: Endpoint<Ecam>,
     pub config: usize,
+    pub quiescence: fn(&Ecam) -> QuiescenceStatus,
     pub source: FlatRange,
     pub used: bool,
 }
@@ -34,21 +34,25 @@ pub(crate) struct Binding {
     pub domain: DomainId,
     pub completion: Completion,
 }
-struct QemuCompletion {
-    config: usize,
+/// Outcome of the trusted platform check after IOMMU retirement.
+pub enum QuiescenceStatus {
+    Pending,
+    Settled,
+    Failed,
 }
-// SAFETY: only the explicit coherent QEMU EDU contract is admitted, without
-// ATS/PRI/passthrough. Adapter calls after DDTP/queues Off; synchronous pci_dma
-// callbacks precede this config completion and future transactions remain denied.
-unsafe impl Quiescence for QemuCompletion {
+
+struct PlatformCompletion {
+    config: Ecam,
+    poll: fn(&Ecam) -> QuiescenceStatus,
+}
+
+// SAFETY: boot requires the platform to supply a bounded proof for this route.
+unsafe impl Quiescence for PlatformCompletion {
     fn poll(&mut self) -> Result<bool, HardwareError> {
-        config::order();
-        let value = unsafe { (self.config as *const u32).read_volatile() };
-        config::order();
-        if value != 0x11e81234 {
-            Err(HardwareError::Fault)
-        } else {
-            Ok(true)
+        match (self.poll)(&self.config) {
+            QuiescenceStatus::Pending => Ok(false),
+            QuiescenceStatus::Settled => Ok(true),
+            QuiescenceStatus::Failed => Err(HardwareError::Fault),
         }
     }
 }
@@ -87,8 +91,9 @@ pub(crate) fn bind(source: &FlatRange, owner: &Admission) -> Result<Binding, Err
             entry.host,
             entry.rid,
             tables,
-            QemuCompletion {
-                config: entry.config,
+            PlatformCompletion {
+                config: Ecam::new(entry.config),
+                poll: entry.quiescence,
             },
         )
     }

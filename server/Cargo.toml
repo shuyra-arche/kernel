@@ -6,9 +6,6 @@ publish = false
 
 [features]
 default = []
-# Trusted deployment contract: QEMU virt + emulated EDU, no VFIO/passthrough,
-# hotplug, ATS or peer-to-peer bypass. Not a physical-platform DMA proof.
-qemu-edu-dma = []
 semihosting = ["dep:serde_json", "dep:semihosting"]
 
 [lib]

@@ -1,6 +1,6 @@
 use super::endpoint::Config;
 
-pub(crate) struct Ecam {
+pub struct Ecam {
     base: usize,
 }
 impl Ecam {
@@ -10,8 +10,13 @@ impl Ecam {
     pub(crate) unsafe fn new(base: usize) -> Self {
         Self { base }
     }
+
+    /// Read one aligned little-endian configuration dword with I/O ordering.
+    pub fn read32(&self, offset: usize) -> u32 {
+        Config::read32(self, offset)
+    }
 }
-pub(super) fn order() {
+fn order() {
     unsafe { core::arch::asm!("fence iorw, iorw", options(nostack)) };
 }
 unsafe impl Config for Ecam {
