@@ -20,7 +20,18 @@ const BEACON_TICK: u64 = 250_000;
 
 pub(super) fn fetch() -> usize {
     #[cfg(debug_assertions)]
-    crate::basis::assert_unlocked();
+    {
+        crate::basis::assert_unlocked();
+        let sp: usize;
+        unsafe { core::arch::asm!("mv {}, sp", out(reg) sp, options(nomem, nostack)) };
+        let me = hart::hart_id();
+        let base = crate::machine::switcher::stack::trap_stack_base(me).get();
+        let edge = crate::machine::switcher::stack::trap_stack_edge(me).get();
+        assert!(
+            sp > base && sp <= edge,
+            "idle must use the guarded hart stack"
+        );
+    }
     loop {
         unsafe {
             sie::set_sext();
