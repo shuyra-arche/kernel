@@ -1,15 +1,15 @@
 //! Kernel-retained device reborrow. A private allocation reserves the whole source;
 //! a View uses the same Pend borrow tree as CPU access. Neither returns on timeout.
 use super::hold::Hold;
-use super::source_authorization::SourceAuthorization;
+use super::source::SourceAuthorization;
 use crate::basis::cell::page::Exposure;
 use crate::basis::cell::page::Page;
 use crate::basis::flat::Pages;
 use crate::basis::nest::Access;
 use crate::basis::pend;
-use crate::basis::pend::authority::Pend;
+use crate::basis::pend::Pend;
 use crate::basis::unit::task::Task;
-use crate::basis::view::share_view::ShareOperation;
+use crate::basis::view::share::ShareOperation;
 use alloc::sync::Arc;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::cell::PageOwner;

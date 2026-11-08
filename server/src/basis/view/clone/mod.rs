@@ -1,10 +1,7 @@
-mod hand;
 pub(crate) mod payload;
-mod pending;
 mod queue;
 mod reading;
 mod reservation;
-mod slot;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -25,9 +22,9 @@ use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::life::Life;
 
-use pending::Pending;
+use queue::Pending;
 use queue::Queue;
-use slot::Slot;
+use queue::Slot;
 
 pub(crate) use reading::peek;
 pub(crate) use reading::read;

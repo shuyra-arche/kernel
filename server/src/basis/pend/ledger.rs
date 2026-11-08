@@ -8,7 +8,7 @@ use crate::basis::unit::task::Task;
 use crate::machine::sync::SpinLock;
 
 use super::HoldTable;
-use super::pend_entry::PendEntry;
+use super::entry::PendEntry;
 
 /// 一个任务的能力账本：登记表（`serial`）下挂它持有的 pend_entry、它替子任务记住的
 /// 父子对（`heirs`）与来源引用（`references`）；

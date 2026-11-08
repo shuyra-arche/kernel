@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::modifiable::Modifiable;
 
-use crate::basis::pend::authority::Pend;
+use crate::basis::pend::Pend;
 
 /// 一份授权记录：token 与它当前的权限位。
 ///

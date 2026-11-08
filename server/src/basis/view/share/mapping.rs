@@ -5,7 +5,12 @@ use crate::basis::nest::Mapping;
 use crate::basis::unit::space::Space;
 use kernel_api::model::identity::PendId;
 
-use super::relation::Relation;
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Relation {
+    Input,
+    Open,
+    Mapping,
+}
 
 /// 一项活跃关系：真实 `Mapping` 加上它的放在哪、属于哪个 token。
 ///

@@ -10,8 +10,8 @@ use super::CloneView;
 use super::HANDS_LIVE;
 use super::key;
 use super::note_hand_off;
-use super::pending::Pending;
-use super::slot::Slot;
+use super::queue::Pending;
+use super::queue::Slot;
 use crate::basis::sign;
 
 pub(crate) struct Reading<'a> {

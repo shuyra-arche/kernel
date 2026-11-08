@@ -248,8 +248,8 @@ pub(crate) fn publish(
 ) -> Result<(), CellFail> {
     let target = target(actor, token, true)?;
     let target_view = target.view().share_view().ok_or(CellFail::Denied)?;
-    let _operation = crate::basis::view::share_view::ShareOperation::acquire(&target_view)
-        .ok_or(CellFail::Busy)?;
+    let _operation =
+        crate::basis::view::share::ShareOperation::acquire(&target_view).ok_or(CellFail::Busy)?;
     let mut records = PROJECTIONS.lock();
     let r = authorized(&mut records, actor, token, id)?;
     if r.task != actor.ident.id {

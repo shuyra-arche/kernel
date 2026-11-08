@@ -12,15 +12,16 @@ use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
+use core::sync::atomic::AtomicU8;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
-use crate::basis::pend::authority::Pend;
+use crate::basis::pend::Pend;
 use crate::basis::unit::space::MappingBinding;
 use crate::basis::unit::space::Space;
-use crate::basis::view::share_view::ShareView;
+use crate::basis::view::share::ShareView;
 use crate::machine::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
@@ -30,9 +31,61 @@ use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::modifiable::Modifiable;
 
-use super::creation::Creation;
 use super::geometry::Geometry;
-use super::source_phase::Phase;
+
+// 一份来源授权当前归谁管：私有根，还是已经交给根 Pend。
+//
+// 两个集合分得很清楚：私有阶段已建的关系记在自己这边；交给 Share 之后
+// 关系由那个 token 下的登记管，撤销随之关闭。
+
+#[derive(Clone)]
+enum Phase {
+    /// 还没有 Share 接手。
+    Private,
+    /// 已由根 Pend 接手：撤销依赖那枚 Pend，后续关系交给 Share 管。
+    Root {
+        meta: Weak<ShareView>,
+        token: PendId,
+        authority: Arc<Pend>,
+    },
+}
+
+const AVAILABLE: u8 = 0;
+const CLAIMED: u8 = 1;
+const CONSUMED: u8 = 2;
+
+struct Creation {
+    state: AtomicU8,
+}
+
+impl Creation {
+    fn new() -> Self {
+        Self {
+            state: AtomicU8::new(AVAILABLE),
+        }
+    }
+
+    fn claim(&self) -> Result<(), kernel_api::abi::call::pend::PendFail> {
+        match self
+            .state
+            .compare_exchange(AVAILABLE, CLAIMED, Ordering::AcqRel, Ordering::Acquire)
+        {
+            Ok(_) => Ok(()),
+            Err(CLAIMED) => Err(kernel_api::abi::call::pend::PendFail::Busy),
+            Err(_) => Err(kernel_api::abi::call::pend::PendFail::Denied),
+        }
+    }
+
+    fn consume(&self) {
+        self.state.store(CONSUMED, Ordering::Release);
+    }
+
+    fn release(&self) {
+        let _ =
+            self.state
+                .compare_exchange(CLAIMED, AVAILABLE, Ordering::AcqRel, Ordering::Acquire);
+    }
+}
 
 pub(crate) struct SourceAuthorization {
     /// 私有阶段由它自己强持整段来源；交给根 Pend 之后这里变空，
@@ -402,7 +455,7 @@ impl SourceAuthorization {
                 authority,
             } => {
                 // 表里没有那一枚：调用者不持 root token，当场不是管理者。
-                let Some(pend_entry) = super::super::locate(task, token) else {
+                let Some(pend_entry) = super::locate(task, token) else {
                     return false;
                 };
                 pend_entry.sire().is_none()

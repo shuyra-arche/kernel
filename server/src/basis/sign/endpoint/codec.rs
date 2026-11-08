@@ -10,7 +10,7 @@ use crate::basis::pend::Need;
 use crate::basis::pend::PendSnapshot;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::life::Life;
-use crate::basis::view::clone_view;
+use crate::basis::view::clone;
 
 /// 权柄轴的失败折成组这一域的操作词汇。
 pub(crate) fn pend_fail(error: PendFail) -> SignFail {
@@ -37,7 +37,7 @@ pub(crate) fn event_fail(error: PendFail) -> SignEventFail {
 /// 这份 source 看的是哪一枚、要哪一种许可；组内那两种非资源 source 没有资源面。
 pub(crate) fn source_watch(source: SignSource) -> Option<(PendId, Need)> {
     match source {
-        SignSource::Clone { token, condition } => Some((token, clone_view::need(condition))),
+        SignSource::Clone { token, condition } => Some((token, clone::need(condition))),
         SignSource::Sign { .. }
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
@@ -55,7 +55,7 @@ pub(crate) fn source_key(
     match source {
         SignSource::Clone { condition, .. } => {
             let meta = view.clone_view()?;
-            Some((clone_view::key(&meta, condition), meta.life()))
+            Some((clone::key(&meta, condition), meta.life()))
         }
         SignSource::Sign { .. }
         | SignSource::Join { .. }

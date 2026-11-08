@@ -7,9 +7,9 @@ use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 
-use super::pend_entry::PendEntry;
+use super::entry::PendEntry;
 use crate::basis::unit::task::Task;
-use crate::basis::view::share_view::ShareOperation;
+use crate::basis::view::share::ShareOperation;
 
 pub(crate) struct Cleanup {
     removed: Vec<PendEntry>,

@@ -1,5 +1,5 @@
-pub mod clone_view;
-pub mod share_view;
+pub mod clone;
+pub mod share;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -12,11 +12,11 @@ use kernel_api::model::identity::TaskId;
 use kernel_api::model::modifiable::Modifiable;
 use kernel_api::model::view::ViewKind;
 
-use crate::basis::pend::authority::Pend;
+use crate::basis::pend::Pend;
 use crate::basis::unit::life::Life;
 
-pub(crate) use clone_view::CloneView;
-pub(crate) use share_view::ShareView;
+pub(crate) use clone::CloneView;
+pub(crate) use share::ShareView;
 
 pub(crate) fn next_id() -> Result<usize, PendFail> {
     static NEXT: AtomicUsize = AtomicUsize::new(1);
@@ -71,8 +71,8 @@ impl View {
 
     pub(crate) fn seal(&self) {
         match self {
-            View::Clone(meta) => clone_view::seal(meta),
-            View::Share(meta) => share_view::seal(meta),
+            View::Clone(meta) => clone::seal(meta),
+            View::Share(meta) => share::seal(meta),
         }
     }
 

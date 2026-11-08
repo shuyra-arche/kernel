@@ -1,8 +1,6 @@
 mod authority;
 mod close;
-mod held_map;
-mod relation;
-mod share_operation;
+mod mapping;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -19,8 +17,8 @@ use crate::basis::nest::Mapping;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionId;
+use crate::basis::pend::Pend;
 use crate::basis::pend::SourceAuthorization;
-use crate::basis::pend::authority::Pend;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::life::Life;
@@ -37,12 +35,11 @@ use kernel_api::model::identity::TaskId;
 use kernel_api::model::modifiable::Modifiable;
 
 use authority::Authority;
-use held_map::HeldMap;
-use relation::Relation;
+use mapping::HeldMap;
+use mapping::Relation;
 
 pub(crate) use close::close;
 pub(crate) use close::pending_close;
-pub(crate) use share_operation::ShareOperation;
 
 /// 资源授权：一段经过授权的来源范围，它的授权记录与活跃关系。
 ///
@@ -320,6 +317,23 @@ fn pend_map_error(error: NestError) -> PendFail {
 /// 来源自己的失败码折成资源授权码，沿用地址空间路径的同一条折叠。
 fn pend_source_error(error: FlatError) -> PendFail {
     pend_map_error(NestError::from(error))
+}
+
+pub(crate) struct ShareOperation(Arc<ShareView>);
+
+impl ShareOperation {
+    pub(crate) fn acquire(meta: &Arc<ShareView>) -> Option<Self> {
+        meta.operating
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()?;
+        Some(Self(meta.clone()))
+    }
+}
+
+impl Drop for ShareOperation {
+    fn drop(&mut self) {
+        self.0.operating.store(false, Ordering::Release);
+    }
 }
 
 impl Drop for ShareView {

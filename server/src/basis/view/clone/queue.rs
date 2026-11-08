@@ -1,10 +1,35 @@
+use super::payload::Payload;
 use alloc::collections::VecDeque;
+use alloc::sync::Arc;
+use kernel_api::model::identity::TaskId;
 
 use kernel_api::model::clone_view::CloneCondition;
 use kernel_api::model::clone_view::CloneLimits;
 
-use super::hand::Hand;
-use super::slot::Slot;
+pub(super) struct Hand {
+    pub(super) from: TaskId,
+    pub(super) buf: Arc<Payload>,
+    pub(super) at: u64,
+}
+
+pub(super) enum Slot {
+    Reserved(usize, usize),
+    Ready(Hand),
+}
+
+impl Slot {
+    pub(super) fn hand(&self) -> Option<&Hand> {
+        match self {
+            Self::Ready(hand) => Some(hand),
+            Self::Reserved(..) => None,
+        }
+    }
+}
+
+pub(super) enum Pending {
+    Queue(Queue),
+    Dead,
+}
 
 #[derive(Default)]
 pub(super) struct Queue {

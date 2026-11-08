@@ -11,10 +11,10 @@ use kernel_api::model::identity::TaskId;
 
 use super::CloneView;
 use super::HANDS_LIVE;
-use super::hand::Hand;
 use super::key;
-use super::pending::Pending;
-use super::slot::Slot;
+use super::queue::Hand;
+use super::queue::Pending;
+use super::queue::Slot;
 use crate::basis::sign;
 
 pub(crate) struct Reservation<'a> {
