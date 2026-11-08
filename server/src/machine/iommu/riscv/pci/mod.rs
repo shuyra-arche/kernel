@@ -4,5 +4,5 @@ pub(crate) mod aperture;
 mod config;
 mod endpoint;
 
-pub(crate) use config::Ecam;
-pub(crate) use endpoint::{Endpoint, Error};
+pub use config::Ecam;
+pub(crate) use endpoint::Endpoint;

@@ -1,4 +1,5 @@
 use super::BootError;
+use super::PciRoute;
 use super::ResourceOperation;
 use crate::basis::room::interrupt;
 use crate::machine::board;
@@ -6,6 +7,22 @@ use crate::machine::clock;
 use crate::machine::console;
 
 pub fn init(dtp: usize) -> Result<(), BootError> {
+    initialize(dtp, None)
+}
+
+/// Install a platform-selected PCI route before exporting boot resources.
+///
+/// # Safety
+/// The platform owns the endpoint, its BAR and the controller exclusively.
+/// All requests traverse the IOMMU, with no bypass or requester alias. The
+/// quiescence callback runs in bounded steps after the IOMMU is off. Settled
+/// must prove that all earlier endpoint accesses that could reach old Pages
+/// have completed and that future accesses remain blocked.
+pub unsafe fn init_with_pci(dtp: usize, route: PciRoute) -> Result<(), BootError> {
+    initialize(dtp, Some(route))
+}
+
+fn initialize(dtp: usize, route: Option<PciRoute>) -> Result<(), BootError> {
     console::init();
     board::init(dtp).map_err(|source| BootError::Machine { dtp, source })?;
     crate::machine::allocator::init().map_err(BootError::Allocator)?;
@@ -24,10 +41,12 @@ pub fn init(dtp: usize) -> Result<(), BootError> {
         operation: ResourceOperation::InitializeIommu,
         source,
     })?;
-    super::devices::init_pci().map_err(|source| BootError::Resources {
-        operation: ResourceOperation::Devices,
-        source,
-    })?;
+    if let Some(route) = route {
+        super::devices::init_pci(route).map_err(|source| BootError::Resources {
+            operation: ResourceOperation::Devices,
+            source,
+        })?;
+    }
     interrupt::init().map_err(|source| BootError::Resources {
         operation: ResourceOperation::InitializeTraps,
         source,

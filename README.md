@@ -143,15 +143,15 @@ until the matching trusted completion settles. Notifications run after commit
 and registry locks are released. An interrupt or business completion is never a
 reclamation receipt. Failed synchronization retains the obligation.
 
-The platform adapter remains deliberately bounded to coherent QEMU virt under
-qemu-edu-dma: the explicitly configured EDU at bus 0/slot 1, one full payload
-Cell, exact IOVA and a one-shot domain. Bootstrap validates and sets up that
-fixture's BAR; this is not a general PCI enumerator or allocation policy.
-Protected PCI configuration, IOMMU registers, private queues, interrupts and
-platform quiescence stay in machine/iommu. ECAM and the surrounding aperture
-are withheld; only the validated BAR is exported as a Pend. General PCI policy
-belongs to upper Units. ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough
-remain unsupported; PQ is disabled. The normal build exports no such route.
+Trusted boot images supply the exact PCI route, BAR placement and quiescence
+check. The Kernel validates the route and keeps ECAM, IOMMU registers, private
+queues and interrupts under its control. It exports the validated BAR as a Pend.
+The normal boot image supplies no PCI route. Upper Units own general PCI policy.
+
+The test image in `server/tests/platform/qemu` supplies the coherent QEMU virt
+EDU route. It exercises one full payload Cell, exact IOVA and a one-shot domain.
+ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough remain unsupported.
+PQ is disabled.
 Settled logical records survive for observation/Delete while their creator lives.
 After creator death they expire only when hardware responsibility has settled.
 
@@ -177,8 +177,8 @@ cargo +nightly test --locked -p kernel-memory-tests --test hardware --target x86
 
 RV64 production builds enforce `-Dwarnings` without blanket unused/dead-code
 allowances. Keep the configured relocation, frame-pointer and code-model flags
-when overriding RUSTFLAGS. Validate debug/release with default, semihosting,
-qemu-edu-dma and all features for changes spanning conditional paths.
+when overriding RUSTFLAGS. Validate debug/release with default and all features
+for changes spanning conditional paths.
 
 All test code lives under owning `tests/` trees, with `tests/<domain>/mod.rs`
 entry points and Cargo declarations. Production libraries remain no_std.
@@ -192,10 +192,10 @@ actual Kernel through Capsule, and runs debug with one/four harts and release
 with four harts. CPU scenarios cover all Slot/Memo endpoint shapes, stale
 transitions, persistent freezing, replacement, borrowed ownership denial, Pend
 windows, Sign revocation, stable Unit results and atomic WaitValue/WakeValue.
-The I/O variants execute Cell traps against real QEMU EDU/IOMMU hardware: DMA
-permission failure, trusted retirement, ownership movement, and creator death
-with a delayed DMA callback. Each variant preserves its own commands, hashes and
-logs under `server/tests/guest/cell/target/evidence/`.
+The I/O variants boot the separate test image with the same Kernel library and
+exercise Cell traps against QEMU EDU/IOMMU. They cover DMA permission failure,
+trusted retirement, ownership movement and creator death with a delayed callback.
+Each variant preserves its own commands, hashes and logs under `server/tests/guest/cell/target/evidence/`.
 
 The separate no_std IOMMU guest runs ten hardware scenarios covering queues,
 failure, delayed completion, owner exit and denied DMA after physical reuse. It

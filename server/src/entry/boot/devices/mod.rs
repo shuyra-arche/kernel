@@ -5,6 +5,7 @@ mod plan;
 use plan::reserved::discover as iommu_regions;
 
 pub(super) use iommu::{init as init_iommu, shutdown as shutdown_iommu};
+pub use pci::PciRoute;
 pub(super) use pci::init as init_pci;
 
 use crate::basis::nest::Access;
