@@ -109,7 +109,11 @@ fn receive(token: PendId, wait: Wait) -> u64 {
         // Let load Tasks exit after a failed assertion, so shutdown can retain
         // the router counters instead of hiding the failure behind a watchdog.
         LOAD_STOP.store(true, Ordering::Release);
-        panic!("UART IRQ missing: {reply:?}; ier={} iir={}", read(1), read(2))
+        panic!(
+            "UART IRQ missing: {reply:?}; ier={} iir={}",
+            read(1),
+            read(2)
+        )
     };
     irq_received();
     sequence
@@ -129,7 +133,10 @@ fn retained(token: PendId) -> u64 {
                 return sequence;
             }
             SignReply::Pending => {
-                assert!(room::clock() < until, "unobserved UART IRQ was not retained");
+                assert!(
+                    room::clock() < until,
+                    "unobserved UART IRQ was not retained"
+                );
                 room::yield_();
             }
             reply => panic!("unexpected UART reply: {reply:?}"),
