@@ -65,7 +65,7 @@ static OBSERVED: AtomicBool = AtomicBool::new(false);
 extern "C" fn observer() -> ! {
     let token = PendId::mint(OBSERVER.load(Ordering::Acquire));
     assert!(matches!(
-        sign::listen(token, deadline()).unwrap(),
+        sign::listen(token, Wait::Infinite).unwrap(),
         SignReply::Triggered { .. }
     ));
     OBSERVED.store(true, Ordering::Release);
