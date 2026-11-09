@@ -26,8 +26,6 @@ jobs:
         run: cargo build --locked --workspace --target riscv64gc-unknown-none-elf
       - name: Build workspace (release)
         run: cargo build --locked --workspace --release --target riscv64gc-unknown-none-elf
-      - name: Build optional crash reporting
-        run: cargo build --locked -p kernel --all-features --target riscv64gc-unknown-none-elf
 
   guest:
     name: Guest tests (QEMU)

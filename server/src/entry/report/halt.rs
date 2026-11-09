@@ -61,17 +61,14 @@ pub(crate) extern "C" fn info(info: &PanicInfo) -> ! {
             if root_ok { "ok" } else { "CORRUPTED" },
             hart::hart_id()
         ))]);
-        report.paragraph("panic", Some(head)).items.extend(rows);
+        report.paragraph(Some(head)).items.extend(rows);
     }
 
     crate::entry::report::scene::dump(&mut report);
 
-    let sealed = report.seal();
     crate::putln!();
     let mut sink = crate::metal::console::Sink;
-    crate::entry::report::render::render(sealed, &mut sink, 2);
-    #[cfg(feature = "semihosting")]
-    crate::entry::report::export::export(sealed);
+    crate::entry::report::render::render(&report, &mut sink, 2);
 
     crate::metal::stop::failed()
 }
