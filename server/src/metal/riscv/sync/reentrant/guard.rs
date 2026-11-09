@@ -11,6 +11,8 @@ pub struct RelLockGuard<'a, T: ?Sized> {
     lock: &'a RelLock<T>,
     _not_send: PhantomData<*const ()>,
     _trap: TrapGuard,
+    #[cfg(feature = "latency")]
+    start: u64,
 }
 
 impl<'a, T: ?Sized> RelLockGuard<'a, T> {
@@ -19,6 +21,8 @@ impl<'a, T: ?Sized> RelLockGuard<'a, T> {
             lock,
             _not_send: PhantomData,
             _trap: trap,
+            #[cfg(feature = "latency")]
+            start: crate::metal::measure::stamp(),
         }
     }
 }
@@ -38,6 +42,8 @@ impl<T: ?Sized> Drop for RelLockGuard<'_, T> {
             *p -= 1;
             *p
         };
+        #[cfg(feature = "latency")]
+        crate::metal::measure::elapsed(crate::metal::measure::Metric::CommitHold, self.start);
         if c == 0 {
             #[cfg(debug_assertions)]
             super::depend::release(self.lock as *const _ as *const () as usize);

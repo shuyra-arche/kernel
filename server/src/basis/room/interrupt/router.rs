@@ -73,6 +73,8 @@ impl Router {
         if hart::hart_id() != self.hart {
             return false;
         }
+        #[cfg(feature = "latency")]
+        let irq_entry = crate::metal::measure::stamp();
         let _commit = crate::basis::commit();
         for _ in 0..4 {
             let Some(irq) = self.controller.claim_masked() else {
@@ -92,6 +94,11 @@ impl Router {
                     .cloned();
                 if let Some(endpoint) = endpoint {
                     Source::deliver(&endpoint);
+                    #[cfg(feature = "latency")]
+                    crate::metal::measure::elapsed(
+                        crate::metal::measure::Metric::IrqSign,
+                        irq_entry,
+                    );
                 } else {
                     self.finish(irq, false);
                 }

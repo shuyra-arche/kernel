@@ -50,6 +50,11 @@ fn hardware_interrupt_sign_delivers_and_rebinds() {
 fn hardware_interrupt_sign_coexists_with_iommu() {
     run("irq-io")
 }
+#[test]
+#[ignore = "requires QEMU virt; opt-in latency instrumentation"]
+fn latency_baseline_observes_contended_paths() {
+    run("latency")
+}
 static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn run(mode: &str) {
     let _run = RUN.lock().unwrap_or_else(|e| e.into_inner());
@@ -58,6 +63,7 @@ fn run(mode: &str) {
     let mixed = mode == "migration";
     let vector = mode == "vector";
     let clock = mode == "clock";
+    let latency = mode == "latency";
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -80,8 +86,13 @@ fn run(mode: &str) {
     }
     std::fs::create_dir_all(&evidence).unwrap();
     let mut guest_build = Command::new("cargo");
-    if io || context || clock || mode == "large" || mode == "irq" {
-        guest_build.args(["+nightly", "build", "--features", mode]);
+    if io || context || clock || mode == "large" || mode == "irq" || latency {
+        guest_build.args([
+            "+nightly",
+            "build",
+            "--features",
+            if latency { "irq" } else { mode },
+        ]);
     } else {
         guest_build.args(["+nightly", "build"]);
     }
@@ -124,6 +135,9 @@ fn run(mode: &str) {
         ]);
         build.env("CARGO_TARGET_DIR", &kernel_target);
         build.arg("--manifest-path").arg(&fixture);
+        if latency {
+            build.args(["--features", "kernel/latency"]);
+        }
         if let Some(extra) = extra {
             build.arg(extra);
         }
@@ -154,7 +168,9 @@ fn run(mode: &str) {
             .map(|harts| (*harts, ""))
             .chain((profile == "debug" && !io).then_some((4, "-split-memory")))
             .chain((profile == "debug" && mode != "io-exit").then_some((4, "-sparse-harts")));
-        let cases: Vec<_> = if clock {
+        let cases: Vec<_> = if latency {
+            harts.iter().map(|h| (*h, "", "rv64")).collect()
+        } else if clock {
             let mut cases = vec![
                 (4, "-sbi", "rv64,sstc=true"),
                 (4, "-sstc", "rv64,sstc=true"),
@@ -215,7 +231,7 @@ fn run(mode: &str) {
                     &trace_path,
                     &["clock_handoff_send", "clock_handoff_receive"],
                 )
-            } else if mode.starts_with("irq") && harts == 4 {
+            } else if (mode.starts_with("irq") || latency) && harts == 4 {
                 super::context::trace_checkpoints(
                     &mut command,
                     &elf,
@@ -265,6 +281,9 @@ fn run(mode: &str) {
             let output = super::run(command, &evidence, &name);
             let log = String::from_utf8_lossy(&output.stdout);
             assert!(output.status.success(), "{name}: {log}");
+            if latency {
+                super::latency::verify(&log, &evidence.join(format!("{name}-latency.tsv")));
+            }
             if clock {
                 if profile == "debug" {
                     super::clock::verify(&log, matches!(suffix, "-sstc" | "-sstc-trace"));
@@ -300,7 +319,7 @@ fn run(mode: &str) {
             ] {
                 assert!(log.contains(marker), "{name}: {log}");
             }
-            if mode.starts_with("irq") {
+            if (mode.starts_with("irq") || latency) {
                 if !symbols.is_empty() {
                     super::context::verify(&trace_path, &symbols, false);
                 }

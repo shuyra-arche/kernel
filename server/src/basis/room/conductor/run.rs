@@ -108,6 +108,10 @@ fn wait() -> usize {
             scheduler::idle::wake(me);
             return pa;
         }
+        #[cfg(feature = "latency")]
+        crate::metal::measure::leave();
         hart::wait();
+        #[cfg(feature = "latency")]
+        crate::metal::measure::enter();
     }
 }

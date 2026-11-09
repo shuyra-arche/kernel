@@ -123,6 +123,15 @@ impl Conductor {
     pub(super) fn push(&self, task: Arc<Task>) -> bool {
         let _commit = crate::basis::commit();
         debug_assert!(task.ready(), "starved 容器只收就绪任务");
+        #[cfg(feature = "latency")]
+        {
+            let _ = task.ready_stamp.compare_exchange(
+                0,
+                crate::metal::measure::stamp(),
+                core::sync::atomic::Ordering::Relaxed,
+                core::sync::atomic::Ordering::Relaxed,
+            );
+        }
         let mut i = self.inner.lock();
         let notify = i.starved_is_empty();
         self.starved_push(&mut i, task);
