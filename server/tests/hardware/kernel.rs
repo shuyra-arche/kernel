@@ -85,6 +85,9 @@ fn run(mode: &str) {
         std::fs::remove_dir_all(&evidence).unwrap();
     }
     std::fs::create_dir_all(&evidence).unwrap();
+    let rust = Command::new("rustc").arg("-Vv").output().unwrap();
+    assert!(rust.status.success());
+    std::fs::write(evidence.join("rustc.txt"), rust.stdout).unwrap();
     let mut guest_build = Command::new("cargo");
     if io || context || clock || mode == "large" || mode == "irq" || latency {
         guest_build.args([
@@ -319,7 +322,7 @@ fn run(mode: &str) {
             ] {
                 assert!(log.contains(marker), "{name}: {log}");
             }
-            if (mode.starts_with("irq") || latency) {
+            if mode.starts_with("irq") || latency {
                 if !symbols.is_empty() {
                     super::context::verify(&trace_path, &symbols, false);
                 }

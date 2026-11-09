@@ -31,6 +31,7 @@ const NAMES: [&str; 10] = [
     "timer-late",
     "probe",
 ];
+#[repr(align(64))]
 struct Local {
     metrics: [Distribution; 10],
     kernel: AtomicU64,
