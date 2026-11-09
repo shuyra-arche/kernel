@@ -1,7 +1,7 @@
 //! 在世任务名册：按 id 找得到每一枚还活着的任务。
 //!
 //! `insert` 在任务真正进世界那一刻登记（先留位、后插入，插不下就退回去）；
-//! `prune` 在收尸时把死掉的弱引用扫掉。
+//! 最后一份强引用释放时按身份摘除登记，不扫描其他 Task。
 
 use alloc::sync::Arc;
 
@@ -50,11 +50,23 @@ pub(crate) fn find(id: TaskId) -> Option<TaskWeak> {
     table().lock().get(&id).map(|w| w.copy_at(Origin::Lookup))
 }
 
-pub(crate) fn prune() -> usize {
-    let mut g = table().lock();
-    let before = g.len();
-    g.retain(|_, w| w.live());
-    before - g.len()
+/// Only Task::drop removes its registration: completed retirement is not proof
+/// that other in-flight owners have released their strong references. No registry
+/// operation drops a strong Task reference while holding this table lock.
+pub(super) fn remove(id: TaskId) {
+    let removed = TABLE.get().and_then(|table| {
+        let mut entries = table.lock();
+        if let Some(task) = entries.get(&id) {
+            assert!(
+                !task.live(),
+                "registration outlives every strong Task owner"
+            );
+        }
+        entries.remove(&id)
+    });
+    // Dropping the last explicit Weak may release storage. Keep it outside the
+    // registry guard, including the already-cleared shutdown case.
+    drop(removed);
 }
 
 #[cfg(debug_assertions)]

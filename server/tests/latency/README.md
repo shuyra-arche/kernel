@@ -50,8 +50,9 @@ is bounded. Sign notification coalesces work; it is not a device completion coun
    waits for its own members' reclaimed acknowledgements, without recursively
    retiring Tasks or scanning the global Task registry. Both scheduler and idle
    service advance husks, retaining a local timer retry. Eager doom, Pend subtrees,
-   membership pruning, the registry prune and individual Nest operations still
-   have size-dependent costs. Logical closure can be bounded separately from
+   receipt clearing and individual Nest operations still have size-dependent
+   costs. Member removal is local and empty-Team pruning follows only ancestors;
+   Task registrations disappear by identity at last strong-reference release. Logical closure can be bounded separately from
    asynchronous physical cleanup; preserve generations and immutable exit results.
 5. **Cell/Nest and hardware retirement** (`basis/cell/`, `basis/nest/`,
    `metal/riscv/iommu/`): zeroing depends on bytes; traversal on mappings/pages;
@@ -204,6 +205,44 @@ last Task exits. The same guest runs under the IRQ/IOMMU and latency fixtures;
 the external-owner-death scenario separately covers delayed device access.
 
 This slice does not finish M2: eager doom/cull, arbitrary Pend descendants,
-global registry and membership pruning, one Nest's mapping/page walk, successful
+owner-receipt subtree clearing, one Nest's mapping/page walk, successful
 IRQ callbacks, and IRQ-off blocking acquisition still require narrower work
 boundaries. No observation here is a WCET or hardware latency guarantee.
+
+## M2: identity-local registration and membership cleanup
+
+Completing one husk no longer scans the Task registry or recursively prunes its
+Team subtree. Task registrations hold only Weak references. `Task::drop` removes
+its own non-reusing identity after the last strong owner is gone; retained
+in-flight Arc owners remain discoverable until then. Registry removal checks
+that no strong owner remains and drops the extracted Weak outside the registry
+guard. Registry readers clone Weak references under the lock and upgrade only
+after unlocking; publication retains the new Task in the held list and its return
+value, so it cannot run a Task destructor under that lock. Explicit shutdown
+clear still drops only Weak records, and a later Task drop tolerates absence.
+
+Member receipt removal and reclamation now own their membership update under
+COMMIT. Only `reclaimed && receipts.is_empty()` permits removal. Binary search
+locates the changed member; vector compaction is bounded by MAX_MEMBERS (1024).
+An empty Ousted Team detaches upward along at most MAX_DEPTH (32) ancestors,
+searching each parent's sorted, MAX_CHILDREN-sized vector (1024). It does not
+visit siblings or their descendants. A live Team and any Team with retained
+results or unfinished members stay registered. Receipt clearing prunes eligible
+members while doing its already-required owner walk, so a separate recursive
+pruning pass and repeated child clears from Task Drop are unnecessary.
+
+Host tests import the production Registry, TaskWeak, Member and TeamNode code.
+They check retained strong references, shutdown-clear tolerance, both orders of
+receipt removal and reclamation, independent result observers, ancestor unlink,
+absent/repeated unlink, partial receipt-root removal, and sibling removal during
+a traversal. Lock-boundary counters verify that an unrelated sibling's member
+list is untouched. These fixtures supply synchronization/notification effects;
+QEMU supplies real COMMIT, destructor and hardware coverage. The eight-member
+guest also inspects every remaining exit result after each deletion.
+
+This removes full-registry and recursive-pruning work from ordinary burial and
+single-result deletion. Hash-table probe cost, allocator destruction and COMMIT
+contention still lack hardware time bounds. `TeamNode::clear` and eager doom
+still walk receipt/lifecycle subtrees; Pend subtree cull and individual Nest
+retirement remain unfinished M2 boundaries. No end-to-end RT guarantee follows
+from the local identity lookup alone.

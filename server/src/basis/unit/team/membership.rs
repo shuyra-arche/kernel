@@ -79,12 +79,45 @@ impl Member {
     }
 
     pub fn receive(&self, owner: TaskId) -> bool {
-        let mut receipts = self.receipts.lock();
-        if let Some(at) = receipts.iter().position(|r| r.owner == owner) {
+        let _commit = crate::basis::commit();
+        {
+            let mut receipts = self.receipts.lock();
+            let Some(at) = receipts.iter().position(|r| r.owner == owner) else {
+                return false;
+            };
             receipts.swap_remove(at);
-            true
-        } else {
-            false
         }
+        if let Some(node) = self.node.upgrade() {
+            node.remove(self.id);
+        }
+        true
+    }
+
+    /// Publish cleanup completion before removing an unobserved member. The
+    /// record remains if any controller still owns its immutable exit result.
+    pub(crate) fn reclaim(&self) {
+        let _commit = crate::basis::commit();
+        self.reclaimed
+            .store(true, core::sync::atomic::Ordering::Release);
+        if let Some(node) = self.node.upgrade() {
+            node.remove(self.id);
+        }
+    }
+
+    pub(super) fn retained(&self) -> bool {
+        !self.reclaimed.load(core::sync::atomic::Ordering::Acquire)
+            || !self.receipts.lock().is_empty()
+    }
+
+    pub(super) fn clear(&self, owner: TaskId, root: Option<TeamId>) {
+        let mut receipts = self.receipts.lock();
+        for receipt in receipts.iter_mut().filter(|r| r.owner == owner) {
+            if let Some(root) = root {
+                receipt.roots.retain(|id| *id != root);
+            } else {
+                receipt.roots.clear();
+            }
+        }
+        receipts.retain(|r| !r.roots.is_empty());
     }
 }

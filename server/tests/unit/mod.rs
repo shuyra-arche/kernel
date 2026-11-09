@@ -32,3 +32,13 @@ fn every_live_phase_can_be_terminated_without_skipping_ready_publication() {
     assert!(Ready.allows(Running));
     assert!(Running.allows(Waiting));
 }
+
+#[allow(dead_code, unused_imports)] // Only topology/retention are host-tested here.
+#[path = "../../src/basis/unit/team/lifecycle/mod.rs"]
+mod lifecycle;
+#[allow(dead_code)]
+#[path = "../../src/basis/unit/team/membership.rs"]
+mod membership;
+mod registration;
+use membership::Member;
+mod topology;

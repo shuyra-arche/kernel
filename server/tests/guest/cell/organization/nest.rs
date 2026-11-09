@@ -138,7 +138,14 @@ fn build(cascade: bool) {
     for task in tasks {
         assert!(crate::lifecycle::wait_task(task));
         assert_eq!(crate::lifecycle::result(task), (1, 83));
+    }
+    for (at, task) in tasks.iter().copied().enumerate() {
         crate::lifecycle::delete(task);
+        // Reclaiming/removing one member must preserve every other receipt and
+        // its immutable result, even after all executions have already exited.
+        for other in &tasks[at + 1..] {
+            assert_eq!(crate::lifecycle::result(*other), (1, 83));
+        }
     }
     unit::finish(team).unwrap();
     unit::delete(UnitTarget::Team(team)).unwrap();
