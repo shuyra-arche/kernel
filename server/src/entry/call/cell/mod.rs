@@ -447,15 +447,19 @@ fn resolve_source(
                 kernel_api::model::pend::CreationRights::FLAT,
             )
             .map_err(source_fail)?;
-            if allocation.align != PAGE_SIZE {
+            if allocation.level.get() >= crate::metal::mmu::mode::levels()
+                || allocation.align != allocation.level.bytes().ok_or(CellFail::NotAligned)?
+            {
                 return Err(CellFail::NotAligned);
             }
             let size = allocation.bytes().ok_or(CellFail::Denied)?;
             let pages = size / PAGE_SIZE;
             let count = PageCount::new(pages).ok_or(CellFail::NotAligned)?;
-            let range =
-                Flat::acquire(ident.team.cells.clone(), Allocation::new(pages, PAGE_SIZE)?)?
-                    .whole();
+            let range = Flat::acquire(
+                ident.team.cells.clone(),
+                Allocation::at_level(pages, allocation.level)?,
+            )?
+            .whole();
             let authorization =
                 SourceAuthorization::new(range, Access::all(), ident.id).map_err(source_fail)?;
             let ceiling = authorization.ceiling();
@@ -688,7 +692,7 @@ fn transfer(
                 .checked_add(page)
                 .ok_or(CellFail::NotAligned)?,
         );
-        let count = PageCount::new(1).ok_or(CellFail::NotAligned)?;
+        let count = PageCount::new(source_page.pages()).ok_or(CellFail::NotAligned)?;
         let window = Geometry::new(offset, count).map_err(source_fail)?;
         ends.push((hold, window));
     }

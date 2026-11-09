@@ -29,7 +29,7 @@ impl FlatRange {
     }
 
     /// 这一段窗口强持的那个来源。
-    pub(super) fn flat(&self) -> &Arc<Flat> {
+    pub(crate) fn flat(&self) -> &Arc<Flat> {
         &self.flat
     }
 
@@ -51,6 +51,15 @@ impl FlatRange {
             && self.count == other.count
     }
 
+    pub fn level(&self) -> kernel_api::model::cell::CellLevel {
+        self.flat.level()
+    }
+    pub fn grain(&self) -> usize {
+        self.flat.grain()
+    }
+    pub(crate) fn cell(&self, offset: PageOffset) -> Result<Self, FlatError> {
+        self.range(offset, PageCount::new(self.grain()).unwrap())
+    }
     /// 相对偏移选择子范围。
     pub fn range(&self, offset: PageOffset, count: PageCount) -> Result<Self, FlatError> {
         let end = offset

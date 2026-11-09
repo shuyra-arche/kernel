@@ -15,7 +15,8 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: FlatCall, ident: &Arc<Task
                 license,
                 size,
                 align,
-            } => authority::create(&task, license, size, align).map(|p| p.get()),
+                level,
+            } => authority::create(&task, license, size, align, level).map(|p| p.get()),
             FlatCall::Inspect { token, out } => {
                 let info = authority::inspect(&task, token)?;
                 if !ident.team.nest.copy_out(&info.to_bytes(), out) {

@@ -98,6 +98,7 @@ fn creation_is_one_canonical_snapshot_for_geometry_and_authority() {
 #[test]
 fn observation_preserves_generation_and_full_width_faults() {
     let info = CellInfo {
+        level: CellLevel::BASE,
         generation: u64::MAX,
         state: CellState::Retracting,
         page: 7,
@@ -109,7 +110,7 @@ fn observation_preserves_generation_and_full_width_faults() {
     };
     let bytes = info.to_bytes();
     assert_eq!(CellInfo::from_bytes(&bytes), Some(info));
-    for (offset, value) in [(8, 9), (24, 4), (56, 1)] {
+    for (offset, value) in [(8, 9), (24, 4), (56, 255)] {
         let mut bad = bytes;
         bad[offset] = value;
         assert!(CellInfo::from_bytes(&bad).is_none());
@@ -133,7 +134,7 @@ fn external_destination_rejects_internal_only_controls_and_geometry() {
     };
     let bytes = request.to_bytes();
     assert_eq!(CellCreate::from_bytes(&bytes), Some(request));
-    for (word, value) in [(5, 1usize), (6, 2), (7, 0), (8, 0x8001), (10, 10), (11, 1)] {
+    for (word, value) in [(5, 1usize), (7, 0), (8, 0x8001), (10, 10), (11, 1)] {
         let mut bad = bytes;
         bad[word * 8..word * 8 + 8].copy_from_slice(&value.to_le_bytes());
         assert!(CellCreate::from_bytes(&bad).is_none(), "word {word}");

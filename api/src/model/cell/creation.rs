@@ -69,6 +69,7 @@ impl CellCreate {
             Self::Slot(a) => {
                 words[1] = a.size;
                 words[2] = a.align;
+                words[3] = a.level.get();
             }
             Self::Memo {
                 source,
@@ -116,7 +117,15 @@ impl CellCreate {
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let w: [usize; 12] = fetch_words(bytes)?;
         match w[0] {
-            0 if w[3..].iter().all(|w| *w == 0) => Some(Self::Slot(Allocation::new(w[1], w[2])?)),
+            0 if w[4..].iter().all(|w| *w == 0) => {
+                let allocation = Allocation {
+                    size: w[1],
+                    align: w[2],
+                    level: super::CellLevel::new(w[3])?,
+                };
+                allocation.bytes()?;
+                Some(Self::Slot(allocation))
+            }
             1 => {
                 if w[2] != 0 || w[4] == 0 || w[4] > isize::MAX as usize {
                     return None;
@@ -136,11 +145,8 @@ impl CellCreate {
                         let super::PlacementAt::Exact(address) = placement.at() else {
                             return None;
                         };
-                        // External publication has one page, one exact address and caller authority.
-                        if control != MappingControl::Caller
-                            || w[6] != 1
-                            || (w[3] == 0 && w[5] != 0)
-                        {
+                        // External publication has one whole Cell, one exact address and caller authority.
+                        if control != MappingControl::Caller || (w[3] == 0 && w[5] != 0) {
                             return None;
                         }
                         let access = match w[10] {

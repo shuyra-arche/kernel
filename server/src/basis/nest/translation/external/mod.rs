@@ -11,7 +11,7 @@ use crate::metal::sync::{Level, SpinLock};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::mem::ManuallyDrop;
-use kernel_api::address::{PAGE_SIZE, VirtAddr};
+use kernel_api::address::VirtAddr;
 pub(super) use state::External;
 
 impl NestState {
@@ -48,14 +48,20 @@ impl Nest {
         source: FlatRange,
         access: Access,
     ) -> Result<Arc<Span>, NestError> {
-        if !self.is_external()
+        let size = source
+            .page_count()
+            .checked_bytes()
+            .ok_or(NestError::NotAligned)?;
+        if size > 1 << 21
+            || source.page_count().get() != source.grain()
+            || !self.is_external()
             || address == 0
             || address >= 1usize << 38
-            || !address.is_multiple_of(PAGE_SIZE)
+            || !address.is_multiple_of(size)
         {
             return Err(NestError::NotAligned);
         }
-        let reservation = self.reserve(Placement::fixed(VirtAddr::new(address), PAGE_SIZE)?)?;
+        let reservation = self.reserve(Placement::fixed(VirtAddr::new(address), size)?)?;
         self.create_memo(reservation, source, access, access)
     }
     pub(in crate::basis::nest) fn commit_external(

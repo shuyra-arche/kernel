@@ -201,6 +201,19 @@ impl SourceAuthorization {
             && matches!(&*self.phase.lock(), Phase::Private(_))
     }
 
+    /// Called under the owner's Pend and the shared commit boundary.
+    pub(crate) fn reshape_ready(&self, task: TaskId) -> Result<(), PendFail> {
+        if !self.private_owner(task) || self.revoked() {
+            return Err(PendFail::Denied);
+        }
+        if self.holds.load(Ordering::Acquire) != 1
+            || !self.bindings.lock().is_empty()
+            || !self.inflight.lock().is_empty()
+        {
+            return Err(PendFail::Busy);
+        }
+        Ok(())
+    }
     /// 相对整段来源的页窗口解析成可用范围。
     ///
     /// 私有阶段用自己的强持范围；已接管就向 Share 要，且要求那枚 Pend 仍活——
@@ -371,6 +384,9 @@ impl SourceAuthorization {
         count: PageCount,
     ) -> Result<(), PendFail> {
         self.ensure_internal()?;
+        self.full_range()
+            .and_then(|range| range.range(offset, count).ok())
+            .ok_or(PendFail::Invalid)?;
         let claimed = self.inflight.lock().iter().any(|(_, window)| {
             window
                 .as_ref()

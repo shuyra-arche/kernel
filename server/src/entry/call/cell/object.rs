@@ -16,7 +16,10 @@ fn index(entry: &RangeEntry, page: usize) -> Result<NestRange, CellFail> {
     entry
         .mapping()
         .ok_or(CellFail::Denied)?
-        .range(PageOffset::new(page), PageCount::new(1).unwrap())
+        .range(
+            PageOffset::new(page),
+            PageCount::new(entry.mapping().ok_or(CellFail::Denied)?.source().grain()).unwrap(),
+        )
         .map_err(CellFail::from)
 }
 fn check(entry: &RangeEntry, actor: &Arc<Task>) -> Result<(), CellFail> {
@@ -105,7 +108,7 @@ pub(super) fn create(
                     address,
                     access,
                 } => (|| {
-                    if range.offset != 0 || range.count != 1 {
+                    if range.offset != 0 {
                         return Err(CellFail::Denied);
                     }
                     let actor = caller(ident).ok_or(CellFail::Denied)?;
@@ -116,6 +119,12 @@ pub(super) fn create(
                         .references
                         .get(range.reference.get())
                         .ok_or(CellFail::Denied)?;
+                    if hold
+                        .resolve()
+                        .is_none_or(|r| r.page_count().get() != range.count)
+                    {
+                        return Err(CellFail::Denied);
+                    }
                     Ok((
                         external::create(
                             &actor,
@@ -133,7 +142,15 @@ pub(super) fn create(
                 let object = CellObject::Memo { target, mapping };
                 let result = (|| {
                     // A Pend supplies an authorized association, never a new owning Slot.
-                    for page in 0..range.count {
+                    let actor = caller(ident).ok_or(CellFail::Denied)?;
+                    let grain = actor
+                        .pend
+                        .references
+                        .get(reference.get())
+                        .and_then(|hold| hold.resolve())
+                        .ok_or(CellFail::Denied)?
+                        .grain();
+                    for page in (0..range.count).step_by(grain) {
                         handoff(
                             CellHandoff {
                                 source: CellPosition {
@@ -185,7 +202,7 @@ fn source(pos: CellPosition, ident: &Arc<TaskIdent>) -> Result<(FlatRange, Arc<P
             let range = hold
                 .resolve()
                 .ok_or(CellFail::Denied)?
-                .range(PageOffset::new(pos.page), PageCount::new(1).unwrap())?;
+                .cell(PageOffset::new(pos.page))?;
             // Fresh Slot capacity acquires its zeroed Page on first use; Missing never regenerates.
             let cell = crate::basis::cell::Cell::Flat(range.clone());
             let page = match cell.page(0) {
@@ -230,13 +247,14 @@ fn inspect(pos: CellPosition, ident: &Arc<TaskIdent>) -> Result<CellInfo, CellFa
         CellObject::Slot(r) => {
             let _serial = actor.pend.lock();
             let range = endpoint(&actor, r)?;
-            let range = range.range(PageOffset::new(pos.page), PageCount::new(1).unwrap())?;
+            let range = range.cell(PageOffset::new(pos.page))?;
             let page = range
                 .materialized_cells()?
                 .into_iter()
                 .next()
                 .map(|(_, p)| p);
             Ok(CellInfo {
+                level: range.level(),
                 generation: 0,
                 state: if page.is_some() {
                     CellState::Ready
@@ -316,7 +334,9 @@ fn handoff_prepared(
                         team,
                         mapping,
                         offset: spec.source.page,
-                        count: 1,
+                        count: with_mapping(team, mapping, ident, |_, entry| {
+                            Ok(entry.mapping().ok_or(CellFail::Denied)?.source().grain())
+                        })?,
                     },
                     ident,
                     None,
@@ -536,6 +556,8 @@ fn publication(
 pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, CellFail> {
     match call {
         CellCall::Create { .. } => unreachable!(),
+        CellCall::Split { slot } => reshape(slot, false, ident),
+        CellCall::Merge { slot } => reshape(slot, true, ident),
         CellCall::Push { request } | CellCall::Pull { request } => handoff(
             CellHandoff::from_bytes(&read_snapshot::<{ CellHandoff::WIDTH }>(
                 &ident.team.nest,
@@ -619,4 +641,59 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
             }
         }
     }
+}
+
+/// Prepare the replacement authority before consuming any physical receipt.
+fn reshape(slot: SlotId, merging: bool, ident: &Arc<TaskIdent>) -> Result<usize, CellFail> {
+    let actor = caller(ident).ok_or(CellFail::Denied)?;
+    let _serial = actor.pend.lock();
+    let _commit = crate::basis::commit();
+    if !pend::live(&actor) {
+        return Err(CellFail::Denied);
+    }
+    let hold = actor
+        .pend
+        .references
+        .get(slot.get())
+        .ok_or(CellFail::Denied)?;
+    hold.source().reshape_ready(ident.id).map_err(source_fail)?;
+    let range = hold.resolve().ok_or(CellFail::Denied)?;
+    if range.index().get() != 0 || range.page_count() != range.flat().page_count() {
+        return Err(CellFail::Denied);
+    }
+    let level = if merging {
+        range.level().parent()
+    } else {
+        range.level().child()
+    }
+    .ok_or(CellFail::NotAligned)?;
+    if level.get() >= crate::metal::mmu::mode::levels() {
+        return Err(CellFail::NotAligned);
+    }
+    let target = Flat::acquire(
+        ident.team.cells.clone(),
+        super::Allocation::at_level(range.page_count().get(), level)?,
+    )?;
+    let source =
+        SourceAuthorization::new(target.whole(), hold.ceiling(), ident.id).map_err(source_fail)?;
+    let replacement = actor
+        .pend
+        .references
+        .insert(
+            source,
+            PageOffset::ZERO,
+            range.page_count(),
+            hold.ceiling(),
+            None,
+        )
+        .map_err(source_fail)?;
+    if let Err(error) = range.flat().reshape_into(&target) {
+        actor.pend.references.remove(replacement);
+        return Err(error.into());
+    }
+    hold.source()
+        .revoke()
+        .expect("exclusive source has no in-flight publication");
+    actor.pend.references.remove(slot.get());
+    Ok(replacement)
 }

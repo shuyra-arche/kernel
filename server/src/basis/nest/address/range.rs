@@ -31,6 +31,10 @@ impl NestRange {
         offset: PageOffset,
         count: PageCount,
     ) -> Result<Self, NestError> {
+        let grain = mapping.source().grain();
+        if !offset.get().is_multiple_of(grain) || !count.get().is_multiple_of(grain) {
+            return Err(NestError::NotAligned);
+        }
         let end = offset
             .get()
             .checked_add(count.get())

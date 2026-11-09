@@ -692,6 +692,9 @@ impl Nest {
         expected: u64,
         page: Arc<Page>,
     ) -> Result<(), NestError> {
+        if page.level() != mapping.source().level() {
+            return Err(NestError::NotAligned);
+        }
         let mut state = self.ready_state()?;
         self.ensure_owned(mapping, &state)?;
         mapping
@@ -752,11 +755,13 @@ impl Nest {
             .state
             .lock()
             .memo_address(mapping.initial_start(), index)?;
-        Ok(state
+        let mut info = state
             .memos
             .get(mapping, index)
             .unwrap_or(&memo::Memo::vacant())
-            .inspect(VirtAddr::new(address)))
+            .inspect(VirtAddr::new(address));
+        info.level = mapping.source().level();
+        Ok(info)
     }
 
     pub(crate) fn push_page(
@@ -1444,8 +1449,10 @@ impl Nest {
                 .find(address.as_usize())
                 .ok_or(NestError::NoRegion)?;
             mapping.range(
-                PageOffset::new(mapping.page_index(page)),
-                PageCount::new(1).expect("one fault page"),
+                PageOffset::new(
+                    mapping.page_index(page) / mapping.source().grain() * mapping.source().grain(),
+                ),
+                PageCount::new(mapping.source().grain()).expect("one fault Cell"),
             )?
         };
         self.materialize_active(selection)

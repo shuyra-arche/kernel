@@ -14,6 +14,7 @@ use kernel_api::{
 };
 use kernel_client::call::{cell, nest, room, sign};
 mod exit;
+mod levels;
 mod publication;
 pub(super) use exit::death;
 pub(super) use publication::run;
@@ -54,7 +55,7 @@ fn create(token: PendId, slot: SlotId, address: usize, writable: bool) -> CellPo
         source: CellSource::Slot(ReferenceRange {
             reference: slot,
             offset: 0,
-            count: 1,
+            count: super::info(super::slot(slot, 0)).level.pages().unwrap(),
         }),
         destination: MemoDestination::External {
             authority: token,

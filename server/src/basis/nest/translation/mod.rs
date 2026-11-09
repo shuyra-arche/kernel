@@ -232,18 +232,19 @@ impl NestState {
                     let pages = size / PAGE_SIZE;
                     let last_page = first_page + pages;
                     let mut count = 0;
-                    for (page, cell) in self
-                        .memos
-                        .published(&mapping)
-                        .filter(|(page, _)| *page >= first_page && *page < last_page)
-                    {
-                        assert_eq!(page, first_page + count, "published Page index gap");
+                    for (page, cell) in self.memos.published(&mapping) {
+                        let from = page.max(first_page);
+                        let end = (page + cell.cell().pages()).min(last_page);
+                        if from >= end {
+                            continue;
+                        }
+                        assert_eq!(from, first_page + count, "published Cell index gap");
                         assert_eq!(
-                            cell.physical_address(),
+                            cell.physical_address() + (from - page) * PAGE_SIZE,
                             physical.as_usize() + count * PAGE_SIZE,
-                            "published Page physical address"
+                            "published Cell physical address"
                         );
-                        count += 1;
+                        count += end - from;
                     }
                     assert_eq!(
                         count, pages,
@@ -283,11 +284,15 @@ impl NestState {
         let physical = PhysAddr::from_raw(page.physical_address());
         self.root
             .cpu_mut()?
-            .prepare_range_geometry(address, physical, PAGE_SIZE, geometry)?;
+            .prepare_range_geometry(address, physical, page.size(), geometry)?;
         memo.publish();
-        self.root
-            .cpu_mut()?
-            .map_range_prepared_geometry(address, physical, PAGE_SIZE, flags, geometry);
+        self.root.cpu_mut()?.map_range_prepared_geometry(
+            address,
+            physical,
+            page.size(),
+            flags,
+            geometry,
+        );
         self.memos.publish(mapping, index, memo);
         self.retirement.mappings.push(mapping.clone());
         self.retirement.mark_dirty(mapping.is_global());
@@ -330,10 +335,10 @@ impl NestState {
             .mappings
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
-        self.prepare_withdrawal(address, PAGE_SIZE, geometry)?;
+        self.prepare_withdrawal(address, expected.size(), geometry)?;
 
         // 过了这里只剩下已经定好的状态转移：PTE、发布记录与承载一起转入退休责任。
-        self.withdraw_prepared(address, PAGE_SIZE, geometry);
+        self.withdraw_prepared(address, expected.size(), geometry);
         self.retirement.mappings.push(mapping.clone());
         let cell = self
             .memos
@@ -355,7 +360,9 @@ impl NestState {
         let mut inner = mapping.state.lock();
         let transition =
             inner.protection_transition(mapping.initial_start(), window, request, |p| {
-                self.memos.publication(mapping, p).is_some()
+                self.memos
+                    .publication(mapping, p / inner.source.grain() * inner.source.grain())
+                    .is_some()
             })?;
 
         // 所有可失败的页表准备先完成；此阶段不提交新的逻辑权限或叶子权限。

@@ -1,23 +1,27 @@
 pub(crate) mod page;
 pub(crate) mod transfer;
 
-use self::page::{InternalPage, Owner, Page, PageError};
+use self::page::{Owner, Page, PageError};
 use crate::basis::flat::FlatError;
-use alloc::alloc::Allocator;
-use alloc::boxed::Box;
+use kernel_api::model::cell::CellLevel;
 pub(crate) mod change;
-/// 分配器一侧分配并清零 RAM，再将唯一归还凭证交给 Page。
 pub(crate) fn allocate(owner: Owner) -> Result<Page, FlatError> {
-    let allocator: &'static (dyn Allocator + Sync) = crate::metal::allocator::frame::instance();
-    let page: InternalPage = crate::tag!(Plain, unsafe {
-        Box::try_new_zeroed_in(allocator)
-            .map_err(|_| FlatError::OutOfMemory)?
-            .assume_init()
-    });
-    Page::from_internal(owner, page).map_err(|error| match error {
+    allocate_level(owner, CellLevel::BASE)
+}
+pub(crate) fn allocate_level(owner: Owner, level: CellLevel) -> Result<Page, FlatError> {
+    crate::tag!(Plain, unsafe {
+        Page::allocate(
+            owner,
+            level,
+            crate::metal::allocator::frame::instance(),
+            crate::metal::allocator::frame::repartition,
+        )
+    })
+    .map_err(|error| match error {
         PageError::InvalidOwner => FlatError::OutOfRange,
         PageError::InvalidRange => FlatError::NotAligned,
-        PageError::IdentityExhausted => FlatError::OutOfMemory,
+        PageError::IdentityExhausted | PageError::OutOfMemory => FlatError::OutOfMemory,
+        PageError::Busy => FlatError::Busy,
     })
 }
 
@@ -35,10 +39,7 @@ impl Cell {
         use crate::basis::nest::NestError;
         match self {
             Self::Flat(range) => range
-                .range(
-                    kernel_api::address::PageOffset::new(offset),
-                    kernel_api::address::PageCount::new(1).unwrap(),
-                )?
+                .cell(kernel_api::address::PageOffset::new(offset))?
                 .materialized_cells()?
                 .into_iter()
                 .next()

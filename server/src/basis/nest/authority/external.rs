@@ -73,7 +73,7 @@ pub(crate) fn create(
 ) -> Result<usize, CellFail> {
     let target = target(actor, token, NestRights::RESERVE)?;
     let pages = hold.resolve().ok_or(CellFail::Denied)?;
-    if pages.page_count().get() != 1 || pages.is_borrowed() {
+    if pages.page_count().get() != pages.grain() || pages.is_borrowed() {
         return Err(CellFail::Denied);
     }
     let nest = target.target().nest().ok_or(CellFail::Denied)?;

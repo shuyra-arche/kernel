@@ -219,6 +219,7 @@ pub(in super::super) fn run(at: usize, count: usize) {
     for slot in [a, b, empty, replacement] {
         super::super::delete(CellObject::Slot(slot));
     }
+    super::levels::run(bar, port_token);
     share_view::shut(bar_token).unwrap();
     let _ = writeln!(
         super::super::Console,

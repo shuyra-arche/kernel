@@ -54,7 +54,7 @@ impl ExternalBorrow {
         }
         let source = hold.source();
         let range = hold.resolve().ok_or(PendFail::Denied)?;
-        if range.page_count().get() != 1 || range.is_borrowed() {
+        if range.page_count().get() != range.grain() || range.is_borrowed() {
             return Err(PendFail::Denied);
         }
         let pages = if let Some(change) = change {

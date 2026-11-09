@@ -67,6 +67,20 @@ impl Transaction {
             owns(target, target_page),
             "the target page is inside its window"
         );
+        if source.level() != target.level()
+            || source
+                .cell(kernel_api::address::PageOffset::new(
+                    source_page.get() - source.index().get(),
+                ))
+                .is_err()
+            || target
+                .cell(kernel_api::address::PageOffset::new(
+                    target_page.get() - target.index().get(),
+                ))
+                .is_err()
+        {
+            return Err(TransferError::OutOfRange);
+        }
         let same = Arc::ptr_eq(source.flat(), target.flat());
         if same && source_page == target_page {
             return Err(TransferError::DestinationOccupied);

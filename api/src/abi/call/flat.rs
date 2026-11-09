@@ -21,6 +21,7 @@ pub mod operations {
         pub license: super::PendId,
         pub size: usize,
         pub align: usize,
+        pub level: usize,
     }
     #[operation(slot=1,output=(),error=FlatFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,9 +1,13 @@
 //! 物理承载实例。身份不取自 PA、Flat 槽号或引用地址，复用物理页会产生新身份。
 //!
-//! 本批只接入分配器管理的 4 KiB RAM。外部物理区间仍使用 BorrowedRegion；
+//! 接入分配器管理的层级连续 RAM。外部物理区间仍使用 BorrowedRegion；
 //! 托管 Page 在分配时归属于 Kernel 或 Team；裸物理别名不创建新的物理身份。
 
 mod identity;
+mod region;
+mod shape;
+use region::Region;
+pub(crate) use region::Repartition;
 mod owner;
 pub(crate) use owner::Owner;
 pub(super) mod reclaim;
@@ -12,7 +16,8 @@ use alloc::alloc::Allocator;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::cell::UnsafeCell;
-use core::mem::ManuallyDrop;
+use core::{alloc::Layout, ptr::NonNull};
+use kernel_api::model::cell::CellLevel;
 
 use kernel_api::model::cell::PAGE_SIZE;
 use kernel_api::model::cell::PageOwner;
@@ -28,6 +33,8 @@ pub(crate) enum PageError {
     InvalidRange,
     InvalidOwner,
     IdentityExhausted,
+    OutOfMemory,
+    Busy,
 }
 
 /// Page 的外部访问风险；Internal 不表示普通持有或 CPU 访问已经结束。
@@ -49,7 +56,8 @@ pub(crate) enum Exposure {
 pub(crate) struct Page {
     id: PageId,
     owner: Owner,
-    page: ManuallyDrop<InternalPage>,
+    page: Option<Region>,
+    level: CellLevel,
     reclaim: reclaim::Reclaim,
 }
 
@@ -64,12 +72,76 @@ impl Page {
         if !start.is_multiple_of(PAGE_SIZE) || start.checked_add(PAGE_SIZE - 1).is_none() {
             return Err(PageError::InvalidRange);
         }
+        let (pointer, allocator) = Box::into_raw_with_allocator(page);
+        Self::from_region(
+            owner,
+            Region {
+                pointer: NonNull::new(pointer.cast()).expect("allocated page"),
+                layout: Layout::new::<UnsafeCell<[u8; PAGE_SIZE]>>(),
+                allocator,
+                repartition: None,
+            },
+            CellLevel::BASE,
+        )
+    }
+
+    fn from_region(owner: Owner, region: Region, level: CellLevel) -> Result<Self, PageError> {
         Ok(Self {
             id: PageId::allocate().ok_or(PageError::IdentityExhausted)?,
             owner,
-            page: ManuallyDrop::new(page),
+            page: Some(region),
+            level,
             reclaim: reclaim::Reclaim::new(),
         })
+    }
+
+    /// # Safety
+    /// `repartition` must implement the supplied allocator's receipt contract.
+    pub(crate) unsafe fn allocate(
+        owner: Owner,
+        level: CellLevel,
+        allocator: &'static (dyn Allocator + Sync),
+        repartition: Repartition,
+    ) -> Result<Self, PageError> {
+        if matches!(owner.identity(), PageOwner::Team(team) if team.get() == 0) {
+            return Err(PageError::InvalidOwner);
+        }
+        if level == CellLevel::BASE {
+            let page: InternalPage = unsafe {
+                Box::try_new_zeroed_in(allocator)
+                    .map_err(|_| PageError::OutOfMemory)?
+                    .assume_init()
+            };
+            let mut result = Self::from_internal(owner, page)?;
+            result.page.as_mut().unwrap().repartition = Some(repartition);
+            return Ok(result);
+        }
+        let size = level.bytes().ok_or(PageError::InvalidRange)?;
+        let layout = Layout::from_size_align(size, size).map_err(|_| PageError::InvalidRange)?;
+        let pointer = allocator
+            .allocate_zeroed(layout)
+            .map_err(|_| PageError::OutOfMemory)?
+            .cast();
+        Self::from_region(
+            owner,
+            Region {
+                pointer,
+                layout,
+                allocator,
+                repartition: Some(repartition),
+            },
+            level,
+        )
+    }
+
+    pub(crate) fn level(&self) -> CellLevel {
+        self.level
+    }
+    pub(crate) fn size(&self) -> usize {
+        self.level.bytes().unwrap()
+    }
+    pub(crate) fn pages(&self) -> usize {
+        self.level.pages().unwrap()
     }
 
     pub(crate) fn begin(self: &Arc<Self>) -> Result<Arc<Change>, RetainError> {
@@ -85,11 +157,15 @@ impl Page {
     }
 
     pub(crate) fn physical_address(&self) -> usize {
-        self.page.get().addr()
+        self.as_mut_ptr().addr()
     }
 
     pub(crate) fn as_mut_ptr(&self) -> *mut u8 {
-        self.page.get().cast()
+        self.page
+            .as_ref()
+            .expect("physical receipt")
+            .pointer
+            .as_ptr()
     }
 
     /// 先预留共享读或独占写，再由调用方发布；登记失败不能继续建立硬件访问。
@@ -132,9 +208,12 @@ impl Drop for Page {
         if self.allows_return() {
             // SAFETY: Page exclusively owns the allocation and no registered
             // hardware obligation remains. This is its only physical return path.
-            unsafe { ManuallyDrop::drop(&mut self.page) };
+            drop(self.page.take());
         }
         // 无法证明安全时不执行 allocator deallocate，宁可保留物理容量。
+        if let Some(region) = self.page.take() {
+            core::mem::forget(region);
+        }
     }
 }
 

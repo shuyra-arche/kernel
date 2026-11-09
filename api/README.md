@@ -63,19 +63,18 @@ not as a universal physical allocation or page-table leaf size.
 | Concept | Current representation | Contract |
 | --- | --- | --- |
 | ABI base page | `address::BASE_PAGE_SIZE` / `BASE_PAGE_SHIFT` (aliases `PAGE_SIZE` / `PAGE_SHIFT`) | `PageCount`, `PageIndex`, `PageOffset`, `CellPosition.page` and Slot/Memo spans count fixed 4 KiB units |
-| Managed physical storage | One independent 4 KiB Page per holding | An `Allocation` may span noncontiguous Pages; its per-Page alignment does not guarantee a contiguous 2 MiB or 1 GiB physical Cell |
-| Hardware translation leaf | Selected by each MMU/IOMMU backend | RISC-V CPU Sv39 encodes 4 KiB, 2 MiB and 1 GiB leaves; Sv48 adds 512 GiB, Sv57 adds 256 TiB. Automatic coalescing currently stops at 1 GiB. External/IOMMU remains 4 KiB per Memo |
+| Managed physical storage | `CellLevel`, size `2^(12 + 9*level)` | Each Cell is contiguous and aligned to its size; separate Cells need not be adjacent. Admission checks the active Sv mode and allocation checks physical capacity |
+| Hardware translation leaf | Selected by each MMU/IOMMU backend | RISC-V CPU Sv39 encodes 4 KiB, 2 MiB and 1 GiB leaves; Sv48 adds 512 GiB, Sv57 adds 256 TiB. Automatic coalescing currently stops at 1 GiB. External/IOMMU admits one whole level-0 or level-1 Cell per Memo, with 4 KiB leaves |
 
 A larger PTE leaf can cover multiple logical positions without merging their
 identities, authorization, freeze or retirement records. CPU leaf changes
 still require splitting and covering TLB completion; external access retains
 independent trusted hardware obligations.
-**Contiguous physical 2 MiB and 1 GiB Cell allocation is not implemented.**
-
-This is source-additive: the existing `PAGE_*` names and wire descriptor
-fields retain their 4 KiB meaning. No ABI version, wire width or encoding
-changes. See [kernel#88](https://github.com/shuyra-arche/kernel/issues/88)
-for the remaining physical-Cell and large-leaf work.
+`Allocation::at_level(level, count)` requests complete physical Cells.
+`Allocation::new(size, align)` remains level 0. Levels admitted by Sv39, Sv48 and
+Sv57 are respectively 0–2, 0–3 and 0–4; representability does not imply available
+RAM. Slot/Memo positions must name a Cell head; windows and transfers cover whole
+Cells. ABI coordinates remain 4 KiB units, so a level-1 Cell spans 512 coordinates.
 
 ## Source migration and ABI compatibility
 
@@ -85,15 +84,15 @@ There are no compatibility aliases for retired operations.
 Rust callers now match `OutOfMemory` for allocation failures. Each domain uses
 its existing numeric ABI code for this variant.
 
-Call numbers are `(version << 48) | (domain << 32) | operation`; version is 4.
-Versions zero through three and unknown versions are rejected before domain dispatch. All byte
+Call numbers are `(version << 48) | (domain << 32) | operation`; version is 5.
+Versions zero through four and unknown versions are rejected before domain dispatch. All byte
 descriptors use fixed little-endian 64-bit words and checked tags/reserved fields.
 Boot capsule format 2 declares the matching ABI in byte 11; old executable
 capsules are rejected before launch. The resource ledger is version 5.
 
 | Domain | Current operations |
 | --- | --- |
-| Cell | Create, Delete, Push, Pull, Publish, Retract, Protect, Inspect |
+| Cell | Create (0), Delete (1), Push (2), Pull (3), Publish (4), Retract (5), Protect (6), Inspect (7), Split (8), Merge (9) |
 | Flat (12) | Create (0), Inspect (1), Slice (2), Delete (3) |
 | Nest (13) | Create (0), Inspect (1), Attach (2), Detach (3), Delete (4) |
 | Port (14) | Inspect (0) |
@@ -104,6 +103,18 @@ capsules are rejected before launch. The resource ledger is version 5.
 | Unit | Create, Delete, Resume, Freeze, Stop, Exit, Finish, Inspect, Accord, Revoke, Return |
 | Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo |
 | Debug | Put, Get |
+
+### Migration from ABI v4 to v5
+
+| Boundary | ABI v5 | Consumer migration |
+| --- | --- | --- |
+| Allocation | Three register words: size, align, level | Supply `CellLevel`; level 0 retains base-page allocation |
+| CellCreate Slot | Word 3 carries level; still 96 bytes | Use the new descriptor encoding |
+| CellInfo | Word 7 carries level; still 64 bytes | Read physical geometry rather than assuming 4 KiB |
+| Flat Create | Fourth argument is level | Pass level explicitly |
+| FlatInfo | 32 bytes, including level | Resize output buffers |
+| Cell Split / Merge | Operations 8 / 9 return a new SlotId | Replace the old handle only on success |
+| Capsules / ledger | ABI v5 / ledger v5 | Rebuild all capsules; ledger format is unchanged |
 
 ### Cell contracts
 
@@ -118,6 +129,7 @@ observations confer access. The number zero is invalid for object identities.
 | Call | Authority and state | Effect and completion |
 | --- | --- | --- |
 | Create Slot | None FLAT license; checked allocation geometry | Reserves lazy zeroed Slot capacity; a moved-out Slot never regenerates its Page |
+| Split / Merge | Private exclusive complete contiguous Slot collection, adjacent level, common owner and allocator, target alignment; no bindings, borrows or hardware obligations | Repartition allocator receipts without copying data; new Page identities and SlotId; old handle consumed only on success; failed preparation changes nothing |
 | Create Memo | Authorized Slot window or relative Pend window; destination control | Reserves address positions; Slot source starts Vacant, Pend source supplies Ready associations; never publishes |
 | Delete Slot | Calling Task's SlotId | Releases that owning handle; Memo and hardware responsibilities survive |
 | Delete Memo | Mapping controller, explicitly permitted Space members, or authorized I/O target controller | Requires all publication withdrawn and fenced; deletes associations and freezes; Busy preserves the record |
@@ -157,8 +169,9 @@ Sign notifications, timeouts, handle deletion or Task exit. Ready is not a claim
 that memory has been freed. Task death retains hardware records through completion;
 a settled I/O record expires after its creator dies, and later lookup fails.
 
-External Memos use exact 4 KiB positions, Caller control and READ or READ|WRITE.
-One binding supports up to 512 independent leaves within the aligned 2 MiB
+External Memos use one complete level-0 or level-1 Cell, aligned to its size,
+Caller control and READ or READ|WRITE. Overlapping ranges are rejected.
+One binding supports up to 512 base-page Cells or one level-1 Cell within the aligned 2 MiB
 window selected by its first Memo. Positions outside that window are rejected.
 A settled Memo can be reassociated and republished; retracting one leaf leaves
 other leaves accessible. Page substitution still requires an explicit Cell
@@ -172,11 +185,16 @@ and general Retain authority are removed. Their replacements are Cell objects,
 qualified transitions and kernel-owned hardware retirement, not a public change
 receipt or duplicate reference lifecycle.
 
+Split/Merge operate on owning Slot collections, not PTE leaves. Flat/Share roots
+are not eligible. Every source Slot must be materialized; merge requires physical
+adjacency. New metadata and the replacement handle are prepared before receipt
+commit, so allocation failure preserves the original collection.
+
 ### Runtime organizations
 
-Flat Create takes None FLAT and returns a Flat-target root Pend; it reserves lazy
-Slots using the existing allocator. Flat Inspect writes 24 bytes (FlatId, effective
-page offset, count). Flat Slice returns a Task-local SlotId for a relative window;
+Flat Create takes `(license, size, align, level)` and returns a Flat-target root Pend;
+it reserves lazy Slots using the frame allocator. Flat Inspect writes 32 bytes
+(FlatId, effective page offset, count, level). Flat Slice returns a Task-local SlotId for a relative window;
 that Slot retains the exact live Pend, not a copied permission snapshot. Every
 use rechecks the current branch/window. It cannot bypass Narrow, suspension or
 Revoke. Flat Delete seals the source and withdraws associations; Busy keeps cleanup
