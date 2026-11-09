@@ -113,6 +113,25 @@ fn receive(token: PendId, wait: Wait) -> u64 {
 fn deadline() -> Wait {
     Wait::At(room::clock().saturating_add(2_000_000_000))
 }
+
+fn retained(token: PendId) -> u64 {
+    // Poll never registers a waiter. Prove retention without assuming an IRQ
+    // must cross a contended commit boundary within an arbitrary 2 ms sleep.
+    let until = room::clock().saturating_add(2_000_000_000);
+    loop {
+        match sign::listen(token, Wait::Poll).unwrap() {
+            SignReply::Triggered { sequence } => {
+                irq_received();
+                return sequence;
+            }
+            SignReply::Pending => {
+                assert!(room::clock() < until, "unobserved UART IRQ was not retained");
+                room::yield_();
+            }
+            reply => panic!("unexpected UART reply: {reply:?}"),
+        }
+    }
+}
 fn accord(
     root: PendId,
     target: AccordTarget,
@@ -285,10 +304,11 @@ pub(super) fn run(at: usize, count: usize) {
     let mut previous = 0;
     for turn in 0..24 {
         write(1, 2);
-        if turn == 0 {
-            room::sleep_until(room::clock() + 2_000_000).unwrap();
-        }
-        let sequence = receive(token, if turn == 0 { Wait::Poll } else { deadline() });
+        let sequence = if turn == 0 {
+            retained(token)
+        } else {
+            receive(token, deadline())
+        };
         assert!(sequence > previous);
         assert_eq!(
             sign::listen(token, Wait::Poll).unwrap(),

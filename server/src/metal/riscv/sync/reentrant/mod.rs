@@ -39,6 +39,40 @@ impl<T> RelLock<T> {
 }
 
 impl<T: ?Sized> RelLock<T> {
+    /// One acquisition attempt; a foreign owner is never waited on. Recursive
+    /// acquisition stays on the same Hart and creates no second lockdep entry.
+    /// A failed attempt drops TrapGuard and restores the caller's IRQ state.
+    #[inline(never)]
+    pub fn try_lock(&self) -> Option<RelLockGuard<'_, T>> {
+        #[cfg(debug_assertions)]
+        let caller = crate::metal::sync::depend_enter!(self);
+        let trap = unsafe { TrapGuard::save() };
+        #[cfg(feature = "latency")]
+        let start = crate::metal::measure::stamp();
+        let me = Owner::of(hart::hart_id());
+        match self.owner.compare_exchange(
+            Owner::FREE.word(),
+            me.word(),
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => {
+                crate::metal::sync::depend_check!(self, caller);
+                unsafe { *self.count.get() = 1 };
+                crate::metal::sync::depend_acquire!(self, caller);
+            }
+            Err(owner) if Owner::from_word(owner) == me => unsafe {
+                *self.count.get() = (*self.count.get())
+                    .checked_add(1)
+                    .expect("recursion overflow");
+            },
+            Err(_) => return None,
+        }
+        #[cfg(feature = "latency")]
+        crate::metal::measure::elapsed(crate::metal::measure::Metric::CommitWait, start);
+        Some(RelLockGuard::new(self, trap))
+    }
+
     #[cfg(debug_assertions)]
     pub(crate) fn held_by_current(&self) -> bool {
         self.owner.load(Ordering::Relaxed) == Owner::of(hart::hart_id()).word()

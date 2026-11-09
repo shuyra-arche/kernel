@@ -352,7 +352,11 @@ pub fn redeem() -> bool {
     if !deadline::is_owner() {
         return false;
     }
-    let _commit = crate::basis::commit();
+    let Some(_commit) = crate::basis::try_commit() else {
+        // Leave both the heap and Holder intact; a retry cannot lose a ticket.
+        deadline::retry();
+        return false;
+    };
     const MAX_DUE: usize = 64;
     let mut due = [0u64; MAX_DUE];
     let n = deadline::drain(clock::now(), &mut due);
@@ -412,30 +416,28 @@ pub(crate) fn requeue<E: Copy>(
 }
 
 pub(crate) fn detach(task: &Arc<Task>) -> bool {
-    for shard in 0..SITE_SHARDS {
-        let mut sites = shard_at(shard).lock();
-        let mut hit: Option<(WakeKey, Ticket)> = None;
-        for (key, site) in sites.iter_mut() {
-            if let Some(ticket) = site
-                .chain
-                .remove_if(&mut |t| Arc::ptr_eq(t, task))
-                .map(|node| node.wait_ticket())
-            {
-                hit = Some((*key, ticket));
-                break;
-            }
-        }
-        let out = hit.map(|(key, ticket)| {
-            prune(&mut sites, key);
-            ticket
+    #[cfg(debug_assertions)]
+    crate::basis::assert_held();
+    // Task owns the exact wait location. Never search unrelated shards/sites.
+    let Some((key, ticket)) = task.state.lock().waiting_on() else {
+        return false;
+    };
+    let Some(shard) = site::existing(key) else {
+        return false;
+    };
+    let removed = {
+        let mut sites = shard.lock();
+        let removed = sites.get_mut(&key).and_then(|site| {
+            site.chain
+                .remove_if(&mut |candidate| Arc::ptr_eq(candidate, task))
         });
-        drop(sites);
-        if let Some(ticket) = out {
-            void(ticket);
-            return true;
-        }
+        prune(&mut sites, key);
+        removed.is_some()
+    };
+    if removed {
+        void(ticket);
     }
-    false
+    removed
 }
 
 /// Remove an empty source left by a failed wait preparation.

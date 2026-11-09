@@ -1,4 +1,5 @@
 mod queue;
+mod retry;
 use crate::metal::sync::OnceLock;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
@@ -17,6 +18,7 @@ use crate::metal::sync::SpinLock;
 const OWNER: HartId = HartId::new(0);
 static LOCAL: [AtomicU64; MAX_HART_SLOTS] =
     [const { AtomicU64::new(crate::metal::generic::clock::DISARMED) }; MAX_HART_SLOTS];
+static RETRIES: [retry::Retry; MAX_HART_SLOTS] = [const { retry::Retry::new() }; MAX_HART_SLOTS];
 
 pub const BLIND_MS: u64 = 100;
 
@@ -46,7 +48,17 @@ pub fn elapsed() -> bool {
         return false;
     }
     TICKS.fetch_add(1, Ordering::Relaxed);
+    RETRIES[hart::hart_id().get()].elapsed(clock::now().as_ticks());
     true
+}
+
+/// Retain a timer retry without acquiring the shared heap or changing Task
+/// deadlines. The local comparator is the only hardware effect of rejection.
+pub(crate) fn retry() {
+    let now = clock::now().as_ticks();
+    let delay = clock::duration_to_ticks(core::time::Duration::from_micros(100));
+    let at = RETRIES[hart::hart_id().get()].request(now, delay);
+    timer::retry(now, at);
 }
 
 pub fn ticks() -> u64 {
@@ -66,12 +78,15 @@ pub fn arm(local: u64) {
 /// A later heap mutation then either appears in this snapshot or leaves an IPI.
 pub fn refresh() {
     let me = hart::hart_id();
-    let local = LOCAL[me.get()].load(Ordering::Relaxed);
+    let local = LOCAL[me.get()]
+        .load(Ordering::Relaxed)
+        .min(RETRIES[me.get()].deadline());
     let next = if me == OWNER {
-        timers()
-            .lock()
-            .nearest()
-            .map_or(local, |head| head.min(local))
+        let Some(queue) = timers().try_lock() else {
+            retry();
+            return;
+        };
+        queue.nearest().map_or(local, |head| head.min(local))
     } else {
         local
     };

@@ -49,6 +49,10 @@ pub(crate) fn set_timer(at: u64) {
     }
 }
 
+pub(crate) fn retry(now: u64, at: u64) {
+    local().retry(now, at).expect("program local retry");
+}
+
 // An unchanged, elapsed comparator remains pending until reprogrammed.
 pub(crate) fn elapsed() -> bool {
     let setting = local().setting().expect("local timer state unknown");

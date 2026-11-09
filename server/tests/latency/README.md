@@ -1,6 +1,6 @@
-# Bounded latency: M1 baseline
+# Bounded latency: M1 baseline and M2 progress
 
-This is the M1 audit for #30. No current operation has a hard real-time guarantee.
+This records the M1 baseline and the first M2 admission boundary for #30. No current operation has a hard real-time guarantee.
 The existing FIFO/time-slice scheduler, authorization and retirement rules remain
 unchanged. QEMU observations are neither WCET bounds nor admission proofs.
 
@@ -24,10 +24,14 @@ is bounded. Sign notification coalesces work; it is not a device completion coun
    extends the outer holder's lifetime. Debug lockdep detects invalid nesting but
    proves no time bound. First catalogue and shorten long holders without moving
    authorization checks away from atomic publication; then introduce narrower
-   transaction boundaries. Replacing the lock type alone is insufficient.
+   transaction boundaries. External IRQ admission and deadline draining now try
+   COMMIT once and retain deferred work on failure; ordinary lock callers and
+   successful callbacks remain outside any time-bound claim. Replacing the lock
+   type alone is insufficient.
 2. **Sign waiting and routing** (`basis/sign/wait/`, `endpoint/`): fan-out depends
    on forwarding edges F, wake chains on waiters W, removal searches a chain,
-   and space/task cleanup scans sites S. The timer batch is at most 64 tickets,
+   and space cleanup scans sites S. Task cancellation uses its authoritative
+   wait key and scans only that one chain, rather than every shard/site. The timer batch is at most 64 tickets,
    but each ticket may search W and launch through H schedulers. Bound one batch
    and retain a continuation before splitting the commit region. Hardware IRQs
    have one processing branch, at most 64 sources and four claims per entry.
@@ -41,7 +45,9 @@ is bounded. Sign notification coalesces work; it is not a device completion coun
    budget admission contract. Preserve this baseline before M3 policy changes.
 4. **Lifecycle and Pend** (`basis/unit/lifecycle/{doom,reap}.rs`, `basis/pend/`):
    descendant walks, ledger cleanup and repeated husk processing depend on live
-   objects and graph size. Logical closure can be bounded separately from
+   objects and graph size. A burial turn processes at most four Tasks, but each
+   Task retirement can still traverse descendants. Remaining husks retain a local
+   timer retry instead of depending on another Task to yield. Logical closure can be bounded separately from
    asynchronous physical cleanup; preserve generations and immutable exit results.
 5. **Cell/Nest and hardware retirement** (`basis/cell/`, `basis/nest/`,
    `metal/riscv/iommu/`): zeroing depends on bytes; traversal on mappings/pages;
@@ -108,5 +114,42 @@ QEMU version, image hashes, serial output and per-Hart count/max/histogram TSV.
 The firmware is OpenSBI supplied by the recorded QEMU package; timebase comes
 from the admitted DTB and is printed as `ticks-hz`. Run on isolated physical
 hardware with fixed firmware/cache/frequency and interference assumptions before
-using measurements for hardware timing analysis. M2/M3 and hardware WCET proof
-remain open.
+using measurements for hardware timing analysis. The rest of M2, M3 and hardware WCET proof remain open.
+
+## M2: retained retry at interrupt admission
+
+External IRQ handling uses one `RelLock::try_lock` attempt before touching PLIC
+claim state, source bindings or Sign receipts. Foreign ownership returns
+immediately from that attempt: the controller keeps the unclaimed interrupt,
+local SEIE is disabled, and a Hart-local retry deadline is retained. The optional
+IRQ→Sign metric keeps the first entry timestamp across deferrals, so retry delay
+is included rather than hidden by starting a fresh sample. Rearming
+also tries admission once; only successful maintenance reenables deferred local
+delivery. The existing claim/unmask/complete ordering stays under COMMIT.
+Source death/revocation is revalidated by the existing binding state machine.
+
+The front half no longer performs arbitrary external-Nest retirement. Every
+successful claim schedules maintenance even if the Hart would otherwise disarm
+its comparator. A 100-microsecond retry interval is a backoff choice, not a
+response-time promise. Earlier future comparator deadlines are preserved; an
+elapsed comparator is advanced to avoid a level-triggered interrupt storm.
+Ordinary timer refresh takes the minimum with the retained retry. A failed heap
+try-lock leaves both registrations and local scheduling requests intact.
+Timer expiry consumes retry state only when due, before retrying maintenance;
+failed COMMIT admission drains no tickets or Holders.
+
+`RelLock::try_lock` retains same-Hart recursion and IRQ-state restoration. It
+never temporarily enables SIE: current kernel trap entry uses a shared per-Hart
+stack and is not a general nested/preemptible kernel entry. Host tests execute
+the production lock atomics and guards with a Hart/IRQ boundary fixture; the
+foreign-owner handshake requires rejection before releasing the other owner.
+Production retry/comparator tests cover earlier deadlines, repeated contention,
+expired settings and failed comparator writes. Actual hardware masking and
+wakeups require the IRQ/IOMMU, clock and lifecycle QEMU scenarios.
+
+This is **not completion of M2**. Successful source callbacks, Timer/idle
+resource maintenance, scheduler COMMIT acquisition, other SpinLock/RelLock
+callers, one-site waiter searches and recursive Pend/Task retirement still need
+narrower ownership and bounded continuations. Under permanent contention,
+deferred work can remain pending indefinitely. No hard-real-time service class
+or hardware latency bound is introduced by this change.
