@@ -1,9 +1,10 @@
+use crate::metal::platform::devices::Devices;
 use crate::{entry::boot::facts, metal::sync::OnceLock};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 use kernel_api::{
     abi::call::pend::PendFail,
-    boot::platform::{Region, devices::Devices},
+    boot::platform::{Region, Resources},
 };
 pub(super) struct Description {
     pub authorities: Vec<Region>,
@@ -26,9 +27,9 @@ fn own(source: &[Region]) -> Result<Vec<Region>, PendFail> {
 pub(in super::super) fn admit(d: Devices<'_>) -> Result<(), PendFail> {
     d.validate(facts::info().memory)?;
     let owned = Description {
-        authorities: own(d.authorities)?,
-        protected: own(d.protected)?,
-        external: own(d.external)?,
+        authorities: own(d.resources.authorities)?,
+        protected: own(d.resources.protected)?,
+        external: own(d.resources.external)?,
         controllers: own(d.controllers)?,
     };
     DESCRIPTION.set(owned).map_err(|_| PendFail::Denied)
@@ -41,12 +42,10 @@ pub(in super::super) fn ready() -> bool {
 }
 impl Description {
     pub(super) fn admits(&self, region: Region) -> Result<(), PendFail> {
-        Devices {
+        Resources {
             authorities: &self.authorities,
             protected: &self.protected,
             external: &self.external,
-            controllers: &self.controllers,
-            interrupt: None,
         }
         .admits_external(region)
     }

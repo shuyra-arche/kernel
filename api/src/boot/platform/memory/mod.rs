@@ -25,7 +25,7 @@ pub struct Memory {
     free: Ranges<MAX_FREE>,
     identity: Ranges<MAX_FREE>,
     kernel: Region,
-    dtb: Region,
+    metadata: Region,
     initrd: Option<Region>,
 }
 
@@ -36,7 +36,7 @@ impl Memory {
         ram: &[Region],
         reserved: &[Region],
         no_map: &[Region],
-        dtb: Region,
+        metadata: Region,
         kernel: Region,
         initrd: Option<Region>,
     ) -> Result<Self, MemoryError> {
@@ -52,8 +52,8 @@ impl Memory {
         if !ram.contains(kernel) {
             return Err(MemoryError::OutsideRam);
         }
-        let dtb_pages = covering_pages(dtb)?;
-        if !dtb.base.is_multiple_of(PAGE_SIZE) || !ram.contains(dtb_pages) {
+        let metadata_pages = covering_pages(metadata)?;
+        if !metadata.base.is_multiple_of(PAGE_SIZE) || !ram.contains(metadata_pages) {
             return Err(MemoryError::OutsideRam);
         }
         if let Some(r) = initrd {
@@ -65,8 +65,8 @@ impl Memory {
                 return Err(MemoryError::OutsideRam);
             }
         }
-        if overlaps(kernel, dtb_pages)
-            || initrd.is_some_and(|r| overlaps(r, kernel) || overlaps(r, dtb_pages))
+        if overlaps(kernel, metadata_pages)
+            || initrd.is_some_and(|r| overlaps(r, kernel) || overlaps(r, metadata_pages))
         {
             return Err(MemoryError::Overlap);
         }
@@ -82,7 +82,7 @@ impl Memory {
         }
         let no_map = excluded;
         let mut reserved = holes;
-        if no_map.overlaps(dtb_pages)
+        if no_map.overlaps(metadata_pages)
             || initrd.is_some_and(|r| no_map.overlaps(r))
             || reserved.overlaps(kernel)
         {
@@ -90,7 +90,7 @@ impl Memory {
         }
         reserved.insert(Region::new(0, PAGE_SIZE), true)?;
         reserved.insert(kernel, true)?;
-        reserved.insert(dtb_pages, true)?;
+        reserved.insert(metadata_pages, true)?;
         if let Some(initrd) = initrd {
             reserved.insert(initrd, true)?;
         }
@@ -101,7 +101,7 @@ impl Memory {
             free,
             identity: ram.subtract(&no_map)?,
             kernel,
-            dtb: dtb_pages,
+            metadata: metadata_pages,
             initrd,
         })
     }
@@ -133,8 +133,10 @@ impl Memory {
     pub fn contains_identity(&self, region: Region) -> bool {
         self.identity.contains(region)
     }
-    pub fn dtb(&self) -> Region {
-        self.dtb
+    /// Opaque firmware metadata retained for the boot image. Its format is
+    /// provider-owned; this constructor only validates physical coverage.
+    pub fn metadata(&self) -> Region {
+        self.metadata
     }
     pub fn initrd(&self) -> Option<Region> {
         self.initrd

@@ -12,3 +12,6 @@ pub(crate) mod mmu;
 pub(crate) mod sbi;
 pub(crate) mod stop;
 pub(crate) mod sync;
+
+// Trusted source-level input selected together with this hardware provider.
+pub(crate) use kernel_api::boot::platform::riscv as platform;

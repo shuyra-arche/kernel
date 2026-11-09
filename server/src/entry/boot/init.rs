@@ -11,7 +11,7 @@ use kernel_api::abi::call::pend::PendFail;
 /// # Safety
 /// Descriptions reflect the actual machine. Firmware has granted exclusive
 /// ownership of free RAM and the executing image; referenced storage is immutable.
-pub unsafe fn init(platform: kernel_api::boot::platform::Platform) -> Result<(), BootError> {
+pub unsafe fn init(platform: crate::metal::platform::Platform) -> Result<(), BootError> {
     console::init();
     facts::init(platform)?;
     crate::metal::mmu::mode::init().map_err(BootError::PagingMode)?;
@@ -41,7 +41,7 @@ pub unsafe fn init(platform: kernel_api::boot::platform::Platform) -> Result<(),
 /// Queue RAM and register accesses satisfy the selected backend's coherence and
 /// ordering contract. The caller excludes bypass, ATS/PRI and mutable routing.
 pub unsafe fn configure(
-    description: kernel_api::boot::platform::devices::Devices<'_>,
+    description: crate::metal::platform::devices::Devices<'_>,
 ) -> Result<(), BootError> {
     super::devices::admit(description).map_err(|source| BootError::Resources {
         operation: ResourceOperation::Devices,

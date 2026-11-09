@@ -18,7 +18,7 @@ use kernel_api::address::PhysAddr;
 const STEP_BUDGET: usize = 1_000_000;
 
 pub(in super::super) fn init(
-    description: kernel_api::boot::platform::devices::Devices<'_>,
+    description: crate::metal::platform::devices::Devices<'_>,
 ) -> Result<(), PendFail> {
     let regions = description.controllers;
     if regions.is_empty() {

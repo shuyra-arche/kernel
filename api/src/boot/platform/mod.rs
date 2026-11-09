@@ -1,31 +1,13 @@
-//! Trusted Rust boot descriptors, separate from the syscall wire ABI.
-//! The integration owner decodes firmware. Constructors validate bounded facts;
-//! Kernel additionally checks the executing image and protected device ownership.
-pub mod hart;
+//! Trusted Rust boot contracts, separate from the syscall wire ABI.
+//! Memory reservations and physical resource custody are provider-independent.
+//! CPU, timer and controller admission belongs to the selected architecture;
+//! currently only `riscv` defines a complete boot input. No generic ISA enum or
+//! unimplemented provider contract is implied by the common physical facts.
 pub mod memory;
 mod region;
-pub use hart::{Cpu, FirmwareId, HartId, Harts, Paging};
+pub mod resources;
+pub mod riscv;
+
 pub use memory::{Memory, MemoryError};
 pub use region::Region;
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ClockAccess {
-    pub user_time: bool,
-    pub supervisor_stimecmp: bool,
-}
-#[derive(Debug)]
-pub struct Platform {
-    pub hart: &'static Harts,
-    pub memory: &'static Memory,
-    pub clock: ClockAccess,
-}
-impl Platform {
-    pub fn initrd(&self) -> Option<Region> {
-        self.memory.initrd()
-    }
-    pub fn dtb(&self) -> Region {
-        self.memory.dtb()
-    }
-}
-
-pub mod devices;
+pub use resources::Resources;

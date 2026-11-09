@@ -240,7 +240,7 @@ assigned a guessed generation. A closed Nest never reopens; a fresh Nest can
 acquire the Port only after matching hardware and platform proof. An interrupt,
 business result or software generation is never a reclamation receipt.
 
-Trusted boot images supply `kernel_api::boot::platform::Platform`, call unsafe
+Trusted boot images supply `kernel_api::boot::platform::riscv::Platform`, call unsafe
 `boot::init`, then `boot::configure` with normalized physical authorities and
 controller routes. `Memory::new` and `Harts::new` admit bounded facts without an
 allocator; Kernel checks the executing image/ROOT reservation and current boot
@@ -288,6 +288,22 @@ prevents silently testing a consumer's older provider. The source-only boot
 interface replaces `init(dtp)` and `init_with_external`; images must rebuild and
 supply the normalized platform descriptors. Boot types are Rust contracts; the
 wire ABI is versioned independently.
+
+`boot::platform::{Memory, Region, Resources}` contains only checked physical
+facts. Memory retains an opaque `metadata` region; RV64 interprets it as DTB.
+`boot::platform::riscv` owns Harts, SBI identities, Sv modes, clock promises and
+PLIC/IOMMU input. Entry selects these types together with the RV64 metal provider.
+Common resource validation cannot admit a controller: the RV64 descriptor also
+checks protected custody, PLIC context/register bounds and queue-source assignment
+before any MMIO setup or authority publication. A second-provider Host fixture
+checks only common physical admission; no second ISA backend is implemented.
+
+Boot consumers must move RV64 imports to `boot::platform::riscv`, place ordinary,
+protected and external ranges in `Devices.resources`, and use `Memory::metadata()`
+where they previously read `Memory::dtb()`. The RV64 `Platform::dtb()` accessor and
+DTB Ledger entry retain their meaning. This source break changes neither syscall
+nor Capsule/Ledger encoding. Vanllia's production image and QEMU fixture must move
+together to the matching provider revision; see API compatibility notes.
 
 ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough remain unsupported.
 PQ is disabled.
