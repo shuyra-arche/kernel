@@ -293,8 +293,11 @@ Ordinary wake placement also owns its cursor in Task's scheduling state. A share
 global cursor allowed periodic workers to remain on one residue when unrelated
 wakeups advanced it by the Hart count. Each Task now progresses independently;
 existing compatibility, idle preference and fixed-Hart reservation rules remain.
-The context guest still requires actual traced migration; its assertions and
-watchdogs are unchanged. IRQ observers park with WaitValue during construction;
+Explicit wakes and expiry share this placement path. Both rotate over the complete
+compatible set: excluding the waker pinned observed blocked workers to the sole
+remote Hart in the sparse two-Hart fixture, despite the per-Task cursor.
+The context guest still requires actual traced migration. IRQ observers park
+with WaitValue during construction;
 their event deadlines start after all observers are prepared. The original four
 Yield workers remain the contention load. Common Sign revocation keeps the
 recipient alive until exact-identity Busy retries settle; logical invalidation
@@ -303,17 +306,37 @@ removal. Errors other than Busy still fail the test.
 
 The floating-point guest confirms both workers reached `Waiting` before starting
 the preemption experiment, separating second-Task construction from that deadline.
-It then performs eight explicit WaitValue wakeups, checking all registers and traced checkpoint
-PCs immediately after each handoff. Short absolute sleeps remain in its workload,
-but can expire before a contended call reaches the kernel and therefore cannot
-alone establish blocking or migration coverage. The cross-Hart trace assertions
-and outer QEMU watchdog remain unchanged.
+It then performs eight explicit WaitValue wakeups, checking all registers and
+traced checkpoint PCs immediately after each handoff. These replace the earlier
+64 floating-point / 128 vector short-sleep rounds: those deadlines could expire
+before Kernel entry and therefore could not alone establish blocking or migration
+coverage. Each retained round proves actual blocking and checks the whole image
+before and after resumption. Timer preemption, Yield, cross-Hart trace assertions,
+fault/reuse cases and the outer QEMU watchdog remain. Timer/deadline semantics
+also retain their dedicated clock and common Room tests.
+
+Vector workers use the same observed handoff with their complete live register
+and control image, including nonzero vstart. Each successful worker performs
+eight blocked handoffs and traces immediately after resumption. The mixed-Hart
+probe can fault before activation; only an activated worker joins the handoff.
+The host still requires actual traced migration and restricts mixed-Hart vector
+checkpoints to the two compatible Harts.
 
 For every handoff the controller parks on an arrival counter while workers execute
-their intervening rounds. Only after both arrive does the three-second transition
-check require their actual `Waiting` state; work between handoffs remains covered
-by the outer watchdog. This separates a blocking assertion from an arbitrary
-debug/host execution-time assumption and keeps all four competing Yield workers.
+their intervening rounds, then requires every worker's actual `Waiting` state and
+the exact WakeValue count. It briefly sleeps between state inspections instead of
+adding a fifth busy Yield competitor. There is no three-second ordinary-Task
+response assumption; a premature worker exit fails and missing progress hits the
+outer watchdog. The four context load workers remain runnable in user computation,
+requiring timer preemption; their startup also uses an arrival wait. Continuous
+Yield load made a two-host-CPU debug vector boot take 119.63 seconds and another
+expire at 120 seconds after vector checks passed. That lock-convoy stress is
+separate from register/placement coverage: context workers still exercise Yield,
+and IRQ/latency scenarios retain their four continuous Yield competitors.
+Context modes allow
+120 seconds for the composed context, common Cell/retirement and shutdown phases:
+a two-host-CPU run passed context checks but exhausted 60 seconds in the common
+suite. The timer-preemption assertion and actual cross-Hart trace checks remain.
 Condition waits retry only `RoomFail::Busy`, rechecking the same atomic predicate
 and retaining any absolute deadline. A concurrent Nest invalidation can reject
 the resident atomic read after call-entry settlement, without consuming a wake.

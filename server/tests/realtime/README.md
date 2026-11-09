@@ -185,7 +185,8 @@ uncalibrated host.
 
 Each realtime boot also runs the complete shared Cell/organization/retirement
 suite afterwards. Its outer process watchdog allows 120 seconds for both phases
-and shutdown; other guest modes retain 60 seconds. A two-host-CPU diagnostic
+and shutdown; context modes use the same composed-run budget, while other guest
+modes retain 60 seconds. A two-host-CPU diagnostic
 replay reached all assertions at 47 seconds and showed allocator pool flushing
 at 50 seconds before normal exit. Hosted evidence previously reached all four
 realtime PASS markers but exhausted 60 seconds during the common suite. This

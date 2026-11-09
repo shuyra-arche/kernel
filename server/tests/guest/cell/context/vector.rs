@@ -12,6 +12,7 @@ use kernel_api::{
 };
 use kernel_client::call::{room, unit};
 static STARTED: AtomicUsize = AtomicUsize::new(0);
+static HANDOFF: super::handoff::Handoff = super::handoff::Handoff::new();
 #[cfg(feature = "migration")]
 static MIGRATION_ENTERED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
@@ -48,6 +49,9 @@ fn worker(id: usize, barrier: bool) -> ! {
     }
     let wanted = [id, id + 3, 0, id]; // nonzero vstart, vl, e8/m1/tu/mu, vcsr
     unsafe { load(expected.as_ptr(), wanted.as_ptr(), bytes) };
+    // First-use faults happen before arrival. Once activated, require actual
+    // blocked handoffs with the whole vector image live, as the F/D guest does.
+    HANDOFF.wait(0);
     if barrier {
         STARTED.fetch_or(1 << id, Ordering::Release);
         let start: u64;
@@ -58,7 +62,7 @@ fn worker(id: usize, barrier: bool) -> ! {
             assert!(now - start < 30_000_000, "no vector timer preemption");
         }
     }
-    for turn in 0..128 {
+    for turn in 0..8 {
         unsafe {
             if id == 1 {
                 context_vector_one();
@@ -69,11 +73,19 @@ fn worker(id: usize, barrier: bool) -> ! {
         unsafe { save(observed.as_mut_ptr(), controls.as_mut_ptr(), bytes) };
         assert_eq!(&observed[..bytes * 4], &expected[..bytes * 4]);
         assert_eq!(controls, wanted);
+        HANDOFF.wait(turn + 1);
+        // Observe the actual resumed context before the following Yield.
+        unsafe {
+            if id == 1 {
+                context_vector_one();
+            } else {
+                context_vector_two();
+            }
+            save(observed.as_mut_ptr(), controls.as_mut_ptr(), bytes);
+        }
+        assert_eq!(&observed[..bytes * 4], &expected[..bytes * 4]);
+        assert_eq!(controls, wanted);
         room::yield_();
-        // Stagger both workers against each other and the Hart timers. A fixed
-        // phase can keep a worker on one Hart for the entire checkpoint trace.
-        let delay = 100_000 + ((turn * 17 + id * 11) % 29) as u64 * 100_000;
-        room::sleep_until(room::clock() + delay).unwrap();
     }
     unsafe { save(observed.as_mut_ptr(), controls.as_mut_ptr(), bytes) };
     assert_eq!(&observed[..bytes * 4], &expected[..bytes * 4]);
@@ -111,6 +123,9 @@ pub(super) fn run() {
     ];
     for task in tasks {
         unit::resume(UnitTarget::Task(task)).unwrap();
+    }
+    for turn in 0..9 {
+        HANDOFF.wake(&tasks, turn);
     }
     for task in tasks {
         assert!(lifecycle::wait_task(task));
@@ -192,6 +207,20 @@ pub(super) fn migration() {
         MIGRATION_ENTERED.store(false, Ordering::Release);
         let task = lifecycle::spawn(migrant as *const () as usize);
         unit::resume(UnitTarget::Task(task)).unwrap();
+        // An incompatible first-use probe exits before reaching HANDOFF. Do
+        // not wait for an arrival from that Task. The enclosing watchdog covers
+        // construction; successful activation proceeds to observed blocking.
+        while !MIGRATION_ENTERED.load(Ordering::Acquire)
+            && lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task))).state
+                != kernel_api::model::unit::UnitState::Exited
+        {
+            room::yield_();
+        }
+        if MIGRATION_ENTERED.load(Ordering::Acquire) {
+            for turn in 0..9 {
+                HANDOFF.wake(&[task], turn);
+            }
+        }
         assert!(lifecycle::wait_task(task));
         let info = lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task)));
         lifecycle::delete(task);

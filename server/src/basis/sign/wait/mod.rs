@@ -389,7 +389,7 @@ pub fn redeem() -> bool {
     let _ = woken;
     rise(
         tasks.iter_mut().filter_map(Option::take),
-        crate::basis::room::scheduler::insert_expired,
+        crate::basis::room::scheduler::insert,
     ) > 0
 }
 

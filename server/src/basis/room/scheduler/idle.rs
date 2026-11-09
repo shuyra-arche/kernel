@@ -47,13 +47,8 @@ pub(super) fn waiting(hart: HartId) -> bool {
 
 /// Rotate within eligible Harts, preferring idle destinations. A sparse
 /// capability set must not inherit the gaps or bias of the physical bitmap.
-pub(super) fn pick(
-    cursor: usize,
-    compatible: impl Fn(HartId) -> bool,
-    prefer_remote: bool,
-) -> HartId {
+pub(super) fn pick(cursor: usize, compatible: impl Fn(HartId) -> bool) -> HartId {
     let n = hart::hart_count();
-    let me = hart::hart_id();
     let eligible = || {
         (0..n)
             .map(HartId::new)
@@ -69,13 +64,6 @@ pub(super) fn pick(
         }
         // Idle flags can change between passes; compatibility is stable while
         // the Task is off-Hart. Continue with the complete eligible set.
-    }
-    if prefer_remote {
-        let remote = || eligible().filter(|candidate| *candidate != me);
-        let count = remote().count();
-        if count != 0 {
-            return remote().nth(cursor % count).unwrap();
-        }
     }
     let count = eligible().count();
     assert!(count != 0, "Task has no compatible Hart");

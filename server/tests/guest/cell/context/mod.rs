@@ -4,10 +4,10 @@ mod handoff;
 mod vector;
 use super::{Console, lifecycle};
 use core::fmt::Write;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use kernel_api::{
     address::VirtAddr,
-    model::{identity::TaskId, unit::UnitTarget},
+    model::{identity::TaskId, unit::UnitTarget, wait::Wait},
 };
 use kernel_client::call::{room, unit};
 static STARTED: AtomicUsize = AtomicUsize::new(0);
@@ -17,7 +17,7 @@ static HANDOFF: handoff::Handoff = handoff::Handoff::new();
 // timer owner can repeatedly steal an expired worker before an idle destination
 // wakes: correct register preservation then provides no migration coverage.
 static LOAD_STOP: AtomicBool = AtomicBool::new(false);
-static LOAD_ENTERED: AtomicUsize = AtomicUsize::new(0);
+static LOAD_ENTERED: AtomicU32 = AtomicU32::new(0);
 struct Load([TaskId; 4]);
 impl Load {
     fn start() -> Self {
@@ -28,10 +28,12 @@ impl Load {
             unit::resume(UnitTarget::Task(task)).unwrap();
             task
         });
-        let deadline = room::clock() + 3_000_000_000;
-        while LOAD_ENTERED.load(Ordering::Acquire) != tasks.len() {
-            assert!(room::clock() < deadline, "load workers did not start");
-            room::yield_();
+        loop {
+            let entered = LOAD_ENTERED.load(Ordering::Acquire);
+            if entered == tasks.len() as u32 {
+                break;
+            }
+            crate::room::wait(&LOAD_ENTERED, entered, Wait::Infinite);
         }
         Self(tasks)
     }
@@ -46,8 +48,12 @@ impl Load {
 }
 extern "C" fn load_worker() -> ! {
     LOAD_ENTERED.fetch_add(1, Ordering::Release);
+    room::wake_value(VirtAddr::new(LOAD_ENTERED.as_ptr() as usize), true).unwrap();
     while !LOAD_STOP.load(Ordering::Acquire) {
-        room::yield_();
+        // Keep every Hart runnable and require timer preemption. A continuous
+        // syscall loop instead benchmarks a lock convoy under oversubscribed
+        // TCG, obscuring the register/placement transitions under test.
+        core::hint::spin_loop();
     }
     unit::exit(0, 0, VirtAddr::new(0), 0)
 }
@@ -97,7 +103,7 @@ fn worker(id: usize) -> ! {
         unsafe { core::arch::asm!("rdtime {}", out(reg) now) };
         assert!(now - start < 30_000_000, "no timer preemption");
     }
-    for turn in 0..64 {
+    for turn in 0..8 {
         unsafe {
             if id == 1 {
                 context_float_one();
@@ -108,26 +114,20 @@ fn worker(id: usize) -> ! {
         unsafe { save(&mut observed) };
         assert_eq!(observed.regs, expected.regs);
         assert_eq!(observed.fcsr, expected.fcsr);
-        if turn % 8 == 0 {
-            HANDOFF.wait((turn / 8) as u32 + 1);
-            // Trace the actual resumed context before another Yield or Sleep
-            // can move it again, then check the whole register image.
-            unsafe {
-                if id == 1 {
-                    context_float_one();
-                } else {
-                    context_float_two();
-                }
-                save(&mut observed);
+        HANDOFF.wait(turn + 1);
+        // Every round covers a real blocked/resumed transition. Trace it
+        // before Yield can move the Task, then check the whole register image.
+        unsafe {
+            if id == 1 {
+                context_float_one();
+            } else {
+                context_float_two();
             }
-            assert_eq!(observed.regs, expected.regs);
-            assert_eq!(observed.fcsr, expected.fcsr);
+            save(&mut observed);
         }
+        assert_eq!(observed.regs, expected.regs);
+        assert_eq!(observed.fcsr, expected.fcsr);
         room::yield_();
-        // Avoid locking both workers to the same timer phase. Every checkpoint
-        // still verifies all registers; the host trace must prove actual migration.
-        let delay = 100_000 + ((turn * 17 + id * 11) % 29) as u64 * 100_000;
-        room::sleep_until(room::clock() + delay).unwrap();
     }
     unsafe { save(&mut observed) };
     assert_eq!(observed.regs, expected.regs);

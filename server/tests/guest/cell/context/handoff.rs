@@ -33,10 +33,10 @@ impl Handoff {
         }
         assert_eq!(self.epoch.load(Ordering::Acquire), turn + 1);
     }
-    pub(super) fn wake(&self, tasks: &[TaskId; 2], turn: u32) {
+    pub(super) fn wake(&self, tasks: &[TaskId], turn: u32) {
         // Work between handoffs is not the blocking transition. Park while
         // the workers execute it instead of adding a fifth Yield competitor.
-        let expected = 2 * (turn + 1);
+        let expected = tasks.len() as u32 * (turn + 1);
         loop {
             let observed = self.arrived.load(Ordering::Acquire);
             assert!(observed <= expected, "handoff arrival advanced twice");
@@ -45,20 +45,20 @@ impl Handoff {
             }
             crate::room::wait(&self.arrived, observed, Wait::Infinite);
         }
-        let deadline = room::clock().saturating_add(3_000_000_000);
         loop {
             let waiting = tasks.iter().all(|id| {
-                super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(*id))).state
-                    == UnitState::Waiting
+                let state =
+                    super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(*id))).state;
+                assert_ne!(state, UnitState::Exited, "context worker exited at {turn}");
+                state == UnitState::Waiting
             });
             if waiting {
                 break;
             }
-            assert!(
-                room::clock() < deadline,
-                "context workers did not block at {turn}"
-            );
-            room::yield_();
+            // Ordinary Tasks have no admitted response bound. Let the workers
+            // reach WaitValue without adding another busy Yield competitor;
+            // the enclosing process watchdog still detects missing progress.
+            room::sleep_until(room::clock().saturating_add(1_000_000)).unwrap();
         }
         self.epoch.store(turn + 1, Ordering::Release);
         assert_eq!(room::wake_value(self.address(), true).unwrap(), tasks.len());
