@@ -41,14 +41,14 @@ fn dispatch(allow_steal: bool) -> Option<usize> {
     // Ready tasks must not escape every scheduler container between commits.
     let _commit = crate::basis::commit();
     let s = current();
-    let task = s.pull().or_else(|| {
+    let task = s.pull(&_commit).or_else(|| {
         if allow_steal {
             scheduler::steal()
         } else {
             None
         }
     });
-    task.and_then(|task| s.seat(task))
+    task.and_then(|task| s.seat(task, &_commit))
 }
 
 pub(super) fn fetch() -> usize {

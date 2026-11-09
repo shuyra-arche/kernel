@@ -24,6 +24,10 @@ pub(crate) fn assert_held() {
     );
 }
 
-pub(crate) fn commit() -> crate::metal::sync::reentrant::RelLockGuard<'static, ()> {
+/// A borrowed witness that the global transaction lock remains held.
+/// Scheduler handoffs pass this guard between dequeue and seating.
+pub(crate) type CommitGuard = crate::metal::sync::reentrant::RelLockGuard<'static, ()>;
+
+pub(crate) fn commit() -> CommitGuard {
     COMMIT.lock()
 }
