@@ -1,7 +1,7 @@
 //! QEMU virt UART is a real level interrupt, not a software Sign trigger.
 use core::{
     fmt::Write,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use kernel_api::{
     abi::reply::SignReply,
@@ -20,10 +20,57 @@ use kernel_api::{
     },
 };
 use kernel_client::call::{pend, room, share_view, sign, unit};
+static LOAD_STOP: AtomicBool = AtomicBool::new(false);
+static LOAD_ENTERED: AtomicUsize = AtomicUsize::new(0);
+struct Load([TaskId; 4]);
+impl Load {
+    fn start() -> Self {
+        LOAD_STOP.store(false, Ordering::Release);
+        LOAD_ENTERED.store(0, Ordering::Release);
+        let tasks = core::array::from_fn(|_| {
+            let task = super::lifecycle::spawn(load_worker as *const () as usize);
+            unit::resume(UnitTarget::Task(task)).unwrap();
+            task
+        });
+        let deadline = room::clock() + 3_000_000_000;
+        while LOAD_ENTERED.load(Ordering::Acquire) != tasks.len() {
+            assert!(room::clock() < deadline, "load workers did not start");
+            room::yield_();
+        }
+        Self(tasks)
+    }
+    fn finish(self) {
+        LOAD_STOP.store(true, Ordering::Release);
+        for task in self.0 {
+            assert!(super::lifecycle::wait_task(task));
+            assert_eq!(super::lifecycle::result(task), (1, 0));
+            super::lifecycle::delete(task);
+        }
+    }
+}
+extern "C" fn load_worker() -> ! {
+    LOAD_ENTERED.fetch_add(1, Ordering::Release);
+    while !LOAD_STOP.load(Ordering::Acquire) {
+        room::yield_();
+    }
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
+
 static UART: AtomicUsize = AtomicUsize::new(0);
 static TOKEN: AtomicUsize = AtomicUsize::new(0);
 static GENERATION: AtomicUsize = AtomicUsize::new(0);
 static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+static OBSERVER: AtomicUsize = AtomicUsize::new(0);
+static OBSERVED: AtomicBool = AtomicBool::new(false);
+extern "C" fn observer() -> ! {
+    let token = PendId::mint(OBSERVER.load(Ordering::Acquire));
+    assert!(matches!(
+        sign::listen(token, deadline()).unwrap(),
+        SignReply::Triggered { .. }
+    ));
+    OBSERVED.store(true, Ordering::Release);
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
 static ENTERED: AtomicUsize = AtomicUsize::new(0);
 fn write(offset: usize, byte: u8) {
     unsafe {
@@ -116,10 +163,27 @@ pub(super) fn run(at: usize, count: usize) {
     write(1, 0);
     assert_ne!(read(5) & 0x20, 0);
     assert!(sign::listen(root, Wait::Poll).is_err());
+    let load = Load::start();
     let generation = sign::claim(root).unwrap();
     assert!(sign::claim(root).is_err());
     assert!(sign::trigger(root).is_err());
     let unrelated = sign::create(crate::license::get()).unwrap();
+    let observer_task = super::lifecycle::spawn(observer as *const () as usize);
+    let bytes = AccordRequest {
+        src: unrelated,
+        target: AccordTarget::Task(observer_task),
+        mark: Mark::NONE,
+        limits: Limits {
+            operations: Operations::Sign(SignRights::LISTEN),
+            modifiable: Modifiable::No,
+            distributable: Distributable::No,
+            range: PendRange::Inherit,
+        },
+    }
+    .to_bytes();
+    let observer_token = pend::accord(super::ptr(&bytes)).unwrap();
+    OBSERVER.store(observer_token.get(), Ordering::Release);
+    unit::resume(UnitTarget::Task(observer_task)).unwrap();
     sign::rearm(root, generation, 0).unwrap();
     let mut previous = 0;
     for turn in 0..24 {
@@ -145,7 +209,20 @@ pub(super) fn run(at: usize, count: usize) {
         assert!(sign::rearm(root, generation, sequence).is_err());
         previous = sequence;
     }
+    // A still-asserted level must request another interrupt after completion.
+    write(1, 2);
+    let held = receive(root, deadline());
+    sign::rearm(root, generation, held).unwrap();
+    let repeated = receive(root, deadline());
+    assert!(repeated > held);
+    write(1, 0);
+    sign::rearm(root, generation, repeated).unwrap();
     sign::yield_binding(root, generation).unwrap();
+    assert!(!OBSERVED.load(Ordering::Acquire));
+    sign::trigger(unrelated).unwrap();
+    assert!(super::lifecycle::wait_task(observer_task));
+    super::lifecycle::delete(observer_task);
+    assert!(OBSERVED.load(Ordering::Acquire));
     sign::delete(unrelated).unwrap();
     pend::return_(unrelated).unwrap();
     let task = super::lifecycle::spawn(dying_driver as *const () as usize);
@@ -191,6 +268,7 @@ pub(super) fn run(at: usize, count: usize) {
     write(1, 0);
     sign::rearm(root, generation, sequence).unwrap();
     sign::yield_binding(root, generation).unwrap();
+    load.finish();
     share_view::shut(page).unwrap();
     writeln!(
         super::Console,

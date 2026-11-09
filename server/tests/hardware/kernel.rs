@@ -215,6 +215,13 @@ fn run(mode: &str) {
                     &trace_path,
                     &["clock_handoff_send", "clock_handoff_receive"],
                 )
+            } else if mode.starts_with("irq") && harts == 4 {
+                super::context::trace_checkpoints(
+                    &mut command,
+                    &elf,
+                    &trace_path,
+                    &["irq_received"],
+                )
             } else if context && harts == 4 {
                 super::context::trace(&mut command, &elf, &trace_path, vector || mixed, mixed)
             } else {
@@ -294,6 +301,9 @@ fn run(mode: &str) {
                 assert!(log.contains(marker), "{name}: {log}");
             }
             if mode.starts_with("irq") {
+                if !symbols.is_empty() {
+                    super::context::verify(&trace_path, &symbols, false);
+                }
                 assert!(log.contains("PASS interrupt uart=1 retained=1 repeated=24 isolated=1 stale=1 death=1 revoke=1 rebind=1"), "{name}: {log}");
             }
             if mode == "large" {
