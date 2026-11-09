@@ -31,11 +31,13 @@ pub(crate) fn assert_held() {
 /// Scheduler handoffs pass this guard between dequeue and seating.
 pub(crate) type CommitGuard = crate::metal::sync::reentrant::RelLockGuard<'static, ()>;
 
+#[cfg_attr(feature = "latency", track_caller)]
 pub(crate) fn commit() -> CommitGuard {
     COMMIT.lock()
 }
 
 /// Interrupt work may retain its event and retry instead of waiting IRQ-off.
+#[cfg_attr(feature = "latency", track_caller)]
 pub(crate) fn try_commit() -> Option<CommitGuard> {
     COMMIT.try_lock()
 }

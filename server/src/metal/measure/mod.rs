@@ -4,7 +4,11 @@ use crate::metal::{clock, hart, sync::OnceLock};
 use alloc::boxed::Box;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 mod distribution;
+pub(crate) mod execution;
+mod transaction;
+use core::cell::UnsafeCell;
 use distribution::Distribution;
+pub(crate) use transaction::Transaction;
 #[derive(Clone, Copy)]
 #[repr(usize)]
 pub(crate) enum Metric {
@@ -18,8 +22,12 @@ pub(crate) enum Metric {
     ReadyRun,
     TimerLate,
     Probe,
+    OuterWait,
+    OuterHold,
+    ReadyQueue,
+    DispatchRun,
 }
-const NAMES: [&str; 10] = [
+const NAMES: [&str; 14] = [
     "irq-off",
     "kernel-active",
     "spin-wait",
@@ -30,17 +38,26 @@ const NAMES: [&str; 10] = [
     "ready-run",
     "timer-late",
     "probe",
+    "outer-wait",
+    "outer-hold",
+    "ready-queue",
+    "dispatch-run",
 ];
 #[repr(align(64))]
 struct Local {
-    metrics: [Distribution; 10],
+    metrics: [Distribution; 14],
+    slowest: UnsafeCell<transaction::Slowest>,
     kernel: AtomicU64,
     irq: AtomicU64,
 }
+// Only this Hart writes attribution while COMMIT and its IRQ guard are held.
+// Reporting runs after every Hart has reached the shutdown barrier.
+unsafe impl Sync for Local {}
 impl Local {
     const fn new() -> Self {
         Self {
-            metrics: [const { Distribution::new() }; 10],
+            metrics: [const { Distribution::new() }; 14],
+            slowest: UnsafeCell::new(transaction::Slowest::new()),
             kernel: AtomicU64::new(0),
             irq: AtomicU64::new(0),
         }
@@ -113,6 +130,36 @@ pub(crate) fn resume_irq(measured: bool) {
         local.irq.store(stamp(), Ordering::Relaxed);
     }
 }
+pub(crate) fn transaction(
+    start: u64,
+    site: &'static core::panic::Location<'static>,
+) -> Transaction {
+    let now = stamp();
+    let wait = now.saturating_sub(start);
+    if start != 0 {
+        record(Metric::OuterWait, wait);
+    }
+    Transaction {
+        site,
+        start: now,
+        wait,
+    }
+}
+pub(crate) fn complete(transaction: Transaction) {
+    if transaction.start == 0 || !ACTIVE.load(Ordering::Relaxed) {
+        return;
+    }
+    let hold = stamp().saturating_sub(transaction.start);
+    record(Metric::OuterHold, hold);
+    if let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) {
+        // Called only by the last COMMIT guard, before releasing ownership.
+        unsafe { &mut *local.slowest.get() }.record(transaction::Sample {
+            site: transaction.site,
+            hold,
+            wait: transaction.wait,
+        });
+    }
+}
 pub(crate) fn report() {
     let (opened, captured) = crate::metal::interrupt::window::stats();
     crate::putln!("latency-windows: opened={} captured={}", opened, captured);
@@ -125,6 +172,18 @@ pub(crate) fn report() {
         crate::entry::boot::facts::info().hart.hertz()
     );
     for (hart, local) in all.iter().enumerate() {
+        // All writers are quiescent at the shutdown barrier.
+        for sample in unsafe { &*local.slowest.get() }.samples.iter().flatten() {
+            crate::putln!(
+                "latency-outer: hart={} hold={} wait={} site={}:{}:{}",
+                hart,
+                sample.hold,
+                sample.wait,
+                sample.site.file(),
+                sample.site.line(),
+                sample.site.column()
+            );
+        }
         for (name, metric) in NAMES.iter().zip(&local.metrics) {
             let (count, max, bins) = metric.snapshot();
             crate::putln!(

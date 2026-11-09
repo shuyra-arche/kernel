@@ -68,7 +68,7 @@ pub(crate) fn admit(
     let _commit = crate::basis::commit();
     if !authorized(actor, task)
         || !(task.held() || task.stopped() && task.ready() && task.on_hart().is_none())
-        || !matches!(*task.schedule.lock(), Schedule::Ordinary)
+        || !matches!(*task.schedule.lock(), Schedule::Ordinary { .. })
         || task.dead()
         || !task.heir.lock().is_empty()
         || task.ident.team.nest.kind().is_supervisor()
@@ -155,7 +155,7 @@ impl Drop for Preparation {
         let _commit = crate::basis::commit();
         let mut state = self.0.schedule.lock();
         if matches!(*state, Schedule::Preparing) {
-            *state = Schedule::Ordinary;
+            *state = Schedule::new();
         }
     }
 }
@@ -186,7 +186,7 @@ pub(crate) fn release(task: &Task) {
     let Some(contract) = task.schedule.lock().contract() else {
         return;
     };
-    *task.schedule.lock() = Schedule::Ordinary;
+    *task.schedule.lock() = Schedule::new();
     let slot = &super::schedulers()[contract.spec.hart as usize];
     let mut admission = slot.admission.lock();
     let members = admission.members();
@@ -199,7 +199,7 @@ pub(crate) fn release(task: &Task) {
                 .as_ref()
                 .and_then(Weak::upgrade)
                 .filter(|task| !task.dead()),
-            Schedule::Ordinary | Schedule::Preparing => None,
+            Schedule::Ordinary { .. } | Schedule::Preparing => None,
         };
         let _ = depend(actor, server.as_ref());
     }

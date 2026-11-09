@@ -22,6 +22,8 @@ pub struct RelLock<T: ?Sized> {
     serving: AtomicUsize,
     owner: AtomicUsize,
     count: UnsafeCell<usize>,
+    #[cfg(feature = "latency")]
+    outer: UnsafeCell<Option<crate::metal::measure::Transaction>>,
 
     #[cfg(debug_assertions)]
     level: Option<depend::Level>,
@@ -38,6 +40,8 @@ impl<T> RelLock<T> {
             serving: AtomicUsize::new(0),
             owner: AtomicUsize::new(0),
             count: UnsafeCell::new(0),
+            #[cfg(feature = "latency")]
+            outer: UnsafeCell::new(None),
             #[cfg(debug_assertions)]
             level: Some(_level),
             data: UnsafeCell::new(val),
@@ -49,6 +53,7 @@ impl<T: ?Sized> RelLock<T> {
     /// One acquisition attempt; a foreign owner is never waited on. Recursive
     /// acquisition stays on the same Hart and creates no second lockdep entry.
     /// A failed attempt drops TrapGuard and restores the caller's IRQ state.
+    #[cfg_attr(feature = "latency", track_caller)]
     #[inline(never)]
     pub fn try_lock(&self) -> Option<RelLockGuard<'_, T>> {
         #[cfg(debug_assertions)]
@@ -75,6 +80,13 @@ impl<T: ?Sized> RelLock<T> {
             crate::metal::sync::depend_check!(self, caller);
             self.owner.store(me.word(), Ordering::Relaxed);
             unsafe { *self.count.get() = 1 };
+            #[cfg(feature = "latency")]
+            unsafe {
+                *self.outer.get() = Some(crate::metal::measure::transaction(
+                    start,
+                    core::panic::Location::caller(),
+                ));
+            }
             crate::metal::sync::depend_acquire!(self, caller);
         }
         #[cfg(feature = "latency")]
@@ -95,6 +107,7 @@ impl<T: ?Sized> RelLock<T> {
         self.owner.load(Ordering::Relaxed) == Owner::of(hart::hart_id()).word()
     }
 
+    #[cfg_attr(feature = "latency", track_caller)]
     #[inline(never)]
     pub fn lock(&self) -> RelLockGuard<'_, T> {
         #[cfg(debug_assertions)]
@@ -124,6 +137,13 @@ impl<T: ?Sized> RelLock<T> {
             }
             self.owner.store(me.word(), Ordering::Relaxed);
             unsafe { *self.count.get() = 1 };
+            #[cfg(feature = "latency")]
+            unsafe {
+                *self.outer.get() = Some(crate::metal::measure::transaction(
+                    start,
+                    core::panic::Location::caller(),
+                ));
+            }
             crate::metal::sync::depend_acquire!(self, caller);
         }
 

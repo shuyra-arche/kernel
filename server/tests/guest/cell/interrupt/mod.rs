@@ -75,9 +75,11 @@ static ENTERED: AtomicUsize = AtomicUsize::new(0);
 static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
 static WATCH_TOKEN: AtomicUsize = AtomicUsize::new(0);
 static WATCH_ENTERED: AtomicUsize = AtomicUsize::new(0);
+static WATCH_ARMED: AtomicBool = AtomicBool::new(false);
 extern "C" fn watch() -> ! {
     let token = PendId::mint(WATCH_TOKEN.load(Ordering::Acquire));
     WATCH_ENTERED.fetch_add(1, Ordering::Release);
+    while !WATCH_ARMED.load(Ordering::Acquire) { room::yield_(); }
     assert!(matches!(
         sign::listen(token, deadline()).unwrap(),
         SignReply::Triggered { .. }
@@ -292,6 +294,7 @@ pub(super) fn run(at: usize, count: usize) {
     let routed = sign::create(crate::license::get()).unwrap();
     let source = kernel_api::model::sign::SignSource::Sign { token };
     sign::attach(routed, source, 0).unwrap();
+    WATCH_ARMED.store(true, Ordering::Release);
     write(1, 2);
     assert_eq!(
         sign::listen(routed, deadline()).unwrap(),

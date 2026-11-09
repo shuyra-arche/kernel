@@ -45,11 +45,33 @@ pub(super) fn verify(log: &str, output: &Path) {
         "ready-run",
         "timer-late",
         "probe",
+        "outer-wait",
+        "outer-hold",
+        "ready-queue",
+        "dispatch-run",
     ] {
         assert!(
             totals.get(metric).copied().unwrap_or(0) > 0,
             "missing samples for {metric}"
         );
     }
+    assert_eq!(totals["outer-wait"], totals["outer-hold"]);
+    assert!(
+        totals["outer-hold"] < totals["commit-hold"],
+        "recursive scopes were not separated"
+    );
+    assert_eq!(totals["ready-queue"], totals["ready-run"]);
+    assert_eq!(totals["dispatch-run"], totals["ready-run"]);
+    let outer: Vec<_> = log
+        .lines()
+        .filter(|line| line.starts_with("latency-outer: "))
+        .collect();
+    assert!(!outer.is_empty(), "missing outer transaction attribution");
+    assert!(
+        outer
+            .iter()
+            .all(|line| line.contains("site=") && line.contains(".rs:"))
+    );
+    std::fs::write(output.with_extension("outer.txt"), outer.join("\n")).unwrap();
     std::fs::write(output, tsv).unwrap();
 }

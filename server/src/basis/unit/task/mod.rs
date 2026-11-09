@@ -45,7 +45,7 @@ pub(crate) const MAX_ARGS: usize = 64;
 /// 账本（`Pend`）的组合，加上它作为家长持有的子团队表。
 pub struct Task {
     #[cfg(feature = "latency")]
-    pub(crate) ready_stamp: core::sync::atomic::AtomicU64,
+    pub(crate) observation: crate::metal::measure::execution::Execution,
     pub(crate) ident: Arc<TaskIdent>,
     pub(crate) life: Arc<Anchor>,
     pub(crate) state: Arc<SpinLock<TaskState>>,
@@ -284,8 +284,7 @@ impl Task {
 
     pub(crate) fn park(task: Arc<Task>) {
         #[cfg(feature = "latency")]
-        task.ready_stamp
-            .store(0, core::sync::atomic::Ordering::Relaxed);
+        task.observation.cancel();
         let team = task.ident.team.clone();
         task.state.lock().park();
         team.park(task);

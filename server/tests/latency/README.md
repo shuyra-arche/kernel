@@ -185,3 +185,46 @@ historical baseline is linked from #30 / PR #100. Compare only named boundaries
 under recorded environments; changed workloads and mask-window boundaries are
 not direct hardware performance comparisons. Full CI validates the final commit;
 M3 and physical-hardware WCET analysis remain separate work.
+
+## Outer transactions and execution phases
+
+The optional provider now adds `outer-wait` and `outer-hold`: each outer COMMIT
+turn contributes once, regardless of recursive guard count. The original
+`commit-wait`/`commit-hold` metrics retain their original scope semantics. Up to
+eight slowest distinct outer call sites per Hart are retained without allocating,
+locking or formatting during a sample. Each `latency-outer` record pairs the
+largest observed hold at that site with the wait for that same transaction;
+it is a bounded selection, not a complete per-site profile. Attribution uses
+static caller locations forwarded through `commit`/`try_commit`. Reporting reads
+those Hart-local records only after all Harts reach the shutdown barrier.
+
+`ready-queue` runs from first ready-queue publication to final seating;
+`dispatch-run` runs from that seating through extension restoration and ASID
+occupancy at the Rust return boundary. Both use the same endpoint and partition
+`ready-run` for each completed sample. Transfer preserves the original ready
+stamp, reseating replaces the dispatch boundary, and parking cancels the sample.
+These do not measure notification work before ready publication, nor final
+assembly return instructions. Histogram percentiles cannot be added together.
+
+Initial attribution identified Cell Split/Merge (`cell/object::reshape`) and
+Share Open (`flat/sharing::open`) as long outer holders. Split/Merge now retains
+its owner's ledger while preparing and converting its exclusive private source
+outside COMMIT. Admission requires one Hold, no bindings and no in-flight
+publication; the owner ledger prevents a second access and retirement. The
+replacement identity is reserved before receipt movement, so successful movement
+cannot be followed by a fallible publication allocation. Final publication closes
+the old identity; if Stop closed the owner meanwhile, replacement receipts remain
+in its ledger for retirement and caller success is refused.
+
+This removes page-count-dependent physical conversion from global COMMIT, but
+not from the private Flat/allocator locks. Share Open's publication transaction,
+private allocator costs and firmware remain unresolved blocking sources. No
+hardware time bound or completion of #30's strongest acceptance is claimed.
+
+Ordinary wake placement also owns its cursor in Task's scheduling state. A shared
+global cursor allowed periodic workers to remain on one residue when unrelated
+wakeups advanced it by the Hart count. Each Task now progresses independently;
+existing compatibility, idle preference and fixed-Hart reservation rules remain.
+The context guest still requires actual traced migration; its assertions and
+watchdogs are unchanged. IRQ observer deadlines start only after all observers
+are prepared, so fixture construction is not mistaken for event-delivery delay.

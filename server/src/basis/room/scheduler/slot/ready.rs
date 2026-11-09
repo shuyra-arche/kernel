@@ -56,12 +56,7 @@ impl Ready {
     pub(super) fn enqueue(&mut self, task: Arc<Task>, now: u64) {
         assert!(task.ready(), "ready queue requires a Ready Task");
         #[cfg(feature = "latency")]
-        let _ = task.ready_stamp.compare_exchange(
-            0,
-            crate::metal::measure::stamp(),
-            core::sync::atomic::Ordering::Relaxed,
-            core::sync::atomic::Ordering::Relaxed,
-        );
+        task.observation.enqueue(crate::metal::measure::stamp());
         let empty = self.is_empty();
         if task.realtime() {
             assert!(self.fixed.len() < MAX_TASKS);

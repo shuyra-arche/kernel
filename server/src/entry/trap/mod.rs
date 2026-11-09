@@ -253,7 +253,7 @@ pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
         next = crate::basis::room::scheduler::slot::current().check() as *mut TrapContext;
     }
     #[cfg(feature = "latency")]
-    let mut ready = 0;
+    let mut observed = None;
     let space = unsafe { (*next).address_space() };
     if !space.is_kernel() {
         let task = crate::basis::room::scheduler::slot::current()
@@ -263,9 +263,7 @@ pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
         let mut status = unsafe { (*next).status() };
         #[cfg(feature = "latency")]
         {
-            ready = task
-                .ready_stamp
-                .swap(0, core::sync::atomic::Ordering::Relaxed);
+            observed = Some(task.clone());
         }
         unsafe {
             task.restore_extensions(&mut status);
@@ -275,7 +273,15 @@ pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
     asid::occupy(space);
     #[cfg(feature = "latency")]
     {
-        crate::metal::measure::elapsed(crate::metal::measure::Metric::ReadyRun, ready);
+        if let Some(task) = observed
+            && let Some((queue, dispatch, total)) =
+                task.observation.finish(crate::metal::measure::stamp())
+        {
+            use crate::metal::measure::{Metric, record};
+            record(Metric::ReadyQueue, queue);
+            record(Metric::DispatchRun, dispatch);
+            record(Metric::ReadyRun, total);
+        }
         crate::metal::measure::leave();
     }
     next
