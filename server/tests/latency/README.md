@@ -72,7 +72,7 @@ Count and exact observed maximum accompany each histogram. Counters wrap after
 | spin-wait / spin-hold | After IRQ mask to successful acquire (including debug lockdep), and guard construction to drop before unlock; failed try_lock is not a successful sample |
 | commit-wait / commit-hold | RelLock acquisition/guard scopes (COMMIT is its only current instance); nested scopes are included separately, so sums are not CPU utilization |
 | irq-sign | External router entry before COMMIT acquisition to retained driver Sign publication/wakeup; excludes device-to-CPU and earlier trap prologue; reserved IOMMU queues are not driver Sign samples |
-| ready-run | First ready-queue publication through user return preparation; preserved across queue transfer/steal, cleared when parked; excludes final extension restore/assembly return |
+| ready-run | First ready-queue publication through the final Rust user-return boundary after extension restore and ASID occupancy; preserved across queue transfer/steal, cleared when parked; excludes only the final assembly return |
 | timer-late | Deadline drain observation minus requested tick, using the existing #27 drain boundary; not time of user execution |
 | probe | 1024 boot-Hart samples of two time reads and one same-layout histogram update; calibration floor, not an overhead subtraction or hardware upper bound |
 
