@@ -90,6 +90,7 @@ fn read(offset: usize) -> u8 {
 extern "C" fn irq_received() {
     core::hint::black_box(());
 }
+#[track_caller]
 fn receive(token: PendId, wait: Wait) -> u64 {
     let SignReply::Triggered { sequence } = sign::listen(token, wait).unwrap() else {
         panic!("UART IRQ missing")
@@ -209,9 +210,12 @@ pub(super) fn run(at: usize, count: usize) {
         assert!(sign::rearm(root, generation, sequence).is_err());
         previous = sequence;
     }
-    // A still-asserted level must request another interrupt after completion.
+    // A fresh device assertion while the old claim is held must survive rearm.
+    // QEMU PLIC does not resample a continuously high input on completion.
     write(1, 2);
     let held = receive(root, deadline());
+    write(1, 0);
+    write(1, 2);
     sign::rearm(root, generation, held).unwrap();
     let repeated = receive(root, deadline());
     assert!(repeated > held);
