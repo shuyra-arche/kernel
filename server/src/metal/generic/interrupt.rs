@@ -6,20 +6,12 @@ pub(crate) struct Irq {
     pub(crate) line: u32,
 }
 
-/// An interrupt claimed from a particular controller context. Finish consumes
-/// the claim and leaves the line masked until the deferred work can rearm it.
-pub(crate) trait Claim {
-    fn finish(self) -> Irq;
-}
-
-pub(crate) trait Controller {
-    fn claim(&self) -> Option<impl Claim + '_>;
+/// Serialized controller mechanism; no Task, Sign or ownership policy here.
+pub(crate) trait Delivery: Send + Sync {
+    /// Claim and mask; the caller retains the outstanding controller claim.
+    fn claim_masked(&self) -> Option<Irq>;
+    fn complete(&self, irq: Irq);
+    fn mask(&self, irq: Irq);
     fn unmask(&self, irq: Irq);
-}
-
-/// An optional Kernel-owned external route selected at boot. Work may run on
-/// any Hart, while the implementation limits register access to its owner.
-pub(crate) trait External: Send + Sync {
-    fn handle(&self) -> bool;
-    fn rearm(&self);
+    fn prioritize(&self, irq: Irq);
 }

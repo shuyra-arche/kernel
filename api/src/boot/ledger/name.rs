@@ -8,9 +8,11 @@ pub enum Name {
     Call(Call),
     Page(Page),
     Port(u64),
+    Interrupt { controller: u64, source: u32 },
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Trap {
+    /// Legacy descriptive name; version 6 never mints this global authority.
     SupervisorExternal,
     PageFault,
 }
@@ -37,7 +39,7 @@ impl Name {
     }
     pub const fn kind(self) -> ResourceKind {
         match self {
-            Self::Trap(Trap::SupervisorExternal) => ResourceKind::Sign,
+            Self::Trap(Trap::SupervisorExternal) | Self::Interrupt { .. } => ResourceKind::Sign,
             Self::Call(Call::Create) => ResourceKind::None,
             Self::Call(_) => ResourceKind::Control,
             Self::Trap(Trap::PageFault) => ResourceKind::Clone,
@@ -51,6 +53,13 @@ impl Name {
     /// Write a ledger name into exactly `WIDTH` bytes.
     pub fn store(&self, out: &mut [u8]) {
         assert_eq!(out.len(), Self::WIDTH);
+        if let Self::Interrupt { controller, source } = *self {
+            out.fill(0);
+            out[0] = 4;
+            out[4..8].copy_from_slice(&source.to_le_bytes());
+            out[8..16].copy_from_slice(&controller.to_le_bytes());
+            return;
+        }
         let (class, item, at): (u8, u8, u64) = match *self {
             Self::Trap(Trap::SupervisorExternal) => (0, 0, 0),
             Self::Trap(Trap::PageFault) => (0, 1, 0),
@@ -61,6 +70,7 @@ impl Name {
             Self::Page(Page::Initrd) => (2, 1, 0),
             Self::Page(Page::Region(base)) => (2, 2, base),
             Self::Port(id) => (3, 0, id),
+            Self::Interrupt { .. } => unreachable!(),
         };
         out.fill(0);
         out[0] = class;
@@ -69,6 +79,12 @@ impl Name {
     }
     pub fn fetch(bytes: &[u8]) -> Option<Self> {
         let bytes = bytes.get(..NAME_LEN)?;
+        if bytes[0] == 4 {
+            let source = u32::from_le_bytes(bytes[4..8].try_into().ok()?);
+            let controller = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
+            return (bytes[1..4] == [0; 3] && source != 0 && controller != 0)
+                .then_some(Self::Interrupt { controller, source });
+        }
         if bytes[2..8].iter().any(|b| *b != 0) {
             return None;
         }

@@ -1,12 +1,10 @@
 //! Boot-only grants issued when the entry task is created.
-use crate::basis::room::interrupt;
 use crate::basis::unit::task::Task;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::boot::ledger::Call;
 use kernel_api::boot::ledger::Entry;
 use kernel_api::boot::ledger::Name;
-use kernel_api::boot::ledger::{ResourceKind, Trap};
-use kernel_api::model::sign::SignRights;
+use kernel_api::boot::ledger::ResourceKind;
 use kernel_api::model::unit::ControlKind;
 pub(crate) const CONTROL_ENTRIES: usize = 2;
 pub(crate) fn grant_controls(target: &Task) -> Result<[Entry; CONTROL_ENTRIES], PendFail> {
@@ -25,7 +23,6 @@ pub(crate) fn grant_controls(target: &Task) -> Result<[Entry; CONTROL_ENTRIES], 
     Ok(entries)
 }
 
-pub(crate) const SIGN_ENTRIES: usize = 1;
 pub(crate) const CALL_ENTRIES: usize = 1;
 pub(crate) fn grant_calls(target: &Task) -> Result<Entry, PendFail> {
     use crate::basis::pend::{self, PendEntry, Target};
@@ -44,18 +41,5 @@ pub(crate) fn grant_calls(target: &Task) -> Result<Entry, PendFail> {
         Name::Call(Call::Create),
         ResourceKind::None,
         token.get(),
-    ))
-}
-pub(crate) fn grant_sign(target: &Task) -> Result<Entry, PendFail> {
-    let _commit = crate::basis::commit();
-    let id = crate::basis::sign::endpoint::grant(
-        target,
-        interrupt::get().supervisor_external.clone(),
-        SignRights::LISTEN,
-    )?;
-    Ok(Entry::new(
-        Name::Trap(Trap::SupervisorExternal),
-        ResourceKind::Sign,
-        id.get(),
     ))
 }

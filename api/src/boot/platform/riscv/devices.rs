@@ -22,7 +22,8 @@ pub struct Devices<'a> {
 impl Devices<'_> {
     pub fn validate(&self, memory: &Memory) -> Result<(), PendFail> {
         self.resources.validate(memory)?;
-        if self.controllers.len() > 1 || self.controllers.is_empty() != self.interrupt.is_none() {
+        if self.controllers.len() > 1 || (!self.controllers.is_empty() && self.interrupt.is_none())
+        {
             return Err(PendFail::Denied);
         }
         for r in self.controllers {
@@ -65,7 +66,15 @@ impl Devices<'_> {
                     return Err(PendFail::Denied);
                 }
             }
-            for (i, irq) in p.queues.iter().enumerate() {
+            if self.controllers.is_empty() && p.queues != [0; 3] {
+                return Err(PendFail::Denied);
+            }
+            for (i, irq) in p
+                .queues
+                .iter()
+                .enumerate()
+                .filter(|_| !self.controllers.is_empty())
+            {
                 if *irq == 0 || *irq as usize > p.sources || p.queues[..i].contains(irq) {
                     return Err(PendFail::Denied);
                 }

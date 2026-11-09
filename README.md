@@ -445,3 +445,26 @@ private to an address space; wake removes one or all current waiters and never
 stores a notification. Timeout, task death and space retirement use the existing
 wait-ticket cleanup. Callers keep the object and mapping alive and recheck their
 condition after a successful wait. Concurrent mapping transactions report `Busy`.
+
+### Hardware interrupt Sign (ABI / ledger 6)
+
+The trusted platform admits exclusive level-high PLIC sources and calls
+`boot::grant_interrupt(controller, source)` before start. The boot ledger names
+both controller and source; raw IRQ numbers never authorize a user call. One
+router owns driver sources and reserved IOMMU queue interrupts.
+
+A driver claims its source Sign, initializes/clears the device, then calls
+`Sign::Rearm(generation, 0)`. An IRQ is claimed and masked, and a retained Sign
+sequence is published. After clearing the device cause, the driver rearms with
+that exact generation and sequence. PLIC completion occurs with the source
+briefly enabled, as required by its completion protocol. Duplicate/stale replies
+cannot rearm. Yield, Pend revocation and Task exit mask the source and invalidate
+the binding. An outstanding controller claim survives the old driver and is
+completed by the replacement's initial rearm after device initialization.
+
+This first provider grants only Listen/Claim/Yield/Rearm, binds one Task and Pend,
+and rejects hardware Sign forwarding. Up to 64 sources are admitted; an IRQ entry
+claims at most four. These bounds do not bound global commit-lock contention.
+Shared lines, cascaded controllers and MSI need separate admission contracts.
+Interrupt acknowledgement is not proof of device quiescence or Page retirement.
+The old global SupervisorExternal boot grant is no longer minted.

@@ -3,6 +3,8 @@
 #[cfg(feature = "context")]
 mod context;
 mod external;
+#[cfg(feature = "irq")]
+mod interrupt;
 mod levels;
 mod license;
 mod lifecycle;
@@ -164,6 +166,8 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     } else if cfg!(feature = "io") {
         external::run(args, count);
     }
+    #[cfg(feature = "irq")]
+    interrupt::run(args, count);
     license::run();
     let _ = writeln!(Console, "START cell-kernel");
     let a = allocate(2);

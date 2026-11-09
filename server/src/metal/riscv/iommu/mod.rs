@@ -10,7 +10,6 @@ mod engine;
 
 pub(crate) use engine::{Engine, EngineError, Phase, fence_complete, registers};
 
-pub(crate) mod interrupt;
 pub(crate) mod mmio;
 pub(crate) mod port;
 

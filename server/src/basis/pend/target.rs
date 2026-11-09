@@ -212,7 +212,7 @@ impl Target {
     }
     pub(crate) fn changed(&self, token: PendId, routing: bool) {
         if let Self::Sign(sign) = self {
-            if !routing {
+            if !routing || sign.interrupt().is_some() {
                 endpoint::release_authority(sign, token);
             }
             endpoint::authority_changed(sign);

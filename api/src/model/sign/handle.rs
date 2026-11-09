@@ -43,6 +43,9 @@ bitflags::bitflags! {
         const ROUTE = 4;
         const CONSUME = 8;
         const DELETE = 16;
+        const CLAIM = 32;
+        const YIELD = 64;
+        const REARM = 128;
     }
 }
 

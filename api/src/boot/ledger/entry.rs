@@ -58,7 +58,7 @@ impl Entry {
             && !matches!(self.name, Name::Page(Page::Region(0)))
     }
 }
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 #[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub version: u32,

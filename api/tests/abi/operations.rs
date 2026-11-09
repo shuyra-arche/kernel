@@ -203,10 +203,10 @@ fn external_mapping_requires_a_target_pend_and_retired_device_abi_is_rejected() 
 #[test]
 fn sign_rights_reject_unknown_and_empty_authority_without_truncation() {
     use kernel_api::{abi::register::Wire, model::sign::SignRights};
-    for bits in [0, 32, 256, usize::MAX] {
+    for bits in [0, 256, 512, usize::MAX] {
         assert!(SignRights::unpack(&[bits, 0, 0, 0, 0, 0], &mut 0).is_err());
     }
-    for bits in 1..32 {
+    for bits in 1..256 {
         assert_eq!(
             SignRights::unpack(&[bits, 0, 0, 0, 0, 0], &mut 0)
                 .unwrap()

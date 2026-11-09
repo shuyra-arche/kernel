@@ -23,7 +23,12 @@ pub(crate) use wait::AwaitWait;
 
 const MAX: usize = 1024;
 
+enum Kind {
+    Direct,
+    Hardware(crate::basis::room::interrupt::source::Source),
+}
 pub struct Endpoint {
+    kind: Kind,
     state: SpinLock<State>,
     pub(crate) id: usize,
     life: Arc<Anchor>,
@@ -36,7 +41,25 @@ fn key(meta: &Endpoint) -> WakeKey {
 }
 impl Endpoint {
     pub(crate) fn try_new(owner: TaskId) -> Result<Arc<Self>, crate::basis::nest::NestError> {
+        Self::new(owner, Kind::Direct)
+    }
+    pub(crate) fn hardware(
+        source: crate::basis::room::interrupt::source::Source,
+    ) -> Result<Arc<Self>, crate::basis::nest::NestError> {
+        Self::new(TaskId::new(0), Kind::Hardware(source))
+    }
+    pub(crate) fn interrupt(&self) -> Option<&crate::basis::room::interrupt::source::Source> {
+        match &self.kind {
+            Kind::Hardware(source) => Some(source),
+            Kind::Direct => None,
+        }
+    }
+    pub(crate) fn sequence(&self) -> Option<u64> {
+        self.state.lock().sequence()
+    }
+    fn new(owner: TaskId, kind: Kind) -> Result<Arc<Self>, crate::basis::nest::NestError> {
         Arc::try_new(Self {
+            kind,
             state: SpinLock::new_level(Level::L3, State::new()),
             id: {
                 static NEXT: crate::basis::name::Serial =
@@ -167,6 +190,9 @@ pub(crate) fn seal(meta: &Endpoint) {
     clear(meta);
 }
 fn clear(meta: &Endpoint) {
+    if let Some(source) = meta.interrupt() {
+        source.seal(meta);
+    }
     let mut state = meta.state.lock();
     *state = state.transition(Event::Close).expect("close is idempotent");
     drop(state);
@@ -195,13 +221,30 @@ pub(crate) fn trigger_key(meta: &Endpoint) -> WakeKey {
 }
 
 pub(crate) fn trigger(meta: &Endpoint) -> Result<(), SignFail> {
+    if meta.interrupt().is_some() {
+        return Err(SignFail::Denied);
+    }
     let _commit = crate::basis::commit();
     apply(meta, Event::Trigger)?;
     sign::signal(trigger_key(meta));
     sign::knock(key(meta), &meta.life());
     Ok(())
 }
+/// IRQ endpoints have one authorized waiting actor and no forwarding graph.
+/// Retained State handles notification-before-Listen; never allocate a Site here.
+pub(crate) fn trigger_hardware(meta: &Endpoint) -> Result<(), SignFail> {
+    let _commit = crate::basis::commit();
+    apply(meta, Event::Trigger)?;
+    sign::signal(key(meta));
+    Ok(())
+}
 pub(crate) fn consume(meta: &Endpoint, sequence: u64) -> Result<(), SignFail> {
+    if meta.interrupt().is_some() {
+        return Err(SignFail::Denied);
+    }
+    consume_hardware(meta, sequence)
+}
+pub(crate) fn consume_hardware(meta: &Endpoint, sequence: u64) -> Result<(), SignFail> {
     let _commit = crate::basis::commit();
     apply(meta, Event::Consume(sequence))
 }
@@ -216,6 +259,10 @@ fn apply(meta: &Endpoint, event: Event) -> Result<(), SignFail> {
 }
 
 pub(crate) fn release_authority(meta: &Endpoint, permit: PendId) {
+    let _commit = crate::basis::commit();
+    if let Some(source) = meta.interrupt() {
+        source.revoke(meta, permit);
+    }
     while meta
         .routes
         .lock()
@@ -246,21 +293,13 @@ pub(crate) fn authorized(
     if !record.permits(kernel_api::model::pend::Operations::Sign(rights)) {
         return Err(SignFail::Denied);
     }
-    record.target().sign().ok_or(SignFail::Denied)
-}
-
-pub(crate) fn grant(
-    actor: &Task,
-    endpoint: Arc<Endpoint>,
-    rights: kernel_api::model::sign::SignRights,
-) -> Result<PendId, kernel_api::abi::call::pend::PendFail> {
-    use crate::basis::pend::{self, PendEntry, Target};
-    use kernel_api::model::{identity::Mark, modifiable::Modifiable, pend::Operations};
-    let record = PendEntry::try_new(Target::Sign(endpoint), Mark::NONE, Modifiable::No, None)?;
-    let mut limits = record.authority().limits();
-    limits.operations = Operations::Sign(rights);
-    record.narrow(limits, None)?;
-    let token = record.token();
-    pend::insert(actor, record)?;
-    Ok(token)
+    let endpoint = record.target().sign().ok_or(SignFail::Denied)?;
+    if rights.contains(kernel_api::model::sign::SignRights::LISTEN)
+        && endpoint
+            .interrupt()
+            .is_some_and(|s| !s.owned(actor.ident.id, token))
+    {
+        return Err(SignFail::Denied);
+    }
+    Ok(endpoint)
 }

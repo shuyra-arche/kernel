@@ -1,4 +1,3 @@
-use crate::basis::sign::endpoint::Endpoint;
 use crate::basis::view::CloneView;
 use crate::metal::sync::OnceLock;
 use ::core::sync::atomic::AtomicUsize;
@@ -8,7 +7,6 @@ use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::TaskId;
 
 pub(crate) struct Interrupts {
-    pub supervisor_external: Arc<Endpoint>,
     pub page_fault: Arc<CloneView>,
 }
 
@@ -23,8 +21,6 @@ pub(crate) fn init() -> Result<(), PendFail> {
         return Ok(());
     }
     let interrupts = Interrupts {
-        supervisor_external: Endpoint::try_new(TaskId::new(0))
-            .map_err(|_| PendFail::OutOfMemory)?,
         page_fault: CloneView::try_new(TaskId::new(0)).map_err(|_| PendFail::OutOfMemory)?,
     };
     assert!(
@@ -36,12 +32,6 @@ pub(crate) fn init() -> Result<(), PendFail> {
 
 pub(crate) fn get() -> &'static Interrupts {
     INTERRUPTS.get().expect("trap resources not initialized")
-}
-
-pub(crate) fn deliver_external(idle: bool) -> bool {
-    let busy = crate::basis::sign::endpoint::trigger(&get().supervisor_external).is_err();
-    note_external(busy, idle);
-    busy
 }
 
 fn note_external(busy: bool, idle: bool) {
@@ -66,14 +56,10 @@ pub(crate) fn stats() -> (usize, usize, usize, usize) {
     )
 }
 
-use crate::metal::generic::interrupt::External;
-use alloc::boxed::Box;
-static EXTERNAL: OnceLock<Box<dyn External>> = OnceLock::new();
-
-pub(crate) fn install_external(route: Box<dyn External>) -> Result<(), ()> {
-    EXTERNAL.set(route).map_err(|_| ())
-}
-
-pub(crate) fn external() -> Option<&'static dyn External> {
-    EXTERNAL.get().map(Box::as_ref)
+mod router;
+pub(crate) mod source;
+pub(crate) use router::{Router, install, register};
+static EXTERNAL: OnceLock<Router> = OnceLock::new();
+pub(crate) fn external() -> Option<&'static Router> {
+    EXTERNAL.get()
 }

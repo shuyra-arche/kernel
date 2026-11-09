@@ -100,7 +100,7 @@ fn wait() -> usize {
         if interrupt::external_pending()
             && !crate::basis::room::interrupt::external().is_some_and(|route| route.handle())
         {
-            crate::basis::room::interrupt::deliver_external(true);
+            interrupt::disable_external();
         }
         // Let notified remote Harts receive the Tasks just placed there
         // before the deadline owner tries to steal them back.

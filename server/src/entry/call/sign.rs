@@ -26,6 +26,43 @@ use kernel_api::model::wait::Wait;
 pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskIdent>) -> Outcome {
     drop(ident);
     match call {
+        SignCall::Claim { token } => answer(
+            frame,
+            with_group(token, SignRights::CLAIM, |task, endpoint| {
+                endpoint
+                    .interrupt()
+                    .ok_or(SignFail::Denied)?
+                    .claim(task.ident.id, token)
+                    .map(|g| g as usize)
+            }),
+        ),
+        SignCall::Yield { token, generation } => answer(
+            frame,
+            with_group(token, SignRights::YIELD, |task, endpoint| {
+                endpoint
+                    .interrupt()
+                    .ok_or(SignFail::Denied)?
+                    .yield_binding(endpoint, task.ident.id, token, generation)?;
+                Ok(0)
+            }),
+        ),
+        SignCall::Rearm {
+            token,
+            generation,
+            sequence,
+        } => answer(
+            frame,
+            with_group(token, SignRights::REARM, |task, endpoint| {
+                endpoint.interrupt().ok_or(SignFail::Denied)?.rearm(
+                    endpoint,
+                    task.ident.id,
+                    token,
+                    generation,
+                    sequence,
+                )?;
+                Ok(0)
+            }),
+        ),
         SignCall::Create { license } => answer(frame, create(license)),
         SignCall::Delete { token } => answer(
             frame,
@@ -112,6 +149,9 @@ fn with_group<T>(
         return Err(SignFail::Dead);
     }
     let endpoint = endpoint::authorized(&task, token, need)?;
+    if !endpoint.alive() {
+        return Err(SignFail::Dead);
+    }
     operation(&task, &endpoint)
 }
 
@@ -200,6 +240,11 @@ pub(crate) fn typed_cell(
         }
         SignSource::Sign { token } => {
             let source = endpoint::authorized(actor, token, SignRights::LISTEN)?;
+            // First hardware delivery contract is one waiting driver, without
+            // unbounded forwarding or fan-out in the interrupt handler.
+            if source.interrupt().is_some() {
+                return Err(SignFail::Denied);
+            }
             keys.push((endpoint::trigger_key(&source), source.life()));
             keys.push((
                 WakeKey::Inspect {

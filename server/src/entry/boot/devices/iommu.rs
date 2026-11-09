@@ -21,13 +21,18 @@ pub(in super::super) fn init(
     description: crate::metal::platform::devices::Devices<'_>,
 ) -> Result<(), PendFail> {
     let regions = description.controllers;
+    if let Some(route) = description.interrupt {
+        let base = super::external::mapped(route.base, route.size)?;
+        let controller =
+            unsafe { crate::metal::interrupt::plic::Plic::new(base, route.base, route.selected) };
+        unsafe { controller.configure(route.contexts, route.sources, route.queues) };
+        let controller =
+            alloc::boxed::Box::try_new(controller).map_err(|_| PendFail::OutOfMemory)?;
+        crate::basis::room::interrupt::install(controller, route)?;
+    }
     if regions.is_empty() {
         return Ok(());
     }
-    let route = description.interrupt.ok_or(PendFail::Denied)?;
-    let plic = super::external::mapped(route.base, route.size)?;
-    unsafe { crate::metal::iommu::interrupt::install(plic, route) }
-        .map_err(|_| PendFail::Denied)?;
     let mut storage = CONTROLLERS.lock();
     if storage.is_some() {
         return Err(PendFail::Denied);
@@ -106,7 +111,9 @@ fn failure(error: crate::metal::iommu::EngineError) -> PendFail {
 }
 
 pub(in super::super) fn shutdown() {
-    crate::metal::iommu::interrupt::report();
+    if let Some(route) = crate::basis::room::interrupt::external() {
+        route.report();
+    }
     let mut storage = CONTROLLERS.lock();
     let Some(controllers) = storage.as_mut() else {
         return;

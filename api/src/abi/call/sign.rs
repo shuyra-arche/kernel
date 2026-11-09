@@ -72,6 +72,28 @@ pub mod operations {
         pub token: super::PendId,
         pub source: super::SignSource,
     }
+    /// Exclusively claim an authorized hardware Sign; returns its binding generation.
+    #[operation(slot = 7, output = u64, error = SignFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Claim {
+        pub token: super::PendId,
+    }
+    /// Close delivery and release this binding; no device-quiescence proof follows.
+    #[operation(slot = 8, output = (), error = SignFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Yield {
+        pub token: super::PendId,
+        pub generation: u64,
+    }
+    /// Arm a fresh binding with sequence=0, or acknowledge its current retained IRQ.
+    /// Clear device state first. Sign Consume never performs this operation.
+    #[operation(slot = 9, output = (), error = SignFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Rearm {
+        pub token: super::PendId,
+        pub generation: u64,
+        pub sequence: u64,
+    }
 }
 pub use operations::{SignCall, SignEventFail, SignFail};
 

@@ -1,0 +1,172 @@
+//! One router owns all sources on the admitted controller: reserved queues and
+//! driver notifications never independently overwrite its enable words.
+use super::{EXTERNAL, source::Source};
+use crate::basis::sign::endpoint::Endpoint;
+use crate::metal::{
+    generic::interrupt::{Delivery, Irq},
+    hart,
+    sync::SpinLock,
+};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::sync::atomic::{AtomicUsize, Ordering};
+use kernel_api::{abi::call::pend::PendFail, boot::platform::riscv::devices::Plic as Plan};
+
+pub(crate) struct Router {
+    controller: Box<dyn Delivery>,
+    physical: usize,
+    limit: usize,
+    hart: hart::HartId,
+    queues: [Irq; 3],
+    pending: AtomicUsize,
+    counts: [AtomicUsize; 3],
+    sources: SpinLock<Vec<Arc<Endpoint>>>,
+}
+/// All hardware effects follow complete descriptor validation at boot.
+pub(crate) fn install(controller: Box<dyn Delivery>, plan: Plan<'_>) -> Result<(), PendFail> {
+    EXTERNAL
+        .set(Router {
+            controller,
+            physical: plan.base,
+            limit: plan.sources,
+            hart: hart::hart_id(),
+            queues: plan.queues.map(|line| Irq {
+                controller: plan.base,
+                line,
+            }),
+            pending: AtomicUsize::new(if plan.queues == [0; 3] { 0 } else { 7 }),
+            counts: core::array::from_fn(|_| AtomicUsize::new(0)),
+            sources: SpinLock::new(Vec::new()),
+        })
+        .map_err(|_| PendFail::Denied)?;
+    EXTERNAL.get().ok_or(PendFail::Denied)?.rearm();
+    Ok(())
+}
+pub(crate) fn register(controller: usize, line: u32) -> Result<(), PendFail> {
+    let route = EXTERNAL.get().ok_or(PendFail::Denied)?;
+    let irq = Irq { controller, line };
+    let _commit = crate::basis::commit();
+    if controller != route.physical
+        || line == 0
+        || line as usize > route.limit
+        || route.queues.contains(&irq)
+    {
+        return Err(PendFail::Denied);
+    }
+    let mut sources = route.sources.lock();
+    if sources.len() >= 64
+        || sources
+            .iter()
+            .any(|e| e.interrupt().is_some_and(|s| s.irq == irq))
+    {
+        return Err(PendFail::Denied);
+    }
+    sources.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+    let source = Source::new(irq);
+    let endpoint = Endpoint::hardware(source).map_err(|_| PendFail::OutOfMemory)?;
+    route.controller.mask(irq);
+    route.controller.prioritize(irq);
+    sources.push(endpoint);
+    Ok(())
+}
+impl Router {
+    pub(crate) fn handle(&self) -> bool {
+        if hart::hart_id() != self.hart {
+            return false;
+        }
+        let _commit = crate::basis::commit();
+        for _ in 0..4 {
+            let Some(irq) = self.controller.claim_masked() else {
+                break;
+            };
+            super::note_external(false, false);
+            if let Some(index) = self.queues.iter().position(|q| *q == irq) {
+                self.finish(irq, false);
+                self.counts[index].fetch_add(1, Ordering::Relaxed);
+                self.pending.fetch_or(1 << index, Ordering::Release);
+            } else {
+                let endpoint = self
+                    .sources
+                    .lock()
+                    .iter()
+                    .find(|e| e.interrupt().is_some_and(|s| s.irq == irq))
+                    .cloned();
+                if let Some(endpoint) = endpoint {
+                    Source::deliver(&endpoint);
+                } else {
+                    self.finish(irq, false);
+                }
+                // Unknown, revoked or already-pending sources stay masked.
+            }
+        }
+        true
+    }
+    pub(crate) fn finish(&self, irq: Irq, rearm: bool) {
+        self.controller.unmask(irq);
+        self.controller.complete(irq);
+        if !rearm {
+            self.controller.mask(irq);
+        }
+    }
+    pub(crate) fn mask(&self, irq: Irq) {
+        self.controller.mask(irq);
+    }
+    pub(crate) fn unmask(&self, irq: Irq) {
+        self.controller.unmask(irq);
+    }
+    pub(crate) fn rearm(&self) {
+        if hart::hart_id() != self.hart {
+            return;
+        }
+        let _commit = crate::basis::commit();
+        let pending = self.pending.swap(0, Ordering::AcqRel);
+        for (index, irq) in self.queues.iter().enumerate() {
+            if pending & (1 << index) != 0 {
+                self.controller.unmask(*irq);
+            }
+        }
+    }
+    pub(crate) fn report(&self) {
+        crate::putln!(
+            "iommu-irqs: cq={} fq={} pq={}",
+            self.counts[0].load(Ordering::Relaxed),
+            self.counts[1].load(Ordering::Relaxed),
+            self.counts[2].load(Ordering::Relaxed)
+        );
+    }
+    pub(crate) fn grants(
+        &self,
+        registry: &mut crate::entry::boot::resources::Registry,
+    ) -> Result<(), PendFail> {
+        use crate::basis::pend::{PendEntry, Target};
+        use kernel_api::{
+            boot::ledger::Name,
+            model::{identity::Mark, modifiable::Modifiable, pend::Operations, sign::SignRights},
+        };
+        let count = self.sources.lock().len();
+        for at in 0..count {
+            let endpoint = self.sources.lock()[at].clone();
+            let irq = endpoint.interrupt().ok_or(PendFail::Denied)?.irq;
+            let root = PendEntry::try_new(
+                Target::Sign(endpoint.clone()),
+                Mark::NONE,
+                Modifiable::No,
+                None,
+            )?;
+            let mut limits = root.authority().limits();
+            limits.operations = Operations::Sign(
+                SignRights::LISTEN | SignRights::CLAIM | SignRights::YIELD | SignRights::REARM,
+            );
+            root.narrow(limits, None)?;
+            registry
+                .register(
+                    Name::Interrupt {
+                        controller: irq.controller as u64,
+                        source: irq.line,
+                    },
+                    root,
+                )
+                .map_err(|e| e.into_parts().0)?;
+        }
+        Ok(())
+    }
+}

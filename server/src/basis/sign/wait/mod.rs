@@ -208,9 +208,12 @@ pub(crate) fn unforward(key: WakeKey, endpoint: usize) {
 
 pub(crate) fn signal(key: WakeKey) -> usize {
     let _commit = crate::basis::commit();
+    let Some(shard) = site::existing(key) else {
+        return 0;
+    };
     let mut fwd = Fwd::empty();
     let chain = {
-        let mut sites = sites(key).lock();
+        let mut sites = shard.lock();
         let chain = match sites.get_mut(&key) {
             Some(site) => {
                 fwd = site.fwd.clone();

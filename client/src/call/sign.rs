@@ -16,4 +16,8 @@ typed_calls! {
     fallible fn consume(token: PendId, sequence: u64) -> Result<(), erra::Error<SignFail>> = op::Consume { token, sequence };
     fallible fn attach(token: PendId, source: SignSource, generation: u64) -> Result<(), erra::Error<SignFail>> = op::Attach { token, source, generation };
     fallible fn detach(token: PendId, source: SignSource) -> Result<(), erra::Error<SignFail>> = op::Detach { token, source };
+    fallible fn claim(token: PendId) -> Result<u64, erra::Error<SignFail>> = op::Claim { token };
+    fallible fn yield_binding(token: PendId, generation: u64) -> Result<(), erra::Error<SignFail>> = op::Yield { token, generation };
+    fallible fn rearm(token: PendId, generation: u64, sequence: u64) -> Result<(), erra::Error<SignFail>> = op::Rearm { token, generation, sequence };
+
 }
