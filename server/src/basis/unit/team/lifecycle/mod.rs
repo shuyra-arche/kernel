@@ -80,37 +80,59 @@ impl TeamNode {
         found
     }
     pub fn clear(&self, owner: TaskId, root: Option<TeamId>) {
+        let _commit = crate::basis::commit();
         self.visit(&mut |node| {
-            for member in node.tasks.lock().iter() {
-                let mut receipts = member.receipts.lock();
-                for receipt in receipts.iter_mut().filter(|r| r.owner == owner) {
-                    if let Some(root) = root {
-                        receipt.roots.retain(|id| *id != root);
-                    } else {
-                        receipt.roots.clear();
-                    }
-                }
-                receipts.retain(|r| !r.roots.is_empty());
-            }
+            node.tasks.lock().retain(|member| {
+                member.clear(owner, root);
+                member.retained()
+            });
+            node.prune();
         });
     }
-    pub fn prune(&self) {
-        self.tasks.lock().retain(|m| {
-            !m.reclaimed.load(core::sync::atomic::Ordering::Acquire)
-                || !m.receipts.lock().is_empty()
-        });
-        let mut at = 0;
-        loop {
-            let child = self.children.lock().get(at).cloned();
-            let Some(child) = child else { break };
-            child.prune();
-            let terminal = child.state.lock().phase.ousted();
-            let empty = child.tasks.lock().is_empty() && child.children.lock().is_empty();
-            if terminal && empty {
-                self.children.lock().remove(at);
-            } else {
-                at += 1;
+
+    /// Membership is sorted and bounded by MAX_MEMBERS. Only the changed
+    /// member can become removable; unrelated Teams need no cleanup scan.
+    pub(super) fn remove(&self, id: TaskId) {
+        let _commit = crate::basis::commit();
+        {
+            let mut members = self.tasks.lock();
+            let Ok(at) = members.binary_search_by_key(&id.get(), |member| member.id.get()) else {
+                return;
+            };
+            if members[at].retained() {
+                return;
             }
+            members.remove(at);
+        }
+        self.prune();
+    }
+
+    /// Empty, ousted nodes detach upward only. The ancestry has MAX_DEPTH
+    /// entries; sibling subtrees are never visited or recursively pruned.
+    pub fn prune(&self) {
+        let _commit = crate::basis::commit();
+        let mut node = self;
+        loop {
+            if !node.state.lock().phase.ousted()
+                || !node.tasks.lock().is_empty()
+                || !node.children.lock().is_empty()
+            {
+                return;
+            }
+            let Some(parent) = node.parent.as_deref() else {
+                return;
+            };
+            let removed = {
+                let mut children = parent.children.lock();
+                let Ok(at) = children.binary_search_by_key(&node.id.get(), |child| child.id.get())
+                else {
+                    // Construction failed before publication, or already detached.
+                    return;
+                };
+                children.remove(at)
+            };
+            drop(removed);
+            node = parent;
         }
     }
     pub fn doom(&self) {

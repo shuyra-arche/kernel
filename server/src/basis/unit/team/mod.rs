@@ -139,11 +139,6 @@ impl Team {
         self.nest.retire()
     }
 
-    pub(crate) fn prune_tasks(&self) {
-        let _commit = commit();
-        self.node.prune();
-    }
-
     /// Fix the completion cohort: existing members keep their execution states,
     /// while new members and descendant Teams can no longer enter this subtree.
     pub(crate) fn finish(&self) {
@@ -224,9 +219,6 @@ impl Drop for Team {
         let _commit = commit();
         self.node.state.lock().phase = TeamPhase::Ousted;
         self.node.prune();
-        if let Some(parent) = &self.node.parent {
-            parent.prune();
-        }
     }
 }
 
@@ -296,7 +288,6 @@ pub(crate) fn oust(me: &Arc<Task>, id: TeamId) -> Result<(), UnitFail> {
         child.node.clear(me.ident.id, None);
         let sire = child.sire.upgrade();
         let detached = sire.as_ref().and_then(|sire| sire.oust(id));
-        child.node.prune();
         (sire, detached)
     };
     drop(operation);

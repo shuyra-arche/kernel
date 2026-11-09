@@ -280,11 +280,6 @@ impl Task {
         };
         child.node.state.lock().phase = TeamPhase::Ousted;
         child.node.clear(self.ident.id, Some(team));
-        let mut root = child.node.clone();
-        while let Some(parent) = &root.parent {
-            root = parent.clone();
-        }
-        root.prune();
         Some(child)
     }
 
@@ -342,14 +337,10 @@ impl Task {
 
 impl Drop for Task {
     fn drop(&mut self) {
+        registry::remove(self.ident.id);
         let _commit = commit();
         self.administration.clear();
         self.ident.team.node.clear(self.ident.id, None);
-        self.ident.team.node.prune();
-        for child in self.heir.lock().iter() {
-            child.node.clear(self.ident.id, None);
-            child.node.prune();
-        }
         for pend_entry in self.pend.entries.lock().iter() {
             pend_entry.invalidate();
         }

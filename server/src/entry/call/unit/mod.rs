@@ -108,9 +108,6 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                     if !member.receive(me.ident.id) {
                         return Err(UnitFail::Denied);
                     }
-                    if let Some(team) = member.node.upgrade() {
-                        team.prune();
-                    }
                     crate::basis::sign::signal(crate::basis::sign::WakeKey::Task { id: member.id });
                     Ok(())
                 })(),

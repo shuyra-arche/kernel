@@ -9,22 +9,97 @@ use std::sync::{
 };
 
 pub(crate) mod metal {
+    #[cfg(debug_assertions)]
+    pub(crate) mod allocator {
+        pub(crate) struct NoAllocation;
+        impl NoAllocation {
+            pub(crate) fn enter() -> Self {
+                Self
+            }
+        }
+    }
+    #[cfg(debug_assertions)]
+    pub(crate) mod hart {
+        pub(crate) struct HartId;
+        impl HartId {
+            pub(crate) fn get(self) -> usize {
+                0
+            }
+        }
+        pub(crate) fn hart_id() -> HartId {
+            HartId
+        }
+    }
+    pub(crate) mod stop {
+        pub(crate) fn protected_stop(_: usize) {
+            panic!("unexpected protected stop")
+        }
+    }
     pub(crate) mod sync {
-        pub(crate) struct SpinLock<T>(std::sync::Mutex<T>);
+        pub(crate) use std::sync::OnceLock;
+        pub(crate) enum Level {
+            Registry,
+            L3,
+        }
+        pub(crate) struct SpinLock<T> {
+            inner: std::sync::Mutex<T>,
+            locks: core::sync::atomic::AtomicUsize,
+        }
         impl<T> SpinLock<T> {
             pub(crate) const fn new(value: T) -> Self {
-                Self(std::sync::Mutex::new(value))
+                Self {
+                    inner: std::sync::Mutex::new(value),
+                    locks: core::sync::atomic::AtomicUsize::new(0),
+                }
             }
             pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, T> {
-                self.0.lock().unwrap()
+                self.locks
+                    .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                self.inner.lock().unwrap()
+            }
+            pub(crate) const fn new_level(_: Level, value: T) -> Self {
+                Self::new(value)
+            }
+            pub(crate) fn locks(&self) -> usize {
+                self.locks.load(core::sync::atomic::Ordering::Relaxed)
             }
             pub(crate) fn try_lock(&self) -> Option<std::sync::MutexGuard<'_, T>> {
-                self.0.try_lock().ok()
+                self.inner.try_lock().ok()
             }
         }
     }
 }
 pub(crate) mod basis {
+    // These fixtures test membership topology and reference lifetime; COMMIT,
+    // interrupt exclusion and hardware effects are exercised by the RV64 guest.
+    pub(crate) fn commit() {}
+    pub(crate) mod unit {
+        pub(crate) mod task {
+            pub(crate) use crate::registration::{Origin, Task, TaskState, TaskWeak};
+        }
+        pub(crate) mod team {
+            pub(crate) use crate::lifecycle::TeamNode;
+        }
+        pub(crate) mod anchor {
+            pub(crate) struct Anchor;
+        }
+        pub(crate) mod control {
+            pub(crate) enum Request {
+                Pause,
+                Resume,
+            }
+        }
+    }
+    pub(crate) mod sign {
+        pub(crate) enum WakeKey {
+            Team {
+                id: kernel_api::model::identity::TeamId,
+            },
+        }
+        pub(crate) fn signal(WakeKey::Team { id }: WakeKey) {
+            let _ = id;
+        }
+    }
     pub(crate) mod pend {
         pub(crate) fn retire(task: &crate::Task) -> Result<(), ()> {
             task.trace.lock().push("pends");

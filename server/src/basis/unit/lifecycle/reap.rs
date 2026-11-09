@@ -184,14 +184,10 @@ pub(crate) fn bury() {
             break;
         }
         if let Some(member) = z.ident.team.node.member(z.ident.id) {
-            member
-                .reclaimed
-                .store(true, core::sync::atomic::Ordering::Release);
+            member.reclaim();
         }
         wipe(WakeKey::Task { id: z.ident.id });
         wipe(WakeKey::Pends { task: z.ident.id });
-        z.ident.team.prune_tasks();
-        let _pruned = crate::basis::unit::task::registry::prune();
         drop(z);
         tally::exit();
     }
