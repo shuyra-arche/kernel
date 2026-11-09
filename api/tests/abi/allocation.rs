@@ -27,8 +27,14 @@ fn public_range_coordinates_remain_four_kib_even_for_larger_requests() {
     assert_eq!(BASE_PAGE_SIZE, 4096);
     assert_eq!(PAGE_SHIFT, BASE_PAGE_SHIFT);
     assert_eq!(PAGE_SIZE, BASE_PAGE_SIZE);
-    assert_eq!(PageCount::new(512).unwrap().checked_bytes(), Some(2 * 1024 * 1024));
+    assert_eq!(
+        PageCount::new(512).unwrap().checked_bytes(),
+        Some(2 * 1024 * 1024)
+    );
     assert_eq!(PageCount::new(usize::MAX).unwrap().checked_bytes(), None);
     // A large byte request alone does not guarantee physical contiguity.
-    assert_eq!(Allocation::new(2 * 1024 * 1024, 4096).unwrap().bytes(), Some(2 * 1024 * 1024));
+    assert_eq!(
+        Allocation::new(2 * 1024 * 1024, 4096).unwrap().bytes(),
+        Some(2 * 1024 * 1024)
+    );
 }

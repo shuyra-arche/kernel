@@ -1,11 +1,11 @@
 //! Slot and Memo identity, positions and handoff descriptors.
 
 use super::{MappingId, MappingTarget, SlotId};
-use crate::address::BASE_PAGE_SIZE;
 use crate::abi::{
     layout::{fetch_words, store_words},
     register::Wire,
 };
+use crate::address::BASE_PAGE_SIZE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CellObject {
