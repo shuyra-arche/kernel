@@ -112,31 +112,28 @@ impl Team {
     }
 
     pub(crate) fn retire(&self) -> Result<(), NestError> {
-        let _operation = self.operation().ok_or(NestError::NoRegion)?;
+        let _operation = self.operation().ok_or(NestError::Busy)?;
         {
             let _commit = commit();
-            if !self.all_reaped() {
-                return Err(NestError::NoRegion);
+            let members = self.node.tasks.lock();
+            if members.iter().any(|member| member.exit().is_none()) {
+                return Err(NestError::Busy);
             }
-            // CPU/task cleanup may fail later. External retirement must not depend
-            // on those steps succeeding or on this Team being dropped.
+            // Each member's husk owns its retirement. Never recursively retire
+            // another Task here or scan the system-wide Task registry. A removed
+            // member has already published reclaimed before pruning.
             self.cells.close();
             self.external.close();
-            self.node.visit(&mut |node| {
-                let mut state = node.state.lock();
-                if !state.terminal() {
-                    state.phase = TeamPhase::Doomed;
-                }
-            });
-        }
-        let mut after = 0;
-        while let Some(task) = crate::basis::unit::task::registry::after(after) {
-            after = task.ident.id.get();
-            if task.ident.team.id == self.id {
-                if !task.reaped() {
-                    return Err(NestError::NoRegion);
-                }
-                task.retire()?;
+            let mut state = self.node.state.lock();
+            if !state.terminal() {
+                state.phase = TeamPhase::Doomed;
+            }
+            drop(state);
+            if members
+                .iter()
+                .any(|member| !member.reclaimed.load(core::sync::atomic::Ordering::Acquire))
+            {
+                return Err(NestError::Busy);
             }
         }
         self.nest.retire()

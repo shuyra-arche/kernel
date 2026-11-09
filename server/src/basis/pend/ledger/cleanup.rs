@@ -360,7 +360,7 @@ pub(crate) fn doom(task: &Arc<Task>) {
         tokens
     };
     // 退场只推进控制清理，不保证结清；HUSKS 的再次 retire 才负责重试未结项。
-    let _ = task.close_controls();
+    let _ = task.controls.retire(task.ident.id);
     seal_owned(task);
     for token in tokens {
         if let Ok(cleanup) = cull(task, token, None, true) {

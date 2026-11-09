@@ -117,7 +117,8 @@ impl PreparedTask {
                     pend: Table::new(),
                     administration: crate::basis::unit::control::Table::new(),
                     heir: SpinLock::new(Vec::new()),
-                    controls: SpinLock::new(Vec::new()),
+                    controls: super::super::controls::Controls::new(),
+                    retirement: SpinLock::new(super::super::retirement::Retirement::new()),
                     extensions: SpinLock::new(
                         crate::metal::switcher::context::extension::ExtendedContext::new(),
                     ),

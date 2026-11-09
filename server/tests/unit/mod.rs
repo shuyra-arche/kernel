@@ -1,5 +1,13 @@
+extern crate alloc;
+mod support;
+use support::{Task, basis, metal};
+mod continuation;
+#[path = "../../src/basis/unit/task/controls.rs"]
+mod controls;
 #[path = "../../src/basis/unit/task/execution/phase.rs"]
 mod phase;
+#[path = "../../src/basis/unit/task/retirement.rs"]
+mod retirement;
 use phase::Phase::*;
 
 #[test]

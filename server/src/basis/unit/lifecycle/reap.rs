@@ -169,7 +169,8 @@ fn note_out<'a>(
 
 pub(crate) fn bury() {
     // Bound this service turn's outer work. Unsettled Tasks retain their place
-    // for a later turn; each Task's recursive retirement is a separate M2 bound.
+    // for a later turn. Each advances one child or local retirement stage;
+    // Pend graph walks and individual hardware operations still need bounds.
     for _ in 0..4 {
         let z = {
             let mut husks = HUSKS.lock();
