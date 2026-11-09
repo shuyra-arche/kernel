@@ -106,3 +106,38 @@ fn console_loss_counts_zero_partial_errors_and_bad_counts() {
     loss.record(5, Some(5));
     assert_eq!(loss.take(), 0);
 }
+
+#[path = "../../src/metal/riscv/console/emergency.rs"]
+mod emergency;
+#[test]
+fn emergency_failure_and_budget_exhaustion_stop_without_retrying_forever() {
+    use core::fmt::Write;
+    let calls = core::cell::Cell::new(0);
+    let bytes = core::cell::RefCell::new(Vec::new());
+    let mut writer = emergency::Emergency::with(|byte| {
+        calls.set(calls.get() + 1);
+        if calls.get() == 3 {
+            return false;
+        }
+        bytes.borrow_mut().push(byte);
+        true
+    });
+    assert!(writer.write_str("abcdef").is_err());
+    assert!(writer.write_str("later").is_err());
+    assert_eq!(calls.get(), 3);
+    writer.finish();
+    assert!(
+        String::from_utf8(bytes.into_inner())
+            .unwrap()
+            .contains("emergency-lost=9")
+    );
+    let calls = core::cell::Cell::new(0);
+    let mut writer = emergency::Emergency::with(|_| {
+        calls.set(calls.get() + 1);
+        true
+    });
+    assert!(writer.write_str(&"x".repeat(9000)).is_err());
+    assert_eq!(calls.get(), 8192);
+    writer.finish();
+    assert!(calls.get() <= 8192 + 128);
+}

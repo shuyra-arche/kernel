@@ -7,7 +7,20 @@ use sbi::DbcnCall;
 use sbi::ecall::SArgs;
 
 mod emergency;
-pub use emergency::Emergency;
+pub type Emergency = emergency::Emergency<fn(u8) -> bool>;
+impl Emergency {
+    pub fn new() -> Self {
+        Self::with(|byte| {
+            DbcnCall::new(Dbcn::ConsoleWriteByte)
+                .args(SArgs {
+                    a0: byte as usize,
+                    ..Default::default()
+                })
+                .call()
+                .is_ok()
+        })
+    }
+}
 mod loss;
 static LOSS: loss::Loss = loss::Loss::new();
 mod line;

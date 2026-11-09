@@ -43,7 +43,14 @@ pub(crate) fn write(source: &Source<'_>, out: &mut impl Write, walk: bool) -> fm
             (frame.gpr.x(Gprs::SP), frame.gpr.x(Gprs::S0))
         }
     };
-    if walk {
+    let root_reused = matches!(source, Source::Trap { .. })
+        && (crate::metal::image::root_stack_base()..crate::metal::image::root_stack_edge())
+            .contains(&sp);
+    if root_reused {
+        // The trap handler ran on the Hart stack, then reporting reset ROOT's
+        // SP. Its old contents can now contain reporter frames, not fault frames.
+        writeln!(out, "backtrace unavailable reason=ROOT-reused")
+    } else if walk {
         stack(out, sp, fp)
     } else {
         writeln!(out, "backtrace unavailable reason=boot-or-peer-state")
