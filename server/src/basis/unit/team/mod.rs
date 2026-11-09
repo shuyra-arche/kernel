@@ -23,7 +23,7 @@ mod membership;
 
 pub(crate) use builder::{TeamBuilder, init_kernel, kernel};
 pub(crate) use lifecycle::exit;
-pub(crate) use lifecycle::{TeamNode, TeamPhase};
+pub(crate) use lifecycle::{Clearance, TeamNode, TeamPhase};
 pub(crate) use membership::{Member, Receipt, Tasks};
 
 pub(crate) const MAX_DEPTH: usize = 32;
@@ -143,10 +143,11 @@ impl Team {
     /// while new members and descendant Teams can no longer enter this subtree.
     pub(crate) fn finish(&self) {
         let _commit = commit();
-        self.node.visit(&mut |node| {
-            let mut state = node.state.lock();
-            state.admission = state.admission.finish();
-        });
+        // Every descendant admission checks its ancestors. One root transition
+        // fixes the whole cohort without walking it under COMMIT.
+        let mut state = self.node.state.lock();
+        state.admission = state.admission.finish();
+        drop(state);
         self.node.notify();
     }
 

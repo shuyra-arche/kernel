@@ -90,6 +90,7 @@ impl PendEntry {
         let entry =
             PendEntry::try_new_window(target, mark, limits.modifiable, Some(self.token), window)?;
         entry.authority.narrow(limits, window)?;
+        entry.authority.inherit(&self.authority)?;
         Ok(entry)
     }
 }
@@ -212,7 +213,7 @@ pub(crate) fn vestor(task: &Arc<Task>, token: PendId) -> Option<TaskId> {
             }
             Some(locate(&lord, parent).map(|_| lord.ident.id))
         });
-        if let Some(result) = result {
+        if let Ok(Some(result)) = result {
             return result;
         }
     }

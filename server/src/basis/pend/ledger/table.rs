@@ -7,38 +7,52 @@ use crate::basis::{
 use crate::metal::sync::SpinLock;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::AtomicUsize;
+use core::sync::atomic::{AtomicBool, Ordering};
 use kernel_api::{abi::call::pend::PendFail, model::identity::PendId};
 
 /// One Task's authority ledger. The transaction lock coordinates registrations,
-/// borrow edges and source references; version validates optimistic observers.
+/// borrow edges and source references; closure invalidates every hosted authority before asynchronous retirement.
 /// Public PendIds index generational slots holding the single shared record.
 pub(crate) struct Table {
     serial: SpinLock<()>,
-    pub(crate) version: AtomicUsize,
+    closed: Arc<AtomicBool>,
     pub(crate) entries: SpinLock<Registry<PendId, Arc<PendEntry>>>,
     pub(crate) heirs: SpinLock<Vec<(PendId, Weak<Task>, PendId)>>,
     pub(crate) references: HoldTable,
 }
 
 impl Table {
-    pub(crate) fn new() -> Self {
-        Self {
+    pub(crate) fn new() -> Result<Self, PendFail> {
+        Ok(Self {
             serial: SpinLock::new(()),
-            version: AtomicUsize::new(0),
+            closed: Arc::try_new(AtomicBool::new(false)).map_err(|_| PendFail::OutOfMemory)?,
             entries: SpinLock::new(Registry::default()),
             heirs: SpinLock::new(Vec::new()),
             references: HoldTable::new(),
-        }
+        })
+    }
+
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::Release);
     }
 
     pub(crate) fn lock(&self) -> crate::metal::sync::spin::SpinLockGuard<'_, ()> {
         self.serial.lock()
     }
+    pub(crate) fn try_lock(&self) -> Option<crate::metal::sync::spin::SpinLockGuard<'_, ()>> {
+        self.serial.try_lock()
+    }
 
     /// Caller holds the ledger transaction lock until publication or rollback.
     /// The guard owns both the unpublished record and its reserved slot.
     pub(crate) fn prepare(&self, entry: Arc<PendEntry>) -> Result<Registration<'_>, PendFail> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(PendFail::Dead);
+        }
+        entry.authority().held_by(&self.closed)?;
+        if self.entries.lock().len() >= 1024 {
+            return Err(PendFail::OutOfMemory);
+        }
         let key = self
             .entries
             .lock()

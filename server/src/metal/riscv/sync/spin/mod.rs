@@ -44,6 +44,7 @@ impl<T: ?Sized> SpinLock<T> {
         loop {
             while self.locked.load(Ordering::Relaxed) {
                 crate::metal::stop::hush();
+                crate::metal::interrupt::window::poll();
                 ::core::hint::spin_loop();
             }
             if self
@@ -54,6 +55,7 @@ impl<T: ?Sized> SpinLock<T> {
                 return;
             }
             crate::metal::stop::hush();
+            crate::metal::interrupt::window::poll();
         }
     }
     #[inline(never)]

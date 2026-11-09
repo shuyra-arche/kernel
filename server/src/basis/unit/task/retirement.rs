@@ -9,6 +9,7 @@ pub(super) enum Retirement {
     Pends,
     Controls,
     Memory,
+    Receipts(crate::basis::unit::team::Clearance),
     Settled,
 }
 impl Retirement {
@@ -49,8 +50,13 @@ impl Task {
             }
             Retirement::Memory => {
                 self.ident.retire()?;
-                *phase = Retirement::Settled;
-                return Ok(());
+                *phase = Retirement::Receipts(self.ident.receipts());
+            }
+            Retirement::Receipts(cursor) => {
+                if cursor.advance(self.ident.id, None) {
+                    *phase = Retirement::Settled;
+                    return Ok(());
+                }
             }
             Retirement::Settled => return Ok(()),
         }

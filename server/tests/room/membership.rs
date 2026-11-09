@@ -82,11 +82,29 @@ fn removing_middle_head_and_tail_preserves_the_other_members() {
         chain.enqueue(task.clone());
     }
     for id in [2, 0, 4] {
-        assert_eq!(chain.remove_if(&mut |t| t.id == id).unwrap().id, id);
+        assert_eq!(chain.remove(&tasks[id]).unwrap().id, id);
         assert!(detached(&tasks[id]));
     }
-    assert!(chain.remove_if(&mut |t| t.id == 9).is_none());
+    assert!(chain.remove(&task(9)).is_none());
     assert_eq!(chain.dequeue().unwrap().id, 1);
     assert_eq!(chain.dequeue().unwrap().id, 3);
     assert!(chain.take().is_none());
+}
+
+#[test]
+fn moved_drain_and_reused_site_never_share_membership_identity() {
+    let a = task(1);
+    let b = task(2);
+    let c = task(3);
+    let mut chain = Chain::new();
+    chain.enqueue(a.clone());
+    chain.enqueue(b.clone());
+    let mut drain = chain.take().unwrap();
+    chain.enqueue(c.clone());
+    assert!(chain.remove(&a).is_none());
+    assert!(chain.remove(&b).is_none());
+    assert_eq!(drain.next().unwrap().id, 1);
+    assert_eq!(chain.remove(&c).unwrap().id, 3);
+    assert_eq!(drain.next().unwrap().id, 2);
+    assert!(drain.next().is_none());
 }

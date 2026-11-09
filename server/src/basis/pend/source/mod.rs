@@ -350,6 +350,9 @@ impl SourceAuthorization {
     /// 备下一条成员的位置（可失败的准备；调用方在同一提交段里紧接着写入）。
     pub(crate) fn reserve_binding(&self) -> Result<(), PendFail> {
         let mut members = self.bindings.lock();
+        if members.len() >= 1024 {
+            return Err(PendFail::OutOfMemory);
+        }
         members.try_reserve(1).map_err(|_| PendFail::OutOfMemory)
     }
 
@@ -396,6 +399,10 @@ impl SourceAuthorization {
             return Err(PendFail::Busy);
         }
         Ok(())
+    }
+
+    pub(crate) fn first_binding(&self) -> Option<Arc<RangeBinding>> {
+        self.bindings.lock().first().cloned()
     }
 
     /// 未结 CPU 身份的快照；不复制关系或物理持有。

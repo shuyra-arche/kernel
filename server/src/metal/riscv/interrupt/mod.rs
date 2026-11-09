@@ -1,4 +1,5 @@
 pub(crate) mod ipi;
+pub(crate) mod window;
 
 use riscv::register::{sie, sip};
 

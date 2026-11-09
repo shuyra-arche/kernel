@@ -340,7 +340,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
                     .remove(token)
                     .expect("serialized Nest root");
                 entry.invalidate();
-                crate::basis::pend::changed(me);
+
                 entry
             });
             // New empty Team: guard selection is immutable and cannot race a member exit.

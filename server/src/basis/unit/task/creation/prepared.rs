@@ -102,6 +102,7 @@ impl PreparedTask {
         {
             return Err(NestError::OutOfMemory);
         }
+        let pend = Table::new().map_err(|_| NestError::OutOfMemory)?;
         let (task, ()) = crate::basis::unit::task::registry::insert(|| {
             commit();
             assert!(team.ready(), "publish: constructing team");
@@ -114,7 +115,7 @@ impl PreparedTask {
                     ident: self.ident.clone(),
                     life: self.life.clone(),
                     state: self.state.clone(),
-                    pend: Table::new(),
+                    pend,
                     administration: crate::basis::unit::control::Table::new(),
                     heir: SpinLock::new(Vec::new()),
                     controls: super::super::controls::Controls::new(),

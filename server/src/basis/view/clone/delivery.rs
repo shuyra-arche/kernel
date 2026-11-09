@@ -83,7 +83,6 @@ pub(crate) fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, Clon
         registration.commit(|publish| {
             reading.commit(|| {
                 publish();
-                pend::changed(&task);
             })
         })?;
     }
@@ -135,7 +134,7 @@ pub(crate) fn create(license: PendId, mark: Mark, limits: CloneLimits) -> Result
         return Err(PendFail::Dead);
     }
     task.pend.prepare(entry)?.publish();
-    pend::changed(&task);
+
     Ok(token.get())
 }
 

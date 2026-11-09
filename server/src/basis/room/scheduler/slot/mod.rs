@@ -69,12 +69,18 @@ impl Slot {
         notify
     }
     fn select(inner: &mut Inner, destination: HartId) -> Option<Arc<Task>> {
-        while let Some(task) = inner.ready.dequeue(destination, clock::now().as_ticks()) {
+        for _ in 0..4 {
+            let Some(task) = inner.ready.dequeue(destination, clock::now().as_ticks()) else {
+                break;
+            };
             if task.stopped() || task.ident.team.paused() {
                 Task::park(task);
             } else {
                 return Some(task);
             }
+        }
+        if !inner.ready.is_empty() {
+            crate::basis::room::deadline::retry();
         }
         None
     }

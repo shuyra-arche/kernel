@@ -137,6 +137,7 @@ pub(crate) fn make_team(
         children: SpinLock::new(Vec::new()),
         life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
         exit: ExitPolicy::new(),
+        termination: SpinLock::new(crate::basis::unit::lifecycle::Termination::new()),
     })
     .map_err(|_| NestError::OutOfMemory)?;
     let team = Arc::try_new(Team {

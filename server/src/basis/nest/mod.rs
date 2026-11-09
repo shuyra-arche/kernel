@@ -157,7 +157,7 @@ impl Nest {
     fn ready_state(&self) -> Result<SpinLockGuard<'_, NestState>, NestError> {
         loop {
             let state = self.state.lock();
-            if state.phase.is_closed() {
+            if !state.phase.is_open() {
                 return Err(NestError::NoRegion);
             }
             match state.retirement.invalidation() {
@@ -1208,11 +1208,14 @@ impl Nest {
         if self.state.lock().retirement.tickets.has_settled() {
             let mut layout = self.layout.lock();
             let mut state = self.state.lock();
-            for ticket in state.retirement.tickets.drain() {
+            for ticket in state.retirement.tickets.drain(4) {
                 layout.occupancy.reclaim(ticket);
             }
         }
-        while let Some(node) = self.take_cleanup() {
+        for _ in 0..4 {
+            let Some(node) = self.take_cleanup() else {
+                break;
+            };
             let Some(mapping) = node.mapping.clone() else {
                 continue;
             };
@@ -1226,6 +1229,11 @@ impl Nest {
                 return Err(error.into());
             }
         }
+        if self.pending_cleanup.lock().is_some()
+            || self.state.lock().retirement.tickets.has_settled()
+        {
+            crate::basis::room::deadline::retry();
+        }
         Ok(())
     }
 
@@ -1237,9 +1245,9 @@ impl Nest {
             }
             if state.retirement.invalidation().is_fencing() {
                 drop(state);
-                while self.state.lock().retirement.invalidation().is_fencing() {
-                    core::hint::spin_loop();
-                }
+                // Keep synchronous callers' access result stable while a peer
+                // fences. Reception uses the stack-free interrupt window.
+                crate::metal::interrupt::window::poll();
                 continue;
             }
             let target = state.retirement.begin(self.id.get(), self.asid())?;
@@ -1291,7 +1299,11 @@ impl Nest {
         drop(state);
         self.finish_invalidation()?;
         self.drain_closed();
-        Ok(())
+        if self.is_closed() {
+            Ok(())
+        } else {
+            Err(NestError::Busy)
+        }
     }
 
     /// Close translations, clear waits for this ASID, and settle control bindings
@@ -1299,8 +1311,15 @@ impl Nest {
     pub(crate) fn retire(&self) -> Result<(), NestError> {
         if !self.cpu.as_ref().is_none_or(|cpu| cpu.domain.released()) {
             self.close()?;
-            sign::wipe_space(self.id);
-            self.reap_mappings();
+            if self.pending_cleanup.lock().is_some() {
+                return Err(NestError::Busy);
+            }
+            if !sign::wipe_space(self.id) {
+                return Err(NestError::Busy);
+            }
+            if !self.reap_mappings() {
+                return Err(NestError::Busy);
+            }
             self.release_asid()?;
         }
         self.reap_mappings();
@@ -1331,15 +1350,13 @@ impl Nest {
 
     /// 与晚到入链共用串行点；关系析构必须在地址占用锁与 Nest 状态锁外。
     fn drain_closed(&self) {
-        let mut nodes = {
-            let mut pending = self.pending_cleanup.lock();
-            if !self.is_closed() {
-                return;
-            }
-            pending.take()
-        };
-        while let Some(mut node) = nodes {
-            nodes = node.next.take();
+        if !self.is_closed() {
+            return;
+        }
+        for _ in 0..4 {
+            let Some(node) = self.take_cleanup() else {
+                break;
+            };
             drop(node);
         }
     }
@@ -1477,7 +1494,9 @@ impl Drop for Nest {
         } else if self.asid().is_kernel() {
             return;
         } else if !self.cpu.as_ref().is_none_or(|cpu| cpu.domain.released()) {
-            sign::wipe_space(self.id);
+            if !sign::wipe_space(self.id) {
+                return;
+            }
             if self.close().and_then(|()| self.release_asid()).is_err() {
                 return;
             }

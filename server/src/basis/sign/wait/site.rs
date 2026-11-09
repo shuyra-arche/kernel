@@ -37,16 +37,32 @@ impl Site {
         life: &Weak<Anchor>,
     ) -> Result<&'a mut Site, ()> {
         if !sites.contains_key(&key) {
+            // Admission bounds ordinary bulk wake and shard lookup work.
+            if sites.len() == 256 {
+                return Err(());
+            }
             sites.try_reserve(1).map_err(|_| ())?;
             sites.insert(key, Site::new(life));
         }
         sites.get_mut(&key).ok_or(())
     }
 
+    pub(super) fn admit(&self) -> Result<(), ()> {
+        if self.chain.len() < 64 {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
     pub(super) fn enqueue(&mut self, task: Arc<Task>) {
         debug_assert!(
             task.waiting(),
             "站点只收 Blocked 任务，且入链前不得挂在链上"
+        );
+        assert!(
+            self.admit().is_ok(),
+            "wait admission must precede Task handoff"
         );
         self.chain.enqueue(task);
     }

@@ -6,6 +6,9 @@ impl<T> SpinLock<T> {
     pub(crate) fn new(value: T) -> Self {
         Self(Mutex::new(value))
     }
+    pub(crate) fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+        self.0.try_lock().ok()
+    }
     pub(crate) fn lock(&self) -> MutexGuard<'_, T> {
         self.0.lock().unwrap()
     }
@@ -21,6 +24,15 @@ impl HoldTable {
 }
 pub(crate) struct PendEntry(pub(crate) PendId);
 impl PendEntry {
+    pub(crate) fn authority(&self) -> &Self {
+        self
+    }
+    pub(crate) fn held_by(
+        &self,
+        _: &Arc<core::sync::atomic::AtomicBool>,
+    ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
+        Ok(())
+    }
     pub(crate) fn token(&self) -> PendId {
         self.0
     }

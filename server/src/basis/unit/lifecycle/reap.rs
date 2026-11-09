@@ -168,9 +168,10 @@ fn note_out<'a>(
 }
 
 pub(crate) fn bury() {
+    super::doom::advance();
     // Bound this service turn's outer work. Unsettled Tasks retain their place
     // for a later turn. Each advances one child or local retirement stage;
-    // Pend graph walks and individual hardware operations still need bounds.
+    // Graph batches retain their position; backend timing remains platform-dependent.
     for _ in 0..4 {
         let z = {
             let mut husks = HUSKS.lock();

@@ -2,8 +2,6 @@ use riscv::register::sstatus;
 
 pub(crate) struct TrapGuard {
     sie_was_enabled: bool,
-    #[cfg(feature = "latency")]
-    start: u64,
 }
 
 impl TrapGuard {
@@ -14,14 +12,13 @@ impl TrapGuard {
             if sstatus::read().sie() {
                 sstatus::clear_sie();
             }
+            crate::metal::interrupt::window::enter();
+            #[cfg(feature = "latency")]
+            if was {
+                crate::metal::measure::resume_irq(true);
+            }
             TrapGuard {
                 sie_was_enabled: was,
-                #[cfg(feature = "latency")]
-                start: if was {
-                    crate::metal::measure::stamp()
-                } else {
-                    0
-                },
             }
         }
     }
@@ -30,9 +27,10 @@ impl TrapGuard {
 impl Drop for TrapGuard {
     #[inline(always)]
     fn drop(&mut self) {
-        #[cfg(feature = "latency")]
-        crate::metal::measure::elapsed(crate::metal::measure::Metric::IrqOff, self.start);
+        crate::metal::interrupt::window::leave();
         if self.sie_was_enabled {
+            #[cfg(feature = "latency")]
+            let _ = crate::metal::measure::pause_irq();
             unsafe {
                 sstatus::set_sie();
             }

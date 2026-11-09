@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::boot::ledger::{Entry, Name};
 
-use crate::basis::pend::{self, PendEntry};
+use crate::basis::pend::PendEntry;
 use crate::basis::unit::task::Task;
 
 #[derive(Default)]
@@ -162,7 +162,7 @@ impl Frozen {
         for registration in registrations {
             registration.publish();
         }
-        pend::changed(target);
+
         drop(commit);
         drop(closed);
         Ok(ledger)

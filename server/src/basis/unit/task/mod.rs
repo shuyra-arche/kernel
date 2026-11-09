@@ -340,7 +340,7 @@ impl Drop for Task {
         registry::remove(self.ident.id);
         let _commit = commit();
         self.administration.clear();
-        self.ident.team.node.clear(self.ident.id, None);
+        // Receipt withdrawal completed in the retained retirement phase.
         for pend_entry in self.pend.entries.lock().iter() {
             pend_entry.invalidate();
         }

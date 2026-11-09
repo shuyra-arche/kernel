@@ -1,4 +1,4 @@
-#![feature(allocator_ext)]
+#![feature(allocator_ext, allocator_api)]
 extern crate alloc;
 
 // Exercise production registries, rollback guards and delegated authority chains.
@@ -52,7 +52,7 @@ mod metal {
 
 #[test]
 fn unpublished_pend_rolls_back_and_keeps_one_record_on_publish() {
-    let table = ledger::Table::new();
+    let table = ledger::Table::new().unwrap();
     let _transaction = table.lock();
     let entry = Arc::new(PendEntry(PendId::mint(1)));
     let failed = (|| -> Result<(), ()> {
@@ -80,13 +80,13 @@ fn unpublished_pend_rolls_back_and_keeps_one_record_on_publish() {
 #[test]
 fn failed_pend_preparation_and_batch_leave_no_hidden_reservations() {
     for fail in [0, 1] {
-        let table = ledger::Table::new();
+        let table = ledger::Table::new().unwrap();
         let entry = Arc::new(PendEntry(PendId::mint(1)));
         assert!(allocation::fail_after(fail, || table.prepare(entry.clone())).is_err());
         table.prepare(entry).unwrap().publish();
         assert_eq!(table.entries.lock().len(), 1);
     }
-    let table = ledger::Table::new();
+    let table = ledger::Table::new().unwrap();
     let records: Vec<_> = (1..=8)
         .map(|id| Arc::new(PendEntry(PendId::mint(id))))
         .collect();

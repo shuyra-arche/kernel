@@ -89,7 +89,7 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
             None
         };
         let _commit = crate::basis::commit();
-        pend.target().seal();
+        pend.target().seal()?;
         (share_view, operation)
     };
     if let Some(share_view) = share_view {

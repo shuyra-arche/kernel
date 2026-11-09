@@ -65,3 +65,25 @@ fn recursive_try_preserves_outer_ownership_and_irq_mask_until_last_guard() {
     assert_eq!(depend::count(), 0);
     assert!(trap::enabled());
 }
+
+#[test]
+fn contended_wait_visits_reception_before_foreign_owner_releases() {
+    metal::hart::set(0);
+    let lock = Arc::new(RelLock::new_level(depend::Level::Unit, 41));
+    let owner = lock.lock();
+    let (sent, received) = mpsc::channel();
+    let other = lock.clone();
+    let worker = std::thread::spawn(move || {
+        metal::hart::set(1);
+        metal::interrupt::window::observe(sent);
+        let acquired = other.lock();
+        assert_eq!(*acquired, 41);
+        assert!(!trap::enabled());
+        drop(acquired);
+        assert!(trap::enabled());
+    });
+    let reception = received.recv_timeout(Duration::from_secs(5));
+    drop(owner);
+    worker.join().unwrap();
+    reception.unwrap();
+}

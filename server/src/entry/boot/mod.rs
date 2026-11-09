@@ -84,6 +84,7 @@ extern "C" fn run_on_stack() -> ! {
 }
 
 pub(crate) fn register_runtime_hooks() {
+    crate::metal::interrupt::window::bind(crate::entry::trap::service);
     use crate::basis::room::shutdown;
 
     static EXIT_HOOKS: &[fn(&alloc::sync::Arc<crate::basis::unit::task::Task>)] = &[

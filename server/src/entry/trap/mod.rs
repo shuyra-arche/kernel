@@ -20,6 +20,19 @@ use kernel_api::address::VirtAddr as KVirt;
 
 use crate::metal::switcher::{stack::TRAP_STACK_CANARY, trap};
 
+/// Deferred external delivery runs at an exclusion-free boundary. It may
+/// publish a retained Sign, but never replaces the current kernel continuation.
+pub(crate) fn service(pending: usize) {
+    // Timer/IPI are level state owned by the ordinary scheduler entry. Do not
+    // acknowledge or reprogram them from a lock destructor: doing so can steal
+    // its dispatch opportunity or create a self-sustaining retry timer storm.
+    if pending & (1 << 9) != 0
+        && !crate::basis::room::interrupt::external().is_some_and(|route| route.handle())
+    {
+        interrupt::disable_external();
+    }
+}
+
 pub(crate) fn persist(frame: &TrapContext) -> bool {
     let Some(i) = ident() else {
         return false;
@@ -146,6 +159,15 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
                 // 完整解析在提交边界之外：结失效、物化、发布，再重探一次。
                 match nest.resolve_fault(fault.addr, fault.kind) {
                     Ok(next) => outcome = next,
+                    Err(crate::basis::nest::NestError::Busy) => {
+                        // A peer owns the fence. Keep the faulting instruction
+                        // unchanged and yield instead of waiting with IRQs off.
+                        drop(nest);
+                        drop(ident);
+                        deadline::retry();
+                        return resume(crate::basis::room::scheduler::slot::current().reschedule()
+                            as *mut TrapContext);
+                    }
                     // 真实资源失败：这是整份地址空间的失败，不是这一页自己失效；
                     // 照实记录，再放掉地址空间按原样终止。
                     Err(resource) => {
@@ -281,6 +303,15 @@ pub(crate) fn envcall(
     };
     let space = &ident.team.nest;
     if let Err(resource) = space.retry_invalidation() {
+        if resource == crate::basis::nest::NestError::Busy {
+            // No call has executed and sepc still names its original trap.
+            // Retrying after a scheduling boundary cannot replay any effects.
+            drop(ident);
+            deadline::retry();
+            return Some(
+                crate::basis::room::scheduler::slot::current().reschedule() as *mut TrapContext
+            );
+        }
         log::error!("envcall: the address space cannot settle its sync: {resource:?}");
         doom(
             Some(&ident),

@@ -6,8 +6,10 @@ use kernel_api::model::identity::TeamId;
 use crate::basis::unit::anchor::Anchor;
 use crate::metal::sync::SpinLock;
 
+mod clearance;
 pub(crate) mod exit;
 mod state;
+pub(crate) use clearance::Clearance;
 
 use super::Member;
 pub(super) use exit::ExitPolicy;
@@ -23,6 +25,7 @@ pub(crate) struct TeamNode {
     pub children: SpinLock<Vec<Arc<TeamNode>>>,
     pub life: Arc<Anchor>,
     pub(crate) exit: ExitPolicy,
+    pub(crate) termination: SpinLock<crate::basis::unit::lifecycle::Termination>,
 }
 
 impl TeamNode {
@@ -134,15 +137,6 @@ impl TeamNode {
             drop(removed);
             node = parent;
         }
-    }
-    pub fn doom(&self) {
-        let _commit = crate::basis::commit();
-        self.visit(&mut |node| {
-            let mut state = node.state.lock();
-            if !state.terminal() {
-                state.phase = TeamPhase::Doomed;
-            }
-        });
     }
     pub fn notify(&self) {
         let mut node = Some(self);

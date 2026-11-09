@@ -1,4 +1,22 @@
 pub(crate) mod metal {
+    pub(crate) mod interrupt {
+        pub(crate) mod window {
+            std::thread_local! {
+                static NOTICE: std::cell::RefCell<Option<std::sync::mpsc::Sender<()>>> = const { std::cell::RefCell::new(None) };
+            }
+            pub(crate) fn observe(sender: std::sync::mpsc::Sender<()>) {
+                NOTICE.with_borrow_mut(|notice| *notice = Some(sender));
+            }
+            pub(crate) fn poll() {
+                NOTICE.with_borrow_mut(|notice| {
+                    if let Some(sender) = notice.take() {
+                        sender.send(()).unwrap()
+                    }
+                });
+                std::thread::yield_now();
+            }
+        }
+    }
     pub(crate) mod hart {
         use std::cell::Cell;
         std::thread_local! { static ID: Cell<usize> = const { Cell::new(0) }; }

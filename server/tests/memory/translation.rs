@@ -35,13 +35,13 @@ fn reclaiming_a_fenced_ticket_keeps_later_failed_tickets_reserved() {
     assert!(!tickets.claim(3));
     assert!(tickets.claim(1));
     assert!(tickets.has_settled());
-    assert_eq!(tickets.drain().collect::<Vec<_>>(), [2]);
+    assert_eq!(tickets.drain(4).collect::<Vec<_>>(), [2]);
     assert!(!tickets.has_settled());
 
     backend.0.set(true);
     assert!(invalidate(&backend, 7).unwrap().confirms(7));
     tickets.settle();
-    assert_eq!(tickets.drain().collect::<Vec<_>>(), [3]);
+    assert_eq!(tickets.drain(4).collect::<Vec<_>>(), [3]);
 }
 
 #[test]
@@ -83,4 +83,22 @@ fn cpu_completion_is_bound_to_domain_attempt_and_full_coverage() {
         assert!(!invalidate(&Cpu, unrelated).unwrap().confirms(pending));
     }
     assert!(invalidate(&Cpu, pending).unwrap().confirms(pending));
+}
+
+#[test]
+fn ticket_batches_retain_the_unprocessed_and_unfenced_suffixes() {
+    let mut tickets = Tickets::new();
+    tickets.reserve(12).unwrap();
+    for id in 1..=9 {
+        tickets.retire(id);
+    }
+    tickets.settle();
+    tickets.retire(10);
+    assert_eq!(tickets.drain(4).collect::<Vec<_>>(), [1, 2, 3, 4]);
+    assert_eq!(tickets.drain(4).collect::<Vec<_>>(), [5, 6, 7, 8]);
+    assert_eq!(tickets.drain(4).collect::<Vec<_>>(), [9]);
+    assert!(!tickets.has_settled());
+    assert!(!tickets.claim(10));
+    tickets.settle();
+    assert_eq!(tickets.drain(4).collect::<Vec<_>>(), [10]);
 }

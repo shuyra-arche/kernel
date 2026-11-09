@@ -66,8 +66,11 @@ impl Table {
             .allocate()
             .map(ControlId::new)
             .ok_or(UnitFail::OutOfMemory)?;
-        self.0
-            .lock()
+        let mut entries = self.0.lock();
+        if entries.len() >= 1024 {
+            return Err(UnitFail::OutOfMemory);
+        }
+        entries
             .insert(
                 id,
                 Entry {

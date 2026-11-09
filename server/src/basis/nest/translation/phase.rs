@@ -3,6 +3,8 @@
 pub(crate) enum ClosePhase {
     /// 仍接受映射事务。
     Open,
+    /// Admission is closed; indexed mappings are withdrawn one per turn.
+    Draining,
     /// 映射已撤下，等待 shootdown 结算。
     Closing,
     /// 映射与退休资源都已结算。
@@ -10,6 +12,9 @@ pub(crate) enum ClosePhase {
 }
 
 impl ClosePhase {
+    pub(crate) fn is_open(self) -> bool {
+        matches!(self, Self::Open)
+    }
     pub(crate) fn is_closed(self) -> bool {
         matches!(self, Self::Closed)
     }

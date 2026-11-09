@@ -86,5 +86,6 @@ pub fn arm_hart() {
         sie::set_stimer();
         sie::set_ssoft();
         sie::set_sext();
+        crate::metal::interrupt::window::arm();
     }
 }

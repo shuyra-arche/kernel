@@ -97,7 +97,7 @@ pub(crate) fn create(license: PendId) -> Result<usize, SignFail> {
         .prepare(entry)
         .map_err(codec::pend_fail)?
         .publish();
-    pend::changed(&task);
+
     Ok(token.get())
 }
 
