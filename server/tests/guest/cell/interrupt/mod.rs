@@ -72,6 +72,7 @@ extern "C" fn observer() -> ! {
     unit::exit(0, 0, VirtAddr::new(0), 0)
 }
 static ENTERED: AtomicUsize = AtomicUsize::new(0);
+static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
 static WATCH_TOKEN: AtomicUsize = AtomicUsize::new(0);
 static WATCH_ENTERED: AtomicUsize = AtomicUsize::new(0);
 extern "C" fn watch() -> ! {
@@ -220,6 +221,11 @@ extern "C" fn revoked_driver() -> ! {
     initial(token);
     ENTERED.store(1, Ordering::Release);
     assert!(sign::listen(token, deadline()).is_err());
+    // Keep this ledger alive until the controller finishes exact-identity
+    // retries; Task exit would otherwise race the same physical retirement.
+    while !REVOKE_FINISHED.load(Ordering::Acquire) {
+        room::yield_();
+    }
     unit::exit(0, 0, VirtAddr::new(0), 0)
 }
 pub(super) fn run(at: usize, count: usize) {
@@ -300,7 +306,7 @@ pub(super) fn run(at: usize, count: usize) {
     write(1, 0);
     sign::consume(token, observed).unwrap();
     sign::delete(routed).unwrap();
-    pend::return_(routed).unwrap();
+    super::lifecycle::return_pend(routed);
     let unrelated = sign::create(crate::license::get()).unwrap();
     let observer_task = super::lifecycle::spawn(observer as *const () as usize);
     let observer_token = accord(
@@ -345,7 +351,7 @@ pub(super) fn run(at: usize, count: usize) {
     assert!(repeated > held);
     write(1, 0);
     sign::consume(token, repeated).unwrap();
-    pend::return_(token).unwrap();
+    super::lifecycle::return_pend(token);
     assert!(!OBSERVED.load(Ordering::Acquire));
     sign::trigger(unrelated).unwrap();
     assert!(super::lifecycle::wait_task(observer_task));
@@ -353,7 +359,7 @@ pub(super) fn run(at: usize, count: usize) {
     super::lifecycle::delete(observer_task);
     assert!(OBSERVED.load(Ordering::Acquire));
     sign::delete(unrelated).unwrap();
-    pend::return_(unrelated).unwrap();
+    super::lifecycle::return_pend(unrelated);
     let task = super::lifecycle::spawn(dying_driver as *const () as usize);
     // Sign cannot be handed out before the matching View exists in this Task.
     assert!(
@@ -380,10 +386,11 @@ pub(super) fn run(at: usize, count: usize) {
     let sequence = receive(replacement, deadline());
     write(1, 0);
     sign::consume(replacement, sequence).unwrap();
-    pend::return_(replacement).unwrap();
+    super::lifecycle::return_pend(replacement);
     // Independently revoking either half closes the binding and wakes its waiter.
     for revoke_view in [false, true] {
         ENTERED.store(0, Ordering::Release);
+        REVOKE_FINISHED.store(false, Ordering::Release);
         let task = super::lifecycle::spawn(revoked_driver as *const () as usize);
         let (view, branch) = pair(page, root, task);
         VIEW.store(view.get(), Ordering::Release);
@@ -395,7 +402,19 @@ pub(super) fn run(at: usize, count: usize) {
             room::yield_();
         }
         room::sleep_until(room::clock() + 2_000_000).unwrap();
-        pend::revoke(task, if revoke_view { view } else { branch }).unwrap();
+        let token = if revoke_view { view } else { branch };
+        let until = room::clock() + 5_000_000_000;
+        loop {
+            match pend::revoke(task, token) {
+                Ok(()) => break,
+                Err(error) => {
+                    assert_eq!(error.source, kernel_api::abi::call::pend::PendFail::Busy);
+                    assert!(room::clock() < until, "IRQ grant retirement stalled");
+                    room::yield_();
+                }
+            }
+        }
+        REVOKE_FINISHED.store(true, Ordering::Release);
         assert!(super::lifecycle::wait_task(task));
         assert_eq!(super::lifecycle::result(task), (1, 0));
         super::lifecycle::delete(task);
@@ -406,7 +425,7 @@ pub(super) fn run(at: usize, count: usize) {
         let sequence = receive(next, deadline());
         write(1, 0);
         sign::consume(next, sequence).unwrap();
-        pend::return_(next).unwrap();
+        super::lifecycle::return_pend(next);
     }
     load.finish();
     share_view::shut(page).unwrap();
