@@ -29,21 +29,21 @@ fn ledger(entries: &[Entry]) -> Vec<u8> {
 #[test]
 fn ledger_keeps_header_entry_offsets_and_reserved_bytes() {
     let bytes = ledger(&[entry()]);
-    let mut expected = vec![0u8; 40];
+    let mut expected = vec![0u8; 48];
     expected[..4].copy_from_slice(&VERSION.to_le_bytes());
     expected[4] = 1; // count
     expected[8] = 2; // Name::Page class, Dtb item 0
     expected[32] = 19; // token, after name/kind/seven reserved bytes
     assert_eq!(bytes, expected);
-    assert_eq!(kernel_api::boot::ledger::ENTRY_LEN, 32);
+    assert_eq!(kernel_api::boot::ledger::ENTRY_LEN, 40);
     assert_eq!(Header::LEN, 8);
     let entries = Entries::new(&bytes).unwrap();
     assert_eq!(entries.iter().collect::<Vec<_>>(), vec![entry()]);
     assert_eq!(entries.find(Name::Page(Page::Dtb)), Some(entry()));
-    let mut out = [0xaa; 40];
-    assert_eq!(entry().store_at(&mut out, 4), Some(36));
+    let mut out = [0xaa; 48];
+    assert_eq!(entry().store_at(&mut out, 4), Some(44));
     assert_eq!(&out[..4], &[0xaa; 4]);
-    assert_eq!(&out[36..], &[0xaa; 4]);
+    assert_eq!(&out[44..], &[0xaa; 4]);
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn ledger_writer_distinguishes_used_length_from_buffer_capacity() {
     let expected = ledger(&values);
     let mut out = [0xaa; 128];
     let len = store_entries(&mut out, &values).unwrap();
-    assert_eq!(len, 72);
+    assert_eq!(len, 88);
     assert_eq!(&out[..len], expected);
     assert!(out[len..].iter().all(|byte| *byte == 0xaa));
     assert_eq!(
@@ -151,4 +151,32 @@ fn boot_creation_license_and_sign_are_pend_targets() {
         31,
     )]);
     assert!(Entries::new(&wrong).is_none());
+}
+
+#[test]
+fn dispatch_pairs_require_a_typed_view_and_sign() {
+    use kernel_api::model::view::ViewKind;
+    let name = Name::Interrupt {
+        controller: 0xc000000,
+        source: 10,
+    };
+    let pair = Entry::pair(name, ViewKind::Share, 42, 43);
+    let bytes = ledger(&[pair]);
+    assert_eq!(
+        Entries::new(&bytes).unwrap().find(name).unwrap().dispatch(),
+        Some(((ViewKind::Share, 42), 43))
+    );
+    for invalid in [
+        Entry::new(name, ResourceKind::Sign, 43),
+        Entry::pair(name, ViewKind::Share, 0, 43),
+        Entry::pair(name, ViewKind::Share, 43, 43),
+        Entry::pair(name, ViewKind::Clone, 42, 43),
+    ] {
+        assert!(Entries::new(&ledger(&[invalid])).is_none());
+    }
+    for at in [25, 26] {
+        let mut bad = bytes.clone();
+        bad[at] = 255;
+        assert!(Entries::new(&bad).is_none());
+    }
 }

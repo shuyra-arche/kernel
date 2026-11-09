@@ -93,9 +93,14 @@ pub unsafe fn grant_mmio(region: kernel_api::boot::platform::Region) -> Result<(
 /// # Safety
 /// The external platform validated the complete DT route, exclusive ownership,
 /// and level-high gateway wiring. Shared/cascaded/MSI routes are not supported.
+/// `region` is this device's admitted MMIO base, used to pair its Share View.
 /// Call only during single-Hart boot preparation, before `start` publishes grants.
-pub unsafe fn grant_interrupt(controller: usize, source: u32) -> Result<(), BootError> {
-    crate::basis::room::interrupt::register(controller, source).map_err(|source| {
+pub unsafe fn grant_interrupt(
+    controller: usize,
+    source: u32,
+    region: usize,
+) -> Result<(), BootError> {
+    crate::basis::room::interrupt::register(controller, source, region).map_err(|source| {
         BootError::Resources {
             operation: ResourceOperation::Devices,
             source,

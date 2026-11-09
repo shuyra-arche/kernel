@@ -88,7 +88,7 @@ Call numbers are `(version << 48) | (domain << 32) | operation`; version is 5.
 Versions zero through four and unknown versions are rejected before domain dispatch. All byte
 descriptors use fixed little-endian 64-bit words and checked tags/reserved fields.
 Boot capsule format 2 declares the matching ABI in byte 11; old executable
-capsules are rejected before launch. The resource ledger is version 5.
+capsules are rejected before launch. The resource ledger is version 7.
 
 | Domain | Current operations |
 | --- | --- |
@@ -115,6 +115,23 @@ capsules are rejected before launch. The resource ledger is version 5.
 | FlatInfo | 32 bytes, including level | Resize output buffers |
 | Cell Split / Merge | Operations 8 / 9 return a new SlotId | Replace the old handle only on success |
 | Capsules / ledger | ABI v5 / ledger v5 | Rebuild all capsules; ledger format is unchanged |
+
+### Ledger v7 dispatch pairs
+
+The syscall ABI remains v5, including all existing Sign slots and rights. Ledger
+v7 entries are 40 bytes: name `[0,16)`, resource kind at 16, optional View tag at
+17 (0 absent, 1 Clone, 2 Share), zero reserved bytes `[18,24)`, primary Pend at
+`[24,32)` and View Pend at `[32,40)`. Handles are little-endian u64 values.
+`Name::Interrupt { controller, source }` requires a Share View and Sign pair;
+`Entry::dispatch()` returns the explicit View kind and both handles. Other entry
+kinds have no paired View. Malformed, incomplete and old-version ledgers fail
+validation. Rebuild ledger readers; no Sign syscall migration is needed.
+
+A source admits one non-distributable Listen/Consume branch only when that Task
+holds the matching full writable Share View with Open permission. Listen-only
+observers may be derived independently. Initial device inspection and real IRQs
+both use ordinary retained sequences and Consume. The source interprets successful
+consumption asynchronously; revocation/cancellation does not acknowledge hardware.
 
 ### Cell contracts
 

@@ -9,56 +9,49 @@ fn holder(actor: usize, permit: usize) -> Holder {
     }
 }
 #[test]
-fn pending_before_listen_is_retained_and_only_exact_ack_rearms() {
-    let mut source = State::new();
-    let owner = holder(1, 2);
-    let generation = source.claim(owner).unwrap();
-    assert_eq!(source.claim(holder(3, 4)), Err(Error::Busy));
-    source.rearm(owner, generation, 0).unwrap();
-    assert!(source.armed());
-    source.claimed();
-    source.deliver(1).unwrap();
-    let pending = source;
-    assert!(!source.armed());
-    assert_eq!(source.deliver(2), Err(Error::Stale));
-    assert_eq!(source.rearm(owner, generation, 0), Err(Error::Stale));
-    assert_eq!(source.rearm(holder(2, 2), generation, 1), Err(Error::Stale));
-    assert_eq!(source, pending);
-    source.rearm(owner, generation, 1).unwrap();
-    assert_eq!(source.rearm(owner, generation, 1), Err(Error::Stale));
-    source.claimed();
-    source.deliver(2).unwrap();
-    assert_eq!(source.rearm(owner, generation, 1), Err(Error::Stale));
-    source.rearm(owner, generation, 2).unwrap();
+fn consumption_is_exact_and_cancellation_does_not_complete_hardware() {
+    let mut s = State::new();
+    assert!(!s.bound());
+    s.claim(holder(1, 2)).unwrap();
+    assert!(s.bound());
+    s.begin(1);
+    assert!(!s.armed());
+    assert_eq!(s.claim(holder(3, 4)), Err(Error::Busy));
+    assert_eq!(s.consume(0), None);
+    assert_eq!(s.consume(1), Some(false));
+    assert!(s.armed());
+    assert!(s.claimed());
+    s.deliver(2).unwrap();
+    assert_eq!(s.consume(1), None);
+    assert_eq!(s.consume(2), Some(true));
+    assert_eq!(s.consume(2), None);
+    s.claimed();
+    s.deliver(3).unwrap();
+    s.close();
+    assert!(!s.bound());
+    assert_eq!(s.consume(3), None);
+    s.claim(holder(3, 4)).unwrap();
+    s.begin(4);
+    assert_eq!(s.consume(3), None);
+    assert_eq!(
+        s.consume(4),
+        Some(true),
+        "replacement retains old controller claim"
+    );
 }
 #[test]
-fn revoked_or_exited_driver_cannot_rearm_a_replacement() {
-    let mut source = State::new();
-    let old = holder(1, 2);
-    let first = source.claim(old).unwrap();
-    source.rearm(old, first, 0).unwrap();
-    source.claimed();
-    source.deliver(7).unwrap();
-    assert!(!source.revoke(PendId::mint(4)));
-    assert!(source.revoke(old.permit));
-    let next = holder(2, 5);
-    let second = source.claim(next).unwrap();
+fn initial_inspection_and_rebind_never_reuse_a_receipt() {
+    let mut s = State::new();
+    let first = s.claim(holder(1, 2)).unwrap();
+    s.begin(1);
+    s.close();
+    let second = s.claim(holder(2, 3)).unwrap();
+    s.begin(2);
     assert!(second > first);
-    assert!(source.owned(next));
-    assert!(!source.owned(old));
-    assert_eq!(source.rearm(old, first, 7), Err(Error::Stale));
-    assert_eq!(source.yield_binding(old, first), Err(Error::Stale));
-    assert!(
-        source.rearm(next, second, 0).unwrap(),
-        "retained claim must be completed by the new binding"
-    );
-    source.claimed();
-    source.deliver(8).unwrap();
-    source.yield_binding(next, second).unwrap();
-    assert!(!source.owned(next));
-    source.claim(next).unwrap();
-    source.close();
-    assert!(!source.armed());
+    assert!(!s.owned(holder(1, 2)));
+    assert!(s.owned(holder(2, 3)));
+    assert_eq!(s.consume(1), None);
+    assert_eq!(s.consume(2), Some(false));
 }
 #[test]
 fn ledger_names_do_not_alias_sources_across_controller_domains() {

@@ -94,6 +94,9 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
         }
         TrapEvent::Ipi => {
             ipi::acknowledge();
+            if let Some(route) = crate::basis::room::interrupt::external() {
+                route.rearm();
+            }
             deadline::refresh();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
                 && let Some(reason) = crate::basis::unit::lifecycle::take_doomed(running.id)
