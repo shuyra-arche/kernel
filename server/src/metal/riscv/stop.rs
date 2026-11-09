@@ -40,7 +40,7 @@ pub(crate) fn quiesced_peers() -> usize {
 
 pub(crate) fn alarm() -> bool {
     let won = claim();
-    if won {
+    if won && crate::entry::boot::facts::dram_edge().is_some() {
         broadcast();
     }
     won
@@ -76,7 +76,7 @@ pub(crate) fn failed() -> ! {
 }
 
 use super::image::ROOT_STACK_SIZE;
-use core::panic::PanicInfo;
+use crate::entry::report::scene::Source;
 static mut SCENE: [usize; 2] = [0; 2];
 
 pub(crate) fn scene() -> (usize, usize) {
@@ -86,7 +86,7 @@ pub(crate) fn scene() -> (usize, usize) {
 
 #[allow(improper_ctypes_definitions)]
 #[unsafe(naked)]
-pub(crate) extern "C" fn home(_info: &PanicInfo) -> ! {
+pub(crate) extern "C" fn home(_info: &Source<'_>) -> ! {
     ::core::arch::naked_asm!(
         "la   t0, {scene}",
         "sd   sp, 0(t0)",
@@ -126,11 +126,4 @@ pub(crate) fn protected_stop(_reason: usize) -> ! {
     loop {
         unsafe { ::core::arch::asm!("wfi") };
     }
-}
-
-pub(crate) fn trap_scene() -> (usize, usize) {
-    (
-        riscv::register::sepc::read(),
-        riscv::register::stval::read(),
-    )
 }

@@ -10,7 +10,6 @@ use crate::basis::room::deadline;
 use crate::basis::sign::redeem;
 use crate::basis::unit::task::TaskIdent;
 use crate::metal::generic::trap::TrapEvent;
-use crate::metal::hart;
 use crate::metal::interrupt::{self, ipi};
 use crate::metal::mmu::identity as asid;
 use crate::metal::mmu::identity::Asid;
@@ -117,7 +116,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
         }
         TrapEvent::Call => {
             if !from_task {
-                panic!("kernel ebreak from the kernel itself");
+                crate::entry::report::halt::trap(frame, 3, 0);
             }
             match envcall(frame, ident) {
                 Some(next) => next,
@@ -126,12 +125,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
         }
         TrapEvent::PageFault(fault) => {
             if !from_task {
-                panic!(
-                    "kernel page fault on hart {} at sepc={:#x}, stval={:#x}",
-                    hart::hart_id(),
-                    fault.detail.pc,
-                    fault.detail.value
-                );
+                crate::entry::report::halt::trap(frame, fault.detail.cause, fault.detail.value);
             }
             // 先取定这一次错误的身份：真正终止任务前会先把 id 标量留下来。
             let (tid, nest) = {
@@ -208,10 +202,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
                 );
                 return kill_fault(ident);
             }
-            panic!(
-                "unhandled kernel exception: {} at sepc={:#x}, stval={:#x}",
-                fault.cause, fault.pc, fault.value
-            );
+            crate::entry::report::halt::trap(frame, fault.cause, fault.value);
         }
     };
 

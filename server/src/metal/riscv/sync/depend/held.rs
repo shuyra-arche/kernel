@@ -19,8 +19,15 @@ impl HeldSet {
         Ok(HeldSet { slots })
     }
 
-    pub(super) fn max_level(&self) -> Option<Level> {
-        self.slots.iter().filter_map(|h| h.level).max()
+    pub(super) fn snapshot(&self) -> Snapshot {
+        let mut result = Snapshot {
+            slots: [None; 32],
+            omitted: self.slots.len().saturating_sub(32),
+        };
+        for (dst, src) in result.slots.iter_mut().zip(&self.slots) {
+            *dst = Some(*src);
+        }
+        result
     }
 
     pub(super) fn push(
@@ -62,3 +69,20 @@ pub(super) struct HeldCell(pub(super) UnsafeCell<HeldSet>);
 
 unsafe impl Send for HeldCell {}
 unsafe impl Sync for HeldCell {}
+
+pub(super) struct Snapshot {
+    slots: [Option<Held>; 32],
+    omitted: usize,
+}
+impl core::fmt::Debug for Snapshot {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        for slot in self.slots.iter().flatten() {
+            write!(
+                f,
+                "\n lock={:#x} level={:?} acquired={:#x}",
+                slot.addr, slot.level, slot.caller
+            )?;
+        }
+        write!(f, "\n omitted={}", self.omitted)
+    }
+}

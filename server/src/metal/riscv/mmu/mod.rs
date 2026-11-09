@@ -15,7 +15,6 @@ pub(crate) fn canonical(addr: usize) -> VirtAddr {
 pub(crate) trait Address {
     fn vpn(self, level: u8) -> usize;
     fn is_user(self) -> bool;
-    fn is_kernel(self) -> bool;
 }
 impl Address for VirtAddr {
     fn vpn(self, level: u8) -> usize {
@@ -23,17 +22,6 @@ impl Address for VirtAddr {
     }
     fn is_user(self) -> bool {
         (self.get() >> mode::geometry(mode::mode()).split_bit()) & 1 == 0
-    }
-    fn is_kernel(self) -> bool {
-        if !self.is_user() {
-            return true;
-        }
-        unsafe extern "C" {
-            static _kernel_base: u8;
-            static _kernel_edge: u8;
-        }
-        self.get() >= (&raw const _kernel_base).addr()
-            && self.get() < (&raw const _kernel_edge).addr()
     }
 }
 

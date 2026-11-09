@@ -49,11 +49,4 @@ impl StackReader {
                 .read_unaligned()
         })
     }
-
-    pub fn pair(&mut self, frame: usize) -> Option<(usize, usize)> {
-        Some((
-            self.word(frame.checked_sub(16)?)?,
-            self.word(frame.checked_sub(8)?)?,
-        ))
-    }
 }
