@@ -2,7 +2,7 @@
 //! 来源与登记项共享帧无关绑定，真实页表与失效责任仍由 Nest 承担。
 
 pub(crate) mod admission;
-pub(crate) mod aperture;
+pub(crate) mod binding;
 pub(crate) mod external;
 
 use alloc::sync::Arc;

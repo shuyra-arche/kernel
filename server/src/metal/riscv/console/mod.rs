@@ -8,24 +8,30 @@ use sbi::ecall::SArgs;
 
 mod line;
 mod logger;
+mod output;
 mod sink;
 
 use line::Line;
 pub use logger::init;
 pub use sink::Sink;
 
-fn write(s: &str) {
-    let bytes = s.as_bytes();
-    if let Some(pa) = physical_buffer(bytes.as_ptr() as usize, bytes.len()) {
+/// Nonblocking output. Return only bytes acknowledged by firmware, with no
+/// implicit newline or UTF-8 replacement. Every submitted chunk stays in one
+/// physical page; a zero/partial firmware write returns immediately.
+pub fn write(bytes: &[u8]) -> Option<usize> {
+    output::transfer(bytes, physical_buffer, |pa, count| {
         DbcnCall::new(Dbcn::ConsoleWrite)
             .args(SArgs {
-                a0: bytes.len(),
+                a0: count,
                 a1: pa,
                 ..Default::default()
             })
             .call()
-            .expect("Dbcn");
-    }
+            .ok()
+    })
+}
+fn write_text(text: &str) {
+    let _ = write(text.as_bytes());
 }
 
 pub fn read(buf: &mut [u8]) -> Option<usize> {

@@ -3,8 +3,10 @@
 //! Flat 不含 VA、页表、Task 或授权账目；它决定槽的物化与迁移，
 //! 槽持有不建立另一份物理所有权。共享访问使用同一 Flat 的范围与映射。
 
+pub(crate) mod authority;
 mod error;
 mod range;
+pub(crate) mod sharing;
 mod storage;
 pub(crate) mod transaction;
 

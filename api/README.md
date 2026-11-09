@@ -63,15 +63,18 @@ There are no compatibility aliases for retired operations.
 Rust callers now match `OutOfMemory` for allocation failures. Each domain uses
 its existing numeric ABI code for this variant.
 
-Call numbers are `(version << 48) | (domain << 32) | operation`; version is 3.
-Versions zero, one, two and unknown versions are rejected before domain dispatch. All byte
+Call numbers are `(version << 48) | (domain << 32) | operation`; version is 4.
+Versions zero through three and unknown versions are rejected before domain dispatch. All byte
 descriptors use fixed little-endian 64-bit words and checked tags/reserved fields.
 Boot capsule format 2 declares the matching ABI in byte 11; old executable
-capsules are rejected before launch. The resource ledger is version 4.
+capsules are rejected before launch. The resource ledger is version 5.
 
 | Domain | Current operations |
 | --- | --- |
 | Cell | Create, Delete, Push, Pull, Publish, Retract, Protect, Inspect |
+| Flat (12) | Create (0), Inspect (1), Slice (2), Delete (3) |
+| Nest (13) | Create (0), Inspect (1), Attach (2), Detach (3), Delete (4) |
+| Port (14) | Inspect (0) |
 | Pend | Accord, Revoke, Narrow, Return, Inspect, Collect |
 | Clone View | Create, Delete, Push, Pull, Peek |
 | Share View | Create, Delete, Open, Shut |
@@ -99,7 +102,7 @@ observations confer access. The number zero is invalid for object identities.
 | Push / Pull | Source access plus destination control; actual Slot ownership for any owning transfer | Same endpoint matrix, expressed from giver/taker; no PTE or IOMMU publication effect |
 | Publish | Valid source authority and qualified Ready Memo | Starts hardware publication of the associated Page, not whatever now occupies its source Slot; Inspect distinguishes Publishing from Published |
 | Retract | Qualified Published Memo (I/O also Publishing) and mapping control | Closes Page admission before withdrawal; accepted I/O request is not completion; query the original object |
-| Protect | Qualified CPU Memo and access within its original ceiling | Changes one position's access and generation; no new association or ownership; I/O protection is immutable for its one-shot binding |
+| Protect | Qualified CPU Memo and access within its original ceiling | Changes one position's access and generation; no new association or ownership; External Protect is unsupported; create a replacement Memo with different permissions |
 | Inspect | Owning Slot or mapping observation authority | Non-consuming state snapshot, including during external access; no raw physical address or reusable permission |
 
 | Source → destination | Effect |
@@ -132,17 +135,88 @@ Sign notifications, timeouts, handle deletion or Task exit. Ready is not a claim
 that memory has been freed. Task death retains hardware records through completion;
 a settled I/O record expires after its creator dies, and later lookup fails.
 
-I/O currently supports one 4 KiB Page, exact IOVA, Caller control, and READ or
-READ|WRITE. The QEMU EDU route is deliberately one-shot: a settled route cannot
-be republished (`NotTransferable`), even though the logical Memo remains
-inspectable/deletable. Admission verifies the captured Page against its actual
-source; an unrelated replacement Slot cannot silently substitute for it. This
-contract makes no promise about unvalidated physical-device quiescence.
+External Memos use exact 4 KiB positions, Caller control and READ or READ|WRITE.
+One binding supports up to 512 independent leaves within the aligned 2 MiB
+window selected by its first Memo. Positions outside that window are rejected.
+A settled Memo can be reassociated and republished; retracting one leaf leaves
+other leaves accessible. Page substitution still requires an explicit Cell
+Push/Pull association and a fresh generation from Inspect. Each range retirement
+requires matching invalidation/fence completion and trusted platform ordering;
+context retirement additionally releases the controller before another Nest binds.
+Unsupported aliases, shared controllers, ATS/PRI and noncoherent access are rejected.
 
 Public Acquire/Release, Attach/Detach, Begin/End, Traverse, Position, Attachment
 and general Retain authority are removed. Their replacements are Cell objects,
 qualified transitions and kernel-owned hardware retirement, not a public change
 receipt or duplicate reference lifecycle.
+
+### Runtime organizations
+
+Flat Create takes None FLAT and returns a Flat-target root Pend; it reserves lazy
+Slots using the existing allocator. Flat Inspect writes 24 bytes (FlatId, effective
+page offset, count). Flat Slice returns a Task-local SlotId for a relative window;
+that Slot retains the exact live Pend, not a copied permission snapshot. Every
+use rechecks the current branch/window. It cannot bypass Narrow, suspension or
+Revoke. Flat Delete seals the source and withdraws associations; Busy keeps cleanup
+responsibility. Cell Delete of a Slot releases only that handle.
+
+Share Create on a Flat Slice requires None SHARE, Flat SHARE, Distributable Yes
+and a permitted borrow. It creates a Share child in the same Pend tree. Flat
+ASSOCIATE permits Share OPEN/SHUT/ASSOCIATE; Flat DELETE alone permits the child's
+DELETE right. Generic Accord never changes target kind. Flat TRANSFER is checked
+separately at both ends of Cell Push/Pull into a Slot; it cannot be inferred from
+read/write access. A mutable parent is suspended while its data is lent.
+
+Nest Create takes None NEST and returns a typed Internal or External root.
+Nest Inspect writes 64 bytes with stable NestId, kind, phase, PortId and retained
+fault information. Port Inspect writes 48 bytes with PortId, controller identity,
+requester, address width (38), page size (4096) and window size (2 MiB). These are
+descriptive facts. Port has no user creation operation: trusted platform setup
+mints its root separately from MMIO Share authority in Ledger v5 `Call::Port`.
+
+Nest Attach takes Nest ATTACH and Port ATTACH, binding one authorized requester
+exclusively to one External Nest. It retains both exact Pends until context
+settlement; Narrow/redistribution that would invalidate a live binding returns
+Busy. BAR ownership grants no Port rights. A conflicting binding returns Busy;
+wrong targets, fabricated tokens and unsupported geometry are denied.
+The lifecycle is Unbound → Bound → Closing → Closed (or Failed on unsafe hardware
+failure). Detach closes admission, then Kernel advances retirement independently
+of the caller. Closed Nest cannot reopen. Only a fresh Nest may bind the settled
+Port; fresh NestId and Memo generations reject stale software operations, while
+trusted retirement proof independently excludes old bus transactions.
+
+Sign Attach now includes `generation`. MappingPublished (tag 11) and MappingRetired
+(tag 9) observe the exact Memo generation, including completion before registration.
+The immediate next generation may be armed before publication. An older generation
+reports Gone rather than matching a replacement publication. NestClosed (13) and
+NestFault (12) require generation zero and authorized Nest INSPECT. Hardware FQ
+records have no software Memo generation: the oldest fault is retained at Nest
+scope, subsequent faults increment a saturating sequence, and no unbounded queue
+or guessed Memo attribution is exposed. Listen/Consume does not clear Nest faults;
+only a fresh binding starts a fresh record. MappingFault (tag 10) is retired.
+Driver exit, binding-authority Return/Revoke and root loss close new admission;
+manager observations and Kernel cleanup survive the driver's execution. Failed,
+pending or mismatched retirement proof cannot release Pages, table pages or Port.
+
+| Operation | Required permission | Additional boundary |
+| --- | --- | --- |
+| Flat Create / legacy Slot allocation | None FLAT | Checked allocation geometry |
+| Flat Inspect / Slice / Delete | Flat INSPECT / ASSOCIATE / DELETE | Current window; Delete retains failed withdrawal |
+| Cell Push/Pull to a Flat Slot | Flat TRANSFER on each Flat endpoint | ASSOCIATE handle, Modifiable Yes, movable Page |
+| Share Create from Flat | None SHARE + Flat SHARE | Distributable, narrowing and borrow rules |
+| Nest Create | None NEST | Explicit Internal/External kind |
+| Team Create with Internal Nest | Build + Nest ATTACH | Exclusive owned root; token consumed |
+| Port Inspect | Port INSPECT | Descriptive only |
+| Nest Inspect / Attach / Detach / Delete | Nest INSPECT / ATTACH / DETACH / DELETE | Attach also Port ATTACH; Delete requires settled organization |
+| External Memo Create / Delete | Nest RESERVE / RELEASE | Source authority; exact supported position |
+| External association / Publish / Retract | Nest TRANSFER / PUBLISH / RETRACT | Exact Memo generation and source access |
+| External Memo Inspect / Sign conditions | Nest INSPECT | Same binding; retained state |
+| External Protect | Unsupported | Reject; CPU Protect remains existing Team/source authority |
+
+Nest PROTECT is reserved and has no External implementation. None grants no Port
+creation, raw hardware access or arbitrary syscall permission. For Internal
+Nest, RESERVE/RELEASE/etc. do not create a second mapping API: once adopted by a
+Team, the existing Team/Cell contract controls its CPU Memos.
 
 ### Authority and control contracts
 
@@ -157,9 +231,8 @@ access before committing a smaller window, and refuses outstanding external
 responsibilities. The 112-byte PendInfo identifies its target and includes the
 effective permissions and source window. FlatId and NestId are stable object
 identities; they grant no access on their own.
-None and Sign use the same Pend ledger and derivation tree as Views. The target
-vocabulary also reserves Flat, Nest and Port; runtime registration of these three
-is the remaining #83 work. None is object-free call permission: its Modifiable
+None, Sign, Flat, Nest and Port use the same live Pend ledger and derivation tree
+as Views. No descriptive identity grants access. None is object-free call permission: its Modifiable
 must be No, its range Inherit, and it permits only the listed CreationRights.
 The Kernel mints the initial None root for the bootstrap Task in Ledger
 `Name::Call(Call::Create)`. A new Task receives no implicit creation permission;
@@ -210,7 +283,14 @@ returning that Pend removes its routes and preserves other branches' routes.
 Direct event sequences and public authority IDs never wrap or revive stale uses.
 
 Unit Create snapshots a 48-byte Team or Task descriptor. Tasks start dormant.
-Team creation requires Build authority; Supervisor creation additionally requires
+Team creation requires Build authority. Its optional `nest: PendId` (word 3, zero
+means allocate a new Nest) transfers an initialized Internal Nest into the new
+Team. The caller must hold its root Nest ATTACH Pend with Modifiable Yes, no
+children and no hardware holds. Success consumes the root token; failure does
+not publish a Team. External Nest, delegated roots, kind mismatch and repeated
+adoption are rejected. Later CPU Cell operations use the existing Team manager
+qualification. This does not attach an External Nest to CPU execution.
+Supervisor creation additionally requires
 a Supervisor caller. A Guard authority may choose an immutable fail-stop policy
 at Team creation, before any member can execute; dynamic Guard/Unguard are gone.
 Membership alone does not authorize managing peer Tasks. Resume/Freeze/Stop
@@ -271,7 +351,7 @@ Consumers must rebuild together with this API and regenerate capsules/ledgers.
 Provider and consumer revisions must move together. The following migration is
 incompatible with both v1 and the interim v2; old call numbers fail before dispatch.
 
-| Previous interface | ABI v3 / Ledger v4 | Consumer migration |
+| Previous interface | ABI v4 / Ledger v5 | Consumer migration |
 | --- | --- | --- |
 | Clone/Share Create without permission | Leading `license: PendId` with None CLONE/SHARE | Read boot Create license or receive it through Pend Accord |
 | Sign Create returning SignId | None SIGN license; returns PendId | Use Pend Inspect for descriptive SignId |
@@ -280,7 +360,7 @@ incompatible with both v1 and the interim v2; old call numbers fail before dispa
 | Cell Create | Leading license; Slot requires None FLAT | Supply explicit license for allocation; Memo authority comes from source/destination |
 | Separate Sign table | One Task Pend ledger | Collect includes None/Sign; inspect Target before using a token |
 | Pend descriptors in v1 | Target-tagged Limits, 88-byte Accord, 64-byte Narrow, 112-byte Info | Rebuild byte snapshots; unknown bits and mismatched target tags reject |
-| Boot interrupt handle in Ledger v3 | Sign-target Pend in Ledger v4 | Rebuild capsule ABI byte and ledger parser; cannot cast an old Sign handle |
+| Boot interrupt handle in Ledger v3 | Sign-target Pend in Ledger v5 | Rebuild capsule ABI byte and ledger parser; cannot cast an old Sign handle |
 
 Room operations and bounded Debug Put/Get are inherent to the executing Task,
 subject to address access and counter capability checks. They need no None grant.
@@ -305,3 +385,27 @@ compile-fail fixtures live under `tests/abi/`; library doctests are disabled. Ho
 checks protect published slots, encoding, malformed input rejection and typed
 operation boundaries. They do not execute traps. See the root README for RV64
 builds and the separate responsibility for system integration.
+
+### Migration from ABI v3 / Ledger v4
+
+| Previous contract | Replacement | Required migration |
+| --- | --- | --- |
+| External authority selected through BAR Share | Nest-target Pend bound using a separate Port Pend | Read both MMIO and Port grants; create/attach Nest before Memo creation |
+| One-shot single-page external route | Repeatable Memo positions under one binding | Retract only the leaf; Detach when retiring the binding |
+| Sign Attach without generation; MappingFault | Generation-qualified MappingPublished/Retired and binding-level NestFault | Pass generation explicitly, use zero for non-Memo sources |
+| Team descriptor word 3 reserved zero | Optional owned Internal Nest root | Existing callers pass None; adopting callers consume root on success |
+| No runtime Flat/Nest/Port calls | Classes 12/13/14 above | Rebuild API, client, executable and capsule ABI byte together |
+| `boot::bind_external` associates MMIO/aperture with requester | `grant_mmio` plus independent ExternalRoute controller/requester/proof | Platform publishes separate trusted facts and Ledger capabilities |
+| Quiescence poll for whole shutdown | `prove(Retirement)` with Range/Binding scope | Exact-token proof; range must drain prior requests without closing the live context |
+
+The initial coherent RV64/QEMU implementation admits one trusted requester per
+controller and rejects shared/aliased/unsupported isolation. The integration
+owner controls configuration that could bypass isolation. Kernel performs no
+PCI enumeration, BAR allocation, device business control or Board parsing.
+Consumer order is provider commit → external boot/QEMU fixture pin → System and
+remaining users → Kernel CI fixture pin; record full revisions in integration PRs.
+No physical-device validation or #82 IRQ routing is claimed by these tests.
+
+Debug Put is nonblocking and returns the exact accepted byte prefix (possibly zero).
+It adds no newline and does not rewrite non-UTF-8 bytes. Callers retaining output
+must retry the unaccepted suffix; Kernel never reports discarded bytes as written.

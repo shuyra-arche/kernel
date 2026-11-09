@@ -3,7 +3,6 @@ use crate::basis::nest::Nest;
 use crate::basis::unit::task::TaskIdent;
 use crate::metal::switcher::context::Gprs;
 use crate::metal::switcher::context::TrapContext;
-use crate::putln;
 use kernel_api::abi::call::debug::DebugFail;
 use kernel_api::address::VirtAddr as KVirt;
 
@@ -24,9 +23,10 @@ pub(super) fn put(frame: &mut TrapContext, ident: &TaskIdent, buf: usize, len: u
         ret_err(frame, DebugFail::Denied);
         return;
     }
-    let text = ::core::str::from_utf8(&text[..n]).unwrap_or("<non-utf8>");
-    putln!("{text}");
-    frame.gpr.set_x(Gprs::A0, n);
+    match crate::metal::console::write(&text[..n]) {
+        Some(written) => frame.gpr.set_x(Gprs::A0, written),
+        None => ret_err(frame, DebugFail::Denied),
+    }
 }
 
 pub(super) fn get(frame: &mut TrapContext, ident: &TaskIdent, buf: usize, len: usize) {

@@ -31,10 +31,7 @@ fn check(entry: &RangeEntry, actor: &Arc<Task>) -> Result<(), CellFail> {
             .and_then(|c| c.control().1)
             .unwrap_or(root);
         let authority = meta.authority(token).ok_or(CellFail::Denied)?;
-        if !authority.permits(kernel_api::model::pend::Operations::Share(
-            kernel_api::model::pend::ShareRights::ASSOCIATE,
-        )) || !source.branch_check(Some(&authority), Access::READ)
-        {
+        if !authority.associates() || !source.branch_check(Some(&authority), Access::READ) {
             return Err(CellFail::Denied);
         }
     } else if !source.private_owner(actor.ident.id) {
@@ -326,9 +323,6 @@ fn handoff_prepared(
                 )?;
                 let r = reference(id);
                 let result = with_mapping(team, mapping, ident, |_, entry| {
-                    if !entry.source.manages(&actor) {
-                        return Err(CellFail::NotTransferable);
-                    }
                     check(entry, &actor)?;
                     let selected = index(entry, spec.source.page)?;
                     if selected
@@ -393,7 +387,7 @@ fn handoff_prepared(
                 let root = entry.source.root();
                 let _operation = root
                     .as_ref()
-                    .map(|(meta, _, _)| ShareOperation::acquire(meta).ok_or(CellFail::Busy))
+                    .map(|(meta, _, _)| SharingOperation::acquire(meta).ok_or(CellFail::Busy))
                     .transpose()?;
                 check(entry, &actor)?;
                 target.nest.associate(
@@ -453,7 +447,7 @@ fn publication(
             let root = entry.source.root();
             let _operation = root
                 .as_ref()
-                .map(|(meta, _, _)| ShareOperation::acquire(meta).ok_or(CellFail::Busy))
+                .map(|(meta, _, _)| SharingOperation::acquire(meta).ok_or(CellFail::Busy))
                 .transpose()?;
             let branch = entry.control.as_ref().and_then(|c| c.control().1);
             let authority = root

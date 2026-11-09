@@ -39,7 +39,7 @@ pub(super) fn wait_task(id: TaskId) -> bool {
     let source = SignSource::Join {
         target: UnitTarget::Task(id),
     };
-    sign::attach(token, source).unwrap();
+    sign::attach(token, source, 0).unwrap();
     let reply = sign::listen(token, Wait::At(room::clock().saturating_add(5_000_000_000))).unwrap();
     assert!(
         matches!(reply, SignReply::Source { source: found, fail: None } if found == source),

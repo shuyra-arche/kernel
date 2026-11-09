@@ -17,11 +17,11 @@ use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
 use crate::basis::flat::FlatRange;
+use crate::basis::flat::sharing::Sharing;
 use crate::basis::nest::Access;
 use crate::basis::nest::Nest;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::Pend;
-use crate::basis::view::share::ShareView;
 use crate::metal::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
@@ -49,7 +49,7 @@ enum Phase {
     Private(FlatRange),
     /// 已由根 Pend 接手：撤销依赖那枚 Pend，后续关系交给 Share 管。
     Root {
-        meta: Weak<ShareView>,
+        meta: Weak<Sharing>,
         token: PendId,
         authority: Arc<Pend>,
     },
@@ -211,9 +211,7 @@ impl SourceAuthorization {
         }
         let (meta, _, authority) = self.root()?;
         self.modifiable()?;
-        if !authority.permits(kernel_api::model::pend::Operations::Share(
-            kernel_api::model::pend::ShareRights::ASSOCIATE,
-        )) {
+        if !authority.associates() {
             return None;
         }
         if !authority.contains(offset, count) {
@@ -299,8 +297,9 @@ impl SourceAuthorization {
         &self,
         id: usize,
         window: Arc<Geometry>,
+        branch: Option<&Pend>,
     ) -> Result<(), PendFail> {
-        self.enter_flight(id, Some(window), None, Access::READ)
+        self.enter_flight(id, Some(window), branch, Access::READ)
     }
 
     fn enter_flight(
@@ -468,19 +467,17 @@ impl SourceAuthorization {
         };
         entry.sire().is_none()
             && entry.alive()
-            && entry.permits(kernel_api::model::pend::Operations::Share(
-                kernel_api::model::pend::ShareRights::ASSOCIATE,
-            ))
+            && entry.associates()
             && Arc::ptr_eq(entry.authority(), &authority)
             && entry
                 .target()
-                .share_view()
+                .memory()
                 .is_some_and(|view| Arc::ptr_eq(&view, &meta))
     }
 
     /// 已接手的根 Pend、它的 token 与**根 Pend 自己的**那枚 `Pend`。
     /// 还没接手就是 `None`。三段来自同一份相位，调用方不再各自去表里另找一遍。
-    pub(crate) fn root(&self) -> Option<(Arc<ShareView>, PendId, Arc<Pend>)> {
+    pub(crate) fn root(&self) -> Option<(Arc<Sharing>, PendId, Arc<Pend>)> {
         match &*self.phase.lock() {
             Phase::Root {
                 meta,
@@ -525,7 +522,7 @@ impl SourceAuthorization {
     /// 已经接手过就拒（一个来源只有一条根）。
     pub(crate) fn adopt(
         &self,
-        meta: &Arc<ShareView>,
+        meta: &Arc<Sharing>,
         token: PendId,
         authority: Arc<Pend>,
     ) -> Result<(), PendFail> {

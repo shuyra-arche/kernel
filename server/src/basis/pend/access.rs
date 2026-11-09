@@ -10,15 +10,15 @@ use kernel_api::model::identity::PendId;
 use kernel_api::model::pend::{CloneRights, Operations, ShareRights};
 use kernel_api::model::view::ViewKind;
 
+use crate::basis::flat::sharing::SharingOperation;
 use crate::basis::pend;
 use crate::basis::pend::Need;
 use crate::basis::pend::PendEntry;
 use crate::basis::room::conductor::current;
-use crate::basis::view::share::ShareOperation;
 
 /// The caller serializes this check with the operation's authority commit.
 /// A resource identity, or a Pend of another target, cannot substitute for it.
-pub(super) fn license(
+pub(crate) fn license(
     task: &alloc::sync::Arc<crate::basis::unit::task::Task>,
     token: PendId,
     operation: kernel_api::model::pend::CreationRights,
@@ -33,7 +33,7 @@ pub(super) fn license(
     Ok(())
 }
 
-pub(super) fn accede(token: PendId, need: Need) -> Result<alloc::sync::Arc<PendEntry>, PendFail> {
+pub(crate) fn accede(token: PendId, need: Need) -> Result<alloc::sync::Arc<PendEntry>, PendFail> {
     let task = current().running_task().ok_or(PendFail::Denied)?;
     pend::accede(&task, token, need)
 }
@@ -41,7 +41,7 @@ pub(super) fn accede(token: PendId, need: Need) -> Result<alloc::sync::Arc<PendE
 /// 取到的这一枚此刻是否还能承载这次操作。
 ///
 /// 交出中的不算可用；遗留的 heir 关系顺手清掉，让这一枚回到可操作状态。
-pub(super) fn usable(pend: &PendEntry) -> Result<(), PendFail> {
+pub(crate) fn usable(pend: &PendEntry) -> Result<(), PendFail> {
     pend::available(pend)
 }
 
@@ -55,7 +55,7 @@ pub(super) fn usable(pend: &PendEntry) -> Result<(), PendFail> {
 /// 关图失败（同步未确认 ⇒ `Busy`）时失活不回滚：这一枚还欠着关图，资源本身
 /// 已失活时仍持有 DELETE 授权的分支可以重发 Seal 把关闭补完；资源
 /// 仍活而这一枚的 Pend 已不答话，或没有 DELETE 授权，都照旧拒。
-pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, PendFail> {
+pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, PendFail> {
     let me = current().running_task().ok_or(PendFail::Denied)?;
     let (share_view, _operation) = {
         let _serial = me.pend.lock();
@@ -67,7 +67,7 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         if !pend.alive()
             && !share_view
                 .as_ref()
-                .is_some_and(|meta| crate::basis::view::share::pending_close(meta))
+                .is_some_and(|meta| crate::basis::flat::sharing::pending_close(meta))
         {
             return Err(PendFail::Dead);
         }
@@ -84,7 +84,7 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
             return Err(PendFail::Denied);
         }
         let operation = if let Some(p) = &share_view {
-            Some(ShareOperation::acquire(p).ok_or(PendFail::Busy)?)
+            Some(SharingOperation::acquire(p).ok_or(PendFail::Busy)?)
         } else {
             None
         };
@@ -93,7 +93,7 @@ pub(super) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         (share_view, operation)
     };
     if let Some(share_view) = share_view {
-        crate::basis::view::share::close(&share_view)?;
+        crate::basis::flat::sharing::close(&share_view)?;
     }
     Ok(0)
 }

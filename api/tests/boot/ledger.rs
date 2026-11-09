@@ -30,7 +30,7 @@ fn ledger(entries: &[Entry]) -> Vec<u8> {
 fn ledger_keeps_header_entry_offsets_and_reserved_bytes() {
     let bytes = ledger(&[entry()]);
     let mut expected = vec![0u8; 40];
-    expected[0] = 4; // version
+    expected[..4].copy_from_slice(&VERSION.to_le_bytes());
     expected[4] = 1; // count
     expected[8] = 2; // Name::Page class, Dtb item 0
     expected[32] = 19; // token, after name/kind/seven reserved bytes
@@ -135,6 +135,7 @@ fn boot_creation_license_and_sign_are_pend_targets() {
     let values = [
         Entry::new(Name::Call(Call::Create), ResourceKind::None, 31),
         Entry::new(Name::Trap(Trap::SupervisorExternal), ResourceKind::Sign, 32),
+        Entry::new(Name::Port(1), ResourceKind::Port, 33),
     ];
     let bytes = ledger(&values);
     assert_eq!(
@@ -142,7 +143,7 @@ fn boot_creation_license_and_sign_are_pend_targets() {
         values
     );
     let mut stale = bytes.clone();
-    stale[..4].copy_from_slice(&3u32.to_le_bytes());
+    stale[..4].copy_from_slice(&(VERSION - 1).to_le_bytes());
     assert!(Entries::new(&stale).is_none());
     let wrong = ledger(&[Entry::new(
         Name::Call(Call::Create),

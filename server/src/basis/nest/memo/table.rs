@@ -13,6 +13,11 @@ impl Memos {
             entries: Vec::new(),
         }
     }
+    pub(in crate::basis::nest) fn idle(&self) -> bool {
+        self.entries
+            .iter()
+            .all(|(_, memo)| memo.publication.is_none())
+    }
     fn key(span: &Span, page: usize) -> (usize, usize) {
         (span.identity(), page)
     }

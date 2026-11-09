@@ -67,3 +67,7 @@ harness = false
 [[test]]
 name = "context"
 path = "context/mod.rs"
+
+[[test]]
+name = "console"
+path = "console/mod.rs"

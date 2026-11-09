@@ -17,8 +17,11 @@ pub mod operations {
     ///
     /// `len == 0` / 区间未映射 ⇒ 负值；返**写出去的字节数**。
     ///
+    /// 非阻塞：固件可能只接收前缀或返回 0；调用方按实际返回量重试。
+    /// 不追加换行，不改写 UTF-8 或任意字节。
+    ///
     /// **`len > DBCN_MAX` 是截断，不是错误**：内核那一步是 `len.min(DBCN_MAX)`
-    /// （`envcall/debug.rs::put`），只搬前 `DBCN_MAX` 字节，返回值即搬走的长度——
+    /// （`envcall/debug.rs::put`），只搬前 `DBCN_MAX` 字节，返回值是固件实际接收的长度——
     /// 要"一个字都不少"就调用方自己分段。**与 [`DebugCall::Get`] 的"多出即拒"
     /// 不同形**：那一格超长即拒，这一格超长即截。
     #[operation(slot = 0, output = usize, error = DebugFail)]

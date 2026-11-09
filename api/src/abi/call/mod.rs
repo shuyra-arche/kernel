@@ -1,7 +1,10 @@
 //! Operation domains and aggregate Server dispatch.
 pub mod cell;
 pub mod debug;
+pub mod flat;
+pub mod nest;
 pub mod pend;
+pub mod port;
 pub mod room;
 pub mod sign;
 pub mod unit;
@@ -15,10 +18,13 @@ pub enum EnvCall {
     Room(self::room::RoomCall),
     Unit(self::unit::UnitCall),
     Cell(self::cell::CellCall),
+    Flat(self::flat::FlatCall),
     Clone(self::clone_view::CloneCall),
     Share(self::share_view::ShareCall),
     Sign(self::sign::SignCall),
     Pend(self::pend::PendCall),
+    Port(self::port::PortCall),
+    Nest(self::nest::NestCall),
     /// 调试面（见 [`self::debug::DebugCall`]）。
     Debug(self::debug::DebugCall),
 }
@@ -45,6 +51,9 @@ impl EnvCall {
                 slot, regs,
             )?)),
             11 => Ok(EnvCall::Sign(self::sign::SignCall::from_wire(slot, regs)?)),
+            12 => Ok(EnvCall::Flat(self::flat::FlatCall::from_wire(slot, regs)?)),
+            13 => Ok(EnvCall::Nest(self::nest::NestCall::from_wire(slot, regs)?)),
+            14 => Ok(EnvCall::Port(self::port::PortCall::from_wire(slot, regs)?)),
             _ => Err(crate::abi::register::Decode::BadSlot),
         }
     }

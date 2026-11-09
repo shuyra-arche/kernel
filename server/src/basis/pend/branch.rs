@@ -8,10 +8,10 @@ use kernel_api::model::identity::PendId;
 use super::Modifiable;
 use super::PendEntry;
 use super::ledger::{insert_heir, with_pair_uncommitted};
+use crate::basis::flat::sharing::SharingOperation;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::task::Task;
-use crate::basis::view::share::ShareOperation;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
 use kernel_api::model::pend::{Limits, PendRange};
@@ -27,7 +27,7 @@ fn effective_window(
     ) {
         return Ok(pend_entry.authority().window());
     }
-    let meta = pend_entry.target().share_view().ok_or(PendFail::Denied)?;
+    let meta = pend_entry.target().memory().ok_or(PendFail::Denied)?;
     let outer = pend_entry
         .authority()
         .window()
@@ -46,17 +46,26 @@ pub(crate) fn accord(
     permit: Option<(PendId, kernel_api::model::pend::Operations)>,
 ) -> Result<usize, PendFail> {
     let subset = limits.modifiable;
+    let share = permit.is_some_and(|(_, operation)| {
+        operation
+            == kernel_api::model::pend::Operations::None(
+                kernel_api::model::pend::CreationRights::SHARE,
+            )
+    }) && matches!(
+        limits.operations,
+        kernel_api::model::pend::Operations::Share(_)
+    );
     let target = dst.upgrade().ok_or(PendFail::Denied)?;
     if !crate::basis::unit::control::adjacent(caller, &target) {
         return Err(PendFail::Denied);
     }
     let observed = super::locate(caller, src).ok_or(PendFail::Denied)?;
-    if !observed.authority().limits().permits_child(limits) {
+    if !derivable(&observed, limits, share) {
         return Err(PendFail::Denied);
     }
-    let share_view = observed.target().share_view();
+    let share_view = observed.target().memory();
     let _operation = if let Some(meta) = &share_view {
-        let operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
+        let operation = SharingOperation::acquire(meta).ok_or(PendFail::Busy)?;
         Some(operation)
     } else {
         None
@@ -76,7 +85,7 @@ pub(crate) fn accord(
             if !pend_entry.alive() {
                 return Err(PendFail::Dead);
             }
-            if !pend_entry.authority().limits().permits_child(limits) {
+            if !derivable(&pend_entry, limits, share) {
                 return Err(PendFail::Denied);
             }
             let mark = if mark == Mark::NONE {
@@ -97,7 +106,7 @@ pub(crate) fn accord(
             if share_view.is_some() {
                 pend_entry.authority().can_borrow(subset)?;
             }
-            let mut granted = pend_entry.vest_window(mark, limits, window)?;
+            let mut granted = pend_entry.vest_window(mark, limits, window, share)?;
             granted.parent(src, Arc::downgrade(caller));
             let granted = Arc::try_new(granted).map_err(|_| PendFail::OutOfMemory)?;
             caller
@@ -151,10 +160,10 @@ pub(crate) fn accord(
 pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<(), PendFail> {
     let range = limits.range;
     let observed = super::locate(task, token).ok_or(PendFail::Denied)?;
-    let share = observed.target().share_view();
+    let share = observed.target().memory();
     let _operation = share
         .as_ref()
-        .map(|meta| ShareOperation::acquire(meta).ok_or(PendFail::Busy))
+        .map(|meta| SharingOperation::acquire(meta).ok_or(PendFail::Busy))
         .transpose()?;
     let _serial = task.pend.lock();
     let observed = super::locate(task, token).ok_or(PendFail::Denied)?;
@@ -211,4 +220,33 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
     drop(_operation);
     super::notify(task.ident.id, token);
     Ok(())
+}
+
+/// Flat → Share is an explicit attenuating creation operation, never a generic
+/// Accord target change. Data operations and deletion cannot exceed the Flat.
+fn derivable(entry: &PendEntry, limits: Limits, share: bool) -> bool {
+    use kernel_api::model::pend::{Distributable, FlatRights, Operations, ShareRights};
+    let parent = entry.authority().limits();
+    if share && matches!(entry.target(), super::Target::Flat(_)) {
+        let Operations::Flat(rights) = parent.operations else {
+            return false;
+        };
+        let Operations::Share(requested) = limits.operations else {
+            return false;
+        };
+        let mut permitted = ShareRights::empty();
+        if rights.contains(FlatRights::ASSOCIATE) {
+            permitted |= ShareRights::OPEN | ShareRights::SHUT | ShareRights::ASSOCIATE;
+        }
+        if rights.contains(FlatRights::DELETE) {
+            permitted |= ShareRights::DELETE;
+        }
+        limits.valid()
+            && parent.distributable == Distributable::Yes
+            && parent.modifiable.allows(limits.modifiable)
+            && rights.contains(FlatRights::SHARE)
+            && permitted.contains(requested)
+    } else {
+        parent.permits_child(limits)
+    }
 }

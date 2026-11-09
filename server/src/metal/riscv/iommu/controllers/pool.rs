@@ -1,6 +1,5 @@
-//! Controller ownership is consumed by a validated route, never selected by a
-//! caller-provided device ID alone. One-shot assignment matches the current
-//! whole-controller Domain; sharing/rebinding requires a separate protocol.
+//! Controller ownership is leased only by a validated route. A settled context
+//! returns its engine; failed or abandoned bindings remain assigned.
 use super::super::Engine;
 use super::super::EngineError;
 use super::super::adapter::Adapter;
@@ -101,6 +100,20 @@ impl<R: Registers> Controllers<R> {
                 Err(BindError::Engine(error))
             }
         }
+    }
+
+    /// Return only an engine whose context and platform ownership were settled.
+    pub(crate) fn restore(&mut self, engine: Engine<R>) -> Result<(), BindError> {
+        let (_, slot) = self
+            .slots
+            .iter_mut()
+            .find(|(base, _)| *base == engine.physical_base())
+            .ok_or(BindError::UnknownController)?;
+        if !matches!(slot, Slot::Assigned) || engine.phase() != super::super::Phase::Ready {
+            return Err(BindError::Unavailable);
+        }
+        *slot = Slot::Available(engine);
+        Ok(())
     }
 
     pub(crate) fn unassigned(&mut self) -> impl Iterator<Item = &mut Engine<R>> {

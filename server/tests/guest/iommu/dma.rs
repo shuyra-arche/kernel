@@ -28,14 +28,17 @@ struct Platform<'a> {
 }
 // SAFETY: plain emulated EDU has no ATS/PRI/bypass; all accesses pass this IOMMU.
 // QEMU performs pci_dma accesses synchronously in its device callback. After
-// DDTP Off, PCI read completions order older accesses; future delayed callbacks
-// are denied. The test keeps DDTP Off and holds exclusive control of topology.
+// each invalidated leaf or closed context, waiting out DMA_RUN excludes delayed
+// callbacks before address/context reuse. The fixture exclusively owns raw MMIO.
 unsafe impl Quiescence for Platform<'_> {
-    fn poll(&mut self, ticket: Retirement) -> Result<Option<Retirement>, HardwareError> {
+    fn prove(&mut self, ticket: Retirement) -> Result<Option<Retirement>, HardwareError> {
         if !self.allow.load(Ordering::Acquire) {
             return Ok(None);
         }
         for endpoint in self.endpoints {
+            if endpoint.read(0x98) & 1 != 0 {
+                return Ok(None);
+            }
             endpoint.drain();
         }
         Ok(Some(ticket))
@@ -163,21 +166,13 @@ pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
     target.revoke().unwrap();
     assert_eq!(RETURNS.load(Ordering::SeqCst), 0);
     assert!(POOL.cell().is_none());
-    for _ in 0..1_000_000 {
-        assert!(!target.advance_close().unwrap());
-        if RETURNS.load(Ordering::SeqCst) == 3 {
-            break;
-        }
-    }
-    assert_eq!(RETURNS.load(Ordering::SeqCst), 3); // CQ/FQ/completion only
-    let held: [_; 3] = core::array::from_fn(|_| POOL.cell().unwrap());
-    assert!(POOL.cell().is_none());
-    // Many more complete queue observations cannot replace platform evidence.
-    for _ in 0..32 {
+    // Range retirement leaves the command engine and unrelated context live.
+    // No payload/table/queue can be freed before the independent proof.
+    for _ in 0..64 {
         assert!(!target.advance_close().unwrap());
     }
     assert!(!target.settled());
-    assert_eq!(RETURNS.load(Ordering::SeqCst), 3);
+    assert_eq!(RETURNS.load(Ordering::SeqCst), 0);
     allow.store(true, Ordering::Release);
     for _ in 0..1_000_000 {
         if target.advance_close().unwrap() {
@@ -185,7 +180,7 @@ pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
         }
     }
     assert!(target.settled());
-    assert_eq!(RETURNS.load(Ordering::SeqCst), 8);
+    assert_eq!(RETURNS.load(Ordering::SeqCst), 5); // payload + tables; controller still owns queues
     let reused = POOL.cell().unwrap();
     assert_eq!(reused.physical_address(), pa);
     assert_ne!(reused.id(), old_id);
@@ -203,7 +198,7 @@ pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
     edu.transfer(IOVA, true);
     edu.drain();
     check(new_bytes, 0xc3);
-    drop((reused, held));
+    drop(reused);
     let _ = match scenario {
         "dma-change" => writeln!(Uart, "PASS iommu-dma change=1 revoked=1 reused=1"),
         "readonly" => writeln!(Uart, "PASS iommu-dma readonly=1 denied=5"),

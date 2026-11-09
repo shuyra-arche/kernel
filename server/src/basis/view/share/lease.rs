@@ -1,57 +1,21 @@
+//! Authorized source adoption and CPU borrowing transactions.
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use kernel_api::abi::call::pend::PendFail;
-use kernel_api::abi::call::share_view::ShareCall;
-use kernel_api::abi::call::share_view::ShareFail;
 use kernel_api::model::cell::SlotId;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::pend::{Operations, ShareRights};
-use kernel_api::model::view::ViewKind;
 
-use super::authority;
-use super::outcome::Outcome;
-use super::outcome::answer;
-use super::outcome::answer_pair;
 use crate::basis::nest::Access;
 use crate::basis::pend;
 use crate::basis::pend::Modifiable;
 use crate::basis::pend::Need;
+use crate::basis::pend::access as authority;
 use crate::basis::room::conductor::current;
 use crate::basis::unit::task::TaskIdent;
-use crate::basis::view;
 use crate::basis::view::View;
-use crate::metal::switcher::context::TrapContext;
-
-pub(super) fn dispatch(frame: &mut TrapContext, call: ShareCall, ident: Arc<TaskIdent>) -> Outcome {
-    match call {
-        ShareCall::Create {
-            license,
-            reference,
-            modifiable,
-        } => {
-            let result = current()
-                .running_task()
-                .ok_or(PendFail::Denied)
-                .and_then(|task| create_share(&task, license, reference, modifiable));
-            answer(frame, result.map(|token| token.get()).map_err(fail));
-        }
-        ShareCall::Delete { token } => {
-            answer(
-                frame,
-                authority::seal_resource(token, ViewKind::Share).map_err(fail),
-            );
-        }
-        ShareCall::Open { token } => {
-            answer_pair(frame, open_resource(ident, token).map_err(fail));
-        }
-        ShareCall::Shut { token } => {
-            answer(frame, shut_resource(token).map_err(fail));
-        }
-    }
-    Outcome::Resume
-}
 
 fn subset_to_access(subset: Modifiable) -> Result<Access, PendFail> {
     if !subset.allows(Modifiable::No) {
@@ -83,16 +47,29 @@ pub(crate) fn create_share(
     let Some(source) = authorization.own_range() else {
         let (parent, _) = hold.branch().ok_or(PendFail::Denied)?;
         let (offset, count) = hold.window();
+        let entry = pend::locate(task, parent).ok_or(PendFail::Denied)?;
+        let mut limits = entry.authority().limits();
+        if let Operations::Flat(rights) = limits.operations {
+            use kernel_api::model::pend::FlatRights;
+            if !rights.contains(FlatRights::SHARE) {
+                return Err(PendFail::Denied);
+            }
+            let mut rights_out = ShareRights::empty();
+            if rights.contains(FlatRights::ASSOCIATE) {
+                rights_out |= ShareRights::OPEN | ShareRights::SHUT | ShareRights::ASSOCIATE;
+            }
+            if rights.contains(FlatRights::DELETE) {
+                rights_out |= ShareRights::DELETE;
+            }
+            limits.operations = Operations::Share(rights_out);
+        }
         return pend::accord(
             task,
             parent,
             &Arc::downgrade(task),
             kernel_api::model::pend::Limits {
                 modifiable: requested,
-                ..pend::locate(task, parent)
-                    .ok_or(PendFail::Denied)?
-                    .authority()
-                    .limits()
+                ..limits
             },
             Mark::NONE,
             pend::Window::Source(offset, count),
@@ -125,7 +102,8 @@ pub(crate) fn create_share(
             .page_count()
             .checked_bytes()
             .ok_or(PendFail::NotAligned)?;
-        let meta = view::share::ShareView::from_source(source.clone(), size, task.ident.id)?;
+        let meta =
+            crate::basis::flat::sharing::Sharing::from_source(source.clone(), size, task.ident.id)?;
         let modifiable = requested;
         if modifiable == Modifiable::Yes && !hold.ceiling().contains(Access::WRITE) {
             return Err(PendFail::Denied);
@@ -180,7 +158,10 @@ pub(crate) fn create_share(
     result
 }
 
-fn open_resource(ident: Arc<TaskIdent>, token: PendId) -> Result<(usize, usize), PendFail> {
+pub(crate) fn open_resource(
+    ident: Arc<TaskIdent>,
+    token: PendId,
+) -> Result<(usize, usize), PendFail> {
     let pend = authority::accede(token, Need::Read)?;
     authority::usable(&pend)?;
     if !pend.permits(Operations::Share(ShareRights::OPEN)) {
@@ -188,10 +169,10 @@ fn open_resource(ident: Arc<TaskIdent>, token: PendId) -> Result<(usize, usize),
     }
     let p = pend.target().share_view().ok_or(PendFail::Denied)?;
     let access = subset_to_access(pend.modifiable())?;
-    view::share::open(&p, token, &ident.team.nest, access)
+    crate::basis::flat::sharing::open(&p, token, &ident.team.nest, access)
 }
 
-fn shut_resource(token: PendId) -> Result<usize, PendFail> {
+pub(crate) fn shut_resource(token: PendId) -> Result<usize, PendFail> {
     let task = current().running_task().ok_or(PendFail::Denied)?;
     let pend = pend::locate(&task, token).ok_or(PendFail::Denied)?;
     if !pend.allows(Need::Read) || !pend.permits(Operations::Share(ShareRights::SHUT)) {
@@ -199,16 +180,5 @@ fn shut_resource(token: PendId) -> Result<usize, PendFail> {
     }
     authority::usable(&pend)?;
     let p = pend.target().share_view().ok_or(PendFail::Denied)?;
-    view::share::shut(&p, token).map(|()| 0)
-}
-
-fn fail(error: PendFail) -> ShareFail {
-    match error {
-        PendFail::Denied | PendFail::Invalid => ShareFail::Denied,
-        PendFail::NotAligned => ShareFail::NotAligned,
-        PendFail::Dead => ShareFail::Dead,
-        PendFail::OutOfMemory => ShareFail::OutOfMemory,
-        PendFail::HandedOver => ShareFail::HandedOver,
-        PendFail::Busy => ShareFail::Busy,
-    }
+    crate::basis::flat::sharing::shut(&p, token).map(|()| 0)
 }

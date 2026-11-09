@@ -76,14 +76,19 @@ impl PendEntry {
             kernel_api::address::PageOffset,
             kernel_api::address::PageCount,
         )>,
+        share: bool,
     ) -> Result<PendEntry, kernel_api::abi::call::pend::PendFail> {
-        let entry = PendEntry::try_new_window(
-            self.meta.clone(),
-            mark,
-            limits.modifiable,
-            Some(self.token),
-            window,
-        )?;
+        let target = if share && matches!(self.meta, Target::Flat(_)) {
+            Target::View(crate::basis::view::View::Share(
+                self.meta
+                    .memory()
+                    .ok_or(kernel_api::abi::call::pend::PendFail::Denied)?,
+            ))
+        } else {
+            self.meta.clone()
+        };
+        let entry =
+            PendEntry::try_new_window(target, mark, limits.modifiable, Some(self.token), window)?;
         entry.authority.narrow(limits, window)?;
         Ok(entry)
     }
@@ -227,4 +232,10 @@ pub(crate) fn accede(
         return Err(kernel_api::abi::call::pend::PendFail::Denied);
     }
     Ok(pend_entry)
+}
+
+impl PendEntry {
+    pub(crate) fn associates(&self) -> bool {
+        self.alive() && self.authority.associates()
+    }
 }

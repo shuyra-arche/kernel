@@ -32,7 +32,7 @@ boundary, not a configuration file.
 `basis` owns scheduling, authorization and retirement records. The local timer
 owns its confirmed comparator setting. CPU retirement accepts an exact domain-instance, attempt and coverage fence
 receipt before settling Pages, tables and address tickets. External access
-uses authorized Nest roots and a boot-selected port. IRQ delivery only
+uses authorized Nest roots and independent platform Port grants. IRQ delivery only
 requests work, while the installed backend supplies retirement evidence.
 
 ## Model boundaries
@@ -222,25 +222,23 @@ A boot MMIO View is delegated with Pend; Driver Units map it through Share Open
 and perform their own register operations. Kernel never proxies business BAR
 reads or writes.
 
-Cell Memo creation selects MappingTarget::Cpu(TeamId) or Io(PendId). The I/O
-Pend identifies a platform-bound MMIO View; a numeric address or ordinary RAM
-View cannot mint a route. Source Cells use the existing Pend borrow tree and
-Flat residency. The IOMMU backend owns its hardware domain, page tables and command queues;
-Memo owns the payload publication obligation. Inspect
-returns mapping state and the first fault; Sign routes MappingRetired and
-MappingFault for that exact MappingId, rechecking target authority. Parent
-holders may observe while lending, but cannot use a suspended Pend to publish.
+Cell Memo creation selects MappingTarget::Cpu(TeamId) or Io(PendId). The external
+Pend targets an External Nest, explicitly bound to a separate platform Port Pend.
+MMIO Share authority and Port authority can be delegated/revoked independently.
+Flat, Nest and Port have runtime ABI operations; a Flat Slice retains its exact
+Pend branch, and an Internal Nest may be consumed by Team creation.
 
-The same Nest Memo owns the associated Page, generation, freeze, publication
-and fault for CPU and external targets. Address spans own only reservations and
-range policy; the ABI MappingId still names that reservation. External authority
-roots retain a Nest and its Pend borrowing until hardware settlement, independently
-of the creating Task. There is no separate Projection/IoSpace lifecycle. Source or target revocation, explicit Retract and
-creator exit all close admission. A live external Nest retains a routing obligation on its target Pend: ordinary resource access remains
-available, while reborrowing or narrowing waits for hardware settlement. Cells remain External
-until the matching trusted completion settles. Notifications run after commit
-and registry locks are released. An interrupt or business completion is never a
-reclamation receipt. Failed synchronization retains the obligation.
+The same Nest Memo owns the associated Page, generation, freeze and publication
+for CPU and external targets. One binding supports independent 4 KiB leaves in
+one aligned 2 MiB window, with repeated publication after exact range settlement.
+The binding remains active while one Memo retracts. There is no Projection/IoSpace
+or parallel Mapping lifecycle. Source/binding revocation and creator death close
+admission; Kernel retains hardware obligations independently of the dying Task.
+Sign observes generation-qualified MappingPublished/MappingRetired and retained
+NestClosed/NestFault. Hardware faults stay at binding scope rather than being
+assigned a guessed generation. A closed Nest never reopens; a fresh Nest can
+acquire the Port only after matching hardware and platform proof. An interrupt,
+business result or software generation is never a reclamation receipt.
 
 Trusted boot images supply `kernel_api::boot::platform::Platform`, call unsafe
 `boot::init`, then `boot::configure` with normalized physical authorities and
@@ -250,24 +248,23 @@ hart, page-overlap rules, control ownership, source limits and hardware capabili
 No Unit can call this Rust interface or manufacture a trusted completion provider.
 
 The integration owner resolves firmware topology and configures the endpoint.
-After protected controller setup it may call `boot::map_mmio` and
-`boot::bind_external(ExternalRoute { controller, requester, base, size, proof })`.
-An external resource must fit a withheld external window and must not expose RAM,
-ordinary grants or protected controls. `requester` is the normalized IOMMU device
-identity, not a PCI RID. `boot::start` rejects incomplete setup. Boot failure is
-terminal; it does not publish partial authorities or start secondary harts.
+After protected controller setup it may call `boot::map_mmio`, then independently
+register `boot::grant_mmio` and
+`boot::bind_external(ExternalRoute { controller, requester, proof })`.
+MMIO grants must fit withheld external windows and cannot expose RAM or protected
+controls. Requester is the normalized IOMMU identity, not a PCI RID. Boot failure
+is terminal and cannot publish partial authorities or start secondary harts.
 
-Kernel never enables or disables PCI Bus Master, reads ECAM, sizes BARs, or uses
-a device stop register during retirement. Translation withdrawal closes memory
-access even if the requester continues issuing work. The RV64 backend completes
-its invalidation/fences, leaves DDTP Off and disables queues before requesting
-platform ordering evidence. Its opaque `Retirement` token binds the controller,
-requester, binding identity and fresh retirement batch. Pending, error, and a
-mismatched/stale token keep the Page and table responsibilities retained. Queue
-storage has its separate confirmed shutdown boundary. The one-shot controller
-cannot be rebound after settlement. No ordinary Unit can install a proof provider.
-See the `Quiescence` safety contract and its pinned IOMMU specification reference;
-IOFENCE PR/PW completion alone is not the platform proof.
+Kernel never enables/disables PCI Bus Master, reads ECAM, sizes BARs or polls device
+stop registers. Range retirement invalidates only the affected leaf and waits for
+PR/PW fences and matching trusted ordering evidence; Binding retirement also leaves
+DDTP Off and shuts down queues before releasing the controller. The opaque
+Retirement token includes scope, controller, requester, binding and fresh batch.
+Pending, error or stale proof retains responsibilities. Queue storage has a separate
+confirmed shutdown boundary. No ordinary Unit can install or forge a provider.
+The external fixture proves queued requests have drained for range reuse and
+endpoint ordering has settled for binding reuse; this assumption is specific to
+that coherent QEMU fixture. See the Quiescence safety contract and pinned spec.
 
 Production board parsing and the normal `shuyra` image live in
 [Vanllia platform/riscv](https://github.com/shuyra-arche/vanllia/tree/main/platform/riscv).
@@ -297,15 +294,15 @@ PQ is disabled.
 Settled logical records survive for observation/Delete while their creator lives.
 After creator death they expire only when hardware responsibility has settled.
 
-ABI v3 rejects version-zero/version-one/version-two calls and removed domains. Pend Accord
+ABI v4 rejects version-zero through version-three calls and removed domains. Pend Accord
 and Narrow carry target-specific operation permissions, independent Distributable
 and Modifiable limits, and the relative source window. Capsule v2 declares the
-ABI before execution; Ledger v4 supplies an explicit creation license and Sign-target Pends.
+ABI before execution; Ledger v5 supplies an explicit creation license and Sign-target Pends.
 Clone/Share/Sign Create and Slot allocation require a None creation license.
 Sign delegates, narrows, returns and revokes through the single Pend lineage.
 Cell uses fixed descriptor snapshots and generation-qualified transitions.
 Protect is CPU-only; a published I/O binding cannot widen access. The current
-one-shot platform route rejects republishing after settlement. Upper consumers
+runtime binding supports repeated publication after range settlement. Upper consumers
 must rebuild and migrate separately; this provider change does not update them.
 
 ## Build and verification

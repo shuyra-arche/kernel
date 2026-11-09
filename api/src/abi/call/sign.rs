@@ -63,6 +63,8 @@ pub mod operations {
     pub struct Attach {
         pub token: super::PendId,
         pub source: super::SignSource,
+        /// Exact Memo generation, or zero for every non-Memo source.
+        pub generation: u64,
     }
     #[operation(slot = 6, output = (), error = SignFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

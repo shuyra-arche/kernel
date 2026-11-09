@@ -268,6 +268,7 @@ fn run(mode: &str) {
             for marker in [
                 "PASS cell-kernel movement=1 memo=1 generation=1 freeze=1",
                 "PASS cell-kernel swap=1 cleanup=1",
+                "PASS organization flat=1 window=1 transfer=1 share=1 revoke=1 internal-nest=1",
                 "PASS room-kernel atomic-wait=1 wake=1 deadline=1",
                 "PASS pend-kernel range=1 return=1 inspect=1 collect=1",
                 "task: all tasks exited",
@@ -310,7 +311,7 @@ fn run(mode: &str) {
             if io {
                 assert!(
                     log.contains(if mode == "io-exit" {
-                        "PASS cell-io death=1 result=1 retirement=1"
+                        "PASS cell-io-exit owner=dead pending=1 retained=1 late-access=denied rebind=1"
                     } else {
                         "PASS cell-io external=1 readonly=1 fault=1 fenced=1 ownership=1"
                     }),

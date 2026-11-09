@@ -13,6 +13,7 @@ use kernel_api::{
 fn creation_variants_use_checked_fixed_width_snapshots() {
     for request in [
         UnitCreate::Team {
+            nest: None,
             kind: ProgramKind::User,
             guard: ControlId::NONE,
         },
@@ -23,19 +24,25 @@ fn creation_variants_use_checked_fixed_width_snapshots() {
             count: 2,
             stack: VirtAddr::new(0),
         },
+        UnitCreate::Team {
+            nest: Some(kernel_api::model::identity::PendId::mint(9)),
+            kind: ProgramKind::User,
+            guard: ControlId::NONE,
+        },
     ] {
         let bytes = request.to_bytes();
         assert_eq!(UnitCreate::from_bytes(&bytes), Some(request));
         assert!(UnitCreate::from_bytes(&bytes[..47]).is_none());
     }
     let mut team = UnitCreate::Team {
+        nest: None,
         kind: ProgramKind::User,
         guard: ControlId::NONE,
     }
     .to_bytes();
-    team[24] = 1;
+    team[32] = 1;
     assert!(UnitCreate::from_bytes(&team).is_none());
-    team[24] = 0;
+    team[32] = 0;
     team[8] = 2;
     assert!(UnitCreate::from_bytes(&team).is_none());
 }

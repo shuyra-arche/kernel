@@ -5,6 +5,7 @@ mod context;
 mod external;
 mod license;
 mod lifecycle;
+mod organization;
 mod pend;
 mod room;
 mod sign;
@@ -24,12 +25,17 @@ struct Console;
 impl core::fmt::Write for Console {
     fn write_str(&mut self, text: &str) -> core::fmt::Result {
         let mut bytes = text.as_bytes();
+        let deadline = kernel_client::call::room::clock().saturating_add(2_000_000_000);
         while !bytes.is_empty() {
             let size = bytes.len().min(256);
             let n = debug::put(VirtAddr::new(bytes.as_ptr() as usize), size)
                 .map_err(|_| core::fmt::Error)?;
             if n == 0 {
-                return Err(core::fmt::Error);
+                if kernel_client::call::room::clock() >= deadline {
+                    return Err(core::fmt::Error);
+                }
+                kernel_client::call::room::yield_();
+                continue;
             }
             bytes = &bytes[n..];
         }
@@ -115,7 +121,7 @@ fn handoff(source: CellPosition, target: CellPosition, pull: bool) {
     } else {
         cell::push(ptr(&spec))
     }
-    .unwrap();
+    .unwrap_or_else(|error| panic!("handoff {source:?} -> {target:?}: {error:?}"));
 }
 fn publish(mapping: MappingId, page: usize) {
     let pos = memo(mapping, page).to_bytes();
@@ -222,6 +228,7 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     delete(raw_memo(mapping, 0).object);
     delete(CellObject::Slot(a));
     let _ = writeln!(Console, "PASS cell-kernel swap=1 cleanup=1");
+    organization::run();
     pend::run();
     sign::run();
     room::run();

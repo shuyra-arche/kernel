@@ -11,7 +11,6 @@ use crate::basis::nest::Access;
 use crate::basis::pend;
 use crate::basis::pend::Modifiable;
 use crate::basis::pend::SourceAuthorization;
-use crate::basis::view;
 use crate::basis::view::View;
 use crate::entry::boot::facts;
 use crate::entry::boot::resources::Registry;
@@ -26,35 +25,27 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     for region in admission::description()?.authorities.iter() {
         grant_region(registry, *region)?;
     }
-    // Export each validated resource through the ordinary View/Pend boot ledger.
-    let apertures = crate::basis::nest::authority::aperture::APERTURES.lock();
-    for aperture in apertures.iter() {
-        let source = aperture.source.clone();
-        let size = source
-            .page_count()
-            .checked_bytes()
-            .ok_or(PendFail::Denied)?;
-        let meta = view::ShareView::from_source(source.clone(), size, TaskId::new(0))?;
-        let root =
-            pend::PendEntry::try_new(View::Share(meta.clone()), Mark::NONE, Modifiable::Yes, None)?;
-        let authorization =
-            SourceAuthorization::new(source, Access::READ | Access::WRITE, TaskId::new(0))?;
-        meta.attach_source(&authorization);
-        authorization.adopt(&meta, root.token(), root.authority().clone())?;
-        authorization.consume();
-        meta.commit_source();
+    for region in external::REGIONS.lock().iter() {
+        grant_region(registry, *region)?;
+    }
+    for port in crate::basis::port::PORTS.lock().iter() {
+        let root = pend::PendEntry::try_new(
+            pend::Target::Port(port.clone()),
+            Mark::NONE,
+            Modifiable::No,
+            None,
+        )?;
         registry
-            .register(Name::Page(Page::Region(aperture.base as u64)), root)
+            .register(Name::Port(port.id().get() as u64), root)
             .map_err(|e| e.into_parts().0)?;
     }
-    drop(apertures);
-    let meta = view::share::region(dtb.base, dtb.size, TaskId::new(0))?;
+    let meta = crate::basis::flat::sharing::region(dtb.base, dtb.size, TaskId::new(0))?;
     let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
     registry
         .register(Name::Page(Page::Dtb), root)
         .map_err(|e| e.into_parts().0)?;
     if let Some(initrd) = facts::info().initrd() {
-        let meta = view::share::region(initrd.base, initrd.size, TaskId::new(0))?;
+        let meta = crate::basis::flat::sharing::region(initrd.base, initrd.size, TaskId::new(0))?;
         let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
         registry
             .register(Name::Page(Page::Initrd), root)
@@ -68,7 +59,7 @@ fn grant_region(
     region: kernel_api::boot::platform::Region,
 ) -> Result<(), PendFail> {
     let (base, size) = (region.base, region.size);
-    let meta = view::share::region(base, size, TaskId::new(0))?;
+    let meta = crate::basis::flat::sharing::region(base, size, TaskId::new(0))?;
     let source = meta.source();
     let root =
         pend::PendEntry::try_new(View::Share(meta.clone()), Mark::NONE, Modifiable::Yes, None)?;

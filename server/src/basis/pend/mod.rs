@@ -1,5 +1,6 @@
 //! Authority over View ranges and the records that bind it to a Task.
 
+pub(crate) mod access;
 mod branch;
 mod ledger;
 mod source;
@@ -9,7 +10,7 @@ mod window;
 pub(crate) use target::Target;
 
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::{PageCount, PageOffset};
@@ -47,7 +48,7 @@ pub(crate) struct Pend {
     window: SpinLock<Option<(PageOffset, PageCount)>>,
     parent: SpinLock<Option<ParentBorrow>>,
     external: AtomicUsize,
-    routing: AtomicBool,
+    routing: AtomicUsize,
 }
 
 impl Pend {
@@ -62,7 +63,7 @@ impl Pend {
             window: SpinLock::new(window),
             parent: SpinLock::new(None),
             external: AtomicUsize::new(0),
-            routing: AtomicBool::new(false),
+            routing: AtomicUsize::new(0),
         })
         .map_err(|_| PendFail::OutOfMemory)
     }
@@ -97,7 +98,7 @@ impl Pend {
         state.usable().then_some(state.access)
     }
     pub(crate) fn can_borrow(&self, access: Modifiable) -> Result<(), PendFail> {
-        if self.routing.load(Ordering::Acquire) {
+        if self.routing.load(Ordering::Acquire) != 0 {
             return Err(PendFail::Busy);
         }
         self.state
@@ -115,7 +116,7 @@ impl Pend {
     fn borrow_kind(self: &Arc<Self>, child: &Arc<Self>, kind: BorrowKind) -> Result<(), PendFail> {
         let access = child.configured();
         let mut state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) {
+        if self.routing.load(Ordering::Acquire) != 0 {
             return Err(PendFail::Busy);
         }
         *state = state.transition(Event::Borrow(access)).map_err(fail)?;
@@ -152,7 +153,7 @@ impl Pend {
             return Err(PendFail::Denied);
         }
         let state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) {
+        if self.routing.load(Ordering::Acquire) != 0 {
             return Err(PendFail::Busy);
         }
         state
@@ -173,7 +174,7 @@ impl Pend {
             return Err(PendFail::Denied);
         }
         let mut state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) {
+        if self.routing.load(Ordering::Acquire) != 0 {
             return Err(PendFail::Busy);
         }
         *state = state
@@ -187,25 +188,28 @@ impl Pend {
         Ok(())
     }
     pub(crate) fn external_pending(&self) -> bool {
-        self.external.load(Ordering::Acquire) != 0 || self.routing.load(Ordering::Acquire)
+        self.external.load(Ordering::Acquire) != 0 || self.routing.load(Ordering::Acquire) != 0
     }
-    /// Retain routing responsibility without lending the BAR's CPU access.
+    /// Retain one binding or Memo obligation without lending data access.
+    /// Operation permission is checked by the caller against its typed target.
     /// Caller holds work commit; publication must either cancel or retain this
     /// obligation until the matching Nest completion has settled.
     pub(crate) fn retain_route(&self) -> Result<(), PendFail> {
         let state = self.state.lock();
-        if !state.usable() || state.access != Modifiable::Yes {
+        if !state.usable() {
             return Err(PendFail::Denied);
         }
         self.routing
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                count.checked_add(1)
+            })
             .map(|_| ())
             .map_err(|_| PendFail::Busy)
     }
     /// # Safety
     /// The route was never published, or its exact hardware completion settled.
     pub(crate) unsafe fn release_route(&self) {
-        assert!(self.routing.swap(false, Ordering::AcqRel));
+        assert!(self.routing.fetch_sub(1, Ordering::AcqRel) > 0);
     }
     pub(crate) fn retiring(&self) -> bool {
         self.state.lock().phase != Phase::Active
@@ -226,7 +230,7 @@ impl Pend {
     }
     fn finish(&self, event: Event) -> Result<(), PendFail> {
         let mut state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) {
+        if self.routing.load(Ordering::Acquire) != 0 {
             return Err(PendFail::Busy);
         }
         *state = state.transition(event).map_err(fail)?;
@@ -272,5 +276,15 @@ impl Need {
             Self::Write => access == Modifiable::Yes,
             Self::Read => true,
         }
+    }
+}
+
+impl Pend {
+    pub(crate) fn associates(&self) -> bool {
+        self.permits(kernel_api::model::pend::Operations::Share(
+            kernel_api::model::pend::ShareRights::ASSOCIATE,
+        )) || self.permits(kernel_api::model::pend::Operations::Flat(
+            kernel_api::model::pend::FlatRights::ASSOCIATE,
+        ))
     }
 }

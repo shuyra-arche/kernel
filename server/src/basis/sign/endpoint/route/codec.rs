@@ -42,7 +42,9 @@ pub(crate) fn source_watch(source: SignSource) -> Option<(PendId, Need)> {
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
         | SignSource::MappingRetired { .. }
-        | SignSource::MappingFault { .. } => None,
+        | SignSource::MappingPublished { .. }
+        | SignSource::NestFault { .. }
+        | SignSource::NestClosed { .. } => None,
     }
 }
 
@@ -66,7 +68,9 @@ pub(crate) fn source_key(
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
         | SignSource::MappingRetired { .. }
-        | SignSource::MappingFault { .. } => None,
+        | SignSource::MappingPublished { .. }
+        | SignSource::NestFault { .. }
+        | SignSource::NestClosed { .. } => None,
     }
 }
 
@@ -84,6 +88,8 @@ pub(crate) fn source_ready(pend_entry: &PendEntry, source: SignSource) -> Option
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
         | SignSource::MappingRetired { .. }
-        | SignSource::MappingFault { .. } => None,
+        | SignSource::MappingPublished { .. }
+        | SignSource::NestFault { .. }
+        | SignSource::NestClosed { .. } => None,
     }
 }

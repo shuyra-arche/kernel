@@ -1,5 +1,5 @@
 //! Physical controllers remain in Kernel custody from boot through assignment.
-//! Binding an endpoint consumes its one-shot engine; data publication is still
+//! Binding an endpoint leases its exclusive engine; data publication is still
 //! performed through the Nest authorization and Memo publication boundary.
 use super::mmio::Mmio;
 mod pool;

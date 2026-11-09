@@ -85,7 +85,7 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
 
 fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendEntry) -> PendInfo {
     let mut limits = pend.authority().limits();
-    if let Some(meta) = pend.target().share_view() {
+    if let Some(meta) = pend.target().memory() {
         let (offset, count) = pend.authority().window().unwrap_or((
             kernel_api::address::PageOffset::ZERO,
             meta.source().page_count(),

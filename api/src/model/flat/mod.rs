@@ -25,3 +25,30 @@ impl Wire for FlatId {
         Self::new(usize::unpack(words, at)?).ok_or(Decode::Invalid)
     }
 }
+
+/// Effective Flat window; neither the identity nor these coordinates authorize access.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlatInfo {
+    pub id: FlatId,
+    pub offset: usize,
+    pub count: usize,
+}
+impl FlatInfo {
+    pub const WIDTH: usize = 24;
+    pub fn to_bytes(self) -> [u8; Self::WIDTH] {
+        let mut b = [0; Self::WIDTH];
+        crate::abi::layout::store_words([self.id.get(), self.offset, self.count], &mut b);
+        b
+    }
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        let [id, offset, count] = crate::abi::layout::fetch_words(b)?;
+        if count == 0 || offset.checked_add(count).is_none() {
+            return None;
+        }
+        Some(Self {
+            id: FlatId::new(id)?,
+            offset,
+            count,
+        })
+    }
+}
