@@ -30,7 +30,6 @@ use support::{HoldTable, PendEntry};
 mod basis {
     pub(crate) use crate::name;
     pub(crate) mod unit {
-        pub(crate) use crate::control;
         pub(crate) mod task {
             pub(crate) use crate::support::Task;
         }

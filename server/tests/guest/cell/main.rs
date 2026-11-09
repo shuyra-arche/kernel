@@ -25,12 +25,17 @@ struct Console;
 impl core::fmt::Write for Console {
     fn write_str(&mut self, text: &str) -> core::fmt::Result {
         let mut bytes = text.as_bytes();
+        let deadline = kernel_client::call::room::clock().saturating_add(2_000_000_000);
         while !bytes.is_empty() {
             let size = bytes.len().min(256);
             let n = debug::put(VirtAddr::new(bytes.as_ptr() as usize), size)
                 .map_err(|_| core::fmt::Error)?;
             if n == 0 {
-                return Err(core::fmt::Error);
+                if kernel_client::call::room::clock() >= deadline {
+                    return Err(core::fmt::Error);
+                }
+                kernel_client::call::room::yield_();
+                continue;
             }
             bytes = &bytes[n..];
         }

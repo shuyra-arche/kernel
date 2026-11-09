@@ -20,7 +20,7 @@ impl Line {
             return;
         }
         if let Ok(text) = ::core::str::from_utf8(&self.buf[..self.len]) {
-            super::write(text);
+            super::write_text(text);
         }
         self.len = 0;
     }
@@ -33,7 +33,7 @@ impl Write for Line {
             self.len += s.len();
         } else {
             self.emit();
-            super::write(s);
+            super::write_text(s);
         }
         Ok(())
     }

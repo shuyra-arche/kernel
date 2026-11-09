@@ -405,3 +405,7 @@ PCI enumeration, BAR allocation, device business control or Board parsing.
 Consumer order is provider commit → external boot/QEMU fixture pin → System and
 remaining users → Kernel CI fixture pin; record full revisions in integration PRs.
 No physical-device validation or #82 IRQ routing is claimed by these tests.
+
+Debug Put is nonblocking and returns the exact accepted byte prefix (possibly zero).
+It adds no newline and does not rewrite non-UTF-8 bytes. Callers retaining output
+must retry the unaccepted suffix; Kernel never reports discarded bytes as written.
