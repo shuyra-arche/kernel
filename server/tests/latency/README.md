@@ -22,8 +22,8 @@ Task dispatch delay. Ordinary memory calls retain their non-RT contract.
 ## Exclusion and reception
 
 `SpinLock`, `RelLock` and OnceLock publication waits visit
-`metal/riscv/interrupt/window` on every unsuccessful wait iteration. A failed
-SpinLock CAS also visits the window. A peer performing a CPU fence is waited on
+`metal/riscv/interrupt/window` on every unsuccessful wait iteration. Both exclusion
+locks retain their FIFO turn while visiting it. A peer performing a CPU fence is waited on
 through the same reception mechanism. Boot does not arm windows until the
 Hart's timer, interrupt mask and ROOT execution environment exist; boot is not
 an admitted runtime section.
@@ -308,3 +308,11 @@ PCs immediately after each handoff. Short absolute sleeps remain in its workload
 but can expire before a contended call reaches the kernel and therefore cannot
 alone establish blocking or migration coverage. The cross-Hart trace assertions
 and outer QEMU watchdog remain unchanged.
+
+The IRQ revocation fixture parks its controller until the driver finishes mapping
+and initial inspection, then requires the driver's actual Sign `Waiting` state.
+That listener has no timeout: only a Dead/Denied authority result satisfies the
+test. This removes an unrelated two-second initialization assumption and a short
+sleep that did not prove blocking. Hardware event waits remain two seconds,
+retirement retries remain five seconds, all four Yield competitors remain active,
+and the outer watchdog remains sixty seconds.

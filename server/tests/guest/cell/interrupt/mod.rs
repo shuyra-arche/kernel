@@ -15,7 +15,7 @@ use kernel_api::{
         modifiable::Modifiable,
         pend::{AccordRequest, AccordTarget, Distributable, Limits, Operations, PendRange},
         sign::SignRights,
-        unit::UnitTarget,
+        unit::{UnitQuery, UnitState, UnitTarget},
         wait::Wait,
     },
 };
@@ -71,7 +71,7 @@ extern "C" fn observer() -> ! {
     OBSERVED.store(true, Ordering::Release);
     unit::exit(0, 0, VirtAddr::new(0), 0)
 }
-static ENTERED: AtomicUsize = AtomicUsize::new(0);
+static ENTERED: AtomicU32 = AtomicU32::new(0);
 static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
 static WATCH_TOKEN: AtomicUsize = AtomicUsize::new(0);
 static WATCH_ENTERED: AtomicUsize = AtomicUsize::new(0);
@@ -231,7 +231,15 @@ extern "C" fn revoked_driver() -> ! {
     open(PendId::mint(VIEW.load(Ordering::Acquire)));
     initial(token);
     ENTERED.store(1, Ordering::Release);
-    assert!(sign::listen(token, deadline()).is_err());
+    room::wake_value(VirtAddr::new(ENTERED.as_ptr() as usize), true).unwrap();
+    // This is a revocation experiment: the controller first observes this
+    // actual blocked listener. Only authority loss may release it.
+    let error = sign::listen(token, Wait::Infinite).unwrap_err();
+    assert!(matches!(
+        error.source,
+        kernel_api::abi::call::sign::SignFail::Dead
+            | kernel_api::abi::call::sign::SignFail::Denied
+    ));
     // Keep this ledger alive until the controller finishes exact-identity
     // retries; Task exit would otherwise race the same physical retirement.
     while !REVOKE_FINISHED.load(Ordering::Acquire) {
@@ -409,12 +417,23 @@ pub(super) fn run(at: usize, count: usize) {
         VIEW.store(view.get(), Ordering::Release);
         TOKEN.store(branch.get(), Ordering::Release);
         unit::resume(UnitTarget::Task(task)).unwrap();
-        let until = room::clock() + 2_000_000_000;
+        // Mapping/initial inspection are setup, not the revocation deadline.
+        // Park the controller instead of adding another competing Yield loop.
         while ENTERED.load(Ordering::Acquire) == 0 {
-            assert!(room::clock() < until);
+            room::wait_value(
+                VirtAddr::new(ENTERED.as_ptr() as usize),
+                0,
+                Wait::Infinite,
+            )
+            .unwrap();
+        }
+        let until = room::clock() + 2_000_000_000;
+        while super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task))).state
+            != UnitState::Waiting
+        {
+            assert!(room::clock() < until, "revocation listener did not block");
             room::yield_();
         }
-        room::sleep_until(room::clock() + 2_000_000).unwrap();
         let token = if revoke_view { view } else { branch };
         let until = room::clock() + 5_000_000_000;
         loop {
