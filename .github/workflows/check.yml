@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: shuyra-arche/vanllia
-          ref: 4531bcd2e73a945a67333cf2f614f0e01edeaaed
+          ref: 5555b1d26e7c8ea5c34f6ab201bcf344cd98d8b9
           path: .integration/vanllia
           sparse-checkout: |
             platform/riscv
