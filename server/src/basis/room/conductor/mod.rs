@@ -130,7 +130,10 @@ impl Conductor {
     }
 
     fn pull(&self) -> Option<Arc<Task>> {
-        let _commit = crate::basis::commit();
+        // dispatch holds COMMIT until this Task is seated on a Hart.
+        // Reacquiring it here adds work but supplies no additional exclusion.
+        #[cfg(debug_assertions)]
+        crate::basis::assert_held();
         let mut i = self.inner.lock();
         self.starved_pop(&mut i, self.hart)
     }
@@ -157,7 +160,10 @@ impl Conductor {
     }
 
     fn seat(&self, mut task: Arc<Task>) -> Option<usize> {
-        let _commit = crate::basis::commit();
+        // Callers retain COMMIT across dequeue/steal and seating: a Ready Task
+        // must not escape every scheduler container between those transitions.
+        #[cfg(debug_assertions)]
+        crate::basis::assert_held();
         let mut i = self.inner.lock();
         if task.stopped() || task.ident.team.paused() {
             Task::park(task);
