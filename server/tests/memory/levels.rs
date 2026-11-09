@@ -60,6 +60,7 @@ unsafe impl Allocator for Pool {
 fn split_merge_preserve_bytes_and_return_each_receipt_once() {
     let pool = Pool::new();
     let page = pool.page();
+    assert_eq!(page.level().get(), 1);
     let id = page.id();
     unsafe {
         page.as_mut_ptr().write(7);
