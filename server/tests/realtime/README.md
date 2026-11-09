@@ -179,9 +179,20 @@ Dependency/lifecycle fixtures use 100 ms credit in a 1 s period, so debug/TCG
 kernel entry and accounting do not implicitly require a 2 ms physical execution
 bound. The dedicated exhaustion fixture still overrides this with 20 ms credit;
 preemption/overload fixtures retain their own explicit budgets. Event deadlines
-and the QEMU watchdog are unchanged. Passing these scenarios establishes their
-functional assertions, not that every admitted minimum budget is sufficient for
-useful execution on an uncalibrated host.
+are unchanged. Passing these scenarios establishes their functional assertions,
+not that every admitted minimum budget is sufficient for useful execution on an
+uncalibrated host.
+
+Each realtime boot also runs the complete shared Cell/organization/retirement
+suite afterwards. Its outer process watchdog allows 120 seconds for both phases
+and shutdown; other guest modes retain 60 seconds. A two-host-CPU diagnostic
+replay reached all assertions at 47 seconds and showed allocator pool flushing
+at 50 seconds before normal exit. Hosted evidence previously reached all four
+realtime PASS markers but exhausted 60 seconds during the common suite. This
+motivates process headroom, not a claim that timeout alone explains every prior
+failure. Per-event deadlines, actual preemption/affinity checks, all common-suite
+assertions and successful process exit remain required. The elapsed record stores
+the selected watchdog explicitly; neither watchdog is a Kernel response bound.
 
 Run the full host suite and builds from the repository root:
 
