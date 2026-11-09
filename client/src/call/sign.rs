@@ -3,7 +3,7 @@
 use kernel_api::abi::call::sign::operations as op;
 use kernel_api::{
     abi::call::sign::{SignFail, SignReply},
-    model::identity::PendId,
+    model::identity::{PendId, TaskId},
     model::sign::SignSource,
     model::wait::Wait,
 };
@@ -16,4 +16,7 @@ typed_calls! {
     fallible fn consume(token: PendId, sequence: u64) -> Result<(), erra::Error<SignFail>> = op::Consume { token, sequence };
     fallible fn attach(token: PendId, source: SignSource, generation: u64) -> Result<(), erra::Error<SignFail>> = op::Attach { token, source, generation };
     fallible fn detach(token: PendId, source: SignSource) -> Result<(), erra::Error<SignFail>> = op::Detach { token, source };
+    fallible fn assign(token: PendId, server: TaskId, grant: PendId) -> Result<(), erra::Error<SignFail>> = op::Assign { token, server, grant };
+    fallible fn resign(token: PendId) -> Result<(), erra::Error<SignFail>> = op::Resign { token };
+    fallible fn await_(token: PendId, wait: Wait) -> Result<SignReply, erra::Error<SignFail>> = op::Await { token, wait };
 }

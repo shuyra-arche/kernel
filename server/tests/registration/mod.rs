@@ -1,4 +1,4 @@
-#![feature(allocator_ext, allocator_api)]
+#![feature(allocator_ext)]
 extern crate alloc;
 
 // Exercise production registries, rollback guards and delegated authority chains.

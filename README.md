@@ -133,6 +133,11 @@ Tickets retain their non-reusing serial IDs and existing holder map.
 Task control follows its explicit controller or the controlling Team ancestry;
 ordinary membership does not permit controlling or reading peer Task results.
 Unit Create makes an empty Team or dormant Task; Resume admits execution.
+Optional `Unit.Admit/Evict/Profile` adds a prepared User Task CPU reservation.
+`Sign.Assign/Resign/Await` adds an explicit same-Hart service dependency, with
+priority inheritance and separate budgets. The [conditional real-time contract](server/tests/realtime/README.md)
+defines preparation, allowed calls, overload and the platform assumptions;
+acceptance is not a physical hard-real-time guarantee.
 Writable cross-Unit data uses Pend Accord. Read-only code may be mapped into a
 controlled constructing Team before Task creation, retaining its revocation edge.
 Unit Exit records the first committed result independently of resource cleanup.

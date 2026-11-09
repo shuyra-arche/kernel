@@ -98,6 +98,41 @@ impl TaskIdent {
     pub(crate) fn receipts(&self) -> crate::basis::unit::team::Clearance {
         crate::basis::unit::team::Clearance::new(self.team.node.clone())
     }
+    pub(crate) fn prepare_resident(&self) -> Result<(), NestError> {
+        use crate::basis::nest::FaultOutcome;
+        use crate::metal::generic::trap::FaultKind;
+        let memory = self.memory.lock();
+        memory.frame.as_ref().ok_or(NestError::NoRegion)?;
+        let (start, size) = memory
+            .stack
+            .as_ref()
+            .ok_or(NestError::NoRegion)?
+            .initial_range();
+        if size > 64 * 1024 {
+            return Err(NestError::NoRegion);
+        }
+        let pc = unsafe {
+            (*(self.frame_pa.as_usize() as *const crate::metal::switcher::context::TrapContext))
+                .sepc
+        };
+        if !matches!(
+            self.team.nest.resolve_fault(pc, FaultKind::Instruction)?,
+            FaultOutcome::Resolved
+        ) {
+            return Err(NestError::Busy);
+        }
+        for offset in (0..size).step_by(kernel_api::address::PAGE_SIZE) {
+            if !matches!(
+                self.team
+                    .nest
+                    .resolve_fault(start + offset, FaultKind::Store)?,
+                FaultOutcome::Resolved
+            ) {
+                return Err(NestError::Busy);
+            }
+        }
+        Ok(())
+    }
 
     pub(crate) fn retire(&self) -> Result<(), NestError> {
         self.memory.lock().retire()

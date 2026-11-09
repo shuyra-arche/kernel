@@ -251,6 +251,7 @@ pub(crate) struct Task {
     pub controls: Arc<Controls>,
     pub ident: Ident,
     pub pend_busy: AtomicBool,
+    pub preparing: AtomicBool,
     pub trace: Arc<SpinLock<Vec<&'static str>>>,
 }
 impl Task {
@@ -261,6 +262,7 @@ impl Task {
             heir: SpinLock::new(Vec::new()),
             controls: Arc::new(Controls::new()),
             pend_busy: AtomicBool::new(false),
+            preparing: AtomicBool::new(false),
             ident: Ident {
                 id: TaskId::new(1),
                 busy: AtomicBool::new(false),
@@ -277,5 +279,8 @@ impl Task {
         });
         self.heir.lock().push(team.clone());
         team
+    }
+    pub(crate) fn preparing(&self) -> bool {
+        self.preparing.load(Ordering::Acquire)
     }
 }

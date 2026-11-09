@@ -278,3 +278,77 @@ fn clock_scale_never_rounds_a_deadline_down_or_wraps() {
     let slow = ClockSource::new(0, NonZeroU64::MIN);
     assert_eq!(slow.nanos(u64::MAX), u64::MAX);
 }
+
+#[test]
+fn realtime_operations_use_additive_slots_and_typed_fields() {
+    use kernel_api::{
+        abi::{
+            PREFIX,
+            call::{
+                sign::{
+                    SignCall,
+                    operations::{Assign, Await, Resign},
+                },
+                unit::{
+                    UnitCall,
+                    operations::{Admit, Evict, Profile},
+                },
+            },
+        },
+        address::VirtAddr,
+        model::{
+            identity::{PendId, TaskId},
+            wait::Wait,
+        },
+    };
+    let task = TaskId::new(7);
+    let token = PendId::mint(11);
+    let admit = Admit {
+        task,
+        schedule: VirtAddr::new(0x1000),
+    };
+    assert_eq!(Admit::SLOT, PREFIX | (1 << 32) | 11);
+    assert_eq!(
+        UnitCall::from_wire(Admit::SLOT, &admit.pack()),
+        Ok(admit.into())
+    );
+    let evict = Evict { task };
+    assert_eq!(
+        UnitCall::from_wire(Evict::SLOT, &evict.pack()),
+        Ok(evict.into())
+    );
+    let profile = Profile {
+        task,
+        out: VirtAddr::new(0x2000),
+    };
+    assert_eq!(
+        UnitCall::from_wire(Profile::SLOT, &profile.pack()),
+        Ok(profile.into())
+    );
+    let assign = Assign {
+        token,
+        server: task,
+        grant: PendId::mint(13),
+    };
+    assert_eq!(Assign::SLOT, PREFIX | (11 << 32) | 10);
+    assert_eq!(
+        SignCall::from_wire(Assign::SLOT, &assign.pack()),
+        Ok(assign.into())
+    );
+    let resign = Resign { token };
+    assert_eq!(
+        SignCall::from_wire(Resign::SLOT, &resign.pack()),
+        Ok(resign.into())
+    );
+    for wait in [Wait::Poll, Wait::At(u64::MAX), Wait::Infinite] {
+        let request = Await { token, wait };
+        assert_eq!(
+            SignCall::from_wire(Await::SLOT, &request.pack()),
+            Ok(request.into())
+        );
+    }
+    assert!(SignCall::from_wire(Await::SLOT, &[11, 3, 0, 0, 0, 0]).is_err());
+    for retired in 7..=9 {
+        assert!(SignCall::from_wire(PREFIX | (11 << 32) | retired, &[0; 6]).is_err());
+    }
+}

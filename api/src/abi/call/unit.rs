@@ -86,6 +86,27 @@ pub mod operations {
     pub struct Return {
         pub authority: super::ControlId,
     }
+    /// Admit a dormant or fully frozen Task after resource preparation.
+    /// Requires Build qualification and control of Task.
+    #[operation(slot = 11, output = (), error = UnitFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Admit {
+        pub task: super::TaskId,
+        pub schedule: super::VirtAddr,
+    }
+    /// Withdraw a reservation before its first Resume. Never resets a used budget.
+    #[operation(slot = 12, output = (), error = UnitFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Evict {
+        pub task: super::TaskId,
+    }
+    /// Write a ScheduleInfo for a controlled admitted Task.
+    #[operation(slot = 13, output = (), error = UnitFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Profile {
+        pub task: super::TaskId,
+        pub out: super::VirtAddr,
+    }
 }
 pub use operations::{UnitCall, UnitFail};
 pub const NOTE_MAX: usize = 128;

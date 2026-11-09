@@ -1,4 +1,4 @@
-#![feature(allocator_api)]
+#![feature(allocator_ext)]
 extern crate alloc;
 mod ancestry;
 #[allow(dead_code)]

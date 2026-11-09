@@ -88,7 +88,9 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
                 // A comparator update can take time to clear a pending STIP.
                 return resume(frame as *mut TrapContext);
             }
-            crate::basis::nest::authority::external::maintain();
+            if !crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id()) {
+                crate::basis::nest::authority::external::maintain();
+            }
             interrupt::enable_external();
             redeem();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
@@ -108,6 +110,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
         }
         TrapEvent::Ipi => {
             ipi::acknowledge();
+            crate::basis::sign::endpoint::delivery::advance();
             if let Some(route) = crate::basis::room::interrupt::external() {
                 route.rearm();
             }
@@ -144,6 +147,12 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
         TrapEvent::PageFault(fault) => {
             if !from_task {
                 crate::entry::report::halt::trap(frame, fault.detail.cause, fault.detail.value);
+            }
+            if crate::basis::room::scheduler::slot::current()
+                .running_task()
+                .is_some_and(|task| task.realtime())
+            {
+                return kill_fault(ident);
             }
             // 先取定这一次错误的身份：真正终止任务前会先把 id 标量留下来。
             let (tid, nest) = {
@@ -237,7 +246,12 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
     resume(next)
 }
 
-pub(crate) fn resume(next: *mut TrapContext) -> *mut TrapContext {
+pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
+    if crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id())
+        && !unsafe { (*next).address_space() }.is_kernel()
+    {
+        next = crate::basis::room::scheduler::slot::current().check() as *mut TrapContext;
+    }
     #[cfg(feature = "latency")]
     let mut ready = 0;
     let space = unsafe { (*next).address_space() };
@@ -301,8 +315,23 @@ pub(crate) fn envcall(
     let Some(Identity::Live(ident)) = ident else {
         panic!("envcall without running task");
     };
+    // Fixed Tasks only run on reserved Harts. Ordinary execution needs no
+    // second scheduling transaction at each call/return boundary.
+    let realtime = crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id());
+    if realtime {
+        let task = crate::basis::room::scheduler::slot::current()
+            .running_task()
+            .expect("call owner");
+        if !task.realtime() {
+            drop(task);
+            drop(ident);
+            return Some(
+                crate::basis::room::scheduler::slot::current().reschedule() as *mut TrapContext
+            );
+        }
+    }
     let space = &ident.team.nest;
-    if let Err(resource) = space.retry_invalidation() {
+    if !realtime && let Err(resource) = space.retry_invalidation() {
         if resource == crate::basis::nest::NestError::Busy {
             // No call has executed and sepc still names its original trap.
             // Retrying after a scheduling boundary cannot replay any effects.

@@ -27,6 +27,7 @@ mod execution;
 mod identity;
 pub(crate) mod registry;
 mod retirement;
+pub(crate) mod schedule;
 mod weak;
 
 pub(crate) use creation::TaskBuilder;
@@ -54,6 +55,7 @@ pub struct Task {
     extensions: SpinLock<crate::metal::switcher::context::extension::ExtendedContext>,
     pub(crate) controls: controls::Controls,
     retirement: SpinLock<retirement::Retirement>,
+    pub(crate) schedule: SpinLock<schedule::Schedule>,
 }
 
 // Kernel Tasks may migrate between harts. Mutable state is behind SpinLock or
@@ -71,9 +73,34 @@ impl Task {
     }
 
     pub(crate) fn can_run_on(&self, hart: HartId) -> bool {
+        let placement = match self.schedule.lock().contract() {
+            Some(contract) => contract.spec.hart as usize == hart.get(),
+            None => !scheduler::isolated(hart),
+        };
+        placement
+            && self
+                .extensions
+                .lock()
+                .compatible(Self::execution_capability(hart))
+    }
+
+    pub(crate) fn realtime(&self) -> bool {
+        self.schedule.lock().contract().is_some()
+    }
+
+    pub(crate) fn preparing(&self) -> bool {
+        matches!(*self.schedule.lock(), schedule::Schedule::Preparing)
+    }
+
+    pub(crate) fn prepare_extensions(&self, hart: HartId, flags: u64) -> Result<(), UnitFail> {
+        use crate::metal::switcher::context::extension::PreparationError;
         self.extensions
             .lock()
-            .compatible(Self::execution_capability(hart))
+            .prepare(Self::execution_capability(hart), flags)
+            .map_err(|error| match error {
+                PreparationError::Unsupported => UnitFail::Denied,
+                PreparationError::OutOfMemory => UnitFail::OutOfMemory,
+            })
     }
 
     /// Called before publishing any waiting/ready/terminal transition.
@@ -119,6 +146,9 @@ impl Task {
         instruction: u32,
         status: &mut usize,
     ) -> Result<bool, ()> {
+        if self.realtime() {
+            return Ok(false);
+        }
         self.extensions.lock().enable(
             instruction,
             status,
@@ -192,6 +222,9 @@ impl Task {
 
     pub(crate) fn release(task: &Arc<Task>) -> Result<(), UnitFail> {
         let _commit = commit();
+        if !scheduler::contract::activated(task) {
+            return Err(UnitFail::Busy);
+        }
         if !task.held() || !task.ident.team.release_held(task) {
             return Err(UnitFail::Denied);
         }
@@ -229,6 +262,9 @@ impl Task {
 
     pub(crate) fn embark(task: &Arc<Task>) -> Result<(), UnitFail> {
         let _commit = commit();
+        if !scheduler::contract::activated(task) {
+            return Err(UnitFail::Busy);
+        }
         if task.held() {
             return Self::release(task);
         }

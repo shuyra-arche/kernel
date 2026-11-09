@@ -66,6 +66,55 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
         return Outcome::fail(frame, UnitFail::Denied);
     };
     match call {
+        UnitCall::Admit { task, schedule } => {
+            let result = (|| {
+                let target = find(task)
+                    .and_then(|task| task.upgrade())
+                    .ok_or(UnitFail::Denied)?;
+                if !me.administration.allows(ControlKind::Build)
+                    || !crate::basis::unit::control::manages(&me, &target)
+                {
+                    return Err(UnitFail::Denied);
+                }
+                let mut bytes = [0; kernel_api::model::unit::Schedule::WIDTH];
+                if !ident.team.nest.copy_in(&mut bytes, schedule) {
+                    return Err(UnitFail::Denied);
+                }
+                let spec = kernel_api::model::unit::Schedule::from_bytes(&bytes)
+                    .ok_or(UnitFail::Denied)?;
+                crate::basis::room::scheduler::contract::admit(&me, &target, spec)
+            })();
+            super::outcome::answer(frame, result.map(|()| 0));
+        }
+        UnitCall::Evict { task } | UnitCall::Profile { task, .. } => {
+            let result = (|| {
+                let target = find(task)
+                    .and_then(|task| task.upgrade())
+                    .ok_or(UnitFail::Denied)?;
+                if !crate::basis::unit::control::manages(&me, &target) {
+                    return Err(UnitFail::Denied);
+                }
+                match call {
+                    UnitCall::Evict { .. } => {
+                        if !me.administration.allows(ControlKind::Build) {
+                            return Err(UnitFail::Denied);
+                        }
+                        crate::basis::room::scheduler::contract::evict(&me, &target)
+                    }
+                    UnitCall::Profile { out, .. } => {
+                        let info = crate::basis::room::scheduler::contract::profile(&me, &target)?;
+                        ident
+                            .team
+                            .nest
+                            .copy_out(&info.to_bytes(), out)
+                            .then_some(())
+                            .ok_or(UnitFail::Denied)
+                    }
+                    _ => unreachable!(),
+                }
+            })();
+            super::outcome::answer(frame, result.map(|()| 0));
+        }
         UnitCall::Create { request } => {
             let result = create(&me, request);
             match result {
@@ -181,7 +230,12 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                     *member.result.lock() = Some(value as usize);
                 }
             }
-            crate::basis::unit::lifecycle::set_exit_note(note.get(), len);
+            // Admitted exit records the result; diagnostic copying/firmware I/O
+            // is excluded from its CPU contract.
+            crate::basis::unit::lifecycle::set_exit_note(
+                note.get(),
+                if me.realtime() { 0 } else { len },
+            );
             crate::basis::unit::lifecycle::set_exit_reason(reason as usize);
             drop(me);
             drop(ident);

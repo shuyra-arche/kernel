@@ -1,5 +1,6 @@
 //! One control endpoint supports explicit triggering and authorized source routing.
 use crate::model::identity::PendId;
+use crate::model::identity::TaskId;
 use crate::model::sign::SignSource;
 use crate::model::wait::Wait;
 
@@ -71,6 +72,28 @@ pub mod operations {
     pub struct Detach {
         pub token: super::PendId,
         pub source: super::SignSource,
+    }
+    /// Bind a controlled admitted server using its live Trigger grant for this
+    /// endpoint. Ordinary Listen remains independent of service dependencies.
+    #[operation(slot = 10, output = (), error = SignFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Assign {
+        pub token: super::PendId,
+        pub server: super::TaskId,
+        pub grant: super::PendId,
+    }
+    #[operation(slot = 11, output = (), error = SignFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Resign {
+        pub token: super::PendId,
+    }
+    /// Wait on the assigned server, with bounded transitive priority inheritance.
+    /// Caller and server must be admitted on the same Hart. Budgets stay separate.
+    #[operation(slot = 12, output = super::SignReply, error = SignFail, reply = 3)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Await {
+        pub token: super::PendId,
+        pub wait: super::Wait,
     }
 }
 pub use operations::{SignCall, SignEventFail, SignFail};

@@ -2,10 +2,12 @@
 mod control;
 mod creation;
 mod info;
+mod schedule;
 
 pub use control::{ControlId, ControlKind};
 pub use creation::{ProgramKind, UnitCreate};
 pub use info::{UnitInfo, UnitQuery, UnitState};
+pub use schedule::{Schedule, ScheduleInfo};
 
 use crate::abi::register::{Decode, Wire};
 use crate::abi::reply::FromPair;

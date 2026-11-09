@@ -27,9 +27,6 @@ pub(crate) fn block_with_call<E: WaitFail>(
     dur: Duration,
     wait: Option<WaitCall>,
 ) -> Result<Blocked, E> {
-    if take_beacon(key) {
-        return Ok(Blocked::Resume);
-    }
     let Some(me) = current().running_task() else {
         return Err(E::busy());
     };
@@ -37,6 +34,14 @@ pub(crate) fn block_with_call<E: WaitFail>(
     if let Some(reason) = crate::basis::unit::lifecycle::take_doomed(me.ident.id) {
         drop(me);
         return Ok(Blocked::Quit(reason));
+    }
+    if me.realtime() {
+        let wait = wait.ok_or_else(E::busy)?;
+        drop(me);
+        return Ok(Blocked::Switch(current().await_local(key, wait, &_commit)));
+    }
+    if take_beacon(key) {
+        return Ok(Blocked::Resume);
     }
     {
         let mut sites = sites(key).lock();

@@ -55,6 +55,11 @@ fn hardware_interrupt_sign_coexists_with_iommu() {
 fn latency_baseline_observes_contended_paths() {
     run("latency")
 }
+#[test]
+#[ignore = "requires RV64 QEMU and OpenSBI"]
+fn realtime_reservations_and_service_dependencies() {
+    run("realtime")
+}
 static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn run(mode: &str) {
     let _run = RUN.lock().unwrap_or_else(|e| e.into_inner());
@@ -64,6 +69,7 @@ fn run(mode: &str) {
     let vector = mode == "vector";
     let clock = mode == "clock";
     let latency = mode == "latency";
+    let realtime = mode == "realtime";
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -89,7 +95,7 @@ fn run(mode: &str) {
     assert!(rust.status.success());
     std::fs::write(evidence.join("rustc.txt"), rust.stdout).unwrap();
     let mut guest_build = Command::new("cargo");
-    if io || context || clock || mode == "large" || mode == "irq" || latency {
+    if io || context || clock || mode == "large" || mode == "irq" || latency || realtime {
         guest_build.args([
             "+nightly",
             "build",
@@ -171,7 +177,7 @@ fn run(mode: &str) {
             .map(|harts| (*harts, ""))
             .chain((profile == "debug" && !io).then_some((4, "-split-memory")))
             .chain((profile == "debug" && mode != "io-exit").then_some((4, "-sparse-harts")));
-        let cases: Vec<_> = if latency {
+        let cases: Vec<_> = if latency || realtime {
             harts.iter().map(|h| (*h, "", "rv64")).collect()
         } else if clock {
             let mut cases = vec![
@@ -227,7 +233,9 @@ fn run(mode: &str) {
                 command.args(["-device", "edu,addr=1.0"]);
             }
             let trace_path = evidence.join(format!("{name}-migration.log"));
-            let symbols = if suffix == "-sstc-trace" {
+            let symbols = if realtime && harts == 4 {
+                super::realtime::trace(&mut command, &elf, &trace_path)
+            } else if suffix == "-sstc-trace" {
                 super::context::trace_checkpoints(
                     &mut command,
                     &elf,
@@ -321,6 +329,26 @@ fn run(mode: &str) {
                 "task: all tasks exited",
             ] {
                 assert!(log.contains(marker), "{name}: {log}");
+            }
+            if realtime {
+                if !symbols.is_empty() {
+                    super::realtime::verify(&trace_path, &symbols, &log);
+                }
+                if harts == 1 {
+                    assert!(
+                        log.contains("PASS realtime single-hart=denied"),
+                        "{name}: {log}"
+                    );
+                } else {
+                    for marker in [
+                        "PASS realtime budget=1",
+                        "PASS realtime preemption=1",
+                        "PASS realtime nested=2",
+                        "PASS realtime resident=1",
+                    ] {
+                        assert!(log.contains(marker), "{name}: {log}");
+                    }
+                }
             }
             if mode.starts_with("irq") || latency {
                 if !symbols.is_empty() {

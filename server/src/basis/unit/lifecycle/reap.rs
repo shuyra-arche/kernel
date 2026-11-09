@@ -20,6 +20,9 @@ use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::sign::wipe;
 
+// Off-Hart terminal Tasks retain their existing intrusive membership while
+// housekeeping performs logical hooks and physical retirement.
+static PENDING: SpinLock<Chain> = SpinLock::new(Chain::new());
 pub(super) static HUSKS: SpinLock<Husks> = SpinLock::new_level(Level::L3, Husks::new());
 
 pub(super) struct Husks {
@@ -81,6 +84,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
         (cause, reason)
     };
     crate::basis::unit::team::exit::member_dying(&task, reason);
+    crate::basis::room::scheduler::contract::release(&task);
     task.release_extensions();
     hooked(&task);
     {
@@ -109,6 +113,14 @@ pub fn quit() -> usize {
         "running 容器里不是在核上的任务"
     );
     let (note_va, note_len) = super::take_exit_note();
+    if exited.realtime() {
+        // No diagnostic copy, extension free, hooks, ledger work or fencing on
+        // the reserved Hart. Doomed already closes this Task's live authority.
+        PENDING.lock().enqueue(exited);
+        crate::basis::room::scheduler::contract::notify();
+        crate::basis::room::scheduler::idle::nudge(crate::metal::hart::HartId::new(0));
+        return crate::basis::room::scheduler::run();
+    }
     let tid = exited.ident.id;
     let mut buf = [0u8; NOTE_MAX];
     let text = note_out(
@@ -168,6 +180,16 @@ fn note_out<'a>(
 }
 
 pub(crate) fn bury() {
+    for _ in 0..4 {
+        let Some(task) = PENDING.lock().dequeue() else {
+            break;
+        };
+        let (cause, reason) = task.state.lock().dying().expect("terminal queue");
+        reap(task, cause, reason);
+    }
+    if !PENDING.lock().is_empty() {
+        crate::basis::room::deadline::retry();
+    }
     super::doom::advance();
     // Bound this service turn's outer work. Unsettled Tasks retain their place
     // for a later turn. Each advances one child or local retirement stage;

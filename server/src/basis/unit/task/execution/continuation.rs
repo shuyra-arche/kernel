@@ -17,6 +17,29 @@ pub(crate) enum Resumption {
 }
 
 impl WaitCall {
+    /// Local admitted waits have pre-existing intrusive storage and never
+    /// allocate a global ticket, Site, forwarding edge or heap registration.
+    pub(crate) fn complete_local(&self, task: &Arc<Task>, now: u64) -> bool {
+        match self {
+            Self::Sleep { deadline } => now >= *deadline,
+            Self::Sign(wait) => {
+                let result = wait.poll();
+                if matches!(result, Ok(kernel_api::abi::reply::SignReply::Pending))
+                    && wait.deadline.is_none_or(|at| now < at)
+                {
+                    return false;
+                }
+                let frame = unsafe {
+                    &mut *(task.ident.frame_pa.as_usize()
+                        as *mut crate::metal::switcher::context::TrapContext)
+                };
+                wait.unwatch();
+                wait.write(frame, result);
+                true
+            }
+            Self::Value { .. } => unreachable!("value wait is outside admitted calls"),
+        }
+    }
     pub(crate) fn resume(self, task: &Arc<Task>) -> Resumption {
         match self {
             Self::Sleep { deadline } => {

@@ -61,6 +61,12 @@ pub fn uptime() -> Duration {
 pub(crate) fn ticks_to_duration(ticks: u64) -> Duration {
     Duration::from_nanos(source().ticks_to_nanos(ticks))
 }
+pub(crate) fn uptime_at(ticks: u64) -> u64 {
+    source().nanos(ticks)
+}
+pub(crate) fn budget_ticks(nanos: u64) -> u64 {
+    ((nanos as u128 * source().hertz().get() as u128) / NANOS_PER_SEC).min(u64::MAX as u128) as u64
+}
 
 pub(crate) fn duration_to_ticks(d: Duration) -> u64 {
     source().duration_ticks(d.as_nanos())

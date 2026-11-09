@@ -59,6 +59,34 @@ fn concurrent_retirement_rejects_before_running_any_effect() {
 }
 
 #[test]
+fn cancelled_admission_retains_resources_until_preparation_releases_its_lease() {
+    let task = Task::new();
+    task.preparing.store(true, Ordering::Release);
+    let (sent, received) = std::sync::mpsc::channel();
+    let other = task.clone();
+    let worker = std::thread::spawn(move || {
+        for _ in 0..16 {
+            assert_eq!(other.retire(), Err(NestError::Busy));
+        }
+        sent.send(()).unwrap();
+    });
+    // A stopped Task's Arc does not retain its context page: its preparation
+    // lease must reject retirement before any Pend or memory effect occurs.
+    let retained = received.recv_timeout(std::time::Duration::from_secs(5));
+    task.preparing.store(false, Ordering::Release);
+    worker.join().unwrap();
+    retained.unwrap();
+    assert!(task.trace.lock().is_empty());
+    for _ in 0..8 {
+        if task.retire() == Ok(()) {
+            break;
+        }
+    }
+    assert_eq!(task.retire(), Ok(()));
+    assert_eq!(&*task.trace.lock(), &["pends", "memory"]);
+}
+
+#[test]
 fn busy_mapping_does_not_starve_other_nests_or_lose_its_record() {
     let controls = Arc::new(Controls::new());
     let actor = TaskId::new(1);

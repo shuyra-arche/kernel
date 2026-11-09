@@ -215,3 +215,5 @@ use kernel_hardware_fixture::host::{clock, harts, memory};
 
 mod diagnostics;
 mod latency;
+
+mod realtime;
