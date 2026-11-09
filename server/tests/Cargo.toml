@@ -75,3 +75,7 @@ path = "console/mod.rs"
 [[test]]
 name = "interrupt"
 path = "interrupt/mod.rs"
+
+[[test]]
+name = "diagnostics"
+path = "diagnostics/mod.rs"

@@ -55,12 +55,14 @@ pub(crate) fn report() {
         statistics::spare_available(),
         statistics::kinds()
     );
-    crate::basis::unit::lifecycle::diagnostics::each(|entry| {
+    let exits = crate::basis::unit::lifecycle::diagnostics::snapshot();
+    putln!("[kernel] unclaimed-exit-overwritten={}", exits.overwritten);
+    for entry in exits.entries() {
         putln!(
             "unclaimed exit: task={} reason={} note={}",
             entry.task.get(),
             entry.reason,
             entry.note()
         );
-    });
+    }
 }

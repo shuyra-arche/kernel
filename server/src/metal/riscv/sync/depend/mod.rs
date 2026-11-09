@@ -4,8 +4,6 @@ use ::core::cell::UnsafeCell;
 #[cfg(debug_assertions)]
 use alloc::boxed::Box;
 #[cfg(debug_assertions)]
-use alloc::format;
-#[cfg(debug_assertions)]
 use alloc::vec::Vec;
 
 #[cfg(debug_assertions)]
@@ -35,38 +33,10 @@ use held::{HeldCell, HeldSet};
 
 #[cfg(debug_assertions)]
 pub(crate) fn report(what: &'static str, lock: usize, caller: usize) -> ! {
-    crate::metal::allocator::portal::switch(crate::metal::allocator::portal::Backend::Spare);
-    let held = held().expect("depend: report outside collected set");
-    let mut msg = format!("[depend] {what}: {lock:#x} ({lock:#x})",);
-    if caller != 0 {
-        msg.push_str(&format!("\n  caller: {:#x} ({caller:#x})", caller,));
-    }
-    if held.slots.is_empty() {
-        msg.push_str("\n  held: (none)");
-    } else {
-        let max = held.max_level();
-        msg.push_str("\n  held:");
-        for slot in held.slots.iter() {
-            let lv = slot
-                .level
-                .map(|l| format!("{l:?}"))
-                .unwrap_or_else(|| "exempt".into());
-            msg.push_str(&format!(
-                "\n    {:#x} {:#x} ({lv}){} acquired at {:#x} ({:#x})",
-                slot.addr,
-                slot.addr,
-                if slot.level == max {
-                    "  <-- max held"
-                } else {
-                    ""
-                },
-                slot.caller,
-                slot.caller
-            ));
-        }
-        msg.push_str("\n  rule: new level must exceed max(held); violation");
-    }
-    panic!("{msg}");
+    // Formatting runs in the Panic reporter on ROOT, after panic ownership is
+    // established. No allocation or global allocator replacement is needed.
+    let snapshot = held().map(|held| held.snapshot());
+    panic!("[depend] {what}: lock={lock:#x} caller={caller:#x} held={snapshot:?}");
 }
 
 #[cfg(debug_assertions)]
