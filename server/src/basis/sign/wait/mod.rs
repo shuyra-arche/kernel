@@ -208,9 +208,12 @@ pub(crate) fn unforward(key: WakeKey, endpoint: usize) {
 
 pub(crate) fn signal(key: WakeKey) -> usize {
     let _commit = crate::basis::commit();
+    let Some(shard) = site::existing(key) else {
+        return 0;
+    };
     let mut fwd = Fwd::empty();
     let chain = {
-        let mut sites = sites(key).lock();
+        let mut sites = shard.lock();
         let chain = match sites.get_mut(&key) {
             Some(site) => {
                 fwd = site.fwd.clone();
@@ -223,6 +226,47 @@ pub(crate) fn signal(key: WakeKey) -> usize {
     };
     fan_out(&fwd);
     rise(Unchain::new(chain), launch)
+}
+
+/// A retained producer can wake existing listeners in fixed batches without
+/// allocating a Site. Forwarding observes direct state and has at most eight
+/// destinations; Sign keys do not recursively forward their route graph.
+pub(crate) fn signal_batch(key: WakeKey) -> bool {
+    let _commit = crate::basis::commit();
+    let fwd = site::existing(key).and_then(|shard| shard.lock().get(&key).map(|s| s.fwd.clone()));
+    let mut more = listeners_batch(key);
+    if let Some(fwd) = fwd {
+        for (id, _) in fwd.entries() {
+            more |= listeners_batch(WakeKey::Sign { id });
+        }
+    }
+    more
+}
+fn listeners_batch(key: WakeKey) -> bool {
+    let Some(shard) = site::existing(key) else {
+        return false;
+    };
+    // Detach the batch before resuming: a waiter that requeues must not consume
+    // the rest of this batch and prevent another waiter from making progress.
+    let mut batch = crate::basis::room::chain::Chain::new();
+    let more = {
+        let mut sites = shard.lock();
+        let more = if let Some(site) = sites.get_mut(&key) {
+            for _ in 0..4 {
+                let Some(task) = site.chain.pop() else {
+                    break;
+                };
+                batch.push(task);
+            }
+            !site.chain.is_empty()
+        } else {
+            false
+        };
+        prune(&mut sites, key);
+        more
+    };
+    rise(Unchain::new(batch.take()), launch);
+    more
 }
 
 pub(crate) fn wipe_space(space: NestId) -> usize {

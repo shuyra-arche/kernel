@@ -62,6 +62,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
             frame,
             with_group(token, SignRights::CONSUME, |_, endpoint| {
                 endpoint::consume(endpoint, sequence)?;
+                crate::basis::room::interrupt::consumed(endpoint);
                 Ok(0)
             }),
         ),
@@ -112,6 +113,9 @@ fn with_group<T>(
         return Err(SignFail::Dead);
     }
     let endpoint = endpoint::authorized(&task, token, need)?;
+    if !endpoint.alive() {
+        return Err(SignFail::Dead);
+    }
     operation(&task, &endpoint)
 }
 

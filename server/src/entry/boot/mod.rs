@@ -11,7 +11,7 @@ pub use error::BootError;
 pub use error::MapOperation;
 pub use error::ResourceOperation;
 pub use error::fail;
-pub use init::{bind_external, configure, grant_mmio, init, map_mmio};
+pub use init::{bind_external, configure, grant_interrupt, grant_mmio, init, map_mmio};
 
 use alloc::sync::Arc;
 
@@ -146,7 +146,6 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
     let ledger_len = crate::entry::boot::resources::ledger::size(
         resources.len()
             + crate::entry::boot::resources::CONTROL_ENTRIES
-            + crate::entry::boot::resources::SIGN_ENTRIES
             + crate::entry::boot::resources::CALL_ENTRIES,
     )
     .map_err(|source| BootError::Resources {
@@ -188,20 +187,11 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
     entries
         .try_reserve(
             crate::entry::boot::resources::CONTROL_ENTRIES
-                + crate::entry::boot::resources::SIGN_ENTRIES
                 + crate::entry::boot::resources::CALL_ENTRIES,
         )
         .map_err(|_| BootError::Bootstrap(NestError::OutOfMemory))?;
     entries.extend(
         crate::entry::boot::resources::grant_controls(&bootstrap).map_err(|source| {
-            BootError::Resources {
-                operation: ResourceOperation::Pend,
-                source,
-            }
-        })?,
-    );
-    entries.push(
-        crate::entry::boot::resources::grant_sign(&bootstrap).map_err(|source| {
             BootError::Resources {
                 operation: ResourceOperation::Pend,
                 source,

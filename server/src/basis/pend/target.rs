@@ -203,6 +203,7 @@ impl Target {
         }
     }
     pub(crate) fn release_pend(&self, token: PendId) {
+        crate::basis::room::interrupt::withdraw(token);
         match self {
             Self::None { .. } | Self::Port(_) | Self::Nest { .. } => {}
             Self::Flat(meta) => meta.release_pend(token),
@@ -211,6 +212,7 @@ impl Target {
         }
     }
     pub(crate) fn changed(&self, token: PendId, routing: bool) {
+        crate::basis::room::interrupt::withdraw(token);
         if let Self::Sign(sign) = self {
             if !routing {
                 endpoint::release_authority(sign, token);

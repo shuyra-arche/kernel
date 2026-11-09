@@ -73,3 +73,11 @@ Use `Allocation::at_level` for Cell Create. `cell::split(slot)` and
 `cell::merge(slot)` consume the old SlotId only on success and return its
 replacement. They require an exclusive complete contiguous collection; mapping
 leaf changes remain separate. ABI v5 requires rebuilding consumer capsules.
+
+Hardware dispatch is read from Ledger v7 as an explicit `(View, Sign)` pair. For
+an admitted device this is a Share View Pend plus Sign Pend. Delegate the full
+writable View before the non-distributable Listen/Consume Sign, rolling back View
+on failure before resuming the recipient. Initialize the device, Listen and Consume
+the initial notification; thereafter clear each device cause before consuming its
+sequence. Return/Revoke either Pend closes delivery. Sign uses its existing ABI v5
+calls; consumption does not synchronously wait for controller completion.

@@ -6,15 +6,41 @@ pub struct Entry {
     name: Name,
     kind: ResourceKind,
     handle: usize,
+    view: Option<(crate::model::view::ViewKind, usize)>,
 }
 pub const ENTRY_LEN: usize = Entry::LEN;
-const _: () = assert!(ENTRY_LEN == 32);
+const _: () = assert!(ENTRY_LEN == 40);
 impl Entry {
     /// Encoded ledger entry size; independent of the Rust struct layout.
-    pub const LEN: usize = 32;
+    pub const LEN: usize = 40;
     pub const NONE: Self = Self::new(Name::Page(Page::Dtb), ResourceKind::Share, 0);
     pub const fn new(name: Name, kind: ResourceKind, handle: usize) -> Self {
-        Self { name, kind, handle }
+        Self {
+            name,
+            kind,
+            handle,
+            view: None,
+        }
+    }
+    /// A data-flow View and its control-flow Sign, each independently authorized.
+    pub const fn pair(
+        name: Name,
+        kind: crate::model::view::ViewKind,
+        view: usize,
+        sign: usize,
+    ) -> Self {
+        Self {
+            name,
+            kind: ResourceKind::Sign,
+            handle: sign,
+            view: Some((kind, view)),
+        }
+    }
+    pub const fn dispatch(&self) -> Option<((crate::model::view::ViewKind, usize), usize)> {
+        match self.view {
+            Some(view) => Some((view, self.handle)),
+            None => None,
+        }
     }
     pub const fn name(&self) -> Name {
         self.name
@@ -32,6 +58,14 @@ impl Entry {
         self.name.store(&mut out[..16]);
         out[16] = self.kind as u8;
         out[17..24].fill(0);
+        out[32..40].fill(0);
+        if let Some((kind, handle)) = self.view {
+            out[17] = match kind {
+                crate::model::view::ViewKind::Clone => 1,
+                crate::model::view::ViewKind::Share => 2,
+            };
+            out[32..40].copy_from_slice(&(handle as u64).to_le_bytes());
+        }
         out[24..32].copy_from_slice(&(self.handle as u64).to_le_bytes());
         Some(end)
     }
@@ -40,25 +74,45 @@ impl Entry {
     pub fn fetch_at(bytes: &[u8], at: usize) -> Option<(Self, usize)> {
         let end = at.checked_add(Self::LEN)?;
         let bytes = bytes.get(at..end)?;
-        if bytes[17..24].iter().any(|byte| *byte != 0) {
+        if bytes[18..24].iter().any(|byte| *byte != 0) {
             return None;
         }
+        let name = Name::fetch(&bytes[..16])?;
+        let kind = ResourceKind::of(bytes[16])?;
+        let handle = usize::try_from(u64::from_le_bytes(bytes[24..32].try_into().ok()?)).ok()?;
+        let view_handle =
+            usize::try_from(u64::from_le_bytes(bytes[32..40].try_into().ok()?)).ok()?;
+        let view = match (bytes[17], view_handle) {
+            (0, 0) => None,
+            (1, n) if n != 0 => Some((crate::model::view::ViewKind::Clone, n)),
+            (2, n) if n != 0 => Some((crate::model::view::ViewKind::Share, n)),
+            _ => return None,
+        };
         Some((
-            Self::new(
-                Name::fetch(&bytes[..16])?,
-                ResourceKind::of(bytes[16])?,
-                usize::try_from(u64::from_le_bytes(bytes[24..32].try_into().ok()?)).ok()?,
-            ),
+            Self {
+                name,
+                kind,
+                handle,
+                view,
+            },
             end,
         ))
     }
     pub fn valid(&self) -> bool {
         self.handle != 0
+            && match (self.name, self.view) {
+                (Name::Interrupt { .. }, Some((crate::model::view::ViewKind::Share, view))) => {
+                    view != 0 && view != self.handle
+                }
+                (Name::Interrupt { .. }, _) => false,
+                (_, None) => true,
+                _ => false,
+            }
             && self.kind == self.name.kind()
             && !matches!(self.name, Name::Page(Page::Region(0)))
     }
 }
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 7;
 #[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub version: u32,

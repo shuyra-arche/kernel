@@ -28,6 +28,9 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     for region in external::REGIONS.lock().iter() {
         grant_region(registry, *region)?;
     }
+    if let Some(route) = crate::basis::room::interrupt::external() {
+        route.grants(registry)?;
+    }
     for port in crate::basis::port::PORTS.lock().iter() {
         let root = pend::PendEntry::try_new(
             pend::Target::Port(port.clone()),

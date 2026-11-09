@@ -13,6 +13,14 @@ pub(crate) struct Registry {
 }
 
 impl Registry {
+    pub(crate) fn region(&self, base: usize) -> Option<Arc<PendEntry>> {
+        self.entries
+            .iter()
+            .find(|(name, _)| {
+                *name == Name::Page(kernel_api::boot::ledger::Page::Region(base as u64))
+            })
+            .map(|(_, entry)| entry.clone())
+    }
     pub(crate) fn register(&mut self, name: Name, root: PendEntry) -> Result<(), RegisterError> {
         // Boot grants access to Kernel-owned endpoints, not permission to
         // destroy them or inject synthetic hardware/fault notifications.
@@ -122,8 +130,36 @@ impl Frozen {
                 }
             }
         }
-        for ((name, root), registration) in self.entries.into_iter().zip(registrations) {
-            ledger.push(Entry::new(name, name.kind(), root.token().get()));
+        for (name, root) in &self.entries {
+            let entry = if let Name::Interrupt { .. } = name {
+                let view = root
+                    .target()
+                    .sign()
+                    .and_then(|s| crate::basis::room::interrupt::region(&s))
+                    .and_then(|base| {
+                        self.entries.iter().find(|(n, _)| {
+                            *n == Name::Page(kernel_api::boot::ledger::Page::Region(base as u64))
+                        })
+                    })
+                    .map(|(_, p)| p.token().get());
+                let Some(view) = view else {
+                    return Err(Failure {
+                        reason: PendFail::Denied,
+                        value: self,
+                    });
+                };
+                Entry::pair(
+                    *name,
+                    kernel_api::model::view::ViewKind::Share,
+                    view,
+                    root.token().get(),
+                )
+            } else {
+                Entry::new(*name, name.kind(), root.token().get())
+            };
+            ledger.push(entry);
+        }
+        for registration in registrations {
             registration.publish();
         }
         pend::changed(target);
@@ -162,7 +198,8 @@ fn valid(name: Name, pend_entry: &PendEntry) -> bool {
             .target()
             .kind()
             .is_some_and(|kind| name.kind() == kind.into())
-            || matches!(name, Name::Port(id) if pend_entry.target().port().is_some_and(|p| p.id().get() as u64 == id)))
+            || matches!(name, Name::Port(id) if pend_entry.target().port().is_some_and(|p| p.id().get() as u64 == id))
+            || matches!(name, Name::Interrupt { controller, source } if pend_entry.target().sign().is_some_and(|s| crate::basis::room::interrupt::identifies(&s, controller, source))))
         && pend_entry.alive()
         && pend_entry.sire().is_none()
         && pend_entry.authority().modifiable().is_some()

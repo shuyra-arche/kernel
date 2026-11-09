@@ -63,8 +63,11 @@ fn site_shard(key: WakeKey) -> usize {
 
 type Shard = SpinLock<HashMap<WakeKey, Site>>;
 
+static SHARDS: OnceLock<Box<[Shard]>> = OnceLock::new();
+pub(super) fn existing(key: WakeKey) -> Option<&'static Shard> {
+    SHARDS.get().map(|shards| &shards[site_shard(key)])
+}
 pub(in super::super) fn shard_at(shard: usize) -> &'static Shard {
-    static SHARDS: OnceLock<Box<[Shard]>> = OnceLock::new();
     let arr: &'static [Shard] = SHARDS.get_or_init(|| {
         let mut v: Vec<Shard> = Vec::with_capacity(SITE_SHARDS);
         for _ in 0..SITE_SHARDS {

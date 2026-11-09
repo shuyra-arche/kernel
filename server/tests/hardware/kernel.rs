@@ -40,10 +40,20 @@ fn clock_backends_rearm_deadlines() {
 fn cell_gigabyte_runs_with_contiguous_ram() {
     run("large")
 }
+#[test]
+#[ignore = "requires QEMU virt PLIC and UART"]
+fn hardware_interrupt_sign_delivers_and_rebinds() {
+    run("irq")
+}
+#[test]
+#[ignore = "requires QEMU virt IOMMU, PLIC, UART and EDU"]
+fn hardware_interrupt_sign_coexists_with_iommu() {
+    run("irq-io")
+}
 static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn run(mode: &str) {
     let _run = RUN.lock().unwrap_or_else(|e| e.into_inner());
-    let io = matches!(mode, "io" | "io-exit");
+    let io = matches!(mode, "io" | "io-exit" | "irq-io");
     let context = matches!(mode, "context" | "vector" | "migration");
     let mixed = mode == "migration";
     let vector = mode == "vector";
@@ -70,7 +80,7 @@ fn run(mode: &str) {
     }
     std::fs::create_dir_all(&evidence).unwrap();
     let mut guest_build = Command::new("cargo");
-    if io || context || clock || mode == "large" {
+    if io || context || clock || mode == "large" || mode == "irq" {
         guest_build.args(["+nightly", "build", "--features", mode]);
     } else {
         guest_build.args(["+nightly", "build"]);
@@ -205,6 +215,13 @@ fn run(mode: &str) {
                     &trace_path,
                     &["clock_handoff_send", "clock_handoff_receive"],
                 )
+            } else if mode.starts_with("irq") && harts == 4 {
+                super::context::trace_checkpoints(
+                    &mut command,
+                    &elf,
+                    &trace_path,
+                    &["irq_received"],
+                )
             } else if context && harts == 4 {
                 super::context::trace(&mut command, &elf, &trace_path, vector || mixed, mixed)
             } else {
@@ -282,6 +299,12 @@ fn run(mode: &str) {
                 "task: all tasks exited",
             ] {
                 assert!(log.contains(marker), "{name}: {log}");
+            }
+            if mode.starts_with("irq") {
+                if !symbols.is_empty() {
+                    super::context::verify(&trace_path, &symbols, false);
+                }
+                assert!(log.contains("PASS interrupt uart=1 retained=1 repeated=24 isolated=1 stale=1 death=1 revoke=1 rebind=1 pair=1 observers=6 forward=1 masked=1"), "{name}: {log}");
             }
             if mode == "large" {
                 assert!(

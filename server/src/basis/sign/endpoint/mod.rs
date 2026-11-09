@@ -24,6 +24,7 @@ pub(crate) use wait::AwaitWait;
 const MAX: usize = 1024;
 
 pub struct Endpoint {
+    consumed: core::sync::atomic::AtomicU64,
     state: SpinLock<State>,
     pub(crate) id: usize,
     life: Arc<Anchor>,
@@ -35,8 +36,15 @@ fn key(meta: &Endpoint) -> WakeKey {
     WakeKey::Sign { id: meta.id }
 }
 impl Endpoint {
+    pub(crate) fn consumed(&self) -> u64 {
+        self.consumed.load(Ordering::Acquire)
+    }
+    pub(crate) fn sequence(&self) -> Option<u64> {
+        self.state.lock().sequence()
+    }
     pub(crate) fn try_new(owner: TaskId) -> Result<Arc<Self>, crate::basis::nest::NestError> {
         Arc::try_new(Self {
+            consumed: core::sync::atomic::AtomicU64::new(0),
             state: SpinLock::new_level(Level::L3, State::new()),
             id: {
                 static NEXT: crate::basis::name::Serial =
@@ -201,9 +209,28 @@ pub(crate) fn trigger(meta: &Endpoint) -> Result<(), SignFail> {
     sign::knock(key(meta), &meta.life());
     Ok(())
 }
+/// Publish retained state separately from notification propagation. A producer
+/// may defer announce until outside its bounded hardware entry work.
+pub(crate) fn publish(meta: &Endpoint) -> Result<u64, SignFail> {
+    let _commit = crate::basis::commit();
+    apply(meta, Event::Trigger)?;
+    Ok(meta.sequence().expect("published event"))
+}
+pub(crate) fn announce(meta: &Endpoint) -> bool {
+    sign::signal_batch(trigger_key(meta)) | sign::signal_batch(key(meta))
+}
+/// Cancellation is not successful consumption and never writes a receipt.
+pub(crate) fn discard(meta: &Endpoint) {
+    let _commit = crate::basis::commit();
+    if let Some(sequence) = meta.sequence() {
+        let _ = apply(meta, Event::Consume(sequence));
+    }
+}
 pub(crate) fn consume(meta: &Endpoint, sequence: u64) -> Result<(), SignFail> {
     let _commit = crate::basis::commit();
-    apply(meta, Event::Consume(sequence))
+    apply(meta, Event::Consume(sequence))?;
+    meta.consumed.store(sequence, Ordering::Release);
+    Ok(())
 }
 fn apply(meta: &Endpoint, event: Event) -> Result<(), SignFail> {
     let mut state = meta.state.lock();
@@ -216,6 +243,7 @@ fn apply(meta: &Endpoint, event: Event) -> Result<(), SignFail> {
 }
 
 pub(crate) fn release_authority(meta: &Endpoint, permit: PendId) {
+    let _commit = crate::basis::commit();
     while meta
         .routes
         .lock()
@@ -246,21 +274,13 @@ pub(crate) fn authorized(
     if !record.permits(kernel_api::model::pend::Operations::Sign(rights)) {
         return Err(SignFail::Denied);
     }
-    record.target().sign().ok_or(SignFail::Denied)
-}
-
-pub(crate) fn grant(
-    actor: &Task,
-    endpoint: Arc<Endpoint>,
-    rights: kernel_api::model::sign::SignRights,
-) -> Result<PendId, kernel_api::abi::call::pend::PendFail> {
-    use crate::basis::pend::{self, PendEntry, Target};
-    use kernel_api::model::{identity::Mark, modifiable::Modifiable, pend::Operations};
-    let record = PendEntry::try_new(Target::Sign(endpoint), Mark::NONE, Modifiable::No, None)?;
-    let mut limits = record.authority().limits();
-    limits.operations = Operations::Sign(rights);
-    record.narrow(limits, None)?;
-    let token = record.token();
-    pend::insert(actor, record)?;
-    Ok(token)
+    let endpoint = record.target().sign().ok_or(SignFail::Denied)?;
+    if rights.intersects(
+        kernel_api::model::sign::SignRights::CONSUME | kernel_api::model::sign::SignRights::LISTEN,
+    ) && record.permits(kernel_api::model::pend::Operations::Sign(
+        kernel_api::model::sign::SignRights::CONSUME,
+    )) {
+        crate::basis::room::interrupt::authorize(&endpoint, actor, token)?;
+    }
+    Ok(endpoint)
 }

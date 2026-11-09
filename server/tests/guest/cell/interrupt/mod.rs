@@ -1,0 +1,383 @@
+//! QEMU virt UART is a real level interrupt, not a software Sign trigger.
+use core::{
+    fmt::Write,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
+use kernel_api::{
+    abi::reply::SignReply,
+    address::VirtAddr,
+    boot::{
+        args,
+        ledger::{Entries, Name},
+    },
+    model::{
+        identity::{Mark, PendId, TaskId},
+        modifiable::Modifiable,
+        pend::{AccordRequest, AccordTarget, Distributable, Limits, Operations, PendRange},
+        sign::SignRights,
+        unit::UnitTarget,
+        wait::Wait,
+    },
+};
+use kernel_client::call::{pend, room, share_view, sign, unit};
+static LOAD_STOP: AtomicBool = AtomicBool::new(false);
+static LOAD_ENTERED: AtomicUsize = AtomicUsize::new(0);
+struct Load([TaskId; 4]);
+impl Load {
+    fn start() -> Self {
+        LOAD_STOP.store(false, Ordering::Release);
+        LOAD_ENTERED.store(0, Ordering::Release);
+        let tasks = core::array::from_fn(|_| {
+            let task = super::lifecycle::spawn(load_worker as *const () as usize);
+            unit::resume(UnitTarget::Task(task)).unwrap();
+            task
+        });
+        let deadline = room::clock() + 3_000_000_000;
+        while LOAD_ENTERED.load(Ordering::Acquire) != tasks.len() {
+            assert!(room::clock() < deadline, "load workers did not start");
+            room::yield_();
+        }
+        Self(tasks)
+    }
+    fn finish(self) {
+        LOAD_STOP.store(true, Ordering::Release);
+        for task in self.0 {
+            assert!(super::lifecycle::wait_task(task));
+            assert_eq!(super::lifecycle::result(task), (1, 0));
+            super::lifecycle::delete(task);
+        }
+    }
+}
+extern "C" fn load_worker() -> ! {
+    LOAD_ENTERED.fetch_add(1, Ordering::Release);
+    while !LOAD_STOP.load(Ordering::Acquire) {
+        room::yield_();
+    }
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
+
+static UART: AtomicUsize = AtomicUsize::new(0);
+static TOKEN: AtomicUsize = AtomicUsize::new(0);
+static VIEW: AtomicUsize = AtomicUsize::new(0);
+static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+static OBSERVER: AtomicUsize = AtomicUsize::new(0);
+static OBSERVED: AtomicBool = AtomicBool::new(false);
+extern "C" fn observer() -> ! {
+    let token = PendId::mint(OBSERVER.load(Ordering::Acquire));
+    assert!(matches!(
+        sign::listen(token, Wait::Infinite).unwrap(),
+        SignReply::Triggered { .. }
+    ));
+    OBSERVED.store(true, Ordering::Release);
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
+static ENTERED: AtomicUsize = AtomicUsize::new(0);
+static WATCH_TOKEN: AtomicUsize = AtomicUsize::new(0);
+static WATCH_ENTERED: AtomicUsize = AtomicUsize::new(0);
+extern "C" fn watch() -> ! {
+    let token = PendId::mint(WATCH_TOKEN.load(Ordering::Acquire));
+    WATCH_ENTERED.fetch_add(1, Ordering::Release);
+    assert!(matches!(
+        sign::listen(token, deadline()).unwrap(),
+        SignReply::Triggered { .. }
+    ));
+    assert!(sign::consume(token, 1).is_err());
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
+fn write(offset: usize, byte: u8) {
+    unsafe {
+        core::arch::asm!("fence iorw,iorw", options(nostack));
+        ((UART.load(Ordering::Acquire) + offset) as *mut u8).write_volatile(byte);
+        core::arch::asm!("fence iorw,iorw", options(nostack));
+    }
+}
+fn read(offset: usize) -> u8 {
+    unsafe {
+        core::arch::asm!("fence iorw,iorw", options(nostack));
+        ((UART.load(Ordering::Acquire) + offset) as *const u8).read_volatile()
+    }
+}
+#[unsafe(no_mangle)]
+#[inline(never)]
+extern "C" fn irq_received() {
+    core::hint::black_box(());
+}
+#[track_caller]
+fn receive(token: PendId, wait: Wait) -> u64 {
+    let SignReply::Triggered { sequence } = sign::listen(token, wait).unwrap() else {
+        panic!("UART IRQ missing")
+    };
+    irq_received();
+    sequence
+}
+fn deadline() -> Wait {
+    Wait::At(room::clock().saturating_add(2_000_000_000))
+}
+fn accord(
+    root: PendId,
+    target: AccordTarget,
+    operations: Operations,
+    modifiable: Modifiable,
+) -> Option<PendId> {
+    let bytes = AccordRequest {
+        src: root,
+        target,
+        mark: Mark::NONE,
+        limits: Limits {
+            operations,
+            modifiable,
+            distributable: Distributable::No,
+            range: PendRange::Inherit,
+        },
+    }
+    .to_bytes();
+    pend::accord(super::ptr(&bytes)).ok()
+}
+fn sign_branch(root: PendId, target: AccordTarget) -> PendId {
+    accord(
+        root,
+        target,
+        Operations::Sign(SignRights::LISTEN | SignRights::CONSUME),
+        Modifiable::No,
+    )
+    .unwrap()
+}
+fn pair(view: PendId, sign: PendId, task: TaskId) -> (PendId, PendId) {
+    let view = accord(
+        view,
+        AccordTarget::Task(task),
+        Operations::Share(
+            kernel_api::model::pend::ShareRights::OPEN | kernel_api::model::pend::ShareRights::SHUT,
+        ),
+        Modifiable::Yes,
+    )
+    .unwrap();
+    let Some(sign) = accord(
+        sign,
+        AccordTarget::Task(task),
+        Operations::Sign(SignRights::LISTEN | SignRights::CONSUME),
+        Modifiable::No,
+    ) else {
+        pend::revoke(task, view).unwrap();
+        panic!("dispatch rolled back")
+    };
+    (view, sign)
+}
+fn open(view: PendId) {
+    let (address, _) = share_view::open(view).unwrap();
+    UART.store(address.get(), Ordering::Release);
+    write(1, 0);
+}
+fn initial(sign: PendId) {
+    let SignReply::Triggered { sequence } = sign::listen(sign, deadline()).unwrap() else {
+        panic!("initial device inspection missing")
+    };
+    sign::consume(sign, sequence).unwrap();
+}
+extern "C" fn dying_driver() -> ! {
+    let token = PendId::mint(TOKEN.load(Ordering::Acquire));
+    open(PendId::mint(VIEW.load(Ordering::Acquire)));
+    initial(token);
+    write(1, 2);
+    let sequence = receive(token, deadline());
+    SEQUENCE.store(sequence as usize, Ordering::Release);
+    // Exit with device asserted and controller claim held.
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
+extern "C" fn revoked_driver() -> ! {
+    let token = PendId::mint(TOKEN.load(Ordering::Acquire));
+    open(PendId::mint(VIEW.load(Ordering::Acquire)));
+    initial(token);
+    ENTERED.store(1, Ordering::Release);
+    assert!(sign::listen(token, deadline()).is_err());
+    unit::exit(0, 0, VirtAddr::new(0), 0)
+}
+pub(super) fn run(at: usize, count: usize) {
+    assert_eq!(count, args::LEN);
+    let words = unsafe { core::slice::from_raw_parts(at as *const usize, count) };
+    let ledger = Entries::new(unsafe {
+        core::slice::from_raw_parts(words[args::LEDGER] as *const u8, words[args::LEDGER_LEN])
+    })
+    .unwrap();
+    let ((kind, view), sign) = ledger
+        .find(Name::Interrupt {
+            controller: 0xc000000,
+            source: 10,
+        })
+        .expect("UART dispatch")
+        .dispatch()
+        .expect("(View, Sign)");
+    assert_eq!(kind, kernel_api::model::view::ViewKind::Share);
+    let page = PendId::mint(view);
+    let root = PendId::mint(sign);
+    open(page);
+    assert_ne!(read(5) & 0x20, 0);
+    assert!(sign::listen(root, Wait::Poll).is_err());
+    let load = Load::start();
+    let token = sign_branch(root, AccordTarget::Caller);
+    assert!(
+        accord(
+            root,
+            AccordTarget::Caller,
+            Operations::Sign(SignRights::LISTEN | SignRights::CONSUME),
+            Modifiable::No
+        )
+        .is_none()
+    );
+    assert!(sign::trigger(token).is_err());
+    // Assert before the initial receipt: unmask must expose an already-pending
+    // source without any subsequent device write creating another edge.
+    write(1, 2);
+    initial(token);
+    let pending = receive(token, deadline());
+    write(1, 0);
+    sign::consume(token, pending).unwrap();
+    // More listeners than a notification batch must all progress. Observation
+    // and forwarding preserve pending work; only the processing branch consumes.
+    let watchers: [TaskId; 6] = core::array::from_fn(|index| {
+        let task = super::lifecycle::spawn(watch as *const () as usize);
+        let observer = accord(
+            root,
+            AccordTarget::Task(task),
+            Operations::Sign(SignRights::LISTEN),
+            Modifiable::No,
+        )
+        .unwrap();
+        WATCH_TOKEN.store(observer.get(), Ordering::Release);
+        unit::resume(UnitTarget::Task(task)).unwrap();
+        let until = room::clock() + 2_000_000_000;
+        while WATCH_ENTERED.load(Ordering::Acquire) != index + 1 {
+            assert!(room::clock() < until);
+            room::yield_();
+        }
+        task
+    });
+    room::sleep_until(room::clock() + 2_000_000).unwrap();
+    let routed = sign::create(crate::license::get()).unwrap();
+    let source = kernel_api::model::sign::SignSource::Sign { token };
+    sign::attach(routed, source, 0).unwrap();
+    write(1, 2);
+    assert_eq!(
+        sign::listen(routed, deadline()).unwrap(),
+        SignReply::Source { source, fail: None }
+    );
+    let observed = receive(token, deadline());
+    for task in watchers {
+        assert!(super::lifecycle::wait_task(task));
+        assert_eq!(super::lifecycle::result(task), (1, 0));
+        super::lifecycle::delete(task);
+    }
+    write(1, 0);
+    sign::consume(token, observed).unwrap();
+    sign::delete(routed).unwrap();
+    pend::return_(routed).unwrap();
+    let unrelated = sign::create(crate::license::get()).unwrap();
+    let observer_task = super::lifecycle::spawn(observer as *const () as usize);
+    let observer_token = accord(
+        unrelated,
+        AccordTarget::Task(observer_task),
+        Operations::Sign(SignRights::LISTEN),
+        Modifiable::No,
+    )
+    .unwrap();
+    OBSERVER.store(observer_token.get(), Ordering::Release);
+    unit::resume(UnitTarget::Task(observer_task)).unwrap();
+    let mut previous = 0;
+    for turn in 0..24 {
+        write(1, 2);
+        if turn == 0 {
+            room::sleep_until(room::clock() + 2_000_000).unwrap();
+        }
+        let sequence = receive(token, if turn == 0 { Wait::Poll } else { deadline() });
+        assert!(sequence > previous);
+        assert_eq!(
+            sign::listen(token, Wait::Poll).unwrap(),
+            SignReply::Triggered { sequence }
+        );
+        assert_eq!(
+            sign::listen(unrelated, Wait::Poll).unwrap(),
+            SignReply::Pending
+        );
+        assert_eq!(read(2) & 0x0f, 2, "hardware THRE cause");
+        write(1, 0);
+        assert!(sign::consume(token, previous).is_err());
+        sign::consume(token, sequence).unwrap();
+        assert!(sign::consume(token, sequence).is_err());
+        previous = sequence;
+    }
+    write(1, 2);
+    let held = receive(token, deadline());
+    write(1, 0);
+    write(1, 2);
+    sign::consume(token, held).unwrap();
+    let repeated = receive(token, deadline());
+    assert!(repeated > held);
+    write(1, 0);
+    sign::consume(token, repeated).unwrap();
+    pend::return_(token).unwrap();
+    assert!(!OBSERVED.load(Ordering::Acquire));
+    sign::trigger(unrelated).unwrap();
+    assert!(super::lifecycle::wait_task(observer_task));
+    assert_eq!(super::lifecycle::result(observer_task), (1, 0));
+    super::lifecycle::delete(observer_task);
+    assert!(OBSERVED.load(Ordering::Acquire));
+    sign::delete(unrelated).unwrap();
+    pend::return_(unrelated).unwrap();
+    let task = super::lifecycle::spawn(dying_driver as *const () as usize);
+    // Sign cannot be handed out before the matching View exists in this Task.
+    assert!(
+        accord(
+            root,
+            AccordTarget::Task(task),
+            Operations::Sign(SignRights::LISTEN | SignRights::CONSUME),
+            Modifiable::No
+        )
+        .is_none()
+    );
+    let (view, branch) = pair(page, root, task);
+    VIEW.store(view.get(), Ordering::Release);
+    TOKEN.store(branch.get(), Ordering::Release);
+    unit::resume(UnitTarget::Task(task)).unwrap();
+    assert!(super::lifecycle::wait_task(task));
+    assert_eq!(super::lifecycle::result(task), (1, 0));
+    super::lifecycle::delete(task);
+    open(page);
+    let replacement = sign_branch(root, AccordTarget::Caller);
+    assert!(sign::consume(replacement, SEQUENCE.load(Ordering::Acquire) as u64).is_err());
+    initial(replacement);
+    write(1, 2);
+    let sequence = receive(replacement, deadline());
+    write(1, 0);
+    sign::consume(replacement, sequence).unwrap();
+    pend::return_(replacement).unwrap();
+    // Independently revoking either half closes the binding and wakes its waiter.
+    for revoke_view in [false, true] {
+        ENTERED.store(0, Ordering::Release);
+        let task = super::lifecycle::spawn(revoked_driver as *const () as usize);
+        let (view, branch) = pair(page, root, task);
+        VIEW.store(view.get(), Ordering::Release);
+        TOKEN.store(branch.get(), Ordering::Release);
+        unit::resume(UnitTarget::Task(task)).unwrap();
+        let until = room::clock() + 2_000_000_000;
+        while ENTERED.load(Ordering::Acquire) == 0 {
+            assert!(room::clock() < until);
+            room::yield_();
+        }
+        room::sleep_until(room::clock() + 2_000_000).unwrap();
+        pend::revoke(task, if revoke_view { view } else { branch }).unwrap();
+        assert!(super::lifecycle::wait_task(task));
+        assert_eq!(super::lifecycle::result(task), (1, 0));
+        super::lifecycle::delete(task);
+        open(page);
+        let next = sign_branch(root, AccordTarget::Caller);
+        initial(next);
+        write(1, 2);
+        let sequence = receive(next, deadline());
+        write(1, 0);
+        sign::consume(next, sequence).unwrap();
+        pend::return_(next).unwrap();
+    }
+    load.finish();
+    share_view::shut(page).unwrap();
+    writeln!(super::Console, "PASS interrupt uart=1 retained=1 repeated=24 isolated=1 stale=1 death=1 revoke=1 rebind=1 pair=1 observers=6 forward=1 masked=1").unwrap();
+}
