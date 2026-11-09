@@ -115,10 +115,15 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
     }
     fn validate(&self, p: Projection) -> Result<(), HardwareError> {
         if self.capacity() == 0
-            || self
-                .leaves
-                .iter()
-                .any(|leaf| leaf.projection.iova == p.iova)
+            || self.leaves.iter().any(|leaf| {
+                leaf.projection.iova.get() < p.iova.get().saturating_add(p.size)
+                    && p.iova.get()
+                        < leaf
+                            .projection
+                            .iova
+                            .get()
+                            .saturating_add(leaf.projection.size)
+            })
         {
             return Err(HardwareError::Unavailable);
         }

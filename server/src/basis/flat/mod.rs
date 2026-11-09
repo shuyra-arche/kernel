@@ -6,6 +6,8 @@
 pub(crate) mod authority;
 mod error;
 mod range;
+mod shape;
+use kernel_api::model::cell::CellLevel;
 pub(crate) mod sharing;
 mod storage;
 pub(crate) mod transaction;
@@ -43,6 +45,7 @@ pub struct Flat {
     /// Recipient of future allocations; existing Cells retain their own owner.
     allocation_owner: Owner,
     page_count: PageCount,
+    level: CellLevel,
     state: SpinLock<FlatState>,
 }
 
@@ -54,6 +57,7 @@ impl Flat {
             FlatSource::Managed(Vec::new()),
             true,
             owner,
+            allocation.level,
         )
     }
 
@@ -73,7 +77,13 @@ impl Flat {
             return Err(FlatError::OutOfRange);
         }
         let slots = slot::admit(page_count.get(), cells)?;
-        Self::new(page_count, FlatSource::Managed(slots), false, owner)
+        Self::new(
+            page_count,
+            FlatSource::Managed(slots),
+            false,
+            owner,
+            CellLevel::BASE,
+        )
     }
 
     /// 保留外部借用物理区间：不分配数据页、不清零、不按 RAM 回收；也不可迁移。
@@ -84,6 +94,7 @@ impl Flat {
             FlatSource::Borrowed(region),
             false,
             Owner::Kernel,
+            CellLevel::BASE,
         )
     }
 
@@ -92,6 +103,7 @@ impl Flat {
         source: FlatSource,
         transferable: bool,
         allocation_owner: Owner,
+        level: CellLevel,
     ) -> Result<Arc<Self>, FlatError> {
         static NEXT: crate::basis::name::Serial =
             crate::basis::name::Serial::new(1, isize::MAX as usize);
@@ -102,6 +114,7 @@ impl Flat {
         Arc::try_new(Self {
             id,
             allocation_owner,
+            level,
             page_count,
             state: SpinLock::new_level(Level::Flat, FlatState::new(source, transferable)),
         })
@@ -126,6 +139,13 @@ impl Flat {
         self.page_count
     }
 
+    pub fn level(&self) -> CellLevel {
+        self.level
+    }
+    pub fn grain(&self) -> usize {
+        self.level.pages().unwrap()
+    }
+
     /// 整段来源。
     pub fn whole(self: &Arc<Self>) -> FlatRange {
         FlatRange::new(self.clone(), PageIndex::ZERO, self.page_count())
@@ -137,6 +157,9 @@ impl Flat {
         index: PageIndex,
         count: PageCount,
     ) -> Result<FlatRange, FlatError> {
+        if !index.get().is_multiple_of(self.grain()) || !count.get().is_multiple_of(self.grain()) {
+            return Err(FlatError::NotAligned);
+        }
         let end = index
             .get()
             .checked_add(count.get())
@@ -163,7 +186,7 @@ impl Flat {
                 let FlatSource::Managed(slots) = &state.source else {
                     return false;
                 };
-                range.page_count().get() == 1 && slots.iter().any(|(index, slot)| {
+                range.page_count().get() == self.grain() && slots.iter().any(|(index, slot)| {
                     *index == range.index()
                         && matches!(slot, Slot::Resident(page) if Arc::ptr_eq(page, change.page()))
                 })
@@ -230,15 +253,18 @@ impl Flat {
                     Slot::Moving { .. } | Slot::Reserved { .. } => return Err(FlatError::Busy),
                     Slot::Resident(_) => {}
                 }
-                page += 1;
+                page += self.grain();
                 at += 1;
                 continue;
             }
             slots.try_reserve(1).map_err(|_| FlatError::OutOfMemory)?;
-            let cell = Arc::try_new(allocate_cell(self.allocation_owner.clone())?)
-                .map_err(|_| FlatError::OutOfMemory)?;
+            let cell = Arc::try_new(crate::basis::cell::allocate_level(
+                self.allocation_owner.clone(),
+                self.level,
+            )?)
+            .map_err(|_| FlatError::OutOfMemory)?;
             slots.insert(at, (PageIndex::new(page), Slot::Resident(cell)));
-            page += 1;
+            page += self.grain();
             at += 1;
         }
         Ok(())
@@ -285,6 +311,7 @@ impl Flat {
         if page.get() >= self.page_count.get() {
             return Err(FlatError::OutOfRange);
         }
+        let page = PageIndex::new(page.get() / self.grain() * self.grain());
         let guard = self.state.lock();
         match &guard.source {
             FlatSource::Borrowed(_) => Ok(true),
@@ -318,12 +345,15 @@ impl Flat {
                 Ok(PhysAddr::from_raw(address))
             }
             FlatSource::Managed(slots) => {
-                let (at, present) = slot::spot(slots, page);
+                let head = page.get() / self.grain() * self.grain();
+                let (at, present) = slot::spot(slots, PageIndex::new(head));
                 if !present {
                     return Err(FlatError::OutOfRange);
                 }
                 match &slots[at].1 {
-                    Slot::Resident(cell) => Ok(PhysAddr::from_raw(cell.physical_address())),
+                    Slot::Resident(cell) => Ok(PhysAddr::from_raw(
+                        cell.physical_address() + (page.get() - head) * PAGE_SIZE,
+                    )),
                     // 承载已移出：这是页槽自己的状态，不抹成“越界”。
                     Slot::Missing => Err(FlatError::Missing),
                     // 在途事务持有/预留的页没有可交出去的物理坐标。
@@ -337,9 +367,10 @@ impl Flat {
 /// 来源的物理分配约束：逻辑页数与每页起址的对齐下界。
 ///
 /// 对齐只约束每个页地址的下界，不表示各页物理连续；不支持的约束在构造时明确拒绝，
-/// 不接受后忽略。PR1 只接受页大小对齐。
+/// 不接受后忽略。每个 Cell 按层级连续分配。
 pub struct Allocation {
     pages: PageCount,
+    level: CellLevel,
 }
 
 impl Allocation {
@@ -348,9 +379,22 @@ impl Allocation {
         if align != PAGE_SIZE {
             return Err(FlatError::NotAligned);
         }
-        Ok(Self { pages })
+        Ok(Self {
+            pages,
+            level: CellLevel::BASE,
+        })
     }
 
+    pub fn at_level(pages: usize, level: CellLevel) -> Result<Self, FlatError> {
+        let pages = PageCount::new(pages).ok_or(FlatError::NotAligned)?;
+        if !pages
+            .get()
+            .is_multiple_of(level.pages().ok_or(FlatError::NotAligned)?)
+        {
+            return Err(FlatError::NotAligned);
+        }
+        Ok(Self { pages, level })
+    }
     pub fn page_count(&self) -> PageCount {
         self.pages
     }

@@ -13,9 +13,12 @@ pub(in super::super) fn admit(
     cells: Vec<(PageIndex, Page)>,
 ) -> Result<Vec<(PageIndex, Slot)>, FlatError> {
     let mut previous = None;
-    for (index, _) in &cells {
+    for (index, cell) in &cells {
         let page = index.get();
-        if page >= page_count || previous.is_some_and(|previous| previous >= page) {
+        if cell.pages() != 1
+            || page >= page_count
+            || previous.is_some_and(|previous| previous >= page)
+        {
             return Err(FlatError::OutOfRange);
         }
         previous = Some(page);

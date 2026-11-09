@@ -111,3 +111,28 @@ pub fn init() -> InitResult<()> {
     })()
     .annotate("initializing frame allocator")
 }
+
+/// Repartition exclusive receipts without changing the allocator's free blocks.
+/// # Safety
+/// Old and new aligned receipts must cover the same live, contiguous allocation union.
+pub(crate) unsafe fn repartition(
+    base: usize,
+    old: kernel_api::model::cell::CellLevel,
+    old_count: usize,
+    new: kernel_api::model::cell::CellLevel,
+    new_count: usize,
+) {
+    instance().inner.with(|frame| {
+        for index in 0..old_count {
+            crate::metal::allocator::statistics::record_frame_give(
+                frame.frame_index(base + index * old.bytes().unwrap()),
+            );
+        }
+        for index in 0..new_count {
+            crate::metal::allocator::statistics::record_frame_take(
+                frame.frame_index(base + index * new.bytes().unwrap()),
+                new.get() * 9,
+            );
+        }
+    });
+}

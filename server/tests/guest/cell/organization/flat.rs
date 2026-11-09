@@ -42,8 +42,8 @@ fn accessible(reference: SlotId) -> bool {
     .is_ok()
 }
 pub(super) fn run() {
-    assert!(flat::create(PendId::NONE, 4096, 4096).is_err());
-    let root = flat::create(crate::license::get(), 8192, 4096).unwrap();
+    assert!(flat::create(PendId::NONE, 4096, 4096, 0).is_err());
+    let root = flat::create(crate::license::get(), 8192, 4096, 0).unwrap();
     assert_eq!(inspect(root).count, 2);
     let identity = inspect(root).id;
     let original = flat::slice(root, 0, 2).unwrap();

@@ -96,11 +96,17 @@ impl<R: Registers> Domain<R> {
         let cap = engine.registers.read64(CAP);
         let pas = (cap >> 32) & 63;
         Self::supports_device(engine, device)?;
-        if projection.size != 4096
+        if !matches!(projection.size, 4096 | 2097152)
             || projection.iova.get() >= (1usize << 38)
-            || !projection.iova.get().is_multiple_of(4096)
-            || !projection.physical.is_multiple_of(4096)
+            || !projection.iova.get().is_multiple_of(projection.size)
+            || !projection.physical.is_multiple_of(projection.size)
             || !(12..=56).contains(&pas)
+        {
+            return Err(EngineError::Address);
+        }
+        if (projection.physical as u64)
+            .checked_add(projection.size as u64 - 1)
+            .is_none_or(|last| last >= 1u64 << pas)
         {
             return Err(EngineError::Address);
         }
@@ -262,16 +268,18 @@ impl<R: Registers> Domain<R> {
         Ok(())
     }
     fn write_leaf(&self, p: Projection) {
-        self.write(
-            3,
-            (p.iova.get() >> 12) & 511,
-            ((p.physical as u64 >> 12) << 10)
-                | 1
-                | 2
-                | 16
-                | 64
-                | if p.modifiable { 4 | 128 } else { 0 },
-        );
+        for offset in (0..p.size).step_by(4096) {
+            self.write(
+                3,
+                ((p.iova.get() + offset) >> 12) & 511,
+                (((p.physical + offset) as u64 >> 12) << 10)
+                    | 1
+                    | 2
+                    | 16
+                    | 64
+                    | if p.modifiable { 4 | 128 } else { 0 },
+            );
+        }
     }
     pub(super) fn publish_leaf(
         &mut self,
@@ -286,7 +294,9 @@ impl<R: Registers> Domain<R> {
         p: Projection,
     ) -> Result<crate::metal::iommu::BatchId, EngineError> {
         self.validate_leaf(p)?;
-        self.write(3, (p.iova.get() >> 12) & 511, 0);
+        for offset in (0..p.size).step_by(4096) {
+            self.write(3, ((p.iova.get() + offset) >> 12) & 511, 0);
+        }
         self.engine.invalidate()
     }
     pub(super) fn observe_leaf(

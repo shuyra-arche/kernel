@@ -40,6 +40,9 @@ mod basis {
 }
 
 mod admission;
+#[path = "../name/allocation.rs"]
+mod allocation;
+mod levels;
 mod ownership;
 mod retention;
 mod support;

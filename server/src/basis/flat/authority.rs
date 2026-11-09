@@ -22,14 +22,20 @@ pub(crate) fn create(
     license: PendId,
     size: usize,
     align: usize,
+    level: usize,
 ) -> Result<PendId, PendFail> {
     let _serial = task.pend.lock();
     pend::access::license(task, license, CreationRights::FLAT)?;
-    let allocation =
-        kernel_api::model::cell::Allocation::new(size, align).ok_or(PendFail::NotAligned)?;
+    let level = kernel_api::model::cell::CellLevel::new(level).ok_or(PendFail::NotAligned)?;
+    if level.get() >= crate::metal::mmu::mode::levels()
+        || align != level.bytes().ok_or(PendFail::NotAligned)?
+    {
+        return Err(PendFail::NotAligned);
+    }
+    let allocation = kernel_api::model::cell::Allocation { size, align, level };
     let size = allocation.bytes().ok_or(PendFail::NotAligned)?;
     let allocation =
-        super::Allocation::new(size / PAGE_SIZE, align).map_err(|_| PendFail::NotAligned)?;
+        super::Allocation::at_level(size / PAGE_SIZE, level).map_err(|_| PendFail::NotAligned)?;
     let range = super::Flat::acquire(task.ident.team.cells.clone(), allocation)
         .map_err(|_| PendFail::OutOfMemory)?
         .whole();
@@ -63,6 +69,7 @@ pub(crate) fn inspect(task: &Arc<Task>, token: PendId) -> Result<FlatInfo, PendF
         .window()
         .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
     Ok(FlatInfo {
+        level: meta.source().level(),
         id: meta.source().source_id(),
         offset: offset.get(),
         count: count.get(),
@@ -100,6 +107,9 @@ pub(crate) fn slice(
     let (offset, count) =
         pend::Window::Parent(kernel_api::model::pend::PendRange::Pages { offset, count })
             .resolve(parent)?;
+    meta.source()
+        .range(offset, count)
+        .map_err(|_| PendFail::NotAligned)?;
     let source = meta.authorization().ok_or(PendFail::Denied)?;
     source.ensure_internal()?;
     task.pend.references.insert(

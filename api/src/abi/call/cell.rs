@@ -77,6 +77,18 @@ pub mod operations {
         pub position: super::VirtAddr,
         pub out: super::VirtAddr,
     }
+    /// Split an exclusive, fully materialized Slot collection into its child level.
+    #[operation(slot = 8, output = crate::model::cell::SlotId, error = CellFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Split {
+        pub slot: crate::model::cell::SlotId,
+    }
+    /// Merge an exclusive, contiguous Slot collection into its parent level.
+    #[operation(slot = 9, output = crate::model::cell::SlotId, error = CellFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Merge {
+        pub slot: crate::model::cell::SlotId,
+    }
 }
 pub use operations::CellCall;
 pub use operations::CellFail;

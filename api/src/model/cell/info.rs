@@ -16,6 +16,7 @@ pub enum CellState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellInfo {
+    pub level: super::CellLevel,
     pub generation: u64,
     pub state: CellState,
     pub page: u64,
@@ -39,7 +40,7 @@ impl CellInfo {
                 self.address.get(),
                 self.fault_cause as usize,
                 self.fault_address as usize,
-                0,
+                self.level.get(),
             ],
             &mut out,
         );
@@ -54,12 +55,13 @@ impl CellInfo {
             address,
             fault_cause,
             fault_address,
-            reserved,
+            level,
         ] = fetch_words(bytes)?;
-        if flags > 3 || reserved != 0 {
+        if flags > 3 {
             return None;
         }
         Some(Self {
+            level: super::CellLevel::new(level)?,
             generation: generation as u64,
             state: match state {
                 0 => CellState::Vacant,

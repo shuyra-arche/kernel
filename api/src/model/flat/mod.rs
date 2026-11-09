@@ -29,24 +29,29 @@ impl Wire for FlatId {
 /// Effective Flat window; neither the identity nor these coordinates authorize access.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FlatInfo {
+    pub level: crate::model::cell::CellLevel,
     pub id: FlatId,
     pub offset: usize,
     pub count: usize,
 }
 impl FlatInfo {
-    pub const WIDTH: usize = 24;
+    pub const WIDTH: usize = 32;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut b = [0; Self::WIDTH];
-        crate::abi::layout::store_words([self.id.get(), self.offset, self.count], &mut b);
+        crate::abi::layout::store_words(
+            [self.id.get(), self.offset, self.count, self.level.get()],
+            &mut b,
+        );
         b
     }
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        let [id, offset, count] = crate::abi::layout::fetch_words(b)?;
+        let [id, offset, count, level] = crate::abi::layout::fetch_words(b)?;
         if count == 0 || offset.checked_add(count).is_none() {
             return None;
         }
         Some(Self {
             id: FlatId::new(id)?,
+            level: crate::model::cell::CellLevel::new(level)?,
             offset,
             count,
         })

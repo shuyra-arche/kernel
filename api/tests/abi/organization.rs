@@ -24,6 +24,7 @@ fn runtime_calls_keep_distinct_domains_and_reject_bad_kinds() {
         license,
         size: 8192,
         align: 4096,
+        level: 0,
     };
     assert_eq!(flat::Create::SLOT, abi::PREFIX | (12 << 32));
     assert_eq!(
@@ -31,7 +32,8 @@ fn runtime_calls_keep_distinct_domains_and_reject_bad_kinds() {
         EnvCall::Flat(FlatCall::Create {
             license,
             size: 8192,
-            align: 4096
+            align: 4096,
+            level: 0,
         })
     );
     let create = nest::Create {
@@ -64,6 +66,7 @@ fn runtime_calls_keep_distinct_domains_and_reject_bad_kinds() {
 #[test]
 fn organization_snapshots_reject_unknown_identity_geometry_and_phase() {
     let flat = FlatInfo {
+        level: kernel_api::model::cell::CellLevel::BASE,
         id: FlatId::new(7).unwrap(),
         offset: 2,
         count: 3,

@@ -78,7 +78,12 @@ impl Span {
         }
         for range in &active {
             let last = range.end();
-            if range.start.as_usize() < start.as_usize() || last > end {
+            if range.start.as_usize() < start.as_usize()
+                || last > end
+                || !(range.start.as_usize() - start.as_usize())
+                    .is_multiple_of(source.grain() * PAGE_SIZE)
+                || !(last - range.start.as_usize() + 1).is_multiple_of(source.grain() * PAGE_SIZE)
+            {
                 return Err(reject(NestError::NoRegion));
             }
         }
@@ -302,6 +307,9 @@ impl SpanState {
     }
 
     pub(crate) fn memo_address(&self, base: VirtAddr, index: usize) -> Result<usize, NestError> {
+        if !index.is_multiple_of(self.source.grain()) {
+            return Err(NestError::NotAligned);
+        }
         let address = base
             .get()
             .checked_add(index.checked_mul(PAGE_SIZE).ok_or(NestError::NoRegion)?)

@@ -4,10 +4,15 @@ use kernel_api::abi::call::cell::operations as op;
 use kernel_api::{
     abi::call::cell::CellFail,
     address::VirtAddr,
-    model::{cell::CreatedCell, identity::PendId},
+    model::{
+        cell::{CreatedCell, SlotId},
+        identity::PendId,
+    },
 };
 
 typed_calls! {
+    fallible fn split(slot: SlotId) -> Result<SlotId, erra::Error<CellFail>> = op::Split { slot };
+    fallible fn merge(slot: SlotId) -> Result<SlotId, erra::Error<CellFail>> = op::Merge { slot };
     fallible fn create(license: PendId, request: VirtAddr) -> Result<CreatedCell, erra::Error<CellFail>> = op::Create { license, request };
     fallible fn delete(object: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Delete { object };
     fallible fn push(request: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Push { request };

@@ -54,7 +54,7 @@ The Kernel guest suite also executes real traps for Cell, Pend, Sign, Unit and R
 [compatibility notes](../api/README.md#source-migration-and-abi-compatibility)
 before updating a consumer's Kernel pin.
 
-ABI v4 creation calls take an explicit None-target Pend license. Sign handles are
+ABI v5 creation calls take an explicit None-target Pend license. Sign handles are
 now PendIds; use Pend Accord/Narrow/Revoke/Return with Operations::Sign instead
 of the removed Sign authorization calls. SignId is descriptive only. Boot Ledger
 v5 provides Name::Call(Call::Create); managers must explicitly delegate creation
@@ -67,3 +67,9 @@ creation may consume an owned Internal Nest root through `UnitCreate::Team::nest
 `Sign::attach` additionally takes a generation: exact Memo generation for
 MappingPublished/Retired, zero for other sources. Use NestFault rather than the
 retired MappingFault. See the API operation matrix and ABI v3 migration table.
+
+`flat::create(license, size, align, level)` selects physical Cell geometry.
+Use `Allocation::at_level` for Cell Create. `cell::split(slot)` and
+`cell::merge(slot)` consume the old SlotId only on success and return its
+replacement. They require an exclusive complete contiguous collection; mapping
+leaf changes remain separate. ABI v5 requires rebuilding consumer capsules.

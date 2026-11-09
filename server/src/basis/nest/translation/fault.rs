@@ -78,7 +78,12 @@ impl FaultOutcome {
         {
             return Self::Resolved;
         }
-        if inner.explicit || state.memos.controlled(&mapping, offset.get()) {
+        if inner.explicit
+            || state.memos.controlled(
+                &mapping,
+                offset.get() / inner.source.grain() * inner.source.grain(),
+            )
+        {
             return Self::Wait(mapping.identity());
         }
         match inner.source.can_materialize(offset) {

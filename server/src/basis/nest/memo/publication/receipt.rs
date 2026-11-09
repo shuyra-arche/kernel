@@ -50,7 +50,7 @@ impl Publication {
             cell: page.id(),
             iova: IoAddress::page(address).ok_or(Error::InvalidRange)?,
             physical: page.physical_address(),
-            size: kernel_api::address::PAGE_SIZE,
+            size: page.size(),
             modifiable: writable,
         };
         if !address.is_multiple_of(projection.size)

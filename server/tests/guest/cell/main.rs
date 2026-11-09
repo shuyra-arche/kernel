@@ -3,6 +3,7 @@
 #[cfg(feature = "context")]
 mod context;
 mod external;
+mod levels;
 mod license;
 mod lifecycle;
 mod organization;
@@ -228,6 +229,7 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     delete(raw_memo(mapping, 0).object);
     delete(CellObject::Slot(a));
     let _ = writeln!(Console, "PASS cell-kernel swap=1 cleanup=1");
+    levels::run();
     organization::run();
     pend::run();
     sign::run();

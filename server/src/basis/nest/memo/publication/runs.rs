@@ -48,8 +48,8 @@ impl<'a> CellRuns<'a> {
     fn joins(&self, at: usize, current: Access) -> bool {
         let previous = &self.cells[at - 1];
         let next = &self.cells[at];
-        next.0 == previous.0 + 1
-            && next.1.physical_address() == previous.1.physical_address() + PAGE_SIZE
+        next.0 == previous.0 + previous.1.cell().pages()
+            && next.1.physical_address() == previous.1.physical_address() + previous.1.cell().size()
             && ActiveRange::current_at(self.active, self.address(next.0).as_usize())
                 .map(|access| access.bits())
                 == Some(current.bits())
@@ -80,7 +80,10 @@ impl Iterator for CellRuns<'_> {
         Some(Ok(CellRun {
             start: self.address(self.cells[first].0),
             physical: PhysAddr::from_raw(self.cells[first].1.physical_address()),
-            size: (last - first) * PAGE_SIZE,
+            size: self.cells[first..last]
+                .iter()
+                .map(|(_, cell)| cell.cell().size())
+                .sum(),
             current,
         }))
     }

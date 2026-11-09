@@ -35,6 +35,11 @@ fn task_migration_respects_hart_capabilities() {
 fn clock_backends_rearm_deadlines() {
     run("clock")
 }
+#[test]
+#[ignore = "requires RV64 QEMU with 3 GiB contiguous guest RAM"]
+fn cell_gigabyte_runs_with_contiguous_ram() {
+    run("large")
+}
 static RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn run(mode: &str) {
     let _run = RUN.lock().unwrap_or_else(|e| e.into_inner());
@@ -65,7 +70,7 @@ fn run(mode: &str) {
     }
     std::fs::create_dir_all(&evidence).unwrap();
     let mut guest_build = Command::new("cargo");
-    if io || context || clock {
+    if io || context || clock || mode == "large" {
         guest_build.args(["+nightly", "build", "--features", mode]);
     } else {
         guest_build.args(["+nightly", "build"]);
@@ -152,6 +157,8 @@ fn run(mode: &str) {
                 ]);
             }
             cases
+        } else if mode == "large" {
+            vec![(1, "-3g", "rv64")]
         } else if mixed {
             vec![(4, "-mixed-v", "rv64,v=true,vlen=128,elen=64")]
         } else if vector {
@@ -176,7 +183,7 @@ fn run(mode: &str) {
                     "-cpu",
                     cpu,
                     "-m",
-                    "128M",
+                    if mode == "large" { "3G" } else { "128M" },
                     "-smp",
                     &harts.to_string(),
                     "-bios",
@@ -268,12 +275,25 @@ fn run(mode: &str) {
             for marker in [
                 "PASS cell-kernel movement=1 memo=1 generation=1 freeze=1",
                 "PASS cell-kernel swap=1 cleanup=1",
+                "PASS cell-levels contiguous=1 boundary=1 movement=1 split=1 merge=1 stale=1 zero=1 capacity=1",
                 "PASS organization flat=1 window=1 transfer=1 share=1 revoke=1 internal-nest=1",
                 "PASS room-kernel atomic-wait=1 wake=1 deadline=1",
                 "PASS pend-kernel range=1 return=1 inspect=1 collect=1",
                 "task: all tasks exited",
             ] {
                 assert!(log.contains(marker), "{name}: {log}");
+            }
+            if mode == "large" {
+                assert!(
+                    log.contains("PASS cell-gigabyte allocation=1 split=1 merge=1 data=1"),
+                    "{name}: {log}"
+                );
+            }
+            if mode == "io" {
+                assert!(
+                    log.contains("PASS cell-io-levels last-leaf=1 retirement=1 split=1"),
+                    "{name}: {log}"
+                );
             }
             if context {
                 assert!(

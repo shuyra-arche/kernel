@@ -3,6 +3,7 @@
 mod allocation;
 mod creation;
 mod info;
+mod level;
 mod mapping;
 mod object;
 mod placement;
@@ -11,6 +12,7 @@ mod slot;
 pub use allocation::Allocation;
 pub use creation::{CellCreate, CellSource, CreatedCell, MemoDestination};
 pub use info::{CellInfo, CellState};
+pub use level::CellLevel;
 pub use mapping::{MappingControl, MappingId, MappingTarget};
 pub use object::{CellHandoff, CellObject, CellPosition};
 pub use placement::{Placement, PlacementAt, PlacementError};

@@ -191,6 +191,11 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
             Some(super::Window::Parent(range).resolve(outer)?)
         }
     };
+    if let (Some(meta), Some((offset, count))) = (&share, window) {
+        meta.source()
+            .range(offset, count)
+            .map_err(|_| PendFail::Invalid)?;
+    }
     let authorization = share.as_ref().and_then(|meta| meta.authorization());
     // No in-flight publication may cross the narrowing commit.
     {

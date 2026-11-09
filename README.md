@@ -51,7 +51,8 @@ The reconstruction is tracked in [#14](https://github.com/shuyra-arche/kernel/is
 | Sign | Retained events, source observation, routing and waiting |
 | Team / Task | Membership admission, execution control, results and eventual cleanup |
 
-Managed Pages are currently 4 KiB RAM allocations. Flat slots and Memos retain
+Managed Pages use `CellLevel`: each allocation is contiguous and aligned to
+`2^(12 + 9*level)` bytes, within the selected Sv mode and available RAM. Flat slots and Memos retain
 that same Page; they do not create another owner. A Team ownership epoch closes
 at retirement, transferring residual responsibilities to Kernel without changing
 Page identity or discharging hardware access. Reallocation requires all holders
@@ -67,7 +68,10 @@ instances live together in `metal/allocator`; there is no allocator adapter
 package. `api::address` owns address/page-coordinate types; machine-dependent
 canonicalization stays in the CPU MMU backend.
 
-Cell exposes Create/Delete, Push/Pull, Publish/Retract, Protect and Inspect.
+Cell exposes Create/Delete, Push/Pull, Publish/Retract, Protect, Inspect and Split/Merge.
+Split/Merge reshape a private, exclusive, fully materialized contiguous Slot collection
+by one level without copying data. Success consumes the old SlotId and assigns new Page
+identities; failed preparation preserves the old handle, data and allocator receipts.
 Push/Pull snapshot a CellHandoff and only move a Slot holding or establish a
 Memo association; publication is explicit. A Memo retains the exact Page even
 when the original Slot moves. Vacant, Ready and Published are separate stable
@@ -93,9 +97,9 @@ readers coexist, a writer excludes all other borrowers, and a mutable parent
 stays suspended until every child returns. The parent flag is not narrowed by
 reborrowing. CPU mappings are withdrawn before lending; returning access waits
 for actual hardware settlement. Revocation retains a Retiring Pend on failure
-and Task cleanup retries it. Windows contain whole 4 KiB Cells; this initial
+and Task cleanup retries it. Windows contain whole Cells; this initial
 borrow model conservatively suspends the entire parent even for a narrower child.
-Larger physical Cells and parallel disjoint writers are not implemented.
+Parallel disjoint writers are not implemented.
 
 Clone Push copies bytes once into immutable, zero-filled Kernel-owned Cells.
 Pull(queue, max_len) returns a separate read-only payload Pend, its exact byte
@@ -229,8 +233,8 @@ Flat, Nest and Port have runtime ABI operations; a Flat Slice retains its exact
 Pend branch, and an Internal Nest may be consumed by Team creation.
 
 The same Nest Memo owns the associated Page, generation, freeze and publication
-for CPU and external targets. One binding supports independent 4 KiB leaves in
-one aligned 2 MiB window, with repeated publication after exact range settlement.
+for CPU and external targets. One binding supports whole level-0 Cells or one level-1 Cell in
+one aligned 2 MiB window, using 4 KiB hardware leaves, with repeated publication after exact range settlement.
 The binding remains active while one Memo retracts. There is no Projection/IoSpace
 or parallel Mapping lifecycle. Source/binding revocation and creator death close
 admission; Kernel retains hardware obligations independently of the dying Task.
@@ -310,7 +314,7 @@ PQ is disabled.
 Settled logical records survive for observation/Delete while their creator lives.
 After creator death they expire only when hardware responsibility has settled.
 
-ABI v4 rejects version-zero through version-three calls and removed domains. Pend Accord
+ABI v5 rejects version-zero through version-four calls and removed domains. Pend Accord
 and Narrow carry target-specific operation permissions, independent Distributable
 and Modifiable limits, and the relative source window. Capsule v2 declares the
 ABI before execution; Ledger v5 supplies an explicit creation license and Sign-target Pends.
@@ -393,6 +397,13 @@ Upper-layer migrations are deferred. Pin API and Client to the same provider
 revision, and regenerate boot artifacts according to the
 [ABI compatibility notes](api/README.md#source-migration-and-abi-compatibility).
 Kernel has no concrete Driver dependency.
+
+Physical Cell tests cover level-1 allocation, interior access, whole-Cell authority,
+Slot movement, exclusive Split/Merge, stale handles, zeroing and failure rollback.
+The `large` QEMU case allocates and reshapes a level-2 Cell with 3 GiB guest RAM;
+128 MiB cases verify capacity failure. External tests exercise the last leaf of a
+level-1 Cell and require retirement before reshaping. Levels 3/4 have geometry
+coverage but no physical allocation run; no physical-board claim is made.
 
 ## Versions
 

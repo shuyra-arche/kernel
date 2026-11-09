@@ -131,6 +131,7 @@ impl Memo {
                 CellState::Vacant
             });
         CellInfo {
+            level: page.map_or(kernel_api::model::cell::CellLevel::BASE, |p| p.level()),
             generation: self.generation.get(),
             state,
             page: page.map_or(0, |p| p.id().get() as u64),
