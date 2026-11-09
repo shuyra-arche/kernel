@@ -85,8 +85,12 @@ fn specification(priority: u64, ceiling: u64) -> Schedule {
         hart: 1,
         priority,
         ceiling,
-        budget: 2_000_000,
-        period: 100_000_000,
+        // These cases verify dependency/lifecycle behavior, not a 2 ms WCET.
+        // Kernel execution consumes credit too; debug/TCG entry overhead must
+        // leave useful user execution in a period. The exhaustion and
+        // preemption cases below override these values and keep their checks.
+        budget: 100_000_000,
+        period: 1_000_000_000,
         latency: 10_000_000,
         extensions: 0,
     }
@@ -112,6 +116,7 @@ fn grant(src: PendId, dst: TaskId, mark: u64, rights: SignRights) -> PendId {
     .to_bytes();
     pend::accord(crate::ptr(&bytes)).unwrap()
 }
+#[track_caller]
 fn event(token: PendId) {
     let SignReply::Triggered { sequence } = sign::listen(token, Wait::At(limit())).unwrap() else {
         panic!("missing event {token:?}")
@@ -190,6 +195,7 @@ impl Fixture {
             shared,
         }
     }
+    #[track_caller]
     fn worker(
         &self,
         role: usize,
@@ -307,6 +313,7 @@ impl Worker {
             }
         }
     }
+    #[track_caller]
     fn join(self, value: usize) {
         event(self.done);
         self.finish(value);

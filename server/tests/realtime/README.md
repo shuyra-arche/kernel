@@ -165,6 +165,14 @@ Yield/freeze, overload rejection, nested service dependencies, cancellation,
 revocation/rebinding, server exit, cycle/ceiling rejection, restricted calls,
 page faults and prepared versus undeclared floating-point execution.
 
+Dependency/lifecycle fixtures use 100 ms credit in a 1 s period, so debug/TCG
+kernel entry and accounting do not implicitly require a 2 ms physical execution
+bound. The dedicated exhaustion fixture still overrides this with 20 ms credit;
+preemption/overload fixtures retain their own explicit budgets. Event deadlines
+and the QEMU watchdog are unchanged. Passing these scenarios establishes their
+functional assertions, not that every admitted minimum budget is sufficient for
+useful execution on an uncalibrated host.
+
 Run the full host suite and builds from the repository root:
 
 ```
