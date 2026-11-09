@@ -1,371 +1,94 @@
-use crate::metal::mmu::Address;
-use ::core::arch::asm;
+//! Only a saved trap frame is fault register evidence. Panic stacks are sampled
+//! at report entry; neither current CSRs nor reporter GPRs are the fault site.
+use super::backtrace::{Backtrace, SPAN, StackReader};
+use crate::metal::switcher::context::{Gprs, TrapContext};
+use core::fmt::{self, Write};
 
-use alloc::format;
-use alloc::string::String;
-use alloc::string::ToString;
-use alloc::vec;
-use alloc::vec::Vec;
-use riscv::interrupt::Exception;
-use riscv::interrupt::Interrupt;
-use riscv::interrupt::Trap;
-use riscv::register::satp;
-use riscv::register::scause;
-use riscv::register::sepc;
-use riscv::register::sscratch;
-use riscv::register::sstatus;
-use riscv::register::stval;
-use riscv::register::stvec;
-
-use crate::basis::nest::SpaceKind;
-use crate::basis::room::conductor::identity::ident;
-use crate::entry::report::backtrace;
-use crate::entry::report::backtrace::Backtrace;
-use crate::entry::report::backtrace::StackReader;
-use crate::entry::report::backtrace::WalkConfig;
-use crate::entry::report::record::Report;
-use crate::metal::switcher::context::Gprs;
-use crate::metal::switcher::context::TrapContext;
-use kernel_api::address::PAGE_SIZE;
-use kernel_api::address::VirtAddr;
-
-use super::render::address_label;
-use super::render::backtrace_rows;
-use super::render::hex;
-
-fn gprs() -> [usize; 32] {
-    let mut r = [0usize; 32];
-    unsafe {
-        asm!("mv {0}, ra", out(reg) r[1]);
-        asm!("mv {0}, sp", out(reg) r[2]);
-        asm!("mv {0}, gp", out(reg) r[3]);
-        asm!("mv {0}, tp", out(reg) r[4]);
-        asm!("mv {0}, t0", out(reg) r[5]);
-        asm!("mv {0}, t1", out(reg) r[6]);
-        asm!("mv {0}, t2", out(reg) r[7]);
-        asm!("mv {0}, s0", out(reg) r[8]);
-        asm!("mv {0}, s1", out(reg) r[9]);
-        asm!("mv {0}, a0", out(reg) r[10]);
-        asm!("mv {0}, a1", out(reg) r[11]);
-        asm!("mv {0}, a2", out(reg) r[12]);
-        asm!("mv {0}, a3", out(reg) r[13]);
-        asm!("mv {0}, a4", out(reg) r[14]);
-        asm!("mv {0}, a5", out(reg) r[15]);
-        asm!("mv {0}, a6", out(reg) r[16]);
-        asm!("mv {0}, a7", out(reg) r[17]);
-        asm!("mv {0}, s2", out(reg) r[18]);
-        asm!("mv {0}, s3", out(reg) r[19]);
-        asm!("mv {0}, s4", out(reg) r[20]);
-        asm!("mv {0}, s5", out(reg) r[21]);
-        asm!("mv {0}, s6", out(reg) r[22]);
-        asm!("mv {0}, s7", out(reg) r[23]);
-        asm!("mv {0}, s8", out(reg) r[24]);
-        asm!("mv {0}, s9", out(reg) r[25]);
-        asm!("mv {0}, s10", out(reg) r[26]);
-        asm!("mv {0}, s11", out(reg) r[27]);
-        asm!("mv {0}, t3", out(reg) r[28]);
-        asm!("mv {0}, t4", out(reg) r[29]);
-        asm!("mv {0}, t5", out(reg) r[30]);
-        asm!("mv {0}, t6", out(reg) r[31]);
-    }
-    r
+pub(crate) enum Source<'a> {
+    RustPanic(&'a core::panic::PanicInfo<'a>),
+    Trap {
+        frame: &'a TrapContext,
+        cause: usize,
+        value: usize,
+    },
 }
 
-#[derive(Debug)]
-pub struct Scene {
-    pub hart: crate::metal::hart::HartId,
-    pub task: Option<usize>,
-    pc: VirtAddr,
-    sp: VirtAddr,
-    fp: VirtAddr,
-    pub(crate) backtrace: Backtrace,
-    cause: Option<Trap<Interrupt, Exception>>,
-}
-
-impl Scene {
-    fn capture_kernel() -> Option<Scene> {
-        let (sp, fp) = match crate::metal::stop::scene() {
-            (0, 0) => {
-                let (sp, fp): (usize, usize);
-                unsafe {
-                    asm!("mv {0}, sp", out(reg) sp);
-                    asm!("mv {0}, s0", out(reg) fp);
-                }
-                (sp, fp)
+pub(crate) fn write(source: &Source<'_>, out: &mut impl Write, walk: bool) -> fmt::Result {
+    let (sp, fp) = match source {
+        Source::RustPanic(info) => {
+            writeln!(out, "[kernel] source=RustPanic fault-registers=unavailable")?;
+            if let Some(location) = info.location() {
+                writeln!(out, "location={location}")?;
             }
-            s => s,
-        };
-        let ceiling = match crate::metal::switcher::stack::trap_stack_hart(sp)
+            writeln!(out, "message={}", info.message())?;
+            {
+                writeln!(out, "stack-source=DiagnosticCapture")?;
+                crate::metal::stop::scene()
+            }
+        }
+        Source::Trap {
+            frame,
+            cause,
+            value,
+        } => {
+            writeln!(
+                out,
+                "[kernel] source=Trap pc={:#x} cause={cause:#x} value={value:#x} status={:#x}",
+                frame.sepc.as_usize(),
+                frame.status()
+            )?;
+            for (index, value) in frame.gpr.0.iter().enumerate().skip(1) {
+                writeln!(out, "x{index}={value:#x}")?;
+            }
+            (frame.gpr.x(Gprs::SP), frame.gpr.x(Gprs::S0))
+        }
+    };
+    let root_reused = matches!(source, Source::Trap { .. })
+        && (crate::metal::image::root_stack_base()..crate::metal::image::root_stack_edge())
+            .contains(&sp);
+    if root_reused {
+        // The trap handler ran on the Hart stack, then reporting reset ROOT's
+        // SP. Its old contents can now contain reporter frames, not fault frames.
+        writeln!(out, "backtrace unavailable reason=ROOT-reused")
+    } else if walk {
+        stack(out, sp, fp)
+    } else {
+        writeln!(out, "backtrace unavailable reason=boot-or-peer-state")
+    }
+}
+
+fn stack(out: &mut impl Write, sp: usize, fp: usize) -> fmt::Result {
+    writeln!(out, "stack sp={sp:#x} fp={fp:#x} completeness=best-effort")?;
+    let ceiling = if (crate::metal::image::root_stack_base()
+        ..crate::metal::image::root_stack_edge())
+        .contains(&sp)
+    {
+        crate::metal::image::root_stack_edge()
+    } else {
+        crate::metal::switcher::stack::trap_stack_hart(sp)
             .map(crate::metal::switcher::stack::trap_stack_edge)
-        {
-            Some(edge) => sp.saturating_add(backtrace::SPAN).min(edge.as_usize()),
-            None => sp.saturating_add(backtrace::SPAN),
-        };
-        let mut reader = StackReader::new(satp::read().bits() & ((1usize << 44) - 1));
-        let cfg = WalkConfig::kernel(ceiling);
-        let code = |w: usize| crate::metal::mmu::canonical(w).is_kernel();
-        let backtrace = Backtrace::walk(&mut reader, &cfg, sp, fp, Some(&code));
-        Some(Scene {
-            hart: crate::metal::hart::hart_id(),
-            task: ident().map(|i| i.task_id()),
-            pc: crate::metal::mmu::canonical(sepc::read()),
-            sp: crate::metal::mmu::canonical(sp),
-            fp: crate::metal::mmu::canonical(fp),
-            cause: scause::read().cause().try_into().ok(),
-            backtrace,
-        })
+            .map(|edge| edge.as_usize())
+            .unwrap_or(sp.saturating_add(SPAN))
+    };
+    // Read-only walk through identity-checked page tables: no allocator or Nest lock.
+    let mut reader = StackReader::new(riscv::register::satp::read().ppn());
+    let trace = Backtrace::walk(
+        |a| reader.word(a),
+        sp,
+        fp,
+        ceiling,
+        crate::metal::image::is_code,
+    );
+    for frame in trace.frames() {
+        writeln!(
+            out,
+            "frame source={:?} pc={:#x} sp={:#x}",
+            frame.source, frame.pc, frame.sp
+        )?;
     }
-
-    fn capture_normal() -> Option<Scene> {
-        let info = ident()?;
-        let pa = info.trap()?;
-        let frame = unsafe { &*(pa.as_usize() as *const TrapContext) };
-        let world = info
-            .live()
-            .map(|t| t.team.nest.kind())
-            .unwrap_or(SpaceKind::User);
-        if world.is_supervisor() {
-            return None;
-        }
-        let sp = frame.gpr.x(Gprs::SP);
-        if sp == 0 {
-            return None;
-        }
-        let fp = frame.gpr.x(Gprs::S0);
-        let mut reader = StackReader::new(frame.user_satp.ppn());
-        let cfg = WalkConfig::normal(world, sp.saturating_add(backtrace::SPAN));
-        let code = |w: usize| crate::metal::mmu::canonical(w).is_user();
-        let backtrace = Backtrace::walk(&mut reader, &cfg, sp, fp, Some(&code));
-        Some(Scene {
-            hart: crate::metal::hart::hart_id(),
-            task: Some(info.task_id()),
-            pc: frame.sepc,
-            sp: crate::metal::mmu::canonical(sp),
-            fp: crate::metal::mmu::canonical(fp),
-            cause: None,
-            backtrace,
-        })
-    }
-}
-
-fn stval_note(int: bool, code: usize) -> &'static str {
-    if int {
-        return "Unknown";
-    }
-    match code {
-        0 | 1 | 4 | 5 | 6 | 7 | 12 | 13 | 15 => "faulting addr",
-        2 => "Illegal instruction bits",
-        3 => "Breakpoint",
-        _ => "Unknown",
-    }
-}
-
-fn csr_rows() -> Vec<Vec<Option<String>>> {
-    let mut rows: Vec<Vec<Option<String>>> = vec![
-        if let Some(i) = ident() {
-            vec![
-                None,
-                Some(format!("#{}", i.task_id())),
-                Some(format!("task #{} @ team #{}", i.task_id(), i.team_id())),
-            ]
-        } else {
-            vec![None, Some("failed to get task info".into()), None]
-        },
-        vec![None, Some("hex".into()), Some("note".into())],
-    ];
-    let sc = scause::read();
-    let (int, code) = (sc.is_interrupt(), sc.code());
-    rows.push(vec![
-        Some("sepc".into()),
-        Some(hex(sepc::read())),
-        Some(address_label(crate::metal::mmu::canonical(sepc::read()))),
-    ]);
-    {
-        let a = stval::read();
-        let n = stval_note(int, code).to_string();
-        rows.push(vec![Some("stval".into()), Some(hex(a)), Some(n)]);
-    }
-    {
-        let trap: Option<Trap<Interrupt, Exception>> = sc.cause().try_into().ok();
-        let note = match trap {
-            Some(Trap::Interrupt(i)) => format!("{i:?}"),
-            Some(Trap::Exception(e)) => format!("{e:?}"),
-            None => "Unknown".to_string(),
-        };
-        rows.push(vec![
-            Some("scause".into()),
-            Some(hex(sc.bits())),
-            Some(note),
-        ]);
-    }
-    rows.push(vec![
-        Some("stvec".into()),
-        Some(hex(stvec::read().address())),
-        Some(address_label(crate::metal::mmu::canonical(
-            stvec::read().address(),
-        ))),
-    ]);
-    {
-        let scr = sscratch::read();
-        let kfb = crate::metal::layout::HART_FRAME_BASE.as_usize();
-        let n = if scr == 0 {
-            "Kernel frame".to_string()
-        } else if scr >= kfb && scr < kfb + crate::metal::layout::MAX_HART_SLOTS * PAGE_SIZE {
-            format!("Kernel frame @ {}", (scr - kfb) / PAGE_SIZE)
-        } else if scr >= crate::metal::layout::TEAM_FRAME_BASE.as_usize()
-            && scr < crate::metal::layout::HART_FRAME_BASE.as_usize()
-        {
-            "User frame".into()
-        } else {
-            "other".into()
-        };
-        rows.push(vec![Some("sscratch".into()), Some(hex(scr)), Some(n)]);
-    }
-    {
-        let ss = sstatus::read();
-        let mut note = format!("{:?}", ss.spp());
-        if ss.sie() {
-            note.push_str(" SIE");
-        }
-        if ss.spie() {
-            note.push_str(" SPIE");
-        }
-        if ss.fs() != riscv::register::mstatus::FS::Off {
-            note.push_str(match ss.fs() {
-                riscv::register::mstatus::FS::Initial => " FS FI",
-                riscv::register::mstatus::FS::Clean => " FS FC",
-                riscv::register::mstatus::FS::Dirty => " FS FD",
-                riscv::register::mstatus::FS::Off => " FS FO",
-            });
-        }
-        if ss.vs() != riscv::register::mstatus::VS::Off {
-            note.push_str(match ss.vs() {
-                riscv::register::mstatus::VS::Initial => " VS VI",
-                riscv::register::mstatus::VS::Clean => " VS VC",
-                riscv::register::mstatus::VS::Dirty => " VS VD",
-                riscv::register::mstatus::VS::Off => " VS VO",
-            });
-        }
-        if ss.xs() != riscv::register::mstatus::XS::AllOff {
-            note.push_str(match ss.xs() {
-                riscv::register::mstatus::XS::NoneDirtyOrClean => " XS XI",
-                riscv::register::mstatus::XS::NoneDirtySomeClean => " XS XC",
-                riscv::register::mstatus::XS::SomeDirty => " XS XD",
-                riscv::register::mstatus::XS::AllOff => " XS XA",
-            });
-        }
-        if ss.sum() {
-            note.push_str(" SUM");
-        }
-        if ss.mxr() {
-            note.push_str(" MXR");
-        }
-        if ss.sd() {
-            note.push_str(" SD");
-        }
-        rows.push(vec![
-            Some("sstatus".into()),
-            Some(hex(ss.bits())),
-            Some(note),
-        ]);
-    }
-    {
-        let s = satp::read();
-        let note = format!("{:?} {:#06x} {:#013x}", s.mode(), s.asid(), s.ppn());
-        rows.push(vec![Some("satp".into()), Some(hex(s.bits())), Some(note)]);
-    }
-    rows
-}
-
-fn gpr_rows() -> Vec<Vec<Option<String>>> {
-    const NAMES: [&str; 32] = [
-        "x0", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2", "a3", "a4",
-        "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "t3", "t4",
-        "t5", "t6",
-    ];
-    let mut rows: Vec<Vec<Option<String>>> = vec![vec![None, Some("hex".into())]];
-    let r = gprs();
-    for (i, name) in NAMES.iter().enumerate().skip(1) {
-        if r[i] == 0 {
-            continue;
-        }
-        rows.push(vec![Some((*name).into()), Some(hex(r[i]))]);
-    }
-    rows
-}
-
-fn scene_rows(scene: &Scene) -> Vec<Vec<Option<String>>> {
-    let mut rows: Vec<Vec<Option<String>>> = vec![vec![
-        Some("scene".into()),
-        Some("hart".into()),
-        Some("task".into()),
-        Some("pc".into()),
-        Some("sp".into()),
-        Some("fp".into()),
-        Some("cause".into()),
-    ]];
-    let cause = scene
-        .cause
-        .map(|c| format!("{c:?}"))
-        .unwrap_or_else(|| "-".into());
-    rows.push(vec![
-        Some("edge".into()),
-        Some(scene.hart.to_string()),
-        Some(
-            scene
-                .task
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "-".into()),
-        ),
-        Some(hex(scene.pc.as_usize())),
-        Some(hex(scene.sp.as_usize())),
-        Some(hex(scene.fp.as_usize())),
-        Some(cause),
-    ]);
-    rows
-}
-
-pub fn dump(r: &mut Report) {
-    let kernel_scene = Scene::capture_kernel();
-    let hart = kernel_scene
-        .as_ref()
-        .map(|s| s.hart)
-        .unwrap_or_else(crate::metal::hart::hart_id);
-    let scene_head = kernel_scene
-        .as_ref()
-        .and_then(|s| {
-            s.task
-                .map(|t| format!("[scene] crash scene, hart {hart}, task #{t}"))
-        })
-        .unwrap_or_else(|| format!("[scene] crash scene, hart {hart}"));
-    r.paragraph(Some(scene_head)).items.extend(csr_rows());
-    if let Some(scene) = kernel_scene.as_ref() {
-        r.paragraph(None).items.extend(scene_rows(scene));
-    }
-    r.paragraph(None).items.extend(gpr_rows());
-
-    if let Some(scene) = kernel_scene.as_ref() {
-        r.paragraph(None)
-            .items
-            .extend(backtrace_rows(&scene.backtrace, "kbt"));
-    }
-    if let Some(scene) = Scene::capture_normal() {
-        r.paragraph(None)
-            .items
-            .extend(backtrace_rows(&scene.backtrace, "nbt"));
-    }
-}
-
-#[macro_export]
-macro_rules! crash_scene {
-    () => {{
-        let mut __r = $crate::entry::report::record::Report::default();
-        $crate::entry::report::scene::dump(&mut __r);
-        let mut __sink = $crate::metal::console::Sink;
-        $crate::entry::report::render::render(&__r, &mut __sink, 2);
-    }};
-    ($($arg:tt)*) => {{
-        $crate::putln!($($arg)*);
-        $crate::crash_scene!();
-    }};
+    writeln!(
+        out,
+        "backtrace stop={:?}; symbolize PCs against the exact ELF",
+        trace.stop
+    )
 }

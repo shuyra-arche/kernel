@@ -445,3 +445,35 @@ private to an address space; wake removes one or all current waiters and never
 stores a notification. Timeout, task death and space retirement use the existing
 wait-ticket cleanup. Callers keep the object and mapping alive and recheck their
 condition after a successful wait. Concurrent mapping transactions report `Busy`.
+
+### Crash evidence
+
+Fatal reports distinguish saved `Trap` registers from `RustPanic` location/message.
+Panic stack registers are labeled `DiagnosticCapture`; frame-chain evidence and
+heuristic stack-scan hits have separate labels. The walker accepts compressed
+instruction addresses and only recognizes the Kernel executable text range (ROOT
+is a stack, never code). A Trap that interrupted ROOT omits its overwritten stack. Reports contain a bounded-walk stop reason. Peer counts
+are observations, not device-reclamation proof; unobserved peers suppress memory
+walking. Before boot facts are available, the report omits the walk.
+
+The fatal path uses bounded formatting and SBI DBCN byte output without Kernel
+locks, heap allocation, address-translation locks, or an allocator-backend switch.
+Firmware latency remains outside the byte-budget guarantee. Recursive failures
+emit a minimal marker and reset. Diagnostic console loss and overwritten orphan
+exit notes are reported separately from the unchanged user `DebugPut` byte count.
+
+`server/tests/guest/diagnostics` deliberately exercises Panic, illegal instruction,
+pre-allocator failure, and recursive formatting in debug/release with 1/4 Harts.
+CI retains serial output, commands, hashes, and the exact ELF. For host symbols:
+
+```sh
+python3 tools/diagnostics/symbolize.py panic-debug.elf panic-debug-smp1-serial.log
+```
+
+Match the ELF to the recorded hash; scan hits are candidates, not proven callers.
+
+Console source prefixes are readability labels, not authenticated provenance:
+`Debug Put` intentionally retains its raw-byte contract, so user bytes can imitate
+labels on the shared serial stream. Preventing that requires a framed/escaped
+transport or a separately trusted channel; this PR does not silently change the
+existing byte API to claim that stronger property.

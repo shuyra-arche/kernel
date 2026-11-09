@@ -21,3 +21,12 @@ pub(crate) fn root_stack_base() -> usize {
 pub(crate) fn root_stack_edge() -> usize {
     kernel_edge() + ROOT_STACK_SIZE
 }
+
+/// ROOT and other writable image data are not executable addresses.
+pub(crate) fn is_code(pc: usize) -> bool {
+    unsafe extern "C" {
+        static _kernel_base: u8;
+        static _text_end: u8;
+    }
+    ((&raw const _kernel_base).addr()..(&raw const _text_end).addr()).contains(&pc)
+}

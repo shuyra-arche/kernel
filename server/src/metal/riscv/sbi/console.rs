@@ -6,6 +6,7 @@ use super::{Extension, ecall::ScallBuilder};
 pub enum Dbcn {
     ConsoleWrite = 0,
     ConsoleRead = 1,
+    ConsoleWriteByte = 2,
 }
 
 impl From<Dbcn> for usize {

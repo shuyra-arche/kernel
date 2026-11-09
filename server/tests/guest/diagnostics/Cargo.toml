@@ -1,0 +1,22 @@
+[package]
+name = "diagnostics-guest"
+version = "0.0.0"
+edition = "2024"
+[workspace]
+[features]
+trap = []
+early = []
+recursive = []
+[dependencies]
+kernel = { path = "../../.." }
+platform-riscv = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "8127d85230176b2483669d2242d62ef33bd36f6c" }
+[patch."https://github.com/shuyra-arche/kernel.git"]
+kernel = { path = "../../.." }
+kernel-api = { path = "../../../../api" }
+[profile.dev]
+panic = "abort"
+[profile.release]
+panic = "abort"
+[[bin]]
+name = "diagnostics-guest"
+path = "main.rs"

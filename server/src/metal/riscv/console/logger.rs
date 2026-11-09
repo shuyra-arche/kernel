@@ -8,7 +8,11 @@ impl log::Log for KernelLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            super::_write(format_args!("[{}] {}\n", record.level(), record.args()));
+            super::_write(format_args!(
+                "[kernel][{}] {}\n",
+                record.level(),
+                record.args()
+            ));
         }
     }
 
