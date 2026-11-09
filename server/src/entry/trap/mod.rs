@@ -41,6 +41,8 @@ pub(crate) fn persist(frame: &TrapContext) -> bool {
 }
 
 pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapContext {
+    #[cfg(feature = "latency")]
+    crate::metal::measure::enter();
     asid::occupy(Asid::kernel());
 
     if from_task {
@@ -214,6 +216,8 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
 }
 
 pub(crate) fn resume(next: *mut TrapContext) -> *mut TrapContext {
+    #[cfg(feature = "latency")]
+    let mut ready = 0;
     let space = unsafe { (*next).address_space() };
     if !space.is_kernel() {
         let task = crate::basis::room::conductor::current()
@@ -221,12 +225,23 @@ pub(crate) fn resume(next: *mut TrapContext) -> *mut TrapContext {
             .expect("return without Task owner");
         assert_eq!(task.ident.frame_pa.as_usize(), next as usize);
         let mut status = unsafe { (*next).status() };
+        #[cfg(feature = "latency")]
+        {
+            ready = task
+                .ready_stamp
+                .swap(0, core::sync::atomic::Ordering::Relaxed);
+        }
         unsafe {
             task.restore_extensions(&mut status);
             (*next).set_status(status);
         }
     }
     asid::occupy(space);
+    #[cfg(feature = "latency")]
+    {
+        crate::metal::measure::elapsed(crate::metal::measure::Metric::ReadyRun, ready);
+        crate::metal::measure::leave();
+    }
     next
 }
 

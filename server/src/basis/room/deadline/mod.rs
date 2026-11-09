@@ -123,6 +123,8 @@ pub fn drain(now: Instant, out: &mut [u64]) -> usize {
         out[n] = handle;
         n += 1;
         let late = now.saturating_sub(wake_at);
+        #[cfg(feature = "latency")]
+        crate::metal::measure::record(crate::metal::measure::Metric::TimerLate, late);
         LATE_N.fetch_add(1, Ordering::Relaxed);
         LATE_SUM.fetch_add(late, Ordering::Relaxed);
         LATE_MAX.fetch_max(late, Ordering::Relaxed);

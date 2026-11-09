@@ -163,22 +163,24 @@ impl Source {
         endpoint::discard(&self.endpoint);
         super::external().expect("source router").request();
     }
-    pub(super) fn deliver(&self) {
+    pub(super) fn deliver(&self) -> bool {
         if !self.live() {
             self.close();
         }
         if !self.binding.lock().phase.claimed() {
-            return;
+            return false;
         }
         match endpoint::publish(&self.endpoint) {
             Ok(sequence) => {
                 let mut b = self.binding.lock();
                 if b.phase.deliver(sequence).is_ok() {
                     b.announce = true;
+                    return true;
                 }
             }
             Err(_) => self.close(),
         }
+        false
     }
     pub(super) fn maintain(&self) {
         if !self.live() {

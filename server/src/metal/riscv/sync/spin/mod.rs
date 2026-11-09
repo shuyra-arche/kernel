@@ -61,12 +61,18 @@ impl<T: ?Sized> SpinLock<T> {
         #[cfg(debug_assertions)]
         let caller = crate::metal::sync::depend_enter!(self);
         let trap = unsafe { TrapGuard::save() };
+        #[cfg(feature = "latency")]
+        let start = crate::metal::measure::stamp();
         crate::metal::sync::depend_check!(self, caller);
 
         self.acquire();
         crate::metal::sync::depend_acquire!(self, caller);
 
-        SpinLockGuard::new(self, trap)
+        {
+            #[cfg(feature = "latency")]
+            crate::metal::measure::elapsed(crate::metal::measure::Metric::SpinWait, start);
+            SpinLockGuard::new(self, trap)
+        }
     }
 
     /// 共持同级对的第二把：只在已持 `lower` 的前提下取，且按地址序在 `lower` 之后。
@@ -78,12 +84,18 @@ impl<T: ?Sized> SpinLock<T> {
         #[cfg(debug_assertions)]
         let caller = crate::metal::sync::depend_enter!(self);
         let trap = unsafe { TrapGuard::save() };
+        #[cfg(feature = "latency")]
+        let start = crate::metal::measure::stamp();
         crate::metal::sync::depend_check_peer!(self, _lower, caller);
 
         self.acquire();
         crate::metal::sync::depend_acquire!(self, caller);
 
-        SpinLockGuard::new(self, trap)
+        {
+            #[cfg(feature = "latency")]
+            crate::metal::measure::elapsed(crate::metal::measure::Metric::SpinWait, start);
+            SpinLockGuard::new(self, trap)
+        }
     }
 
     #[inline(never)]
@@ -91,6 +103,8 @@ impl<T: ?Sized> SpinLock<T> {
         #[cfg(debug_assertions)]
         let caller = crate::metal::sync::depend_enter!(self);
         let trap = unsafe { TrapGuard::save() };
+        #[cfg(feature = "latency")]
+        let start = crate::metal::measure::stamp();
 
         if self
             .locked
@@ -101,7 +115,11 @@ impl<T: ?Sized> SpinLock<T> {
         }
         crate::metal::sync::depend_acquire!(self, caller);
 
-        Some(SpinLockGuard::new(self, trap))
+        Some({
+            #[cfg(feature = "latency")]
+            crate::metal::measure::elapsed(crate::metal::measure::Metric::SpinWait, start);
+            SpinLockGuard::new(self, trap)
+        })
     }
 }
 

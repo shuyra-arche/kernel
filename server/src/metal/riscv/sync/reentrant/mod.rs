@@ -49,6 +49,8 @@ impl<T: ?Sized> RelLock<T> {
         #[cfg(debug_assertions)]
         let caller = crate::metal::sync::depend_enter!(self);
         let trap = unsafe { TrapGuard::save() };
+        #[cfg(feature = "latency")]
+        let start = crate::metal::measure::stamp();
         let me = Owner::of(hart::hart_id());
 
         #[cfg(debug_assertions)]
@@ -94,6 +96,10 @@ impl<T: ?Sized> RelLock<T> {
             }
         }
 
-        RelLockGuard::new(self, trap)
+        {
+            #[cfg(feature = "latency")]
+            crate::metal::measure::elapsed(crate::metal::measure::Metric::CommitWait, start);
+            RelLockGuard::new(self, trap)
+        }
     }
 }

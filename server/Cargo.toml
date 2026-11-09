@@ -27,3 +27,6 @@ bitflags = { workspace = true }
 fack = { workspace = true }
 erra = { workspace = true }
 kernel-api = { workspace = true }
+
+[features]
+latency = []

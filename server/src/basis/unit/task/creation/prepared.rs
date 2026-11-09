@@ -110,6 +110,8 @@ impl PreparedTask {
             Arc::get_mut(&mut slot)
                 .expect("unique prepare slot")
                 .write(Task {
+                    #[cfg(feature = "latency")]
+                    ready_stamp: core::sync::atomic::AtomicU64::new(0),
                     ident: self.ident.clone(),
                     life: self.life.clone(),
                     state: self.state.clone(),

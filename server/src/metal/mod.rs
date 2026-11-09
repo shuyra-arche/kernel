@@ -7,3 +7,6 @@ pub(crate) mod riscv;
 pub(crate) use riscv::{
     clock, console, hart, image, interrupt, iommu, layout, mmu, platform, stop, switcher, sync,
 };
+
+#[cfg(feature = "latency")]
+pub(crate) mod measure;

@@ -52,6 +52,8 @@ pub fn start() -> Result<(), BootError> {
         return Err(BootError::Description("devices not configured"));
     }
     scheduler::init().map_err(BootError::Scheduler)?;
+    #[cfg(feature = "latency")]
+    crate::metal::measure::init().map_err(BootError::Scheduler)?;
     register_runtime_hooks();
 
     if let Some(entry) = spawn_entry()? {

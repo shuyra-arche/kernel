@@ -10,6 +10,8 @@ pub struct SpinLockGuard<'a, T: ?Sized> {
     lock: &'a SpinLock<T>,
     _not_send: PhantomData<*const ()>,
     _trap: TrapGuard,
+    #[cfg(feature = "latency")]
+    start: u64,
 }
 
 impl<'a, T: ?Sized> SpinLockGuard<'a, T> {
@@ -18,6 +20,8 @@ impl<'a, T: ?Sized> SpinLockGuard<'a, T> {
             lock,
             _not_send: PhantomData,
             _trap: trap,
+            #[cfg(feature = "latency")]
+            start: crate::metal::measure::stamp(),
         }
     }
 }
@@ -39,6 +43,8 @@ impl<T: ?Sized> DerefMut for SpinLockGuard<'_, T> {
 impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
     fn drop(&mut self) {
         crate::metal::sync::depend_release!(self.lock);
+        #[cfg(feature = "latency")]
+        crate::metal::measure::elapsed(crate::metal::measure::Metric::SpinHold, self.start);
         self.lock.locked.store(false, Ordering::Release);
     }
 }

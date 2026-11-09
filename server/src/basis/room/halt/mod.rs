@@ -52,6 +52,8 @@ pub(super) fn halt() -> ! {
             }
             core::hint::spin_loop();
         }
+        #[cfg(feature = "latency")]
+        crate::metal::measure::report();
         hooked();
         crate::metal::stop::reset();
     }
