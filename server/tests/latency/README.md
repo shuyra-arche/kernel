@@ -1,6 +1,6 @@
 # Bounded latency: M1 baseline and M2 progress
 
-This records the M1 baseline and the first M2 admission boundary for #30. No current operation has a hard real-time guarantee.
+This records the M1 baseline and M2 admission/retirement progress for #30. No current operation has a hard real-time guarantee.
 The existing FIFO/time-slice scheduler, authorization and retirement rules remain
 unchanged. QEMU observations are neither WCET bounds nor admission proofs.
 
@@ -45,9 +45,13 @@ is bounded. Sign notification coalesces work; it is not a device completion coun
    budget admission contract. Preserve this baseline before M3 policy changes.
 4. **Lifecycle and Pend** (`basis/unit/lifecycle/{doom,reap}.rs`, `basis/pend/`):
    descendant walks, ledger cleanup and repeated husk processing depend on live
-   objects and graph size. A burial turn processes at most four Tasks, but each
-   Task retirement can still traverse descendants. Remaining husks retain a local
-   timer retry instead of depending on another Task to yield. Logical closure can be bounded separately from
+   objects and graph size. A burial turn processes at most four Tasks; each
+   Task now advances one child Team or one local retirement stage. Team retirement
+   waits for its own members' reclaimed acknowledgements, without recursively
+   retiring Tasks or scanning the global Task registry. Both scheduler and idle
+   service advance husks, retaining a local timer retry. Eager doom, Pend subtrees,
+   membership pruning, the registry prune and individual Nest operations still
+   have size-dependent costs. Logical closure can be bounded separately from
    asynchronous physical cleanup; preserve generations and immutable exit results.
 5. **Cell/Nest and hardware retirement** (`basis/cell/`, `basis/nest/`,
    `metal/riscv/iommu/`): zeroing depends on bytes; traversal on mappings/pages;
@@ -156,7 +160,50 @@ wakeups require the IRQ/IOMMU, clock and lifecycle QEMU scenarios.
 
 This is **not completion of M2**. Successful source callbacks, Timer/idle
 resource maintenance, scheduler COMMIT acquisition, other SpinLock/RelLock
-callers, one-site waiter searches and recursive Pend/Task retirement still need
+callers, one-site waiter searches and recursive Pend/lifecycle work still need
 narrower ownership and bounded continuations. Under permanent contention,
 deferred work can remain pending indefinitely. No hard-real-time service class
 or hardware latency bound is introduced by this change.
+
+## M2: retained Task retirement stages
+
+Each Task owns `Heirs → Pends → Controls → Memory → Settled`. One attempt advances
+one child Team or one local stage. A failed operation retains the stage and all
+cleanup responsibility; completed stages are not replayed. The phase guard is
+tried once, so competing retirement cannot run the same stage concurrently.
+Child selection resumes after a monotonic Team identity rather than a vector
+index, which could skip a child when Oust removes an earlier entry.
+
+Team retirement closes admission, then waits for its own members to publish
+`reclaimed`. Every member retires its own children before that acknowledgement;
+a member with cleared receipts remains in the Team until reclaimed. Thus the
+Team no longer recursively executes Task retirement or searches the system-wide
+Task registry. Member checks and child selection still scan bounded-capacity
+vectors (at most 1024 entries); they are not constant-time operations.
+
+Caller-controlled mappings share their records and round-robin cursor in one
+Task-owned collection. Each attempt addresses one record. A busy Nest retains
+its record while other mappings get subsequent turns; missing or stale records
+are removed without asserting hardware completion. Final removal of a live
+mapping still belongs to `Nest::settle`, after COMMIT revalidation. The former
+full-Nest mapping sweep after each controller is gone. Record lookup/removal,
+individual invalidation and Nest retirement remain size-dependent.
+
+Both the active scheduler and the idle loop service retained husks outside
+COMMIT. The idle service is necessary after the final runnable Task exits:
+a timer retry alone cannot advance cleanup if no caller reenters `run`. A local
+QEMU run caught exactly this last-husk stall before idle service was added.
+
+Host tests import the production retirement and controller modules with effect
+fixtures: stage retry, concurrent rejection, child removal, stalled mapping
+fairness, stale Nest removal and competing publication. They do not model the
+hardware settlement proof. The CPU guest reclaims eight exited Tasks, then lets
+a parent exit with eight held children and no explicit cleanup. It waits for the
+parent's reclamation, and the harness also requires complete shutdown after the
+last Task exits. The same guest runs under the IRQ/IOMMU and latency fixtures;
+the external-owner-death scenario separately covers delayed device access.
+
+This slice does not finish M2: eager doom/cull, arbitrary Pend descendants,
+global registry and membership pruning, one Nest's mapping/page walk, successful
+IRQ callbacks, and IRQ-off blocking acquisition still require narrower work
+boundaries. No observation here is a WCET or hardware latency guarantee.

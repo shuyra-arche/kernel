@@ -232,7 +232,7 @@ impl Nest {
         {
             let (controller, _) = control.control();
             if let Some(task) = registry::find(controller).and_then(|task| task.upgrade()) {
-                task.release_control(id);
+                task.controls.remove(id);
             }
         }
     }

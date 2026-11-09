@@ -121,15 +121,17 @@ fn wait() -> usize {
         shutdown::finish();
     }
     loop {
-        if tally::done() {
-            ipi::acknowledge();
-            leave(me);
-            shutdown::finish();
-        }
         // Clear first, then inspect work and deadlines. An IPI racing this
         // clear is either observed through the queue or stays pending for WFI.
         ipi::acknowledge();
         let redeemed = deadline::elapsed() && sign::redeem();
+        // No runnable Task may remain to reenter scheduler::run. Advance the
+        // retained husks here too, outside COMMIT and before rearming/WFI.
+        crate::basis::unit::lifecycle::bury();
+        if tally::done() {
+            leave(me);
+            shutdown::finish();
+        }
         shutdown::observe(me);
 
         let external_pending = crate::basis::nest::authority::external::maintain();

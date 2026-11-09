@@ -275,7 +275,7 @@ fn create_memo(
         return Err(source_fail(error));
     }
     if control == kernel_api::model::cell::MappingControl::Caller
-        && let Err(error) = caller_task.track_control(&space, id)
+        && let Err(error) = caller_task.controls.insert(&space, id)
     {
         rollback(&space, id, Some(reservation), None);
         return Err(error.into());

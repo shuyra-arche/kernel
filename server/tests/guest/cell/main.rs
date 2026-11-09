@@ -234,7 +234,7 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     delete(CellObject::Slot(a));
     let _ = writeln!(Console, "PASS cell-kernel swap=1 cleanup=1");
     levels::run();
-    organization::run();
+    organization::run(args, count);
     pend::run();
     sign::run();
     room::run();

@@ -95,9 +95,10 @@ impl TeamNode {
         });
     }
     pub fn prune(&self) {
-        self.tasks
-            .lock()
-            .retain(|m| m.exit().is_none() || !m.receipts.lock().is_empty());
+        self.tasks.lock().retain(|m| {
+            !m.reclaimed.load(core::sync::atomic::Ordering::Acquire)
+                || !m.receipts.lock().is_empty()
+        });
         let mut at = 0;
         loop {
             let child = self.children.lock().get(at).cloned();

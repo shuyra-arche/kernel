@@ -3,7 +3,7 @@ use kernel_api::{
     address::VirtAddr,
     model::{
         cell::*,
-        identity::{Mark, PendId},
+        identity::{Mark, PendId, TaskId},
         modifiable::Modifiable,
         nest::{NestInfo, NestKind},
         pend::{
@@ -32,6 +32,16 @@ fn request(token: PendId) -> [u8; UnitCreate::WIDTH] {
     .to_bytes()
 }
 pub(super) fn run() {
+    build(false);
+}
+// Leave a whole Team of held Tasks to the Kernel, with no Join/Oust/receipt
+// cleanup by their owner. This crosses the four-husk service limit and checks
+// that cleared receipts cannot hide members whose retirement is still pending.
+pub(super) extern "C" fn cascade() -> ! {
+    build(true);
+    unit::exit(84, 0, VirtAddr::new(0), 0)
+}
+fn build(cascade: bool) {
     let external = nest::create(crate::license::get(), NestKind::External).unwrap();
     assert!(unit::create(ptr(&request(external))).is_err());
     nest::delete(external).unwrap();
@@ -112,13 +122,24 @@ pub(super) fn run() {
         stack: VirtAddr::new(0),
     }
     .to_bytes();
-    let UnitTarget::Task(task) = unit::create(ptr(&descriptor)).unwrap() else {
-        panic!("expected Task")
-    };
-    unit::resume(UnitTarget::Task(task)).unwrap();
-    assert!(crate::lifecycle::wait_task(task));
-    assert_eq!(crate::lifecycle::result(task), (1, 83));
-    crate::lifecycle::delete(task);
+    let mut tasks = [TaskId::new(0); 8];
+    for task in &mut tasks {
+        let UnitTarget::Task(id) = unit::create(ptr(&descriptor)).unwrap() else {
+            panic!("expected Task")
+        };
+        *task = id;
+    }
+    if cascade {
+        return;
+    }
+    for task in tasks {
+        unit::resume(UnitTarget::Task(task)).unwrap();
+    }
+    for task in tasks {
+        assert!(crate::lifecycle::wait_task(task));
+        assert_eq!(crate::lifecycle::result(task), (1, 83));
+        crate::lifecycle::delete(task);
+    }
     unit::finish(team).unwrap();
     unit::delete(UnitTarget::Team(team)).unwrap();
     pend::return_(source).unwrap();
