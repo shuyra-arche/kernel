@@ -1,10 +1,16 @@
 //! Real RelLock atomics/guard ownership with a host Hart/IRQ boundary fixture.
 //! These tests prove admission and recursion, not RISC-V interrupt timing.
 mod support;
+pub(crate) use metal::sync::{depend, trap};
 pub(crate) use support::metal;
+mod exclusion;
 #[path = "../../src/metal/riscv/sync/reentrant/mod.rs"]
 mod reentrant;
-use metal::sync::{depend, trap};
+#[allow(dead_code)]
+#[path = "../../src/metal/riscv/sync/spin/mod.rs"]
+mod spin;
+#[path = "../../src/metal/riscv/sync/turn.rs"]
+mod turn;
 use reentrant::RelLock;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;

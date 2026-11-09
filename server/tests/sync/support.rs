@@ -79,9 +79,20 @@ pub(crate) mod metal {
                 );
             };
         }
+        macro_rules! depend_check_peer {
+            ($lock:expr, $lower:expr, $caller:expr) => {
+                crate::metal::sync::depend_check!($lock, $caller);
+            };
+        }
+        macro_rules! depend_release {
+            ($lock:expr) => {
+                #[cfg(debug_assertions)]
+                crate::metal::sync::depend::release($lock as *const _ as *const () as usize);
+            };
+        }
         #[cfg(debug_assertions)]
         pub(crate) use depend_enter;
-        pub(crate) use {depend_acquire, depend_check};
+        pub(crate) use {depend_acquire, depend_check, depend_check_peer, depend_release};
         pub(crate) mod depend {
             use std::cell::RefCell;
             std::thread_local! { static HELD: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) }; }

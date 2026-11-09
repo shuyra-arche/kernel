@@ -26,8 +26,10 @@ pub(crate) enum Metric {
     OuterHold,
     ReadyQueue,
     DispatchRun,
+    IrqAdmit,
+    IrqPublish,
 }
-const NAMES: [&str; 14] = [
+const NAMES: [&str; 16] = [
     "irq-off",
     "kernel-active",
     "spin-wait",
@@ -42,10 +44,12 @@ const NAMES: [&str; 14] = [
     "outer-hold",
     "ready-queue",
     "dispatch-run",
+    "irq-admit",
+    "irq-publish",
 ];
 #[repr(align(64))]
 struct Local {
-    metrics: [Distribution; 14],
+    metrics: [Distribution; 16],
     slowest: UnsafeCell<transaction::Slowest>,
     kernel: AtomicU64,
     irq: AtomicU64,
@@ -56,7 +60,7 @@ unsafe impl Sync for Local {}
 impl Local {
     const fn new() -> Self {
         Self {
-            metrics: [const { Distribution::new() }; 14],
+            metrics: [const { Distribution::new() }; 16],
             slowest: UnsafeCell::new(transaction::Slowest::new()),
             kernel: AtomicU64::new(0),
             irq: AtomicU64::new(0),

@@ -414,10 +414,20 @@ pub(crate) fn open(
         .checked_bytes()
         .ok_or(PendFail::NotAligned)?;
     let authorization = meta.authorization();
-    // 这一段是这份来源自己的一部分：准入复核、复用判定与发表都在同一个 `commit` 段里
-    // 做完——与已分出的子段、与别人的独立持有都不相交才继续，不隐式裁剪；
-    // 复用旧关系的那一路也过同一道门。
-    let _commit = crate::basis::commit();
+    let window = authorization
+        .as_ref()
+        .map(|_| {
+            let (offset, count) = authority
+                .window()
+                .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
+            crate::basis::pend::Geometry::new(offset, count)
+        })
+        .transpose()?;
+    // The operation lease serializes Open with derivation, narrowing and
+    // physical withdrawal. Source flight registration additionally prevents
+    // retirement from settling this publication while the ledger closes.
+    // Neither lease requires COMMIT across page-table work or remote fences.
+    let commit = crate::basis::commit();
     if !meta.alive()
         || !authority.permits(kernel_api::model::pend::Operations::Share(
             kernel_api::model::pend::ShareRights::OPEN,
@@ -444,9 +454,28 @@ pub(crate) fn open(
             .map(|entry| entry.mapping.clone())
     };
     if let Some(mapping) = reusable {
-        narrow_mapping(space, &mapping, access).map_err(pend_map_error)?;
+        let id = mapping.identity();
+        if let (Some(authorization), Some(window)) = (&authorization, &window) {
+            authorization.enter_publish_range(id, window.clone(), Some(&authority))?;
+        }
+        drop(commit);
+        let result = narrow_mapping(space, &mapping, access).map_err(pend_map_error);
+        let permitted = {
+            let _commit = crate::basis::commit();
+            meta.alive() && authority.modifiable().is_some()
+        };
+        if let Some(authorization) = &authorization {
+            authorization.leave_publish(id);
+        }
+        // A stopped holder can close its ledger during the operation. The
+        // existing mapping remains in the same retained withdrawal record.
+        if !permitted {
+            return Err(PendFail::Dead);
+        }
+        result?;
         return Ok((mapping.initial_range().0.as_usize(), size));
     }
+    drop(commit);
     meta.reserve_records(1)?;
     // 来源已在手上：先选址登记，再按来源范围挂载，不经任何 kernel / canonical 视图。
     let reservation = space
@@ -456,6 +485,20 @@ pub(crate) fn open(
         )
         .map_err(pend_map_error)?;
     let id = reservation.id();
+    let commit = crate::basis::commit();
+    if !meta.alive() || authority.modifiable().is_none() {
+        drop(commit);
+        let _ = space.release_reservation(reservation);
+        return Err(PendFail::Dead);
+    }
+    if let (Some(authorization), Some(window)) = (&authorization, &window) {
+        let (offset, count) = window.window();
+        if let Err(error) = authorization.check_publish(offset, count) {
+            drop(commit);
+            let _ = space.release_reservation(reservation);
+            return Err(error);
+        }
+    }
     if let Some(authorization) = &authorization
         && let Err(error) = space
             .mappings
@@ -465,22 +508,45 @@ pub(crate) fn open(
         space.retire_mapping(id);
         return Err(error);
     }
+    if let (Some(authorization), Some(window)) = (&authorization, &window)
+        && let Err(error) = authorization.enter_publish_range(id, window.clone(), Some(&authority))
+    {
+        drop(commit);
+        let _ = space.release_reservation(reservation);
+        space.retire_mapping(id);
+        return Err(error);
+    }
+    drop(commit);
     let mapping = match space.attach(reservation, source, access, access) {
         Ok(mapping) => mapping,
         Err(error) => {
+            if let Some(authorization) = &authorization {
+                authorization.leave_publish(id);
+            }
             space.retire_mapping(id);
             return Err(pend_map_error(error));
         }
     };
     let address = mapping.initial_start().as_usize();
-    if let Err(rejected) = meta.record(token, space, mapping.clone(), true) {
+    let recorded = {
+        let _commit = crate::basis::commit();
+        let result = meta.record(token, space, mapping.clone(), true);
+        if result.is_ok() && authorization.is_some() {
+            space.mappings.commit(id, mapping.clone());
+        }
+        result
+    };
+    if let Err(rejected) = recorded {
         drop(mapping);
         let _ = space.dispose(rejected);
         space.retire_mapping(id);
+        if let Some(authorization) = &authorization {
+            authorization.leave_publish(id);
+        }
         return Err(PendFail::Dead);
     }
-    if authorization.is_some() {
-        space.mappings.commit(id, mapping);
+    if let Some(authorization) = &authorization {
+        authorization.leave_publish(id);
     }
     Ok((address, size))
 }

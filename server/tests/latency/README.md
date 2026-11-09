@@ -53,8 +53,8 @@ ordinary scheduler entry remains responsible for consuming them. An earlier
 implementation reproduced a self-sustaining timer storm in the IRQ/IOMMU guest;
 the callback must not manufacture a new timer for every observed timer.
 
-SpinLock acquisition is still not fair or time bounded. COMMIT uses FIFO turns
-as detailed below, without a transaction-duration bound. Interrupt *reception* can
+SpinLock and COMMIT share FIFO turn admission as detailed below. This bounds
+overtaking, without supplying a transaction-duration bound. Interrupt *reception* can
 occur while the caller waits; full handler work and Task scheduling have their
 own admission boundaries. Ordinary trap entry reuses ROOT and is not a generic
 nested kernel entry. A kernel continuation is switched only through existing
@@ -146,6 +146,7 @@ evidence run. Sampling perturbs execution; it is not an overhead subtraction.
 | spin-wait / spin-hold | IRQ mask to successful acquisition, and guard construction to unlock; failed try is not a successful sample. |
 | commit-wait / commit-hold | RelLock scopes, including recursive scopes; sums are not CPU utilization. |
 | irq-sign | First router attempt through successful retained publication, including deferred admission; excludes deferred waiter notification and device-to-CPU latency. |
+| irq-admit / irq-publish | Partition each successful irq-sign sample at COMMIT admission; the former includes deferred retries, the latter includes controller claim and retained publication. Cancelled/no-claim attempts produce no delivery sample. |
 | ready-run | First ready publication through extension restore/ASID occupancy at Rust user return; preserves the timestamp across queue transfer. |
 | timer-late | Deadline drain observation minus requested tick, not time of user execution. |
 | probe | Measurement floor under the recorded environment, not hardware WCET. |
@@ -217,10 +218,76 @@ cannot be followed by a fallible publication allocation. Final publication close
 the old identity; if Stop closed the owner meanwhile, replacement receipts remain
 in its ledger for retirement and caller success is refused.
 
-This removes page-count-dependent physical conversion from global COMMIT, but
-not from the private Flat/allocator locks. Share Open's publication transaction,
-private allocator costs and firmware remain unresolved blocking sources. No
-hardware time bound or completion of #30's strongest acceptance is claimed.
+Share Open now uses its existing operation lease and a source publication window
+across page-table installation and invalidation outside COMMIT. The window is
+registered before translation, excludes overlapping transfer, and prevents
+withdrawal settlement. The shared boundary validates authority and registers the
+binding, then records the completed mapping in a separate short commit. Ledger
+closure during installation rejects success and transfers cleanup to Nest before
+the flight ends. Physical cleanup remains owed on Busy. Reusing an existing map
+also registers the publication window; it does not bypass the same exclusion.
+This preserves the existing authority/withdrawal owner, including borrowed device
+regions whose operation lease serializes direct revocation.
+
+Admission response arithmetic also runs outside COMMIT. One preparation per
+destination excludes concurrent additions; removals can only reduce interference.
+Retained immutable contracts supply the calculation, not a second scheduling
+authority. Final publication revalidates the controller and prepared Task; it
+does not overwrite a removed Task's later admission on another Hart.
+
+IRQ front halves still try COMMIT once. A retained request joins the FIFO at an
+outer trap return or an existing scheduling boundary, so a stream of peer commits
+cannot indefinitely reject it. The stackless reception callback never joins this
+queue or switches a continuation. A successful deferred turn checks the controller
+even when its CPU pending bit disappeared, settling cancelled attempts before a
+later IRQ can reuse their timestamp. Claim, notification and consumption retain
+their existing batch and ownership limits.
+
+## Conditional blocking bounds
+
+Both exclusion locks use the same turn queue. With H online participating Harts,
+each lock has at most H outstanding turns: nonrecursive SpinLock admits one per
+Hart, and recursive COMMIT guards reuse their owner's turn. H is at most the
+boot-admitted 4096 slots and far below the sequence-number modulus. A blocking
+reservation therefore has at most H-1 predecessor turns. Failed tries reserve
+nothing and cannot barge during an owner-to-owner gap. Host handshakes pause a
+real queued waiter in that gap, verify rejection, FIFO entry and protected-write
+visibility for both locks; these are work/order proofs, not timing tests.
+
+Let C_l bound the **wall-clock duration of a complete outer ownership interval**
+for lock l, including nested lock waits, firmware interruption and memory stalls.
+Then one reserved acquisition waits at most `(H - 1) * C_l`, plus bounded queue
+atomic overhead. A try performs one queue observation/CAS. For a finite invocation
+path with n_l outer acquisitions, its cumulative lock blocking is bounded by
+`sum_l n_l * (H - 1) * C_l`. Recursive COMMIT scopes do not add predecessor turns.
+Use the lock-dependency order to derive each C_l from local execution plus its
+bounded nested dependencies; do not count the same wait again as local execution.
+
+| Admitted path | Finite software work and required duration input |
+| --- | --- |
+| Clock / ClockInfo | Resident monotonic read and arithmetic; platform clock read bound. |
+| Yield / return / timer / IPI | At most 32 fixed registrations and pending continuations per pass; bounded selection/relocation; at most H destinations. Bound slot/Task/COMMIT ownership and timer/IPI/context operations. |
+| Direct Sign Listen / Await | One poll/watch/local handoff; the admitted branch cannot take the ordinary beacon retry loop. Authority ancestry is at most 64; dependency analysis has at most 32 origins and 9 visits per origin. A server's later answer is a separate service bound. |
+| Direct Sign Trigger / Consume | One retained state transition; notification queue insertion is O(1), with at most H notifications. Bound endpoint/ledger/queue ownership and IPIs, including competing ordinary mutations. |
+| Unit Exit | One local handoff plus retained retirement publication. Physical memory/IOMMU settlement remains asynchronous and cannot be included as successful synchronous completion. |
+| IRQ to retained Sign | At most 4 claims, each scanning at most 64 sources and bounded authority ancestry. Deferred maintenance visits at most 64 sources, with the existing per-key listener batches. Bound the interrupted ordinary continuation until an outer return, one FIFO admission, controller MMIO and publication. |
+
+These formulas require a healthy platform that eventually executes every admitted
+Hart, finite bounds on each holder's actual work, and finite call/arrival counts
+over the response window. Admission and queue capacities bound software counts;
+they do not establish C_l. Ordinary peers can still hold translation/allocator
+locks for work depending on Span pages/ranges, Nest size, boot memory and admitted
+Sv geometry. Those dependencies must be bounded for the selected deployment,
+even though the admitted Task itself cannot call those operations. A cancelled
+try, reception window or FIFO queue cannot substitute for that evidence.
+
+For M3, add the cumulative result to interrupt/dispatch/platform interference to
+justify `Schedule.latency` over the **whole response window**, not one lock wait.
+Unknown C_l, unbounded external arrivals, offline Harts or uncontrolled host
+descheduling make a finite time guarantee unavailable. QEMU provides observations
+and regression evidence only. #30's strong hardware-dependent acceptance remains
+unproved until these deployment inputs are established; no observed maximum is
+promoted to an upper bound.
 
 Ordinary wake placement also owns its cursor in Task's scheduling state. A shared
 global cursor allowed periodic workers to remain on one residue when unrelated
@@ -234,8 +301,9 @@ recipient alive until exact-identity Busy retries settle; logical invalidation
 may wake it before physical ledger removal, and immediate exit would race that
 removal. Errors other than Busy still fail the test.
 
-The floating-point guest also confirms both workers reached `Waiting` before
-eight explicit WaitValue wakeups, checking all registers and traced checkpoint
+The floating-point guest confirms both workers reached `Waiting` before starting
+the preemption experiment, separating second-Task construction from that deadline.
+It then performs eight explicit WaitValue wakeups, checking all registers and traced checkpoint
 PCs immediately after each handoff. Short absolute sleeps remain in its workload,
 but can expire before a contended call reaches the kernel and therefore cannot
 alone establish blocking or migration coverage. The cross-Hart trace assertions

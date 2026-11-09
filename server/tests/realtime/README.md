@@ -18,6 +18,13 @@ The preparation lease also retains retirement: Stop closes live authority
 immediately, but resource retirement waits until preparation releases its lease.
 An Arc to Task alone is not proof that its context page remains resident.
 
+The destination also retains one in-flight preparation identity. No second
+admission can add interference there until it finishes. The bounded response
+calculation runs outside COMMIT over immutable contracts: concurrent exits or
+evictions only make that interference set more conservative. Publication checks
+live authority again and never updates a Task that has since obtained a different
+contract. Every failure releases both preparation obligations.
+
 An administrator with Build qualification and control of the Task calls
 `Unit.Admit`. The Task must be initially held, or individually frozen and fully
 off-Hart after ordinary preparation. It must own no child Teams and run in User
@@ -134,9 +141,12 @@ and context-switch cost, timer/IPI service, cache/memory interference and delays
 from the housekeeping/controller environment. Same-Hart competing budgeted
 execution is already in the sum. Ordinary Tasks on other Harts can still contend
 for shared Kernel resources: merely setting a small B_i does not bound them.
-M2 reception windows preserve interrupt reception during lock contention, but
-provide neither fairness nor a time bound on full scheduling. Those assumptions
-must be independently justified on a deployment; **this PR does not prove them**.
+Reception windows preserve interrupt reception during lock contention. FIFO
+SpinLock/COMMIT admission now bounds predecessor turns to H-1 per reserved outer
+acquisition; it does not supply their durations. The [blocking analysis](../latency/README.md#conditional-blocking-bounds)
+lists per-path work limits and derives cumulative waiting from bounded holder
+durations and invocation counts. Those physical inputs must be independently
+justified on a deployment; **QEMU does not prove them**.
 
 As an illustrative admitted set in milliseconds, Q=2, T=100, B=10 for priorities
 9/5/3/1 with ceilings 9/5/9/9 gives responses 20/24/24/24. Changing a competitor

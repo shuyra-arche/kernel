@@ -247,6 +247,9 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
 }
 
 pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
+    if let Some(route) = crate::basis::room::interrupt::external() {
+        route.advance();
+    }
     if crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id())
         && !unsafe { (*next).address_space() }.is_kernel()
     {

@@ -21,11 +21,13 @@ use kernel_api::{
 
 pub(super) struct Admission {
     tasks: [Option<Weak<Task>>; MAX_TASKS],
+    preparing: Option<Weak<Task>>,
 }
 impl Admission {
     pub(super) const fn new() -> Self {
         Self {
             tasks: [const { None }; MAX_TASKS],
+            preparing: None,
         }
     }
     fn members(&mut self) -> [Option<Arc<Task>>; MAX_TASKS] {
@@ -76,8 +78,19 @@ pub(crate) fn admit(
     {
         return Err(UnitFail::Denied);
     }
+    let slot = &super::schedulers()[destination.get()];
+    {
+        let mut admission = slot.admission.lock();
+        if admission.preparing.is_some() {
+            return Err(UnitFail::Busy);
+        }
+        admission.preparing = Some(Arc::downgrade(task));
+    }
     *task.schedule.lock() = Schedule::Preparing;
-    let preparation = Preparation(task.clone());
+    let preparation = Preparation {
+        task: task.clone(),
+        destination,
+    };
     drop(_commit);
     task.prepare_extensions(destination, spec.extensions)?;
     task.ident.prepare_resident().map_err(|_| UnitFail::Busy)?;
@@ -88,9 +101,7 @@ pub(crate) fn admit(
     {
         return Err(UnitFail::Denied);
     }
-    let slot = &super::schedulers()[destination.get()];
-    let mut admission = slot.admission.lock();
-    let members = admission.members();
+    let members = slot.admission.lock().members();
     let at = members
         .iter()
         .position(Option::is_none)
@@ -114,14 +125,29 @@ pub(crate) fn admit(
         latency: ticks(spec.latency),
         response: 0,
     };
+    // Existing contracts are immutable apart from their derived response.
+    // This Hart's preparation lease excludes additions; exits/evictions can
+    // only remove interference. Analyze retained values without any lock.
+    drop(_commit);
     if !analyze(&mut contracts[..=count]) {
         return Err(UnitFail::Busy);
     }
+    let _commit = crate::basis::commit();
+    if !authorized(actor, task)
+        || task.dead()
+        || !matches!(*task.schedule.lock(), Schedule::Preparing)
+    {
+        return Err(UnitFail::Denied);
+    }
+    let mut admission = slot.admission.lock();
     for (task, contract) in members.iter().flatten().zip(&contracts[..count]) {
         if let Schedule::Fixed {
             contract: current, ..
         } = &mut *task.schedule.lock()
+            && current.spec == contract.spec
         {
+            // A removed Task may already have been admitted on another Hart.
+            // Never overwrite that distinct contract with this analysis.
             *current = *contract;
         }
     }
@@ -149,11 +175,21 @@ fn authorized(actor: &Task, task: &Task) -> bool {
 }
 
 /// Cancel the preparation lease on failure; a successful publication owns it.
-struct Preparation(Arc<Task>);
+struct Preparation {
+    task: Arc<Task>,
+    destination: HartId,
+}
 impl Drop for Preparation {
     fn drop(&mut self) {
         let _commit = crate::basis::commit();
-        let mut state = self.0.schedule.lock();
+        let mut admission = super::schedulers()[self.destination.get()].admission.lock();
+        assert!(
+            admission
+                .preparing
+                .take()
+                .is_some_and(|task| task.ptr_eq(&Arc::downgrade(&self.task)))
+        );
+        let mut state = self.task.schedule.lock();
         if matches!(*state, Schedule::Preparing) {
             *state = Schedule::new();
         }

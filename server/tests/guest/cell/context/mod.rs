@@ -73,6 +73,10 @@ extern "C" fn two() -> ! {
     worker(2)
 }
 fn worker(id: usize) -> ! {
+    // Start the preemption experiment only after both Tasks exist and are
+    // actually blocked. Creation/Resume of the second Task can itself take
+    // time under debug contention; it is not part of the preemption bound.
+    HANDOFF.wait(id, 0);
     let mut observed = Image::zero();
     // First use is a read, so a prior Task's hardware contents cannot hide.
     unsafe { save(&mut observed) };
@@ -105,7 +109,7 @@ fn worker(id: usize) -> ! {
         assert_eq!(observed.regs, expected.regs);
         assert_eq!(observed.fcsr, expected.fcsr);
         if turn % 8 == 0 {
-            HANDOFF.wait(id, (turn / 8) as u32);
+            HANDOFF.wait(id, (turn / 8) as u32 + 1);
             // Trace the actual resumed context before another Yield or Sleep
             // can move it again, then check the whole register image.
             unsafe {
@@ -144,7 +148,7 @@ pub(super) fn run() {
     for task in tasks {
         unit::resume(UnitTarget::Task(task)).unwrap();
     }
-    for turn in 0..8 {
+    for turn in 0..9 {
         HANDOFF.wake(&tasks, turn);
     }
     for task in tasks {

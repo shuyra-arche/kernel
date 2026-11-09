@@ -4,6 +4,7 @@ mod pair;
 pub(crate) mod reentrant;
 pub(crate) mod spin;
 mod trap;
+mod turn;
 
 pub(crate) use pair::with_pair;
 

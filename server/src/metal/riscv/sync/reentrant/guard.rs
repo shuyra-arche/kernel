@@ -54,7 +54,7 @@ impl<T: ?Sized> Drop for RelLockGuard<'_, T> {
             self.lock.owner.store(Owner::FREE.word(), Ordering::Relaxed);
             // Publish all protected writes before the next reserved Hart may
             // enter. Recursive releases never advance the queue.
-            self.lock.serving.fetch_add(1, Ordering::Release);
+            self.lock.turns.leave();
         }
     }
 }

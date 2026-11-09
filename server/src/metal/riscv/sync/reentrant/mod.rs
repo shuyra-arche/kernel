@@ -5,6 +5,7 @@ use crate::metal::hart;
 
 use super::depend;
 use super::trap::TrapGuard;
+use super::turn::Turns;
 
 mod guard;
 mod owner;
@@ -18,8 +19,7 @@ pub struct RelLock<T: ?Sized> {
     // One outstanding admission per Hart; recursive guards reuse its ticket.
     // Wrapping sequence numbers remain distinct with fewer than usize::MAX
     // outstanding Harts. A reservation cannot be cancelled or bypassed.
-    next: AtomicUsize,
-    serving: AtomicUsize,
+    turns: Turns,
     owner: AtomicUsize,
     count: UnsafeCell<usize>,
     #[cfg(feature = "latency")]
@@ -36,8 +36,7 @@ unsafe impl<T: ?Sized + Send> Sync for RelLock<T> {}
 impl<T> RelLock<T> {
     pub const fn new_level(_level: depend::Level, val: T) -> Self {
         RelLock {
-            next: AtomicUsize::new(0),
-            serving: AtomicUsize::new(0),
+            turns: Turns::new(),
             owner: AtomicUsize::new(0),
             count: UnsafeCell::new(0),
             #[cfg(feature = "latency")]
@@ -68,15 +67,9 @@ impl<T: ?Sized> RelLock<T> {
             // Acquire observes the previous outer release. Reserve only an
             // empty queue: a failed try creates no abandoned ticket, and a
             // free owner between turns does not let this caller barge.
-            let serving = self.serving.load(Ordering::Acquire);
-            self.next
-                .compare_exchange(
-                    serving,
-                    serving.wrapping_add(1),
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                )
-                .ok()?;
+            if !self.turns.try_enter() {
+                return None;
+            }
             crate::metal::sync::depend_check!(self, caller);
             self.owner.store(me.word(), Ordering::Relaxed);
             unsafe { *self.count.get() = 1 };
@@ -129,12 +122,7 @@ impl<T: ?Sized> RelLock<T> {
         if Owner::from_word(self.owner.load(Ordering::Relaxed)) == me {
             self.reenter();
         } else {
-            let ticket = self.next.fetch_add(1, Ordering::Relaxed);
-            while self.serving.load(Ordering::Acquire) != ticket {
-                crate::metal::stop::hush();
-                crate::metal::interrupt::window::poll();
-                ::core::hint::spin_loop();
-            }
+            self.turns.enter();
             self.owner.store(me.word(), Ordering::Relaxed);
             unsafe { *self.count.get() = 1 };
             #[cfg(feature = "latency")]

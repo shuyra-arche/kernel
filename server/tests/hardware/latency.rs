@@ -49,6 +49,8 @@ pub(super) fn verify(log: &str, output: &Path) {
         "outer-hold",
         "ready-queue",
         "dispatch-run",
+        "irq-admit",
+        "irq-publish",
     ] {
         assert!(
             totals.get(metric).copied().unwrap_or(0) > 0,
@@ -62,6 +64,8 @@ pub(super) fn verify(log: &str, output: &Path) {
     );
     assert_eq!(totals["ready-queue"], totals["ready-run"]);
     assert_eq!(totals["dispatch-run"], totals["ready-run"]);
+    assert_eq!(totals["irq-admit"], totals["irq-sign"]);
+    assert_eq!(totals["irq-publish"], totals["irq-sign"]);
     let outer: Vec<_> = log
         .lines()
         .filter(|line| line.starts_with("latency-outer: "))

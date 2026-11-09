@@ -1,6 +1,5 @@
 use ::core::marker::PhantomData;
 use ::core::ops::{Deref, DerefMut};
-use ::core::sync::atomic::Ordering;
 
 use crate::metal::sync::trap::TrapGuard;
 
@@ -45,6 +44,6 @@ impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
         crate::metal::sync::depend_release!(self.lock);
         #[cfg(feature = "latency")]
         crate::metal::measure::elapsed(crate::metal::measure::Metric::SpinHold, self.start);
-        self.lock.locked.store(false, Ordering::Release);
+        self.lock.turns.leave();
     }
 }

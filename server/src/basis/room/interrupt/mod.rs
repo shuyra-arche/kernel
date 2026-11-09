@@ -169,6 +169,8 @@ impl Router {
         // interval from IRQ→Sign would manufacture a lower latency observation.
         #[cfg(feature = "latency")]
         self.first_entry.store(0, Ordering::Relaxed);
+        #[cfg(feature = "latency")]
+        let admitted = crate::metal::measure::stamp();
         let mut claimed = false;
         for _ in 0..4 {
             let Some(irq) = self.controller.claim_masked() else {
@@ -185,10 +187,13 @@ impl Router {
                 if let Some(endpoint) = endpoint {
                     if endpoint.deliver() {
                         #[cfg(feature = "latency")]
-                        crate::metal::measure::elapsed(
-                            crate::metal::measure::Metric::IrqSign,
-                            irq_entry,
-                        );
+                        {
+                            use crate::metal::measure::{Metric, record, stamp};
+                            let published = stamp();
+                            record(Metric::IrqAdmit, admitted.saturating_sub(irq_entry));
+                            record(Metric::IrqPublish, published.saturating_sub(admitted));
+                            record(Metric::IrqSign, published.saturating_sub(irq_entry));
+                        }
                     }
                 } else {
                     self.finish(irq, false);
@@ -229,6 +234,16 @@ impl Router {
             self.rearm();
         }
     }
+    /// An outer trap return owns no exclusion guard or partially published
+    /// state. Join the FIFO once here: a stream of peer transactions cannot
+    /// indefinitely reject the front half's nonblocking admission attempts.
+    /// The stackless reception callback never calls this switching boundary.
+    pub(crate) fn advance(&self) {
+        if hart::hart_id() == self.hart && self.deferred.load(Ordering::Acquire) {
+            let commit = crate::basis::commit();
+            self.retry(&commit);
+        }
+    }
     pub(crate) fn rearm(&self) {
         if hart::hart_id() != self.hart {
             return;
@@ -254,11 +269,11 @@ impl Router {
         }
         if deferred {
             crate::metal::interrupt::enable_external();
-            if crate::metal::interrupt::external_pending() {
-                // Keep COMMIT through the deferred claim instead of returning
-                // only to lose another acquisition race on external trap entry.
-                self.handle();
-            }
+            // Recheck the controller even if the CPU pending bit disappeared.
+            // A cancelled assertion must settle the retained first attempt;
+            // otherwise an unrelated later IRQ inherits its old timestamp.
+            // COMMIT remains owned through this bounded claim batch.
+            self.handle();
         }
     }
     pub(crate) fn report(&self) {
