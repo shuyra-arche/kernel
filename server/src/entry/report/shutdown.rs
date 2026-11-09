@@ -66,6 +66,4 @@ pub(crate) fn report() {
             entry.note()
         );
     });
-    #[cfg(feature = "semihosting")]
-    super::export::complete();
 }

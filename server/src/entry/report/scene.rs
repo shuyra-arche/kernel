@@ -338,21 +338,19 @@ pub fn dump(r: &mut Report) {
                 .map(|t| format!("[scene] crash scene, hart {hart}, task #{t}"))
         })
         .unwrap_or_else(|| format!("[scene] crash scene, hart {hart}"));
-    r.paragraph("csr", Some(scene_head))
-        .items
-        .extend(csr_rows());
+    r.paragraph(Some(scene_head)).items.extend(csr_rows());
     if let Some(scene) = kernel_scene.as_ref() {
-        r.paragraph("scene", None).items.extend(scene_rows(scene));
+        r.paragraph(None).items.extend(scene_rows(scene));
     }
-    r.paragraph("gpr", None).items.extend(gpr_rows());
+    r.paragraph(None).items.extend(gpr_rows());
 
     if let Some(scene) = kernel_scene.as_ref() {
-        r.paragraph("kbt", None)
+        r.paragraph(None)
             .items
             .extend(backtrace_rows(&scene.backtrace, "kbt"));
     }
     if let Some(scene) = Scene::capture_normal() {
-        r.paragraph("nbt", None)
+        r.paragraph(None)
             .items
             .extend(backtrace_rows(&scene.backtrace, "nbt"));
     }
@@ -363,11 +361,8 @@ macro_rules! crash_scene {
     () => {{
         let mut __r = $crate::entry::report::record::Report::default();
         $crate::entry::report::scene::dump(&mut __r);
-        let __sealed = __r.seal();
         let mut __sink = $crate::metal::console::Sink;
-        $crate::entry::report::render::render(__sealed, &mut __sink, 2);
-        #[cfg(feature = "semihosting")]
-        $crate::entry::report::export::export(__sealed);
+        $crate::entry::report::render::render(&__r, &mut __sink, 2);
     }};
     ($($arg:tt)*) => {{
         $crate::putln!($($arg)*);

@@ -6,10 +6,6 @@ edition.workspace = true
 publish = false
 autobins = false
 
-[features]
-default = []
-semihosting = ["dep:serde_json", "dep:semihosting"]
-
 [lib]
 path = "src/lib.rs"
 test = false
@@ -27,10 +23,6 @@ serde = { version = "1.0", default-features = false, features = [
   "derive",
   "alloc",
 ] }
-serde_json = { version = "1.0", default-features = false, features = [
-  "alloc",
-], optional = true }
-semihosting = { version = "0.1.25", features = ["fs"], optional = true }
 bitflags = { workspace = true }
 fack = { workspace = true }
 erra = { workspace = true }
