@@ -1,6 +1,9 @@
 use kernel_api::boot::platform::{
-    Cpu, FirmwareId, Harts, Memory, Paging, Region,
-    devices::{Devices, Plic},
+    Memory, Region, Resources,
+    riscv::{
+        Cpu, FirmwareId, Harts, Paging,
+        devices::{Devices, Plic},
+    },
 };
 fn memory() -> Memory {
     Memory::new(
@@ -35,21 +38,27 @@ fn raw_platform_facts_cannot_publish_protected_memory() {
         queues: [1, 2, 3],
     };
     let mut d = Devices {
-        authorities: &[],
-        protected: &protection,
-        external: &[Region::new(0x40000000, 0x10000)],
+        resources: Resources {
+            authorities: &[],
+            protected: &protection,
+            external: &[Region::new(0x40000000, 0x10000)],
+        },
         controllers: &protection[..1],
         interrupt: Some(irq),
     };
     d.validate(&m).unwrap();
-    assert!(d.admits_external(Region::new(0x40001000, 4096)).is_ok());
-    assert!(d.admits_external(protection[0]).is_err());
+    assert!(
+        d.resources
+            .admits_external(Region::new(0x40001000, 4096))
+            .is_ok()
+    );
+    assert!(d.resources.admits_external(protection[0]).is_err());
     let alias = [Region::new(0x3000001, 4)];
-    d.authorities = &alias;
+    d.resources.authorities = &alias;
     assert!(d.validate(&m).is_err());
-    d.authorities = &protection[..1];
+    d.resources.authorities = &protection[..1];
     assert!(d.validate(&m).is_err());
-    d.authorities = &[];
+    d.resources.authorities = &[];
     d.interrupt = Some(Plic {
         contexts: &[usize::MAX],
         selected: usize::MAX,
@@ -63,6 +72,24 @@ fn raw_platform_facts_cannot_publish_protected_memory() {
     assert!(d.validate(&m).is_err());
     d.interrupt = None;
     assert!(d.validate(&m).is_err());
+    // Generic ownership validation cannot substitute for controller admission.
+    assert!(d.resources.validate(&m).is_ok());
+    d.interrupt = Some(irq);
+    let oversized = [Region::new(0x3000000, 8192)];
+    d.controllers = &oversized;
+    assert!(d.validate(&m).is_err());
+    let alias = [Region::new(0xc000000, 4096)];
+    d.controllers = &alias;
+    assert!(d.validate(&m).is_err());
+    d.controllers = &protection[..1];
+    for queues in [[0, 2, 3], [1, 2, 32]] {
+        d.interrupt = Some(Plic { queues, ..irq });
+        assert!(d.validate(&m).is_err());
+    }
+    d.interrupt = Some(Plic { selected: 2, ..irq });
+    assert!(d.validate(&m).is_err());
+    d.interrupt = Some(irq);
+    d.validate(&m).unwrap();
 }
 #[test]
 fn cpu_identity_admission_is_bounded_and_boot_slot_is_explicit() {
@@ -84,7 +111,8 @@ fn cpu_identity_admission_is_bounded_and_boot_slot_is_explicit() {
     let h = Harts::new(&[cpu, other], cpu.id, 100).unwrap();
     assert_eq!(h.paging(), Paging::Sv39);
     assert_eq!(
-        h.firmware(kernel_api::boot::platform::HartId::new(1)).get(),
+        h.firmware(kernel_api::boot::platform::riscv::HartId::new(1))
+            .get(),
         300
     );
 }

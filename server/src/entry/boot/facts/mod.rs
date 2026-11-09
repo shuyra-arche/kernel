@@ -1,8 +1,9 @@
 //! Once-only admitted boot facts. The integration owner supplies normalized
 //! descriptors; Kernel owns publication and validates its executing image.
 use super::BootError;
+use crate::metal::platform::Platform;
 use crate::metal::{hart, sync::OnceLock};
-use kernel_api::boot::platform::{Platform, Region};
+use kernel_api::boot::platform::Region;
 static PLATFORM: OnceLock<Platform> = OnceLock::new();
 pub(super) fn init(platform: Platform) -> Result<(), BootError> {
     if !platform.memory.protects(super::image_region())

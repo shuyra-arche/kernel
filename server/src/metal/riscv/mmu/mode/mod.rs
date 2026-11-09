@@ -3,7 +3,7 @@ use riscv::register::satp;
 use crate::entry::boot::facts;
 use crate::metal::sync::OnceLock;
 use kernel_api::address::VirtAddr;
-use kernel_api::boot::platform::Paging;
+use kernel_api::boot::platform::riscv::Paging;
 
 mod error;
 mod geometry;

@@ -431,3 +431,33 @@ No physical-device validation or #82 IRQ routing is claimed by these tests.
 Debug Put is nonblocking and returns the exact accepted byte prefix (possibly zero).
 It adds no newline and does not rewrite non-UTF-8 bytes. Callers retaining output
 must retry the unaccepted suffix; Kernel never reports discarded bytes as written.
+
+## Trusted boot provider input
+
+The source-level boot contract is separate from the versioned syscall and boot
+wire formats. `boot::platform::{Memory, Region, Resources}` admits bounded
+physical RAM, reservations, opaque firmware metadata and MMIO custody. Common
+admission knows no Sv mode, SBI target, Sstc flag or PLIC context. `Resources`
+validation does not grant authority or prove a hardware route is supported.
+
+The complete implemented input lives at `boot::platform::riscv`: `Platform`,
+`ClockAccess`, `hart::{Cpu, Harts, HartId, FirmwareId, Paging, HartError}` and
+`devices::{Devices, Plic}`. The selected metal provider chooses this input for
+Kernel entry. Firmware declarations, verified capabilities and Kernel controller
+ownership remain distinct: existing CPU checks/probes and RV64 device validation
+still precede publication. There is no generic ISA enum or second-ISA boot claim.
+
+| Previous source | Replacement |
+| --- | --- |
+| `platform::{Platform, ClockAccess, Cpu, Harts, HartId, FirmwareId, Paging}` | The same names under `platform::riscv` |
+| `platform::hart::HartError` | `platform::riscv::hart::HartError` |
+| `platform::devices::{Devices, Plic}` | `platform::riscv::devices::{Devices, Plic}` |
+| `Devices.{authorities, protected, external}` | `Devices.resources: platform::Resources` |
+| `Memory::dtb()` | `Memory::metadata()`; the constructor's fourth argument is opaque firmware storage |
+
+`Platform::dtb()` remains RV64-specific. Physical range units, pre-heap capacities,
+separate static memory/Hart storage and wire encoding are unchanged. Images must
+rebuild against the new source contract. Publish Kernel first, then migrate and
+pin Vanllia `platform/riscv` and `tests/platform/qemu` together. The Host
+second-provider fixture validates common physical inputs without manufacturing
+RISC-V facts; CPU/controller admission for another ISA awaits an actual provider.

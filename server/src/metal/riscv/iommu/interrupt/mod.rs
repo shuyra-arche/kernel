@@ -6,7 +6,7 @@ use crate::metal::interrupt::plic::Plic;
 use alloc::boxed::Box;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
-use kernel_api::boot::platform::devices::Plic as Plan;
+use kernel_api::boot::platform::riscv::devices::Plic as Plan;
 struct Route<C> {
     controller: C,
     hart: hart::HartId,

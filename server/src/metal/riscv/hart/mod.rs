@@ -1,6 +1,6 @@
 mod per_hart;
 
-pub use kernel_api::boot::platform::{FirmwareId, HartId};
+pub use kernel_api::boot::platform::riscv::{FirmwareId, HartId};
 pub use per_hart::PerHart;
 pub(crate) use per_hart::lease_load;
 pub(crate) use per_hart::lease_store;
