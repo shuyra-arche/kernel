@@ -1,4 +1,5 @@
 mod boundary;
+mod handoff;
 #[cfg(feature = "vector")]
 mod vector;
 use super::{Console, lifecycle};
@@ -10,6 +11,7 @@ use kernel_api::{
 };
 use kernel_client::call::{room, unit};
 static STARTED: AtomicUsize = AtomicUsize::new(0);
+static HANDOFF: handoff::Handoff = handoff::Handoff::new();
 
 // Keep the four-Hart fixture runnable during context handoffs. Otherwise the
 // timer owner can repeatedly steal an expired worker before an idle destination
@@ -102,6 +104,21 @@ fn worker(id: usize) -> ! {
         unsafe { save(&mut observed) };
         assert_eq!(observed.regs, expected.regs);
         assert_eq!(observed.fcsr, expected.fcsr);
+        if turn % 8 == 0 {
+            HANDOFF.wait(id, (turn / 8) as u32);
+            // Trace the actual resumed context before another Yield or Sleep
+            // can move it again, then check the whole register image.
+            unsafe {
+                if id == 1 {
+                    context_float_one();
+                } else {
+                    context_float_two();
+                }
+                save(&mut observed);
+            }
+            assert_eq!(observed.regs, expected.regs);
+            assert_eq!(observed.fcsr, expected.fcsr);
+        }
         room::yield_();
         // Avoid locking both workers to the same timer phase. Every checkpoint
         // still verifies all registers; the host trace must prove actual migration.
@@ -126,6 +143,9 @@ pub(super) fn run() {
     ];
     for task in tasks {
         unit::resume(UnitTarget::Task(task)).unwrap();
+    }
+    for turn in 0..8 {
+        HANDOFF.wake(&tasks, turn);
     }
     for task in tasks {
         assert!(lifecycle::wait_task(task));

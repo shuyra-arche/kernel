@@ -233,3 +233,10 @@ Yield workers remain the contention load. Common Sign revocation keeps the
 recipient alive until exact-identity Busy retries settle; logical invalidation
 may wake it before physical ledger removal, and immediate exit would race that
 removal. Errors other than Busy still fail the test.
+
+The floating-point guest also confirms both workers reached `Waiting` before
+eight explicit WaitValue wakeups, checking all registers and traced checkpoint
+PCs immediately after each handoff. Short absolute sleeps remain in its workload,
+but can expire before a contended call reaches the kernel and therefore cannot
+alone establish blocking or migration coverage. The cross-Hart trace assertions
+and outer QEMU watchdog remain unchanged.
