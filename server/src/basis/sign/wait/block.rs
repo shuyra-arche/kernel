@@ -1,6 +1,6 @@
 use super::*;
 use crate::basis::room::Handoff;
-use crate::basis::room::conductor::run::run;
+use crate::basis::room::scheduler::run;
 use crate::basis::unit::lifecycle::quit;
 use crate::basis::unit::lifecycle::set_exit_reason;
 
@@ -49,14 +49,20 @@ pub(crate) fn block_with_call<E: WaitFail>(
     );
     if let Some(at) = at {
         hold(ticket, key, &me).map_err(|()| E::oom())?;
-        if deadline::tock(ticket.raw(), at).is_err() {
+        if deadline::insert(ticket.raw(), at).is_err() {
             void(ticket);
             return Err(E::oom());
         }
     }
     drop(me);
-    let (task, next_pa) = current().swap();
-    task.block(key, ticket, wait);
+    let (task, next_pa) = current().handoff(
+        crate::basis::room::scheduler::slot::Departure::Wait {
+            key,
+            ticket,
+            call: wait,
+        },
+        &_commit,
+    );
     let queued = {
         let mut sites = sites(key).lock();
         let queued = match sites.get_mut(&key) {
@@ -67,7 +73,7 @@ pub(crate) fn block_with_call<E: WaitFail>(
                 false
             }
             Some(site) => {
-                site.push_back(task.clone());
+                site.enqueue(task.clone());
                 true
             }
         };
@@ -79,7 +85,7 @@ pub(crate) fn block_with_call<E: WaitFail>(
         drop(task);
     } else {
         void(ticket);
-        rise(core::iter::once(task), launch);
+        rise(core::iter::once(task), insert);
     }
     #[cfg(debug_assertions)]
     crate::basis::unit::task::check_block_heldout();

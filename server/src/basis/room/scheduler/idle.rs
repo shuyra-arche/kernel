@@ -1,4 +1,11 @@
-//! 空着的核：谁睡着了记在位图上，活往哪放、怎么把核叫醒。
+use crate::basis::{
+    room::{deadline, shutdown},
+    sign,
+    unit::lifecycle::tally,
+};
+use crate::metal::interrupt::{self, ipi};
+const BEACON_TICK: u64 = 250_000;
+// Idle registration and the wait loop share their wakeup protocol.
 
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
@@ -14,7 +21,7 @@ static PICK_CURSOR: AtomicUsize = AtomicUsize::new(0);
 
 const WAITING_WORDS: usize = crate::metal::layout::MAX_HART_SLOTS / usize::BITS as usize;
 
-pub(crate) fn sleep(hart: HartId) {
+pub(crate) fn enter(hart: HartId) {
     debug_assert!(
         hart.get() < crate::metal::layout::MAX_HART_SLOTS,
         "sleep hart {hart} beyond MAX_HART_SLOTS"
@@ -23,7 +30,7 @@ pub(crate) fn sleep(hart: HartId) {
     WAITING[word].fetch_or(bit, Ordering::AcqRel);
 }
 
-pub(crate) fn wake(hart: HartId) {
+pub(crate) fn leave(hart: HartId) {
     debug_assert!(
         hart.get() < crate::metal::layout::MAX_HART_SLOTS,
         "wake hart {hart} beyond MAX_HART_SLOTS"
@@ -87,4 +94,69 @@ pub(crate) fn yell() {
 /// 叫醒指定的那一核：它得重新看一眼自己手上的活。
 pub(crate) fn nudge(hart: HartId) {
     let _ = crate::metal::interrupt::ipi::send(hart);
+}
+
+pub(super) fn fetch() -> usize {
+    #[cfg(debug_assertions)]
+    {
+        crate::basis::assert_unlocked();
+        crate::metal::switcher::stack::assert_active();
+    }
+    interrupt::enable_external();
+    if let Some(pa) = super::dispatch(true) {
+        return pa;
+    }
+    wait()
+}
+
+fn wait() -> usize {
+    let me = hart::hart_id();
+    enter(me);
+    let found = super::dispatch(true);
+    if let Some(pa) = found {
+        leave(me);
+        return pa;
+    }
+    if tally::done() {
+        shutdown::finish();
+    }
+    loop {
+        if tally::done() {
+            ipi::acknowledge();
+            leave(me);
+            shutdown::finish();
+        }
+        // Clear first, then inspect work and deadlines. An IPI racing this
+        // clear is either observed through the queue or stays pending for WFI.
+        ipi::acknowledge();
+        let redeemed = deadline::elapsed() && sign::redeem();
+        shutdown::observe(me);
+
+        let external_pending = crate::basis::nest::authority::external::maintain();
+        let fallback = if shutdown::active() || external_pending {
+            crate::metal::clock::now()
+                .as_ticks()
+                .saturating_add(BEACON_TICK)
+        } else {
+            crate::metal::generic::clock::DISARMED
+        };
+        deadline::arm(fallback);
+        interrupt::enable_external();
+        if interrupt::external_pending()
+            && !crate::basis::room::interrupt::external().is_some_and(|route| route.handle())
+        {
+            interrupt::disable_external();
+        }
+        // Let notified remote Harts receive the Tasks just placed there
+        // before the deadline owner tries to steal them back.
+        if let Some(pa) = super::dispatch(!redeemed) {
+            leave(me);
+            return pa;
+        }
+        #[cfg(feature = "latency")]
+        crate::metal::measure::leave();
+        hart::wait();
+        #[cfg(feature = "latency")]
+        crate::metal::measure::enter();
+    }
 }

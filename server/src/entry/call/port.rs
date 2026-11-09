@@ -14,7 +14,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: PortCall, ident: &Arc<Task
     super::outcome::answer(
         frame,
         (|| {
-            let actor = crate::basis::room::conductor::current()
+            let actor = crate::basis::room::scheduler::slot::current()
                 .running_task()
                 .ok_or(PortFail::Denied)?;
             let _serial = actor.pend.lock();

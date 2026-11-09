@@ -23,9 +23,11 @@ use crate::metal::sync::SpinLock;
 use crate::basis::unit::control::Request;
 use execution::Effect;
 
+pub(crate) mod chain;
 mod creation;
 mod execution;
 mod identity;
+pub(crate) mod registry;
 mod weak;
 
 pub(crate) use creation::TaskBuilder;
@@ -176,18 +178,6 @@ impl Task {
         self.state.lock().is_waiting()
     }
 
-    pub(crate) fn next(&self) -> Option<Arc<Task>> {
-        self.state.lock().link().clone()
-    }
-
-    pub(crate) fn set_next(&self, value: Option<Arc<Task>>) {
-        *self.state.lock().link() = value;
-    }
-
-    pub(crate) fn take_next(&self) -> Option<Arc<Task>> {
-        self.state.lock().link().take()
-    }
-
     pub(crate) fn wait_ticket(&self) -> Ticket {
         self.state.lock().wait_ticket()
     }
@@ -206,7 +196,7 @@ impl Task {
             return Err(UnitFail::Denied);
         }
         task.state.lock().transform(TaskState::ready());
-        scheduler::launch(task.clone());
+        scheduler::insert(task.clone());
         Ok(())
     }
 
@@ -220,7 +210,7 @@ impl Task {
             }
             Effect::Dequeue => {
                 // Do not publish the paused state if queue removal fails.
-                if !scheduler::remove_from_starved(task) {
+                if !scheduler::remove(task) {
                     return Err(UnitFail::Busy);
                 }
                 task.state.lock().apply_control(transition);
@@ -249,7 +239,7 @@ impl Task {
             Effect::Release => Self::release(task),
             Effect::Enqueue => {
                 task.ident.team.release_held(task);
-                scheduler::launch(task.clone());
+                scheduler::insert(task.clone());
                 Ok(())
             }
             other => unreachable!("resume effect: {other:?}"),

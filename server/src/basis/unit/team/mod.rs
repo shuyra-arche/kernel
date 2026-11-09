@@ -88,7 +88,7 @@ impl Team {
                 if task.parked() {
                     task.state.lock().rise();
                     task.ident.team.release_held(&task);
-                    scheduler::launch(task);
+                    scheduler::insert(task);
                 }
             }
         });
@@ -130,7 +130,7 @@ impl Team {
             });
         }
         let mut after = 0;
-        while let Some(task) = scheduler::roster::after(after) {
+        while let Some(task) = crate::basis::unit::task::registry::after(after) {
             after = task.ident.id.get();
             if task.ident.team.id == self.id {
                 if !task.reaped() {

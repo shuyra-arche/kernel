@@ -5,12 +5,12 @@ use kernel_api::model::identity::TaskId;
 
 use super::diagnostics;
 use crate::basis::nest::Nest;
-use crate::basis::room::chain::Chain;
-use crate::basis::room::conductor::current;
+use crate::basis::room::scheduler::slot::current;
 use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskExitCause;
 use crate::basis::unit::task::TaskState;
+use crate::basis::unit::task::chain::Chain;
 use crate::metal::sync::Level;
 use crate::metal::sync::OnceLock;
 use crate::metal::sync::SpinLock;
@@ -33,16 +33,16 @@ impl Husks {
         }
     }
 
-    fn push(&mut self, task: Arc<Task>) {
+    fn enqueue(&mut self, task: Arc<Task>) {
         debug_assert!(
             task.reaped(),
             "躯壳容器只收 Reaped 任务，且入壳前不得挂在链上"
         );
-        self.chain.push(task);
+        self.chain.enqueue(task);
     }
 
-    fn pop(&mut self) -> Option<Arc<Task>> {
-        self.chain.pop()
+    fn dequeue(&mut self) -> Option<Arc<Task>> {
+        self.chain.dequeue()
     }
 
     #[cfg(debug_assertions)]
@@ -50,7 +50,7 @@ impl Husks {
         self.chain.len()
     }
 
-    pub(super) fn take(&mut self) -> Option<Arc<Task>> {
+    pub(super) fn take(&mut self) -> Option<crate::basis::unit::task::chain::Drain> {
         self.chain.take()
     }
 }
@@ -89,7 +89,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
     }
     sign::signal(WakeKey::Task { id: task.ident.id });
     task.ident.team.node.notify();
-    HUSKS.lock().push(task);
+    HUSKS.lock().enqueue(task);
 }
 
 pub fn quit() -> usize {
@@ -97,11 +97,11 @@ pub fn quit() -> usize {
     let requested = super::take_exit_reason();
     let (exited, _next_pa, reason) = {
         let _commit = crate::basis::commit();
-        let (task, next) = cond.swap();
-        let mut state = task.state.lock();
-        let (cause, reason) = state.dying().unwrap_or((TaskExitCause::Reap, requested));
-        state.doom(None, cause, reason);
-        drop(state);
+        let (task, next) = cond.handoff(
+            crate::basis::room::scheduler::slot::Departure::Exit { reason: requested },
+            &_commit,
+        );
+        let (_, reason) = task.state.lock().dying().expect("committed exit");
         (task, next, reason)
     };
     debug_assert!(
@@ -130,7 +130,7 @@ pub fn quit() -> usize {
     };
     diagnostics::note(tid, reason, text, owner);
     reap(exited, TaskExitCause::Reap, reason);
-    crate::basis::room::conductor::run::run()
+    crate::basis::room::scheduler::run()
 }
 
 fn note_out<'a>(
@@ -171,13 +171,13 @@ pub(crate) fn bury() {
     loop {
         let z = {
             let mut husks = HUSKS.lock();
-            let Some(z) = husks.pop() else {
+            let Some(z) = husks.dequeue() else {
                 break;
             };
             z
         };
         if z.retire().is_err() {
-            HUSKS.lock().push(z);
+            HUSKS.lock().enqueue(z);
             break;
         }
         if let Some(member) = z.ident.team.node.member(z.ident.id) {
@@ -188,7 +188,7 @@ pub(crate) fn bury() {
         wipe(WakeKey::Task { id: z.ident.id });
         wipe(WakeKey::Pends { task: z.ident.id });
         z.ident.team.prune_tasks();
-        let _pruned = crate::basis::room::scheduler::roster::prune_dead();
+        let _pruned = crate::basis::unit::task::registry::prune();
         drop(z);
         tally::exit();
     }

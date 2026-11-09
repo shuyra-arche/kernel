@@ -1,5 +1,5 @@
 use crate::{
-    basis::{flat::authority, room::conductor::current, unit::task::TaskIdent},
+    basis::{flat::authority, room::scheduler::slot::current, unit::task::TaskIdent},
     metal::switcher::context::TrapContext,
 };
 use alloc::sync::Arc;

@@ -21,21 +21,19 @@ use kernel_api::{
         sign::SignRights,
     },
 };
-use state::{Holder, State};
+use state::{Action, Holder, State};
 
 pub(crate) struct Source {
     pub(crate) irq: Irq,
     pub(crate) region: usize,
     pub(crate) endpoint: Arc<Endpoint>,
     view: OnceLock<Arc<Sharing>>,
-    binding: SpinLock<Binding>,
+    state: SpinLock<State<Receiver>>,
 }
-struct Binding {
-    phase: State,
+struct Receiver {
     task: Weak<Task>,
     view: Weak<PendEntry>,
     sign: Weak<PendEntry>,
-    announce: bool,
 }
 impl Source {
     pub(super) fn new(irq: Irq, region: usize) -> Result<Self, PendFail> {
@@ -44,16 +42,7 @@ impl Source {
             region,
             endpoint: Endpoint::try_new(TaskId::new(0)).map_err(|_| PendFail::OutOfMemory)?,
             view: OnceLock::new(),
-            binding: SpinLock::new_level(
-                Level::L3,
-                Binding {
-                    phase: State::new(),
-                    task: Weak::new(),
-                    view: Weak::new(),
-                    sign: Weak::new(),
-                    announce: false,
-                },
-            ),
+            state: SpinLock::new_level(Level::L3, State::new()),
         })
     }
     pub(super) fn associate(&self, view: Arc<Sharing>) -> Result<(), PendFail> {
@@ -61,7 +50,10 @@ impl Source {
     }
     fn live(&self) -> bool {
         let (task, view, sign) = {
-            let b = self.binding.lock();
+            let state = self.state.lock();
+            let Some(b) = state.receiver() else {
+                return false;
+            };
             (b.task.upgrade(), b.view.upgrade(), b.sign.upgrade())
         };
         task.is_some_and(|t| pend::live(&t))
@@ -72,7 +64,7 @@ impl Source {
                 s.permits(Operations::Sign(SignRights::LISTEN | SignRights::CONSUME))
             })
     }
-    pub(super) fn bind(&self, task: &Arc<Task>, sign: &Arc<PendEntry>) -> Result<(), PendFail> {
+    pub(super) fn attach(&self, task: &Arc<Task>, sign: &Arc<PendEntry>) -> Result<(), PendFail> {
         if !sign.permits(Operations::Sign(SignRights::CONSUME)) {
             return Ok(()); // observation-only derivations do not acquire the source
         }
@@ -102,30 +94,34 @@ impl Source {
             .cloned()
             .ok_or(PendFail::Denied)?;
         if !self.live() {
-            self.close();
+            self.detach();
         }
-        let mut next = self.binding.lock().phase;
-        // Preflight the exclusive binding before publishing any event.
-        next.claim(Holder {
-            actor: task.ident.id,
-            permit: sign.token(),
-        })
-        .map_err(failure)?;
+        // COMMIT is retained by Pend publication across preflight and commit.
+        #[cfg(debug_assertions)]
+        crate::basis::assert_held();
+        self.state.lock().admit().map_err(failure)?;
         let sequence = endpoint::publish(&self.endpoint).map_err(|_| PendFail::Busy)?;
-        next.begin(sequence);
-        *self.binding.lock() = Binding {
-            phase: next,
-            task: Arc::downgrade(task),
-            view: Arc::downgrade(&view),
-            sign: Arc::downgrade(sign),
-            announce: true,
-        };
+        self.state
+            .lock()
+            .attach(
+                Holder {
+                    actor: task.ident.id,
+                    permit: sign.token(),
+                },
+                Receiver {
+                    task: Arc::downgrade(task),
+                    view: Arc::downgrade(&view),
+                    sign: Arc::downgrade(sign),
+                },
+                sequence,
+            )
+            .expect("preflighted source binding under COMMIT");
         super::external().expect("source router").request();
         Ok(())
     }
     pub(super) fn authorize(&self, task: &Task, token: PendId) -> Result<(), SignFail> {
         if self.live()
-            && self.binding.lock().phase.owned(Holder {
+            && self.state.lock().owned(Holder {
                 actor: task.ident.id,
                 permit: token,
             })
@@ -137,72 +133,64 @@ impl Source {
     }
     pub(super) fn withdraw(&self, token: PendId) {
         let closes = {
-            let b = self.binding.lock();
+            let state = self.state.lock();
+            let Some(b) = state.receiver() else { return };
             b.sign.upgrade().is_some_and(|s| s.token() == token)
                 || b.view.upgrade().is_some_and(|v| v.token() == token)
         };
         if closes {
-            self.close();
+            self.detach();
         }
     }
-    fn close(&self) {
-        if !self.binding.lock().phase.bound() {
+    fn detach(&self) {
+        if !self.state.lock().bound() {
             return;
         }
         if let Some(route) = super::external() {
-            route.mask(self.irq);
+            route.shut(self.irq);
         }
-        {
-            let mut b = self.binding.lock();
-            b.phase.close();
-            b.announce = true;
-            b.task = Weak::new();
-            b.view = Weak::new();
-            b.sign = Weak::new();
-        }
+        self.state.lock().detach();
         endpoint::discard(&self.endpoint);
         super::external().expect("source router").request();
     }
     pub(super) fn deliver(&self) -> bool {
         if !self.live() {
-            self.close();
+            self.detach();
         }
-        if !self.binding.lock().phase.claimed() {
+        if !self.state.lock().claimed() {
             return false;
         }
         match endpoint::publish(&self.endpoint) {
             Ok(sequence) => {
-                let mut b = self.binding.lock();
-                if b.phase.deliver(sequence).is_ok() {
-                    b.announce = true;
+                let mut b = self.state.lock();
+                if b.deliver(sequence).is_ok() {
                     return true;
                 }
             }
-            Err(_) => self.close(),
+            Err(_) => self.detach(),
         }
         false
     }
     pub(super) fn maintain(&self) {
         if !self.live() {
-            self.close();
+            self.detach();
         }
         let consumed = self.endpoint.consumed();
         let (complete, announce) = {
-            let mut b = self.binding.lock();
-            let complete = b.phase.consume(consumed);
-            let announce = core::mem::take(&mut b.announce);
+            let mut b = self.state.lock();
+            let complete = b.consume(consumed);
+            let announce = b.take_notice();
             (complete, announce)
         };
-        if let Some(held) = complete {
-            let route = super::external().expect("source router");
-            if held {
-                route.finish(self.irq, true);
-            } else {
-                route.unmask(self.irq);
-            }
+        match complete {
+            Action::None => {}
+            Action::Open => super::external().expect("source router").open(self.irq),
+            Action::Complete => super::external()
+                .expect("source router")
+                .finish(self.irq, true),
         }
         if announce && endpoint::announce(&self.endpoint) {
-            self.binding.lock().announce = true;
+            self.state.lock().request_notice();
             super::external().expect("source router").request();
         }
     }
@@ -211,11 +199,10 @@ fn failure(error: state::Error) -> PendFail {
     match error {
         state::Error::Busy => PendFail::Busy,
         state::Error::Stale => PendFail::Denied,
-        state::Error::Exhausted => PendFail::OutOfMemory,
     }
 }
 
 // SAFETY: PendId's API marker prevents user-side ownership duplication. Here IDs
 // only identify ledger records; every binding transition is serialized by COMMIT
 // and this lock, and records themselves are retained through synchronized Weak.
-unsafe impl Send for Binding {}
+unsafe impl Send for State<Receiver> {}

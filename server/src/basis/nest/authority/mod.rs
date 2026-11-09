@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 
 use super::Span;
 use crate::basis::pend::SourceAuthorization;
-use crate::basis::room::scheduler::roster;
+use crate::basis::unit::task::registry;
 use crate::metal::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::cell::MappingControl;
@@ -231,7 +231,7 @@ impl Nest {
             && control.scope() == kernel_api::model::cell::MappingControl::Caller
         {
             let (controller, _) = control.control();
-            if let Some(task) = roster::muster(controller).and_then(|task| task.upgrade()) {
+            if let Some(task) = registry::find(controller).and_then(|task| task.upgrade()) {
                 task.release_control(id);
             }
         }

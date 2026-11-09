@@ -3,10 +3,10 @@ pub(crate) mod resources;
 
 use crate::basis::nest::FaultOutcome;
 use crate::basis::nest::Nest;
-use crate::basis::room::conductor::identity::Identity;
-use crate::basis::room::conductor::identity::ident;
-use crate::basis::room::conductor::run::run;
 use crate::basis::room::deadline;
+use crate::basis::room::scheduler::run;
+use crate::basis::room::scheduler::slot::identity::Identity;
+use crate::basis::room::scheduler::slot::identity::ident;
 use crate::basis::sign::redeem;
 use crate::basis::unit::task::TaskIdent;
 use crate::metal::generic::trap::TrapEvent;
@@ -46,7 +46,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
     asid::occupy(Asid::kernel());
 
     if from_task {
-        let task = crate::basis::room::conductor::current()
+        let task = crate::basis::room::scheduler::slot::current()
             .running_task()
             .expect("task trap without owner");
         assert_eq!(task.ident.frame_pa.as_usize(), frame as *const _ as usize);
@@ -173,7 +173,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
             }
         }
         TrapEvent::IllegalInstruction(_) if from_task => {
-            let task = crate::basis::room::conductor::current()
+            let task = crate::basis::room::scheduler::slot::current()
                 .running_task()
                 .expect("task fault without owner");
             let space = &task.ident.team.nest;
@@ -220,7 +220,7 @@ pub(crate) fn resume(next: *mut TrapContext) -> *mut TrapContext {
     let mut ready = 0;
     let space = unsafe { (*next).address_space() };
     if !space.is_kernel() {
-        let task = crate::basis::room::conductor::current()
+        let task = crate::basis::room::scheduler::slot::current()
             .running_task()
             .expect("return without Task owner");
         assert_eq!(task.ident.frame_pa.as_usize(), next as usize);
@@ -333,11 +333,11 @@ fn instr_len(space: &Nest, sepc: KVirt) -> Option<usize> {
 fn doom(ident: Option<&Arc<TaskIdent>>, cause: kernel_api::model::unit::ExitCause, reason: usize) {
     let task = match ident {
         Some(ident) => {
-            crate::basis::room::scheduler::roster::muster(ident.id).and_then(|weak| weak.upgrade())
+            crate::basis::unit::task::registry::find(ident.id).and_then(|weak| weak.upgrade())
         }
         None => None,
     }
-    .or_else(|| crate::basis::room::conductor::current().running_task());
+    .or_else(|| crate::basis::room::scheduler::slot::current().running_task());
     let Some(task) = task else { return };
     let _commit = crate::basis::commit();
     crate::basis::unit::team::exit::member_dying(&task, reason);

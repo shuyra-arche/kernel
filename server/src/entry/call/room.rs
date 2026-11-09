@@ -1,5 +1,5 @@
 use super::outcome::Outcome;
-use crate::basis::room::{Handoff, conductor::current};
+use crate::basis::room::{Handoff, scheduler::slot::current};
 use crate::basis::sign::{self, WakeKey, park_until};
 use crate::basis::unit::task::TaskIdent;
 use crate::metal::switcher::context::{Gprs, TrapContext};
@@ -10,7 +10,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
     match call {
         RoomCall::Yield => {
             drop(ident);
-            Outcome::Switch(current().starve() as *mut TrapContext)
+            Outcome::Switch(current().reschedule() as *mut TrapContext)
         }
         RoomCall::Clock => {
             frame.gpr.set_x(

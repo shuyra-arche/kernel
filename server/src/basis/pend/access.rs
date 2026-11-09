@@ -14,7 +14,7 @@ use crate::basis::flat::sharing::SharingOperation;
 use crate::basis::pend;
 use crate::basis::pend::Need;
 use crate::basis::pend::PendEntry;
-use crate::basis::room::conductor::current;
+use crate::basis::room::scheduler::slot::current;
 
 /// The caller serializes this check with the operation's authority commit.
 /// A resource identity, or a Pend of another target, cannot substitute for it.

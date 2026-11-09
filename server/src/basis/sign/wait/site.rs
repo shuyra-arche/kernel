@@ -5,9 +5,9 @@ use alloc::vec::Vec;
 
 use hashbrown::HashMap;
 
-use crate::basis::room::chain::Chain;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
+use crate::basis::unit::task::chain::Chain;
 use crate::metal::sync::Level;
 use crate::metal::sync::OnceLock;
 use crate::metal::sync::SpinLock;
@@ -43,12 +43,12 @@ impl Site {
         sites.get_mut(&key).ok_or(())
     }
 
-    pub(super) fn push_back(&mut self, task: Arc<Task>) {
+    pub(super) fn enqueue(&mut self, task: Arc<Task>) {
         debug_assert!(
-            task.waiting() && task.next().is_none(),
+            task.waiting(),
             "站点只收 Blocked 任务，且入链前不得挂在链上"
         );
-        self.chain.push(task);
+        self.chain.enqueue(task);
     }
 }
 

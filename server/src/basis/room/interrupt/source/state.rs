@@ -1,5 +1,6 @@
-//! A hardware source has one binding and one retained event. Neither generation
-//! nor sequence wraps; stale acknowledgements cannot affect a new driver.
+//! One binding owns its receiver and delivery state. A controller claim can
+//! outlive that binding. Sign's non-reusing sequence is the receipt identity;
+//! a second, unused binding generation would supply no additional validation.
 use kernel_api::model::identity::{PendId, TaskId};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Holder {
@@ -7,83 +8,90 @@ pub(super) struct Holder {
     pub permit: PendId,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Delivery {
-    Dormant,
+enum Delivery {
     Armed,
     Pending(u64),
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Binding {
+enum Binding<R> {
     Vacant,
-    Held { holder: Holder, delivery: Delivery },
+    Held {
+        holder: Holder,
+        receiver: R,
+        delivery: Delivery,
+    },
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Claim {
     Clear,
     Held,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct State {
+pub(super) struct State<R> {
     claim: Claim,
-    generation: u64,
-    binding: Binding,
+    binding: Binding<R>,
+    announce: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Error {
     Busy,
     Stale,
-    Exhausted,
 }
-impl State {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Action {
+    None,
+    Open,
+    Complete,
+}
+impl<R> State<R> {
     pub(super) const fn new() -> Self {
         Self {
             claim: Claim::Clear,
-            generation: 0,
             binding: Binding::Vacant,
+            announce: false,
         }
     }
-    pub(super) fn claim(&mut self, holder: Holder) -> Result<u64, Error> {
-        if self.binding != Binding::Vacant {
-            return Err(Error::Busy);
+    /// Checked before Sign publication, while COMMIT excludes binding changes.
+    pub(super) fn admit(&self) -> Result<(), Error> {
+        if self.bound() {
+            Err(Error::Busy)
+        } else {
+            Ok(())
         }
-        self.generation = self.generation.checked_add(1).ok_or(Error::Exhausted)?;
+    }
+    pub(super) fn attach(
+        &mut self,
+        holder: Holder,
+        receiver: R,
+        sequence: u64,
+    ) -> Result<(), Error> {
+        self.admit()?;
+        if sequence == 0 {
+            return Err(Error::Stale);
+        }
         self.binding = Binding::Held {
             holder,
-            delivery: Delivery::Dormant,
+            receiver,
+            delivery: Delivery::Pending(sequence),
         };
-        Ok(self.generation)
+        self.announce = true;
+        Ok(())
     }
-    /// The initial inspection and each hardware event use real Sign sequences.
-    pub(super) fn begin(&mut self, sequence: u64) {
-        if let Binding::Held { delivery, .. } = &mut self.binding {
-            *delivery = Delivery::Pending(sequence);
+    pub(super) fn receiver(&self) -> Option<&R> {
+        match &self.binding {
+            Binding::Vacant => None,
+            Binding::Held { receiver, .. } => Some(receiver),
         }
     }
-    /// A successful Sign consumption, never cancellation, resumes this producer.
-    pub(super) fn consume(&mut self, sequence: u64) -> Option<bool> {
-        if sequence == 0 {
-            return None;
-        }
-        if let Binding::Held { delivery, .. } = &mut self.binding {
-            if *delivery == Delivery::Pending(sequence) {
-                *delivery = Delivery::Armed;
-                let held = self.claim == Claim::Held;
-                self.claim = Claim::Clear;
-                return Some(held);
-            }
-        }
-        None
-    }
-    pub(super) fn owned(self, holder: Holder) -> bool {
-        matches!(self.binding, Binding::Held { holder: known, .. } if known == holder)
+    pub(super) fn owned(&self, holder: Holder) -> bool {
+        matches!(&self.binding, Binding::Held { holder: known, .. } if *known == holder)
     }
     pub(super) fn bound(&self) -> bool {
-        self.binding != Binding::Vacant
+        matches!(self.binding, Binding::Held { .. })
     }
-    pub(super) fn close(&mut self) {
+    pub(super) fn detach(&mut self) {
         self.binding = Binding::Vacant;
+        self.announce = true;
     }
-    pub(super) fn armed(self) -> bool {
+    pub(super) fn armed(&self) -> bool {
         matches!(
             self.binding,
             Binding::Held {
@@ -92,23 +100,39 @@ impl State {
             }
         )
     }
+    /// Retain the physical claim even without a live receiver.
     pub(super) fn claimed(&mut self) -> bool {
         self.claim = Claim::Held;
         self.armed()
     }
     pub(super) fn deliver(&mut self, sequence: u64) -> Result<(), Error> {
-        match self.binding {
-            Binding::Held {
-                holder,
-                delivery: Delivery::Armed,
-            } if sequence != 0 => {
-                self.binding = Binding::Held {
-                    holder,
-                    delivery: Delivery::Pending(sequence),
-                };
+        match &mut self.binding {
+            Binding::Held { delivery, .. } if *delivery == Delivery::Armed && sequence != 0 => {
+                *delivery = Delivery::Pending(sequence);
+                self.announce = true;
                 Ok(())
             }
             _ => Err(Error::Stale),
         }
+    }
+    /// Only exact successful consumption resumes hardware; cancellation does not.
+    pub(super) fn consume(&mut self, sequence: u64) -> Action {
+        if sequence != 0
+            && let Binding::Held { delivery, .. } = &mut self.binding
+            && *delivery == Delivery::Pending(sequence)
+        {
+            *delivery = Delivery::Armed;
+            return match core::mem::replace(&mut self.claim, Claim::Clear) {
+                Claim::Clear => Action::Open,
+                Claim::Held => Action::Complete,
+            };
+        }
+        Action::None
+    }
+    pub(super) fn take_notice(&mut self) -> bool {
+        core::mem::take(&mut self.announce)
+    }
+    pub(super) fn request_notice(&mut self) {
+        self.announce = true;
     }
 }

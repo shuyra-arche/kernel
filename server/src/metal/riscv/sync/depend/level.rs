@@ -9,7 +9,7 @@ pub enum Level {
     Flat = 5,
     TeamTasks = 6,
     L3 = 7,
-    Roster = 8,
+    Registry = 8,
     Asid = 9,
     Frame = 10,
     Tally = 12,

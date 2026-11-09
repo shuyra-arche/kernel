@@ -140,6 +140,32 @@ Inspect observes results repeatedly; Delete requires reclamation and removes the
 caller's retained record. Sign routes completion without consuming results.
 Team Finish permanently closes admission. Membership never grants peer control.
 
+## Room execution coordination
+
+`room/scheduler` owns placement and complete dispatch. Its per-Hart `slot` owns
+Task entry/departure, the ready queue and current/last identity publication.
+`slot/ready` keeps membership and its scheduling ceiling together; `slot/turn`
+evaluates immutable scheduling observations while COMMIT remains held through
+application. Wait/exit handoffs commit the departing Task's destination state
+before exposing it to Sign or lifecycle cleanup. Wait queue publication retains
+the same commit guard; exit cleanup starts from a committed off-Hart Doomed state.
+
+Task registration and intrusive membership live in `unit/task`. A tail remains
+explicitly attached even though it has no successor; an attached Task cannot
+enter another chain or change execution phase. Drains retain membership until
+removal and release remaining links iteratively when abandoned.
+
+`room/deadline` owns deadline registrations; `room/interrupt` owns controller
+routing and one receiver-bearing binding per Source. A controller claim survives
+detachment, while Sign's non-reusing sequence identifies consumption. There is
+no parallel binding generation or resource record. `room/shutdown` owns the
+Hart barrier and one-shot progress decision; `entry/report/shutdown` formats
+reports, and `entry/trap/resources` owns page-fault boot resources.
+
+Paired internal operations use `enter/leave`, `enqueue/dequeue`, `attach/detach`,
+`insert/remove` and `open/shut`. These organization changes do not alter call ABI,
+Sign rights, hardware completion ordering or the scheduling policy.
+
 ## Task register state
 
 Tasks allocate a private FLEN=64 image on first use of a supported F/D instruction

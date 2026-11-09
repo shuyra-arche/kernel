@@ -1,3 +1,4 @@
+use crate::basis::unit::task::chain::Drain;
 pub(super) mod holder;
 pub(super) mod key;
 pub(super) mod site;
@@ -9,10 +10,10 @@ use alloc::sync::Weak;
 use core::time::Duration;
 
 use crate::basis::nest::NestId;
-use crate::basis::room::conductor::current;
-use crate::basis::room::conductor::run::run;
 use crate::basis::room::deadline;
-use crate::basis::room::scheduler::launch;
+use crate::basis::room::scheduler::insert;
+use crate::basis::room::scheduler::run;
+use crate::basis::room::scheduler::slot::current;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Resumption;
 use crate::basis::unit::task::Task;
@@ -41,25 +42,10 @@ fn fan_out(fwd: &Fwd) {
     }
 }
 
-struct Unchain {
-    cur: Option<Arc<Task>>,
-}
-
-impl Unchain {
-    fn new(cur: Option<Arc<Task>>) -> Self {
-        Self { cur }
-    }
-}
-
-impl Iterator for Unchain {
-    type Item = Arc<Task>;
-
-    fn next(&mut self) -> Option<Arc<Task>> {
-        let task = self.cur.take()?;
+fn unchain(chain: Option<Drain>) -> impl Iterator<Item = Arc<Task>> {
+    chain.into_iter().flatten().inspect(|task| {
         void(task.wait_ticket());
-        self.cur = task.take_next();
-        Some(task)
-    }
+    })
 }
 
 fn rise(tasks: impl IntoIterator<Item = Arc<Task>>, place: impl Fn(Arc<Task>)) -> usize {
@@ -152,7 +138,7 @@ pub(crate) fn wipe(key: WakeKey) -> usize {
         }
         None => None,
     };
-    rise(Unchain::new(chain), launch)
+    rise(unchain(chain), insert)
 }
 
 pub(crate) fn knock(key: WakeKey, life: &Weak<Anchor>) -> usize {
@@ -182,7 +168,7 @@ pub(crate) fn knock(key: WakeKey, life: &Weak<Anchor>) -> usize {
         chain
     };
     fan_out(&fwd);
-    rise(Unchain::new(chain), launch)
+    rise(unchain(chain), insert)
 }
 
 pub(crate) fn forward(
@@ -225,7 +211,7 @@ pub(crate) fn signal(key: WakeKey) -> usize {
         chain
     };
     fan_out(&fwd);
-    rise(Unchain::new(chain), launch)
+    rise(unchain(chain), insert)
 }
 
 /// A retained producer can wake existing listeners in fixed batches without
@@ -248,15 +234,15 @@ fn listeners_batch(key: WakeKey) -> bool {
     };
     // Detach the batch before resuming: a waiter that requeues must not consume
     // the rest of this batch and prevent another waiter from making progress.
-    let mut batch = crate::basis::room::chain::Chain::new();
+    let mut batch = crate::basis::unit::task::chain::Chain::new();
     let more = {
         let mut sites = shard.lock();
         let more = if let Some(site) = sites.get_mut(&key) {
             for _ in 0..4 {
-                let Some(task) = site.chain.pop() else {
+                let Some(task) = site.chain.dequeue() else {
                     break;
                 };
-                batch.push(task);
+                batch.enqueue(task);
             }
             !site.chain.is_empty()
         } else {
@@ -265,7 +251,7 @@ fn listeners_batch(key: WakeKey) -> bool {
         prune(&mut sites, key);
         more
     };
-    rise(Unchain::new(batch.take()), launch);
+    rise(unchain(batch.take()), insert);
     more
 }
 
@@ -289,7 +275,7 @@ pub(crate) fn wipe_space(space: NestId) -> usize {
                 key.and_then(|key| sites.remove(&key))
             };
             let Some(mut site) = taken else { break };
-            woken += rise(Unchain::new(site.chain.take()), launch);
+            woken += rise(unchain(site.chain.take()), insert);
         }
     }
     woken
@@ -305,16 +291,16 @@ pub(crate) fn wake_counted(key: WakeKey, all: bool) -> usize {
             if all {
                 site.chain.take()
             } else {
-                site.chain.pop()
+                site.chain.dequeue().map(Drain::single)
             }
         });
         prune(&mut table, key);
         chain
     };
     let mut count = 0;
-    for task in Unchain::new(chain) {
+    for task in unchain(chain) {
         count += 1;
-        rise(core::iter::once(task), launch);
+        rise(core::iter::once(task), insert);
     }
     count
 }
@@ -330,12 +316,12 @@ pub fn wake(key: WakeKey, life: &Weak<Anchor>) -> bool {
         if Anchor::dead(life) {
             let chain = sites.remove(&key).and_then(|mut site| site.chain.take());
             drop(sites);
-            rise(Unchain::new(chain), launch);
+            rise(unchain(chain), insert);
             return false;
         } else {
             let mut beacon_only = false;
             let popped = match sites.get_mut(&key) {
-                Some(site) => match site.chain.pop() {
+                Some(site) => match site.chain.dequeue() {
                     Some(task) => Some(task),
                     None => {
                         site.pend = true;
@@ -358,7 +344,7 @@ pub fn wake(key: WakeKey, life: &Weak<Anchor>) -> bool {
     fan_out(&fwd);
     let Some(task) = popped else { return false };
     void(task.wait_ticket());
-    rise(core::iter::once(task), launch);
+    rise(core::iter::once(task), insert);
     true
 }
 
@@ -379,7 +365,7 @@ pub fn redeem() -> bool {
         drop(holder);
         let popped = {
             let mut sites = sites(key).lock();
-            let pick = &mut |t: &mut Arc<Task>| t.wait_ticket() == Ticket(handle);
+            let pick = &mut |t: &Arc<Task>| t.wait_ticket() == Ticket(handle);
             let w = sites
                 .get_mut(&key)
                 .and_then(|site| site.chain.remove_if(pick));
@@ -393,7 +379,7 @@ pub fn redeem() -> bool {
     let _ = woken;
     rise(
         tasks.iter_mut().filter_map(Option::take),
-        crate::basis::room::scheduler::launch_expired,
+        crate::basis::room::scheduler::insert_expired,
     ) > 0
 }
 
@@ -412,7 +398,7 @@ pub(crate) fn requeue<E: Copy>(
     let ticket = Ticket::next_id().ok_or(oom)?;
     if let Some(at) = call.deadline(dur) {
         hold(ticket, key, task).map_err(|_| oom)?;
-        if deadline::tock(ticket.raw(), at).is_err() {
+        if deadline::insert(ticket.raw(), at).is_err() {
             void(ticket);
             return Err(oom);
         }
@@ -421,7 +407,7 @@ pub(crate) fn requeue<E: Copy>(
     let mut table = sites(key).lock();
     let site = table.get_mut(&key).expect("requeued site");
     site.pend = false;
-    site.push_back(task.clone());
+    site.enqueue(task.clone());
     Ok(())
 }
 

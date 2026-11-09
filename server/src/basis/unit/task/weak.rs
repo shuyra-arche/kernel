@@ -13,12 +13,11 @@ use core::sync::atomic::Ordering::Release;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Origin {
-    Roster,
+    Registry,
     Holder,
     TeamTasks,
     Sire,
-    Muster,
-    Snapshot,
+    Lookup,
 }
 
 #[cfg(debug_assertions)]
@@ -28,7 +27,7 @@ const SLOTS: usize = 48;
 static RECORDS: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(0) }; SLOTS];
 
 #[cfg(debug_assertions)]
-const ORIGINS: usize = Origin::Snapshot as usize + 1;
+const ORIGINS: usize = Origin::Lookup as usize + 1;
 
 #[cfg(debug_assertions)]
 pub(crate) fn register(origin: Origin) -> usize {
@@ -59,8 +58,7 @@ pub(crate) fn check_block_heldout() {
             continue;
         }
         let origin = match (record - 1) % ORIGINS {
-            value if value == Origin::Muster as usize => Origin::Muster,
-            value if value == Origin::Snapshot as usize => Origin::Snapshot,
+            value if value == Origin::Lookup as usize => Origin::Lookup,
             _ => continue,
         };
         panic!(
