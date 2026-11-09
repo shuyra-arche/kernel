@@ -13,8 +13,8 @@ use kernel_api::model::view::ViewKind;
 use crate::basis::pend::Pend;
 use crate::basis::unit::anchor::Anchor;
 
+use crate::basis::flat::sharing::{self, Sharing};
 pub(crate) use clone::CloneView;
-pub(crate) use share::ShareView;
 
 pub(crate) fn next_id() -> Result<usize, PendFail> {
     static NEXT: crate::basis::name::Serial =
@@ -25,7 +25,7 @@ pub(crate) fn next_id() -> Result<usize, PendFail> {
 #[derive(Clone)]
 pub(crate) enum View {
     Clone(Arc<CloneView>),
-    Share(Arc<ShareView>),
+    Share(Arc<Sharing>),
 }
 
 impl View {
@@ -67,7 +67,7 @@ impl View {
     pub(crate) fn seal(&self) {
         match self {
             View::Clone(meta) => clone::seal(meta),
-            View::Share(meta) => share::seal(meta),
+            View::Share(meta) => sharing::seal(meta),
         }
     }
 
@@ -78,7 +78,7 @@ impl View {
         }
     }
 
-    pub(crate) fn share_view(&self) -> Option<Arc<ShareView>> {
+    pub(crate) fn share_view(&self) -> Option<Arc<Sharing>> {
         match self {
             View::Share(meta) => Some(meta.clone()),
             _ => None,

@@ -7,6 +7,7 @@ pub enum Name {
     Trap(Trap),
     Call(Call),
     Page(Page),
+    Port(u64),
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Trap {
@@ -41,6 +42,7 @@ impl Name {
             Self::Call(_) => ResourceKind::Control,
             Self::Trap(Trap::PageFault) => ResourceKind::Clone,
             Self::Page(_) => ResourceKind::Share,
+            Self::Port(_) => ResourceKind::Port,
         }
     }
 }
@@ -58,6 +60,7 @@ impl Name {
             Self::Page(Page::Dtb) => (2, 0, 0),
             Self::Page(Page::Initrd) => (2, 1, 0),
             Self::Page(Page::Region(base)) => (2, 2, base),
+            Self::Port(id) => (3, 0, id),
         };
         out.fill(0);
         out[0] = class;
@@ -79,6 +82,7 @@ impl Name {
             (2, 0, 0) => Some(Self::Page(Page::Dtb)),
             (2, 1, 0) => Some(Self::Page(Page::Initrd)),
             (2, 2, base) if base != 0 => Some(Self::Page(Page::Region(base))),
+            (3, 0, id) if id > 0 && id <= isize::MAX as u64 => Some(Self::Port(id)),
             _ => None,
         }
     }

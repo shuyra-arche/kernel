@@ -183,7 +183,7 @@ fn external_mapping_requires_a_target_pend_and_retired_device_abi_is_rejected() 
     let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
     for source in [
         SignSource::MappingRetired { token, mapping },
-        SignSource::MappingFault { token, mapping },
+        SignSource::MappingPublished { token, mapping },
     ] {
         assert_eq!(SignSource::of(source.words()), Some(source));
         let mut words = source.words();

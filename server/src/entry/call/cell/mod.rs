@@ -13,6 +13,7 @@ use crate::basis::flat::Allocation;
 use crate::basis::flat::Flat;
 use crate::basis::flat::FlatError;
 use crate::basis::flat::FlatRange;
+use crate::basis::flat::sharing::SharingOperation;
 use crate::basis::nest::Access;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
@@ -32,7 +33,6 @@ use crate::basis::sign::WakeKey;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::unit::team::Team;
-use crate::basis::view::share::ShareOperation;
 use crate::metal::mmu::identity;
 use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::PAGE_SIZE;
@@ -210,9 +210,9 @@ fn create_memo(
     });
     let _operation = share_view
         .as_ref()
-        .map(|meta| ShareOperation::acquire(meta).ok_or(CellFail::Busy))
+        .map(|meta| SharingOperation::acquire(meta).ok_or(CellFail::Busy))
         .transpose()?;
-    // Revalidate after acquiring ShareOperation: Narrow may have run after the initial resolution.
+    // Revalidate after acquiring SharingOperation: Narrow may have run after the initial resolution.
     hold.resolve().ok_or(CellFail::Denied)?;
     let modifiable = match &authority {
         Some(authority) => authority.modifiable(),
@@ -441,7 +441,7 @@ fn resolve_source(
     let _commit = crate::basis::commit();
     let (authorization, offset, count, ceiling, branch) = match source {
         SourceSpec::Allocation(allocation) => {
-            super::authority::license(
+            crate::basis::pend::access::license(
                 &task,
                 license.ok_or(CellFail::Denied)?,
                 kernel_api::model::pend::CreationRights::FLAT,
@@ -469,12 +469,10 @@ fn resolve_source(
             // 从 Share 的某一枚 PendEntry 取得：撤销边与上限按**这一枚**的子 Pend 算，
             // 不因同 Flat、共享根资格就并到根上去。
             let pend = crate::basis::pend::locate(&task, token).ok_or(CellFail::Denied)?;
-            if !pend.permits(kernel_api::model::pend::Operations::Share(
-                kernel_api::model::pend::ShareRights::ASSOCIATE,
-            )) {
+            if !pend.associates() {
                 return Err(CellFail::Denied);
             }
-            let meta = pend.target().share_view().ok_or(CellFail::Denied)?;
+            let meta = pend.target().memory().ok_or(CellFail::Denied)?;
             if !pend.modifiable().allows(Modifiable::No) {
                 return Err(CellFail::Denied);
             }
@@ -541,9 +539,8 @@ fn resolve_source(
                 let token = branch.unwrap_or(root_token);
                 let pend = crate::basis::pend::locate(&task, token).ok_or(CellFail::Denied)?;
                 let authority = meta.authority(token).ok_or(CellFail::Denied)?;
-                if !pend.permits(kernel_api::model::pend::Operations::Share(
-                    kernel_api::model::pend::ShareRights::ASSOCIATE,
-                )) || !pend.modifiable().allows(Modifiable::No)
+                if !pend.associates()
+                    || !pend.modifiable().allows(Modifiable::No)
                     || !Arc::ptr_eq(pend.authority(), &authority)
                 {
                     return Err(CellFail::Denied);
@@ -631,7 +628,7 @@ fn next_flight_key() -> Result<usize, CellFail> {
 /// 结算后按同一笔键一次撤完（两域同号互不干涉，见 `next_flight_key`）。
 /// 旧引用因此不能把已分出的子段移来移去，也不会把对端饿死在锁上。
 ///
-/// `ShareOperation` 不是授权，这里不取它：槽的独占与逐页撤销的串行由事务与各
+/// `SharingOperation` 不是授权，这里不取它：槽的独占与逐页撤销的串行由事务与各
 /// Nest 自己的临界区负责，另取一把 Share 租约只会把“同根两端”变成第二个失败面。
 fn transfer(
     from: kernel_api::model::cell::SlotId,
@@ -673,6 +670,17 @@ fn transfer(
             .references
             .get(reference.get())
             .ok_or(CellFail::Denied)?;
+        if let Some(authority) = hold.authority()
+            && matches!(
+                authority.limits().operations,
+                kernel_api::model::pend::Operations::Flat(_)
+            )
+            && (!authority.permits(kernel_api::model::pend::Operations::Flat(
+                kernel_api::model::pend::FlatRights::TRANSFER,
+            )) || authority.modifiable() != Some(Modifiable::Yes))
+        {
+            return Err(CellFail::Denied);
+        }
         let offset = PageOffset::new(
             hold.window()
                 .0
@@ -698,7 +706,11 @@ fn transfer(
         let mut at = 0;
         while at < ends.len() {
             let (hold, window) = &ends[at];
-            if let Err(error) = hold.source().enter_publish_range(flight, window.clone()) {
+            if let Err(error) = hold.source().enter_publish_range(
+                flight,
+                window.clone(),
+                hold.authority().map(Arc::as_ref),
+            ) {
                 for (held, _) in &ends[..at] {
                     held.source().leave_publish(flight);
                 }
@@ -731,7 +743,13 @@ fn endpoint(
         .references
         .get(reference.get())
         .ok_or(CellFail::Denied)?;
-    if !hold.source().manages(caller) {
+    let flat = hold.authority().is_some_and(|p| {
+        matches!(
+            p.limits().operations,
+            kernel_api::model::pend::Operations::Flat(_)
+        )
+    });
+    if !flat && !hold.source().manages(caller) {
         return Err(CellFail::Denied);
     }
     hold.resolve().ok_or(CellFail::Denied)

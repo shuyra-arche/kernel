@@ -13,10 +13,18 @@ pub enum SignSource {
         token: PendId,
         mapping: crate::model::cell::MappingId,
     },
-    /// First I/O fault; observing it never discharges a Page obligation.
-    MappingFault {
+    /// Retained completion of one exact publication generation.
+    MappingPublished {
         token: PendId,
         mapping: crate::model::cell::MappingId,
+    },
+    /// Oldest unattributed fault retained by this binding; never a reclaim proof.
+    NestFault {
+        token: PendId,
+    },
+    /// Context and independent platform proof have both completed.
+    NestClosed {
+        token: PendId,
     },
     Clone {
         token: PendId,
@@ -38,7 +46,9 @@ impl SignSource {
     pub fn words(self) -> [usize; 3] {
         match self {
             Self::MappingRetired { token, mapping } => [9, token.get(), mapping.get()],
-            Self::MappingFault { token, mapping } => [10, token.get(), mapping.get()],
+            Self::MappingPublished { token, mapping } => [11, token.get(), mapping.get()],
+            Self::NestFault { token } => [12, token.get(), 0],
+            Self::NestClosed { token } => [13, token.get(), 0],
             Self::Clone { token, condition } => [1, token.get(), condition as usize],
             Self::Join {
                 target: UnitTarget::Task(task),
@@ -54,7 +64,7 @@ impl SignSource {
     pub fn of(words: [usize; 3]) -> Option<Self> {
         match words {
             [tag, token, mapping]
-                if matches!(tag, 9 | 10)
+                if matches!(tag, 9 | 11)
                     && token != 0
                     && mapping != 0
                     && token <= isize::MAX as usize
@@ -65,9 +75,15 @@ impl SignSource {
                 Some(if tag == 9 {
                     Self::MappingRetired { token, mapping }
                 } else {
-                    Self::MappingFault { token, mapping }
+                    Self::MappingPublished { token, mapping }
                 })
             }
+            [12, token, 0] if token > 0 && token <= isize::MAX as usize => Some(Self::NestFault {
+                token: PendId::new(token),
+            }),
+            [13, token, 0] if token > 0 && token <= isize::MAX as usize => Some(Self::NestClosed {
+                token: PendId::new(token),
+            }),
             [1, token, condition] if token != 0 => {
                 let condition = match condition {
                     0 => CloneCondition::Pull,

@@ -1374,7 +1374,7 @@ impl Nest {
         Ok(())
     }
 
-    fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         self.state.lock().phase.is_closed()
     }
 

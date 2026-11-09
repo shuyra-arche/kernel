@@ -12,6 +12,8 @@ pub enum UnitCreate {
     Team {
         kind: ProgramKind,
         guard: ControlId,
+        /// Consume an unbound Internal Nest root; None allocates a new Nest.
+        nest: Option<crate::model::identity::PendId>,
     },
     /// None selects the caller's Team; other Teams require management authority.
     Task {
@@ -27,14 +29,14 @@ impl UnitCreate {
     pub const WIDTH: usize = 48;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let words = match self {
-            Self::Team { kind, guard } => [
+            Self::Team { kind, guard, nest } => [
                 0,
                 match kind {
                     ProgramKind::User => 0,
                     ProgramKind::Supervisor => 1,
                 },
                 guard.get(),
-                0,
+                nest.map_or(0, crate::model::identity::PendId::get),
                 0,
                 0,
             ],
@@ -60,13 +62,14 @@ impl UnitCreate {
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let [tag, a, b, c, d, e] = fetch_words(bytes)?;
         match tag {
-            0 if c == 0 && d == 0 && e == 0 => Some(Self::Team {
+            0 if c <= isize::MAX as usize && d == 0 && e == 0 => Some(Self::Team {
                 kind: match a {
                     0 => ProgramKind::User,
                     1 => ProgramKind::Supervisor,
                     _ => return None,
                 },
                 guard: ControlId::new(b),
+                nest: (c != 0).then(|| crate::model::identity::PendId::new(c)),
             }),
             1 if a <= isize::MAX as usize => Some(Self::Task {
                 team: (a != 0).then(|| TeamId::new(a)),

@@ -18,14 +18,13 @@ fn failures_never_forge_a_closed_domain_or_accept_a_stale_fence() {
         Phase::Blocked,
         Phase::Detaching,
         Phase::Draining(expected),
-        Phase::Stopping,
         Phase::Failed,
     ] {
         assert_eq!(phase.next(Event::Fail), Some(Phase::Failed));
         assert_eq!(phase.next(Event::Complete(stale)), None);
     }
     assert_eq!(Phase::Closed.next(Event::Fail), Some(Phase::Closed));
-    assert_eq!(Phase::Failed.next(Event::Stopped), None);
+    assert_eq!(Phase::Failed.next(Event::Close), None);
     let path = [
         Event::Start(expected),
         Event::Complete(expected),
@@ -37,7 +36,6 @@ fn failures_never_forge_a_closed_domain_or_accept_a_stale_fence() {
         Event::Close,
         Event::Detached(expected),
         Event::Complete(expected),
-        Event::Stopped,
     ];
     let mut current = Phase::Prepared;
     for event in path {

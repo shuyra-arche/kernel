@@ -26,16 +26,9 @@ impl NestState {
     }
 }
 impl Nest {
-    /// The existing one-shot route has a checked, single-page IOVA contract.
-    pub(crate) fn external(
-        address: usize,
-        source: FlatRange,
-        access: Access,
-    ) -> Result<(Arc<Self>, Arc<Span>), NestError> {
-        if address == 0 || address >= 1usize << 38 || !address.is_multiple_of(PAGE_SIZE) {
-            return Err(NestError::NotAligned);
-        }
-        let nest = Arc::try_new(Self {
+    /// Empty external address organization, before any requester is admitted.
+    pub(crate) fn external_empty() -> Result<Arc<Self>, NestError> {
+        Arc::try_new(Self {
             id: super::super::next_id()?,
             cpu: None,
             life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
@@ -44,10 +37,26 @@ impl Nest {
             pending_cleanup: SpinLock::new(None),
             state: ManuallyDrop::new(SpinLock::new_level(Level::Nest, NestState::external())),
         })
-        .map_err(|_| NestError::OutOfMemory)?;
-        let reservation = nest.reserve(Placement::fixed(VirtAddr::new(address), PAGE_SIZE)?)?;
-        let span = nest.create_memo(reservation, source, access, access)?;
-        Ok((nest, span))
+        .map_err(|_| NestError::OutOfMemory)
+    }
+    pub(crate) fn is_external(&self) -> bool {
+        self.cpu.is_none()
+    }
+    pub(crate) fn external_memo(
+        self: &Arc<Self>,
+        address: usize,
+        source: FlatRange,
+        access: Access,
+    ) -> Result<Arc<Span>, NestError> {
+        if !self.is_external()
+            || address == 0
+            || address >= 1usize << 38
+            || !address.is_multiple_of(PAGE_SIZE)
+        {
+            return Err(NestError::NotAligned);
+        }
+        let reservation = self.reserve(Placement::fixed(VirtAddr::new(address), PAGE_SIZE)?)?;
+        self.create_memo(reservation, source, access, access)
     }
     pub(in crate::basis::nest) fn commit_external(
         &self,
@@ -141,13 +150,70 @@ impl Nest {
             return Err(Error::InvalidState);
         };
         let memo = memos.get_mut(span, 0).map_err(|_| Error::OutOfMemory)?;
-        match external.progress(&mut memo.publication)? {
+        match external.progress(
+            &mut memo.publication,
+            matches!(
+                memo.flight,
+                Some(super::super::memo::MemoFlight::Retracting)
+            ),
+        )? {
             state::Progress::Published | state::Progress::Withdrawn => memo.finish(),
             state::Progress::Pending | state::Progress::Closed => {}
+        }
+        if memos.idle() {
+            external.finish_close()?;
         }
         Ok(external.settled())
     }
 
+    pub(crate) fn external_phase(&self) -> kernel_api::model::nest::NestPhase {
+        match &self.state.lock().root {
+            Storage::External(e) => e.phase(),
+            _ => kernel_api::model::nest::NestPhase::Bound,
+        }
+    }
+    pub(crate) fn progress_external_close(&self) -> Result<bool, Error> {
+        let mut state = self.state.lock();
+        if !state.memos.idle() {
+            return Ok(false);
+        }
+        match &mut state.root {
+            Storage::External(e) => e.finish_close(),
+            _ => Err(Error::InvalidState),
+        }
+    }
+    pub(crate) fn delete_external_memo(&self, span: &Arc<Span>) -> Result<(), NestError> {
+        let memo = {
+            let mut state = self.state.lock();
+            if state
+                .memos
+                .get(span, 0)
+                .is_some_and(|m| m.publication.is_some() || m.flight.is_some())
+            {
+                return Err(NestError::Busy);
+            }
+            state.index.remove(span);
+            span.state.lock().active.clear();
+            state.memos.take_deleted(span)
+        };
+        self.give_back(&span.reservation);
+        drop(memo);
+        Ok(())
+    }
+    pub(crate) fn delete_organization(&self) -> Result<(), NestError> {
+        if !self.is_external() {
+            return self.retire();
+        }
+        if !self.external_settled() {
+            return Err(NestError::Busy);
+        }
+        let mut state = self.state.lock();
+        if state.index.len() != 0 {
+            return Err(NestError::Busy);
+        }
+        state.phase = ClosePhase::Closed;
+        Ok(())
+    }
     pub(crate) fn external_settled(&self) -> bool {
         let state = self.state.lock();
         matches!(&state.root, Storage::External(e) if e.settled())
@@ -169,11 +235,6 @@ impl Nest {
 }
 
 impl Nest {
-    pub(crate) fn record_fault(&self, span: &Arc<Span>, fault: Fault) {
-        if let Ok(memo) = self.state.lock().memos.get_mut(span, 0) {
-            memo.fault.get_or_insert(fault);
-        }
-    }
     pub(crate) fn retract_external(
         &self,
         span: &Arc<Span>,

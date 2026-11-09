@@ -53,15 +53,24 @@ impl Route {
             Watch::ExternalMapping {
                 token,
                 mapping,
-                fault,
+                published,
+                generation,
             } => match crate::basis::nest::authority::external::event(
-                actor, *token, *mapping, *fault,
+                actor,
+                *token,
+                *mapping,
+                *published,
+                *generation,
             ) {
-                Ok((_, Some(true))) => Some(None),
-                Ok((_, Some(false))) => Some(Some(SignEventFail::Busy)),
-                Ok(_) => None,
+                Ok((_, result)) => result,
                 Err(_) => Some(Some(SignEventFail::Denied)),
             },
+            Watch::Nest { token, fault } => {
+                match crate::basis::nest::authority::binding::event(actor, *token, *fault) {
+                    Ok((_, result)) => result,
+                    Err(_) => Some(Some(SignEventFail::Denied)),
+                }
+            }
             Watch::Resource { source } => {
                 let Some((token, need)) = codec::source_watch(*source) else {
                     return Some(Some(SignEventFail::Denied));

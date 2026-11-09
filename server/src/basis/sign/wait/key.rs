@@ -11,6 +11,9 @@ use crate::basis::nest::NestId;
 /// 空间清场按 NestId 一并清掉 `Value` 与 `Mapping`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WakeKey {
+    ExternalNest {
+        id: NestId,
+    },
     ExternalMapping {
         id: usize,
     },
@@ -64,6 +67,7 @@ impl WakeKey {
 
     pub(super) fn fold(self) -> u64 {
         match self {
+            WakeKey::ExternalNest { id } => (id.get() as u64).wrapping_mul(0x1c69_b3f7_4ac4_ae35),
             WakeKey::ExternalMapping { id } => (id as u64).wrapping_mul(0xB8A7_641D_2C39_EF05),
             WakeKey::Value { space, address } => {
                 (space.get() as u64).wrapping_mul(0xA24B_AED4_963E_E407) ^ address as u64

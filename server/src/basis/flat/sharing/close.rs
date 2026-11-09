@@ -6,11 +6,11 @@ use kernel_api::abi::call::pend::PendFail;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::SourceAuthorization;
 
-use super::ShareView;
+use super::Sharing;
 use super::pend_map_error;
 use super::seal;
 
-pub(crate) fn pending_close(meta: &ShareView) -> bool {
+pub(crate) fn pending_close(meta: &Sharing) -> bool {
     meta.has_maps()
         || meta
             .authorization()
@@ -18,7 +18,7 @@ pub(crate) fn pending_close(meta: &ShareView) -> bool {
 }
 
 /// 调用者持有根资源的操作租约；CPU 关闭不在全局提交锁下等待。
-pub(crate) fn close(root: &Arc<ShareView>) -> Result<(), PendFail> {
+pub(crate) fn close(root: &Arc<Sharing>) -> Result<(), PendFail> {
     let Some(source) = root.authorization() else {
         return root.close_maps(None);
     };

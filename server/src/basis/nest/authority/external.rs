@@ -1,10 +1,9 @@
 //! Authorized roots for external Nests. All position and hardware responsibility
 //! state belongs to the retained Nest; task death only closes admission.
-use super::aperture;
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::PublicationError as Error;
 use crate::basis::nest::{Access, Nest, Span};
-use crate::basis::pend::{self, ExternalBorrow, Hold, Need};
+use crate::basis::pend::{self, ExternalBorrow, Hold};
 use crate::basis::sign::{self, WakeKey};
 use crate::basis::unit::{anchor::Anchor, task::Task};
 use crate::metal::sync::SpinLock;
@@ -14,17 +13,15 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use kernel_api::abi::call::cell::CellFail;
 use kernel_api::model::cell::{CellInfo, CellState, MappingId};
 use kernel_api::model::identity::{PendId, TaskId};
-use kernel_api::model::modifiable::Modifiable;
+use kernel_api::model::pend::{NestRights, Operations};
 
 struct Registration {
     actor: Weak<Task>,
     task: TaskId,
-    source: FlatRange,
     target: Option<Arc<pend::PendEntry>>,
     hold: Arc<Hold>,
     nest: Arc<Nest>,
     span: Arc<Span>,
-    requester: Option<u32>,
     modifiable: bool,
     borrow: Option<ExternalBorrow>,
 }
@@ -33,13 +30,10 @@ impl Registration {
         self.span.inspect_memo(0).expect("registered Memo")
     }
     fn idle(&self) -> bool {
-        matches!(self.info().state, CellState::Vacant | CellState::Ready)
-            && self.nest.external_settled()
+        matches!(self.info().state, CellState::Vacant | CellState::Ready) && self.borrow.is_none()
     }
 }
 static NESTS: SpinLock<Vec<Registration>> = SpinLock::new(Vec::new());
-// Scheduling count only; authoritative completion is in each retained Nest.
-static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 fn failure(error: Error) -> CellFail {
     match error {
         Error::OutOfMemory | Error::Capacity => CellFail::OutOfMemory,
@@ -48,37 +42,25 @@ fn failure(error: Error) -> CellFail {
         _ => CellFail::Denied,
     }
 }
-fn target(actor: &Task, token: PendId, write: bool) -> Result<Arc<pend::PendEntry>, CellFail> {
-    let entry = pend::locate(actor, token).ok_or(CellFail::Denied)?;
-    if !entry.permits(kernel_api::model::pend::Operations::Share(
-        kernel_api::model::pend::ShareRights::ASSOCIATE,
-    )) || (write && !entry.allows(Need::Write))
-    {
-        return Err(CellFail::Denied);
-    }
-    let view = entry.target().share_view().ok_or(CellFail::Denied)?;
-    if let Some((offset, count)) = entry.authority().window() {
-        if offset.get() != 0 || count != view.source().page_count() {
-            return Err(CellFail::Denied);
-        }
-    }
-    Ok(entry)
+fn target(
+    actor: &Task,
+    token: PendId,
+    rights: NestRights,
+) -> Result<Arc<pend::PendEntry>, CellFail> {
+    super::binding::authorized(actor, token, rights).map_err(|_| CellFail::Denied)
 }
 fn authorized<'a>(
     records: &'a mut [Registration],
     actor: &Task,
     token: PendId,
     id: MappingId,
+    rights: NestRights,
 ) -> Result<&'a mut Registration, CellFail> {
-    let entry = target(actor, token, false)?;
-    let range = entry
-        .target()
-        .share_view()
-        .ok_or(CellFail::Denied)?
-        .source();
+    let entry = target(actor, token, rights)?;
+    let nest = entry.target().nest().ok_or(CellFail::Denied)?;
     records
         .iter_mut()
-        .find(|p| p.span.identity() == id.get() && p.source.same_range(&range))
+        .find(|p| p.span.identity() == id.get() && Arc::ptr_eq(&p.nest, &nest))
         .ok_or(CellFail::Denied)
 }
 
@@ -89,37 +71,34 @@ pub(crate) fn create(
     iova: usize,
     modifiable: bool,
 ) -> Result<usize, CellFail> {
-    let target = target(actor, token, true)?;
+    let target = target(actor, token, NestRights::RESERVE)?;
     let pages = hold.resolve().ok_or(CellFail::Denied)?;
-    if target.modifiable() != Modifiable::Yes
-        || pages.page_count().get() != 1
-        || pages.is_borrowed()
-    {
+    if pages.page_count().get() != 1 || pages.is_borrowed() {
         return Err(CellFail::Denied);
     }
-    let source = target
-        .target()
-        .share_view()
-        .ok_or(CellFail::Denied)?
-        .source();
+    let nest = target.target().nest().ok_or(CellFail::Denied)?;
+    if !matches!(
+        nest.external_phase(),
+        kernel_api::model::nest::NestPhase::Unbound | kernel_api::model::nest::NestPhase::Bound
+    ) {
+        return Err(CellFail::Denied);
+    }
     let access = if modifiable {
         Access::READ | Access::WRITE
     } else {
         Access::READ
     };
-    let (nest, span) = Nest::external(iova, pages, access)?;
-    let id = span.identity();
     let mut records = NESTS.lock();
     records.try_reserve(1).map_err(|_| CellFail::OutOfMemory)?;
+    let span = nest.external_memo(iova, pages, access)?;
+    let id = span.identity();
     records.push(Registration {
         actor: Arc::downgrade(actor),
         task: actor.ident.id,
-        source,
         target: None,
         hold,
         nest,
         span,
-        requester: None,
         modifiable,
         borrow: None,
     });
@@ -134,7 +113,7 @@ pub(crate) fn associate(
     page: Arc<crate::basis::cell::page::Page>,
 ) -> Result<(), CellFail> {
     let mut records = NESTS.lock();
-    let r = authorized(&mut records, actor, token, id)?;
+    let r = authorized(&mut records, actor, token, id, NestRights::TRANSFER)?;
     if r.task != actor.ident.id
         || !r
             .hold
@@ -151,7 +130,7 @@ pub(crate) fn associate(
 }
 pub(crate) fn snapshot(actor: &Task, token: PendId, id: MappingId) -> Result<CellInfo, CellFail> {
     let mut records = NESTS.lock();
-    let r = authorized(&mut records, actor, token, id)?;
+    let r = authorized(&mut records, actor, token, id, NestRights::INSPECT)?;
     let mut info = r.info();
     if r.nest.external_error().is_some() {
         info.state = CellState::Failed;
@@ -165,7 +144,7 @@ pub(crate) fn page(
     expected: u64,
 ) -> Result<(FlatRange, Arc<crate::basis::cell::page::Page>), CellFail> {
     let mut records = NESTS.lock();
-    let r = authorized(&mut records, actor, token, id)?;
+    let r = authorized(&mut records, actor, token, id, NestRights::INSPECT)?;
     if r.info().generation != expected {
         return Err(CellFail::Busy);
     }
@@ -181,7 +160,7 @@ pub(crate) fn owning_hold(
     expected: u64,
 ) -> Result<(Arc<Hold>, Arc<crate::basis::cell::page::Page>), CellFail> {
     let mut records = NESTS.lock();
-    let r = authorized(&mut records, actor, token, id)?;
+    let r = authorized(&mut records, actor, token, id, NestRights::TRANSFER)?;
     if r.task != actor.ident.id || !r.hold.source().manages(actor) {
         return Err(CellFail::NotTransferable);
     }
@@ -199,20 +178,20 @@ pub(crate) fn publish(
     id: MappingId,
     expected: u64,
 ) -> Result<(), CellFail> {
-    let target = target(actor, token, true)?;
-    let target_view = target.target().share_view().ok_or(CellFail::Denied)?;
-    let _operation =
-        crate::basis::view::share::ShareOperation::acquire(&target_view).ok_or(CellFail::Busy)?;
+    let target = target(actor, token, NestRights::PUBLISH)?;
     let mut records = NESTS.lock();
-    let r = authorized(&mut records, actor, token, id)?;
+    let r = authorized(&mut records, actor, token, id, NestRights::PUBLISH)?;
     if r.task != actor.ident.id {
         return Err(CellFail::Denied);
     }
     if r.info().generation != expected || !r.idle() {
         return Err(CellFail::Busy);
     }
-    if r.requester.is_some() {
-        return Err(CellFail::NotTransferable);
+    if r.nest.external_phase() != kernel_api::model::nest::NestPhase::Bound {
+        return Err(CellFail::Denied);
+    }
+    if r.modifiable && target.modifiable() != kernel_api::model::modifiable::Modifiable::Yes {
+        return Err(CellFail::Denied);
     }
     let page = r.nest.memo_page(&r.span, 0)?.ok_or(CellFail::SourceEmpty)?;
     let change = crate::basis::cell::change::acquire(&page)?;
@@ -230,29 +209,16 @@ pub(crate) fn publish(
         .authority()
         .retain_route()
         .map_err(|_| CellFail::Busy)?;
-    let (did, hardware) = match aperture::bind(&r.source, &actor.ident.team.external) {
-        Ok(bound) => bound,
-        Err(e) => {
-            unsafe { target.authority().release_route() };
-            return Err(failure(e));
-        }
-    };
-    // A registration binds once; all subsequent failure paths retain the actual Nest.
-    if let Err((error, hardware)) = r.nest.bind_external(hardware) {
-        // Backend Drop preserves its own unfinished queue/table obligations.
-        drop(hardware);
-        unsafe { target.authority().release_route() };
-        return Err(failure(error));
-    }
-    r.requester = Some(did);
     r.target = Some(target);
     r.borrow = Some(borrow);
-    ACTIVE.fetch_add(1, Ordering::Release);
     if let Err(e) = r
         .nest
         .prepare_external(&r.span, expected, &page, change, r.modifiable)
     {
-        close(r);
+        r.borrow.take();
+        if let Some(target) = r.target.take() {
+            unsafe { target.authority().release_route() };
+        }
         return Err(failure(e));
     }
     r.borrow.as_mut().unwrap().publish();
@@ -269,9 +235,9 @@ pub(crate) fn retract(
     expected: u64,
 ) -> Result<(), CellFail> {
     let mut records = NESTS.lock();
-    let r = authorized(&mut records, actor, token, id)?;
+    let r = authorized(&mut records, actor, token, id, NestRights::RETRACT)?;
     if r.task != actor.ident.id {
-        target(actor, token, true)?;
+        target(actor, token, NestRights::RETRACT)?;
     }
     let info = r.info();
     if info.generation != expected
@@ -282,18 +248,18 @@ pub(crate) fn retract(
     let page = r.nest.memo_page(&r.span, 0)?.ok_or(CellFail::SourceEmpty)?;
     let change = crate::basis::cell::change::acquire(&page)?;
     r.nest.retract_external(&r.span, expected, change)?;
-    close(r);
     Ok(())
 }
 pub(crate) fn delete(actor: &Task, token: PendId, id: MappingId) -> Result<(), CellFail> {
     let mut records = NESTS.lock();
-    let r = authorized(&mut records, actor, token, id)?;
+    let r = authorized(&mut records, actor, token, id, NestRights::RELEASE)?;
     if r.task != actor.ident.id {
-        target(actor, token, true)?;
+        target(actor, token, NestRights::RETRACT)?;
     }
     if !r.idle() {
         return Err(CellFail::Busy);
     }
+    r.nest.delete_external_memo(&r.span)?;
     let at = records
         .iter()
         .position(|r| r.span.identity() == id.get())
@@ -308,22 +274,51 @@ pub(crate) fn event(
     actor: &Task,
     token: PendId,
     id: MappingId,
-    fault: bool,
-) -> Result<(Weak<Anchor>, Option<bool>), CellFail> {
+    published: bool,
+    expected: u64,
+) -> Result<
+    (
+        Weak<Anchor>,
+        Option<Option<kernel_api::abi::call::sign::SignEventFail>>,
+    ),
+    CellFail,
+> {
+    use kernel_api::abi::call::sign::SignEventFail;
     let mut records = NESTS.lock();
-    let r = authorized(&mut records, actor, token, id)?;
+    let r = authorized(&mut records, actor, token, id, NestRights::INSPECT)?;
     let info = r.info();
-    let ready = if info.state == CellState::Failed || r.nest.external_error().is_some() {
-        Some(false)
-    } else if fault {
-        (info.fault_cause != 0).then_some(true)
+    if expected == 0 {
+        return Err(CellFail::Denied);
+    }
+    let ready = if info.generation > expected {
+        Some(Some(SignEventFail::Gone))
+    } else if info.generation < expected {
+        let next = info.generation.checked_add(1) == Some(expected)
+            && if published {
+                info.state == CellState::Ready
+            } else {
+                matches!(info.state, CellState::Published | CellState::Publishing)
+            };
+        if next {
+            None
+        } else {
+            Some(Some(SignEventFail::Gone))
+        }
+    } else if info.state == CellState::Failed || r.nest.external_error().is_some() {
+        Some(Some(SignEventFail::Busy))
+    } else if if published {
+        info.state == CellState::Published
     } else {
-        (r.requester.is_some() && r.idle()).then_some(true)
+        r.idle()
+    } {
+        Some(None)
+    } else {
+        None
     };
     Ok((r.nest.life(), ready))
 }
 fn advance(r: &mut Registration) -> [Option<(TaskId, PendId)>; 2] {
-    if r.requester.is_none() || r.idle() && r.borrow.is_none() {
+    if r.borrow.is_none() {
         return [None, None];
     }
     let invalid = r
@@ -332,38 +327,31 @@ fn advance(r: &mut Registration) -> [Option<(TaskId, PendId)>; 2] {
         .is_none_or(|a| a.dead() || a.ident.team.external.closed())
         || r.target
             .as_ref()
-            .is_none_or(|t| !t.alive() || !t.allows(Need::Write))
+            .is_none_or(|t| !t.permits(Operations::Nest(NestRights::PUBLISH)))
         || r.borrow.as_ref().is_some_and(ExternalBorrow::revoked);
-    if invalid || r.nest.external_error().is_some() {
-        close(r);
-    }
-    if matches!(r.info().state, CellState::Publishing | CellState::Published) {
-        for _ in 0..4 {
-            match r.nest.external_fault() {
-                Ok(Some(fault)) if Some(fault.device) == r.requester => {
-                    r.nest.record_fault(&r.span, fault)
-                }
-                Ok(None) => break,
-                _ => {
-                    close(r);
-                    break;
-                }
+    if invalid && matches!(r.info().state, CellState::Publishing | CellState::Published) {
+        if let Ok(Some(page)) = r.nest.memo_page(&r.span, 0) {
+            if let Ok(change) = crate::basis::cell::change::acquire(&page) {
+                let _ = r
+                    .nest
+                    .retract_external(&r.span, r.info().generation, change);
             }
         }
     }
     let _ = r.nest.progress_external(&r.span);
-    if r.nest.external_settled() {
-        let observer = r.borrow.take().and_then(|borrow| {
-            ACTIVE.fetch_sub(1, Ordering::AcqRel);
-            unsafe { borrow.settle() }
-        });
+    if matches!(r.info().state, CellState::Ready | CellState::Vacant) {
+        let observer = r
+            .borrow
+            .take()
+            .and_then(|borrow| unsafe { borrow.settle() });
         let route = r.target.take().map(|target| {
             unsafe { target.authority().release_route() };
             (r.task, target.token())
         });
-        return [observer, route];
+        [observer, route]
+    } else {
+        [None, None]
     }
-    [None, None]
 }
 pub(crate) fn maintain() -> bool {
     crate::basis::cell::change::maintain();
@@ -382,11 +370,7 @@ pub(crate) fn maintain() -> bool {
             let before = r.info();
             let observers = advance(r);
             let id = r.span.identity();
-            let expired = r.idle() && r.actor.upgrade().is_none_or(|a| a.dead());
-            let changed = before != r.info() || expired;
-            if expired {
-                records.remove(at);
-            }
+            let changed = before != r.info();
             (id, changed, observers)
         };
         for (task, token) in observers.into_iter().flatten() {
@@ -399,5 +383,29 @@ pub(crate) fn maintain() -> bool {
     if let Some(route) = crate::basis::room::interrupt::external() {
         route.rearm();
     }
-    ACTIVE.load(Ordering::Acquire) != 0
+    super::binding::maintain()
+}
+
+/// Only the vanished root's organization can discard unobserved ready positions.
+/// Published/retiring positions retain their source and address for later progress.
+pub(super) fn discard(nest: &Arc<Nest>) -> bool {
+    let mut records = NESTS.lock();
+    if records
+        .iter()
+        .any(|r| Arc::ptr_eq(&r.nest, nest) && !r.idle())
+    {
+        return false;
+    }
+    let mut at = 0;
+    while at < records.len() {
+        if Arc::ptr_eq(&records[at].nest, nest) {
+            if nest.delete_external_memo(&records[at].span).is_err() {
+                return false;
+            }
+            records.remove(at);
+        } else {
+            at += 1;
+        }
+    }
+    true
 }

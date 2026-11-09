@@ -12,7 +12,6 @@ pub(crate) enum DomainPhase {
     Blocked,
     Detaching,
     Draining(BatchId),
-    Stopping,
     Closed,
     Failed,
 }
@@ -25,7 +24,6 @@ pub(super) enum Event {
     Submitted(BatchId),
     Close,
     Detached(BatchId),
-    Stopped,
     Fail,
 }
 
@@ -44,8 +42,7 @@ impl DomainPhase {
             (Self::Revoking(expected), Complete(actual)) if expected == actual => Self::Blocked,
             (Self::Blocked, Close) => Self::Detaching,
             (Self::Detaching, Detached(batch)) => Self::Draining(batch),
-            (Self::Draining(expected), Complete(actual)) if expected == actual => Self::Stopping,
-            (Self::Stopping, Stopped) => Self::Closed,
+            (Self::Draining(expected), Complete(actual)) if expected == actual => Self::Closed,
             _ => return None,
         })
     }

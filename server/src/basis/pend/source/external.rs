@@ -5,11 +5,11 @@ use super::hold::Hold;
 use crate::basis::cell::page::Exposure;
 use crate::basis::cell::page::Page;
 use crate::basis::flat::Pages;
+use crate::basis::flat::sharing::SharingOperation;
 use crate::basis::nest::Access;
 use crate::basis::pend;
 use crate::basis::pend::Pend;
 use crate::basis::unit::task::Task;
-use crate::basis::view::share::ShareOperation;
 use alloc::sync::Arc;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::cell::PageOwner;
@@ -74,14 +74,11 @@ impl ExternalBorrow {
         let (loan, parent, observer) = if let Some((meta, root, authority)) = source.root() {
             let (token, authority) = hold.branch().unwrap_or((root, &authority));
             let entry = pend::locate(task, token).ok_or(PendFail::Denied)?;
-            if !entry.permits(kernel_api::model::pend::Operations::Share(
-                kernel_api::model::pend::ShareRights::ASSOCIATE,
-            )) || !Arc::ptr_eq(entry.authority(), authority)
-                || source.revoked()
+            if !entry.associates() || !Arc::ptr_eq(entry.authority(), authority) || source.revoked()
             {
                 return Err(PendFail::Denied);
             }
-            let _operation = ShareOperation::acquire(&meta).ok_or(PendFail::Busy)?;
+            let _operation = SharingOperation::acquire(&meta).ok_or(PendFail::Busy)?;
             let _publication = source.begin_withdraw()?;
             let (offset, count) = hold.window();
             source.check_publish(offset, count)?;

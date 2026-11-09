@@ -1,7 +1,11 @@
 //! Validate a trusted external resource and its immutable translation route.
 //! Hardware discovery/configuration is performed by the caller's boot image.
 use crate::basis::flat::{BorrowedRegion, Flat};
-use crate::basis::nest::authority::aperture::{APERTURES, Aperture};
+use crate::basis::port::Port;
+use crate::metal::sync::SpinLock;
+use alloc::vec::Vec;
+use kernel_api::boot::platform::Region;
+pub(super) static REGIONS: SpinLock<Vec<Region>> = SpinLock::new(Vec::new());
 use crate::basis::nest::{Access, Placement, RegionKind};
 use crate::basis::unit::team::kernel;
 use crate::metal::generic::iommu::Quiescence;
@@ -15,8 +19,6 @@ use kernel_api::address::{PAGE_SIZE, PhysAddr};
 pub struct ExternalRoute {
     pub controller: usize,
     pub requester: u32,
-    pub base: usize,
-    pub size: usize,
     pub proof: Box<dyn Quiescence>,
 }
 
@@ -51,8 +53,6 @@ pub(in super::super) fn mapped(base: usize, size: usize) -> Result<usize, PendFa
 
 pub(in super::super) fn init(route: ExternalRoute) -> Result<(), PendFail> {
     let description = super::admission::description()?;
-    let region = kernel_api::boot::platform::Region::new(route.base, route.size);
-    description.admits(region)?;
     if !description
         .controllers
         .iter()
@@ -61,31 +61,28 @@ pub(in super::super) fn init(route: ExternalRoute) -> Result<(), PendFail> {
     {
         return Err(PendFail::Denied);
     }
-    let did = route.requester;
-    let mut apertures = APERTURES.lock();
-    if !apertures.is_empty() {
-        return Err(PendFail::Denied);
-    }
-    apertures
-        .try_reserve(1)
-        .map_err(|_| PendFail::OutOfMemory)?;
-    let borrowed = unsafe { BorrowedRegion::new(PhysAddr::from_raw(route.base), route.size) }
-        .map_err(|_| PendFail::Denied)?;
-    let source = Flat::from_region(borrowed)
-        .map_err(|_| PendFail::OutOfMemory)?
-        .whole();
     let port = Box::try_new(Requester {
         controller: route.controller,
         id: route.requester,
-        proof: Some(route.proof),
+        proof: crate::metal::iommu::port::Provider::new(route.proof)
+            .map_err(|_| PendFail::OutOfMemory)?,
     })
     .map_err(|_| PendFail::OutOfMemory)?;
-    apertures.push(Aperture {
-        base: route.base,
-        did,
-        port,
-        source,
-    });
-    log::info!("iommu: {} trusted external apertures", apertures.len());
+    Port::register(route.controller, route.requester, port)
+}
+
+/// Grant raw register access independently of external source management.
+/// This never registers a requester or changes an IOMMU context.
+pub(in super::super) fn grant(region: Region) -> Result<(), PendFail> {
+    let description = super::admission::description()?;
+    description.admits(region)?;
+    let mut regions = REGIONS.lock();
+    let overlap =
+        |old: &Region| old.base < region.base + region.size && region.base < old.base + old.size;
+    if regions.iter().any(overlap) || description.authorities.iter().any(overlap) {
+        return Err(PendFail::Denied);
+    }
+    regions.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+    regions.push(region);
     Ok(())
 }

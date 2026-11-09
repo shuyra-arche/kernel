@@ -62,7 +62,7 @@ pub unsafe fn configure(
 
 /// Bind an exclusively held resource to its admitted translation controller.
 /// # Safety
-/// The platform owns this source and the whole one-shot controller. All its
+/// The platform owns this source and its complete isolation group. All its
 /// requests traverse that controller without bypass/ATS/PRI. Quiescence covers
 /// every requester and retains the platform evidence for the entire binding.
 pub unsafe fn bind_external(route: ExternalRoute) -> Result<(), BootError> {
@@ -76,4 +76,15 @@ pub unsafe fn bind_external(route: ExternalRoute) -> Result<(), BootError> {
 /// Physical interval is MMIO owned by this image, never allocator-owned RAM.
 pub unsafe fn map_mmio(base: usize, size: usize) -> Result<usize, PendFail> {
     super::devices::external::mapped(base, size)
+}
+
+/// Grant a validated external MMIO interval to the initial Unit.
+/// # Safety
+/// The interval is independently assignable raw device memory. The trusted
+/// manager must revoke former driver access before reassigning an external source.
+pub unsafe fn grant_mmio(region: kernel_api::boot::platform::Region) -> Result<(), BootError> {
+    super::devices::external::grant(region).map_err(|source| BootError::Resources {
+        operation: ResourceOperation::Devices,
+        source,
+    })
 }

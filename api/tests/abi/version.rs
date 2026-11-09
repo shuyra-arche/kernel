@@ -11,11 +11,11 @@ use kernel_api::{
 fn old_and_future_versions_cannot_execute_reused_operation_numbers() {
     let call = SleepUntil { at: u64::MAX };
     assert!(EnvCall::from_wire(SleepUntil::SLOT, &call.pack()).is_ok());
-    for version in [0, 1, abi::VERSION + 1, u16::MAX] {
+    for version in (0..abi::VERSION).chain([abi::VERSION + 1, u16::MAX]) {
         let slot = (SleepUntil::SLOT & ((1usize << 48) - 1)) | ((version as usize) << 48);
         assert!(EnvCall::from_wire(slot, &call.pack()).is_err());
     }
-    for domain in [4usize, 6, 12, 13] {
+    for domain in [4usize, 6, 15, 16] {
         assert!(EnvCall::from_wire(abi::PREFIX | (domain << 32), &[0; 6]).is_err());
     }
 }

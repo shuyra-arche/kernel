@@ -32,7 +32,7 @@ struct Proof(Arc<Mutex<Evidence>>);
 // No hardware DMA exists in the host fixture. The script only models the
 // independent platform evidence boundary, never replaces production decisions.
 unsafe impl Quiescence for Proof {
-    fn poll(&mut self, ticket: Retirement) -> Result<Option<Retirement>, HardwareError> {
+    fn prove(&mut self, ticket: Retirement) -> Result<Option<Retirement>, HardwareError> {
         let mut e = self.0.lock().unwrap();
         e.polls += 1;
         e.requests.push(ticket);
@@ -114,6 +114,17 @@ fn drain_to_platform(space: &mut Space, device: &Device, proof: &Arc<Mutex<Evide
     panic!("platform proof not reached");
 }
 
+fn finish(space: &mut Space, device: &Device, proof: &Arc<Mutex<Evidence>>) {
+    proof.lock().unwrap().outcomes.extend([Ok(true); 8]);
+    for _ in 0..40 {
+        complete(device);
+        if space.advance_close().unwrap() {
+            return;
+        }
+    }
+    panic!("binding close did not finish");
+}
+
 #[test]
 fn translation_completion_cannot_discharge_platform_responsibility() {
     let (mut space, device, pools, cell, proof) = space(8);
@@ -122,8 +133,8 @@ fn translation_completion_cannot_discharge_platform_responsibility() {
     drop(cell);
     space.revoke().unwrap();
     drain_to_platform(&mut space, &device, &proof);
-    assert_eq!(device.read64(DDTP), 0);
-    assert!(pools[..3].iter().all(|p| p.gives() == 1));
+    assert_ne!(device.read64(DDTP), 0);
+    assert!(pools[..3].iter().all(|p| p.gives() == 0));
     assert!(pools[3..].iter().all(|p| p.gives() == 0));
     drop(space);
     assert!(
@@ -158,9 +169,9 @@ fn platform_failure_retains_data_and_retry_requires_fresh_evidence() {
     assert_eq!(Arc::strong_count(&cell), 1);
     assert_eq!(pools[7].gives(), 0); // still held by the original owner
     drop(cell);
-    while !space.advance_close().unwrap() {}
+    finish(&mut space, &device, &proof);
     assert!(space.settled());
-    assert!(pools.iter().all(|p| p.gives() == 1));
+    assert!(pools[3..].iter().all(|p| p.gives() == 1));
 }
 
 #[test]
@@ -173,7 +184,7 @@ fn closing_during_each_activation_step_finishes_without_requester() {
             space.ready().unwrap();
         }
         drop(cell);
-        proof.lock().unwrap().outcomes.push_back(Ok(true));
+        proof.lock().unwrap().outcomes.extend([Ok(true); 8]);
         for _ in 0..30 {
             complete(&device);
             if space.advance_close().unwrap() {
@@ -182,7 +193,7 @@ fn closing_during_each_activation_step_finishes_without_requester() {
             assert_eq!(space.ready(), Err(Error::Closed));
         }
         assert!(space.settled());
-        assert!(pools.iter().all(|p| p.gives() == 1));
+        assert!(pools[3..].iter().all(|p| p.gives() == 1));
     }
 }
 
@@ -205,7 +216,8 @@ fn domain_failure_keeps_both_payload_and_hardware_tables() {
 #[test]
 fn invalid_geometry_and_extra_binding_fail_before_publication() {
     for (device_id, iova) in [(8, 1), (8, 1usize << 38)] {
-        let (mut space, device, pools, cell, _) = space(device_id);
+        let (mut space, device, pools, cell, proof) = space(device_id);
+        proof.lock().unwrap().outcomes.extend([Ok(true); 8]);
         assert!(space.prepare(&cell, iova, true, None).is_err());
         assert_eq!(space.phase(), None);
         assert_eq!(cell.exposure(), Exposure::Internal);
@@ -218,9 +230,10 @@ fn invalid_geometry_and_extra_binding_fail_before_publication() {
             }
         }
         assert!(space.settled());
-        assert!(pools.iter().all(|p| p.gives() == 1));
+        assert!(pools[3..].iter().all(|p| p.gives() == 1));
     }
-    let (mut space, device, pools, cell, _) = space(8);
+    let (mut space, device, pools, cell, proof) = space(8);
+    proof.lock().unwrap().outcomes.extend([Ok(true); 8]);
     space.prepare(&cell, 0x400000, true, None).unwrap();
     assert_eq!(
         space.prepare(&cell, 0x500000, true, None),
@@ -233,7 +246,7 @@ fn invalid_geometry_and_extra_binding_fail_before_publication() {
         }
     }
     assert_eq!(device.read64(DDTP), 0);
-    assert!(pools.iter().all(|p| p.gives() == 1));
+    assert!(pools[3..].iter().all(|p| p.gives() == 1));
 }
 
 #[test]
@@ -303,7 +316,7 @@ fn bound_controller_uses_admitted_device_id_and_cannot_be_assigned_twice() {
         Err(BindError::Unavailable)
     ));
     drop(cell);
-    proof.lock().unwrap().outcomes.push_back(Ok(true));
+    proof.lock().unwrap().outcomes.extend([Ok(true); 8]);
     for _ in 0..30 {
         complete(&device);
         if space.advance_close().unwrap() {
@@ -312,7 +325,8 @@ fn bound_controller_uses_admitted_device_id_and_cannot_be_assigned_twice() {
     }
     assert!(space.settled());
     assert_eq!(payload.gives(), 1);
-    assert!(tables.iter().chain(queues.iter()).all(|p| p.gives() == 1));
+    assert!(tables.iter().all(|p| p.gives() == 1));
+    assert!(queues.iter().all(|p| p.gives() == 0));
     assert!(matches!(
         controllers.engine(CONTROLLER),
         Err(BindError::Unavailable)
@@ -334,7 +348,7 @@ fn physical_controller_identity_must_match_firmware_before_installation() {
     assert_eq!(error, BindError::UnknownController);
     assert_eq!(device.read64(DDTP), 0);
     engine.stop().unwrap();
-    assert!(pools.iter().all(|p| p.gives() == 1));
+    assert!(pools[3..].iter().all(|p| p.gives() == 1));
 }
 
 #[test]
@@ -390,7 +404,8 @@ fn platform_receipt_is_bound_to_the_binding_and_retry_batch() {
     assert!(space.poll().unwrap());
     assert_eq!(space.poll(), Err(Error::UnknownBinding));
     drop(cell);
-    assert!(pools.iter().all(|p| p.gives() == 1));
+    finish(&mut space, &device, &proof);
+    assert!(pools[3..].iter().all(|p| p.gives() == 1));
 }
 
 #[test]
@@ -411,10 +426,139 @@ fn another_requesters_platform_receipt_cannot_settle_a_domain() {
     assert_eq!(c2.exposure(), Exposure::External);
     assert!(p2[3..].iter().all(|p| p.gives() == 0));
     second.revoke().unwrap();
-    for (space, proof) in [(&mut first, q1), (&mut second, q2)] {
+    for (space, proof) in [(&mut first, &q1), (&mut second, &q2)] {
         proof.lock().unwrap().outcomes.push_back(Ok(true));
         assert!(space.poll().unwrap());
     }
     drop((c1, c2));
-    assert!(p1.iter().chain(&p2).all(|p| p.gives() == 1));
+    finish(&mut first, &d1, &q1);
+    finish(&mut second, &d2, &q2);
+    assert!(p1[3..].iter().chain(&p2[3..]).all(|p| p.gives() == 1));
+}
+
+#[test]
+fn leaves_retire_independently_and_context_reuse_requires_binding_proof() {
+    use crate::iommu::Hardware;
+    use crate::iommu::contract::RetirementScope;
+    use crate::publication::Publication;
+    let (mut engine, device, queues) = engine();
+    start(&mut engine);
+    let mut controllers = Controllers::new([CONTROLLER]).unwrap();
+    controllers
+        .install(engine)
+        .map_err(|(error, _)| error)
+        .unwrap();
+    let tables = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
+    let cells = tables.map(|p| Page::from_internal(PageOwner::Kernel, p.page().unwrap()).unwrap());
+    let evidence = Arc::new(Mutex::new(Evidence::default()));
+    let leaf_address = cells[3].physical_address();
+    let mut adapter =
+        unsafe { controllers.bind(CONTROLLER, 8, cells, Proof(evidence.clone())) }.unwrap();
+    let payloads = [Pool::new(0), Pool::new(0), Pool::new(0)];
+    let pages = payloads
+        .map(|p| Arc::new(Page::from_internal(PageOwner::Kernel, p.page().unwrap()).unwrap()));
+    let prepare = |hardware: &Adapter<Device, Proof>, page: &Arc<Page>, address| {
+        Publication::prepare_external(hardware, page, address, true, None).unwrap()
+    };
+    let mut first = prepare(&adapter, &pages[0], 0x400000);
+    first.submit(&mut adapter).unwrap();
+    for _ in 0..20 {
+        complete(&device);
+        if first.ready(&mut adapter).unwrap() {
+            break;
+        }
+    }
+    assert_eq!(first.phase(), Phase::Mapped);
+    let mut second = prepare(&adapter, &pages[1], 0x401000);
+    second.submit(&mut adapter).unwrap();
+    for _ in 0..20 {
+        complete(&device);
+        if second.ready(&mut adapter).unwrap() {
+            break;
+        }
+    }
+    assert_eq!(second.phase(), Phase::Mapped);
+    // Both entries actually exist in the retained page table, not merely in a ledger.
+    let leaf = leaf_address as *const u64;
+    assert_ne!(unsafe { leaf.read_volatile() } & 1, 0);
+    let second_pte = unsafe { leaf.add(1).read_volatile() };
+    assert_ne!(second_pte & 1, 0);
+    let old = first.revoke(&mut adapter).unwrap().unwrap();
+    for _ in 0..20 {
+        complete(&device);
+        assert!(!first.poll(&mut adapter).unwrap());
+        if !evidence.lock().unwrap().requests.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(unsafe { leaf.read_volatile() }, 0);
+    assert_eq!(unsafe { leaf.add(1).read_volatile() }, second_pte);
+    assert_ne!(device.read64(DDTP), 0);
+    assert_eq!(pages[0].exposure(), Exposure::External);
+    assert_eq!(
+        evidence.lock().unwrap().requests.last().unwrap().scope(),
+        RetirementScope::Range {
+            address: 0x400000,
+            size: 4096
+        }
+    );
+    evidence.lock().unwrap().outcomes.push_back(Ok(true));
+    assert!(first.poll(&mut adapter).unwrap());
+    assert_eq!(pages[0].exposure(), Exposure::Internal);
+    // Another Page can occupy the settled address; the former batch cannot act on it.
+    let mut replacement = prepare(&adapter, &pages[2], 0x400000);
+    replacement.submit(&mut adapter).unwrap();
+    for _ in 0..20 {
+        complete(&device);
+        if replacement.ready(&mut adapter).unwrap() {
+            break;
+        }
+    }
+    assert_eq!(adapter.observe(old), Err(HardwareError::Fault));
+    assert_eq!(unsafe { leaf.add(1).read_volatile() }, second_pte);
+    assert!(Publication::prepare_external(&adapter, &pages[0], 0x600000, true, None).is_err());
+    assert!(adapter.take_engine().is_none());
+    assert!(!adapter.shutdown().unwrap());
+    for receipt in [&mut second, &mut replacement] {
+        receipt.revoke(&mut adapter).unwrap();
+        evidence.lock().unwrap().outcomes.push_back(Ok(true));
+        for _ in 0..20 {
+            complete(&device);
+            if receipt.poll(&mut adapter).unwrap() {
+                break;
+            }
+        }
+        assert_eq!(receipt.phase(), Phase::Settled);
+    }
+    // All payloads are safe but context tables and controller ownership are not.
+    for _ in 0..20 {
+        complete(&device);
+        assert!(!adapter.shutdown().unwrap());
+    }
+    assert_eq!(device.read64(DDTP), 0);
+    assert_eq!(
+        evidence.lock().unwrap().requests.last().unwrap().scope(),
+        RetirementScope::Binding
+    );
+    assert!(tables.iter().all(|p| p.gives() == 0));
+    assert!(adapter.take_engine().is_none());
+    evidence.lock().unwrap().outcomes.push_back(Ok(true));
+    assert!(adapter.shutdown().unwrap());
+    controllers.restore(adapter.take_engine().unwrap()).unwrap();
+    assert!(tables.iter().all(|p| p.gives() == 1));
+    assert!(queues.iter().all(|p| p.gives() == 0));
+    let next_tables = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
+    let next_cells =
+        next_tables.map(|p| Page::from_internal(PageOwner::Kernel, p.page().unwrap()).unwrap());
+    evidence.lock().unwrap().outcomes.push_back(Ok(true));
+    let mut next = unsafe { controllers.bind(CONTROLLER, 8, next_cells, Proof(evidence)) }.unwrap();
+    assert_eq!(next.observe(old), Err(HardwareError::Fault));
+    assert!(next.shutdown().unwrap());
+    controllers.restore(next.take_engine().unwrap()).unwrap();
+    let engine = controllers.engine(CONTROLLER).unwrap();
+    engine.stop().unwrap();
+    for _ in 0..4 {
+        engine.step().unwrap();
+    }
+    assert!(queues.iter().all(|p| p.gives() == 1));
 }

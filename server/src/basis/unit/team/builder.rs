@@ -72,15 +72,30 @@ impl TeamBuilder {
             .spawn()
     }
 
+    pub(crate) fn prepare_nest(kind: SpaceKind) -> Result<Arc<Nest>, NestError> {
+        let nest = Nest::new(kind)?;
+        seed_trampoline(&nest, &kernel().ok_or(NestError::NoRegion)?.nest)?;
+        Ok(nest)
+    }
+    /// Caller has exclusive authority to transfer this initialized, unbound Nest.
+    pub(crate) fn spawn_in(self, nest: Arc<Nest>) -> Result<Arc<Team>, NestError> {
+        if nest.is_external()
+            || nest.kind().is_supervisor() != self.kind.is_supervisor()
+            || nest.is_closed()
+        {
+            return Err(NestError::NoRegion);
+        }
+        let sire = self.sire.upgrade().ok_or(NestError::NoRegion)?;
+        make_team(nest, Some(sire), self.creator, self.constructing)
+    }
+
     pub fn spawn(self) -> Result<Arc<Team>, NestError> {
         let sire = match self.sire.upgrade() {
             Some(task) => Some(task),
             None if self.sire.as_weak().ptr_eq(&Weak::new()) => None,
             None => return Err(NestError::NoRegion),
         };
-        let nest = Nest::new(self.kind)?;
-        let source = kernel().expect("kernel team not initialized");
-        seed_trampoline(&nest, &source.nest)?;
+        let nest = Self::prepare_nest(self.kind)?;
         make_team(nest, sire, self.creator, self.constructing)
     }
 }

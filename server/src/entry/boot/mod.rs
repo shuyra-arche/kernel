@@ -5,13 +5,13 @@ mod init;
 pub(crate) mod resources;
 mod space;
 
-pub use crate::metal::generic::iommu::{HardwareError, Quiescence, Retirement};
+pub use crate::metal::generic::iommu::{HardwareError, Quiescence, Retirement, RetirementScope};
 pub use devices::{ExternalRoute, MapMmio};
 pub use error::BootError;
 pub use error::MapOperation;
 pub use error::ResourceOperation;
 pub use error::fail;
-pub use init::{bind_external, configure, init, map_mmio};
+pub use init::{bind_external, configure, grant_mmio, init, map_mmio};
 
 use alloc::sync::Arc;
 

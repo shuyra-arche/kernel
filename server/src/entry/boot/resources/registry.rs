@@ -18,13 +18,14 @@ impl Registry {
         // destroy them or inject synthetic hardware/fault notifications.
         use kernel_api::model::pend::{CloneRights, Operations, ShareRights};
         let mut limits = root.authority().limits();
-        limits.operations = match root.target().kind().expect("boot View resource") {
-            kernel_api::model::view::ViewKind::Clone => {
+        limits.operations = match root.target().kind() {
+            Some(kernel_api::model::view::ViewKind::Clone) => {
                 Operations::Clone(CloneRights::PULL | CloneRights::PEEK)
             }
-            kernel_api::model::view::ViewKind::Share => {
+            Some(kernel_api::model::view::ViewKind::Share) => {
                 Operations::Share(ShareRights::OPEN | ShareRights::SHUT | ShareRights::ASSOCIATE)
             }
+            None => limits.operations,
         };
         if let Err(reason) = root.narrow(limits, root.authority().window()) {
             return Err(Failure {
@@ -122,11 +123,7 @@ impl Frozen {
             }
         }
         for ((name, root), registration) in self.entries.into_iter().zip(registrations) {
-            ledger.push(Entry::new(
-                name,
-                root.target().kind().expect("validated View").into(),
-                root.token().get(),
-            ));
+            ledger.push(Entry::new(name, name.kind(), root.token().get()));
             registration.publish();
         }
         pend::changed(target);
@@ -161,12 +158,12 @@ fn valid(name: Name, pend_entry: &PendEntry) -> bool {
     let mut bytes = [0u8; kernel_api::boot::ledger::NAME_LEN];
     name.store(&mut bytes);
     Name::fetch(&bytes) == Some(name)
-        && pend_entry
+        && (pend_entry
             .target()
             .kind()
             .is_some_and(|kind| name.kind() == kind.into())
+            || matches!(name, Name::Port(id) if pend_entry.target().port().is_some_and(|p| p.id().get() as u64 == id)))
         && pend_entry.alive()
         && pend_entry.sire().is_none()
-        && pend_entry.authority().modifiable().is_some()
         && pend_entry.authority().modifiable().is_some()
 }

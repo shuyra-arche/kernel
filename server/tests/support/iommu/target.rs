@@ -39,7 +39,7 @@ impl<H: Hardware<PageId>> Target<H> {
         if !self.backend.open() {
             return Err(Error::Closed);
         }
-        self.backend.progress(&mut self.publication)?;
+        self.backend.progress(&mut self.publication, false)?;
         Ok(self.phase() == Some(Phase::Mapped))
     }
     pub(crate) fn fault(&mut self) -> Result<Option<Fault>, Error> {
@@ -51,7 +51,7 @@ impl<H: Hardware<PageId>> Target<H> {
         if let Some(Phase::Waiting(batch)) = self.phase() {
             return Ok(Some(batch));
         }
-        self.backend.progress(&mut self.publication)?;
+        self.backend.progress(&mut self.publication, false)?;
         Ok(match self.phase() {
             Some(Phase::Waiting(batch)) => Some(batch),
             _ => None,
@@ -62,13 +62,16 @@ impl<H: Hardware<PageId>> Target<H> {
             return Err(Error::UnknownBinding);
         }
         Ok(matches!(
-            self.backend.progress(&mut self.publication)?,
+            self.backend.progress(&mut self.publication, false)?,
             Progress::Withdrawn
         ))
     }
     pub(crate) fn advance_close(&mut self) -> Result<bool, Error> {
         self.backend.close();
-        self.backend.progress(&mut self.publication)?;
+        self.backend.progress(&mut self.publication, false)?;
+        if self.publication.is_none() {
+            self.backend.finish_close()?;
+        }
         Ok(self.backend.settled())
     }
     pub(crate) fn settled(&self) -> bool {

@@ -7,16 +7,17 @@ use crate::basis::unit::task::TaskIdent;
 use crate::metal::switcher::context::Gprs;
 use crate::metal::switcher::context::TrapContext;
 
-mod authority;
 pub(in crate::entry) mod cell;
-mod clone_view;
 mod debug;
+mod flat;
+mod nest;
 mod outcome;
 mod pend;
+mod port;
 mod room;
-pub(crate) mod share_view;
 pub(crate) mod sign;
 mod unit;
+mod view;
 
 use outcome::Outcome;
 use outcome::ret_err;
@@ -49,9 +50,21 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
             cell::dispatch(frame, call, &ident);
             Outcome::Resume
         }
-        EnvCall::Clone(call) => clone_view::dispatch(frame, call, ident),
-        EnvCall::Share(call) => share_view::dispatch(frame, call, ident),
+        EnvCall::Clone(call) => view::clone::dispatch(frame, call, ident),
+        EnvCall::Share(call) => view::share::dispatch(frame, call, ident),
         EnvCall::Sign(call) => sign::dispatch(frame, call, ident),
+        EnvCall::Flat(call) => {
+            flat::dispatch(frame, call, &ident);
+            Outcome::Resume
+        }
+        EnvCall::Nest(call) => {
+            nest::dispatch(frame, call, &ident);
+            Outcome::Resume
+        }
+        EnvCall::Port(call) => {
+            port::dispatch(frame, call, &ident);
+            Outcome::Resume
+        }
         EnvCall::Pend(call) => {
             pend::dispatch(frame, call, ident);
             Outcome::Resume

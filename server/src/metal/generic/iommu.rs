@@ -64,16 +64,23 @@ pub enum HardwareError {
     Timeout,
 }
 
-/// Exact retirement attempt presented only after translation and queue teardown.
-/// Fields are Kernel-issued: a platform can retain/return the token, not mint one.
-/// The binding identifies its immutable full-Page range; binding and batch IDs
-/// are boot-wide, never-reused identities, including across controller instances.
+/// Scope of the independently proved platform boundary. A range retirement
+/// leaves the rest of the context live; Binding permits replacing the context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetirementScope {
+    Range { address: usize, size: usize },
+    Binding,
+}
+
+/// Kernel-issued, non-reusable retirement attempt. Returning a token from a
+/// different controller, requester, scope, publication or retry is rejected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Retirement {
     controller: usize,
     requester: u32,
     binding: BindingId,
     batch: BatchId,
+    scope: RetirementScope,
 }
 
 impl Retirement {
@@ -88,7 +95,15 @@ impl Retirement {
             requester,
             binding,
             batch,
+            scope: RetirementScope::Binding,
         }
+    }
+    pub(crate) fn range(mut self, address: usize, size: usize) -> Self {
+        self.scope = RetirementScope::Range { address, size };
+        self
+    }
+    pub fn scope(&self) -> RetirementScope {
+        self.scope
     }
 
     pub fn controller(&self) -> usize {
@@ -103,29 +118,31 @@ impl Retirement {
 /// This is a Rust boot interface, never a Unit acknowledgement or call ABI.
 ///
 /// # Safety
-/// The implementation must exclusively cover the token's controller/requester
-/// and every other requester sharing its current one-shot controller. Returning
-/// the token proves that earlier accesses which could reach the old Pages have
-/// completed, including required interconnect ordering. Future requests remain
-/// blocked by the retired IOMMU domain; bypass, ATS/PRI and noncoherent access
-/// are unsupported. A stopped device or business completion alone is insufficient.
-/// Each call is bounded; None and errors retain all outstanding responsibilities.
-/// An implementation must not re-enable the controller or expose its queues.
+/// The provider covers the immutable controller/requester and its entire real
+/// isolation group. Returning a token proves that every earlier access that
+/// could reach the retired range has completed, including requests not yet
+/// observed by the IOMMU and required interconnect ordering. For Range, that
+/// leaf is invalid and invalidation + IOFENCE.C PR/PW have completed; other
+/// leaves and queues remain live. For Binding, DDTP is Off and all payloads,
+/// context caches and translations have drained. Binding additionally proves
+/// that old ownership cannot submit delayed requests into a replacement context.
+/// The trusted integration must remove old raw device/configuration authority
+/// before reassignment; a software epoch does not provide this isolation.
+/// Bypass, ATS/PRI and noncoherent access are unsupported. No driver Ack, IRQ,
+/// or business completion alone proves this contract. None/errors retain all
+/// responsibilities. Each poll is bounded and cannot re-enable a context.
 ///
-/// RISC-V IOMMU v20250828, "IOMMU Command-queue Fence commands": IOFENCE.C
-/// PR/PW orders requests already processed by the IOMMU. Platform ordering for
-/// requests not yet observed is a separate condition. The caller first revokes
-/// the translation, completes invalidation with PR/PW, holds DDTP Off, and stops
-/// queues before asking for this additional proof.
+/// RISC-V IOMMU v20250828, "IOMMU Command-queue Fence commands": PR/PW orders
+/// requests already processed by the IOMMU; platform ordering is independent.
 /// https://docs.riscv.org/reference/iommu/v20250828/iommu_in_memory_queues.html
 pub unsafe trait Quiescence: Send {
-    fn poll(&mut self, retirement: Retirement) -> Result<Option<Retirement>, HardwareError>;
+    fn prove(&mut self, retirement: Retirement) -> Result<Option<Retirement>, HardwareError>;
 }
 
 // SAFETY: exclusive forwarding preserves the installed provider's contract.
 unsafe impl<Q: Quiescence + ?Sized> Quiescence for Box<Q> {
-    fn poll(&mut self, retirement: Retirement) -> Result<Option<Retirement>, HardwareError> {
-        (**self).poll(retirement)
+    fn prove(&mut self, retirement: Retirement) -> Result<Option<Retirement>, HardwareError> {
+        (**self).prove(retirement)
     }
 }
 
@@ -208,7 +225,7 @@ unsafe impl<P: Copy, H: Hardware<P> + ?Sized> Hardware<P> for Box<H> {
 
 pub(crate) type Backend<P> = Box<dyn Hardware<P> + Send>;
 
-/// A trusted one-shot binding to an IOMMU requester. Device business control
+/// A trusted exclusive binding to an IOMMU requester. Device business control
 /// lives outside Kernel; publication and withdrawal govern hardware reachability.
 ///
 /// # Safety

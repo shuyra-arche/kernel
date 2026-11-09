@@ -282,7 +282,8 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
             )?;
             Ok(UnitTarget::Task(task.ident.id))
         }
-        UnitCreate::Team { kind, guard } => {
+        UnitCreate::Team { kind, guard, nest } => {
+            let serial = me.pend.lock();
             let _commit = crate::basis::commit();
             if !crate::basis::pend::live(me)
                 || kind == kernel_api::model::unit::ProgramKind::Supervisor
@@ -298,16 +299,63 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
                 return Err(UnitFail::Denied);
             }
             let sire = TaskWeak::stored(Arc::downgrade(me), Origin::Sire);
-            let team = crate::basis::unit::team::TeamBuilder::build_with_creator(
-                SpaceKind::from(kind),
-                sire,
-                me.ident.id,
-            )
+            let selected = if let Some(token) = nest {
+                let entry = crate::basis::pend::locate(me, token).ok_or(UnitFail::Denied)?;
+                if entry.sire().is_some()
+                    || entry.target().owner() != me.ident.id
+                    || !entry.permits(kernel_api::model::pend::Operations::Nest(
+                        kernel_api::model::pend::NestRights::ATTACH,
+                    ))
+                    || entry.modifiable() != kernel_api::model::modifiable::Modifiable::Yes
+                    || me
+                        .pend
+                        .heirs
+                        .lock()
+                        .iter()
+                        .any(|(parent, _, _)| *parent == token)
+                    || entry.authority().external_pending()
+                {
+                    return Err(UnitFail::Denied);
+                }
+                Some(entry.target().nest().ok_or(UnitFail::Denied)?)
+            } else {
+                None
+            };
+            let team = if let Some(selected) = selected {
+                crate::basis::unit::team::TeamBuilder::new(SpaceKind::from(kind))
+                    .sire(sire)
+                    .creator(me.ident.id)
+                    .constructing()
+                    .spawn_in(selected)
+            } else {
+                crate::basis::unit::team::TeamBuilder::build_with_creator(
+                    SpaceKind::from(kind),
+                    sire,
+                    me.ident.id,
+                )
+            }
             .map_err(map_err)?;
+            let consumed = nest.map(|token| {
+                let entry = me
+                    .pend
+                    .entries
+                    .lock()
+                    .remove(token)
+                    .expect("serialized Nest root");
+                entry.invalidate();
+                crate::basis::pend::changed(me);
+                entry
+            });
             // New empty Team: guard selection is immutable and cannot race a member exit.
             if guard != ControlId::NONE {
                 crate::basis::unit::team::exit::arm(&team.node, me.ident.id)
                     .expect("new empty guarded Team");
+            }
+            drop(_commit);
+            drop(serial);
+            if let Some(entry) = consumed {
+                crate::basis::pend::notify(me.ident.id, entry.token());
+                drop(entry);
             }
             Ok(UnitTarget::Team(team.id))
         }

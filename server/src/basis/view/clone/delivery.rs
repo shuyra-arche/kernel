@@ -1,6 +1,6 @@
+//! Queue authority, payload capture and atomic recipient publication.
 use alloc::sync::Arc;
 
-use kernel_api::abi::call::clone_view::CloneCall;
 use kernel_api::abi::call::clone_view::CloneFail;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::clone_view::CloneLimits;
@@ -9,59 +9,29 @@ use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::pend::{CloneRights, Operations};
-use kernel_api::model::view::ViewKind;
 
-use super::authority;
-use super::outcome::Outcome;
-use super::outcome::answer;
-use super::outcome::ret_err;
 use crate::basis::nest::Access;
 use crate::basis::pend;
 use crate::basis::pend::Modifiable;
 use crate::basis::pend::Need;
+use crate::basis::pend::access as authority;
 use crate::basis::room::conductor::current;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::view;
 use crate::basis::view::View;
-use crate::metal::switcher::context::Gprs;
-use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::VirtAddr as KVirt;
 
-pub(super) fn dispatch(frame: &mut TrapContext, call: CloneCall, ident: Arc<TaskIdent>) -> Outcome {
-    match call {
-        CloneCall::Create {
-            license,
-            mark,
-            limits,
-        } => {
-            answer(frame, create(license, mark, limits).map_err(fail));
-            Outcome::Resume
-        }
-        CloneCall::Delete { token } => {
-            answer(
-                frame,
-                authority::seal_resource(token, ViewKind::Clone).map_err(fail),
-            );
-            Outcome::Resume
-        }
-        CloneCall::Push { token, msg, len } => push(frame, ident, token, msg.get(), len),
-        CloneCall::Pull { token, max_len } => pull(frame, token, max_len),
-        CloneCall::Peek { token } => peek(frame, token),
-    }
-}
-
-fn push(
-    frame: &mut TrapContext,
+pub(crate) fn push(
     ident: Arc<TaskIdent>,
     token: PendId,
     msg: usize,
     len: usize,
-) -> Outcome {
+) -> Result<(), CloneFail> {
     let me = current()
         .running_task()
         .map(|t| t.ident.id)
         .unwrap_or(TaskId::new(0));
-    let r = with_clone(token, Need::Write, CloneRights::PUSH, |meta| {
+    with_clone(token, Need::Write, CloneRights::PUSH, |meta| {
         if len == 0
             || !ident
                 .team
@@ -73,25 +43,10 @@ fn push(
         let reservation = view::clone::reserve_len(meta, len)?;
         let bytes = view::clone::payload::Payload::capture(&ident.team.nest, msg, len)?;
         reservation.commit(bytes, me)
-    });
-    answer(frame, r.map(|()| 0));
-    Outcome::Resume
+    })
 }
 
-fn pull(frame: &mut TrapContext, token: PendId, max_len: usize) -> Outcome {
-    let result = receive(token, max_len);
-    match result {
-        Ok(delivery) => {
-            frame.gpr.set_x(Gprs::A0, delivery.token.get());
-            frame.gpr.set_x(Gprs::A1, delivery.len);
-            frame.gpr.set_x(Gprs::A2, delivery.sender.get());
-        }
-        Err(error) => ret_err(frame, error),
-    }
-    Outcome::Resume
-}
-
-fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
+pub(crate) fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
     let task = current().running_task().ok_or(CloneFail::Denied)?;
     let observed = authority::accede(token, Need::Read).map_err(fail)?;
     authority::usable(&observed).map_err(fail)?;
@@ -136,21 +91,11 @@ fn receive(token: PendId, max_len: usize) -> Result<PullOutcome, CloneFail> {
     Ok(outcome)
 }
 
-fn peek(frame: &mut TrapContext, token: PendId) -> Outcome {
-    let r = with_clone(token, Need::Read, CloneRights::PEEK, |meta| {
+pub(crate) fn peek(token: PendId) -> Result<(usize, TaskId, usize), CloneFail> {
+    with_clone(token, Need::Read, CloneRights::PEEK, |meta| {
         view::clone::peek(meta)
-    });
-    match r {
-        Ok((n, from, depth)) => {
-            frame.gpr.set_x(Gprs::A0, n);
-            frame.gpr.set_x(Gprs::A1, from.get());
-            frame.gpr.set_x(Gprs::A2, depth);
-        }
-        Err(e) => ret_err(frame, e),
-    }
-    Outcome::Resume
+    })
 }
-
 /// 取这一枚 Clone 并按本域词汇报错：失败不是 Clone 的状态就是权柄轴的状态。
 fn with_clone<T>(
     token: PendId,
@@ -194,7 +139,7 @@ pub(crate) fn create(license: PendId, mark: Mark, limits: CloneLimits) -> Result
     Ok(token.get())
 }
 
-fn fail(error: PendFail) -> CloneFail {
+pub(crate) fn fail(error: PendFail) -> CloneFail {
     match error {
         PendFail::Denied | PendFail::NotAligned | PendFail::Invalid => CloneFail::Denied,
         PendFail::Dead => CloneFail::Dead,

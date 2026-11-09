@@ -79,9 +79,7 @@ impl Hold {
     pub(crate) fn resolve(&self) -> Option<FlatRange> {
         if let Some((_, authority)) = &self.branch {
             authority.modifiable()?;
-            if !authority.permits(kernel_api::model::pend::Operations::Share(
-                kernel_api::model::pend::ShareRights::ASSOCIATE,
-            )) {
+            if !authority.associates() {
                 return None;
             }
             if !authority.contains(self.offset, self.count) {

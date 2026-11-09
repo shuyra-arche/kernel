@@ -5,6 +5,7 @@ mod context;
 mod external;
 mod license;
 mod lifecycle;
+mod organization;
 mod pend;
 mod room;
 mod sign;
@@ -115,7 +116,7 @@ fn handoff(source: CellPosition, target: CellPosition, pull: bool) {
     } else {
         cell::push(ptr(&spec))
     }
-    .unwrap();
+    .unwrap_or_else(|error| panic!("handoff {source:?} -> {target:?}: {error:?}"));
 }
 fn publish(mapping: MappingId, page: usize) {
     let pos = memo(mapping, page).to_bytes();
@@ -222,6 +223,7 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     delete(raw_memo(mapping, 0).object);
     delete(CellObject::Slot(a));
     let _ = writeln!(Console, "PASS cell-kernel swap=1 cleanup=1");
+    organization::run();
     pend::run();
     sign::run();
     room::run();

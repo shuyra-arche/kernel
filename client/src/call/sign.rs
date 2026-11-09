@@ -14,6 +14,6 @@ typed_calls! {
     fallible fn listen(token: PendId, wait: Wait) -> Result<SignReply, erra::Error<SignFail>> = op::Listen { token, wait };
     fallible fn trigger(token: PendId) -> Result<(), erra::Error<SignFail>> = op::Trigger { token };
     fallible fn consume(token: PendId, sequence: u64) -> Result<(), erra::Error<SignFail>> = op::Consume { token, sequence };
-    fallible fn attach(token: PendId, source: SignSource) -> Result<(), erra::Error<SignFail>> = op::Attach { token, source };
+    fallible fn attach(token: PendId, source: SignSource, generation: u64) -> Result<(), erra::Error<SignFail>> = op::Attach { token, source, generation };
     fallible fn detach(token: PendId, source: SignSource) -> Result<(), erra::Error<SignFail>> = op::Detach { token, source };
 }

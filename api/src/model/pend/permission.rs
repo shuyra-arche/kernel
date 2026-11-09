@@ -152,8 +152,10 @@ impl Limits {
         result.valid().then_some(result)
     }
     pub fn valid(self) -> bool {
-        if matches!(self.operations, Operations::None(_) | Operations::Sign(_))
-            && self.modifiable != Modifiable::No
+        if matches!(
+            self.operations,
+            Operations::None(_) | Operations::Sign(_) | Operations::Port(_)
+        ) && self.modifiable != Modifiable::No
         {
             return false;
         }

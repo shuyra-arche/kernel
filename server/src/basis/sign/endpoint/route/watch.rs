@@ -17,6 +17,11 @@ pub(crate) enum Watch {
     ExternalMapping {
         token: kernel_api::model::identity::PendId,
         mapping: kernel_api::model::cell::MappingId,
+        published: bool,
+        generation: u64,
+    },
+    Nest {
+        token: PendId,
         fault: bool,
     },
     Resource {
@@ -43,10 +48,11 @@ impl Watch {
             Watch::ExternalMapping {
                 token,
                 mapping,
-                fault,
+                published,
+                ..
             } => {
-                if *fault {
-                    SignSource::MappingFault {
+                if *published {
+                    SignSource::MappingPublished {
                         token: *token,
                         mapping: *mapping,
                     }
@@ -55,6 +61,13 @@ impl Watch {
                         token: *token,
                         mapping: *mapping,
                     }
+                }
+            }
+            Watch::Nest { token, fault } => {
+                if *fault {
+                    SignSource::NestFault { token: *token }
+                } else {
+                    SignSource::NestClosed { token: *token }
                 }
             }
             Watch::Resource { source } => *source,

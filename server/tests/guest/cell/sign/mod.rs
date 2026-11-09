@@ -105,7 +105,7 @@ pub(super) fn run() {
     )
     .unwrap();
     let source_event = SignSource::Sign { token: source };
-    sign::attach(routed, source_event).unwrap();
+    sign::attach(routed, source_event, 0).unwrap();
     sign::trigger(source).unwrap();
     assert_eq!(
         sign::listen(root, Wait::Poll).unwrap(),

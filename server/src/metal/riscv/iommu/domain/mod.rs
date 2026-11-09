@@ -1,6 +1,5 @@
-//! Bounded hardware projection: one controller, one device and one whole Page.
-//! This internal bootstrap mechanism does not assign Unit ownership or implement
-//! View/Pend. It is not yet installed by normal boot or exposed through an ABI.
+//! One exclusive requester context with a bounded 2 MiB Sv39 window.
+//! Individual leaves can be withdrawn while the other leaves and queues remain live.
 //! Translation withdrawal and platform reclamation proof remain separate steps.
 mod phase;
 
@@ -22,7 +21,7 @@ pub(crate) struct Domain<R: Registers> {
     engine: Engine<R>,
     // DDT and Sv39 root/middle/leaf only. Nest retains the payload.
     pages: Option<[Retention; 4]>,
-    leaf: usize,
+    window: usize,
     phase: DomainPhase,
 }
 
@@ -53,7 +52,7 @@ impl<R: Registers> Domain<R> {
         let result = Self {
             engine,
             pages: Some(pages),
-            leaf: (iova >> 12) & 511,
+            window: iova & !((1 << 21) - 1),
             phase: DomainPhase::Prepared,
         };
         let p = result.pages.as_ref().expect("prepared pages");
@@ -67,17 +66,7 @@ impl<R: Registers> Domain<R> {
         result.write(0, context, 1);
         result.write(1, (iova >> 30) & 511, pointer(&p[2]));
         result.write(2, (iova >> 21) & 511, pointer(&p[3]));
-        // V/R/U/A, optional W/D. No executable mapping and no hardware A/D writes.
-        result.write(
-            3,
-            result.leaf,
-            ((projection.physical as u64 >> 12) << 10)
-                | 1
-                | 2
-                | 16
-                | 64
-                | if projection.modifiable { 4 | 128 } else { 0 },
-        );
+        result.write_leaf(projection);
         Ok(result)
     }
 
@@ -194,7 +183,9 @@ impl<R: Registers> Domain<R> {
     pub(crate) fn revoke(&mut self) -> Result<(), EngineError> {
         self.advance(Event::Revoke)?;
         self.pages = self.pages.take().map(|p| p.map(Retention::retire));
-        self.write(3, self.leaf, 0);
+        for leaf in 0..512 {
+            self.write(3, leaf, 0);
+        }
         match self.engine.invalidate_directory() {
             Ok(batch) => self.advance(Event::Submitted(batch)),
             Err(error) => {
@@ -246,12 +237,6 @@ impl<R: Registers> Domain<R> {
             DomainPhase::Draining(batch) => {
                 if self.engine.observe(batch)? {
                     self.advance(Event::Complete(batch))?;
-                    self.engine.stop()?;
-                }
-            }
-            DomainPhase::Stopping => {
-                if self.engine.step()? == Phase::Closed {
-                    self.advance(Event::Stopped)?;
                 }
             }
             DomainPhase::Failed => return Err(EngineError::State),
@@ -260,26 +245,80 @@ impl<R: Registers> Domain<R> {
         Ok(())
     }
 
+    /// A live domain has one fixed leaf-table window. Reject aliasing rather
+    /// than silently reusing its middle/root indexes for another address.
+    pub(super) fn validate_leaf(&self, projection: Projection) -> Result<(), EngineError> {
+        Self::validate(
+            &self.engine,
+            self.pages.as_ref().ok_or(EngineError::State)?,
+            projection,
+            0,
+        )?;
+        if self.phase != DomainPhase::Active
+            || projection.iova.get() & !((1 << 21) - 1) != self.window
+        {
+            return Err(EngineError::Address);
+        }
+        Ok(())
+    }
+    fn write_leaf(&self, p: Projection) {
+        self.write(
+            3,
+            (p.iova.get() >> 12) & 511,
+            ((p.physical as u64 >> 12) << 10)
+                | 1
+                | 2
+                | 16
+                | 64
+                | if p.modifiable { 4 | 128 } else { 0 },
+        );
+    }
+    pub(super) fn publish_leaf(
+        &mut self,
+        p: Projection,
+    ) -> Result<crate::metal::iommu::BatchId, EngineError> {
+        self.validate_leaf(p)?;
+        self.write_leaf(p);
+        self.engine.invalidate()
+    }
+    pub(super) fn withdraw_leaf(
+        &mut self,
+        p: Projection,
+    ) -> Result<crate::metal::iommu::BatchId, EngineError> {
+        self.validate_leaf(p)?;
+        self.write(3, (p.iova.get() >> 12) & 511, 0);
+        self.engine.invalidate()
+    }
+    pub(super) fn observe_leaf(
+        &mut self,
+        batch: crate::metal::iommu::BatchId,
+    ) -> Result<bool, EngineError> {
+        self.engine.observe(batch)
+    }
+    pub(super) fn idle(&self) -> bool {
+        self.phase == DomainPhase::Active && self.engine.phase() == Phase::Ready
+    }
+
     pub(crate) fn fault(&mut self) -> Result<Option<Fault>, EngineError> {
         self.engine.fault().inspect_err(|_| self.fail())
     }
 
-    /// Closed means translation/queue teardown only. It does NOT itself prove
-    /// platform quiescence, and Drop in Closed still retains these four table Cells.
+    /// Closed means translation/context teardown only. Queues stay with Engine. It does NOT itself prove
+    /// It does not prove platform quiescence; Drop still retains the four table Pages.
     ///
     /// # Safety
     /// Caller independently proved all old device requests and platform-specific
     /// ordering are complete, with no ATS/device cache/bypass path left. DDTP must
     /// remain Off until stale requests can no longer reach reused memory. An FQ
     /// record, driver acknowledgement, or business completion is not this proof.
-    pub(crate) unsafe fn settle(mut self) -> Result<(), EngineError> {
+    pub(crate) unsafe fn settle(mut self) -> Result<Engine<R>, EngineError> {
         if self.phase != DomainPhase::Closed {
             return Err(EngineError::State);
         }
         for page in self.pages.take().expect("retiring pages") {
             unsafe { page.settle() };
         }
-        Ok(())
+        Ok(self.engine)
     }
 }
 

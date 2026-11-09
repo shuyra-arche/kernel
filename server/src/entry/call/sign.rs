@@ -34,10 +34,14 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
                 Ok(0)
             }),
         ),
-        SignCall::Attach { token, source } => {
+        SignCall::Attach {
+            token,
+            source,
+            generation,
+        } => {
             answer(
                 frame,
-                attach(token, |task| typed_cell(task, token, source)).map(|()| 0),
+                attach(token, |task| typed_cell(task, token, source, generation)).map(|()| 0),
             );
         }
         SignCall::Detach { token, source } => {
@@ -72,7 +76,7 @@ pub(crate) fn create(license: PendId) -> Result<usize, SignFail> {
     if !pend::live(&task) {
         return Err(SignFail::Dead);
     }
-    super::authority::license(
+    crate::basis::pend::access::license(
         &task,
         license,
         kernel_api::model::pend::CreationRights::SIGN,
@@ -137,22 +141,62 @@ pub(crate) fn typed_cell(
     actor: &Arc<Task>,
     permit: PendId,
     source: SignSource,
+    generation: u64,
 ) -> Result<Route, SignFail> {
+    let memo = matches!(
+        source,
+        SignSource::MappingRetired { .. } | SignSource::MappingPublished { .. }
+    );
+    if memo == (generation == 0) {
+        return Err(SignFail::Denied);
+    }
     let mut keys = Vec::new();
     keys.try_reserve(4).map_err(|_| SignFail::OutOfMemory)?;
     let watch = match source {
         SignSource::MappingRetired { token, mapping }
-        | SignSource::MappingFault { token, mapping } => {
-            let fault = matches!(source, SignSource::MappingFault { .. });
-            let (life, _) =
-                crate::basis::nest::authority::external::event(actor, token, mapping, fault)
-                    .map_err(|_| SignFail::Denied)?;
+        | SignSource::MappingPublished { token, mapping } => {
+            let published = matches!(source, SignSource::MappingPublished { .. });
+            let (life, _) = crate::basis::nest::authority::external::event(
+                actor, token, mapping, published, generation,
+            )
+            .map_err(|_| SignFail::Denied)?;
             keys.push((WakeKey::ExternalMapping { id: mapping.get() }, life));
+            keys.push((
+                WakeKey::Inspect {
+                    task: actor.ident.id,
+                    token: token.get(),
+                },
+                actor.life(),
+            ));
             Watch::ExternalMapping {
                 token,
                 mapping,
-                fault,
+                published,
+                generation,
             }
+        }
+        SignSource::NestFault { token } | SignSource::NestClosed { token } => {
+            let fault = matches!(source, SignSource::NestFault { .. });
+            let nest = crate::basis::nest::authority::binding::authorized(
+                actor,
+                token,
+                kernel_api::model::pend::NestRights::INSPECT,
+            )
+            .map_err(|_| SignFail::Denied)?
+            .target()
+            .nest()
+            .ok_or(SignFail::Denied)?;
+            crate::basis::nest::authority::binding::event(actor, token, fault)
+                .map_err(|_| SignFail::Denied)?;
+            keys.push((WakeKey::ExternalNest { id: nest.id() }, nest.life()));
+            keys.push((
+                WakeKey::Inspect {
+                    task: actor.ident.id,
+                    token: token.get(),
+                },
+                actor.life(),
+            ));
+            Watch::Nest { token, fault }
         }
         SignSource::Sign { token } => {
             let source = endpoint::authorized(actor, token, SignRights::LISTEN)?;

@@ -8,8 +8,8 @@ use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 
 use super::entry::PendEntry;
+use crate::basis::flat::sharing::SharingOperation;
 use crate::basis::unit::task::Task;
-use crate::basis::view::share::ShareOperation;
 
 pub(crate) struct Cleanup {
     removed: Vec<Arc<PendEntry>>,
@@ -27,7 +27,7 @@ impl Cleanup {
     }
 }
 
-/// 在 pend、commit 与 ShareOperation 锁外通知并释放已摘取的 PendEntry。
+/// 在 pend、commit 与 SharingOperation 锁外通知并释放已摘取的 PendEntry。
 fn settle(tasks: &[TaskId], pend_entry: Arc<PendEntry>) {
     // Publish the returned borrow before waking observers. Waking first can let
     // an observer re-park on Suspended and miss the only completion notification.
@@ -204,10 +204,10 @@ pub(super) fn cull(
             .try_reserve(tasks.len())
             .map_err(|_| PendFail::OutOfMemory)?;
         let root = super::locate(task, token).ok_or(PendFail::Denied)?;
-        let share_view = root.target().share_view();
+        let share_view = root.target().memory();
         let _operation = match &share_view {
             Some(meta) => {
-                let operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
+                let operation = SharingOperation::acquire(meta).ok_or(PendFail::Busy)?;
                 Some(operation)
             }
             None => None,
@@ -299,11 +299,11 @@ fn reap(task: &Arc<Task>, token: PendId) -> Result<Option<Arc<PendEntry>>, PendF
     {
         return Ok(None);
     }
-    let share_view = pend_entry.target().share_view();
+    let share_view = pend_entry.target().memory();
     let _operation = match &share_view {
         Some(meta) => {
-            let operation = ShareOperation::acquire(meta).ok_or(PendFail::Busy)?;
-            // ShareOperation 阻止并发发布修改映射账。
+            let operation = SharingOperation::acquire(meta).ok_or(PendFail::Busy)?;
+            // SharingOperation 阻止并发发布修改映射账。
             if meta.has_maps() {
                 return Ok(None);
             }

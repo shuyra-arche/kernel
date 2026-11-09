@@ -113,15 +113,19 @@ fn shutdown_failure_retains_backend_after_payload_is_already_safe() {
         .shutdown
         .push_back(Err(HardwareError::Timeout));
     trace.lock().unwrap().completion.push_back(Ok(Some(batch)));
-    assert_eq!(target.poll(), Err(Error::Hardware(HardwareError::Timeout)));
-    // Payload proof does not remove Memo's publication before backend shutdown.
-    assert_eq!(target.phase(), Some(Phase::Settled));
+    assert!(target.poll().unwrap());
+    // The payload settles independently of the context and queue shutdown.
+    assert_eq!(
+        target.advance_close(),
+        Err(Error::Hardware(HardwareError::Timeout))
+    );
+    assert_eq!(target.phase(), None);
     assert!(!target.settled());
     drop(page);
     assert_eq!(pool.gives(), 1);
     trace.lock().unwrap().shutdown.push_back(Ok(false));
     assert!(!target.advance_close().unwrap());
-    assert_eq!(target.phase(), Some(Phase::Settled));
+    assert_eq!(target.phase(), None);
     assert!(target.advance_close().unwrap());
     assert_eq!(target.phase(), None);
     drop(target);
