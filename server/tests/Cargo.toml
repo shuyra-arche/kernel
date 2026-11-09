@@ -12,7 +12,7 @@ erra.workspace = true
 hashbrown = { version = "0.17.1", default-features = false, features = ["alloc", "default-hasher"] }
 kernel-api = { path = "../../api" }
 fack = { version = "0.2.0", default-features = false }
-kernel-hardware-fixture = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "95dd33d0d819f000655d50902083888723d712e3" }
+kernel-hardware-fixture = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "eb37b0b0db299513274864cec23cee509a3cd3cc" }
 
 [[test]]
 name = "memory"
