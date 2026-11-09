@@ -247,7 +247,9 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
 }
 
 pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
-    if !unsafe { (*next).address_space() }.is_kernel() {
+    if crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id())
+        && !unsafe { (*next).address_space() }.is_kernel()
+    {
         next = crate::basis::room::scheduler::slot::current().check() as *mut TrapContext;
     }
     #[cfg(feature = "latency")]
@@ -313,18 +315,21 @@ pub(crate) fn envcall(
     let Some(Identity::Live(ident)) = ident else {
         panic!("envcall without running task");
     };
-    let task = crate::basis::room::scheduler::slot::current()
-        .running_task()
-        .expect("call owner");
-    if !task.can_run_on(crate::metal::hart::hart_id()) {
-        drop(task);
-        drop(ident);
-        return Some(
-            crate::basis::room::scheduler::slot::current().reschedule() as *mut TrapContext
-        );
+    // Fixed Tasks only run on reserved Harts. Ordinary execution needs no
+    // second scheduling transaction at each call/return boundary.
+    let realtime = crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id());
+    if realtime {
+        let task = crate::basis::room::scheduler::slot::current()
+            .running_task()
+            .expect("call owner");
+        if !task.realtime() {
+            drop(task);
+            drop(ident);
+            return Some(
+                crate::basis::room::scheduler::slot::current().reschedule() as *mut TrapContext
+            );
+        }
     }
-    let realtime = task.realtime();
-    drop(task);
     let space = &ident.team.nest;
     if !realtime && let Err(resource) = space.retry_invalidation() {
         if resource == crate::basis::nest::NestError::Busy {

@@ -39,7 +39,14 @@ cannot reset or replace its budget. Exit removes the reservation.
 | Overrun | Charge actual elapsed ticks, including the Task's kernel work. Record time beyond the available budget; delayed reception does not hide excess execution or manufacture credit. |
 | Observation | `Unit.Profile` returns the contract, effective priority, remaining budget, absolute next replenishment, cumulative consumed/overrun time and conditional response calculation. Dormant replenishment is zero. |
 
-Every outer Task return checks ready priorities, placement and remaining budget.
+Every outer Task return on a reserved Hart checks ready priorities, placement
+and remaining budget. Ordinary Harts keep their existing return path without
+an extra COMMIT transaction; an empty deferred-delivery queue also skips COMMIT.
+Ordinary scheduling decisions skip budget-account calculations. The global timer
+owner retries retained due work once it owns COMMIT at a scheduling boundary;
+repeated front-half try-lock failure cannot discard that opportunity. Each pass
+keeps the existing 64-ticket limit, and idle delivery does not immediately steal
+the Tasks it has just sent to remote Harts.
 Timer/IPI and syscall return use the existing ROOT handoff boundaries. No Task
 switch occurs in M2's stackless reception vector or across a live exclusion
 operation. Ordinary syscall returns preserve the existing maintenance deadline.

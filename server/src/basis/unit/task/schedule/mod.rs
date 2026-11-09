@@ -55,9 +55,4 @@ impl Schedule {
             account.leave(now);
         }
     }
-    pub(crate) fn charge(&mut self, now: u64) {
-        if let Self::Fixed { account, .. } = self {
-            account.charge(now);
-        }
-    }
 }

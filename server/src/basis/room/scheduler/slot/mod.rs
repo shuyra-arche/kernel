@@ -110,7 +110,9 @@ impl Slot {
             !task.stopped() && !task.ident.team.paused(),
             "stopped Task admission"
         );
-        task.schedule.lock().enter(clock::now().as_ticks());
+        if super::isolated(self.hart) {
+            task.schedule.lock().enter(clock::now().as_ticks());
+        }
         task.transform_checked(TaskState::running(self.hart, QUANTUM_TICKS));
         let pa = task.ident.frame_pa.as_usize();
         unsafe {
@@ -124,12 +126,14 @@ impl Slot {
         }
         self.identity.enter(&task.ident);
         inner.running = Some(task);
-        deadline::arm(Self::ceiling(inner, clock::now().as_ticks()));
+        deadline::arm(self.ceiling(inner, clock::now().as_ticks()));
         pa
     }
     fn leave(&self, inner: &mut Inner, _commit: &CommitGuard) -> Arc<Task> {
         let task = inner.running.take().expect("no running Task");
         assert_eq!(task.on_hart(), Some(self.hart), "execution owner mismatch");
+        // A Doomed Task may outlive its admission index until this handoff.
+        // Always close any running account, including after isolation ends.
         task.schedule.lock().leave(clock::now().as_ticks());
         self.identity.leave(&task.ident);
         task
@@ -172,16 +176,20 @@ impl Slot {
         self.inner.lock().running.as_ref().map(Arc::clone)
     }
     fn step(&self, cause: Cause, commit: &CommitGuard) -> Option<usize> {
-        self.awaken();
-        self.relocate();
+        let reserved = super::isolated(self.hart);
+        if reserved {
+            self.awaken();
+            self.relocate();
+        }
         let mut inner = self.inner.lock();
         let cur = inner.running.as_ref()?;
         let now = clock::now().as_ticks();
-        cur.schedule.lock().charge(now);
-        let ceiling = Self::ceiling(&inner, now);
-        let (priority, budget) = {
+        let ceiling = self.ceiling(&inner, now);
+        let (priority, budget) = if reserved {
             let mut schedule = cur.schedule.lock();
             (schedule.priority(), schedule.available(now))
+        } else {
+            (0, true)
         };
         let choice = Turn {
             stopped: cur.stopped() || cur.ident.team.paused(),
@@ -190,8 +198,12 @@ impl Slot {
             now,
             ceiling,
             priority,
-            ready_priority: inner.ready.priority(now),
-            eligible: cur.can_run_on(self.hart),
+            ready_priority: if reserved {
+                inner.ready.priority(now)
+            } else {
+                0
+            },
+            eligible: !reserved || cur.can_run_on(self.hart),
             budget,
         }
         .decide(cause);
@@ -211,7 +223,7 @@ impl Slot {
                     Task::park(cur);
                 } else {
                     cur.transform_checked(TaskState::ready());
-                    if !cur.can_run_on(self.hart) {
+                    if reserved && !cur.can_run_on(self.hart) {
                         let next = Self::select(&mut inner, self.hart)
                             .map(|next| self.enter(&mut inner, next, commit));
                         drop(inner);
@@ -224,7 +236,10 @@ impl Slot {
             }
         }
     }
-    fn ceiling(inner: &Inner, now: u64) -> u64 {
+    fn ceiling(&self, inner: &Inner, now: u64) -> u64 {
+        if !super::isolated(self.hart) {
+            return inner.ready.deadline(now, 0);
+        }
         let priority = inner
             .running
             .as_ref()
@@ -246,7 +261,7 @@ impl Slot {
         at
     }
     pub(crate) fn deadline(&self, now: u64) -> u64 {
-        Self::ceiling(&self.inner.lock(), now)
+        self.ceiling(&self.inner.lock(), now)
     }
     pub(super) fn relocate(&self) {
         if !super::isolated(self.hart) {

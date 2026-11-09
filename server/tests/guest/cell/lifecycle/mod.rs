@@ -43,7 +43,8 @@ pub(super) fn wait_task(id: TaskId) -> bool {
     let reply = sign::listen(token, Wait::At(room::clock().saturating_add(5_000_000_000))).unwrap();
     assert!(
         matches!(reply, SignReply::Source { source: found, fail: None } if found == source),
-        "join {id:?}: {reply:?}"
+        "join {id:?}: {reply:?}; target={:?}",
+        inspect(UnitQuery::Target(UnitTarget::Task(id)))
     );
     sign::detach(token, source).unwrap();
     sign::delete(token).unwrap();

@@ -163,6 +163,11 @@ pub(crate) fn run() -> usize {
         crate::basis::unit::lifecycle::bury();
     }
     let commit = crate::basis::commit();
+    // The timer front half may have retained due tickets when try_commit was
+    // busy. Once this scheduler obtains COMMIT, advance them before returning
+    // it to competing Yield loops; repeated front-half rejection must not
+    // starve a deadline whose owner is already making scheduling progress.
+    sign::redeem();
     if let Some(route) = super::interrupt::external() {
         route.retry(&commit);
     }
@@ -184,14 +189,19 @@ pub(crate) fn run() -> usize {
 fn dispatch(allow_steal: bool) -> Option<usize> {
     // Ready tasks must not escape every scheduler container between commits.
     let _commit = crate::basis::commit();
+    let redeemed = sign::redeem();
     if let Some(route) = super::interrupt::external() {
         route.retry(&_commit);
     }
     let s = slot::current();
     s.awaken();
     s.relocate();
-    let task = s
-        .dequeue(&_commit)
-        .or_else(|| if allow_steal { steal(&_commit) } else { None });
+    let task = s.dequeue(&_commit).or_else(|| {
+        if allow_steal && !redeemed {
+            steal(&_commit)
+        } else {
+            None
+        }
+    });
     task.and_then(|task| s.dispatch(task, &_commit))
 }

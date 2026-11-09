@@ -53,7 +53,9 @@ pub(crate) fn enqueue(endpoint: &Arc<Endpoint>) {
     crate::basis::room::scheduler::idle::nudge(crate::metal::hart::HartId::new(0));
 }
 pub(crate) fn advance() {
-    if crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id()) {
+    if crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id())
+        || PENDING.lock().first.is_none()
+    {
         return;
     }
     let _commit = crate::basis::commit();

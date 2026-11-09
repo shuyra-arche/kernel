@@ -43,9 +43,10 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
             return Some(frame as *mut TrapContext);
         }
     };
-    if crate::basis::room::scheduler::slot::current()
-        .running_task()
-        .is_some_and(|task| task.realtime())
+    if crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id())
+        && crate::basis::room::scheduler::slot::current()
+            .running_task()
+            .is_some_and(|task| task.realtime())
     {
         use kernel_api::abi::call::{room::RoomCall, sign::SignCall, unit::UnitCall};
         let allowed = matches!(
