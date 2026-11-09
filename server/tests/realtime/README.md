@@ -14,6 +14,9 @@ The scheduler retains weak admission registrations, not copies of live budgets.
 `Preparing` leases a fully stopped Task, preventing Resume while resident pages
 and extension images are prepared **outside COMMIT**. Publication revalidates
 live administrative authority and Task state under COMMIT. Stop can cancel it.
+The preparation lease also retains retirement: Stop closes live authority
+immediately, but resource retirement waits until preparation releases its lease.
+An Arc to Task alone is not proof that its context page remains resident.
 
 An administrator with Build qualification and control of the Task calls
 `Unit.Admit`. The Task must be initially held, or individually frozen and fully

@@ -88,6 +88,10 @@ impl Task {
         self.schedule.lock().contract().is_some()
     }
 
+    pub(crate) fn preparing(&self) -> bool {
+        matches!(*self.schedule.lock(), schedule::Schedule::Preparing)
+    }
+
     pub(crate) fn prepare_extensions(&self, hart: HartId, flags: u64) -> Result<(), UnitFail> {
         use crate::metal::switcher::context::extension::PreparationError;
         self.extensions

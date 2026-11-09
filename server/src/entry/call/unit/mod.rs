@@ -99,10 +99,10 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                         if !me.administration.allows(ControlKind::Build) {
                             return Err(UnitFail::Denied);
                         }
-                        crate::basis::room::scheduler::contract::evict(&target)
+                        crate::basis::room::scheduler::contract::evict(&me, &target)
                     }
                     UnitCall::Profile { out, .. } => {
-                        let info = crate::basis::room::scheduler::contract::profile(&target)?;
+                        let info = crate::basis::room::scheduler::contract::profile(&me, &target)?;
                         ident
                             .team
                             .nest

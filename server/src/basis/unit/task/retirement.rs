@@ -22,6 +22,13 @@ impl Task {
     /// Busy retains the husk. The phase guard is tried, never waited on.
     pub(crate) fn retire(self: &Arc<Self>) -> Result<(), NestError> {
         let mut phase = self.retirement.try_lock().ok_or(NestError::Busy)?;
+        // Stop closes live authority while admission prepares outside COMMIT.
+        // Keep the original resources until that lease finishes reading them.
+        // Only reaped Tasks reach retirement, so a new live admission cannot
+        // begin after this check.
+        if self.preparing() {
+            return Err(NestError::Busy);
+        }
         match &mut *phase {
             Retirement::Heirs { after } => {
                 // Team identities never repeat. Concurrent Oust may remove an

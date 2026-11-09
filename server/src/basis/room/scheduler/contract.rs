@@ -159,9 +159,9 @@ impl Drop for Preparation {
         }
     }
 }
-pub(crate) fn evict(task: &Arc<Task>) -> Result<(), UnitFail> {
+pub(crate) fn evict(actor: &Task, task: &Arc<Task>) -> Result<(), UnitFail> {
     let _commit = crate::basis::commit();
-    if !task.held() || !task.realtime() {
+    if !authorized(actor, task) || !task.held() || !task.realtime() {
         return Err(UnitFail::Denied);
     }
     release(task);
@@ -207,8 +207,14 @@ pub(crate) fn release(task: &Task) {
     notify();
     super::idle::yell();
 }
-pub(crate) fn profile(task: &Task) -> Result<ScheduleInfo, UnitFail> {
+pub(crate) fn profile(actor: &Task, task: &Task) -> Result<ScheduleInfo, UnitFail> {
     let _commit = crate::basis::commit();
+    if actor.dead()
+        || actor.ident.team.node.closed()
+        || !crate::basis::unit::control::manages(actor, task)
+    {
+        return Err(UnitFail::Denied);
+    }
     let now = clock::now().as_ticks();
     let mut state = task.schedule.lock();
     let Schedule::Fixed {

@@ -102,6 +102,7 @@ impl TaskIdent {
         use crate::basis::nest::FaultOutcome;
         use crate::metal::generic::trap::FaultKind;
         let memory = self.memory.lock();
+        memory.frame.as_ref().ok_or(NestError::NoRegion)?;
         let (start, size) = memory
             .stack
             .as_ref()
