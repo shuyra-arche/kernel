@@ -199,6 +199,7 @@ impl Router {
         if claimed {
             // Notification and IOMMU progress no longer run in this front half.
             // Even an otherwise idle Hart needs a future maintenance turn.
+            self.deferred.store(true, Ordering::Release);
             super::deadline::retry();
         }
         true
@@ -217,16 +218,29 @@ impl Router {
         self.controller.unmask(irq);
     }
     pub(crate) fn request(&self) {
+        self.deferred.store(true, Ordering::Release);
         let _ = crate::metal::interrupt::ipi::send(self.hart);
+    }
+    /// A scheduler already owns COMMIT here. Continue deferred IRQ work before
+    /// relinquishing that admission; repeated try/release/try races can starve
+    /// notification while peer Harts keep making ordinary scheduling progress.
+    pub(crate) fn retry(&self, _commit: &crate::basis::CommitGuard) {
+        if hart::hart_id() == self.hart && self.deferred.load(Ordering::Acquire) {
+            self.rearm();
+        }
     }
     pub(crate) fn rearm(&self) {
         if hart::hart_id() != self.hart {
             return;
         }
         let Some(_commit) = crate::basis::try_commit() else {
+            self.deferred.store(true, Ordering::Release);
             super::deadline::retry();
             return;
         };
+        // Consume this request before callbacks: a remaining notification batch
+        // can request another turn without this one clearing that continuation.
+        let deferred = self.deferred.swap(false, Ordering::AcqRel);
         let count = self.sources.lock().len();
         for at in 0..count {
             let source = self.sources.lock()[at].clone();
@@ -238,8 +252,13 @@ impl Router {
                 self.controller.unmask(*irq);
             }
         }
-        if self.deferred.swap(false, Ordering::Relaxed) {
+        if deferred {
             crate::metal::interrupt::enable_external();
+            if crate::metal::interrupt::external_pending() {
+                // Keep COMMIT through the deferred claim instead of returning
+                // only to lose another acquisition race on external trap entry.
+                self.handle();
+            }
         }
     }
     pub(crate) fn report(&self) {

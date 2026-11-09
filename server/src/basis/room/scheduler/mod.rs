@@ -148,6 +148,9 @@ pub(crate) fn run() -> usize {
     crate::metal::stop::hush();
     crate::basis::unit::lifecycle::bury();
     let commit = crate::basis::commit();
+    if let Some(route) = super::interrupt::external() {
+        route.retry(&commit);
+    }
     if slot::current()
         .running_task()
         .is_some_and(|task| crate::basis::unit::lifecycle::take_doomed(task.ident.id).is_some())
@@ -166,6 +169,9 @@ pub(crate) fn run() -> usize {
 fn dispatch(allow_steal: bool) -> Option<usize> {
     // Ready tasks must not escape every scheduler container between commits.
     let _commit = crate::basis::commit();
+    if let Some(route) = super::interrupt::external() {
+        route.retry(&_commit);
+    }
     let s = slot::current();
     let task = s
         .dequeue(&_commit)

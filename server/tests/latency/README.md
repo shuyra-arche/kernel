@@ -124,10 +124,15 @@ immediately from that attempt: the controller keeps the unclaimed interrupt,
 local SEIE is disabled, and a Hart-local retry deadline is retained. The optional
 IRQ→Sign metric keeps the first entry timestamp across deferrals, so retry delay
 is included rather than hidden by starting a fresh sample. Rearming
-also tries admission once; success clears the deferred marker and reenables
-local delivery. Timer/idle entry can also reenable delivery, allowing another
-admission attempt while the controller still retains the event. The existing
-claim/unmask/complete ordering stays under COMMIT.
+also tries admission once. The deferred marker is consumed before callbacks,
+so a callback requesting another notification batch keeps its continuation.
+Timer/idle entry can also reenable delivery. If the owning scheduler already
+holds COMMIT at tick, yield or idle dispatch, it services a deferred batch before
+releasing that admission. Successful rearm can claim a still-pending source
+under the same guard; it does not release COMMIT just to compete for it again.
+This avoids retry starvation while ordinary scheduling continues to acquire
+COMMIT, without adding a new blocking lock acquisition to the continuation.
+The existing claim/unmask/complete ordering stays under COMMIT.
 Source death/revocation is revalidated by the existing binding state machine.
 
 The front half no longer performs arbitrary external-Nest retirement. Every

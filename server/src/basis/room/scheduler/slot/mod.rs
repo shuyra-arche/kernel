@@ -193,6 +193,9 @@ impl Slot {
     }
     pub(crate) fn reschedule(&self) -> usize {
         let commit = crate::basis::commit();
+        if let Some(route) = crate::basis::room::interrupt::external() {
+            route.retry(&commit);
+        }
         if self.running_task().is_some_and(|t| t.doomed()) {
             drop(commit);
             return crate::basis::unit::lifecycle::quit();
