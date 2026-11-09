@@ -398,11 +398,11 @@ fn delete_mapping(
 
 /// 发起调用的那个任务（正在跑的，或者是这个 ident 对应的）。
 fn caller(ident: &Arc<TaskIdent>) -> Option<Arc<Task>> {
-    use crate::basis::room::conductor::current;
-    use crate::basis::room::scheduler::roster::muster;
+    use crate::basis::room::scheduler::slot::current;
+    use crate::basis::unit::task::registry::find;
     current()
         .running_task()
-        .or_else(|| muster(ident.id).and_then(|task| task.upgrade()))
+        .or_else(|| find(ident.id).and_then(|task| task.upgrade()))
 }
 
 /// 来源侧的失败码折成地址空间同轴的那一条。

@@ -11,9 +11,9 @@ use kernel_api::model::pend::{AccordRequest, AccordTarget, NarrowRequest};
 use crate::basis::nest::Access;
 use crate::basis::pend;
 use crate::basis::pend::PendEntry;
-use crate::basis::room::conductor::current;
-use crate::basis::room::scheduler::roster::muster;
+use crate::basis::room::scheduler::slot::current;
 use crate::basis::unit::task::TaskIdent;
+use crate::basis::unit::task::registry::find;
 use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::VirtAddr as KVirt;
 
@@ -45,7 +45,7 @@ fn accord(frame: &mut TrapContext, ident: &TaskIdent, request: VirtAddr) {
         let caller = current().running_task().ok_or(PendFail::Denied)?;
         let target = match request.target {
             AccordTarget::Caller => Arc::downgrade(&caller),
-            AccordTarget::Task(id) => muster(id).ok_or(PendFail::Denied)?.as_weak().clone(),
+            AccordTarget::Task(id) => find(id).ok_or(PendFail::Denied)?.as_weak().clone(),
         };
         pend::accord(
             &caller,
@@ -77,7 +77,7 @@ fn narrow(frame: &mut TrapContext, ident: &TaskIdent, request: VirtAddr) {
 fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
     let r = (|| -> Result<usize, PendFail> {
         let caller = current().running_task().ok_or(PendFail::Denied)?;
-        let target = muster(dst_id).ok_or(PendFail::Denied)?;
+        let target = find(dst_id).ok_or(PendFail::Denied)?;
         pend::revoke(&caller, target.as_weak(), token).map(|_| 0)
     })();
     answer(frame, r);

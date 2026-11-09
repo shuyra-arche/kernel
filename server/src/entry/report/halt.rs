@@ -57,7 +57,7 @@ pub(crate) extern "C" fn info(source: &Source<'_>) -> ! {
         crate::metal::hart::hart_id(),
         expected.saturating_sub(quiet)
     );
-    if let Some(identity) = crate::basis::room::conductor::identity::ident() {
+    if let Some(identity) = crate::basis::room::scheduler::slot::identity::ident() {
         let _ = writeln!(
             sink,
             "team={} task={}",

@@ -1,13 +1,13 @@
 use crate::basis::room::deadline;
-use crate::basis::room::halt;
 use crate::basis::room::interrupt;
 use crate::basis::room::scheduler;
+use crate::basis::room::shutdown;
 use crate::basis::unit::lifecycle::tally;
 use crate::metal::clock;
 use crate::putln;
 
 pub(crate) fn waiting() {
-    let (arrived, total) = halt::barrier();
+    let (arrived, total) = shutdown::barrier();
     let (pushed, reaped) = tally::counts();
     putln!(
         "[stop] halt 屏障等待：已达 {arrived}/{total} 核；任务 PUSHED={pushed}                      REAPED={reaped}（差 {}）—— 屏障等的是**核**，不是任务",
@@ -24,7 +24,7 @@ pub(crate) fn report() {
     } else {
         clock::ticks_to_duration(late_sum / late_n).as_millis()
     };
-    let (tocks, mutes, remote_rearms) = deadline::tock_stats();
+    let (tocks, mutes, remote_rearms) = deadline::registration_stats();
     putln!(
         "timer: late_n={late_n} late_max_ms={max_ms} late_avg_ms={avg_ms} late_max_tick={late_max} traps={} tocks={tocks} mutes={mutes} remote_rearms={remote_rearms}",
         deadline::ticks()
@@ -36,8 +36,8 @@ pub(crate) fn report() {
             "timer-program: sbi={sbi} sbi_ticks={sbi_ticks} sstc={sstc} sstc_ticks={sstc_ticks} skipped={skipped}"
         );
     }
-    let (held, starved, blocked, nudged) = crate::basis::unit::lifecycle::branch_stats();
-    putln!("doom: held={held} starved={starved} blocked={blocked} nudged={nudged}");
+    let (held, ready, blocked, nudged) = crate::basis::unit::lifecycle::branch_stats();
+    putln!("doom: held={held} ready={ready} blocked={blocked} nudged={nudged}");
     let (kicks, fallback) = scheduler::kick_stats();
     putln!("sched: kicks={kicks} fallback={fallback}");
     putln!("external_interrupts: claimed={}", interrupt::claimed());
@@ -63,6 +63,41 @@ pub(crate) fn report() {
             entry.task.get(),
             entry.reason,
             entry.note()
+        );
+    }
+}
+
+pub(crate) fn stalled(observation: shutdown::Observation) {
+    let shutdown::Observation {
+        hart,
+        pushed,
+        reaped,
+    } = observation;
+    #[cfg(debug_assertions)]
+    {
+        let holders = crate::basis::sign::timed_wait_count();
+        let husks = crate::basis::unit::lifecycle::retained_count();
+        let (more, ids) = crate::basis::unit::task::registry::live_ids();
+        let live = {
+            let mut n = 0usize;
+            while n < ids.len() && ids[n] != 0 {
+                n += 1;
+            }
+            n
+        };
+        crate::putln!(
+            "[stop] hart {hart} 空闲等待：PUSHED={pushed} REAPED={reaped}（差 {}）husks={husks} \
+             holders={holders} 在世任务 id={:?}{}",
+            pushed.saturating_sub(reaped),
+            &ids[..live],
+            if more > 0 { " …" } else { "" }
+        );
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        crate::putln!(
+            "[stop] hart {hart} 空闲等待：PUSHED={pushed} REAPED={reaped}（差 {}）",
+            pushed.saturating_sub(reaped)
         );
     }
 }

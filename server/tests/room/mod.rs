@@ -62,3 +62,10 @@ mod metal {
         pub(crate) use crate::clock_contract as clock;
     }
 }
+
+mod membership;
+use membership::Task;
+#[path = "../../src/basis/unit/task/chain.rs"]
+mod chain;
+mod scheduling;
+mod shutdown;

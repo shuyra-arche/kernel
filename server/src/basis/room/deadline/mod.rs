@@ -2,7 +2,6 @@ mod queue;
 use crate::metal::sync::OnceLock;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
-use core::time::Duration;
 use queue::Queue;
 
 use crate::metal::clock;
@@ -22,15 +21,17 @@ static LOCAL: [AtomicU64; MAX_HART_SLOTS] =
 pub const BLIND_MS: u64 = 100;
 
 pub fn blind_deadline() -> u64 {
-    clock::now().add(Duration::from_millis(BLIND_MS)).as_ticks()
+    clock::now()
+        .add(core::time::Duration::from_millis(BLIND_MS))
+        .as_ticks()
 }
 
 static LATE_N: AtomicU64 = AtomicU64::new(0);
 static LATE_SUM: AtomicU64 = AtomicU64::new(0);
 static LATE_MAX: AtomicU64 = AtomicU64::new(0);
 
-static TOCK_N: AtomicU64 = AtomicU64::new(0);
-static MUTE_N: AtomicU64 = AtomicU64::new(0);
+static INSERTS: AtomicU64 = AtomicU64::new(0);
+static REMOVES: AtomicU64 = AtomicU64::new(0);
 
 static TICKS: AtomicU64 = AtomicU64::new(0);
 static REMOTE_REARMS: AtomicU64 = AtomicU64::new(0);
@@ -88,24 +89,24 @@ fn head_changed(changed: bool) {
     }
 }
 
-pub fn tock(handle: u64, wake_at: u64) -> Result<(), ()> {
+pub fn insert(handle: u64, wake_at: u64) -> Result<(), ()> {
     let mut queue = timers().lock();
     let before = queue.nearest();
     queue.insert(handle, wake_at)?;
     let changed = queue.nearest() != before;
     drop(queue);
     head_changed(changed);
-    TOCK_N.fetch_add(1, Ordering::Relaxed);
+    INSERTS.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 
-pub fn mute(handle: u64) {
+pub fn remove(handle: u64) {
     let mut queue = timers().lock();
     let before = queue.nearest();
     if !queue.remove(handle) {
         return;
     }
-    MUTE_N.fetch_add(1, Ordering::Relaxed);
+    REMOVES.fetch_add(1, Ordering::Relaxed);
     let changed = queue.nearest() != before;
     drop(queue);
     head_changed(changed);
@@ -140,10 +141,10 @@ pub fn late_stats() -> (u64, u64, u64) {
     )
 }
 
-pub fn tock_stats() -> (u64, u64, u64) {
+pub fn registration_stats() -> (u64, u64, u64) {
     (
-        TOCK_N.load(Ordering::Relaxed),
-        MUTE_N.load(Ordering::Relaxed),
+        INSERTS.load(Ordering::Relaxed),
+        REMOVES.load(Ordering::Relaxed),
         REMOTE_REARMS.load(Ordering::Relaxed),
     )
 }

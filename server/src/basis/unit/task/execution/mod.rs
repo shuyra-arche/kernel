@@ -1,5 +1,5 @@
+use super::chain::Link;
 use crate::basis::unit::control::Request;
-use alloc::sync::Arc;
 use core::fmt;
 use kernel_api::abi::call::unit::UnitFail;
 
@@ -12,9 +12,7 @@ mod continuation;
 use crate::metal::hart::HartId;
 pub(crate) use continuation::{Resumption, WaitCall};
 
-use super::Task;
-
-/// 任务状态机的轴：任一时刻只在一根轴上。`next` 是入链载荷，只挂在就绪 / 等待 /
+/// 任务状态机的轴：任一时刻只在一根轴上。`link` 是入链载荷，只挂在就绪 / 等待 /
 /// 躯壳三种轴上（饥饿链、等待链、躯壳链共用同一个槽）。
 pub enum TaskAxis {
     OnHart {
@@ -22,12 +20,12 @@ pub enum TaskAxis {
         ticks_left: u32,
     },
     Ready {
-        next: Option<Arc<Task>>,
+        link: Link,
     },
     Waiting {
         key: WakeKey,
         ticket: Ticket,
-        next: Option<Arc<Task>>,
+        link: Link,
         wait: Option<WaitCall>,
     },
     Held,
@@ -40,17 +38,17 @@ pub enum TaskAxis {
     Reaped {
         cause: TaskExitCause,
         reason: usize,
-        next: Option<Arc<Task>>,
+        link: Link,
     },
 }
 
 impl TaskAxis {
     /// 入链载荷槽：链只穿就绪 / 等待 / 躯壳三种轴，其余轴没有槽。
-    pub(crate) fn chain(&mut self) -> &mut Option<Arc<Task>> {
+    pub(crate) fn chain(&mut self) -> &mut Link {
         match self {
-            TaskAxis::Ready { next }
-            | TaskAxis::Waiting { next, .. }
-            | TaskAxis::Reaped { next, .. } => next,
+            TaskAxis::Ready { link }
+            | TaskAxis::Waiting { link, .. }
+            | TaskAxis::Reaped { link, .. } => link,
             other => unreachable!("链只穿就绪/等待/躯壳任务，实为 {other:?}"),
         }
     }
@@ -58,9 +56,9 @@ impl TaskAxis {
     /// 入链载荷是否为空：没有槽的轴恒为空。
     pub(crate) fn unlinked(&self) -> bool {
         match self {
-            TaskAxis::Ready { next }
-            | TaskAxis::Waiting { next, .. }
-            | TaskAxis::Reaped { next, .. } => next.is_none(),
+            TaskAxis::Ready { link }
+            | TaskAxis::Waiting { link, .. }
+            | TaskAxis::Reaped { link, .. } => link.detached(),
             _ => true,
         }
     }
@@ -74,13 +72,13 @@ impl fmt::Debug for TaskAxis {
                 "OnHart {{ hart: {}, ticks_left: {ticks_left} }}",
                 hart.get()
             ),
-            TaskAxis::Ready { next } => write!(f, "Ready {{ next: {} }}", next.is_some()),
+            TaskAxis::Ready { link } => write!(f, "Ready {{ attached: {} }}", !link.detached()),
             TaskAxis::Waiting {
-                key, ticket, next, ..
+                key, ticket, link, ..
             } => write!(
                 f,
-                "Waiting {{ key: {key:?}, ticket: {ticket:?}, next: {} }}",
-                next.is_some()
+                "Waiting {{ key: {key:?}, ticket: {ticket:?}, attached: {} }}",
+                !link.detached()
             ),
             TaskAxis::Held => write!(f, "Held"),
             TaskAxis::Parked => write!(f, "Parked"),
@@ -229,7 +227,9 @@ impl TaskState {
 
     pub(crate) fn ready() -> TaskState {
         TaskState {
-            axis: TaskAxis::Ready { next: None },
+            axis: TaskAxis::Ready {
+                link: Link::Detached,
+            },
             paused: false,
         }
     }
@@ -239,7 +239,7 @@ impl TaskState {
             axis: TaskAxis::Reaped {
                 cause,
                 reason,
-                next: None,
+                link: Link::Detached,
             },
             paused: false,
         }
@@ -265,7 +265,7 @@ impl TaskState {
         self.set_axis(TaskAxis::Waiting {
             key,
             ticket,
-            next: None,
+            link: Link::Detached,
             wait,
         });
     }
@@ -368,7 +368,7 @@ impl TaskState {
         }
     }
 
-    pub(crate) fn link(&mut self) -> &mut Option<Arc<Task>> {
+    pub(in super::super) fn link(&mut self) -> &mut Link {
         self.axis.chain()
     }
 
@@ -437,7 +437,9 @@ impl TaskState {
         if transition.after.phase != transition.before.phase {
             assert_eq!(transition.before.phase, Phase::Parked);
             assert_eq!(transition.after.phase, Phase::Ready);
-            self.set_axis(TaskAxis::Ready { next: None });
+            self.set_axis(TaskAxis::Ready {
+                link: Link::Detached,
+            });
         }
         self.paused = transition.after.paused;
     }
@@ -446,7 +448,9 @@ impl TaskState {
     pub(crate) fn park(&mut self) {
         let paused = self.paused;
         self.set_axis(if paused {
-            TaskAxis::Ready { next: None }
+            TaskAxis::Ready {
+                link: Link::Detached,
+            }
         } else {
             TaskAxis::Parked
         });
@@ -454,7 +458,9 @@ impl TaskState {
 
     /// 升起：轴摆成就绪，回答「暂停」是否还挂着（挂着就由调用方送去泊位）。
     pub(crate) fn rise(&mut self) -> bool {
-        self.set_axis(TaskAxis::Ready { next: None });
+        self.set_axis(TaskAxis::Ready {
+            link: Link::Detached,
+        });
         self.paused
     }
 }

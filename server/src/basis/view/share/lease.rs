@@ -13,7 +13,7 @@ use crate::basis::pend;
 use crate::basis::pend::Modifiable;
 use crate::basis::pend::Need;
 use crate::basis::pend::access as authority;
-use crate::basis::room::conductor::current;
+use crate::basis::room::scheduler::slot::current;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::view::View;
 

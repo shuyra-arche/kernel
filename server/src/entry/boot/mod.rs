@@ -22,7 +22,6 @@ use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
-use crate::basis::room::conductor;
 use crate::basis::room::scheduler;
 use crate::basis::unit::team::kernel;
 use crate::metal::hart;
@@ -57,7 +56,7 @@ pub fn start() -> Result<(), BootError> {
     register_runtime_hooks();
 
     if let Some(entry) = spawn_entry()? {
-        crate::basis::room::halt::beacon::arm(&entry);
+        crate::basis::room::shutdown::watch(&entry);
     }
 
     crate::basis::unit::lifecycle::tally::rooted();
@@ -81,11 +80,11 @@ pub fn run() -> ! {
 }
 
 extern "C" fn run_on_stack() -> ! {
-    restore(conductor::run::run())
+    restore(scheduler::run())
 }
 
 pub(crate) fn register_runtime_hooks() {
-    use crate::basis::room::halt;
+    use crate::basis::room::shutdown;
 
     static EXIT_HOOKS: &[fn(&alloc::sync::Arc<crate::basis::unit::task::Task>)] = &[
         crate::basis::unit::lifecycle::doom,
@@ -99,7 +98,11 @@ pub(crate) fn register_runtime_hooks() {
         crate::basis::room::scheduler::rip,
         crate::metal::allocator::block::flush,
     ];
-    halt::hook(SHUTDOWN_HOOKS, crate::entry::report::shutdown::waiting);
+    shutdown::hook(
+        SHUTDOWN_HOOKS,
+        crate::entry::report::shutdown::waiting,
+        crate::entry::report::shutdown::stalled,
+    );
 }
 
 fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Task>>, BootError> {

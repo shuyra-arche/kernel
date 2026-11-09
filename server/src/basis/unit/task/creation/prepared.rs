@@ -4,7 +4,6 @@ use core::mem::MaybeUninit;
 
 use crate::basis::nest::NestError;
 use crate::basis::pend::Table;
-use crate::basis::room::scheduler;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::task::Origin;
@@ -75,7 +74,7 @@ impl PreparedTask {
             result: SpinLock::new(None),
         })
         .map_err(|_| NestError::OutOfMemory)?;
-        scheduler::roster::reserve_publication().map_err(|_| NestError::OutOfMemory)?;
+        crate::basis::unit::task::registry::reserve().map_err(|_| NestError::OutOfMemory)?;
         // 下面的提交段在 `NoAllocation` 下并持几把锁：这里自己四把（提交锁、成员表、
         // 暂扣表、名册），回调里还会取它自己那几把。依赖栈容量按「自己四把 + 四把
         // 余量」先在这里备好：提交段里惰性扩容就是一次分配，回调再取锁就只剩溢出。
@@ -103,7 +102,7 @@ impl PreparedTask {
         {
             return Err(NestError::OutOfMemory);
         }
-        let (task, ()) = scheduler::roster::publish(|| {
+        let (task, ()) = crate::basis::unit::task::registry::insert(|| {
             commit();
             assert!(team.ready(), "publish: constructing team");
             let mut slot = self.slot.take().expect("prepare slot");

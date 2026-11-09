@@ -2,7 +2,7 @@ use super::super::outcome::{Outcome, answer, answer_pair};
 use crate::{
     basis::{
         pend::access as authority,
-        room::conductor::current,
+        room::scheduler::slot::current,
         unit::task::TaskIdent,
         view::share::lease::{create_share, open_resource, shut_resource},
     },

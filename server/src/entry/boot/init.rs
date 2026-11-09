@@ -1,7 +1,6 @@
 use super::BootError;
 use super::ExternalRoute;
 use super::ResourceOperation;
-use crate::basis::room::interrupt;
 use crate::entry::boot::facts;
 use crate::metal::clock;
 use crate::metal::console;
@@ -51,7 +50,7 @@ pub unsafe fn configure(
         operation: ResourceOperation::InitializeIommu,
         source,
     })?;
-    interrupt::init().map_err(|source| BootError::Resources {
+    crate::entry::trap::resources::init().map_err(|source| BootError::Resources {
         operation: ResourceOperation::InitializeTraps,
         source,
     })?;

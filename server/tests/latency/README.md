@@ -35,7 +35,7 @@ is bounded. Sign notification coalesces work; it is not a device completion coun
    at most four waiters and has at most eight forwarding destinations per batch,
    with continuation retained. Callback cost, repeated batches, the shared commit
    lock and scheduler still defeat a latency proof.
-3. **Scheduler** (`basis/room/conductor/`, `scheduler/`): admission, steal and
+3. **Scheduler** (`basis/room/scheduler/`, including `slot/`): admission, steal and
    compatible-Hart selection depend on H and queued Tasks Q; extended-state
    save/restore depends on F/D/V state and VLEN. There is no priority, affinity or
    budget admission contract. Preserve this baseline before M3 policy changes.

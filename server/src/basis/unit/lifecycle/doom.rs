@@ -1,23 +1,24 @@
 use super::reap::reap;
-use crate::basis::room::counter::Counter;
-use crate::basis::room::scheduler::roster::muster;
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::basis::sign;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskExitCause;
+use crate::basis::unit::task::registry::find;
 use crate::basis::unit::team::Team;
 use crate::basis::unit::team::TeamNode;
 use alloc::sync::Arc;
 use kernel_api::model::identity::TaskId;
-static CULL_HELD: Counter = Counter::new();
-static CULL_STARVED: Counter = Counter::new();
-static CULL_BLOCKED: Counter = Counter::new();
-static NUDGED: Counter = Counter::new();
+static CULL_HELD: AtomicUsize = AtomicUsize::new(0);
+static CULL_READY: AtomicUsize = AtomicUsize::new(0);
+static CULL_BLOCKED: AtomicUsize = AtomicUsize::new(0);
+static NUDGED: AtomicUsize = AtomicUsize::new(0);
 pub(crate) fn branch_stats() -> (usize, usize, usize, usize) {
     (
-        CULL_HELD.get(),
-        CULL_STARVED.get(),
-        CULL_BLOCKED.get(),
-        NUDGED.get(),
+        CULL_HELD.load(Ordering::Relaxed),
+        CULL_READY.load(Ordering::Relaxed),
+        CULL_BLOCKED.load(Ordering::Relaxed),
+        NUDGED.load(Ordering::Relaxed),
     )
 }
 fn suspend(task: &Arc<Task>, cause: TaskExitCause, reason: usize) -> bool {
@@ -28,19 +29,19 @@ fn suspend(task: &Arc<Task>, cause: TaskExitCause, reason: usize) -> bool {
     crate::basis::unit::team::exit::member_dying(task, reason);
     if let Some(hart) = task.on_hart() {
         task.state.lock().doom(Some(hart), cause, reason);
-        NUDGED.bump();
+        NUDGED.fetch_add(1, Ordering::Relaxed);
         crate::basis::room::scheduler::idle::nudge(hart);
         return false;
     }
     if task.ready() && !task.stopped() {
-        assert!(crate::basis::room::scheduler::remove_from_starved(task));
-        CULL_STARVED.bump();
+        assert!(crate::basis::room::scheduler::remove(task));
+        CULL_READY.fetch_add(1, Ordering::Relaxed);
     } else if task.waiting() {
         assert!(sign::detach(task), "published blocked waiter");
-        CULL_BLOCKED.bump();
+        CULL_BLOCKED.fetch_add(1, Ordering::Relaxed);
     } else {
         assert!(task.ident.team.release_held(task));
-        CULL_HELD.bump();
+        CULL_HELD.fetch_add(1, Ordering::Relaxed);
     }
     if let Some(wait) = task.take_wait() {
         wait.cancel();
@@ -86,7 +87,7 @@ pub(crate) fn doom(task: &Arc<Task>) {
     }
 }
 pub(crate) fn take_doomed(tid: TaskId) -> Option<usize> {
-    let task = muster(tid)?.upgrade()?;
+    let task = find(tid)?.upgrade()?;
     task.doomed_on_hart()
 }
 pub(crate) fn slay(task: &Arc<Task>) {

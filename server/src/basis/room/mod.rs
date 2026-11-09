@@ -1,16 +1,8 @@
-//! 房间：一台域跑起来之后的那一面。
-//!
-//! 每核一张运行槽（`conductor`），跨核的放置与唤醒在 `scheduler`，没有活可跑之后
-//! 各核走 `halt` 收场；等待站点与超时分别是 `sign`、`deadline`。
-//! 任务链（`chain`）与松弛计数（`counter`）是这一层共用的两件小东西。
-
-pub(crate) mod chain;
-pub(crate) mod conductor;
-pub(crate) mod counter;
+//! Execution coordination: scheduling, deadlines, interrupt delivery and shutdown.
 pub(crate) mod deadline;
-pub(crate) mod halt;
 pub(crate) mod interrupt;
-pub mod scheduler;
+pub(crate) mod scheduler;
+pub(crate) mod shutdown;
 
 pub enum Handoff<T> {
     Resume(T),

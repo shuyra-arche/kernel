@@ -44,7 +44,7 @@ pub(super) fn hold(ticket: Ticket, key: WakeKey, task: &Arc<Task>) -> Result<(),
 }
 
 pub(in super::super) fn void(ticket: Ticket) -> Option<(WakeKey, Arc<Task>)> {
-    deadline::mute(ticket.raw());
+    deadline::remove(ticket.raw());
     holders()
         .lock()
         .remove(&ticket)

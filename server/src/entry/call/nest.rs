@@ -20,7 +20,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: NestCall, ident: &Arc<Task
     super::outcome::answer(
         frame,
         (|| {
-            let actor = crate::basis::room::conductor::current()
+            let actor = crate::basis::room::scheduler::slot::current()
                 .running_task()
                 .ok_or(NestFail::Denied)?;
             let _serial = actor.pend.lock();

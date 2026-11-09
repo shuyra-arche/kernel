@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use crate::basis::nest::{FaultOutcome, Nest};
 use crate::basis::room::Handoff;
-use crate::basis::room::conductor::identity::Identity;
+use crate::basis::room::scheduler::slot::identity::Identity;
 use crate::basis::sign::{self, WakeKey};
 use crate::metal::generic::trap::{FaultKind, PageFault};
 use crate::metal::switcher::context::TrapContext;

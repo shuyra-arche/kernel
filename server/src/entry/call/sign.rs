@@ -2,8 +2,7 @@ use super::outcome::Outcome;
 use super::outcome::answer;
 use crate::basis::pend;
 use crate::basis::room::Handoff;
-use crate::basis::room::conductor::current;
-use crate::basis::room::scheduler::roster::muster;
+use crate::basis::room::scheduler::slot::current;
 use crate::basis::sign::WakeKey;
 use crate::basis::sign::endpoint;
 use crate::basis::sign::endpoint::AwaitWait;
@@ -12,6 +11,7 @@ use crate::basis::sign::endpoint::Watch;
 use crate::basis::sign::endpoint::codec;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
+use crate::basis::unit::task::registry::find;
 use crate::metal::switcher::context::TrapContext;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -236,7 +236,7 @@ pub(crate) fn typed_cell(
             Watch::Join { target, selected }
         }
         SignSource::Inspect { task: id, token } => {
-            let holder = muster(id)
+            let holder = find(id)
                 .and_then(|task| task.upgrade())
                 .ok_or(SignFail::Denied)?;
             let pend = pend::locate(&holder, token).ok_or(SignFail::Denied)?;

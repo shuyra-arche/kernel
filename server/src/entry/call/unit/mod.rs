@@ -8,12 +8,12 @@ use kernel_api::model::unit::UnitTarget;
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::SpaceKind;
-use crate::basis::room::scheduler::roster::muster;
 use crate::basis::unit::task::MAX_ARGS;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::unit::task::TaskWeak;
+use crate::basis::unit::task::registry::find;
 use crate::metal::switcher::context::Gprs;
 use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::VirtAddr as KVirt;
@@ -62,7 +62,7 @@ use kernel_api::model::unit::{ControlId, ControlKind, UnitCreate, UnitInfo, Unit
 mod inspect;
 pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskIdent>) -> Outcome {
     frame.gpr.set_x(Gprs::A0, 0);
-    let Some(me) = muster(ident.id).and_then(|w| w.upgrade()) else {
+    let Some(me) = find(ident.id).and_then(|w| w.upgrade()) else {
         return Outcome::fail(frame, UnitFail::Denied);
     };
     match call {
@@ -130,7 +130,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             target,
             delegable,
         } => {
-            let result = muster(target)
+            let result = find(target)
                 .and_then(|weak| weak.upgrade())
                 .ok_or(UnitFail::Denied)
                 .and_then(|target| {
@@ -145,7 +145,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             branch,
         } => {
             let _commit = crate::basis::commit();
-            let result = muster(target)
+            let result = find(target)
                 .and_then(|weak| weak.upgrade())
                 .ok_or(UnitFail::Denied)
                 .and_then(|target| {
@@ -193,7 +193,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
         UnitCall::Resume { target } | UnitCall::Freeze { target } | UnitCall::Stop { target } => {
             let result = match target {
                 UnitTarget::Task(id) => {
-                    let Some(task) = muster(id).and_then(|w| w.upgrade()) else {
+                    let Some(task) = find(id).and_then(|w| w.upgrade()) else {
                         return Outcome::fail(frame, UnitFail::Denied);
                     };
                     if !crate::basis::unit::control::manages(&me, &task) {
@@ -208,7 +208,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                                 drop(me);
                                 drop(ident);
                                 return Outcome::Switch(
-                                    crate::basis::room::conductor::run::run() as *mut TrapContext
+                                    crate::basis::room::scheduler::run() as *mut TrapContext
                                 );
                             }
                             result
