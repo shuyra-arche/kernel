@@ -104,8 +104,12 @@ extern "C" fn irq_received() {
 }
 #[track_caller]
 fn receive(token: PendId, wait: Wait) -> u64 {
-    let SignReply::Triggered { sequence } = sign::listen(token, wait).unwrap() else {
-        panic!("UART IRQ missing")
+    let reply = sign::listen(token, wait).unwrap();
+    let SignReply::Triggered { sequence } = reply else {
+        // Let load Tasks exit after a failed assertion, so shutdown can retain
+        // the router counters instead of hiding the failure behind a watchdog.
+        LOAD_STOP.store(true, Ordering::Release);
+        panic!("UART IRQ missing: {reply:?}; ier={} iir={}", read(1), read(2))
     };
     irq_received();
     sequence
