@@ -109,6 +109,30 @@ validated against its consumption sequence and live binding.
 
 ## Measurement definitions
 
+### COMMIT admission order
+
+COMMIT's reentrant lock reserves one FIFO turn per waiting Hart. The outermost
+release publishes protected writes and advances that turn; recursive guards
+reuse their Hart's current turn. A nonblocking try succeeds only with an empty
+queue (or for the existing owner). Failed tries reserve nothing, including the
+interval after an owner releases and before the next waiter enters.
+
+With H participating Harts, an outer reservation has at most H−1 earlier turns.
+New requests cannot overtake it. This removes starvation from repeated lock
+reacquisition; it is not priority inheritance or a bound on transaction time.
+Its elapsed wait still includes those preceding outer transactions, any nested
+work, firmware and host/hardware scheduling. A stalled predecessor stalls its
+successors. Waiters retain the stackless reception windows; no Task switch,
+allocation or lock acquisition is introduced in those windows.
+
+Host tests hold waiters at acknowledged reception boundaries to check FIFO
+ordering, protected-write visibility, recursion while queued, non-barging tries
+and the absence of abandoned turns. The QEMU latency workload continues to use
+four competing Yield workers plus real UART IRQ publication and revocation;
+functional assertions and watchdogs are unchanged. Compare observed distributions
+under the same QEMU mode, but do not infer a hardware upper bound from a lower
+maximum in one run.
+
 Enable provider feature `kernel/latency`. Fixed per-Hart histograms use 32 bins,
 relaxed atomic updates and the admitted `time` clock. The probe measures 1024
 pairs of clock reads plus same-layout updates. Counters must not wrap during an

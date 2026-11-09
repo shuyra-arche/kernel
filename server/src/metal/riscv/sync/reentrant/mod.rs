@@ -15,6 +15,11 @@ use owner::Owner;
 
 #[derive(Debug)]
 pub struct RelLock<T: ?Sized> {
+    // One outstanding admission per Hart; recursive guards reuse its ticket.
+    // Wrapping sequence numbers remain distinct with fewer than usize::MAX
+    // outstanding Harts. A reservation cannot be cancelled or bypassed.
+    next: AtomicUsize,
+    serving: AtomicUsize,
     owner: AtomicUsize,
     count: UnsafeCell<usize>,
 
@@ -29,6 +34,8 @@ unsafe impl<T: ?Sized + Send> Sync for RelLock<T> {}
 impl<T> RelLock<T> {
     pub const fn new_level(_level: depend::Level, val: T) -> Self {
         RelLock {
+            next: AtomicUsize::new(0),
+            serving: AtomicUsize::new(0),
             owner: AtomicUsize::new(0),
             count: UnsafeCell::new(0),
             #[cfg(debug_assertions)]
@@ -50,27 +57,37 @@ impl<T: ?Sized> RelLock<T> {
         #[cfg(feature = "latency")]
         let start = crate::metal::measure::stamp();
         let me = Owner::of(hart::hart_id());
-        match self.owner.compare_exchange(
-            Owner::FREE.word(),
-            me.word(),
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => {
-                crate::metal::sync::depend_check!(self, caller);
-                unsafe { *self.count.get() = 1 };
-                crate::metal::sync::depend_acquire!(self, caller);
-            }
-            Err(owner) if Owner::from_word(owner) == me => unsafe {
-                *self.count.get() = (*self.count.get())
-                    .checked_add(1)
-                    .expect("recursion overflow");
-            },
-            Err(_) => return None,
+        if Owner::from_word(self.owner.load(Ordering::Relaxed)) == me {
+            self.reenter();
+        } else {
+            // Acquire observes the previous outer release. Reserve only an
+            // empty queue: a failed try creates no abandoned ticket, and a
+            // free owner between turns does not let this caller barge.
+            let serving = self.serving.load(Ordering::Acquire);
+            self.next
+                .compare_exchange(
+                    serving,
+                    serving.wrapping_add(1),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
+                .ok()?;
+            crate::metal::sync::depend_check!(self, caller);
+            self.owner.store(me.word(), Ordering::Relaxed);
+            unsafe { *self.count.get() = 1 };
+            crate::metal::sync::depend_acquire!(self, caller);
         }
         #[cfg(feature = "latency")]
         crate::metal::measure::elapsed(crate::metal::measure::Metric::CommitWait, start);
         Some(RelLockGuard::new(self, trap))
+    }
+
+    fn reenter(&self) {
+        unsafe {
+            *self.count.get() = (*self.count.get())
+                .checked_add(1)
+                .expect("recursion overflow");
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -96,39 +113,18 @@ impl<T: ?Sized> RelLock<T> {
             );
         }
 
-        loop {
-            match self.owner.compare_exchange(
-                Owner::FREE.word(),
-                me.word(),
-                Ordering::Acquire,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => {
-                    unsafe { *self.count.get() = 1 };
-                    #[cfg(debug_assertions)]
-                    depend::acquire(
-                        self as *const Self as *const () as usize,
-                        self.level,
-                        caller,
-                    );
-                    break;
-                }
-                Err(cur) if Owner::from_word(cur) == me => {
-                    unsafe {
-                        *self.count.get() = (*self.count.get())
-                            .checked_add(1)
-                            .expect("recursion overflow")
-                    };
-                    break;
-                }
-                Err(_) => {
-                    while self.owner.load(Ordering::Relaxed) != Owner::FREE.word() {
-                        crate::metal::stop::hush();
-                        crate::metal::interrupt::window::poll();
-                        ::core::hint::spin_loop();
-                    }
-                }
+        if Owner::from_word(self.owner.load(Ordering::Relaxed)) == me {
+            self.reenter();
+        } else {
+            let ticket = self.next.fetch_add(1, Ordering::Relaxed);
+            while self.serving.load(Ordering::Acquire) != ticket {
+                crate::metal::stop::hush();
+                crate::metal::interrupt::window::poll();
+                ::core::hint::spin_loop();
             }
+            self.owner.store(me.word(), Ordering::Relaxed);
+            unsafe { *self.count.get() = 1 };
+            crate::metal::sync::depend_acquire!(self, caller);
         }
 
         {
