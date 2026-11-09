@@ -2,8 +2,9 @@
 
 M2 supplies interrupt reception during foreign-owner waits, local publication
 boundaries and retained cleanup batches for #30. It does not introduce a hard
-real-time service class. M3 still owns priority/preemption policy, budgets,
-affinity, overload and priority inversion. QEMU measurements are observations,
+real-time service class. [M3](../realtime/README.md) adds the conditional
+priority/preemption, budget, affinity and Sign service contract. This file
+retains the M1/M2 baseline and exclusion audit. QEMU measurements are observations,
 not hardware WCET bounds or schedulability proofs.
 
 ## Operation contract

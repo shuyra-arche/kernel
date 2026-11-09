@@ -28,12 +28,15 @@ const QUANTUM_TICKS: u32 = 8;
 struct Inner {
     running: Option<Arc<Task>>,
     ready: Ready,
+    pending: crate::basis::unit::task::chain::Chain,
 }
 #[repr(align(64))]
 pub(crate) struct Slot {
     pub(super) hart: HartId,
     inner: SpinLock<Inner>,
     identity: Publication,
+    pub(super) admission: SpinLock<super::contract::Admission>,
+    pub(super) isolated: core::sync::atomic::AtomicBool,
 }
 /// Required destination state when a current Task leaves this scheduler.
 /// Ready/Park are internal scheduling choices; Wait/Exit cross owner boundaries.
@@ -56,15 +59,18 @@ impl Slot {
                 Inner {
                     running: None,
                     ready: Ready::new(),
+                    pending: crate::basis::unit::task::chain::Chain::new(),
                 },
             ),
             identity: Publication::new(),
+            admission: SpinLock::new(super::contract::Admission::new()),
+            isolated: core::sync::atomic::AtomicBool::new(false),
         }
     }
     pub(super) fn enqueue(&self, task: Arc<Task>) -> bool {
         let _commit = crate::basis::commit();
         let mut inner = self.inner.lock();
-        let notify = inner.ready.is_empty();
+        let notify = inner.ready.is_empty() || task.realtime();
         inner.ready.enqueue(task, clock::now().as_ticks());
         notify
     }
@@ -79,7 +85,7 @@ impl Slot {
                 return Some(task);
             }
         }
-        if !inner.ready.is_empty() {
+        if inner.ready.ordinary() || inner.ready.priority(clock::now().as_ticks()) != 0 {
             crate::basis::room::deadline::retry();
         }
         None
@@ -104,6 +110,7 @@ impl Slot {
             !task.stopped() && !task.ident.team.paused(),
             "stopped Task admission"
         );
+        task.schedule.lock().enter(clock::now().as_ticks());
         task.transform_checked(TaskState::running(self.hart, QUANTUM_TICKS));
         let pa = task.ident.frame_pa.as_usize();
         unsafe {
@@ -117,12 +124,13 @@ impl Slot {
         }
         self.identity.enter(&task.ident);
         inner.running = Some(task);
-        deadline::arm(inner.ready.deadline(clock::now().as_ticks()));
+        deadline::arm(Self::ceiling(inner, clock::now().as_ticks()));
         pa
     }
     fn leave(&self, inner: &mut Inner, _commit: &CommitGuard) -> Arc<Task> {
         let task = inner.running.take().expect("no running Task");
         assert_eq!(task.on_hart(), Some(self.hart), "execution owner mismatch");
+        task.schedule.lock().leave(clock::now().as_ticks());
         self.identity.leave(&task.ident);
         task
     }
@@ -144,6 +152,7 @@ impl Slot {
     ) -> (Arc<Task>, Option<usize>) {
         let mut inner = self.inner.lock();
         let task = self.leave(&mut inner, commit);
+        let exiting = matches!(departure, Departure::Exit { .. });
         match departure {
             Departure::Wait { key, ticket, call } => task.block(key, ticket, call),
             Departure::Exit { reason } => {
@@ -152,24 +161,38 @@ impl Slot {
                 state.doom(None, cause, reason);
             }
         }
-        let next =
-            Self::select(&mut inner, self.hart).map(|next| self.enter(&mut inner, next, commit));
+        let next = if exiting {
+            None
+        } else {
+            Self::select(&mut inner, self.hart).map(|next| self.enter(&mut inner, next, commit))
+        };
         (task, next)
     }
     pub(crate) fn running_task(&self) -> Option<Arc<Task>> {
         self.inner.lock().running.as_ref().map(Arc::clone)
     }
     fn step(&self, cause: Cause, commit: &CommitGuard) -> Option<usize> {
+        self.awaken();
+        self.relocate();
         let mut inner = self.inner.lock();
         let cur = inner.running.as_ref()?;
         let now = clock::now().as_ticks();
-        let ceiling = inner.ready.deadline(now);
+        cur.schedule.lock().charge(now);
+        let ceiling = Self::ceiling(&inner, now);
+        let (priority, budget) = {
+            let mut schedule = cur.schedule.lock();
+            (schedule.priority(), schedule.available(now))
+        };
         let choice = Turn {
             stopped: cur.stopped() || cur.ident.team.paused(),
             ready: !inner.ready.is_empty(),
             remaining: cur.ticks_left(),
             now,
             ceiling,
+            priority,
+            ready_priority: inner.ready.priority(now),
+            eligible: cur.can_run_on(self.hart),
+            budget,
         }
         .decide(cause);
         match choice {
@@ -188,11 +211,102 @@ impl Slot {
                     Task::park(cur);
                 } else {
                     cur.transform_checked(TaskState::ready());
+                    if !cur.can_run_on(self.hart) {
+                        let next = Self::select(&mut inner, self.hart)
+                            .map(|next| self.enter(&mut inner, next, commit));
+                        drop(inner);
+                        super::insert(cur);
+                        return next;
+                    }
                     inner.ready.enqueue(cur, now);
                 }
                 Self::select(&mut inner, self.hart).map(|next| self.enter(&mut inner, next, commit))
             }
         }
+    }
+    fn ceiling(inner: &Inner, now: u64) -> u64 {
+        let priority = inner
+            .running
+            .as_ref()
+            .map_or(0, |task| task.schedule.lock().priority());
+        let mut at = inner.ready.deadline(now, priority);
+        if let Some(task) = &inner.running {
+            at = at.min(task.schedule.lock().deadline(now));
+        }
+        inner.pending.visit(
+            crate::basis::unit::task::schedule::account::MAX_TASKS,
+            |task| {
+                if let Some(wait) = task.state.lock().local_wait() {
+                    if let Some(deadline) = wait.deadline(core::time::Duration::MAX) {
+                        at = at.min(deadline);
+                    }
+                }
+            },
+        );
+        at
+    }
+    pub(crate) fn deadline(&self, now: u64) -> u64 {
+        Self::ceiling(&self.inner.lock(), now)
+    }
+    pub(super) fn relocate(&self) {
+        if !super::isolated(self.hart) {
+            return;
+        }
+        for _ in 0..4 {
+            let task = self.inner.lock().ready.relocate();
+            let Some(task) = task else { break };
+            super::insert(task);
+        }
+        if self.inner.lock().ready.ordinary() {
+            deadline::retry();
+        }
+    }
+    pub(super) fn awaken(&self) {
+        let now = clock::now().as_ticks();
+        let count = self.inner.lock().pending.len();
+        for _ in 0..count {
+            let task = self.inner.lock().pending.dequeue().expect("local waiter");
+            let wait = task.state.lock().local_wait().expect("local continuation");
+            if wait.complete_local(&task, now) {
+                task.take_wait();
+                if Task::rise(&task) {
+                    self.inner.lock().ready.enqueue(task, now);
+                }
+            } else {
+                self.inner.lock().pending.enqueue(task);
+            }
+        }
+    }
+    pub(crate) fn await_local(
+        &self,
+        key: WakeKey,
+        wait: WaitCall,
+        commit: &CommitGuard,
+    ) -> Option<usize> {
+        let (task, next) = self.handoff(
+            Departure::Wait {
+                key,
+                ticket: Ticket::LOCAL,
+                call: Some(wait),
+            },
+            commit,
+        );
+        self.inner.lock().pending.enqueue(task);
+        deadline::arm(self.deadline(clock::now().as_ticks()));
+        next
+    }
+    pub(crate) fn detach_local(&self, task: &Arc<Task>) -> bool {
+        self.inner.lock().pending.remove(task).is_some()
+    }
+    pub(crate) fn check(&self) -> usize {
+        let commit = crate::basis::commit();
+        if self.running_task().is_some_and(|task| task.doomed()) {
+            drop(commit);
+            return crate::basis::unit::lifecycle::quit();
+        }
+        let next = self.step(Cause::Check, &commit);
+        drop(commit);
+        next.unwrap_or_else(super::idle::fetch)
     }
     pub(super) fn advance(&self, commit: &CommitGuard) -> Option<usize> {
         self.step(Cause::Tick, commit)

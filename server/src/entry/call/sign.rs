@@ -26,6 +26,29 @@ use kernel_api::model::wait::Wait;
 pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskIdent>) -> Outcome {
     drop(ident);
     match call {
+        SignCall::Assign {
+            token,
+            server,
+            grant,
+        } => {
+            let result = with_group(token, SignRights::ROUTE, |actor, endpoint| {
+                let server = find(server)
+                    .and_then(|server| server.upgrade())
+                    .ok_or(SignFail::Denied)?;
+                endpoint::service::assign(actor, endpoint, token, &server, grant)
+            });
+            answer(frame, result.map(|()| 0));
+        }
+        SignCall::Resign { token } => {
+            answer(
+                frame,
+                with_group(token, SignRights::ROUTE, |_, group| {
+                    endpoint::service::resign(group);
+                    Ok(0)
+                }),
+            );
+        }
+        SignCall::Await { token, wait } => return await_group(frame, token, wait, true),
         SignCall::Create { license } => answer(frame, create(license)),
         SignCall::Delete { token } => answer(
             frame,
@@ -50,11 +73,17 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: SignCall, ident: Arc<TaskI
             });
             answer(frame, result.map(|()| 0));
         }
-        SignCall::Listen { token, wait } => return await_group(frame, token, wait),
+        SignCall::Listen { token, wait } => return await_group(frame, token, wait, false),
         SignCall::Trigger { token } => answer(
             frame,
-            with_group(token, SignRights::TRIGGER, |_, endpoint| {
-                endpoint::trigger(endpoint)
+            with_group(token, SignRights::TRIGGER, |actor, endpoint| {
+                if actor.realtime() {
+                    endpoint::publish(endpoint)?;
+                    endpoint::delivery::enqueue(endpoint);
+                    Ok(())
+                } else {
+                    endpoint::trigger(endpoint)
+                }
             })
             .map(|()| 0),
         ),
@@ -112,6 +141,10 @@ fn with_group<T>(
     if !pend::live(&task) {
         return Err(SignFail::Dead);
     }
+    #[cfg(debug_assertions)]
+    let _resident = task
+        .realtime()
+        .then(crate::metal::allocator::NoAllocation::enter);
     let endpoint = endpoint::authorized(&task, token, need)?;
     if !endpoint.alive() {
         return Err(SignFail::Dead);
@@ -128,9 +161,16 @@ fn attach(
     })
 }
 
-fn await_group(frame: &mut TrapContext, token: PendId, millis: Wait) -> Outcome {
+fn await_group(frame: &mut TrapContext, token: PendId, millis: Wait, service: bool) -> Outcome {
     let result = with_group(token, SignRights::LISTEN, |task, group| {
-        Ok(AwaitWait::new(group.clone(), token, task, millis))
+        let mut wait = AwaitWait::new(group.clone(), token, task, millis);
+        if service {
+            if !task.realtime() {
+                return Err(SignFail::Denied);
+            }
+            wait.service = Some(endpoint::service::binding(group)?);
+        }
+        Ok(wait)
     })
     .and_then(crate::basis::sign::endpoint::wait::wait);
     match result {

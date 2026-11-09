@@ -17,6 +17,12 @@ pub(crate) struct Capability {
     pub vector: Option<Shape>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PreparationError {
+    Unsupported,
+    OutOfMemory,
+}
+
 #[derive(Default)]
 pub(crate) struct ExtendedContext {
     float: Option<Box<Float>>,
@@ -37,6 +43,40 @@ impl ExtendedContext {
                 .vector
                 .as_ref()
                 .is_none_or(|image| Some(image.shape()) == target.vector)
+    }
+
+    /// Prepare every declared image while the Task is stopped. No first-use
+    /// allocation is permitted after real-time admission.
+    pub(crate) fn prepare(&mut self, caps: Capability, flags: u64) -> Result<(), PreparationError> {
+        if flags & !3 != 0
+            || flags != 0 && !caps.float
+            || flags & 2 != 0 && caps.vector.is_none()
+            || self.float.is_some() && flags == 0
+            || self.vector.is_some() && flags & 2 == 0
+            || !self.compatible(caps)
+        {
+            return Err(PreparationError::Unsupported);
+        }
+        let float = if flags != 0 && self.float.is_none() {
+            Some(Box::try_new(Float::zero()).map_err(|_| PreparationError::OutOfMemory)?)
+        } else {
+            None
+        };
+        let vector = if flags & 2 != 0 && self.vector.is_none() {
+            Some(
+                vector::Vector::new(caps.vector.ok_or(PreparationError::Unsupported)?)
+                    .map_err(|_| PreparationError::OutOfMemory)?,
+            )
+        } else {
+            None
+        };
+        if let Some(image) = float {
+            self.float = Some(image);
+        }
+        if let Some(image) = vector {
+            self.vector = Some(image);
+        }
+        Ok(())
     }
 
     /// Commit only after allocation succeeds; failure leaves an unused context.

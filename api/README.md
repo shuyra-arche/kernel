@@ -99,8 +99,8 @@ capsules are rejected before launch. The resource ledger is version 7.
 | Pend | Accord, Revoke, Narrow, Return, Inspect, Collect |
 | Clone View | Create, Delete, Push, Pull, Peek |
 | Share View | Create, Delete, Open, Shut |
-| Sign | Create, Delete, Listen, Trigger, Consume, Attach, Detach |
-| Unit | Create, Delete, Resume, Freeze, Stop, Exit, Finish, Inspect, Accord, Revoke, Return |
+| Sign | Create, Delete, Listen, Trigger, Consume, Attach, Detach, Assign, Resign, Await |
+| Unit | Create, Delete, Resume, Freeze, Stop, Exit, Finish, Inspect, Accord, Revoke, Return, Admit, Evict, Profile |
 | Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo |
 | Debug | Put, Get |
 
@@ -496,3 +496,34 @@ rebuild against the new source contract. Publish Kernel first, then migrate and
 pin Vanllia `platform/riscv` and `tests/platform/qemu` together. The Host
 second-provider fixture validates common physical inputs without manufacturing
 RISC-V facts; CPU/controller admission for another ISA awaits an actual provider.
+
+
+## Optional CPU reservations and explicit service waits
+
+Unit slots 11/12/13 are `Admit(task, schedule)`, `Evict(task)` and
+`Profile(task, out)`. Schedule is seven little-endian u64 words: Hart slot,
+base priority, inheritance ceiling, budget ns, period ns, latency assumption ns,
+and extension flags (bit 0 F/D; bit 1 V including F/D). ScheduleInfo appends six
+u64 words: effective priority, remaining ns, next replenishment uptime ns,
+consumed ns, overruns ns and conditional response ns (104 bytes total).
+
+Sign slots 10/11/12 are `Assign(token, server, grant)`, `Resign(token)` and
+`Await(token, wait)`. Slots 7–9 remain retired. Await has the same Wait and
+three-register reply encoding as Listen, with an explicit live server dependency.
+The new operations are additive to ABI v5; existing slots/layouts are unchanged.
+
+Admit requires Build and Task management authority and a stopped User Task;
+Evict requires the same authority and an initially dormant Task; Profile requires
+management authority. Assign requires ROUTE plus control of the admitted server
+and its live Trigger grant to the same direct endpoint. Await uses LISTEN and
+requires caller/server reservations on the same Hart. Invalid identity, policy,
+cycle/depth or ceiling escalation is Denied; unschedulable admission is Busy;
+metadata/extension allocation failure is OutOfMemory. Rebinding invalidates old
+waits; server death is Dead and revoked authority is Denied.
+
+The [execution contract](../server/tests/realtime/README.md) specifies all ranges,
+resource preparation, allowed operations, separate server budgets, accounting,
+response analysis assumptions and reproducible validation. In particular,
+Profile.response covers conditional runnable CPU service, not arbitrary external
+service completion. Unit Exit from this class retains result/reason but ignores
+the diagnostic note; safe physical reclamation remains asynchronous.

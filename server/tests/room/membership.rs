@@ -29,6 +29,24 @@ fn detached(task: &Task) -> bool {
 }
 
 #[test]
+fn bounded_visit_preserves_membership_and_queue_order() {
+    let mut chain = Chain::new();
+    for id in 0..5 {
+        chain.enqueue(task(id));
+    }
+    let mut seen = Vec::new();
+    chain.visit(3, |task| {
+        assert!(!detached(task));
+        seen.push(task.id);
+    });
+    assert_eq!(seen, [0, 1, 2]);
+    assert_eq!(chain.len(), 5);
+    for id in 0..5 {
+        assert_eq!(chain.dequeue().unwrap().id, id);
+    }
+}
+
+#[test]
 fn singleton_and_tail_cannot_enter_a_second_queue() {
     let a = task(1);
     let b = task(2);

@@ -2,7 +2,7 @@ use kernel_api::{
     abi::reply::SignReply,
     address::VirtAddr,
     model::{
-        identity::TaskId,
+        identity::{PendId, TaskId},
         sign::SignSource,
         unit::{UnitCreate, UnitInfo, UnitQuery, UnitState, UnitTarget},
         wait::Wait,
@@ -47,7 +47,7 @@ pub(super) fn wait_task(id: TaskId) -> bool {
     );
     sign::detach(token, source).unwrap();
     sign::delete(token).unwrap();
-    pend::return_(token).unwrap();
+    return_pend(token);
     inspect(UnitQuery::Target(UnitTarget::Task(id))).state == UnitState::Exited
 }
 pub(super) fn result(id: TaskId) -> (usize, usize) {
@@ -73,4 +73,19 @@ pub(super) fn delete(id: TaskId) {
         )
         .is_err()
     );
+}
+
+/// Return keeps its identity across contention and asynchronous retirement.
+pub(super) fn return_pend(token: PendId) {
+    let deadline = room::clock() + 5_000_000_000;
+    loop {
+        match pend::return_(token) {
+            Ok(()) => break,
+            Err(error) => {
+                assert_eq!(error.source, kernel_api::abi::call::pend::PendFail::Busy);
+                assert!(room::clock() < deadline, "Pend retirement stalled");
+                room::yield_();
+            }
+        }
+    }
 }

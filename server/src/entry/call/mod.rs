@@ -43,6 +43,44 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
             return Some(frame as *mut TrapContext);
         }
     };
+    if crate::basis::room::scheduler::slot::current()
+        .running_task()
+        .is_some_and(|task| task.realtime())
+    {
+        use kernel_api::abi::call::{room::RoomCall, sign::SignCall, unit::UnitCall};
+        let allowed = matches!(
+            envcall,
+            EnvCall::Room(
+                RoomCall::Yield
+                    | RoomCall::Clock
+                    | RoomCall::ClockInfo
+                    | RoomCall::SleepUntil { .. }
+            ) | EnvCall::Sign(
+                SignCall::Listen { .. }
+                    | SignCall::Await { .. }
+                    | SignCall::Trigger { .. }
+                    | SignCall::Consume { .. }
+            ) | EnvCall::Unit(UnitCall::Exit { .. })
+        );
+        if !allowed {
+            use kernel_api::abi::call as abi;
+            // Fail in the operation's own domain before any domain effect.
+            match envcall {
+                EnvCall::Room(_) => ret_err(frame, abi::room::RoomFail::Denied),
+                EnvCall::Unit(_) => ret_err(frame, abi::unit::UnitFail::Denied),
+                EnvCall::Cell(_) => ret_err(frame, abi::cell::CellFail::Denied),
+                EnvCall::Flat(_) => ret_err(frame, abi::flat::FlatFail::Denied),
+                EnvCall::Clone(_) => ret_err(frame, abi::clone_view::CloneFail::Denied),
+                EnvCall::Share(_) => ret_err(frame, abi::share_view::ShareFail::Denied),
+                EnvCall::Sign(_) => ret_err(frame, abi::sign::SignFail::Denied),
+                EnvCall::Pend(_) => ret_err(frame, abi::pend::PendFail::Denied),
+                EnvCall::Port(_) => ret_err(frame, abi::port::PortFail::Denied),
+                EnvCall::Nest(_) => ret_err(frame, abi::nest::NestFail::Denied),
+                EnvCall::Debug(_) => ret_err(frame, abi::debug::DebugFail::Denied),
+            }
+            return Some(frame as *mut TrapContext);
+        }
+    }
     let outcome = match envcall {
         EnvCall::Room(call) => room::dispatch(frame, call, ident),
         EnvCall::Unit(call) => unit::dispatch(frame, call, ident),

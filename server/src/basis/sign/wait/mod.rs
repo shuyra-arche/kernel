@@ -126,6 +126,7 @@ where
 }
 
 pub(crate) fn wipe(key: WakeKey) -> usize {
+    crate::basis::room::scheduler::contract::notify();
     let _commit = crate::basis::commit();
     let chain = {
         let mut sites = sites(key).lock();
@@ -142,6 +143,7 @@ pub(crate) fn wipe(key: WakeKey) -> usize {
 }
 
 pub(crate) fn knock(key: WakeKey, life: &Weak<Anchor>) -> usize {
+    crate::basis::room::scheduler::contract::notify();
     let _commit = crate::basis::commit();
     let mut fwd = Fwd::empty();
     let chain = {
@@ -193,6 +195,7 @@ pub(crate) fn unforward(key: WakeKey, endpoint: usize) {
 }
 
 pub(crate) fn signal(key: WakeKey) -> usize {
+    crate::basis::room::scheduler::contract::notify();
     let _commit = crate::basis::commit();
     let Some(shard) = site::existing(key) else {
         return 0;
@@ -218,6 +221,7 @@ pub(crate) fn signal(key: WakeKey) -> usize {
 /// allocating a Site. Forwarding observes direct state and has at most eight
 /// destinations; Sign keys do not recursively forward their route graph.
 pub(crate) fn signal_batch(key: WakeKey) -> bool {
+    crate::basis::room::scheduler::contract::notify();
     let _commit = crate::basis::commit();
     let fwd = site::existing(key).and_then(|shard| shard.lock().get(&key).map(|s| s.fwd.clone()));
     let mut more = listeners_batch(key);
@@ -426,6 +430,9 @@ pub(crate) fn detach(task: &Arc<Task>) -> bool {
     let Some((key, ticket)) = task.state.lock().waiting_on() else {
         return false;
     };
+    if ticket == Ticket::LOCAL {
+        return crate::basis::room::scheduler::detach_local(task);
+    }
     let Some(shard) = site::existing(key) else {
         return false;
     };

@@ -109,6 +109,18 @@ impl Chain {
     pub(crate) fn len(&self) -> usize {
         self.len
     }
+    /// The owning container remains borrowed throughout this bounded traversal.
+    pub(crate) fn visit(&self, limit: usize, mut visit: impl FnMut(&Arc<Task>)) {
+        let mut next = self.head.clone();
+        for _ in 0..limit {
+            let Some(task) = next else { break };
+            next = match task.state.lock().link() {
+                Link::Attached { owner, next, .. } if *owner == self.identity => next.clone(),
+                _ => panic!("foreign chain member"),
+            };
+            visit(&task);
+        }
+    }
 }
 impl Drop for Chain {
     fn drop(&mut self) {

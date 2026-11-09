@@ -67,5 +67,6 @@ mod membership;
 use membership::Task;
 #[path = "../../src/basis/unit/task/chain.rs"]
 mod chain;
+mod reservation;
 mod scheduling;
 mod shutdown;

@@ -20,4 +20,7 @@ typed_calls! {
     fallible fn accord(authority: ControlId, target: TaskId, delegable: bool) -> Result<ControlId, erra::Error<UnitFail>> = op::Accord { authority, target, delegable };
     fallible fn revoke(authority: ControlId, target: TaskId, branch: ControlId) -> Result<(), erra::Error<UnitFail>> = op::Revoke { authority, target, branch };
     fallible fn return_(authority: ControlId) -> Result<(), erra::Error<UnitFail>> = op::Return { authority };
+    fallible fn admit(task: TaskId, schedule: VirtAddr) -> Result<(), erra::Error<UnitFail>> = op::Admit { task, schedule };
+    fallible fn evict(task: TaskId) -> Result<(), erra::Error<UnitFail>> = op::Evict { task };
+    fallible fn profile(task: TaskId, out: VirtAddr) -> Result<(), erra::Error<UnitFail>> = op::Profile { task, out };
 }

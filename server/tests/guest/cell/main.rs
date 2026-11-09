@@ -10,6 +10,8 @@ mod license;
 mod lifecycle;
 mod organization;
 mod pend;
+#[cfg(feature = "realtime")]
+mod realtime;
 mod room;
 mod sign;
 use core::fmt::Write;
@@ -169,6 +171,8 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     #[cfg(feature = "irq")]
     interrupt::run(args, count);
     license::run();
+    #[cfg(feature = "realtime")]
+    realtime::run();
     let _ = writeln!(Console, "START cell-kernel");
     let a = allocate(2);
     let b = allocate(2);

@@ -1,4 +1,5 @@
 //! Scheduling coordination, placement and complete per-Hart dispatch.
+pub(crate) mod contract;
 pub(crate) mod idle;
 pub(crate) mod slot;
 
@@ -55,6 +56,17 @@ pub(crate) fn installed() -> bool {
 
 fn schedulers() -> &'static [Slot] {
     SCHEDULERS.get().expect("schedulers not initialized")
+}
+pub(crate) fn isolated(hart: HartId) -> bool {
+    SCHEDULERS
+        .get()
+        .is_some_and(|all| all[hart.get()].isolated.load(Ordering::Acquire))
+}
+pub(crate) fn detach_local(task: &Arc<Task>) -> bool {
+    let Some(contract) = task.schedule.lock().contract() else {
+        return false;
+    };
+    schedulers()[contract.spec.hart as usize].detach_local(task)
 }
 
 /// 把一枚就绪任务放到挑中的那颗核上。
@@ -146,7 +158,10 @@ pub(crate) fn kick_stats() -> (usize, usize) {
 
 pub(crate) fn run() -> usize {
     crate::metal::stop::hush();
-    crate::basis::unit::lifecycle::bury();
+    crate::basis::sign::endpoint::delivery::advance();
+    if !isolated(hart::hart_id()) {
+        crate::basis::unit::lifecycle::bury();
+    }
     let commit = crate::basis::commit();
     if let Some(route) = super::interrupt::external() {
         route.retry(&commit);
@@ -173,6 +188,8 @@ fn dispatch(allow_steal: bool) -> Option<usize> {
         route.retry(&_commit);
     }
     let s = slot::current();
+    s.awaken();
+    s.relocate();
     let task = s
         .dequeue(&_commit)
         .or_else(|| if allow_steal { steal(&_commit) } else { None });

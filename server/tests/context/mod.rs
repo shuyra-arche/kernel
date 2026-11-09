@@ -154,3 +154,47 @@ fn vector_csr_access_and_absent_hardware_keep_fault_boundaries() {
 }
 
 mod allocation;
+
+#[test]
+fn reservation_prepares_declared_images_and_cannot_omit_existing_state() {
+    use extension::{PreparationError, Shape};
+    let caps = Capability {
+        float: true,
+        vector: Shape::checked(32, 15),
+    };
+    let mut state = ExtendedContext::new();
+    assert_eq!(state.prepare(caps, 2), Ok(())); // V also prepares F/D
+    assert!(!state.compatible(Capability {
+        float: false,
+        vector: caps.vector
+    }));
+    assert_eq!(state.prepare(caps, 0), Err(PreparationError::Unsupported));
+    assert_eq!(state.prepare(caps, 1), Err(PreparationError::Unsupported));
+    assert_eq!(
+        state.prepare(
+            Capability {
+                float: true,
+                vector: Shape::checked(16, 15)
+            },
+            2
+        ),
+        Err(PreparationError::Unsupported)
+    );
+    assert!(state.compatible(caps));
+    assert_eq!(state.prepare(caps, 3), Ok(()));
+    let mut empty = ExtendedContext::new();
+    assert_eq!(
+        empty.prepare(
+            Capability {
+                float: false,
+                vector: None
+            },
+            1
+        ),
+        Err(PreparationError::Unsupported)
+    );
+    assert!(empty.compatible(Capability {
+        float: false,
+        vector: None
+    }));
+}

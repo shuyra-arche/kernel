@@ -1,4 +1,6 @@
+pub(crate) mod delivery;
 mod route;
+pub(crate) mod service;
 mod state;
 pub(crate) mod wait;
 use crate::basis::sign;
@@ -31,6 +33,8 @@ pub struct Endpoint {
     routes: SpinLock<Vec<Route>>,
     owner: TaskId,
     cursor: AtomicUsize,
+    service: SpinLock<Option<Arc<service::Binding>>>,
+    delivery: SpinLock<delivery::Delivery>,
 }
 fn key(meta: &Endpoint) -> WakeKey {
     WakeKey::Sign { id: meta.id }
@@ -56,6 +60,8 @@ impl Endpoint {
             routes: SpinLock::new_level(Level::L3, Vec::new()),
             owner,
             cursor: AtomicUsize::new(0),
+            service: SpinLock::new(None),
+            delivery: SpinLock::new(delivery::Delivery::Idle),
         })
         .map_err(|_| crate::basis::nest::NestError::OutOfMemory)
     }
@@ -71,6 +77,9 @@ impl Endpoint {
     }
     pub(crate) fn ready(&self) -> bool {
         self.state.lock().ready()
+    }
+    pub(crate) fn direct(&self) -> bool {
+        self.routes.lock().is_empty()
     }
     pub(crate) fn poll(&self, task: &Arc<Task>) -> Result<SignReply, SignFail> {
         if !self.alive() {
@@ -107,6 +116,9 @@ pub(crate) fn attach(meta: &Endpoint, route: Route) -> Result<(), SignFail> {
     let _commit = crate::basis::commit();
     if !meta.alive() {
         return Err(SignFail::Dead);
+    }
+    if meta.service.lock().is_some() {
+        return Err(SignFail::Denied);
     }
     let mut shared = [false; 4];
     {
@@ -175,6 +187,7 @@ pub(crate) fn seal(meta: &Endpoint) {
     clear(meta);
 }
 fn clear(meta: &Endpoint) {
+    meta.service.lock().take();
     let mut state = meta.state.lock();
     *state = state.transition(Event::Close).expect("close is idempotent");
     drop(state);

@@ -120,6 +120,7 @@ impl PreparedTask {
                     heir: SpinLock::new(Vec::new()),
                     controls: super::super::controls::Controls::new(),
                     retirement: SpinLock::new(super::super::retirement::Retirement::new()),
+                    schedule: SpinLock::new(super::super::schedule::Schedule::new()),
                     extensions: SpinLock::new(
                         crate::metal::switcher::context::extension::ExtendedContext::new(),
                     ),

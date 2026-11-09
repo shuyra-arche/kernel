@@ -24,6 +24,7 @@ pub(crate) struct AwaitWait {
     pub token: PendId,
     pub actor: Weak<Task>,
     pub deadline: Option<u64>,
+    pub service: Option<Arc<super::service::Binding>>,
 }
 
 fn inspect_key(actor: &Arc<Task>, token: PendId) -> WakeKey {
@@ -45,11 +46,19 @@ impl AwaitWait {
             token,
             actor: Arc::downgrade(actor),
             deadline: crate::metal::clock::deadline(wait),
+            service: None,
         }
     }
 
     pub fn watch(&self) -> Result<(), SignFail> {
         let actor = self.actor.upgrade().ok_or(SignFail::Denied)?;
+        if let Some(binding) = &self.service {
+            let server = super::service::valid(&self.group, binding)?;
+            crate::basis::room::scheduler::contract::depend(&actor, Some(&server))?;
+        }
+        if actor.realtime() {
+            return self.group.direct().then_some(()).ok_or(SignFail::Denied);
+        }
         sign::forward(
             inspect_key(&actor, self.token),
             actor.life(),
@@ -61,6 +70,12 @@ impl AwaitWait {
 
     pub fn unwatch(&self) {
         if let Some(actor) = self.actor.upgrade() {
+            if self.service.is_some() {
+                let _ = crate::basis::room::scheduler::contract::depend(&actor, None);
+            }
+            if actor.realtime() {
+                return;
+            }
             sign::unforward(inspect_key(&actor, self.token), self.group.id);
         }
     }
@@ -75,6 +90,12 @@ impl AwaitWait {
 
     pub fn poll(&self) -> Result<SignReply, SignFail> {
         let actor = self.actor.upgrade().ok_or(SignFail::Denied)?;
+        if actor.realtime() && !self.group.direct() {
+            return Err(SignFail::Denied);
+        }
+        if let Some(binding) = &self.service {
+            super::service::valid(&self.group, binding)?;
+        }
         let endpoint = super::authorized(&actor, self.token, SignRights::LISTEN)?;
         if !Arc::ptr_eq(&endpoint, &self.group) {
             return Err(SignFail::Denied);
@@ -129,7 +150,10 @@ pub(crate) fn wait(
             wait.unwatch();
             return Ok(Handoff::Resume(reply));
         }
-        wait.watch()?;
+        if let Err(error) = wait.watch() {
+            wait.unwatch();
+            return Err(error);
+        }
         let blocked = match block_with_call::<kernel_api::abi::call::sign::SignFail>(
             wait.key(),
             wait.life(),

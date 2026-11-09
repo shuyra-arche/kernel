@@ -124,17 +124,21 @@ fn wait() -> usize {
         // Clear first, then inspect work and deadlines. An IPI racing this
         // clear is either observed through the queue or stays pending for WFI.
         ipi::acknowledge();
+        crate::basis::sign::endpoint::delivery::advance();
         let redeemed = deadline::elapsed() && sign::redeem();
         // No runnable Task may remain to reenter scheduler::run. Advance the
         // retained husks here too, outside COMMIT and before rearming/WFI.
-        crate::basis::unit::lifecycle::bury();
+        if !super::isolated(me) {
+            crate::basis::unit::lifecycle::bury();
+        }
         if tally::done() {
             leave(me);
             shutdown::finish();
         }
         shutdown::observe(me);
 
-        let external_pending = crate::basis::nest::authority::external::maintain();
+        let external_pending =
+            !super::isolated(me) && crate::basis::nest::authority::external::maintain();
         let fallback = if shutdown::active() || external_pending {
             crate::metal::clock::now()
                 .as_ticks()
@@ -142,7 +146,9 @@ fn wait() -> usize {
         } else {
             crate::metal::generic::clock::DISARMED
         };
-        deadline::arm(fallback);
+        deadline::arm(
+            fallback.min(super::slot::current().deadline(crate::metal::clock::now().as_ticks())),
+        );
         interrupt::enable_external();
         if interrupt::external_pending()
             && !crate::basis::room::interrupt::external().is_some_and(|route| route.handle())

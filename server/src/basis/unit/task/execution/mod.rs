@@ -13,7 +13,7 @@ use crate::metal::hart::HartId;
 pub(crate) use continuation::{Resumption, WaitCall};
 
 /// 任务状态机的轴：任一时刻只在一根轴上。`link` 是入链载荷，只挂在就绪 / 等待 /
-/// 躯壳三种轴上（饥饿链、等待链、躯壳链共用同一个槽）。
+/// 离核终止 / 躯壳轴上（饥饿链、等待链、躯壳链共用同一个槽）。
 pub enum TaskAxis {
     OnHart {
         hart: HartId,
@@ -32,6 +32,7 @@ pub enum TaskAxis {
     Parked,
     Doomed {
         hart: Option<HartId>,
+        link: Link,
         cause: TaskExitCause,
         reason: usize,
     },
@@ -43,13 +44,16 @@ pub enum TaskAxis {
 }
 
 impl TaskAxis {
-    /// 入链载荷槽：链只穿就绪 / 等待 / 躯壳三种轴，其余轴没有槽。
+    /// 入链载荷槽：链只穿就绪 / 等待 / 离核终止 / 躯壳轴，其余轴没有槽。
     pub(crate) fn chain(&mut self) -> &mut Link {
         match self {
             TaskAxis::Ready { link }
             | TaskAxis::Waiting { link, .. }
-            | TaskAxis::Reaped { link, .. } => link,
-            other => unreachable!("链只穿就绪/等待/躯壳任务，实为 {other:?}"),
+            | TaskAxis::Reaped { link, .. }
+            | TaskAxis::Doomed {
+                hart: None, link, ..
+            } => link,
+            other => unreachable!("链只穿就绪/等待/离核终止/躯壳任务，实为 {other:?}"),
         }
     }
 
@@ -58,7 +62,8 @@ impl TaskAxis {
         match self {
             TaskAxis::Ready { link }
             | TaskAxis::Waiting { link, .. }
-            | TaskAxis::Reaped { link, .. } => link.detached(),
+            | TaskAxis::Reaped { link, .. }
+            | TaskAxis::Doomed { link, .. } => link.detached(),
             _ => true,
         }
     }
@@ -86,6 +91,7 @@ impl fmt::Debug for TaskAxis {
                 hart,
                 cause,
                 reason,
+                ..
             } => write!(
                 f,
                 "Doomed {{ hart: {}, cause: {cause:?}, reason: {reason:#x} }}",
@@ -255,6 +261,7 @@ impl TaskState {
         }
         self.set_axis(TaskAxis::Doomed {
             hart,
+            link: Link::Detached,
             cause,
             reason,
         });
@@ -371,6 +378,12 @@ impl TaskState {
     pub(crate) fn take_wait(&mut self) -> Option<WaitCall> {
         match &mut self.axis {
             TaskAxis::Waiting { wait, .. } => wait.take(),
+            _ => None,
+        }
+    }
+    pub(crate) fn local_wait(&self) -> Option<WaitCall> {
+        match &self.axis {
+            TaskAxis::Waiting { wait, .. } => wait.clone(),
             _ => None,
         }
     }
