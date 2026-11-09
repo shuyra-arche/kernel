@@ -380,7 +380,7 @@ unsafe impl TranslationTable for TableNode {
         while offset < size {
             let v = va + offset;
             let p = pa + offset;
-            let mut target = 2.min(levels - 1);
+            let mut target = geo.automatic_leaf_level();
             while target > 0
                 && (size - offset < Self::span(target)
                     || (v.as_usize() | p.as_usize()) & (Self::span(target) - 1) != 0)
@@ -417,7 +417,7 @@ unsafe impl TranslationTable for TableNode {
         while offset < size {
             let v = va + offset;
             let p = pa + offset;
-            let mut target = 2.min(levels - 1);
+            let mut target = geo.automatic_leaf_level();
             while target > 0
                 && (size - offset < Self::span(target)
                     || (v.as_usize() | p.as_usize()) & (Self::span(target) - 1) != 0)

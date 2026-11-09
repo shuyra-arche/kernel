@@ -55,6 +55,28 @@ Deployment selection, program catalogs, image packing and service protocols
 belong to the integration owner, not this package. The former deployment
 manifest parser and packer have been removed.
 
+## Memory geometry: three distinct units
+
+The current public contracts use **4 KiB as their base coordinate**,
+not as a universal physical allocation or page-table leaf size.
+
+| Concept | Current representation | Contract |
+| --- | --- | --- |
+| ABI base page | `address::BASE_PAGE_SIZE` / `BASE_PAGE_SHIFT` (aliases `PAGE_SIZE` / `PAGE_SHIFT`) | `PageCount`, `PageIndex`, `PageOffset`, `CellPosition.page` and Slot/Memo spans count fixed 4 KiB units |
+| Managed physical storage | One independent 4 KiB Page per holding | An `Allocation` may span noncontiguous Pages; its per-Page alignment does not guarantee a contiguous 2 MiB or 1 GiB physical Cell |
+| Hardware translation leaf | Selected by each MMU/IOMMU backend | RISC-V CPU Sv39 encodes 4 KiB, 2 MiB and 1 GiB leaves; Sv48 adds 512 GiB, Sv57 adds 256 TiB. Automatic coalescing currently stops at 1 GiB. External/IOMMU remains 4 KiB per Memo |
+
+A larger PTE leaf can cover multiple logical positions without merging their
+identities, authorization, freeze or retirement records. CPU leaf changes
+still require splitting and covering TLB completion; external access retains
+independent trusted hardware obligations.
+**Contiguous physical 2 MiB and 1 GiB Cell allocation is not implemented.**
+
+This is source-additive: the existing `PAGE_*` names and wire descriptor
+fields retain their 4 KiB meaning. No ABI version, wire width or encoding
+changes. See [kernel#88](https://github.com/shuyra-arche/kernel/issues/88)
+for the remaining physical-Cell and large-leaf work.
+
 ## Source migration and ABI compatibility
 
 This is a breaking provider redesign of Cell, View, Pend, Sign, Unit and Room.

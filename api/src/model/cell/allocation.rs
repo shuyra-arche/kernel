@@ -2,12 +2,14 @@
 
 use crate::abi::register::{Decode, Wire};
 
-use super::PAGE_SIZE;
+use crate::address::BASE_PAGE_SIZE;
 
-/// 新 RAM 来源：`size` 至少 4 KiB，合法长度向上取整到页；`align` 是每页起址的对齐下界。
+/// 新 RAM 来源：`size` 至少一个 4 KiB ABI 基础单位，合法长度向上取整；
+/// `align` 是每个独立物理 Page 起址的对齐下界。
 ///
-/// 对齐只约束**每页起址**的下界，不表示各页物理连续；不支持的约束在构造时明确拒绝，
-/// 不接受后忽略。
+/// 此请求可以由多个互不连续的 4 KiB Page 满足。即使 `size` 是 2 MiB 或
+/// 1 GiB，它也不表示单个连续物理 Cell，或授予某种 MMU 巨页承诺。
+/// 对齐只约束**每页起址**，不代表各页物理连续；不支持的约束在构造时拒绝。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Allocation {
     pub size: usize,
@@ -27,10 +29,10 @@ impl Allocation {
 
     /// 重新校验公开字段并给出分配长度。可由多个 Page 满足，不承诺物理连续。
     pub fn bytes(self) -> Option<usize> {
-        if self.size < PAGE_SIZE || !self.align.is_power_of_two() {
+        if self.size < BASE_PAGE_SIZE || !self.align.is_power_of_two() {
             return None;
         }
-        self.size.checked_next_multiple_of(PAGE_SIZE)
+        self.size.checked_next_multiple_of(BASE_PAGE_SIZE)
     }
 }
 
