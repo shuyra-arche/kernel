@@ -6,6 +6,23 @@ use sbi::Dbcn;
 use sbi::DbcnCall;
 use sbi::ecall::SArgs;
 
+mod emergency;
+pub type Emergency = emergency::Emergency<fn(u8) -> bool>;
+impl Emergency {
+    pub fn new() -> Self {
+        Self::with(|byte| {
+            DbcnCall::new(Dbcn::ConsoleWriteByte)
+                .args(SArgs {
+                    a0: byte as usize,
+                    ..Default::default()
+                })
+                .call()
+                .is_ok()
+        })
+    }
+}
+mod loss;
+static LOSS: loss::Loss = loss::Loss::new();
 mod line;
 mod logger;
 mod output;
@@ -31,7 +48,7 @@ pub fn write(bytes: &[u8]) -> Option<usize> {
     })
 }
 fn write_text(text: &str) {
-    let _ = write(text.as_bytes());
+    LOSS.record(text.len(), write(text.as_bytes()));
 }
 
 pub fn read(buf: &mut [u8]) -> Option<usize> {
@@ -84,6 +101,10 @@ fn translate_kernel(va: usize, len: usize) -> Option<usize> {
 
 pub fn _write(args: fmt::Arguments) {
     let mut line = Line::new();
+    let lost = LOSS.take();
+    if lost != 0 {
+        let _ = fmt::write(&mut line, format_args!("[kernel] console-lost={lost}\n"));
+    }
     let _ = fmt::write(&mut line, args);
     line.emit();
 }

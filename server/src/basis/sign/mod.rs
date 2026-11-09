@@ -19,6 +19,7 @@ pub(crate) use wait::prune_empty;
 pub(crate) use wait::redeem;
 pub(crate) use wait::requeue;
 pub(crate) use wait::signal;
+pub(crate) use wait::signal_batch;
 pub(crate) use wait::unforward;
 pub(crate) use wait::wait_until;
 pub(crate) use wait::wake;

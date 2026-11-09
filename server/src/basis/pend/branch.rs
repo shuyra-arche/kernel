@@ -124,6 +124,7 @@ pub(crate) fn accord(
         if let Some(meta) = &share_view
             && pend_entry.modifiable() == Modifiable::Yes
         {
+            crate::basis::room::interrupt::withdraw(src);
             meta.close_maps(Some(src))?;
         }
         let _commit = crate::basis::commit();
@@ -136,6 +137,7 @@ pub(crate) fn accord(
         if share_view.is_some() {
             pend_entry.authority().borrow(granted.authority())?;
         }
+        crate::basis::room::interrupt::dispatch(&target, &granted)?;
         insert_heir(caller, src, Arc::downgrade(&target), token);
         registration.publish();
         super::changed(caller);

@@ -22,14 +22,14 @@ use kernel_api::model::identity::TaskId;
 
 pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     let dtb = facts::info().dtb();
-    if let Some(route) = crate::basis::room::interrupt::external() {
-        route.grants(registry)?;
-    }
     for region in admission::description()?.authorities.iter() {
         grant_region(registry, *region)?;
     }
     for region in external::REGIONS.lock().iter() {
         grant_region(registry, *region)?;
+    }
+    if let Some(route) = crate::basis::room::interrupt::external() {
+        route.grants(registry)?;
     }
     for port in crate::basis::port::PORTS.lock().iter() {
         let root = pend::PendEntry::try_new(

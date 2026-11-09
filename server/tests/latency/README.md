@@ -8,8 +8,8 @@ unchanged. QEMU observations are neither WCET bounds nor admission proofs.
 
 | Class | Operations | Required preparation / work parameters | Waiting or exclusion |
 | --- | --- | --- | --- |
-| Candidate for a future bounded path | Clock read; retained Sign poll; hardware source acknowledgement; already-created Task handoff | Resident code/stack/data; fixed admitted Harts H; no first-use extension allocation; one exclusive IRQ listener; fixed routing graph | Poll/ack still enter COMMIT; scheduler searches Harts/ready queues; no current blocking-time bound |
-| Asynchronous completion only | Sign Listen; deadlines; delegated page fault; external Memo retract; Nest close | Precreated resources, explicit deadline and failure policy; source lifetime remains valid | Caller blocks; readiness is distinct from execution; IOMMU completion and safe reclamation are distinct from business/IRQ completion |
+| Candidate for a future bounded path | Clock read; retained Sign poll; Sign consumption receipt; already-created Task handoff | Resident code/stack/data; fixed admitted Harts H; no first-use extension allocation; one exclusive IRQ processor; fixed routing graph | Poll/Consume still enter COMMIT; scheduler searches Harts/ready queues; no current blocking-time bound |
+| Asynchronous completion only | hardware source completion after Consume; Sign Listen; deadlines; delegated page fault; external Memo retract; Nest close | Precreated resources, explicit deadline and failure policy; source lifetime remains valid | Caller blocks; readiness is distinct from execution; IOMMU completion and safe reclamation are distinct from business/IRQ completion |
 | Forbidden synchronously in a future deadline-critical section | Allocation/Cell reshape; Task/Team creation; arbitrary Clone copy; arbitrary Pend subtree revoke; Unit teardown; bulk routing/cleanup; debug output; firmware reset | Perform before admission or after leaving the critical path; no implicit fallback from a prepared operation | Allocator search/zeroing, graph traversal, firmware calls, remote TLB/IOMMU progress and reclamation have unproved/unbounded duration |
 
 The first row is an analysis candidate, not an exported RT service class. Blocking
@@ -30,8 +30,11 @@ is bounded. Sign notification coalesces work; it is not a device completion coun
    and space/task cleanup scans sites S. The timer batch is at most 64 tickets,
    but each ticket may search W and launch through H schedulers. Bound one batch
    and retain a continuation before splitting the commit region. Hardware IRQs
-   have one bound waiter, no forwarding, at most 64 sources and four claims per
-   entry; the shared commit lock and scheduler still defeat a latency proof.
+   have one processing branch, at most 64 sources and four claims per entry.
+   Retained publication is separate from deferred notification: each key wakes
+   at most four waiters and has at most eight forwarding destinations per batch,
+   with continuation retained. Callback cost, repeated batches, the shared commit
+   lock and scheduler still defeat a latency proof.
 3. **Scheduler** (`basis/room/conductor/`, `scheduler/`): admission, steal and
    compatible-Hart selection depend on H and queued Tasks Q; extended-state
    save/restore depends on F/D/V state and VLEN. There is no priority, affinity or
@@ -71,7 +74,7 @@ Count and exact observed maximum accompany each histogram. Counters wrap after
 | kernel-active | Rust trap entry to return preparation, split around WFI; includes contention and nested operations, excludes idle waiting and assembly |
 | spin-wait / spin-hold | After IRQ mask to successful acquire (including debug lockdep), and guard construction to drop before unlock; failed try_lock is not a successful sample |
 | commit-wait / commit-hold | RelLock acquisition/guard scopes (COMMIT is its only current instance); nested scopes are included separately, so sums are not CPU utilization |
-| irq-sign | External router entry before COMMIT acquisition to retained driver Sign publication/wakeup; excludes device-to-CPU and earlier trap prologue; reserved IOMMU queues are not driver Sign samples |
+| irq-sign | External router entry before COMMIT acquisition to successful retained driver Sign publication; excludes deferred waiter wakeup, device-to-CPU and earlier trap prologue; reserved IOMMU queues and unpublished/cancelled delivery are not samples |
 | ready-run | First ready-queue publication through the final Rust user-return boundary after extension restore and ASID occupancy; preserved across queue transfer/steal, cleared when parked; excludes only the final assembly return |
 | timer-late | Deadline drain observation minus requested tick, using the existing #27 drain boundary; not time of user execution |
 | probe | 1024 boot-Hart samples of two time reads and one same-layout histogram update; calibration floor, not an overhead subtraction or hardware upper bound |

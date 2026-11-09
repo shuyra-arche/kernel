@@ -202,3 +202,4 @@ mod context;
 use kernel_hardware_fixture::host::{clock, harts, memory};
 
 mod latency;
+mod diagnostics;

@@ -19,7 +19,7 @@ pub(crate) struct Router {
     queues: [Irq; 3],
     pending: AtomicUsize,
     counts: [AtomicUsize; 3],
-    sources: SpinLock<Vec<Arc<Endpoint>>>,
+    sources: SpinLock<Vec<Arc<Source>>>,
 }
 /// All hardware effects follow complete descriptor validation at boot.
 pub(crate) fn install(controller: Box<dyn Delivery>, plan: Plan<'_>) -> Result<(), PendFail> {
@@ -41,7 +41,7 @@ pub(crate) fn install(controller: Box<dyn Delivery>, plan: Plan<'_>) -> Result<(
     EXTERNAL.get().ok_or(PendFail::Denied)?.rearm();
     Ok(())
 }
-pub(crate) fn register(controller: usize, line: u32) -> Result<(), PendFail> {
+pub(crate) fn register(controller: usize, line: u32, region: usize) -> Result<(), PendFail> {
     let route = EXTERNAL.get().ok_or(PendFail::Denied)?;
     let irq = Irq { controller, line };
     let _commit = crate::basis::commit();
@@ -53,19 +53,14 @@ pub(crate) fn register(controller: usize, line: u32) -> Result<(), PendFail> {
         return Err(PendFail::Denied);
     }
     let mut sources = route.sources.lock();
-    if sources.len() >= 64
-        || sources
-            .iter()
-            .any(|e| e.interrupt().is_some_and(|s| s.irq == irq))
-    {
+    if sources.len() >= 64 || sources.iter().any(|e| e.irq == irq) {
         return Err(PendFail::Denied);
     }
     sources.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
-    let source = Source::new(irq);
-    let endpoint = Endpoint::hardware(source).map_err(|_| PendFail::OutOfMemory)?;
+    let source = Arc::try_new(Source::new(irq, region)?).map_err(|_| PendFail::OutOfMemory)?;
     route.controller.mask(irq);
     route.controller.prioritize(irq);
-    sources.push(endpoint);
+    sources.push(source);
     Ok(())
 }
 impl Router {
@@ -86,19 +81,15 @@ impl Router {
                 self.counts[index].fetch_add(1, Ordering::Relaxed);
                 self.pending.fetch_or(1 << index, Ordering::Release);
             } else {
-                let endpoint = self
-                    .sources
-                    .lock()
-                    .iter()
-                    .find(|e| e.interrupt().is_some_and(|s| s.irq == irq))
-                    .cloned();
+                let endpoint = self.sources.lock().iter().find(|e| e.irq == irq).cloned();
                 if let Some(endpoint) = endpoint {
-                    Source::deliver(&endpoint);
-                    #[cfg(feature = "latency")]
-                    crate::metal::measure::elapsed(
-                        crate::metal::measure::Metric::IrqSign,
-                        irq_entry,
-                    );
+                    if endpoint.deliver() {
+                        #[cfg(feature = "latency")]
+                        crate::metal::measure::elapsed(
+                            crate::metal::measure::Metric::IrqSign,
+                            irq_entry,
+                        );
+                    }
                 } else {
                     self.finish(irq, false);
                 }
@@ -120,11 +111,19 @@ impl Router {
     pub(crate) fn unmask(&self, irq: Irq) {
         self.controller.unmask(irq);
     }
+    pub(crate) fn request(&self) {
+        let _ = crate::metal::interrupt::ipi::send(self.hart);
+    }
     pub(crate) fn rearm(&self) {
         if hart::hart_id() != self.hart {
             return;
         }
         let _commit = crate::basis::commit();
+        let count = self.sources.lock().len();
+        for at in 0..count {
+            let source = self.sources.lock()[at].clone();
+            source.maintain();
+        }
         let pending = self.pending.swap(0, Ordering::AcqRel);
         for (index, irq) in self.queues.iter().enumerate() {
             if pending & (1 << index) != 0 {
@@ -151,8 +150,11 @@ impl Router {
         };
         let count = self.sources.lock().len();
         for at in 0..count {
-            let endpoint = self.sources.lock()[at].clone();
-            let irq = endpoint.interrupt().ok_or(PendFail::Denied)?.irq;
+            let source = self.sources.lock()[at].clone();
+            let endpoint = source.endpoint.clone();
+            let irq = source.irq;
+            let view = registry.region(source.region).ok_or(PendFail::Denied)?;
+            source.associate(view.target().share_view().ok_or(PendFail::Denied)?)?;
             let root = PendEntry::try_new(
                 Target::Sign(endpoint.clone()),
                 Mark::NONE,
@@ -160,9 +162,7 @@ impl Router {
                 None,
             )?;
             let mut limits = root.authority().limits();
-            limits.operations = Operations::Sign(
-                SignRights::LISTEN | SignRights::CLAIM | SignRights::YIELD | SignRights::REARM,
-            );
+            limits.operations = Operations::Sign(SignRights::LISTEN | SignRights::CONSUME);
             root.narrow(limits, None)?;
             registry
                 .register(
@@ -175,5 +175,22 @@ impl Router {
                 .map_err(|e| e.into_parts().0)?;
         }
         Ok(())
+    }
+}
+
+impl Router {
+    pub(super) fn source(&self, endpoint: &Endpoint) -> Option<Arc<Source>> {
+        self.sources
+            .lock()
+            .iter()
+            .find(|s| s.endpoint.id == endpoint.id)
+            .cloned()
+    }
+    pub(super) fn withdraw(&self, token: kernel_api::model::identity::PendId) {
+        let count = self.sources.lock().len();
+        for at in 0..count {
+            let source = self.sources.lock()[at].clone();
+            source.withdraw(token);
+        }
     }
 }

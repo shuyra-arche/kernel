@@ -446,29 +446,85 @@ stores a notification. Timeout, task death and space retirement use the existing
 wait-ticket cleanup. Callers keep the object and mapping alive and recheck their
 condition after a successful wait. Concurrent mapping transactions report `Busy`.
 
-### Hardware interrupt Sign (ABI / ledger 6)
+### Hardware interrupt dispatch (View, Sign)
 
 The trusted platform admits exclusive level-high PLIC sources and calls
-`boot::grant_interrupt(controller, source)` before start. The boot ledger names
-both controller and source; raw IRQ numbers never authorize a user call. One
-router owns driver sources and reserved IOMMU queue interrupts.
+`boot::grant_interrupt(controller, source, region)` before start. Ledger v7
+publishes the device's `(Share View, Sign)` pair under its controller/source name;
+each handle is an ordinary Pend. Raw IRQ numbers never authorize a user call.
+One router owns driver sources and reserved IOMMU queue interrupts.
 
-A driver claims its source Sign, initializes/clears the device, then calls
-`Sign::Rearm(generation, 0)`. An IRQ is claimed and masked, and a retained Sign
-sequence is published. After clearing the device cause, the driver rearms with
-that exact generation and sequence. PLIC completion occurs with the source
-briefly enabled, as required by its completion protocol. Duplicate/stale replies
-cannot rearm. Yield, Pend revocation and Task exit mask the source and invalidate
-the binding. An outstanding controller claim survives the old driver and is
-completed by the replacement's initial rearm after device initialization.
+A manager first delegates the full writable MMIO Share View, then a
+non-distributable `Listen | Consume` Sign Pend to the same Task. The source owner
+checks the matching live View and exclusive processing branch before publishing
+the Sign grant. A competing processor or a Sign grant without that View fails.
+Managers prepare stopped Tasks, revoke the View if Sign delegation fails, and
+resume only after both grants succeed; the two Pend calls are not one atomic
+transaction. Observers may hold Listen-only branches and use existing Sign routes.
 
-This first provider grants only Listen/Claim/Yield/Rearm, binds one Task and Pend,
-and rejects hardware Sign forwarding. Up to 64 sources are admitted; an IRQ entry
-claims at most four. These bounds do not bound global commit-lock contention.
-Shared lines, cascaded controllers and MSI need separate admission contracts.
-Interrupt acknowledgement is not proof of device quiescence or Page retirement.
-The old global SupervisorExternal boot grant is no longer minted.
+The source remains masked and publishes a normal initial Sign notification. The
+driver initializes/clears the device and calls existing `Consume(sequence)`.
+The source owner observes that exact successful receipt and enables delivery.
+Each hardware IRQ is then claimed, masked and published as a retained Sign event.
+After clearing the device cause, the driver consumes its sequence. The owner
+completes the claim with the source enabled, as required by PLIC, and resumes
+notification. Consumption schedules owner-Hart work; it is not a synchronous
+hardware-completion acknowledgement. Cancellation writes no consumption receipt.
 
-PLIC ordering follows the [RISC-V PLIC 1.0.0 completion contract](https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic-1.0.0.pdf): completion of a disabled source is ignored. The driver gateway retains its claim until device acknowledgement.
+Pend Return/Revoke, loss of either View or Sign authority, and Task exit close
+delivery. An outstanding controller claim survives the old driver and is completed
+only after the replacement initializes the device and consumes its new initial
+notification. Old or duplicate receipts cannot reopen a replacement. Sign keeps
+its existing operations, rights and ABI v5; there is no hardware Sign variant,
+Claim/Yield/Rearm call, new authority object or public binding generation.
 
-QEMU 10 SiFive PLIC does not resample a continuously asserted input on completion (`hw/intc/sifive_plic.c`). The hardware test generates a fresh UART assertion while the first claim is outstanding, then verifies it survives rearm. Persistent-high resampling remains a physical-controller validation item.
+Up to 64 sources are admitted; an IRQ entry claims at most four. Sign publication
+allocates nothing and notification propagation is deferred in fixed batches
+(four listeners per key and at most eight forwarding destinations). These bounds
+do not bound callback cost or global commit-lock contention. Shared lines,
+cascaded controllers and MSI need separate admission contracts. Interrupt
+acknowledgement is not proof of device quiescence or Page retirement. The old
+global SupervisorExternal boot grant is no longer minted.
+
+PLIC ordering follows the [RISC-V PLIC 1.0.0 completion contract](https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic-1.0.0.pdf): completion of a disabled source is ignored. The source retains its claim until device acknowledgement.
+
+[QEMU 10.0.13's SiFive PLIC](https://github.com/qemu/qemu/blob/v10.0.13/hw/intc/sifive_plic.c)
+does not recompute output on enable-register writes. The backend rewrites the
+unchanged threshold after enabling, preserving policy while making previously
+pending work visible. A regression asserts UART before the initial consumption
+and performs no subsequent device write until delivery. QEMU also does not
+resample a continuously asserted input on completion; another test generates a
+fresh assertion while the first claim is outstanding. Persistent-high resampling
+remains a physical-controller validation item.
+
+### Crash evidence
+
+Fatal reports distinguish saved `Trap` registers from `RustPanic` location/message.
+Panic stack registers are labeled `DiagnosticCapture`; frame-chain evidence and
+heuristic stack-scan hits have separate labels. The walker accepts compressed
+instruction addresses and only recognizes the Kernel executable text range (ROOT
+is a stack, never code). A Trap that interrupted ROOT omits its overwritten stack. Reports contain a bounded-walk stop reason. Peer counts
+are observations, not device-reclamation proof; unobserved peers suppress memory
+walking. Before boot facts are available, the report omits the walk.
+
+The fatal path uses bounded formatting and SBI DBCN byte output without Kernel
+locks, heap allocation, address-translation locks, or an allocator-backend switch.
+Firmware latency remains outside the byte-budget guarantee. Recursive failures
+emit a minimal marker and reset. Diagnostic console loss and overwritten orphan
+exit notes are reported separately from the unchanged user `DebugPut` byte count.
+
+`server/tests/guest/diagnostics` deliberately exercises Panic, illegal instruction,
+pre-allocator failure, and recursive formatting in debug/release with 1/4 Harts.
+CI retains serial output, commands, hashes, and the exact ELF. For host symbols:
+
+```sh
+python3 tools/diagnostics/symbolize.py panic-debug.elf panic-debug-smp1-serial.log
+```
+
+Match the ELF to the recorded hash; scan hits are candidates, not proven callers.
+
+Console source prefixes are readability labels, not authenticated provenance:
+`Debug Put` intentionally retains its raw-byte contract, so user bytes can imitate
+labels on the shared serial stream. Preventing that requires a framed/escaped
+transport or a separately trusted channel; this PR does not silently change the
+existing byte API to claim that stronger property.

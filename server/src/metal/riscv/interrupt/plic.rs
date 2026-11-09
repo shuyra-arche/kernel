@@ -1,7 +1,7 @@
 use crate::metal::generic::interrupt::{Delivery, Irq};
 
-/// Access to one S-mode context of an exclusively owned PLIC. The route must
-/// serialize MMIO on its Hart with interrupts masked.
+/// Access to one S-mode context of an exclusively owned PLIC. The route serializes
+/// MMIO with interrupts masked; claims/completions run on its owning Hart.
 pub(crate) struct Plic {
     base: usize,
     physical: usize,
@@ -97,6 +97,12 @@ impl Delivery for Plic {
             offset,
             read(self.base, offset) | (1 << (irq.line % 32)),
         );
+        // QEMU 10.0's SiFive PLIC does not recompute its output on enable writes.
+        // Rewrite the unchanged threshold so an interrupt asserted while masked
+        // becomes visible too. This is also a valid, non-claiming hardware write:
+        // it preserves the context's policy and never completes an unclaimed IRQ.
+        let threshold = 0x200000 + self.context * 0x1000;
+        write(self.base, threshold, read(self.base, threshold));
     }
     fn prioritize(&self, irq: Irq) {
         write(self.base, irq.line as usize * 4, 1);

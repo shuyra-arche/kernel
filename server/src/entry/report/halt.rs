@@ -1,74 +1,74 @@
-use ::core::panic::PanicInfo;
-
-use alloc::format;
-use alloc::string::String;
-use alloc::vec;
-use alloc::vec::Vec;
-
-use crate::entry::report::record::Report;
-use crate::metal::hart;
-use crate::metal::stop::alarm;
+use super::scene::Source;
+use core::fmt::Write;
+use core::panic::PanicInfo;
 
 #[panic_handler]
 pub(crate) fn panic_handler(info: &PanicInfo) -> ! {
-    crash_scene(info)
+    start(&Source::RustPanic(info))
 }
 
-fn crash_scene(info: &PanicInfo) -> ! {
-    if !alarm() {
-        crate::putln!(
-            "info: {} sepc={:#x} stval={:#x}",
-            info.message(),
-            crate::metal::stop::trap_scene().0,
-            crate::metal::stop::trap_scene().1,
+pub(crate) fn trap(
+    frame: &crate::metal::switcher::context::TrapContext,
+    cause: usize,
+    value: usize,
+) -> ! {
+    start(&Source::Trap {
+        frame,
+        cause,
+        value,
+    })
+}
+
+fn start(source: &Source<'_>) -> ! {
+    unsafe { core::arch::asm!("csrci sstatus, 2") };
+    if !crate::metal::stop::alarm() {
+        let _ = writeln!(
+            crate::metal::console::Emergency::new(),
+            "[kernel] recursive-failure evidence=incomplete"
         );
         crate::metal::stop::failed()
     }
-    crate::metal::stop::home(info)
+    crate::metal::stop::home(source)
 }
 
 #[allow(improper_ctypes_definitions)]
-pub(crate) extern "C" fn info(info: &PanicInfo) -> ! {
+pub(crate) extern "C" fn info(source: &Source<'_>) -> ! {
+    let mut sink = crate::metal::console::Emergency::new();
+    let booted = crate::entry::boot::facts::dram_edge().is_some();
+    let expected = if booted {
+        crate::metal::hart::hart_count().saturating_sub(1)
+    } else {
+        0
+    };
+    // Bounded observation only. A missing acknowledgement is never reclamation proof.
+    for _ in 0..100_000 {
+        if crate::metal::stop::quiesced_peers() == expected {
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    let quiet = crate::metal::stop::quiesced_peers();
     let root_ok =
         unsafe { (crate::metal::image::root_stack_base() as *const usize).read_volatile() }
             == crate::metal::image::ROOT_STACK_CANARY;
-
-    crate::metal::allocator::portal::switch(crate::metal::allocator::portal::Backend::Spare);
-
-    let mut report = Report::default();
-    {
-        let mut head = String::from("[panic]");
-        if let Some(loc) = info.location() {
-            head.push_str(&format!(
-                " at {}:{}:{}",
-                loc.file(),
-                loc.line(),
-                loc.column()
-            ));
-        }
-        let mut rows: Vec<Vec<Option<String>>> = Vec::new();
-        if let Some(i) = crate::basis::room::conductor::identity::ident() {
-            rows.push(vec![Some(format!(
-                "team #{} / task #{} @ hart {}",
-                i.team_id(),
-                i.task_id(),
-                hart::hart_id()
-            ))]);
-        }
-        rows.push(vec![Some(format!("{}", info.message()))]);
-        rows.push(vec![Some(format!(
-            "root stack @ {} : {}",
-            if root_ok { "ok" } else { "CORRUPTED" },
-            hart::hart_id()
-        ))]);
-        report.paragraph(Some(head)).items.extend(rows);
+    let _ = writeln!(
+        sink,
+        "[kernel] fatal hart={} peers-quiet={quiet}/{expected} peers-unobserved={} root-canary={root_ok}",
+        crate::metal::hart::hart_id(),
+        expected.saturating_sub(quiet)
+    );
+    if let Some(identity) = crate::basis::room::conductor::identity::ident() {
+        let _ = writeln!(
+            sink,
+            "team={} task={}",
+            identity.team_id(),
+            identity.task_id()
+        );
     }
-
-    crate::entry::report::scene::dump(&mut report);
-
-    crate::putln!();
-    let mut sink = crate::metal::console::Sink;
-    crate::entry::report::render::render(&report, &mut sink, 2);
-
+    // Unacknowledged peers may still change memory. Omit the page-table walk in
+    // that case rather than racing freed table pages during crash reporting.
+    let _ = super::scene::write(source, &mut sink, booted && quiet == expected);
+    let _ = writeln!(sink, "[kernel] terminal-reset reason=failure");
+    sink.finish();
     crate::metal::stop::failed()
 }

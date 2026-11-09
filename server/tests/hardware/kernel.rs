@@ -326,7 +326,7 @@ fn run(mode: &str) {
                 if !symbols.is_empty() {
                     super::context::verify(&trace_path, &symbols, false);
                 }
-                assert!(log.contains("PASS interrupt uart=1 retained=1 repeated=24 isolated=1 stale=1 death=1 revoke=1 rebind=1"), "{name}: {log}");
+                assert!(log.contains("PASS interrupt uart=1 retained=1 repeated=24 isolated=1 stale=1 death=1 revoke=1 rebind=1 pair=1 observers=6 forward=1 masked=1"), "{name}: {log}");
             }
             if mode == "large" {
                 assert!(

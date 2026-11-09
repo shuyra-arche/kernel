@@ -53,38 +53,32 @@ impl State {
         };
         Ok(self.generation)
     }
-    pub(super) fn rearm(
-        &mut self,
-        holder: Holder,
-        generation: u64,
-        sequence: u64,
-    ) -> Result<bool, Error> {
-        if self.generation != generation {
-            return Err(Error::Stale);
+    /// The initial inspection and each hardware event use real Sign sequences.
+    pub(super) fn begin(&mut self, sequence: u64) {
+        if let Binding::Held { delivery, .. } = &mut self.binding {
+            *delivery = Delivery::Pending(sequence);
         }
-        match self.binding {
-            Binding::Held {
-                holder: known,
-                delivery,
-            } if known == holder => {
-                if !matches!((delivery, sequence), (Delivery::Dormant, 0))
-                    && delivery != Delivery::Pending(sequence)
-                {
-                    return Err(Error::Stale);
-                }
-                self.binding = Binding::Held {
-                    holder,
-                    delivery: Delivery::Armed,
-                };
-                let complete = self.claim == Claim::Held;
+    }
+    /// A successful Sign consumption, never cancellation, resumes this producer.
+    pub(super) fn consume(&mut self, sequence: u64) -> Option<bool> {
+        if sequence == 0 {
+            return None;
+        }
+        if let Binding::Held { delivery, .. } = &mut self.binding {
+            if *delivery == Delivery::Pending(sequence) {
+                *delivery = Delivery::Armed;
+                let held = self.claim == Claim::Held;
                 self.claim = Claim::Clear;
-                Ok(complete)
+                return Some(held);
             }
-            _ => Err(Error::Stale),
         }
+        None
     }
     pub(super) fn owned(self, holder: Holder) -> bool {
         matches!(self.binding, Binding::Held { holder: known, .. } if known == holder)
+    }
+    pub(super) fn bound(&self) -> bool {
+        self.binding != Binding::Vacant
     }
     pub(super) fn close(&mut self) {
         self.binding = Binding::Vacant;
@@ -115,24 +109,6 @@ impl State {
                 Ok(())
             }
             _ => Err(Error::Stale),
-        }
-    }
-    pub(super) fn yield_binding(&mut self, holder: Holder, generation: u64) -> Result<(), Error> {
-        if self.generation != generation {
-            return Err(Error::Stale);
-        }
-        if !matches!(self.binding, Binding::Held { holder: known, .. } if known == holder) {
-            return Err(Error::Stale);
-        }
-        self.binding = Binding::Vacant;
-        Ok(())
-    }
-    pub(super) fn revoke(&mut self, permit: PendId) -> bool {
-        if matches!(self.binding, Binding::Held { holder, .. } if holder.permit == permit) {
-            self.binding = Binding::Vacant;
-            true
-        } else {
-            false
         }
     }
 }
