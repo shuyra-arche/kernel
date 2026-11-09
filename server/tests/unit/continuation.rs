@@ -40,14 +40,16 @@ fn removing_an_earlier_child_does_not_skip_the_next_child() {
 #[test]
 fn concurrent_retirement_rejects_before_running_any_effect() {
     let task = Task::new();
-    let _owner = task.retirement.lock();
-    std::thread::scope(|scope| {
-        let other = task.clone();
-        scope
-            .spawn(move || assert_eq!(other.retire(), Err(NestError::Busy)))
-            .join()
-            .unwrap();
-    });
+    let owner = task.retirement.lock();
+    let (sent, received) = std::sync::mpsc::channel();
+    let other = task.clone();
+    let worker = std::thread::spawn(move || sent.send(other.retire()).unwrap());
+    // Rejection must arrive before the owner releases. A watchdog makes a
+    // regression to blocking acquisition fail without hanging the test suite.
+    let rejected = received.recv_timeout(std::time::Duration::from_secs(5));
+    drop(owner);
+    worker.join().unwrap();
+    assert_eq!(rejected.unwrap(), Err(NestError::Busy));
     assert!(task.trace.lock().is_empty());
 }
 
