@@ -1,8 +1,10 @@
-//! Logical page coordinates and lengths.
+//! Logical page coordinates and lengths in the current 4 KiB ABI base unit.
+//!
+//! These indexes do not encode a physical Cell's contiguity or an MMU leaf.
 
 use core::num::NonZeroUsize;
 
-use super::PAGE_SIZE;
+use super::BASE_PAGE_SIZE;
 
 /// 页数。非零：空范围没有单独表示，不能与"未声明"混为一谈。
 #[repr(transparent)]
@@ -24,7 +26,7 @@ impl PageCount {
     /// 页数折算字节；溢出返回 `None`。
     #[inline]
     pub fn checked_bytes(self) -> Option<usize> {
-        self.0.get().checked_mul(PAGE_SIZE)
+        self.0.get().checked_mul(BASE_PAGE_SIZE)
     }
 }
 

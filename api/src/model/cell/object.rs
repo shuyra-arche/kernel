@@ -1,6 +1,7 @@
 //! Slot and Memo identity, positions and handoff descriptors.
 
-use super::{MappingId, MappingTarget, PAGE_SIZE, SlotId};
+use super::{MappingId, MappingTarget, SlotId};
+use crate::address::BASE_PAGE_SIZE;
 use crate::abi::{
     layout::{fetch_words, store_words},
     register::Wire,
@@ -57,6 +58,8 @@ impl CellObject {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellPosition {
     pub object: CellObject,
+    /// Zero-based position in 4 KiB ABI units, independent of physical Cell size
+    /// and the leaf selected by a translation backend.
     pub page: usize,
     pub generation: u64,
 }
@@ -75,7 +78,7 @@ impl CellPosition {
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let [a, b, c, d, page, generation] = fetch_words(bytes)?;
         let object = CellObject::of([a, b, c, d])?;
-        page.checked_mul(PAGE_SIZE)?;
+        page.checked_mul(BASE_PAGE_SIZE)?;
         if matches!(object, CellObject::Slot(_)) && generation != 0 {
             return None;
         }

@@ -16,7 +16,7 @@ pub use object::{CellHandoff, CellObject, CellPosition};
 pub use placement::{Placement, PlacementAt, PlacementError};
 pub use slot::{ReferenceRange, SlotId};
 
-/// 环境内存调用与装载格式使用的页粒度。
+/// Existing alias for the 4 KiB ABI coordinate. This is not physical Cell geometry.
 pub use crate::address::PAGE_SIZE;
 
 /// A protection domain owns managed memory. Task membership and management
