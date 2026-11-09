@@ -129,7 +129,7 @@ impl Conductor {
         notify
     }
 
-    fn pull(&self) -> Option<Arc<Task>> {
+    fn pull(&self, _commit: &crate::basis::CommitGuard) -> Option<Arc<Task>> {
         // dispatch holds COMMIT until this Task is seated on a Hart.
         // Reacquiring it here adds work but supplies no additional exclusion.
         #[cfg(debug_assertions)]
@@ -159,7 +159,7 @@ impl Conductor {
         deadline::arm(ceiling);
     }
 
-    fn seat(&self, mut task: Arc<Task>) -> Option<usize> {
+    fn seat(&self, mut task: Arc<Task>, _commit: &crate::basis::CommitGuard) -> Option<usize> {
         // Callers retain COMMIT across dequeue/steal and seating: a Ready Task
         // must not escape every scheduler container between those transitions.
         #[cfg(debug_assertions)]
@@ -187,7 +187,7 @@ impl Conductor {
         drop(i);
         self.badge.shed(&task.ident);
         let next_pa = if let Some(next) = next {
-            self.seat(next)
+            self.seat(next, &_commit)
         } else {
             None
         };
@@ -231,7 +231,7 @@ impl Conductor {
         self.badge.shed(&cur.ident);
         let next = self.rotate(&mut i, cur);
         drop(i);
-        let pa = next.and_then(|next| self.seat(next));
+        let pa = next.and_then(|next| self.seat(next, &_commit));
         drop(_commit);
         pa.unwrap_or_else(run::fetch)
     }
@@ -245,7 +245,7 @@ impl Conductor {
             Task::park(cur);
             let next = self.starved_pop(&mut i, self.hart);
             drop(i);
-            return next.and_then(|next| self.seat(next));
+            return next.and_then(|next| self.seat(next, &_commit));
         }
         let ticks_left = cur.ticks_left();
         let ceiling = i.ready_deadline();
@@ -261,7 +261,7 @@ impl Conductor {
         self.badge.shed(&cur.ident);
         let next = self.rotate(&mut i, cur);
         drop(i);
-        let pa = next.and_then(|next| self.seat(next));
+        let pa = next.and_then(|next| self.seat(next, &_commit));
         pa
     }
 }

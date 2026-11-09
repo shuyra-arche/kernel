@@ -19,4 +19,4 @@ mod commit;
 pub(crate) use commit::assert_held;
 #[cfg(debug_assertions)]
 pub(crate) use commit::assert_unlocked;
-pub(crate) use commit::commit;
+pub(crate) use commit::{CommitGuard, commit};
