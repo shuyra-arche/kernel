@@ -168,12 +168,16 @@ fn iommu_on_real_qemu_registers() {
 }
 
 fn run(mut command: Command, evidence: &PathBuf, name: &str) -> Output {
+    let started = Instant::now();
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("start QEMU");
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // Traced debug IRQ/IOMMU images take 24–26 s locally, including firmware,
+    // FDT admission and shutdown. Leave host-load headroom; guest deadlines and
+    // behavioral assertions remain unchanged and process exit is still required.
+    let deadline = started + Duration::from_secs(60);
     let mut timed_out = false;
     while child.try_wait().expect("QEMU status").is_none() {
         if Instant::now() >= deadline {
@@ -184,6 +188,14 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str) -> Output {
         std::thread::sleep(Duration::from_millis(20));
     }
     let output = child.wait_with_output().expect("QEMU output");
+    std::fs::write(
+        evidence.join(format!("{name}-elapsed.txt")),
+        format!(
+            "elapsed_ms={} watchdog_ms=60000 timed_out={timed_out}\n",
+            started.elapsed().as_millis()
+        ),
+    )
+    .unwrap();
     std::fs::write(evidence.join(format!("{name}-serial.log")), &output.stdout).unwrap();
     std::fs::write(evidence.join(format!("{name}-stderr.log")), &output.stderr).unwrap();
     assert!(
