@@ -250,10 +250,18 @@ pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
     if let Some(route) = crate::basis::room::interrupt::external() {
         route.advance();
     }
-    if crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id())
-        && !unsafe { (*next).address_space() }.is_kernel()
-    {
-        next = crate::basis::room::scheduler::slot::current().check() as *mut TrapContext;
+    if !unsafe { (*next).address_space() }.is_kernel() {
+        let slot = crate::basis::room::scheduler::slot::current();
+        // Pause/Stop already owns a publication. An ordinary Task repeatedly
+        // making calls must acknowledge it at this safe return boundary too,
+        // without depending solely on a later timer/software interrupt.
+        let check = crate::basis::room::scheduler::isolated(crate::metal::hart::hart_id())
+            || slot
+                .running_task()
+                .is_some_and(|task| task.stopped() || task.doomed() || task.ident.team.paused());
+        if check {
+            next = slot.check() as *mut TrapContext;
+        }
     }
     #[cfg(feature = "latency")]
     let mut observed = None;

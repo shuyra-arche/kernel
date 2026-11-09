@@ -61,6 +61,7 @@ fn resume(id: TaskId) {
         }
     }
 }
+#[track_caller]
 fn freeze(id: TaskId) {
     let end = limit();
     loop {
@@ -68,7 +69,7 @@ fn freeze(id: TaskId) {
             Ok(()) => break,
             Err(e) => {
                 assert_eq!(e.source, UnitFail::Busy);
-                assert!(room::clock() < end);
+                assert!(room::clock() < end, "freeze {id:?}: {:?}", state(id));
                 room::yield_();
             }
         }

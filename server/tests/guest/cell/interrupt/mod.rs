@@ -82,12 +82,7 @@ extern "C" fn watch() -> ! {
     // Fixture preparation is not part of IRQ service latency or the four
     // competing Yield workers. Park until every observer has been constructed.
     while WATCH_ARMED.load(Ordering::Acquire) == 0 {
-        room::wait_value(
-            VirtAddr::new(WATCH_ARMED.as_ptr() as usize),
-            0,
-            Wait::Infinite,
-        )
-        .unwrap();
+        crate::room::wait(&WATCH_ARMED, 0, Wait::Infinite);
     }
     assert!(matches!(
         sign::listen(token, deadline()).unwrap(),
@@ -420,12 +415,7 @@ pub(super) fn run(at: usize, count: usize) {
         // Mapping/initial inspection are setup, not the revocation deadline.
         // Park the controller instead of adding another competing Yield loop.
         while ENTERED.load(Ordering::Acquire) == 0 {
-            room::wait_value(
-                VirtAddr::new(ENTERED.as_ptr() as usize),
-                0,
-                Wait::Infinite,
-            )
-            .unwrap();
+            crate::room::wait(&ENTERED, 0, Wait::Infinite);
         }
         let until = room::clock() + 2_000_000_000;
         while super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task))).state

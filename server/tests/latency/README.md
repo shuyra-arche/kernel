@@ -309,6 +309,15 @@ but can expire before a contended call reaches the kernel and therefore cannot
 alone establish blocking or migration coverage. The cross-Hart trace assertions
 and outer QEMU watchdog remain unchanged.
 
+For every handoff the controller parks on an arrival counter while workers execute
+their intervening rounds. Only after both arrive does the three-second transition
+check require their actual `Waiting` state; work between handoffs remains covered
+by the outer watchdog. This separates a blocking assertion from an arbitrary
+debug/host execution-time assumption and keeps all four competing Yield workers.
+Condition waits retry only `RoomFail::Busy`, rechecking the same atomic predicate
+and retaining any absolute deadline. A concurrent Nest invalidation can reject
+the resident atomic read after call-entry settlement, without consuming a wake.
+
 The IRQ revocation fixture parks its controller until the driver finishes mapping
 and initial inspection, then requires the driver's actual Sign `Waiting` state.
 That listener has no timeout: only a Dead/Denied authority result satisfies the
@@ -316,3 +325,10 @@ test. This removes an unrelated two-second initialization assumption and a short
 sleep that did not prove blocking. Hardware event waits remain two seconds,
 retirement retries remain five seconds, all four Yield competitors remain active,
 and the outer watchdog remains sixty seconds.
+
+Ordinary Task returns also check already-published Pause/Stop requests. A Task
+that repeatedly calls Kernel must acknowledge control at this exclusion-free
+boundary, without depending solely on a later timer/IPI entry. The existing slot
+transition revalidates and parks/quits it under COMMIT; a temporary ROOT kernel
+continuation is never switched through this check. Uncontrolled ordinary returns
+do not acquire another global COMMIT turn.

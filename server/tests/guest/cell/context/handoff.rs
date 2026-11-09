@@ -13,36 +13,44 @@ use kernel_client::call::room;
 
 pub(super) struct Handoff {
     epoch: AtomicU32,
-    entered: [AtomicU32; 2],
+    arrived: AtomicU32,
 }
 impl Handoff {
     pub(super) const fn new() -> Self {
         Self {
             epoch: AtomicU32::new(0),
-            entered: [const { AtomicU32::new(0) }; 2],
+            arrived: AtomicU32::new(0),
         }
     }
     fn address(&self) -> VirtAddr {
         VirtAddr::new(self.epoch.as_ptr() as usize)
     }
-    pub(super) fn wait(&self, id: usize, turn: u32) {
-        self.entered[id - 1].store(turn + 1, Ordering::Release);
+    pub(super) fn wait(&self, turn: u32) {
+        self.arrived.fetch_add(1, Ordering::Release);
+        room::wake_value(VirtAddr::new(self.arrived.as_ptr() as usize), true).unwrap();
         while self.epoch.load(Ordering::Acquire) == turn {
-            room::wait_value(self.address(), turn, Wait::Infinite).unwrap();
+            crate::room::wait(&self.epoch, turn, Wait::Infinite);
         }
         assert_eq!(self.epoch.load(Ordering::Acquire), turn + 1);
     }
     pub(super) fn wake(&self, tasks: &[TaskId; 2], turn: u32) {
+        // Work between handoffs is not the blocking transition. Park while
+        // the workers execute it instead of adding a fifth Yield competitor.
+        let expected = 2 * (turn + 1);
+        loop {
+            let observed = self.arrived.load(Ordering::Acquire);
+            assert!(observed <= expected, "handoff arrival advanced twice");
+            if observed == expected {
+                break;
+            }
+            crate::room::wait(&self.arrived, observed, Wait::Infinite);
+        }
         let deadline = room::clock().saturating_add(3_000_000_000);
         loop {
-            let waiting = self
-                .entered
-                .iter()
-                .all(|value| value.load(Ordering::Acquire) == turn + 1)
-                && tasks.iter().all(|id| {
-                    super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(*id))).state
-                        == UnitState::Waiting
-                });
+            let waiting = tasks.iter().all(|id| {
+                super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(*id))).state
+                    == UnitState::Waiting
+            });
             if waiting {
                 break;
             }
