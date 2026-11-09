@@ -13,7 +13,6 @@ pub(super) use invalidation::Invalidation;
 pub use fault::FaultOutcome;
 
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 use super::address::span::Protection;
 use super::memo::publication::Publication;
@@ -93,11 +92,10 @@ impl NestState {
     /// Withdraw the indexed mappings in one locked transition and retain
     /// their obligations until the covering fence succeeds.
     pub(super) fn close_mappings(&mut self, geometry: Geometry) -> Result<(), NestError> {
-        let mut mappings = Vec::new();
-        mappings
-            .try_reserve(self.index.len())
-            .map_err(|_| NestError::OutOfMemory)?;
-        self.index.collect(&mut mappings);
+        // One indexed Span per service turn. Its admitted Page/active-range
+        // geometry bounds the backend work; no complete-Nest snapshot is made.
+        self.phase = ClosePhase::Draining;
+        let mappings = self.index.first_overlap(0, usize::MAX);
         let cell_count = mappings
             .iter()
             .map(|mapping| self.memos.published(mapping).count())
@@ -108,10 +106,10 @@ impl NestState {
             .map_err(|_| NestError::OutOfMemory)?;
         self.retirement
             .mappings
-            .try_reserve(mappings.len())
+            .try_reserve(usize::from(mappings.is_some()))
             .map_err(|_| NestError::OutOfMemory)?;
         {
-            for mapping in &mappings {
+            if let Some(mapping) = &mappings {
                 for range in &mapping.state.lock().active {
                     self.root.cpu_mut()?.prepare_geometry(
                         range.start,
@@ -123,7 +121,7 @@ impl NestState {
             self.root
                 .cpu_mut()?
                 .reserve_retired_tables(&mut self.retirement.tables)?;
-            for mapping in &mappings {
+            if let Some(mapping) = &mappings {
                 for range in &mapping.state.lock().active {
                     self.root.cpu_mut()?.unmap_prepared_geometry(
                         range.start,
@@ -137,16 +135,18 @@ impl NestState {
                 .reclaim_empty_tables(&mut self.retirement.tables);
         }
         let global = mappings.iter().any(|mapping| mapping.is_global());
-        for mapping in mappings {
+        for mapping in mappings.iter() {
+            self.index.remove(mapping);
             self.retirement.mappings.push(mapping.clone());
             let mut inner = mapping.state.lock();
             self.memos
                 .withdraw(&mapping, 0, usize::MAX, &mut self.retirement.cells);
             inner.active.clear();
         }
-        self.index.clear();
         self.retirement.mark_dirty(global);
-        self.phase = self.phase.begin();
+        if self.index.len() == 0 {
+            self.phase = self.phase.begin();
+        }
         Ok(())
     }
 

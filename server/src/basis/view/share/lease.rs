@@ -144,7 +144,7 @@ pub(crate) fn create_share(
             meta.commit_source();
             authorization.consume();
             registration.publish();
-            pend::changed(task);
+
             Ok(token)
         })();
         if transition.is_err() {

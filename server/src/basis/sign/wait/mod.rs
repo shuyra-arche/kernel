@@ -255,9 +255,9 @@ fn listeners_batch(key: WakeKey) -> bool {
     more
 }
 
-pub(crate) fn wipe_space(space: NestId) -> usize {
+pub(crate) fn wipe_space(space: NestId) -> bool {
     let _commit = crate::basis::commit();
-    let mut woken = 0usize;
+    let mut removed = 0usize;
     for shard in 0..SITE_SHARDS {
         loop {
             let taken = {
@@ -275,10 +275,14 @@ pub(crate) fn wipe_space(space: NestId) -> usize {
                 key.and_then(|key| sites.remove(&key))
             };
             let Some(mut site) = taken else { break };
-            woken += rise(unchain(site.chain.take()), insert);
+            rise(unchain(site.chain.take()), insert);
+            removed += 1;
+            if removed == 4 {
+                return false;
+            }
         }
     }
-    woken
+    true
 }
 
 // Wake current listeners without retaining a notification for later listeners.
@@ -366,13 +370,11 @@ pub fn redeem() -> bool {
         let Some((key, holder)) = void(Ticket(handle)) else {
             continue;
         };
-        drop(holder);
         let popped = {
             let mut sites = sites(key).lock();
-            let pick = &mut |t: &Arc<Task>| t.wait_ticket() == Ticket(handle);
             let w = sites
                 .get_mut(&key)
-                .and_then(|site| site.chain.remove_if(pick));
+                .and_then(|site| site.chain.remove(&holder));
             prune(&mut sites, key);
             w
         };
@@ -397,7 +399,9 @@ pub(crate) fn requeue<E: Copy>(
 ) -> Result<(), E> {
     {
         let mut table = sites(key).lock();
-        Site::ensure(&mut table, key, &life).map_err(|()| oom)?;
+        Site::ensure(&mut table, key, &life)
+            .and_then(|site| site.admit())
+            .map_err(|()| oom)?;
     }
     let ticket = Ticket::next_id().ok_or(oom)?;
     if let Some(at) = call.deadline(dur) {
@@ -427,10 +431,7 @@ pub(crate) fn detach(task: &Arc<Task>) -> bool {
     };
     let removed = {
         let mut sites = shard.lock();
-        let removed = sites.get_mut(&key).and_then(|site| {
-            site.chain
-                .remove_if(&mut |candidate| Arc::ptr_eq(candidate, task))
-        });
+        let removed = sites.get_mut(&key).and_then(|site| site.chain.remove(task));
         prune(&mut sites, key);
         removed.is_some()
     };

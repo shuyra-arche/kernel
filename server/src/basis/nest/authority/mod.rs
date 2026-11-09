@@ -252,10 +252,14 @@ impl Nest {
     }
 
     /// 把一个空间里已结清的登记都收掉；同样一条收尾，不再重复一份解除动作。
-    pub(crate) fn reap_mappings(&self) {
-        let _commit = crate::basis::commit();
-        while let Some(entry) = self.mappings.take_settled(self) {
+    pub(crate) fn reap_mappings(&self) -> bool {
+        for _ in 0..4 {
+            let _commit = crate::basis::commit();
+            let Some(entry) = self.mappings.take_settled(self) else {
+                return true;
+            };
             Self::settle(entry);
         }
+        self.mappings.entries.lock().is_empty()
     }
 }

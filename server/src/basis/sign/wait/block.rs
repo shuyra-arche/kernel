@@ -40,7 +40,9 @@ pub(crate) fn block_with_call<E: WaitFail>(
     }
     {
         let mut sites = sites(key).lock();
-        Site::ensure(&mut sites, key, &life).map_err(|()| E::oom())?;
+        Site::ensure(&mut sites, key, &life)
+            .and_then(|site| site.admit())
+            .map_err(|()| E::oom())?;
     }
     let ticket = Ticket::next_id().ok_or_else(E::oom)?;
     let at = wait.as_ref().map_or_else(

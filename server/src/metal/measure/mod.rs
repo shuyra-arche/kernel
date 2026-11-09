@@ -35,12 +35,14 @@ const NAMES: [&str; 10] = [
 struct Local {
     metrics: [Distribution; 10],
     kernel: AtomicU64,
+    irq: AtomicU64,
 }
 impl Local {
     const fn new() -> Self {
         Self {
             metrics: [const { Distribution::new() }; 10],
             kernel: AtomicU64::new(0),
+            irq: AtomicU64::new(0),
         }
     }
 }
@@ -88,16 +90,32 @@ pub(crate) fn elapsed(metric: Metric, start: u64) {
 pub(crate) fn enter() {
     if let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) {
         local.kernel.store(stamp(), Ordering::Relaxed);
+        local.irq.store(stamp(), Ordering::Relaxed);
     }
 }
 pub(crate) fn leave() {
     if let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) {
         let start = local.kernel.swap(0, Ordering::Relaxed);
         elapsed(Metric::Kernel, start);
-        elapsed(Metric::IrqOff, start);
+        elapsed(Metric::IrqOff, local.irq.swap(0, Ordering::Relaxed));
+    }
+}
+pub(crate) fn pause_irq() -> bool {
+    let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) else {
+        return false;
+    };
+    let start = local.irq.swap(0, Ordering::Relaxed);
+    elapsed(Metric::IrqOff, start);
+    start != 0
+}
+pub(crate) fn resume_irq(measured: bool) {
+    if measured && let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) {
+        local.irq.store(stamp(), Ordering::Relaxed);
     }
 }
 pub(crate) fn report() {
+    let (opened, captured) = crate::metal::interrupt::window::stats();
+    crate::putln!("latency-windows: opened={} captured={}", opened, captured);
     ACTIVE.store(false, Ordering::Release);
     let Some(all) = LOCALS.get() else {
         return;

@@ -32,7 +32,7 @@ pub(crate) fn done() -> bool {
         return false;
     }
     let pushed = PUSHED.load(Ordering::Relaxed);
-    pushed == 0 || REAPED.load(Ordering::Relaxed) == pushed
+    (pushed == 0 || REAPED.load(Ordering::Relaxed) == pushed) && super::doom::settled()
 }
 
 /// 读数：起了多少 / 收了多少。

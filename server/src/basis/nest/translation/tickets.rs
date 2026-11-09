@@ -47,7 +47,9 @@ impl Tickets {
         true
     }
 
-    pub(crate) fn drain(&mut self) -> impl Iterator<Item = usize> + '_ {
-        self.entries.drain(..core::mem::take(&mut self.settled))
+    pub(crate) fn drain(&mut self, limit: usize) -> impl Iterator<Item = usize> + '_ {
+        let count = self.settled.min(limit);
+        self.settled -= count;
+        self.entries.drain(..count)
     }
 }

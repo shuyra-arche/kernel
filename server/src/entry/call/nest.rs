@@ -65,7 +65,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: NestCall, ident: &Arc<Task
                         binding::register(&nest, &actor, &root)?;
                     }
                     registration.publish();
-                    pend::changed(&actor);
+
                     Ok(token.get())
                 }
                 NestCall::Inspect { token, out } => {

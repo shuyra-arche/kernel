@@ -43,6 +43,7 @@ impl<T> OnceLock<T> {
             }
             Err(_) => {
                 while self.state.load(Ordering::Acquire) == WRITING {
+                    crate::metal::interrupt::window::poll();
                     ::core::hint::spin_loop();
                 }
                 Err(value)

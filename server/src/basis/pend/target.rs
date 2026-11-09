@@ -80,7 +80,7 @@ impl Target {
             Self::Sign(sign) => sign.alive(),
         }
     }
-    pub(crate) fn seal(&self) {
+    pub(crate) fn seal(&self) -> Result<(), PendFail> {
         match self {
             Self::None { .. } | Self::Port(_) => {}
             Self::Flat(meta) => crate::basis::flat::sharing::seal(meta),
@@ -88,12 +88,13 @@ impl Target {
             Self::Sign(sign) => endpoint::seal(sign),
             Self::Nest { nest, .. } => {
                 if nest.is_external() {
-                    let _ = nest.close_external();
+                    nest.close_external().map_err(|_| PendFail::Busy)?;
                 } else {
-                    let _ = nest.retire();
+                    nest.retire().map_err(|_| PendFail::Busy)?;
                 }
             }
         }
+        Ok(())
     }
     pub(crate) fn wake(&self) -> Option<(WakeKey, Weak<Anchor>)> {
         Some(match self {

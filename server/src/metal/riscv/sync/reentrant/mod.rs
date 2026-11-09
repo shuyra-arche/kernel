@@ -124,6 +124,7 @@ impl<T: ?Sized> RelLock<T> {
                 Err(_) => {
                     while self.owner.load(Ordering::Relaxed) != Owner::FREE.word() {
                         crate::metal::stop::hush();
+                        crate::metal::interrupt::window::poll();
                         ::core::hint::spin_loop();
                     }
                 }

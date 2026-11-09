@@ -95,6 +95,10 @@ impl TaskIdent {
         }
     }
 
+    pub(crate) fn receipts(&self) -> crate::basis::unit::team::Clearance {
+        crate::basis::unit::team::Clearance::new(self.team.node.clone())
+    }
+
     pub(crate) fn retire(&self) -> Result<(), NestError> {
         self.memory.lock().retire()
     }

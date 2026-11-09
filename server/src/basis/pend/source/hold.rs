@@ -135,6 +135,9 @@ impl HoldTable {
         )>,
     ) -> Result<usize, PendFail> {
         let mut holds = self.holds.lock();
+        if holds.len() >= 1024 {
+            return Err(PendFail::OutOfMemory);
+        }
         holds.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
         let id = next_id()?;
         let hold = Arc::try_new(Hold::new(id, source, offset, count, ceiling, branch))
@@ -163,13 +166,14 @@ impl HoldTable {
     }
 
     /// Task 走到尽头：结清本表全部引用，未消费的资格随之结束。
-    pub(crate) fn clear(&self) {
-        let mut holds = self.holds.lock();
-        let drained = core::mem::take(&mut *holds);
-        drop(holds);
-        for hold in &drained {
+    pub(crate) fn clear(&self) -> bool {
+        for _ in 0..4 {
+            let Some(hold) = self.holds.lock().pop() else {
+                return true;
+            };
             hold.source().release_hold();
         }
+        self.holds.lock().is_empty()
     }
 }
 

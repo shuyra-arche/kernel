@@ -1,6 +1,16 @@
 use std::{collections::BTreeMap, path::Path};
 pub(super) fn verify(log: &str, output: &Path) {
     assert!(log.contains("bins=log2-saturated-32 proof=observation"));
+    let windows = log
+        .lines()
+        .find_map(|line| line.strip_prefix("latency-windows: opened="))
+        .expect("missing reception window evidence");
+    let (opened, captured) = windows.split_once(" captured=").unwrap();
+    assert!(opened.parse::<u64>().unwrap() > 0);
+    assert!(
+        captured.trim().parse::<u64>().unwrap() > 0,
+        "no interrupt received through a window"
+    );
     let mut totals = BTreeMap::<String, u64>::new();
     let mut tsv = String::from("hart\tmetric\tcount\tmax_ticks\tbins\n");
     for line in log.lines().filter(|l| l.starts_with("latency: hart=")) {

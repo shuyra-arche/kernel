@@ -148,7 +148,20 @@ fn build(cascade: bool) {
         }
     }
     unit::finish(team).unwrap();
-    unit::delete(UnitTarget::Team(team)).unwrap();
+    let deadline = kernel_client::call::room::clock().saturating_add(5_000_000_000);
+    loop {
+        match unit::delete(UnitTarget::Team(team)) {
+            Ok(()) => break,
+            Err(error) => {
+                assert_eq!(error.source, kernel_api::abi::call::unit::UnitFail::Busy);
+                assert!(
+                    kernel_client::call::room::clock() < deadline,
+                    "Team retirement stalled"
+                );
+                kernel_client::call::room::yield_();
+            }
+        }
+    }
     pend::return_(source).unwrap();
     delete(CellObject::Slot(reference));
 }

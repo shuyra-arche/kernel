@@ -1,5 +1,12 @@
+extern crate alloc;
+mod support;
+pub(crate) use support::{Task, basis, metal};
+#[allow(dead_code)]
+#[path = "../../src/basis/unit/task/chain.rs"]
+mod chain;
 #[path = "../../src/basis/sign/endpoint/state.rs"]
 mod state;
+mod wait;
 use state::Event;
 use state::Rejection;
 use state::State;

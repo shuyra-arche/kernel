@@ -20,6 +20,7 @@ pub(crate) fn node(id: usize, parent: Option<&Arc<TeamNode>>) -> Arc<TeamNode> {
         children: SpinLock::new(Vec::new()),
         life: Arc::new(Anchor),
         exit: exit::ExitPolicy::new(),
+        termination: SpinLock::new(crate::basis::unit::lifecycle::Termination::new()),
     });
     if let Some(parent) = parent {
         parent.children.lock().push(node.clone());
@@ -128,4 +129,39 @@ fn clearing_one_root_preserves_other_receipt_roots_and_unreclaimed_members() {
     assert_eq!(task.receipts.lock()[0].roots, vec![root.id]);
     child.clear(TaskId::new(1), Some(root.id));
     assert!(root.children.lock().is_empty());
+}
+
+#[test]
+fn receipt_clearance_advances_one_member_and_keeps_other_owners_results() {
+    let root = node(1, None);
+    let child = node(2, Some(&root));
+    let sibling = node(3, Some(&root));
+    child.state.lock().phase = TeamPhase::Ousted;
+    let first = member(&child, 4, &[1]);
+    let second = member(&child, 5, &[1]);
+    let retained = member(&sibling, 6, &[1, 7]);
+    first.reclaim();
+    second.reclaim();
+    retained.reclaim();
+    let mut cursor = crate::lifecycle::Clearance::new(root.clone());
+    let untouched = sibling.tasks.locks();
+    assert!(!cursor.advance(TaskId::new(1), None)); // root members
+    assert!(!cursor.advance(TaskId::new(1), None)); // enter child
+    assert!(!cursor.advance(TaskId::new(1), None)); // one member
+    assert!(!first.pending(TaskId::new(1)));
+    assert!(second.pending(TaskId::new(1)));
+    assert_eq!(sibling.tasks.locks(), untouched);
+    let mut done = false;
+    for _ in 0..20 {
+        if cursor.advance(TaskId::new(1), None) {
+            done = true;
+            break;
+        }
+    }
+    assert!(done);
+    assert!(!second.pending(TaskId::new(1)));
+    assert!(!retained.pending(TaskId::new(1)));
+    assert!(retained.pending(TaskId::new(7)));
+    assert_eq!(*retained.result.lock(), Some(83));
+    assert_eq!(root.children.lock().len(), 1);
 }

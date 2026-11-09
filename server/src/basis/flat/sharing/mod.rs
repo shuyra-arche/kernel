@@ -141,14 +141,16 @@ impl Sharing {
         token: PendId,
         authority: Arc<Pend>,
     ) -> Result<(), PendFail> {
-        self.authorities
-            .lock()
-            .try_reserve(1)
-            .map_err(|_| PendFail::OutOfMemory)?;
-        self.maps
-            .lock()
-            .try_reserve(1)
-            .map_err(|_| PendFail::OutOfMemory)?;
+        {
+            let mut authorities = self.authorities.lock();
+            if authorities.len() >= 1024 {
+                return Err(PendFail::OutOfMemory);
+            }
+            authorities
+                .try_reserve(1)
+                .map_err(|_| PendFail::OutOfMemory)?;
+        }
+        self.reserve_records(1)?;
         {
             let mut maps = self.maps.lock();
             if let Some(input) = maps
@@ -186,10 +188,11 @@ impl Sharing {
     }
 
     pub(crate) fn reserve_records(&self, count: usize) -> Result<(), PendFail> {
-        self.maps
-            .lock()
-            .try_reserve(count)
-            .map_err(|_| PendFail::OutOfMemory)
+        let mut maps = self.maps.lock();
+        if count > 1024usize.saturating_sub(maps.len()) {
+            return Err(PendFail::OutOfMemory);
+        }
+        maps.try_reserve(count).map_err(|_| PendFail::OutOfMemory)
     }
 
     /// 把一段已有关系关联到根 Pend：创建事务的 Input 交接。
@@ -251,7 +254,7 @@ impl Sharing {
     }
 
     pub(crate) fn close_maps(&self, token: Option<PendId>) -> Result<(), PendFail> {
-        loop {
+        for _ in 0..4 {
             let entry = {
                 let mut maps = self.maps.lock();
                 let index = maps
@@ -282,6 +285,16 @@ impl Sharing {
                 }
                 space.retire_mapping(id);
             }
+        }
+        if self
+            .maps
+            .lock()
+            .iter()
+            .any(|entry| token.is_none_or(|t| entry.closable(t)))
+        {
+            Err(PendFail::Busy)
+        } else {
+            Ok(())
         }
     }
 }

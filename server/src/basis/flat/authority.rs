@@ -58,7 +58,7 @@ pub(crate) fn create(
     source.consume();
     meta.commit_source();
     registration.publish();
-    pend::changed(task);
+
     Ok(entry.token())
 }
 pub(crate) fn inspect(task: &Arc<Task>, token: PendId) -> Result<FlatInfo, PendFail> {
@@ -140,7 +140,7 @@ pub(crate) fn delete(task: &Arc<Task>, token: PendId) -> Result<(), PendFail> {
         let meta = entry.target().memory().ok_or(PendFail::Denied)?;
         let operation = SharingOperation::acquire(&meta).ok_or(PendFail::Busy)?;
         let _commit = crate::basis::commit();
-        entry.target().seal();
+        entry.target().seal()?;
         (meta, operation)
     };
     crate::basis::flat::sharing::close(&meta)

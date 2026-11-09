@@ -74,11 +74,19 @@ pub(crate) mod basis {
     // interrupt exclusion and hardware effects are exercised by the RV64 guest.
     pub(crate) fn commit() {}
     pub(crate) mod unit {
+        pub(crate) mod lifecycle {
+            pub(crate) struct Termination;
+            impl Termination {
+                pub(crate) const fn new() -> Self {
+                    Self
+                }
+            }
+        }
         pub(crate) mod task {
             pub(crate) use crate::registration::{Origin, Task, TaskState, TaskWeak};
         }
         pub(crate) mod team {
-            pub(crate) use crate::lifecycle::TeamNode;
+            pub(crate) use crate::lifecycle::{Clearance, TeamNode};
         }
         pub(crate) mod anchor {
             pub(crate) struct Anchor;
@@ -225,6 +233,9 @@ pub(crate) struct Ident {
     trace: Arc<SpinLock<Vec<&'static str>>>,
 }
 impl Ident {
+    pub(crate) fn receipts(&self) -> crate::lifecycle::Clearance {
+        crate::lifecycle::Clearance::new(crate::topology::node(1, None))
+    }
     pub(crate) fn retire(&self) -> Result<(), NestError> {
         self.trace.lock().push("memory");
         if self.busy.load(Ordering::Acquire) {

@@ -1,268 +1,29 @@
 //! Authority over View ranges and the records that bind it to a Task.
 
 pub(crate) mod access;
+mod authority;
 mod branch;
 mod ledger;
 mod source;
-mod state;
+pub(crate) use authority::Pend;
 mod target;
 mod window;
 pub(crate) use target::Target;
 
-use alloc::sync::Arc;
-use core::sync::atomic::{AtomicUsize, Ordering};
-
-use kernel_api::abi::call::pend::PendFail;
-use kernel_api::address::{PageCount, PageOffset};
 pub(crate) use kernel_api::model::modifiable::Modifiable;
-use kernel_api::model::pend::{Distributable, Limits, Operations, PendRange};
 
 use crate::basis::unit::task::Task;
-use crate::metal::sync::SpinLock;
-
-use state::{Event, Failure, Phase, State};
 
 pub(crate) use branch::{accord, reduce};
 pub(crate) use ledger::{
-    PendEntry, Table, accede, available, changed, doom, insert, locate, notify, retire, return_,
-    revoke, vestor,
+    PendEntry, Table, accede, available, doom, insert, locate, notify, retire, return_, revoke,
+    vestor,
 };
 pub(crate) use source::{ExternalBorrow, Geometry, Hold, HoldTable, SourceAuthorization};
 pub(crate) use window::Window;
 
-/// A Pend is the live access authority for one View range. Its parent obligation
-/// survives handle removal until CPU withdrawal and any external use are settled.
-#[derive(Clone, Copy)]
-enum BorrowKind {
-    Internal,
-    External,
-}
-struct ParentBorrow {
-    parent: Arc<Pend>,
-    access: Modifiable,
-    kind: BorrowKind,
-}
-
-pub(crate) struct Pend {
-    state: SpinLock<State>,
-    window: SpinLock<Option<(PageOffset, PageCount)>>,
-    parent: SpinLock<Option<ParentBorrow>>,
-    external: AtomicUsize,
-    routing: AtomicUsize,
-}
-
-impl Pend {
-    pub(crate) fn try_new_window(
-        access: Modifiable,
-        window: Option<(PageOffset, PageCount)>,
-        operations: Operations,
-        distributable: Distributable,
-    ) -> Result<Arc<Self>, PendFail> {
-        Arc::try_new(Self {
-            state: SpinLock::new(State::authorized(access, operations, distributable)),
-            window: SpinLock::new(window),
-            parent: SpinLock::new(None),
-            external: AtomicUsize::new(0),
-            routing: AtomicUsize::new(0),
-        })
-        .map_err(|_| PendFail::OutOfMemory)
-    }
-    pub(crate) fn window(&self) -> Option<(PageOffset, PageCount)> {
-        *self.window.lock()
-    }
-    pub(crate) fn contains(&self, offset: PageOffset, count: PageCount) -> bool {
-        self.window().is_none_or(|(base, size)| {
-            matches!((offset.get().checked_add(count.get()), base.get().checked_add(size.get())),
-                (Some(end), Some(limit)) if offset.get() >= base.get() && end <= limit)
-        })
-    }
-    pub(crate) fn configured(&self) -> Modifiable {
-        self.state.lock().access
-    }
-    /// A retained retiring object carries obligations, but no live registration.
-    pub(crate) fn alive(&self) -> bool {
-        self.state.lock().phase == Phase::Active
-    }
-    pub(crate) fn status(&self) -> kernel_api::model::pend::PendStatus {
-        use kernel_api::model::pend::PendStatus;
-        let state = *self.state.lock();
-        match state.phase {
-            Phase::Dead => PendStatus::Dead,
-            Phase::Retiring => PendStatus::Retiring,
-            Phase::Active if state.usable() => PendStatus::Active,
-            Phase::Active => PendStatus::Suspended,
-        }
-    }
-    pub(crate) fn modifiable(&self) -> Option<Modifiable> {
-        let state = *self.state.lock();
-        state.usable().then_some(state.access)
-    }
-    pub(crate) fn can_borrow(&self, access: Modifiable) -> Result<(), PendFail> {
-        if self.routing.load(Ordering::Acquire) != 0 {
-            return Err(PendFail::Busy);
-        }
-        self.state
-            .lock()
-            .transition(Event::Borrow(access))
-            .map(|_| ())
-            .map_err(fail)
-    }
-    pub(crate) fn borrow(self: &Arc<Self>, child: &Arc<Self>) -> Result<(), PendFail> {
-        self.borrow_kind(child, BorrowKind::Internal)
-    }
-    pub(crate) fn borrow_external(self: &Arc<Self>, child: &Arc<Self>) -> Result<(), PendFail> {
-        self.borrow_kind(child, BorrowKind::External)
-    }
-    fn borrow_kind(self: &Arc<Self>, child: &Arc<Self>, kind: BorrowKind) -> Result<(), PendFail> {
-        let access = child.configured();
-        let mut state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) != 0 {
-            return Err(PendFail::Busy);
-        }
-        *state = state.transition(Event::Borrow(access)).map_err(fail)?;
-        if matches!(kind, BorrowKind::External) {
-            self.external.fetch_add(1, Ordering::Release);
-        }
-        *child.parent.lock() = Some(ParentBorrow {
-            parent: self.clone(),
-            access,
-            kind,
-        });
-        Ok(())
-    }
-    pub(crate) fn limits(&self) -> Limits {
-        let state = self.state.lock();
-        let range = self
-            .window()
-            .map_or(PendRange::Inherit, |(offset, count)| PendRange::Pages {
-                offset: offset.get(),
-                count: count.get(),
-            });
-        Limits {
-            operations: state.operations,
-            modifiable: state.access,
-            distributable: state.distributable,
-            range,
-        }
-    }
-    pub(crate) fn permits(&self, operations: Operations) -> bool {
-        self.state.lock().permits(operations)
-    }
-    pub(crate) fn can_narrow(&self, limits: Limits) -> Result<(), PendFail> {
-        if !limits.valid() {
-            return Err(PendFail::Denied);
-        }
-        let state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) != 0 {
-            return Err(PendFail::Busy);
-        }
-        state
-            .transition(Event::Limit {
-                access: limits.modifiable,
-                operations: limits.operations,
-                distributable: limits.distributable,
-            })
-            .map(|_| ())
-            .map_err(fail)
-    }
-    pub(crate) fn narrow(
-        &self,
-        limits: Limits,
-        window: Option<(PageOffset, PageCount)>,
-    ) -> Result<(), PendFail> {
-        if !limits.valid() {
-            return Err(PendFail::Denied);
-        }
-        let mut state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) != 0 {
-            return Err(PendFail::Busy);
-        }
-        *state = state
-            .transition(Event::Limit {
-                access: limits.modifiable,
-                operations: limits.operations,
-                distributable: limits.distributable,
-            })
-            .map_err(fail)?;
-        *self.window.lock() = window;
-        Ok(())
-    }
-    pub(crate) fn external_pending(&self) -> bool {
-        self.external.load(Ordering::Acquire) != 0 || self.routing.load(Ordering::Acquire) != 0
-    }
-    /// Retain one binding or Memo obligation without lending data access.
-    /// Operation permission is checked by the caller against its typed target.
-    /// Caller holds work commit; publication must either cancel or retain this
-    /// obligation until the matching Nest completion has settled.
-    pub(crate) fn retain_route(&self) -> Result<(), PendFail> {
-        let state = self.state.lock();
-        if !state.usable() {
-            return Err(PendFail::Denied);
-        }
-        self.routing
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                count.checked_add(1)
-            })
-            .map(|_| ())
-            .map_err(|_| PendFail::Busy)
-    }
-    /// # Safety
-    /// The route was never published, or its exact hardware completion settled.
-    pub(crate) unsafe fn release_route(&self) {
-        assert!(self.routing.fetch_sub(1, Ordering::AcqRel) > 0);
-    }
-    pub(crate) fn retiring(&self) -> bool {
-        self.state.lock().phase != Phase::Active
-    }
-    pub(crate) fn invalidate(&self) {
-        let mut state = self.state.lock();
-        *state = state.transition(Event::Retire).expect("retire is total");
-    }
-    /// Only after actual mapping withdrawal. Drop deliberately does not call this.
-    pub(crate) fn settle(&self) -> Result<(), PendFail> {
-        self.finish(Event::Settle)
-    }
-    /// # Safety
-    /// This child has never authorized a published hardware access. Only the
-    /// unpublished ExternalBorrow rollback owns this proof.
-    pub(in crate::basis::pend) unsafe fn cancel_unpublished(&self) -> Result<(), PendFail> {
-        self.finish(Event::Cancel)
-    }
-    fn finish(&self, event: Event) -> Result<(), PendFail> {
-        let mut state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) != 0 {
-            return Err(PendFail::Busy);
-        }
-        *state = state.transition(event).map_err(fail)?;
-        drop(state);
-        if let Some(ParentBorrow {
-            parent,
-            access,
-            kind,
-        }) = self.parent.lock().take()
-        {
-            let mut state = parent.state.lock();
-            if matches!(kind, BorrowKind::External) {
-                parent.external.fetch_sub(1, Ordering::Release);
-            }
-            *state = state
-                .transition(Event::Return(access))
-                .expect("registered child borrow");
-        }
-        Ok(())
-    }
-}
-
-fn fail(error: Failure) -> PendFail {
-    match error {
-        Failure::Denied => PendFail::Denied,
-        Failure::Busy => PendFail::Busy,
-        Failure::Dead => PendFail::Dead,
-    }
-}
-
 pub(crate) fn live(task: &Task) -> bool {
-    !task.dead()
+    !task.dead() && !task.ident.team.node.closed()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,15 +37,5 @@ impl Need {
             Self::Write => access == Modifiable::Yes,
             Self::Read => true,
         }
-    }
-}
-
-impl Pend {
-    pub(crate) fn associates(&self) -> bool {
-        self.permits(kernel_api::model::pend::Operations::Share(
-            kernel_api::model::pend::ShareRights::ASSOCIATE,
-        )) || self.permits(kernel_api::model::pend::Operations::Flat(
-            kernel_api::model::pend::FlatRights::ASSOCIATE,
-        ))
     }
 }

@@ -1,5 +1,4 @@
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 use kernel_api::abi::call::pend::PendFail;
 
@@ -22,56 +21,62 @@ pub(crate) fn close(root: &Arc<Sharing>) -> Result<(), PendFail> {
     let Some(source) = root.authorization() else {
         return root.close_maps(None);
     };
-    let bindings = {
+    {
         let _commit = crate::basis::commit();
-        let bindings = source.bindings()?;
         source.revoke()?;
         seal(root);
-        bindings
-    };
+    }
     root.close_maps(None)?;
-    close_bindings(&source, bindings)
+    for _ in 0..4 {
+        let Some(binding) = source.first_binding() else {
+            return Ok(());
+        };
+        close_binding(&source, binding)?;
+    }
+    if source.pending_close() {
+        Err(PendFail::Busy)
+    } else {
+        Ok(())
+    }
 }
 
-fn close_bindings(
+fn close_binding(
     source: &Arc<SourceAuthorization>,
-    bindings: Vec<Arc<RangeBinding>>,
+    binding: Arc<RangeBinding>,
 ) -> Result<(), PendFail> {
-    for binding in bindings {
-        let (space, mapping) = {
-            let _commit = crate::basis::commit();
-            if !source.owns_binding(&binding) {
-                continue;
-            }
-            let space = binding.nest().upgrade().ok_or(PendFail::Busy)?;
-            let entry = space
-                .mappings
-                .registered(binding.id())
-                .ok_or(PendFail::Busy)?;
-            if !Arc::ptr_eq(&entry.source, source) || !Arc::ptr_eq(&entry.binding, &binding) {
-                return Err(PendFail::Busy);
-            }
-            (space, entry.mapping().cloned())
-        };
-        let id = binding.id();
-        if !space.settled(id)
-            && let Err(error) = space.retry_invalidation()
+    let (space, mapping) = {
+        let _commit = crate::basis::commit();
+        if !source.owns_binding(&binding) {
+            return Ok(());
+        }
+        let space = binding.nest().upgrade().ok_or(PendFail::Busy)?;
+        let entry = space
+            .mappings
+            .registered(binding.id())
+            .ok_or(PendFail::Busy)?;
+        if !Arc::ptr_eq(&entry.source, source) || !Arc::ptr_eq(&entry.binding, &binding) {
+            return Err(PendFail::Busy);
+        }
+        (space, entry.mapping().cloned())
+    };
+    let id = binding.id();
+    if !space.settled(id)
+        && let Err(error) = space.retry_invalidation()
+        && !space.settled(id)
+    {
+        return Err(pend_map_error(error));
+    }
+    if !space.settled(id) {
+        let mapping = mapping.ok_or(PendFail::Busy)?;
+        if let Err(error) = space.detach(mapping.whole())
             && !space.settled(id)
         {
             return Err(pend_map_error(error));
         }
-        if !space.settled(id) {
-            let mapping = mapping.ok_or(PendFail::Busy)?;
-            if let Err(error) = space.detach(mapping.whole())
-                && !space.settled(id)
-            {
-                return Err(pend_map_error(error));
-            }
-        }
-        if !space.settled(id) {
-            return Err(PendFail::Busy);
-        }
-        space.retire_mapping(id);
     }
+    if !space.settled(id) {
+        return Err(PendFail::Busy);
+    }
+    space.retire_mapping(id);
     Ok(())
 }

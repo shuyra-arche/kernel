@@ -61,6 +61,24 @@ unsafe impl Allocator for FrameAllocator {
         })
     }
 
+    fn allocate_zeroed(&self, layout: core::alloc::Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let block = self.allocate(layout)?;
+        // The allocator lock is already released. Large Cells keep receiving
+        // interrupts without exposing partially initialized memory to a Task.
+        for offset in (0..block.len()).step_by(64 * 1024) {
+            let count = (block.len() - offset).min(64 * 1024);
+            unsafe {
+                block
+                    .as_ptr()
+                    .cast::<u8>()
+                    .add(offset)
+                    .write_bytes(0, count)
+            };
+            crate::metal::interrupt::window::poll();
+        }
+        Ok(block)
+    }
+
     #[track_caller]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: core::alloc::Layout) {
         unsafe {

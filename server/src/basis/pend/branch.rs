@@ -109,12 +109,13 @@ pub(crate) fn accord(
             let mut granted = pend_entry.vest_window(mark, limits, window, share)?;
             granted.parent(src, Arc::downgrade(caller));
             let granted = Arc::try_new(granted).map_err(|_| PendFail::OutOfMemory)?;
-            caller
-                .pend
-                .heirs
-                .lock()
-                .try_reserve(1)
-                .map_err(|_| PendFail::OutOfMemory)?;
+            {
+                let mut heirs = caller.pend.heirs.lock();
+                if heirs.len() >= 1024 {
+                    return Err(PendFail::OutOfMemory);
+                }
+                heirs.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+            }
             let registration = target.pend.prepare(granted.clone())?;
             (pend_entry, granted, registration)
         };
@@ -140,12 +141,8 @@ pub(crate) fn accord(
         crate::basis::room::interrupt::dispatch(&target, &granted)?;
         insert_heir(caller, src, Arc::downgrade(&target), token);
         registration.publish();
-        super::changed(caller);
-        if !Arc::ptr_eq(caller, &target) {
-            super::changed(&target);
-        }
         Ok(token)
-    })?;
+    })??;
     let _ = sign::wake(
         WakeKey::Pends {
             task: target.ident.id,
@@ -221,7 +218,6 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
         let entries = task.pend.entries.lock();
         let entry = entries.get(token).ok_or(PendFail::Denied)?;
         entry.narrow(limits, window)?;
-        super::changed(task);
     }
     drop(_serial);
     drop(_operation);

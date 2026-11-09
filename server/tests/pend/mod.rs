@@ -1,5 +1,25 @@
+#![feature(allocator_api)]
+extern crate alloc;
+mod ancestry;
+#[allow(dead_code)]
+#[path = "../../src/basis/pend/authority/mod.rs"]
+mod authority;
+mod metal {
+    pub(crate) mod sync {
+        pub(crate) use std::sync::OnceLock;
+        pub(crate) struct SpinLock<T>(std::sync::Mutex<T>);
+        impl<T> SpinLock<T> {
+            pub(crate) fn new(value: T) -> Self {
+                Self(std::sync::Mutex::new(value))
+            }
+            pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, T> {
+                self.0.lock().unwrap()
+            }
+        }
+    }
+}
 mod ranges;
-#[path = "../../src/basis/pend/state.rs"]
+#[path = "../../src/basis/pend/authority/state.rs"]
 mod state;
 #[path = "../../src/basis/pend/window.rs"]
 mod window;

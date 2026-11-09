@@ -42,17 +42,19 @@ impl Ready {
         }
     }
     pub(super) fn dequeue(&mut self, destination: HartId, now: u64) -> Option<Arc<Task>> {
-        let task = self
-            .chain
-            .remove_if(&mut |task| task.can_run_on(destination))?;
-        self.since = (!self.chain.is_empty()).then_some(now);
-        Some(task)
+        for _ in 0..4 {
+            let task = self.chain.dequeue()?;
+            if task.can_run_on(destination) {
+                self.since = (!self.chain.is_empty()).then_some(now);
+                return Some(task);
+            }
+            self.chain.enqueue(task);
+        }
+        crate::basis::room::deadline::retry();
+        None
     }
     pub(super) fn remove(&mut self, target: &Arc<Task>) -> bool {
-        let removed = self
-            .chain
-            .remove_if(&mut |task| Arc::ptr_eq(task, target))
-            .is_some();
+        let removed = self.chain.remove(target).is_some();
         if self.chain.is_empty() {
             self.since = None;
         }

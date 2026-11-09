@@ -1,6 +1,5 @@
 use alloc::boxed::Box;
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 #[cfg(debug_assertions)]
 use crate::metal::generic::mmu::{Attributes, PageTable};
@@ -61,20 +60,9 @@ impl Index {
         first_overlap(self.root.as_deref(), lo, hi)
     }
 
-    /// 中序收集全部关系。
-    pub(super) fn collect(&self, mappings: &mut Vec<Arc<Span>>) {
-        collect_mappings(self.root.as_deref(), mappings)
-    }
-
     /// 关系区间变化后重算其节点缓存。
     pub(super) fn refresh(&mut self, mapping: &Arc<Span>) -> bool {
         refresh(&mut self.root, mapping)
-    }
-
-    /// 撕销全部索引。
-    pub(super) fn clear(&mut self) {
-        self.root = None;
-        self.len = 0;
     }
 
     /// 索引自身的不变量：节点数等于计数，键、高度与缓存都要对。
@@ -172,13 +160,6 @@ fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<S
     } else {
         None
     }
-}
-
-fn collect_mappings(node: Option<&IndexNode>, mappings: &mut Vec<Arc<Span>>) {
-    let Some(node) = node else { return };
-    collect_mappings(node.left.as_deref(), mappings);
-    mappings.push(node.mapping.clone());
-    collect_mappings(node.right.as_deref(), mappings);
 }
 
 fn refresh(root: &mut Option<Box<IndexNode>>, mapping: &Arc<Span>) -> bool {

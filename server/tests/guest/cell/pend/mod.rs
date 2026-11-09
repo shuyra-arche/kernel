@@ -1,4 +1,5 @@
 mod permission;
+mod retirement;
 
 use kernel_api::{
     abi::call::pend::PendFail,
@@ -73,6 +74,7 @@ extern "C" fn recipient() -> ! {
 
 pub(super) fn run() {
     permission::run();
+    retirement::run();
     let reference = super::allocate(8);
     let root = share_view::create(crate::license::get(), reference, Modifiable::Yes).unwrap();
     let (address, len) = share_view::open(root).unwrap();
