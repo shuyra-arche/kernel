@@ -112,11 +112,11 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
             }
         }
         TrapEvent::External => {
-            if crate::basis::room::interrupt::external().is_some_and(|route| route.handle()) {
-                crate::basis::nest::authority::external::maintain();
-            } else {
+            if !crate::basis::room::interrupt::external().is_some_and(|route| route.handle()) {
                 interrupt::disable_external();
             }
+            // Claims/receipts remain retained. Resource retirement belongs to
+            // timer/idle maintenance, not the external interrupt front half.
             frame as *mut TrapContext
         }
         TrapEvent::Call => {

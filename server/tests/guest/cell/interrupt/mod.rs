@@ -104,14 +104,44 @@ extern "C" fn irq_received() {
 }
 #[track_caller]
 fn receive(token: PendId, wait: Wait) -> u64 {
-    let SignReply::Triggered { sequence } = sign::listen(token, wait).unwrap() else {
-        panic!("UART IRQ missing")
+    let reply = sign::listen(token, wait).unwrap();
+    let SignReply::Triggered { sequence } = reply else {
+        // Let load Tasks exit after a failed assertion, so shutdown can retain
+        // the router counters instead of hiding the failure behind a watchdog.
+        LOAD_STOP.store(true, Ordering::Release);
+        panic!(
+            "UART IRQ missing: {reply:?}; ier={} iir={}",
+            read(1),
+            read(2)
+        )
     };
     irq_received();
     sequence
 }
 fn deadline() -> Wait {
     Wait::At(room::clock().saturating_add(2_000_000_000))
+}
+
+fn retained(token: PendId) -> u64 {
+    // Poll never registers a waiter. Prove retention without assuming an IRQ
+    // must cross a contended commit boundary within an arbitrary 2 ms sleep.
+    let until = room::clock().saturating_add(2_000_000_000);
+    loop {
+        match sign::listen(token, Wait::Poll).unwrap() {
+            SignReply::Triggered { sequence } => {
+                irq_received();
+                return sequence;
+            }
+            SignReply::Pending => {
+                assert!(
+                    room::clock() < until,
+                    "unobserved UART IRQ was not retained"
+                );
+                room::yield_();
+            }
+            reply => panic!("unexpected UART reply: {reply:?}"),
+        }
+    }
 }
 fn accord(
     root: PendId,
@@ -285,10 +315,11 @@ pub(super) fn run(at: usize, count: usize) {
     let mut previous = 0;
     for turn in 0..24 {
         write(1, 2);
-        if turn == 0 {
-            room::sleep_until(room::clock() + 2_000_000).unwrap();
-        }
-        let sequence = receive(token, if turn == 0 { Wait::Poll } else { deadline() });
+        let sequence = if turn == 0 {
+            retained(token)
+        } else {
+            receive(token, deadline())
+        };
         assert!(sequence > previous);
         assert_eq!(
             sign::listen(token, Wait::Poll).unwrap(),

@@ -1,0 +1,102 @@
+pub(crate) mod metal {
+    pub(crate) mod hart {
+        use std::cell::Cell;
+        std::thread_local! { static ID: Cell<usize> = const { Cell::new(0) }; }
+        #[derive(Clone, Copy)]
+        pub(crate) struct HartId(usize);
+        impl HartId {
+            pub(crate) fn get(self) -> usize {
+                self.0
+            }
+        }
+        pub(crate) fn hart_id() -> HartId {
+            HartId(ID.get())
+        }
+        pub(crate) fn set(id: usize) {
+            ID.set(id);
+        }
+    }
+    pub(crate) mod stop {
+        pub(crate) fn hush() {}
+    }
+    pub(crate) mod sync {
+        #[cfg(debug_assertions)]
+        macro_rules! depend_enter {
+            ($lock:expr) => {
+                0usize
+            };
+        }
+        macro_rules! depend_check {
+            ($lock:expr, $caller:expr) => {
+                #[cfg(debug_assertions)]
+                crate::metal::sync::depend::check(
+                    $lock as *const _ as *const () as usize,
+                    $lock.level,
+                    $caller,
+                );
+            };
+        }
+        macro_rules! depend_acquire {
+            ($lock:expr, $caller:expr) => {
+                #[cfg(debug_assertions)]
+                crate::metal::sync::depend::acquire(
+                    $lock as *const _ as *const () as usize,
+                    $lock.level,
+                    $caller,
+                );
+            };
+        }
+        #[cfg(debug_assertions)]
+        pub(crate) use depend_enter;
+        pub(crate) use {depend_acquire, depend_check};
+        pub(crate) mod depend {
+            use std::cell::RefCell;
+            std::thread_local! { static HELD: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) }; }
+            #[derive(Debug, Clone, Copy)]
+            pub(crate) enum Level {
+                Unit,
+            }
+            #[cfg(debug_assertions)]
+            pub(crate) fn check(address: usize, _: Option<Level>, _: usize) {
+                HELD.with_borrow(|held| assert!(!held.contains(&address)));
+            }
+            #[cfg(debug_assertions)]
+            pub(crate) fn acquire(address: usize, _: Option<Level>, _: usize) {
+                HELD.with_borrow_mut(|held| {
+                    assert!(!held.contains(&address));
+                    held.push(address);
+                });
+            }
+            #[cfg(debug_assertions)]
+            pub(crate) fn release(address: usize) {
+                HELD.with_borrow_mut(|held| {
+                    let at = held.iter().position(|known| *known == address).unwrap();
+                    held.remove(at);
+                });
+            }
+            pub(crate) fn count() -> usize {
+                HELD.with_borrow(Vec::len)
+            }
+        }
+        pub(crate) mod trap {
+            use std::cell::Cell;
+            std::thread_local! { static ENABLED: Cell<bool> = const { Cell::new(true) }; }
+            pub(crate) fn enabled() -> bool {
+                ENABLED.get()
+            }
+            pub(crate) struct TrapGuard(bool);
+            impl TrapGuard {
+                pub(crate) unsafe fn save() -> Self {
+                    Self(ENABLED.replace(false))
+                }
+            }
+            impl Drop for TrapGuard {
+                fn drop(&mut self) {
+                    if self.0 {
+                        ENABLED.set(true);
+                    }
+                }
+            }
+        }
+    }
+}

@@ -168,7 +168,9 @@ fn note_out<'a>(
 }
 
 pub(crate) fn bury() {
-    loop {
+    // Bound this service turn's outer work. Unsettled Tasks retain their place
+    // for a later turn; each Task's recursive retirement is a separate M2 bound.
+    for _ in 0..4 {
         let z = {
             let mut husks = HUSKS.lock();
             let Some(z) = husks.dequeue() else {
@@ -191,6 +193,12 @@ pub(crate) fn bury() {
         let _pruned = crate::basis::unit::task::registry::prune();
         drop(z);
         tally::exit();
+    }
+    if !HUSKS.lock().chain.is_empty() {
+        // Keep the continuation live even with no competing ready Task to
+        // shorten the ordinary scheduling ceiling. Busy retirement retains all
+        // hardware and Cell ownership until a later attempt actually settles.
+        crate::basis::room::deadline::retry();
     }
 }
 

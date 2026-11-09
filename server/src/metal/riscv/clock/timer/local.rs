@@ -26,6 +26,19 @@ impl<B: Comparator> LocalTimer<B> {
             .then(|| Compare::from_ticks(self.armed.load(Ordering::Relaxed)))
     }
 
+    /// Back off an elapsed comparator while preserving any earlier future
+    /// interrupt. The shared deadline heap is neither read nor modified.
+    pub(crate) fn retry(&self, now: u64, at: u64) -> Result<bool, B::Error> {
+        let next = self.setting().map_or(at, |known| {
+            if known.ticks() > now {
+                known.ticks().min(at)
+            } else {
+                at
+            }
+        });
+        self.set(Compare::from_ticks(next))
+    }
+
     /// Returns whether a hardware write was needed. Even a request to restore
     /// the prior setting must reach the backend after a failed write.
     pub(crate) fn set(&self, setting: Compare) -> Result<bool, B::Error> {

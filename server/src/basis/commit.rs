@@ -31,3 +31,8 @@ pub(crate) type CommitGuard = crate::metal::sync::reentrant::RelLockGuard<'stati
 pub(crate) fn commit() -> CommitGuard {
     COMMIT.lock()
 }
+
+/// Interrupt work may retain its event and retry instead of waiting IRQ-off.
+pub(crate) fn try_commit() -> Option<CommitGuard> {
+    COMMIT.try_lock()
+}

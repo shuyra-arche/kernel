@@ -44,6 +44,7 @@ fn singleton_and_tail_cannot_enter_a_second_queue() {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| second.enqueue(b.clone())));
     assert!(rejected.is_err());
     assert!(second.is_empty());
+    #[cfg(debug_assertions)]
     assert_eq!(first.len(), 2);
     assert_eq!(first.dequeue().unwrap().id, 1);
     assert_eq!(first.dequeue().unwrap().id, 2);

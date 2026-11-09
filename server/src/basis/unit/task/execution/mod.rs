@@ -361,6 +361,13 @@ impl TaskState {
         }
     }
 
+    pub(crate) fn waiting_on(&self) -> Option<(WakeKey, Ticket)> {
+        match self.axis {
+            TaskAxis::Waiting { key, ticket, .. } => Some((key, ticket)),
+            _ => None,
+        }
+    }
+
     pub(crate) fn take_wait(&mut self) -> Option<WaitCall> {
         match &mut self.axis {
             TaskAxis::Waiting { wait, .. } => wait.take(),

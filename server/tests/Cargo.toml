@@ -51,6 +51,10 @@ name = "room"
 path = "room/mod.rs"
 
 [[test]]
+name = "sync"
+path = "sync/mod.rs"
+
+[[test]]
 name = "allocator"
 path = "allocator/mod.rs"
 
@@ -83,3 +87,7 @@ path = "latency/mod.rs"
 [[test]]
 name = "diagnostics"
 path = "diagnostics/mod.rs"
+
+# Imported production synchronization code retains its provider feature gates.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("latency"))'] }
