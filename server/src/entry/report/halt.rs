@@ -68,6 +68,7 @@ pub(crate) extern "C" fn info(source: &Source<'_>) -> ! {
     // Unacknowledged peers may still change memory. Omit the page-table walk in
     // that case rather than racing freed table pages during crash reporting.
     let _ = super::scene::write(source, &mut sink, booted && quiet == expected);
+    let _ = writeln!(sink, "[kernel] terminal-reset reason=failure");
     sink.finish();
     crate::metal::stop::failed()
 }

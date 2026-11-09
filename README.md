@@ -452,7 +452,7 @@ Fatal reports distinguish saved `Trap` registers from `RustPanic` location/messa
 Panic stack registers are labeled `DiagnosticCapture`; frame-chain evidence and
 heuristic stack-scan hits have separate labels. The walker accepts compressed
 instruction addresses and only recognizes the Kernel executable text range (ROOT
-is a stack, never code). Reports contain a bounded-walk stop reason. Peer counts
+is a stack, never code). A Trap that interrupted ROOT omits its overwritten stack. Reports contain a bounded-walk stop reason. Peer counts
 are observations, not device-reclamation proof; unobserved peers suppress memory
 walking. Before boot facts are available, the report omits the walk.
 
@@ -471,3 +471,9 @@ python3 tools/diagnostics/symbolize.py panic-debug.elf panic-debug-smp1-serial.l
 ```
 
 Match the ELF to the recorded hash; scan hits are candidates, not proven callers.
+
+Console source prefixes are readability labels, not authenticated provenance:
+`Debug Put` intentionally retains its raw-byte contract, so user bytes can imitate
+labels on the shared serial stream. Preventing that requires a framed/escaped
+transport or a separately trusted channel; this PR does not silently change the
+existing byte API to claim that stronger property.

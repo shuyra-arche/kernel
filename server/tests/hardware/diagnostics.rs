@@ -90,10 +90,16 @@ fn crash_evidence_comes_from_the_fault_and_survives_without_an_allocator() {
                 .unwrap();
                 let output = super::run(command, &evidence, &name);
                 let serial = String::from_utf8_lossy(&output.stdout);
-                assert!(
-                    !output.status.success(),
-                    "fatal boot must reset with failure: {serial}"
-                );
+                // OpenSBI v1.6 syscon_do_poweroff ignores the SRST reason:
+                // lib/utils/reset/fdt_reset_syscon.c. QEMU's process exit code
+                // therefore cannot distinguish a successful boot from Panic.
+                // Require terminal evidence below, plus an orderly emulator exit.
+                assert!(matches!(output.status.code(), Some(0 | 1)), "{serial}");
+                std::fs::write(
+                    evidence.join(format!("{name}-exit.txt")),
+                    format!("{}\n", output.status),
+                )
+                .unwrap();
                 if mode == "recursive" {
                     assert!(
                         serial.contains("recursive-failure evidence=incomplete"),
@@ -101,6 +107,7 @@ fn crash_evidence_comes_from_the_fault_and_survives_without_an_allocator() {
                     );
                     continue;
                 }
+                assert!(serial.contains("terminal-reset reason=failure"), "{serial}");
                 assert!(serial.contains("root-canary=true"), "{serial}");
                 assert!(serial.contains("emergency-lost=0"), "{serial}");
                 if mode == "trap" {
