@@ -468,3 +468,5 @@ claims at most four. These bounds do not bound global commit-lock contention.
 Shared lines, cascaded controllers and MSI need separate admission contracts.
 Interrupt acknowledgement is not proof of device quiescence or Page retirement.
 The old global SupervisorExternal boot grant is no longer minted.
+
+PLIC ordering follows the [RISC-V PLIC 1.0.0 completion contract](https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic-1.0.0.pdf): completion of a disabled source is ignored. The driver gateway retains its claim until device acknowledgement.

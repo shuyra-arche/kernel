@@ -25,9 +25,9 @@ pub(in super::super) fn init(
         let base = super::external::mapped(route.base, route.size)?;
         let controller =
             unsafe { crate::metal::interrupt::plic::Plic::new(base, route.base, route.selected) };
-        unsafe { controller.configure(route.contexts, route.sources, route.queues) };
         let controller =
             alloc::boxed::Box::try_new(controller).map_err(|_| PendFail::OutOfMemory)?;
+        unsafe { controller.configure(route.contexts, route.sources, route.queues) };
         crate::basis::room::interrupt::install(controller, route)?;
     }
     if regions.is_empty() {
