@@ -53,7 +53,8 @@ ordinary scheduler entry remains responsible for consuming them. An earlier
 implementation reproduced a self-sustaining timer storm in the IRQ/IOMMU guest;
 the callback must not manufacture a new timer for every observed timer.
 
-Lock acquisition is still not fair or time bounded. Interrupt *reception* can
+SpinLock acquisition is still not fair or time bounded. COMMIT uses FIFO turns
+as detailed below, without a transaction-duration bound. Interrupt *reception* can
 occur while the caller waits; full handler work and Task scheduling have their
 own admission boundaries. Ordinary trap entry reuses ROOT and is not a generic
 nested kernel entry. A kernel continuation is switched only through existing
@@ -226,5 +227,9 @@ global cursor allowed periodic workers to remain on one residue when unrelated
 wakeups advanced it by the Hart count. Each Task now progresses independently;
 existing compatibility, idle preference and fixed-Hart reservation rules remain.
 The context guest still requires actual traced migration; its assertions and
-watchdogs are unchanged. IRQ observer deadlines start only after all observers
-are prepared, so fixture construction is not mistaken for event-delivery delay.
+watchdogs are unchanged. IRQ observers park with WaitValue during construction;
+their event deadlines start after all observers are prepared. The original four
+Yield workers remain the contention load. Common Sign revocation keeps the
+recipient alive until exact-identity Busy retries settle; logical invalidation
+may wake it before physical ledger removal, and immediate exit would race that
+removal. Errors other than Busy still fail the test.

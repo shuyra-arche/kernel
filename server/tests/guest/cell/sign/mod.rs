@@ -1,6 +1,9 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::{
-    abi::{call::sign::SignFail, reply::SignReply},
+    abi::{
+        call::{pend::PendFail, sign::SignFail},
+        reply::SignReply,
+    },
     address::VirtAddr,
     model::{
         identity::{Mark, PendId, TaskId},
@@ -17,6 +20,7 @@ use kernel_api::{
 use kernel_client::call::{pend, room, sign, unit};
 static TOKEN: AtomicUsize = AtomicUsize::new(0);
 static ENTERED: AtomicUsize = AtomicUsize::new(0);
+static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
 extern "C" fn recipient() -> ! {
     let token = PendId::mint(TOKEN.load(Ordering::Acquire));
     ENTERED.store(1, Ordering::Release);
@@ -24,6 +28,11 @@ extern "C" fn recipient() -> ! {
         sign::listen(token, Wait::Infinite).unwrap_err().source,
         SignFail::Denied | SignFail::Dead
     ));
+    // Logical invalidation can wake us before physical ledger cleanup ends.
+    // Keep the original registration alive for the controller's retries.
+    while !REVOKE_FINISHED.load(Ordering::Acquire) {
+        room::yield_();
+    }
     unit::exit(37, 0, VirtAddr::new(0), 0)
 }
 fn accord(
@@ -139,7 +148,18 @@ pub(super) fn run() {
     }
     // Exercise revocation after the receiver has had a chance to enqueue.
     room::sleep_until(room::clock().saturating_add(2_000_000)).unwrap();
-    pend::revoke(task, branch).unwrap();
+    let deadline = room::clock().saturating_add(2_000_000_000);
+    loop {
+        match pend::revoke(task, branch) {
+            Ok(()) => break,
+            Err(error) if error.source == PendFail::Busy => {
+                assert!(room::clock() < deadline, "Sign revocation did not settle");
+                room::yield_();
+            }
+            Err(error) => panic!("Sign revocation failed: {error:?}"),
+        }
+    }
+    REVOKE_FINISHED.store(true, Ordering::Release);
     assert!(super::lifecycle::wait_task(task));
     assert_eq!(super::lifecycle::result(task), (1, 37));
     super::lifecycle::delete(task);

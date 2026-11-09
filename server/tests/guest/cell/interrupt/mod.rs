@@ -1,7 +1,7 @@
 //! QEMU virt UART is a real level interrupt, not a software Sign trigger.
 use core::{
     fmt::Write,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
 };
 use kernel_api::{
     abi::reply::SignReply,
@@ -75,11 +75,20 @@ static ENTERED: AtomicUsize = AtomicUsize::new(0);
 static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
 static WATCH_TOKEN: AtomicUsize = AtomicUsize::new(0);
 static WATCH_ENTERED: AtomicUsize = AtomicUsize::new(0);
-static WATCH_ARMED: AtomicBool = AtomicBool::new(false);
+static WATCH_ARMED: AtomicU32 = AtomicU32::new(0);
 extern "C" fn watch() -> ! {
     let token = PendId::mint(WATCH_TOKEN.load(Ordering::Acquire));
     WATCH_ENTERED.fetch_add(1, Ordering::Release);
-    while !WATCH_ARMED.load(Ordering::Acquire) { room::yield_(); }
+    // Fixture preparation is not part of IRQ service latency or the four
+    // competing Yield workers. Park until every observer has been constructed.
+    while WATCH_ARMED.load(Ordering::Acquire) == 0 {
+        room::wait_value(
+            VirtAddr::new(WATCH_ARMED.as_ptr() as usize),
+            0,
+            Wait::Infinite,
+        )
+        .unwrap();
+    }
     assert!(matches!(
         sign::listen(token, deadline()).unwrap(),
         SignReply::Triggered { .. }
@@ -290,11 +299,12 @@ pub(super) fn run(at: usize, count: usize) {
         }
         task
     });
-    room::sleep_until(room::clock() + 2_000_000).unwrap();
     let routed = sign::create(crate::license::get()).unwrap();
     let source = kernel_api::model::sign::SignSource::Sign { token };
     sign::attach(routed, source, 0).unwrap();
-    WATCH_ARMED.store(true, Ordering::Release);
+    WATCH_ARMED.store(1, Ordering::Release);
+    room::wake_value(VirtAddr::new(WATCH_ARMED.as_ptr() as usize), true).unwrap();
+    room::sleep_until(room::clock() + 2_000_000).unwrap();
     write(1, 2);
     assert_eq!(
         sign::listen(routed, deadline()).unwrap(),
