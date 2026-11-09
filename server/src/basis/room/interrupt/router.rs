@@ -78,7 +78,7 @@ impl Router {
             let Some(irq) = self.controller.claim_masked() else {
                 break;
             };
-            super::note_external(false, false);
+            super::note_external();
             if let Some(index) = self.queues.iter().position(|q| *q == irq) {
                 self.finish(irq, false);
                 self.counts[index].fetch_add(1, Ordering::Relaxed);

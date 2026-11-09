@@ -40,10 +40,7 @@ pub(crate) fn report() {
     putln!("doom: held={held} starved={starved} blocked={blocked} nudged={nudged}");
     let (kicks, fallback) = scheduler::kick_stats();
     putln!("sched: kicks={kicks} fallback={fallback}");
-    let (ring, busy, idle_ring, idle_busy) = interrupt::stats();
-    putln!(
-        "supervisor_external: ring={ring} busy={busy} idle_ring={idle_ring} idle_busy={idle_busy}"
-    );
+    putln!("external_interrupts: claimed={}", interrupt::claimed());
     crate::basis::view::clone::hold_line();
     use crate::metal::allocator::statistics;
     putln!(
