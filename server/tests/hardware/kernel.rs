@@ -131,7 +131,15 @@ fn run(mode: &str) {
     assert!(version.status.success());
     std::fs::write(evidence.join("qemu.txt"), &version.stdout).unwrap();
     for (profile, extra, harts) in [
-        ("debug", None, &[1, 4][..]),
+        (
+            "debug",
+            None,
+            if realtime {
+                &[1, 2, 4][..]
+            } else {
+                &[1, 4][..]
+            },
+        ),
         ("release", Some("--release"), &[4][..]),
     ] {
         let mut build = Command::new("cargo");
@@ -347,6 +355,10 @@ fn run(mode: &str) {
                         "{name}: {log}"
                     );
                 } else {
+                    assert!(
+                        log.contains(&format!("PASS room-inspect ordinary={harts}")),
+                        "{name}: {log}"
+                    );
                     for marker in [
                         "PASS realtime budget=1",
                         "PASS realtime preemption=1",

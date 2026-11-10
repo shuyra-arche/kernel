@@ -102,7 +102,7 @@ old executable capsules are rejected before launch. The resource Ledger is
 | Share View | Create, Delete, Open, Shut |
 | Sign | Create, Delete, Listen, Trigger, Consume, Attach, Detach, Assign, Resign, Await |
 | Unit | Create, Delete, Resume, Freeze, Stop, Exit, Finish, Inspect, Accord, Revoke, Return, Admit, Evict, Profile |
-| Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo |
+| Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo, Inspect |
 | Debug | Put, Get |
 
 ### Migration from ABI v6 to ABI v7
@@ -444,6 +444,7 @@ revocable ancestry.
 | Room WaitValue / WakeValue | Aligned accessible AtomicU32 in same address space | Atomic compare/enqueue or wake current waiters; no stored notification, recheck predicate |
 | Room Clock | Executing Task | Full-width monotonic ns observation |
 | Room ClockInfo | Direct counter authorized on all admitted Harts | Success returns status zero, boot tick and frequency in a0–a2. Fall back to Clock if unavailable. |
+| Room Inspect (`Ordinary`) | Ordinary callers | Slot 6, query tag 0 in a0. Returns the number of online Harts without a real-time reservation in a0. The snapshot may change between calls. Older ABI v7 providers report an unknown call. |
 | Debug Put / Get | Valid bounded caller buffer | Bounded diagnostic I/O, reports transferred length |
 
 Failures do not imply rollback of accepted asynchronous retirement. Query the

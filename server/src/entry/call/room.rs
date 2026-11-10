@@ -1,10 +1,13 @@
 use super::outcome::Outcome;
-use crate::basis::room::{Handoff, scheduler::slot::current};
+use crate::basis::room::{
+    Handoff,
+    scheduler::{self, slot::current},
+};
 use crate::basis::sign::{self, WakeKey, park_until};
 use crate::basis::unit::task::TaskIdent;
 use crate::metal::switcher::context::{Gprs, TrapContext};
 use alloc::sync::Arc;
-use kernel_api::abi::call::room::{RoomCall, RoomFail};
+use kernel_api::abi::call::room::{RoomCall, RoomFail, RoomQuery};
 pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskIdent>) -> Outcome {
     frame.gpr.set_x(Gprs::A0, 0);
     match call {
@@ -27,6 +30,12 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: RoomCall, ident: Arc<TaskI
             };
             frame.gpr.set_x(Gprs::A1, source.boot_tick() as usize);
             frame.gpr.set_x(Gprs::A2, source.hertz().get() as usize);
+            Outcome::Resume
+        }
+        RoomCall::Inspect {
+            query: RoomQuery::Ordinary,
+        } => {
+            frame.gpr.set_x(Gprs::A0, scheduler::ordinary_capacity());
             Outcome::Resume
         }
         RoomCall::SleepUntil { at } => {

@@ -107,3 +107,32 @@ fn clock_metadata_uses_an_additive_slot_and_two_full_width_values() {
     // Older providers report Unknown (-1), so Client can fall back to Clock.
     assert!(ClockInfo::decode_return((usize::MAX, 0, 0)).is_err());
 }
+
+#[test]
+fn room_inspect_selects_the_ordinary_pool() {
+    use kernel_api::abi::{
+        call::room::{RoomCall, RoomFail, RoomQuery, operations::Inspect},
+        operation::{KernelCall, RegisterCall},
+    };
+
+    let request = Inspect {
+        query: RoomQuery::Ordinary,
+    };
+    assert_eq!(Inspect::SLOT, kernel_api::abi::PREFIX | 6);
+    assert_eq!(request.pack(), [0; 6]);
+    assert_eq!(
+        RoomCall::from_wire(Inspect::SLOT, &request.pack()),
+        Ok(RoomCall::Inspect {
+            query: RoomQuery::Ordinary
+        })
+    );
+    assert!(RoomCall::from_wire(Inspect::SLOT, &[1, 0, 0, 0, 0, 0]).is_err());
+    assert_eq!(Inspect::decode_return((2, 0, 0)).unwrap(), 2);
+    assert!(Inspect::decode_return((usize::MAX, 0, 0)).is_err());
+    assert_eq!(
+        Inspect::decode_return(((-4isize) as usize, 0, 0))
+            .unwrap_err()
+            .source,
+        RoomFail::Denied
+    );
+}

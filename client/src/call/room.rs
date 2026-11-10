@@ -3,7 +3,11 @@
 use kernel_api::abi::call::room::operations as op;
 #[cfg(target_arch = "riscv64")]
 use kernel_api::model::clock::ClockSource;
-use kernel_api::{abi::call::room::RoomFail, address::VirtAddr, model::wait::Wait};
+use kernel_api::{
+    abi::call::room::{RoomFail, RoomQuery},
+    address::VirtAddr,
+    model::wait::Wait,
+};
 
 typed_calls! {
     infallible fn yield_() -> () = op::Yield;
@@ -11,6 +15,7 @@ typed_calls! {
     fallible fn sleep_until(at: u64) -> Result<(), erra::Error<RoomFail>> = op::SleepUntil { at };
     fallible fn wait_value(address: VirtAddr, expected: u32, wait: Wait) -> Result<bool, erra::Error<RoomFail>> = op::WaitValue { address, expected, wait };
     fallible fn wake_value(address: VirtAddr, all: bool) -> Result<usize, erra::Error<RoomFail>> = op::WakeValue { address, all };
+    fallible fn inspect(query: RoomQuery) -> Result<usize, erra::Error<RoomFail>> = op::Inspect { query };
 }
 
 /// A monotonic clock reader with a cached counter source when the Kernel

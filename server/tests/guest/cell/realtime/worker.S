@@ -195,6 +195,11 @@ worker_restrict:
     ebreak
     li t0, -4
     bne a0, t0, worker_fail
+    li a0, 0                  // RoomQuery::Ordinary
+    li a7, {inspect_room}
+    ebreak
+    li t0, -4
+    bne a0, t0, worker_fail
     li a7, {clock}
     ebreak
     li t0, 1000000

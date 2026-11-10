@@ -1,6 +1,31 @@
 //! Scheduling and monotonic time. All deadlines are absolute nanoseconds since boot.
+use crate::abi::register::{Decode, Wire};
 use crate::address::VirtAddr;
 use crate::model::{clock::ClockSource, wait::Wait};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoomQuery {
+    Ordinary,
+}
+
+impl Wire for RoomQuery {
+    const WORDS: usize = 1;
+
+    fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
+        let tag = match self {
+            Self::Ordinary => 0usize,
+        };
+        tag.pack(words, at);
+    }
+
+    fn unpack(words: &[usize; 6], at: &mut usize) -> Result<Self, Decode> {
+        match usize::unpack(words, at)? {
+            0 => Ok(Self::Ordinary),
+            _ => Err(Decode::Invalid),
+        }
+    }
+}
+
 pub type RoomResult<T> = Result<T, erra::Error<RoomFail>>;
 #[kernel_api_macros::envcall(class = 0, call = RoomCall)]
 pub mod operations {
@@ -48,6 +73,14 @@ pub mod operations {
     #[operation(slot = 5, output = super::ClockSource, error = RoomFail, reply = 3)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct ClockInfo;
+
+    /// Ordinary returns the number of online Harts in the ordinary pool.
+    /// A Hart with at least one real-time contract is outside that pool.
+    #[operation(slot = 6, output = usize, error = RoomFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Inspect {
+        pub query: super::RoomQuery,
+    }
 }
 pub use operations::{RoomCall, RoomFail};
 
