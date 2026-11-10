@@ -1,4 +1,5 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     abi::call::{clone_view::CloneFail, share_view::ShareFail, sign::SignFail},
     model::{
@@ -18,7 +19,13 @@ extern "C" fn recipient() -> ! {
     let endpoint = sign::create(get()).unwrap();
     sign::delete(endpoint).unwrap();
     pend::return_(endpoint).unwrap();
-    kernel_client::call::unit::exit(39, 0, kernel_api::address::VirtAddr::new(0), 0)
+    kernel_client::call::unit::exit(
+        39,
+        0,
+        kernel_api::address::VirtAddr::new(0),
+        0,
+        ExitScope::Task,
+    )
 }
 
 pub(super) fn get() -> PendId {

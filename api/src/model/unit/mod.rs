@@ -68,6 +68,27 @@ impl FromPair for crate::model::unit::UnitTarget {
     }
 }
 
+/// The calling Task or its own Team.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExitScope {
+    Task,
+    Team,
+}
+
+impl Wire for ExitScope {
+    const WORDS: usize = 1;
+    fn pack(&self, words: &mut [usize; 6], at: &mut usize) {
+        matches!(self, Self::Team).pack(words, at);
+    }
+    fn unpack(words: &[usize; 6], at: &mut usize) -> Result<Self, Decode> {
+        Ok(if bool::unpack(words, at)? {
+            Self::Team
+        } else {
+            Self::Task
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(usize)]
 pub enum ExitCause {

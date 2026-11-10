@@ -1,6 +1,7 @@
 use super::{Console, Image, lifecycle, load, save};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, Ordering};
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     address::VirtAddr,
     model::{
@@ -14,7 +15,7 @@ extern "C" fn invalid() -> ! {
     unsafe {
         core::arch::asm!(".4byte 0x30002573");
     } // U-mode read of mstatus
-    unit::exit(1, 0, VirtAddr::new(0), 0)
+    unit::exit(1, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 extern "C" fn active_invalid() -> ! {
     let expected = Image {
@@ -25,14 +26,14 @@ extern "C" fn active_invalid() -> ! {
         load(&expected);
         core::arch::asm!(".4byte 0x0000000b");
     }
-    unit::exit(1, 0, VirtAddr::new(0), 0)
+    unit::exit(1, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 extern "C" fn fresh() -> ! {
     let mut image = Image::zero();
     unsafe { save(&mut image) };
     assert_eq!(image.regs, [0; 32]);
     assert_eq!(image.fcsr, 0);
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 extern "C" fn running() -> ! {
     unsafe {
@@ -55,7 +56,7 @@ extern "C" fn blocked() -> ! {
     };
     STARTED.store(true, Ordering::Release);
     room::sleep_until(room::clock() + 10_000_000_000).unwrap();
-    unit::exit(1, 0, VirtAddr::new(0), 0)
+    unit::exit(1, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 #[unsafe(naked)]
 extern "C" fn first_single() -> ! {
@@ -67,7 +68,7 @@ extern "C" fn first_double() -> ! {
 }
 extern "C" fn first_done(value: usize, control: usize) -> ! {
     assert_eq!((value, control), (0, 0));
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 pub(super) fn run() {
     for entry in [

@@ -1,4 +1,5 @@
 use kernel_api::abi::call::unit::UnitFail;
+use kernel_api::model::unit::ExitCause;
 
 use crate::basis::unit::control::Request;
 
@@ -7,7 +8,7 @@ use crate::basis::unit::control::Request;
 enum TeamPhase {
     Live,
     Paused,
-    Doomed,
+    Doomed { exit: Option<TeamExit> },
     Ousted,
 }
 
@@ -16,7 +17,7 @@ impl TeamPhase {
     /// after publishing the selected phase under the commit boundary.
     fn transition(self, request: Request) -> Result<Self, UnitFail> {
         match (self, request) {
-            (Self::Doomed | Self::Ousted, _) => Err(UnitFail::Denied),
+            (Self::Doomed { .. } | Self::Ousted, _) => Err(UnitFail::Denied),
             (_, Request::Pause) => Ok(Self::Paused),
             (_, Request::Resume) => Ok(Self::Live),
         }
@@ -24,8 +25,15 @@ impl TeamPhase {
 
     /// 注定要死或已被撤离：这两种相位都不再接新的事。
     fn terminal(self) -> bool {
-        matches!(self, Self::Doomed | Self::Ousted)
+        matches!(self, Self::Doomed { .. } | Self::Ousted)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TeamExit {
+    pub(crate) cause: ExitCause,
+    pub(crate) reason: u64,
+    pub(crate) value: Option<u64>,
 }
 
 /// 团队的阶段：还在构造（没有默认入口）或已就绪。
@@ -79,10 +87,17 @@ impl TeamState {
         self.admission = Admission::Closed;
     }
 
-    pub(crate) fn doom(&mut self) {
+    pub(crate) fn doom(&mut self, exit: Option<TeamExit>) {
         if !self.terminal() {
             self.finish();
-            self.phase = TeamPhase::Doomed;
+            self.phase = TeamPhase::Doomed { exit };
+        }
+    }
+
+    pub(crate) fn exit(&self) -> Option<TeamExit> {
+        match self.phase {
+            TeamPhase::Doomed { exit } => exit,
+            _ => None,
         }
     }
 

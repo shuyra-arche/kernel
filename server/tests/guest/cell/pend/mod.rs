@@ -1,6 +1,7 @@
 mod permission;
 mod retirement;
 
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     abi::call::pend::PendFail,
     address::VirtAddr,
@@ -69,7 +70,7 @@ extern "C" fn recipient() -> ! {
     assert_eq!(len, 4096);
     assert_eq!(super::read(address, 0), 0x13579);
     pend::return_(token).unwrap();
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 
 pub(super) fn run() {

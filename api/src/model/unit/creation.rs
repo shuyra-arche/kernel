@@ -14,6 +14,8 @@ pub enum UnitCreate {
         guard: ControlId,
         /// Consume an unbound Internal Nest root; None allocates a new Nest.
         nest: Option<crate::model::identity::PendId>,
+        /// Permit members to exit this Team through Unit.Exit.
+        member_exit: bool,
     },
     /// None selects the caller's Team; other Teams require management authority.
     Task {
@@ -29,7 +31,12 @@ impl UnitCreate {
     pub const WIDTH: usize = 48;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let words = match self {
-            Self::Team { kind, guard, nest } => [
+            Self::Team {
+                kind,
+                guard,
+                nest,
+                member_exit,
+            } => [
                 0,
                 match kind {
                     ProgramKind::User => 0,
@@ -37,7 +44,7 @@ impl UnitCreate {
                 },
                 guard.get(),
                 nest.map_or(0, crate::model::identity::PendId::get),
-                0,
+                member_exit as usize,
                 0,
             ],
             Self::Task {
@@ -62,7 +69,7 @@ impl UnitCreate {
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let [tag, a, b, c, d, e] = fetch_words(bytes)?;
         match tag {
-            0 if c <= isize::MAX as usize && d == 0 && e == 0 => Some(Self::Team {
+            0 if c <= isize::MAX as usize && d <= 1 && e == 0 => Some(Self::Team {
                 kind: match a {
                     0 => ProgramKind::User,
                     1 => ProgramKind::Supervisor,
@@ -70,6 +77,7 @@ impl UnitCreate {
                 },
                 guard: ControlId::new(b),
                 nest: (c != 0).then(|| crate::model::identity::PendId::new(c)),
+                member_exit: d == 1,
             }),
             1 if a <= isize::MAX as usize => Some(Self::Task {
                 team: (a != 0).then(|| TeamId::new(a)),

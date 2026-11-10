@@ -9,39 +9,73 @@ use kernel_api::{
         pend::{
             AccordRequest, AccordTarget, Distributable, Limits, NestRights, Operations, PendRange,
         },
-        unit::{ControlId, ProgramKind, UnitCreate, UnitTarget},
+        unit::{
+            ControlId, ExitCause, ExitScope, ProgramKind, UnitCreate, UnitQuery, UnitState,
+            UnitTarget,
+        },
     },
 };
 use kernel_client::call::{cell, nest, pend, share_view, unit};
 core::arch::global_asm!(
  ".pushsection .text.nest_test,\"ax\"", ".balign 4", ".global nest_child_start", "nest_child_start:",
- "li a0, 83", "li a1, 0", "li a2, 0", "li a3, 0", "li a7, {exit}", "ebreak", "j .",
+ "li a0, 83", "li a1, 0", "li a2, 0", "li a3, 0", "li a4, 0", "li a7, {exit}", "ebreak", "j .",
+ ".global nest_blocked_start", "nest_blocked_start:",
+ "li a0, -1", "li a7, {sleep}", "ebreak", "j .",
+ ".global nest_team_exit_start", "nest_team_exit_start:",
+ "li a0, 23", "li a1, 0", "li a2, 0", "li a3, 0", "li a4, 1", "li a7, {exit}", "ebreak", "j .",
  ".global nest_child_end", "nest_child_end:", ".popsection",
- exit=const ((kernel_api::abi::VERSION as usize)<<48)|(1<<32)|5
+ exit=const ((kernel_api::abi::VERSION as usize)<<48)|(1<<32)|5,
+ sleep=const ((kernel_api::abi::VERSION as usize)<<48)|1,
 );
 unsafe extern "C" {
     static nest_child_start: u8;
+    static nest_blocked_start: u8;
+    static nest_team_exit_start: u8;
     static nest_child_end: u8;
 }
-fn request(token: PendId) -> [u8; UnitCreate::WIDTH] {
+fn request(token: PendId, member_exit: bool) -> [u8; UnitCreate::WIDTH] {
     UnitCreate::Team {
+        member_exit,
         nest: Some(token),
         kind: ProgramKind::User,
         guard: ControlId::NONE,
     }
     .to_bytes()
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Case {
+    TaskExit,
+    TeamExit,
+    Cascade,
+}
+
 pub(super) fn run() {
-    build(false);
+    use kernel_api::abi::{
+        call::unit::{UnitFail, operations::Exit},
+        operation::RegisterCall,
+    };
+    let denied = Exit {
+        value: 23,
+        reason: 0,
+        note: VirtAddr::new(0),
+        len: 0,
+        scope: ExitScope::Team,
+    };
+    let (code, _, _) = unsafe { kernel_client::transport::trap(Exit::SLOT, denied.pack()) };
+    assert_eq!(code, UnitFail::Denied.code() as usize);
+    build(Case::TaskExit);
+    build(Case::TeamExit);
 }
 // Leave a whole Team of held Tasks to the Kernel, with no Join/Oust/receipt
 // cleanup by their owner. This crosses the four-husk service limit and checks
 // that cleared receipts cannot hide members whose retirement is still pending.
 pub(super) extern "C" fn cascade() -> ! {
-    build(true);
-    unit::exit(84, 0, VirtAddr::new(0), 0)
+    build(Case::Cascade);
+    unit::exit(84, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
-fn build(cascade: bool) {
+fn build(case: Case) {
+    let member_exit = case == Case::TeamExit;
     // Ordinary creation has no External kind or requester arguments. External
     // Team-adoption rejection is exercised against the real trusted I/O grant.
     let root = nest::create(crate::license::get()).unwrap();
@@ -64,14 +98,14 @@ fn build(cascade: bool) {
     }
     .to_bytes();
     let child = pend::accord(ptr(&descriptor)).unwrap();
-    assert!(unit::create(ptr(&request(child))).is_err());
-    assert!(unit::create(ptr(&request(root))).is_err());
+    assert!(unit::create(ptr(&request(child, member_exit))).is_err());
+    assert!(unit::create(ptr(&request(root, member_exit))).is_err());
     pend::return_(child).unwrap();
-    let UnitTarget::Team(team) = unit::create(ptr(&request(root))).unwrap() else {
+    let UnitTarget::Team(team) = unit::create(ptr(&request(root, member_exit))).unwrap() else {
         panic!("expected Team")
     };
     assert!(nest::inspect(root, VirtAddr::new(observation.as_mut_ptr() as usize)).is_err());
-    assert!(unit::create(ptr(&request(root))).is_err());
+    assert!(unit::create(ptr(&request(root, member_exit))).is_err());
     let reference = allocate(1);
     let (staging, address) = attach(reference, 1);
     let start = core::ptr::addr_of!(nest_child_start);
@@ -110,36 +144,81 @@ fn build(cascade: bool) {
     .to_bytes();
     // Association advances the initial vacant generation once.
     cell::publish(ptr(&position)).unwrap();
-    let descriptor = UnitCreate::Task {
-        team: Some(team),
-        entry: address,
-        args: VirtAddr::new(0),
-        count: 0,
-        stack: VirtAddr::new(0),
-    }
-    .to_bytes();
     let mut tasks = [TaskId::new(0); 8];
-    for task in &mut tasks {
-        let UnitTarget::Task(id) = unit::create(ptr(&descriptor)).unwrap() else {
+    let tasks = if member_exit {
+        &mut tasks[..2]
+    } else {
+        &mut tasks[..]
+    };
+    let descriptor = |entry| {
+        UnitCreate::Task {
+            team: Some(team),
+            entry,
+            args: VirtAddr::new(0),
+            count: 0,
+            stack: VirtAddr::new(0),
+        }
+        .to_bytes()
+    };
+    for (index, task) in tasks.iter_mut().enumerate() {
+        let entry = if member_exit {
+            let symbol = if index == 0 {
+                core::ptr::addr_of!(nest_blocked_start)
+            } else {
+                core::ptr::addr_of!(nest_team_exit_start)
+            };
+            address + (symbol.addr() - start.addr())
+        } else {
+            address
+        };
+        let UnitTarget::Task(id) = unit::create(ptr(&descriptor(entry))).unwrap() else {
             panic!("expected Task")
         };
         *task = id;
     }
-    if cascade {
+    if case == Case::Cascade {
         return;
     }
-    for task in tasks {
+    let deadline = kernel_client::call::room::clock().saturating_add(5_000_000_000);
+    if member_exit {
+        let blocked = UnitTarget::Task(tasks[0]);
+        unit::resume(blocked).unwrap();
+        while crate::lifecycle::inspect(UnitQuery::Target(blocked)).state != UnitState::Waiting {
+            assert!(
+                kernel_client::call::room::clock() < deadline,
+                "Team member did not block"
+            );
+            kernel_client::call::room::yield_();
+        }
+    }
+    for task in tasks.iter().copied().skip(usize::from(member_exit)) {
         unit::resume(UnitTarget::Task(task)).unwrap();
     }
-    for task in tasks {
+    for task in tasks.iter().copied() {
         assert!(crate::lifecycle::wait_task(task));
-        assert_eq!(crate::lifecycle::result(task), (1, 83));
+    }
+    if member_exit {
+        let target = UnitTarget::Team(team);
+        let before = crate::lifecycle::inspect(UnitQuery::Target(target));
+        assert_eq!(before.state, UnitState::Exited);
+        assert!(!before.admitting);
+        assert_eq!(before.exit, Some((ExitCause::Reap, 0)));
+        assert_eq!(before.result, Some(23));
+        assert_eq!(crate::lifecycle::result(tasks[0]), (0, 0));
+        assert_eq!(crate::lifecycle::result(tasks[1]), (1, 23));
+        assert!(unit::create(ptr(&descriptor(address))).is_err());
+        unit::stop(target).unwrap();
+        assert_eq!(crate::lifecycle::inspect(UnitQuery::Target(target)), before);
     }
     for (at, task) in tasks.iter().copied().enumerate() {
+        if !member_exit {
+            assert_eq!(crate::lifecycle::result(task), (1, 83));
+        }
         crate::lifecycle::delete(task);
         // Removing one member preserves all other retained results.
         for other in &tasks[at + 1..] {
-            assert_eq!(crate::lifecycle::result(*other), (1, 83));
+            let expected = if member_exit { (1, 23) } else { (1, 83) };
+            assert_eq!(crate::lifecycle::result(*other), expected);
         }
     }
     unit::finish(team).unwrap();

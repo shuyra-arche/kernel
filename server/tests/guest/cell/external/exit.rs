@@ -3,6 +3,7 @@ use core::{
     fmt::Write,
     sync::atomic::{AtomicUsize, Ordering},
 };
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     abi::call::{cell::CellFail, nest::NestFail, sign::SignReply},
     model::{identity::TaskId, pend::ShareRights, unit::UnitTarget},
@@ -59,7 +60,7 @@ extern "C" fn publisher() -> ! {
     // Death occurs with a queued QEMU write, not with an already-idle device.
     start(bar, ADDRESS, true);
     assert_ne!(read(bar, 0x98) & 1, 0);
-    unit::exit(77, 0, VirtAddr::new(0), 0)
+    unit::exit(77, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 extern "C" fn successor() -> ! {
     let bar_token = PendId::mint(BAR.load(Ordering::Acquire));
@@ -84,7 +85,7 @@ extern "C" fn successor() -> ! {
     super::super::delete(super::super::raw_memo(cpu, 0).object);
     super::super::delete(CellObject::Slot(slot));
     share_view::shut(bar_token).unwrap();
-    unit::exit(78, 0, VirtAddr::new(0), 0)
+    unit::exit(78, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 pub(in super::super) fn death(at: usize, count: usize) {
     let (bar, root) = roots(at, count);

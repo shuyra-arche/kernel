@@ -2,6 +2,7 @@
 pub(super) mod counter;
 
 use core::sync::atomic::{AtomicU32, Ordering};
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     address::VirtAddr,
     model::{unit::UnitTarget, wait::Wait},
@@ -39,7 +40,7 @@ extern "C" fn recipient() -> ! {
         ACK.store(round, Ordering::Release);
         room::wake_value(address(&ACK), true).unwrap();
     }
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 extern "C" fn earlier_alarm() -> ! {
     for round in 1..=16 {
@@ -53,7 +54,7 @@ extern "C" fn earlier_alarm() -> ! {
         ALARM.store(round, Ordering::Release);
         room::wake_value(address(&ALARM), true).unwrap();
     }
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 
 pub(super) fn run() {

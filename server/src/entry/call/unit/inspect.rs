@@ -66,6 +66,7 @@ fn team_info(team: &Arc<Team>) -> UnitInfo {
     } else {
         UnitState::Ready
     };
+    let exit = team.node.state.lock().exit();
     UnitInfo {
         target: UnitTarget::Team(team.id),
         team: team.id,
@@ -75,8 +76,8 @@ fn team_info(team: &Arc<Team>) -> UnitInfo {
         state,
         reclaimed: false,
         admitting,
-        exit: None,
-        result: None,
+        exit: exit.map(|exit| (exit.cause, exit.reason)),
+        result: exit.and_then(|exit| exit.value),
     }
 }
 fn task_info(member: &Member) -> UnitInfo {

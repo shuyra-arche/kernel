@@ -58,7 +58,9 @@ fn copy_words(space: &Nest, va: KVirt, count: usize) -> Option<Vec<usize>> {
 }
 
 use core::sync::atomic::Ordering;
-use kernel_api::model::unit::{ControlId, ControlKind, UnitCreate, UnitInfo, UnitQuery, UnitState};
+use kernel_api::model::unit::{
+    ControlId, ControlKind, ExitScope, UnitCreate, UnitInfo, UnitQuery, UnitState,
+};
 mod inspect;
 pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskIdent>) -> Outcome {
     frame.gpr.set_x(Gprs::A0, 0);
@@ -209,9 +211,13 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
             reason,
             note,
             len,
+            scope,
         } => {
             {
                 let _commit = crate::basis::commit();
+                if scope == ExitScope::Team && (!me.ident.team.node.member_exit || me.realtime()) {
+                    return Outcome::fail(frame, UnitFail::Denied);
+                }
                 let mut state = me.state.lock();
                 if !state.is_dead() {
                     let hart = state.on_hart();
@@ -228,6 +234,9 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
                         .member(me.ident.id)
                         .expect("published Task member");
                     *member.result.lock() = Some(value as usize);
+                    if scope == ExitScope::Team {
+                        crate::basis::unit::lifecycle::exit_team(&me.ident.team, value, reason);
+                    }
                 }
             }
             // Admitted exit records the result; diagnostic copying/firmware I/O
@@ -333,7 +342,12 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
             )?;
             Ok(UnitTarget::Task(task.ident.id))
         }
-        UnitCreate::Team { kind, guard, nest } => {
+        UnitCreate::Team {
+            kind,
+            guard,
+            nest,
+            member_exit,
+        } => {
             let serial = me.pend.lock();
             let _commit = crate::basis::commit();
             if !crate::basis::pend::live(me)
@@ -343,9 +357,10 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
             {
                 return Err(UnitFail::Denied);
             }
-            if guard != ControlId::NONE
-                && (!me.administration.matches(guard, ControlKind::Guard)
-                    || me.ident.team.node.protected())
+            let guarded = guard != ControlId::NONE;
+            if ((guarded || member_exit) && me.ident.team.node.protected())
+                || (guarded
+                    && (member_exit || !me.administration.matches(guard, ControlKind::Guard)))
             {
                 return Err(UnitFail::Denied);
             }
@@ -372,18 +387,15 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
             } else {
                 None
             };
+            let builder = crate::basis::unit::team::TeamBuilder::new(SpaceKind::from(kind))
+                .sire(sire)
+                .creator(me.ident.id)
+                .constructing()
+                .member_exit(member_exit);
             let team = if let Some(selected) = selected {
-                crate::basis::unit::team::TeamBuilder::new(SpaceKind::from(kind))
-                    .sire(sire)
-                    .creator(me.ident.id)
-                    .constructing()
-                    .spawn_in(selected)
+                builder.spawn_in(selected)
             } else {
-                crate::basis::unit::team::TeamBuilder::build_with_creator(
-                    SpaceKind::from(kind),
-                    sire,
-                    me.ident.id,
-                )
+                builder.spawn()
             }
             .map_err(map_err)?;
             let consumed = nest.map(|token| {

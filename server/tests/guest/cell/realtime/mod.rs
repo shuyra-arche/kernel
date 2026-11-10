@@ -1,5 +1,6 @@
 //! Real User Tasks, controlled by the ordinary guest. No testing ABI is added.
 use core::fmt::Write;
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     abi::{call::unit::UnitFail, reply::SignReply},
     address::VirtAddr,
@@ -138,6 +139,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let bytes = UnitCreate::Team {
+            member_exit: false,
             nest: None,
             kind: ProgramKind::User,
             guard: ControlId::NONE,
@@ -424,7 +426,7 @@ pub(super) fn run() {
     );
 }
 extern "C" fn supervisor_exit() -> ! {
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 fn dependencies(fixture: &Fixture) {
     let reply_a = endpoint();

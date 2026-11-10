@@ -85,8 +85,8 @@ There are no compatibility aliases for retired operations.
 Rust callers match `OutOfMemory` for allocation failures. Each domain uses
 its existing numeric ABI code for this variant.
 
-Call numbers are `(version << 48) | (domain << 32) | operation`; version is **6**.
-Versions zero through five and unknown versions are rejected before dispatch.
+Call numbers are `(version << 48) | (domain << 32) | operation`. The ABI version is **7**.
+Other versions are rejected before dispatch.
 All byte descriptors use fixed little-endian 64-bit words and checked tags and
 reserved fields. Boot Capsule format 2 declares the matching ABI in byte 11;
 old executable capsules are rejected before launch. The resource Ledger is
@@ -105,7 +105,15 @@ old executable capsules are rejected before launch. The resource Ledger is
 | Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo |
 | Debug | Put, Get |
 
-### Migration from ABI v5 / Ledger v7 to ABI v6 / Ledger v8
+### Migration from ABI v6 to ABI v7
+
+Rebuild executables and regenerate Capsule format 2 with ABI byte 7. The
+resource Ledger stays at version 8. `Unit.Exit` uses slot 5 and takes
+`(value, reason, note, len, scope)`. Raw callers initialize register `a4` to
+0 for Task or 1 for Team. Team creation descriptor word 4 is now the checked
+`member_exit` flag. Set it to zero for the existing per-Task exit policy.
+
+### Historical migration from ABI v5 / Ledger v7 to ABI v6 / Ledger v8
 
 | Previous boundary | Current contract | Consumer migration |
 | --- | --- | --- |
@@ -149,7 +157,7 @@ little-endian u64 values. `Name::Interrupt { controller, source }` requires a
 Share View and Sign pair; `Entry::dispatch()` returns the explicit View kind
 and both handles. Other entry kinds, including Nest, have no paired View.
 Malformed, incomplete and old-version ledgers fail validation. Sign operations
-retain their slots and payloads, now under the ABI v6 prefix.
+retain their slots and payloads under the current ABI prefix.
 
 A source admits one non-distributable Listen/Consume branch only when that Task
 holds the matching full writable Share View with Open permission. Listen-only
@@ -397,9 +405,15 @@ into 112 bytes. Caller, target, child enumeration and member enumeration share
 this query contract. Observing a result does not consume it. Task Delete requires
 completed reclamation and removes only the caller's retained record; subsequent
 observations through that record are denied. Team Delete requires retirement.
-Task Exit publishes a value plus a bounded diagnostic note; the first committed
-termination wins. Exit is not proof of Page/DMA reclamation. Unit Accord/Revoke/
-Return operate on independent administrative authorities with revocable ancestry.
+Task scope publishes the calling Task's value and a bounded diagnostic note.
+Team scope also commits a result for the caller's Team, closes its admission,
+and queues termination of the remaining members and descendants through the
+same sweep as Stop. Team scope requires a non-realtime Task and a Team created
+with `member_exit` enabled. Boot Teams and guarded Teams use Task scope.
+An authorized manager can read the Team result with Inspect, independently of
+member completion and reclamation. The first committed termination wins.
+Unit Accord/Revoke/Return operate on independent administrative authorities with
+revocable ancestry.
 
 | Call | Required authority / state | Completion or retained effect |
 | --- | --- | --- |
@@ -421,7 +435,7 @@ Return operate on independent administrative authorities with revocable ancestry
 | Unit Create | Own Team or controlled constructing child; Build for Team | Dormant Task or empty Team; explicit Resume begins execution |
 | Unit Delete | Authorized observer/manager and completed reclamation | Removes caller's Task record or retired Team; unfinished cleanup is not discarded |
 | Unit Resume / Freeze | Controller or ancestor manager | Admits/suspends execution; does not alter results or transfer authority |
-| Unit Stop / Exit | Controller / executing Task | Requests termination / terminates with result; first committed termination wins |
+| Unit Stop / Exit | Controller / executing Task with scope-specific authority | Requests termination / exits the Task or its opted-in Team with a result |
 | Unit Finish | Team management | Permanently closes member admission |
 | Unit Inspect | Caller identity or authorized target/enumeration | Stable non-consuming result/state/reclamation observation; expired records fail |
 | Unit Accord / Revoke / Return | Administrative qualification with allowed delegation / direct grantor / holder | Changes administrative ancestry, never data borrowing or membership |
@@ -444,7 +458,7 @@ crash backtraces and bounded Debug Put/Get remain available.
 
 Consumers must rebuild together with this API and regenerate capsules/ledgers.
 Provider and consumer revisions must move together. The following historical
-migration describes changes retained from ABI v4; current binaries must use v6.
+migration describes changes retained from ABI v4; current binaries must use v7.
 
 | Previous interface | ABI v4 / Ledger v5 change | Consumer migration |
 | --- | --- | --- |
@@ -556,7 +570,7 @@ Sign slots 10/11/12 are `Assign(token, server, grant)`, `Resign(token)` and
 `Await(token, wait)`. Slots 7–9 remain retired. Await has the same Wait and
 three-register reply encoding as Listen, with an explicit live server dependency.
 These operations were introduced in ABI v5; their slots and payload layouts are
-unchanged under the ABI v6 prefix.
+unchanged under the current ABI prefix.
 
 Admit requires Build and Task management authority and a stopped User Task;
 Evict requires the same authority and an initially dormant Task; Profile requires

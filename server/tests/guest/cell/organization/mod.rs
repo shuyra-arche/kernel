@@ -26,6 +26,6 @@ pub(super) fn run(at: usize, count: usize) {
     use core::fmt::Write;
     let _ = writeln!(
         crate::Console,
-        "PASS organization flat=1 window=1 transfer=1 share=1 revoke=1 internal-nest=1 retirement=8 cascade=8"
+        "PASS organization flat=1 window=1 transfer=1 share=1 revoke=1 internal-nest=1 retirement=8 cascade=8 team-exit=1"
     );
 }

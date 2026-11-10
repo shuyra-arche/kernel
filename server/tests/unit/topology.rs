@@ -20,6 +20,7 @@ pub(crate) fn node(id: usize, parent: Option<&Arc<TeamNode>>) -> Arc<TeamNode> {
         children: SpinLock::new(Vec::new()),
         life: Arc::new(Anchor),
         exit: exit::ExitPolicy::new(),
+        member_exit: false,
         termination: SpinLock::new(crate::basis::unit::lifecycle::Termination::new()),
     });
     if let Some(parent) = parent {
@@ -183,13 +184,20 @@ fn finishing_keeps_pause_independent_and_oust_never_reopens_admission() {
     state.embark().unwrap();
     assert!(!state.paused());
     assert!(!state.admitting());
-    state.doom();
-    state.doom();
+    use kernel_api::model::unit::ExitCause;
+    let first = super::lifecycle::TeamExit {
+        cause: ExitCause::Reap,
+        reason: 0,
+        value: Some(23),
+    };
+    state.doom(Some(first));
+    state.doom(None);
+    assert_eq!(state.exit(), Some(first));
     assert_eq!(state.embark(), Err(UnitFail::Denied));
     assert_eq!(state.debark(), Err(UnitFail::Denied));
     assert_eq!(state.default_entry(), 0);
     state.oust().unwrap();
-    state.doom();
+    state.doom(None);
     state.oust().unwrap();
     assert!(state.ousted());
     assert!(!state.admitting());

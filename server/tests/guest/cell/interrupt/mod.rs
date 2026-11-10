@@ -3,6 +3,7 @@ use core::{
     fmt::Write,
     sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
 };
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     abi::reply::SignReply,
     address::VirtAddr,
@@ -53,7 +54,7 @@ extern "C" fn load_worker() -> ! {
     while !LOAD_STOP.load(Ordering::Acquire) {
         room::yield_();
     }
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 
 static UART: AtomicUsize = AtomicUsize::new(0);
@@ -69,7 +70,7 @@ extern "C" fn observer() -> ! {
         SignReply::Triggered { .. }
     ));
     OBSERVED.store(true, Ordering::Release);
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 static ENTERED: AtomicU32 = AtomicU32::new(0);
 static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
@@ -90,7 +91,7 @@ extern "C" fn watch() -> ! {
     assert!(sign::consume(token, 1).is_err());
     WATCH_OBSERVED.fetch_add(1, Ordering::Release);
     room::wake_value(VirtAddr::new(WATCH_OBSERVED.as_ptr() as usize), true).unwrap();
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 fn write(offset: usize, byte: u8) {
     unsafe {
@@ -220,7 +221,7 @@ extern "C" fn dying_driver() -> ! {
     let sequence = receive(token, deadline());
     SEQUENCE.store(sequence as usize, Ordering::Release);
     // Exit with device asserted and controller claim held.
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 extern "C" fn revoked_driver() -> ! {
     let token = PendId::mint(TOKEN.load(Ordering::Acquire));
@@ -233,15 +234,14 @@ extern "C" fn revoked_driver() -> ! {
     let error = sign::listen(token, Wait::Infinite).unwrap_err();
     assert!(matches!(
         error.source,
-        kernel_api::abi::call::sign::SignFail::Dead
-            | kernel_api::abi::call::sign::SignFail::Denied
+        kernel_api::abi::call::sign::SignFail::Dead | kernel_api::abi::call::sign::SignFail::Denied
     ));
     // Keep this ledger alive until the controller finishes exact-identity
     // retries; Task exit would otherwise race the same physical retirement.
     while !REVOKE_FINISHED.load(Ordering::Acquire) {
         room::yield_();
     }
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 pub(super) fn run(at: usize, count: usize) {
     assert_eq!(count, args::LEN);

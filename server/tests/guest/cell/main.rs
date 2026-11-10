@@ -15,6 +15,7 @@ mod realtime;
 mod room;
 mod sign;
 use core::fmt::Write;
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     address::VirtAddr,
     model::{cell::*, identity::TeamId},
@@ -50,7 +51,7 @@ impl core::fmt::Write for Console {
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     let _ = writeln!(Console, "FAIL cell-kernel {info}");
-    unit::exit(1, 0, VirtAddr::new(0), 0)
+    unit::exit(1, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 fn ptr(bytes: &[u8]) -> VirtAddr {
     VirtAddr::new(bytes.as_ptr() as usize)
@@ -249,5 +250,5 @@ extern "C" fn run(args: usize, count: usize) -> ! {
         Console,
         "PASS pend-kernel range=1 return=1 inspect=1 collect=1"
     );
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }

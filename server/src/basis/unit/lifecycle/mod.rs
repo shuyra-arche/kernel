@@ -67,6 +67,7 @@ pub(crate) const EXIT_CASCADE: usize = 0xFFFF_FFFD;
 
 pub(crate) use doom::cull;
 pub(crate) use doom::doom;
+pub(crate) use doom::exit_team;
 pub(crate) use doom::slay;
 pub(crate) use doom::take_doomed;
 pub(crate) use doom::{Termination, branch_stats};

@@ -33,6 +33,7 @@ pub struct TeamBuilder {
     sire: TaskWeak,
     creator: kernel_api::model::identity::TaskId,
     constructing: bool,
+    member_exit: bool,
 }
 
 impl TeamBuilder {
@@ -42,6 +43,7 @@ impl TeamBuilder {
             sire: TaskWeak::empty(),
             creator: kernel_api::model::identity::TaskId::new(0),
             constructing: false,
+            member_exit: false,
         }
     }
 
@@ -60,16 +62,9 @@ impl TeamBuilder {
         self
     }
 
-    pub(crate) fn build_with_creator(
-        kind: SpaceKind,
-        sire: TaskWeak,
-        creator: kernel_api::model::identity::TaskId,
-    ) -> Result<Arc<Team>, NestError> {
-        TeamBuilder::new(kind)
-            .sire(sire)
-            .creator(creator)
-            .constructing()
-            .spawn()
+    pub(crate) fn member_exit(mut self, enabled: bool) -> Self {
+        self.member_exit = enabled;
+        self
     }
 
     pub(crate) fn prepare_nest(kind: SpaceKind) -> Result<Arc<Nest>, NestError> {
@@ -86,7 +81,13 @@ impl TeamBuilder {
             return Err(NestError::NoRegion);
         }
         let sire = self.sire.upgrade().ok_or(NestError::NoRegion)?;
-        make_team(nest, Some(sire), self.creator, self.constructing)
+        make_team(
+            nest,
+            Some(sire),
+            self.creator,
+            self.constructing,
+            self.member_exit,
+        )
     }
 
     pub fn spawn(self) -> Result<Arc<Team>, NestError> {
@@ -96,7 +97,13 @@ impl TeamBuilder {
             None => return Err(NestError::NoRegion),
         };
         let nest = Self::prepare_nest(self.kind)?;
-        make_team(nest, sire, self.creator, self.constructing)
+        make_team(
+            nest,
+            sire,
+            self.creator,
+            self.constructing,
+            self.member_exit,
+        )
     }
 }
 
@@ -110,11 +117,12 @@ pub(crate) fn next_id() -> Result<TeamId, NestError> {
 
 /// 从零落一座团队：造状态机、成员表与生命周期线，再把自己的根挂到家长名下。
 /// 家长位的深度与容量都在这里把关（失败时团队本身还没任何人看得到）。
-pub(crate) fn make_team(
+fn make_team(
     nest: Arc<Nest>,
     sire: Option<Arc<Task>>,
     creator: TaskId,
     constructing: bool,
+    member_exit: bool,
 ) -> Result<Arc<Team>, NestError> {
     let parent = sire.as_ref().map(|task| task.ident.team.node.clone());
     let owner = sire.as_ref().map_or(TaskId::new(0), |task| task.ident.id);
@@ -137,6 +145,7 @@ pub(crate) fn make_team(
         children: SpinLock::new(Vec::new()),
         life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
         exit: ExitPolicy::new(),
+        member_exit,
         termination: SpinLock::new(crate::basis::unit::lifecycle::Termination::new()),
     })
     .map_err(|_| NestError::OutOfMemory)?;
@@ -208,6 +217,7 @@ pub(crate) fn init_kernel(nest: Arc<Nest>) -> Result<&'static Arc<Team>, NestErr
             nest,
             None,
             kernel_api::model::identity::TaskId::new(0),
+            false,
             false,
         )?;
         assert!(KERNEL_TEAM.set(team).is_ok());

@@ -3,7 +3,7 @@ use crate::{
     address::VirtAddr,
     model::{
         identity::{TaskId, TeamId},
-        unit::{ControlId, UnitQuery, UnitTarget},
+        unit::{ControlId, ExitScope, UnitQuery, UnitTarget},
     },
 };
 pub type UnitResult<T> = Result<T, erra::Error<UnitFail>>;
@@ -46,6 +46,7 @@ pub mod operations {
     pub struct Stop {
         pub target: super::UnitTarget,
     }
+    /// Team scope requires the caller's Team to have enabled member exit.
     #[operation(slot = 5, nonreturning)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Exit {
@@ -53,6 +54,7 @@ pub mod operations {
         pub reason: u64,
         pub note: super::VirtAddr,
         pub len: usize,
+        pub scope: super::ExitScope,
     }
     /// Permanently close Team member admission without stopping existing members.
     #[operation(slot = 6, output = (), error = UnitFail)]
