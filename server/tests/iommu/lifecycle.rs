@@ -111,18 +111,12 @@ fn a_change_authorizes_only_its_exact_page_and_does_not_end_external_access() {
         Err(Error::Retain(RetainError::Busy))
     ));
     assert!(matches!(
-        Publication::prepare_external(&hardware, &other, 4096, true, Some((&change, false))),
+        Publication::prepare_external(&hardware, &other, 4096, true, Some(&change)),
         Err(Error::InvalidRange)
     ));
     assert!(trace.lock().unwrap().calls.is_empty());
-    let mut external = Publication::prepare_external(
-        &hardware,
-        &page,
-        4096,
-        true,
-        Some((&change, freeze.belongs_to(&change))),
-    )
-    .unwrap();
+    let mut external =
+        Publication::prepare_external(&hardware, &page, 4096, true, Some(&change)).unwrap();
     external.submit(&mut hardware).unwrap();
     drop((freeze, change));
     assert_eq!(page.exposure(), Exposure::External);

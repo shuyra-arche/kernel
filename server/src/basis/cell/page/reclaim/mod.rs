@@ -34,7 +34,7 @@ pub(crate) enum RetainError {
 #[derive(Clone, Copy)]
 enum Admission {
     Ordinary,
-    Changing { own_freeze: bool },
+    Changing,
 }
 use kernel_api::model::modifiable::Modifiable;
 
@@ -89,7 +89,7 @@ impl State {
                 ..
             } if self.changing => Err(RetainError::Busy),
             Event::Register {
-                admission: Admission::Changing { .. },
+                admission: Admission::Changing,
                 ..
             } if !self.changing => Err(RetainError::Unbalanced),
             Event::Freeze { retracts } => {
@@ -117,8 +117,8 @@ impl State {
                 admission,
             } => {
                 let writable = access == Modifiable::Yes;
-                let own_freeze = matches!(admission, Admission::Changing { own_freeze: true });
-                if writable && self.freezes > usize::from(own_freeze) {
+                let permitted_freezes = usize::from(matches!(admission, Admission::Changing));
+                if writable && self.freezes > permitted_freezes {
                     return Err(RetainError::Busy);
                 }
                 // CPU mappings share coherent RAM. Preserve the exclusion of
@@ -233,16 +233,11 @@ impl Reclaim {
             admission: Admission::Ordinary,
         })
     }
-    pub(super) fn register_during(
-        &self,
-        kind: Kind,
-        modifiable: bool,
-        own_freeze: bool,
-    ) -> Result<(), RetainError> {
+    pub(super) fn register_during(&self, kind: Kind, modifiable: bool) -> Result<(), RetainError> {
         self.apply(Event::Register {
             kind,
             access: mode(modifiable),
-            admission: Admission::Changing { own_freeze },
+            admission: Admission::Changing,
         })
     }
     pub(super) fn begin(&self) -> Result<(), RetainError> {

@@ -214,9 +214,10 @@ Retract returns Busy before changing the Memo if another publication still
 retains write access to the Page. Successful Retract retains a persistent freeze
 in the Memo. `frozen` proves the admission
 gate is closed, no writable hardware responsibility remains, and the Page is
-not quarantined. A sequence check alone proves none of this. Another frozen
-Memo blocks a conflicting writer even through another authorized publication;
-explicit read-only publication may preserve a frozen snapshot. Publish,
+not quarantined. A sequence check alone proves none of this. An independent
+CPU Memo's freeze blocks a writable CPU publication. An authorized external
+handoff can use the sole freeze after CPU withdrawal, subject to exclusive
+Page access. Explicit read-only publication may preserve a frozen snapshot. Publish,
 association replacement or Delete ends that object's freeze. Failed publication
 may advance the generation and leave Ready with its freeze, so retry from Inspect.
 Historical observation references do not prolong deleted freezes after fencing.
@@ -269,9 +270,11 @@ DELETE right. Generic Accord never changes target kind. Flat TRANSFER is checked
 separately at both ends of Cell Push/Pull into a Slot; it cannot be inferred from
 read/write access. A Share-derived Memo uses the owning root to authorize an
 owning transfer. Deriving a CPU Share Pend preserves the parent's existing
-mappings. Authorized CPU mappings of the same Page may coexist, with write
+mappings. Authorized CPU mappings of the same RAM Page may coexist, with write
 permission checked separately for every branch. The caller coordinates writes
-and observations through its shared-memory protocol.
+and observations through its shared-memory protocol. Device register Views
+use exclusive writable custody. Delegation of such a View withdraws the
+writable parent's mappings until the child access has settled.
 
 Nest Create takes a None NEST license and returns an Internal root. External
 Nests are created only by trusted boot admission, which authenticates the complete

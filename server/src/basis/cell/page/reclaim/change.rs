@@ -38,14 +38,12 @@ impl Change {
     }
     pub(crate) fn hardware(&self, modifiable: bool) -> Result<Retention, RetainError> {
         // CPU Memo publication holds its own freeze before preparing a PTE.
-        Retention::during(self, Kind::Cpu, modifiable, true)
+        Retention::during(self, Kind::Cpu, modifiable)
     }
-    pub(crate) fn external(
-        &self,
-        modifiable: bool,
-        own_freeze: bool,
-    ) -> Result<Retention, RetainError> {
-        Retention::during(self, Kind::External, modifiable, own_freeze)
+    pub(crate) fn external(&self, modifiable: bool) -> Result<Retention, RetainError> {
+        // A device handoff can use the sole freeze left by CPU withdrawal.
+        // External writers also require all CPU and other device use to settle.
+        Retention::during(self, Kind::External, modifiable)
     }
 }
 impl Drop for Change {
@@ -68,9 +66,6 @@ impl Freeze {
         // retiring writer still counts until its exact obligation discharges.
         change.page.reclaim.freeze(retracts)?;
         Ok(Self { change })
-    }
-    pub(crate) fn belongs_to(&self, change: &Change) -> bool {
-        core::ptr::eq(self.change.as_ref(), change)
     }
 }
 impl Drop for Freeze {

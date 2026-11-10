@@ -110,12 +110,6 @@ impl Memo {
         Ok(page)
     }
 
-    pub(super) fn frozen_by(&self, change: &Change) -> bool {
-        self.freeze
-            .as_ref()
-            .is_some_and(|freeze| freeze.belongs_to(change))
-    }
-
     pub(super) fn publish_external(
         &mut self,
         expected: u64,

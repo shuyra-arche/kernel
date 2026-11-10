@@ -113,7 +113,7 @@ impl Nest {
             page,
             span.initial_start().get(),
             writable,
-            Some((&change, memo.frozen_by(&change))),
+            Some(&change),
         )?;
         memo.publish_external(expected, change, publication)
             .map_err(|_| Error::InvalidState)

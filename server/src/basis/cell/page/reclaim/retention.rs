@@ -42,12 +42,8 @@ impl Retention {
         change: &super::Change,
         kind: Kind,
         modifiable: bool,
-        own_freeze: bool,
     ) -> Result<Self, RetainError> {
-        change
-            .page()
-            .reclaim
-            .register_during(kind, modifiable, own_freeze)?;
+        change.page().reclaim.register_during(kind, modifiable)?;
         Ok(Self {
             cell: Some(change.page().clone()),
             phase: Phase::Prepared,

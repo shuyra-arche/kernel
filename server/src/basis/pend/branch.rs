@@ -68,6 +68,11 @@ pub(crate) fn accord(
     } else {
         None
     };
+    // A device register window requires exclusive writable custody; this
+    // differs from Page-backed Share, whose CPU mappings may coexist.
+    let registers = share_view
+        .as_ref()
+        .filter(|meta| meta.source().is_borrowed());
     let check_source = |window: Option<(PageOffset, PageCount)>| {
         if let Some(meta) = &share_view
             && let Some(authorization) = meta.authorization()
@@ -78,7 +83,7 @@ pub(crate) fn accord(
         Ok::<(), PendFail>(())
     };
     let token = with_pair_uncommitted(caller, &target, || {
-        let _commit = crate::basis::commit();
+        let mut commit = crate::basis::commit();
         if !super::live(caller) || !super::live(&target) {
             return Err(PendFail::Dead);
         }
@@ -99,7 +104,11 @@ pub(crate) fn accord(
         } else {
             mark
         };
-        if share_view.is_some() && pend_entry.authority().modifiable().is_none() {
+        if registers.is_some() {
+            pend_entry
+                .authority()
+                .can_lend_registers(limits.modifiable)?;
+        } else if share_view.is_some() && pend_entry.authority().modifiable().is_none() {
             return Err(PendFail::Busy);
         }
         let window = effective_window(&pend_entry, requested)?;
@@ -115,10 +124,26 @@ pub(crate) fn accord(
             heirs.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
         }
         let registration = target.pend.prepare(granted.clone())?;
+        if let Some(meta) = registers {
+            if pend_entry.modifiable() == kernel_api::model::modifiable::Modifiable::Yes {
+                // Task ledgers and the Share operation remain serialized while
+                // remote TLB completion proceeds outside COMMIT.
+                drop(commit);
+                crate::basis::room::interrupt::withdraw(src);
+                meta.close_maps(Some(src))?;
+                commit = crate::basis::commit();
+                if !super::live(caller) || !super::live(&target) {
+                    return Err(PendFail::Dead);
+                }
+                check_source(window)?;
+            }
+            pend_entry.authority().lend_registers(granted.authority())?;
+        }
         let token = granted.token();
         crate::basis::room::interrupt::dispatch(&target, &granted)?;
         insert_heir(caller, src, Arc::downgrade(&target), token);
         registration.publish();
+        drop(commit);
         Ok(token)
     })??;
     let _ = sign::wake(

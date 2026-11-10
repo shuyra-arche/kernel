@@ -69,7 +69,7 @@ impl<H: Hardware<PageId>> External<H> {
         page: &Arc<Page>,
         address: usize,
         writable: bool,
-        change: Option<(&Change, bool)>,
+        change: Option<&Change>,
     ) -> Result<Publication, Error> {
         if !self.open() {
             return Err(Error::Closed);
