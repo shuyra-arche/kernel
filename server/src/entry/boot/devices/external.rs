@@ -67,10 +67,9 @@ pub(in super::super) fn init(route: ExternalRoute) -> Result<(), PendFail> {
     let nest = Nest::external_empty().map_err(|_| PendFail::OutOfMemory)?;
     // SAFETY: bind_external's trusted caller authenticated the actual source
     // and full isolation group. Controllers additionally enforces exclusivity.
-    let hardware = unsafe {
-        crate::metal::iommu::bind(route.controller, route.requester, route.proof)
-    }
-    .map_err(|_| PendFail::Denied)?;
+    let hardware =
+        unsafe { crate::metal::iommu::bind(route.controller, route.requester, route.proof) }
+            .map_err(|_| PendFail::Denied)?;
     if let Err((_, hardware)) = nest.bind_external(hardware) {
         // Failure cannot discharge an already installed hardware obligation.
         drop(hardware);

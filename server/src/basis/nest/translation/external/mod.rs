@@ -142,7 +142,7 @@ impl Nest {
         Ok(())
     }
     /// At most one bounded backend step; the caller releases all guards before notification.
-    pub(crate) fn progress_external(&self, span: &Arc<Span>) -> Result<bool, Error> {
+    pub(crate) fn progress_external(&self, span: &Arc<Span>) -> Result<(), Error> {
         let mut state = self.state.lock();
         let NestState {
             root: Storage::External(external),
@@ -159,10 +159,8 @@ impl Nest {
             state::Progress::Withdrawn => memo.settle_external(),
             state::Progress::Pending | state::Progress::Closed => {}
         }
-        if memos.idle() {
-            external.finish_close()?;
-        }
-        Ok(external.settled())
+        // The binding worker owns the final transition and its NestClosed wakeup.
+        Ok(())
     }
 
     pub(crate) fn external_phase(&self) -> kernel_api::model::nest::NestPhase {

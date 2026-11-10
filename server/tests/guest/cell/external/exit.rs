@@ -4,12 +4,13 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 use kernel_api::{
-    abi::call::{nest::NestFail, sign::SignReply},
+    abi::call::{cell::CellFail, nest::NestFail, sign::SignReply},
     model::{identity::TaskId, pend::ShareRights, unit::UnitTarget},
 };
 use kernel_client::call::{share_view, unit};
 static BAR: AtomicUsize = AtomicUsize::new(0);
 static NEST: AtomicUsize = AtomicUsize::new(0);
+static EXIT: AtomicUsize = AtomicUsize::new(0);
 static MEMO: AtomicUsize = AtomicUsize::new(0);
 fn delegate(root: PendId, task: TaskId, operations: Operations, modifiable: Modifiable) -> PendId {
     let bytes = AccordRequest {
@@ -22,7 +23,8 @@ fn delegate(root: PendId, task: TaskId, operations: Operations, modifiable: Modi
             distributable: Distributable::No,
             range: PendRange::Inherit,
         },
-    }.to_bytes();
+    }
+    .to_bytes();
     pend::accord(super::super::ptr(&bytes)).unwrap()
 }
 fn prepare(bar: PendId, root: PendId, task: TaskId) -> PendId {
@@ -44,10 +46,16 @@ extern "C" fn publisher() -> ! {
     let (bar, _) = share_view::open(bar_token).unwrap();
     let slot = super::super::allocate(1);
     let pos = create(root, slot, ADDRESS, true);
-    if let CellObject::Memo { mapping, .. } = pos.object {
-        MEMO.store(mapping.get(), Ordering::Release);
-    }
+    // Leave a vacant reservation as well as the active mapping.
+    reserve(root, slot, ADDRESS + 4096, true).unwrap();
     publish(pos);
+    let CellObject::Memo { mapping, .. } = pos.object else {
+        unreachable!();
+    };
+    MEMO.store(mapping.get(), Ordering::Release);
+    while EXIT.load(Ordering::Acquire) == 0 {
+        room::yield_();
+    }
     // Death occurs with a queued QEMU write, not with an already-idle device.
     start(bar, ADDRESS, true);
     assert_ne!(read(bar, 0x98) & 1, 0);
@@ -63,6 +71,9 @@ extern "C" fn successor() -> ! {
     super::super::write(address, 0, 0xc3c3c3c3);
     super::super::retract(cpu, 0);
     let fresh = create(token, slot, ADDRESS, true);
+    // The first holder's vacant reservation was reclaimed too.
+    let vacant = reserve(token, slot, ADDRESS + 4096, true).unwrap();
+    super::super::delete(vacant.object);
     publish(fresh);
     transfer(bar, ADDRESS, false);
     retract(fresh);
@@ -78,26 +89,33 @@ extern "C" fn successor() -> ! {
 pub(in super::super) fn death(at: usize, count: usize) {
     let (bar, root) = roots(at, count);
     let identity = context(root).id;
-    // An independent live leaf proves that temporary-holder death is not a
-    // disguised full-context reset or replacement.
-    let keeper_slot = super::super::allocate(1);
-    let (keeper_cpu, keeper_address) = super::super::attach(keeper_slot, 1);
-    super::super::write(keeper_address, 0, 0x12345678);
-    super::super::retract(keeper_cpu, 0);
-    let keeper = create(root, keeper_slot, ADDRESS + 4096, true);
-    publish(keeper);
+    let contender = super::super::allocate(1);
     let closed_event = sign::create(crate::license::get()).unwrap();
     sign::attach(closed_event, SignSource::NestClosed { token: root }, 0).unwrap();
     let task = super::super::lifecycle::spawn(publisher as *const () as usize);
     let nest_child = prepare(bar, root, task);
     assert!(share_view::open(bar).is_err());
     unit::resume(UnitTarget::Task(task)).unwrap();
+    let until = room::clock() + 2_000_000_000;
+    let old_mapping = loop {
+        let mapping = MEMO.load(Ordering::Acquire);
+        if mapping != 0 {
+            break MappingId::from_bytes(&(mapping as u64).to_le_bytes()).unwrap();
+        }
+        assert!(room::clock() < until, "publisher stalled");
+        room::yield_();
+    };
+    assert_eq!(
+        reserve(root, contender, ADDRESS + 8192, true),
+        Err(CellFail::Busy)
+    );
+    EXIT.store(1, Ordering::Release);
     assert!(super::super::lifecycle::wait_task(task));
     assert_eq!(super::super::lifecycle::result(task), (1, 77));
     let pos = CellPosition {
         object: CellObject::Memo {
             target: MappingTarget::Io(root),
-            mapping: MappingId::from_bytes(&(MEMO.load(Ordering::Acquire) as u64).to_le_bytes()).unwrap(),
+            mapping: old_mapping,
         },
         page: 0,
         generation: 1,
@@ -106,15 +124,16 @@ pub(in super::super) fn death(at: usize, count: usize) {
     while observed(pos).is_some() {
         assert_eq!(context(root).id, identity);
         assert_eq!(context(root).phase, NestPhase::Bound);
-        assert_eq!(super::super::info(keeper).state, CellState::Published);
         assert!(room::clock() < until, "dead branch retirement stalled");
         room::yield_();
     }
     super::super::lifecycle::delete(task);
     assert_eq!(context(root).id, identity);
     assert_eq!(context(root).phase, NestPhase::Bound);
-    assert_eq!(sign::listen(closed_event, Wait::Poll).unwrap(), SignReply::Pending);
-    assert_eq!(super::super::info(keeper).state, CellState::Published);
+    assert_eq!(
+        sign::listen(closed_event, Wait::Poll).unwrap(),
+        SignReply::Pending
+    );
     let mut info = [0; NestInfo::WIDTH];
     assert!(nest::inspect(nest_child, VirtAddr::new(info.as_mut_ptr() as usize)).is_err());
     let (registers, _) = share_view::open(bar).unwrap();
@@ -134,15 +153,10 @@ pub(in super::super) fn death(at: usize, count: usize) {
     assert_eq!(context(root).id, identity);
     assert_eq!(context(root).phase, NestPhase::Bound);
     assert_eq!(context(root).fault_sequence, faults);
-    assert_eq!(super::super::info(keeper).state, CellState::Published);
-    let (registers, _) = share_view::open(bar).unwrap();
-    transfer(registers, ADDRESS + 4096, true);
-    retract(keeper);
-    super::super::delete(keeper.object);
-    super::super::publish(keeper_cpu, 0);
-    assert_eq!(super::super::read(keeper_address, 0), 0xc3c3c3c3);
-    super::super::retract(keeper_cpu, 0);
-    assert_eq!(sign::listen(closed_event, Wait::Poll).unwrap(), SignReply::Pending);
+    assert_eq!(
+        sign::listen(closed_event, Wait::Poll).unwrap(),
+        SignReply::Pending
+    );
     assert_eq!(nest::delete(root).unwrap_err().source, NestFail::Busy);
     event(closed_event, SignSource::NestClosed { token: root });
     closed(root);
@@ -150,11 +164,9 @@ pub(in super::super) fn death(at: usize, count: usize) {
     returned(root);
     sign::delete(closed_event).unwrap();
     returned(closed_event);
-    super::super::delete(super::super::raw_memo(keeper_cpu, 0).object);
-    super::super::delete(CellObject::Slot(keeper_slot));
-    share_view::shut(bar).unwrap();
+    super::super::delete(CellObject::Slot(contender));
     let _ = writeln!(
         super::super::Console,
-        "PASS cell-io-exit owner=dead pending=1 retained=1 late-access=denied handover=1 same-nest=1 sibling=1"
+        "PASS cell-io-exit owner=dead pending=1 retained=1 late-access=denied handover=1 same-nest=1 exclusive=1"
     );
 }

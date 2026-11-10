@@ -1,6 +1,6 @@
 //! A trusted external Nest retains one root authorization and hardware binding.
 //! Child Pends govern their own Memo publications; losing a child never closes
-//! this address space. Only the root, Delete, or a backend failure can do that.
+//! this address space. The boot root and backend govern full retirement.
 use crate::{
     basis::{
         nest::Nest,
@@ -76,10 +76,12 @@ pub(crate) fn deliver(root: &Arc<PendEntry>, holder: TaskId) {
         .find(|r| r.root.ptr_eq(&Arc::downgrade(root.authority())))
         .expect("registered external Nest root");
     let entry = Arc::downgrade(root);
-    assert!(record
-        .notification
-        .as_ref()
-        .is_none_or(|(task, known)| *task == holder && known.ptr_eq(&entry)));
+    assert!(
+        record
+            .notification
+            .as_ref()
+            .is_none_or(|(task, known)| *task == holder && known.ptr_eq(&entry))
+    );
     record.notification = Some((holder, entry));
 }
 
@@ -116,13 +118,14 @@ pub(crate) fn inspect(actor: &Task, token: PendId) -> Result<NestInfo, NestFail>
 }
 
 pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), NestFail> {
-    let nest = authorized(actor, token, NestRights::DELETE)?
-        .target()
-        .nest()
-        .ok_or(NestFail::Denied)?;
+    let entry = authorized(actor, token, NestRights::DELETE)?;
+    let nest = entry.target().nest().ok_or(NestFail::Denied)?;
     if !nest.is_external() {
         // CPU invalidation must not run under the global commit lock.
         return nest.delete_organization().map_err(|_| NestFail::Busy);
+    }
+    if entry.sire().is_some() {
+        return Err(NestFail::Denied);
     }
     let _commit = crate::basis::commit();
     let mut records = ORGANIZATIONS.lock();

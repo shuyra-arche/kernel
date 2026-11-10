@@ -71,12 +71,11 @@ requester. `nest::inspect` writes a 56-byte NestInfo without a Port identity.
 Keep the External Nest root with its manager and delegate limited Pend branches
 for actual users. Returning/revoking a worker branch retires its own Memos,
 including unused reservations, without replacing the Nest or closing other live
-branches. Withhold DELETE and Distributable when the worker should not terminate
-the address space or delegate further. `nest::delete` closes the entire Nest;
-Busy retains the close and callers retry after hardware settlement. Closed is
-terminal, not a handover state. Retained object retirement does not permanently
-block Narrow; live descendants, borrows and publication still enforce their
-existing transaction constraints.
+branches. Set Distributable to No for workers that cannot delegate further.
+A different Task can reserve Memos after the former Task's positions have all
+retired and been removed. `nest::delete` requires the boot root to terminate
+an External Nest. Busy retains the close until hardware settlement and Closed
+is terminal. Live descendants, borrows and active publications constrain Narrow.
 
 `Sign::attach` additionally takes a generation: exact Memo generation for
 MappingPublished/Retired, zero for other sources. Use NestFault rather than the

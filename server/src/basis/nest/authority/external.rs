@@ -108,8 +108,19 @@ pub(crate) fn create(
         Access::READ
     };
     let mut records = NESTS.lock();
+    // The requester can reach every live leaf in this Nest. Another Task
+    // must wait for the current Task's positions, including retiring ones.
+    if records
+        .iter()
+        .any(|record| Arc::ptr_eq(&record.nest, &nest) && record.task != actor.ident.id)
+    {
+        return Err(CellFail::Busy);
+    }
     records.try_reserve(1).map_err(|_| CellFail::OutOfMemory)?;
-    target.authority().retain_retirement().map_err(|_| CellFail::Busy)?;
+    target
+        .authority()
+        .retain_retirement()
+        .map_err(|_| CellFail::Busy)?;
     let span = match nest.external_memo(iova, pages, access) {
         Ok(span) => span,
         Err(error) => {

@@ -111,13 +111,13 @@ old executable capsules are rejected before launch. The resource Ledger is
 | --- | --- | --- |
 | Public Port model, rights, calls and Pend target | Removed; domain 14 and target/permission kind 5 remain invalid | Receive a trusted External Nest Pend, not a Port Pend |
 | `Nest.Create(license, kind)` | `Nest.Create(license)` creates Internal only | External Nest comes from trusted boot; no user-supplied requester |
-| `Nest.Attach(nest, port)` / Detach | Slots 2/3 removed | Use Pend branches for handover; Delete only to terminate the whole Nest |
-| Nest ATTACH/DETACH rights | ATTACH remains solely for Internal Nest adoption into Team; DETACH bit 16 invalid | Do not delegate external binding rights; withhold DELETE from workers |
+| `Nest.Attach(nest, port)` / Detach | Slots 2/3 removed | Use Pend branches for handover and the boot root for terminal Delete |
+| Nest ATTACH/DETACH rights | ATTACH remains solely for Internal Nest adoption into Team; DETACH bit 16 invalid | Use ATTACH only for Internal Nest adoption |
 | 64-byte NestInfo with PortId | 56 bytes: NestId, kind, phase and four fault words | Resize output buffers and use the checked codec |
 | Ledger Port name/class 3, kind 6 | `Name::Nest { controller, requester }`, name class 5, resource kind 7 | Treat topology as descriptive; only the accompanying Pend grants access |
 | Per-user Nest creation/binding | One persistent Nest with revocable Pend branches | Retain the manager root; limit operations, Modifiable and Distributable |
 | Driver death closes the whole binding | Its exact Memos retire; unrelated branches and NestId survive | Wait for branch cleanup before unsafe address/Page reuse |
-| Root termination | Root loss or authorized Nest Delete closes the entire Nest | Busy retains cleanup; retry Delete after settlement; Closed never reopens |
+| Root termination | Root loss or root-only Nest Delete closes the entire Nest | Busy retains cleanup; retry Delete after settlement; Closed never reopens |
 | Capsule ABI 5 / Ledger 7 | Capsule format 2 declaring ABI 6 / Ledger 8 | Rebuild executables, descriptors and ledger readers together |
 
 No new source capability, source Nest or Nest CREATE permission replaces Port.
@@ -265,11 +265,13 @@ its rights or acquire another source by supplying a raw number. Its death,
 Return or Revoke invalidates the branch and retires its Memos, not the entire
 Nest. The exact creating branch remains retained until its positions are idle
 and removed; a live publication additionally retains its actual publishing
-permission and data borrow. Other authorized leaves remain live. Reusing an
-old address requires the old position's hardware obligations to be settled,
-not merely a new Pend token. A replacement Memo receives a different identity.
+permission and data borrow. Other branches of the same Task keep their live
+leaves. Only one Task at a time may reserve positions in an External Nest.
+A competing reservation returns Busy until the former Task's positions have
+all been removed. Reusing an old address requires hardware settlement, and
+the replacement Memo receives a different identity.
 
-Root loss, Nest Delete with DELETE permission, or an unsafe backend failure
+Root loss, Delete by the External Nest root with DELETE permission, or an unsafe backend failure
 closes the entire address space. Delete starts irreversible Closing and returns
 Busy while binding retirement or cleanup remains; retry completes deletion.
 Closed cannot reopen. A private Unbound state exists only during trusted boot
@@ -297,7 +299,7 @@ branch retirement remain observably different.
 | Share Create from Flat | None SHARE + Flat SHARE | Distributable, narrowing and borrow rules |
 | Nest Create | None NEST | Internal only; no hardware source parameter |
 | Team Create with Internal Nest | Build + Nest ATTACH | Exclusive owned root; token consumed |
-| Nest Inspect / Delete | Nest INSPECT / DELETE | Delete closes the whole organization; Busy retains cleanup |
+| Nest Inspect / Delete | Nest INSPECT / DELETE | External Delete requires the boot root; Busy retains cleanup |
 | External Memo Create / Delete | Nest RESERVE / RELEASE | Source authority; exact supported position |
 | External association / Publish / Retract | Nest TRANSFER / PUBLISH / RETRACT | Exact Memo generation and source access |
 | External Memo Inspect / Sign conditions | Nest INSPECT | Same Nest; retained state |

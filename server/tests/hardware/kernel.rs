@@ -411,7 +411,7 @@ fn run(mode: &str) {
             if io {
                 assert!(
                     log.contains(if mode == "io-exit" {
-                        "PASS cell-io-exit owner=dead pending=1 retained=1 late-access=denied handover=1 same-nest=1 sibling=1"
+                        "PASS cell-io-exit owner=dead pending=1 retained=1 late-access=denied handover=1 same-nest=1 exclusive=1"
                     } else {
                         "PASS cell-io external=1 readonly=1 fault=1 fenced=1 ownership=1 multi=2 repeat=1 handover=1 same-nest=1 events=1 revoke=1 orphan=1"
                     }),

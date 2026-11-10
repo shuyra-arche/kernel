@@ -9,7 +9,9 @@ use kernel_api::{
         identity::{Mark, PendId},
         modifiable::Modifiable,
         nest::{NestInfo, NestKind, NestPhase},
-        pend::{AccordRequest, AccordTarget, Distributable, Limits, NestRights, Operations, PendRange},
+        pend::{
+            AccordRequest, AccordTarget, Distributable, Limits, NestRights, Operations, PendRange,
+        },
         sign::SignSource,
         wait::Wait,
     },
@@ -29,9 +31,15 @@ fn roots(at: usize, count: usize) -> (PendId, PendId) {
     })
     .unwrap();
     let bar = PendId::mint(
-        ledger.find(Name::Page(Page::Region(0x40000000))).unwrap().handle(),
+        ledger
+            .find(Name::Page(Page::Region(0x40000000)))
+            .unwrap()
+            .handle(),
     );
-    let entry = ledger.iter().find(|e| matches!(e.name(), Name::Nest { .. })).unwrap();
+    let entry = ledger
+        .iter()
+        .find(|e| matches!(e.name(), Name::Nest { .. }))
+        .unwrap();
     assert_eq!(entry.kind(), ResourceKind::Nest);
     assert!(matches!(entry.name(), Name::Nest { requester: 8, .. }));
     let root = PendId::mint(entry.handle());
@@ -46,7 +54,9 @@ fn context(token: PendId) -> NestInfo {
 }
 fn limits() -> Limits {
     Limits {
-        operations: Operations::Nest(NestRights::all() & !(NestRights::DELETE | NestRights::ATTACH)),
+        operations: Operations::Nest(
+            NestRights::all() & !(NestRights::DELETE | NestRights::ATTACH),
+        ),
         modifiable: Modifiable::Yes,
         distributable: Distributable::No,
         range: PendRange::Inherit,
@@ -58,7 +68,8 @@ fn branch(root: PendId) -> PendId {
         target: AccordTarget::Caller,
         mark: Mark::NONE,
         limits: limits(),
-    }.to_bytes();
+    }
+    .to_bytes();
     pend::accord(super::ptr(&bytes)).unwrap()
 }
 fn returned(token: PendId) {
@@ -75,15 +86,24 @@ fn returned(token: PendId) {
     }
 }
 fn alias(pos: CellPosition, token: PendId) -> CellPosition {
-    let CellObject::Memo { mapping, .. } = pos.object else { panic!("Memo expected") };
+    let CellObject::Memo { mapping, .. } = pos.object else {
+        panic!("Memo expected")
+    };
     CellPosition {
-        object: CellObject::Memo { target: MappingTarget::Io(token), mapping },
+        object: CellObject::Memo {
+            target: MappingTarget::Io(token),
+            mapping,
+        },
         ..pos
     }
 }
 fn observed(pos: CellPosition) -> Option<CellInfo> {
     let mut bytes = [0; CellInfo::WIDTH];
-    cell::inspect(super::ptr(&pos.to_bytes()), VirtAddr::new(bytes.as_mut_ptr() as usize)).ok()?;
+    cell::inspect(
+        super::ptr(&pos.to_bytes()),
+        VirtAddr::new(bytes.as_mut_ptr() as usize),
+    )
+    .ok()?;
     CellInfo::from_bytes(&bytes)
 }
 fn current(mut pos: CellPosition) -> CellPosition {
@@ -91,6 +111,17 @@ fn current(mut pos: CellPosition) -> CellPosition {
     pos
 }
 fn create(token: PendId, slot: SlotId, address: usize, writable: bool) -> CellPosition {
+    let pos = reserve(token, slot, address, writable).unwrap();
+    super::handoff(super::slot(slot, 0), pos, false);
+    current(pos)
+}
+
+fn reserve(
+    token: PendId,
+    slot: SlotId,
+    address: usize,
+    writable: bool,
+) -> Result<CellPosition, kernel_api::abi::call::cell::CellFail> {
     let bytes = CellCreate::Memo {
         source: CellSource::Slot(ReferenceRange {
             reference: slot,
@@ -100,18 +131,27 @@ fn create(token: PendId, slot: SlotId, address: usize, writable: bool) -> CellPo
         destination: MemoDestination::External {
             authority: token,
             address: VirtAddr::new(address),
-            access: if writable { Modifiable::Yes } else { Modifiable::No },
+            access: if writable {
+                Modifiable::Yes
+            } else {
+                Modifiable::No
+            },
         },
-    }.to_bytes();
-    let CreatedCell::Memo { mapping, .. } = cell::create(PendId::NONE, super::ptr(&bytes)).unwrap()
-    else { panic!("Memo expected") };
-    let pos = CellPosition {
-        object: CellObject::Memo { target: MappingTarget::Io(token), mapping },
+    }
+    .to_bytes();
+    let CreatedCell::Memo { mapping, .. } =
+        cell::create(PendId::NONE, super::ptr(&bytes)).map_err(|error| error.source)?
+    else {
+        panic!("Memo expected")
+    };
+    Ok(CellPosition {
+        object: CellObject::Memo {
+            target: MappingTarget::Io(token),
+            mapping,
+        },
         page: 0,
         generation: 1,
-    };
-    super::handoff(super::slot(slot, 0), pos, false);
-    current(pos)
+    })
 }
 fn wait(pos: CellPosition, state: CellState) {
     let until = room::clock() + 2_000_000_000;
@@ -131,7 +171,11 @@ fn retract(pos: CellPosition) {
 fn closed(token: PendId) {
     let until = room::clock() + 2_000_000_000;
     while context(token).phase != NestPhase::Closed {
-        assert!(room::clock() < until, "Nest close deadline {:?}", context(token));
+        assert!(
+            room::clock() < until,
+            "Nest close deadline {:?}",
+            context(token)
+        );
         room::yield_();
     }
 }
@@ -166,8 +210,13 @@ fn transfer(bar: VirtAddr, address: usize, writing: bool) {
     complete(bar);
 }
 fn source(pos: CellPosition, published: bool) -> SignSource {
-    let CellObject::Memo { target: MappingTarget::Io(token), mapping } = pos.object
-    else { panic!("external position") };
+    let CellObject::Memo {
+        target: MappingTarget::Io(token),
+        mapping,
+    } = pos.object
+    else {
+        panic!("external position")
+    };
     if published {
         SignSource::MappingPublished { token, mapping }
     } else {

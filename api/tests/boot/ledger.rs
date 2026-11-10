@@ -136,7 +136,10 @@ fn boot_creation_license_sign_and_nest_are_distinct_pend_targets() {
         Entry::new(Name::Call(Call::Create), ResourceKind::None, 31),
         Entry::new(Name::Trap(Trap::SupervisorExternal), ResourceKind::Sign, 32),
         Entry::new(
-            Name::Nest { controller: 0x30000000, requester: 0 },
+            Name::Nest {
+                controller: 0x30000000,
+                requester: 0,
+            },
             ResourceKind::Nest,
             33,
         ),
@@ -159,7 +162,10 @@ fn boot_creation_license_sign_and_nest_are_distinct_pend_targets() {
 
 #[test]
 fn trusted_nest_routes_are_descriptions_not_port_handles() {
-    let name = Name::Nest { controller: 0x30000000, requester: 8 };
+    let name = Name::Nest {
+        controller: 0x30000000,
+        requester: 8,
+    };
     let record = Entry::new(name, ResourceKind::Nest, 101);
     let bytes = ledger(&[record]);
     assert_eq!(Entries::new(&bytes).unwrap().find(name), Some(record));
@@ -168,18 +174,27 @@ fn trusted_nest_routes_are_descriptions_not_port_handles() {
     assert_eq!(bytes[24], 7);
     for raw in [0, u32::MAX] {
         let record = Entry::new(
-            Name::Nest { controller: 0x30000000, requester: raw },
+            Name::Nest {
+                controller: 0x30000000,
+                requester: raw,
+            },
             ResourceKind::Nest,
             101,
         );
         // The codec does not authenticate topology; trusted admission does.
         assert!(Entries::new(&ledger(&[record])).is_some());
     }
-    assert!(Entries::new(&ledger(&[Entry::new(
-        Name::Nest { controller: 0, requester: 8 },
-        ResourceKind::Nest,
-        101,
-    )])).is_none());
+    assert!(
+        Entries::new(&ledger(&[Entry::new(
+            Name::Nest {
+                controller: 0,
+                requester: 8
+            },
+            ResourceKind::Nest,
+            101,
+        )]))
+        .is_none()
+    );
     assert!(Entries::new(&ledger(&[Entry::new(name, ResourceKind::Share, 101)])).is_none());
     let mut old_kind = bytes.clone();
     old_kind[24] = 6;

@@ -268,10 +268,12 @@ exact Pend branch. MMIO Share authority and Nest authority remain independently
 delegable and revocable.
 
 A manager retains the External Nest root and uses normal Pend Accord/Narrow to
-grant subsets of NestRights, Modifiable and Distributable. Worker branches can
-omit DELETE and further distribution. Losing one worker, returning its branch
-or revoking it withdraws only that branch's Memos; the same NestId, backend and
-other live leaves survive. Each creating branch remains held until its positions
+grant subsets of NestRights, Modifiable and Distributable. An External Nest
+admits Memo reservations from one Task at a time. Returning or revoking one
+of that Task's branches retires its Memos while other live branches keep their
+leaves. Task exit retires the Task's Memos and preserves the NestId and backend.
+A different Task can reserve positions after the previous Task's positions
+have all been removed. Each creating branch remains held until its positions
 are idle and removed, including unused reservations. Published positions also
 retain the exact publishing permission and data borrow through hardware retirement.
 Retirement-only retention does not permanently prevent Narrow; live descendants,
@@ -286,7 +288,7 @@ no Projection/IoSpace or parallel Mapping lifecycle. Kernel retains hardware
 obligations independently of a dying Task; a later mapping at the same IOVA has
 a new MappingId, and the old orphaned identity is not revived.
 
-Root authority loss, authorized Nest Delete, or unsafe backend failure closes
+Root authority loss, root-only Nest Delete, or unsafe backend failure closes
 the whole Nest. Delete starts irreversible Closing and returns Busy while the
 hardware binding or cleanup remains; retry completes deletion. Closed never
 reopens and is not the ordinary handover state. Sign observes generation-qualified
@@ -441,10 +443,11 @@ windows, Sign revocation, stable Unit results and atomic WaitValue/WakeValue.
 The I/O variants boot the separate test image with the same Kernel library and
 exercise Cell traps against QEMU EDU/IOMMU. They cover DMA permission failure,
 trusted retirement, ownership movement and creator death with a delayed callback.
-They additionally retain a live sibling Memo while one branch is revoked or its
-Task exits, then give a different Task a new Pend to the same NestId. Assertions
-cover old MappingId rejection, address reuse after retirement, unused reservation
-cleanup, retained faults and the distinction from final whole-Nest deletion.
+They retain a live sibling Memo while another branch of the same Task is revoked.
+A separate case denies a second Task admission while the first holds positions,
+then passes the same Nest to a successor after the first exits. Assertions cover
+old MappingId rejection, address reuse after retirement, unused reservations,
+retained faults and final whole-Nest deletion.
 Each variant preserves its own commands, hashes and logs under `server/tests/guest/cell/target/evidence/`.
 
 The separate no_std IOMMU guest runs ten hardware scenarios covering queues,

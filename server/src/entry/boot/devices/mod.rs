@@ -43,7 +43,9 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
             None,
         )?;
         crate::basis::nest::authority::binding::register(&nest, root.authority())?;
-        registry.register(name, root).map_err(|e| e.into_parts().0)?;
+        registry
+            .register(name, root)
+            .map_err(|e| e.into_parts().0)?;
     }
     let meta = crate::basis::flat::sharing::region(dtb.base, dtb.size, TaskId::new(0))?;
     let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;

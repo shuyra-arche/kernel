@@ -30,5 +30,8 @@ pub(super) fn run(bar: VirtAddr, root: PendId) {
     crate::delete(crate::raw_memo(cpu, 0).object);
     let children = cell::split(slot).unwrap();
     crate::delete(CellObject::Slot(children));
-    let _ = writeln!(crate::Console, "PASS cell-io-levels last-leaf=1 retirement=1 split=1");
+    let _ = writeln!(
+        crate::Console,
+        "PASS cell-io-levels last-leaf=1 retirement=1 split=1"
+    );
 }

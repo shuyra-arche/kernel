@@ -23,7 +23,10 @@ fn grant(operations: Operations) -> Limits {
 #[test]
 fn each_operation_family_requires_its_own_target() {
     let kinds = [
-        (Target::Sign(SignId::new(7)), Operations::Sign(SignRights::LISTEN)),
+        (
+            Target::Sign(SignId::new(7)),
+            Operations::Sign(SignRights::LISTEN),
+        ),
         (Target::None, Operations::None(CreationRights::FLAT)),
         (
             Target::View(ViewTarget::Clone(ViewId::new(7))),
@@ -33,8 +36,14 @@ fn each_operation_family_requires_its_own_target() {
             Target::View(ViewTarget::Share(ViewId::new(7))),
             Operations::Share(ShareRights::OPEN),
         ),
-        (Target::Flat(FlatId::new(7).unwrap()), Operations::Flat(FlatRights::INSPECT)),
-        (Target::Nest(NestId::new(7).unwrap()), Operations::Nest(NestRights::INSPECT)),
+        (
+            Target::Flat(FlatId::new(7).unwrap()),
+            Operations::Flat(FlatRights::INSPECT),
+        ),
+        (
+            Target::Nest(NestId::new(7).unwrap()),
+            Operations::Nest(NestRights::INSPECT),
+        ),
     ];
     for (i, (target, operations)) in kinds.iter().enumerate() {
         assert_eq!(Target::of(target.words()), Some(*target));
@@ -53,12 +62,18 @@ fn each_operation_family_requires_its_own_target() {
 #[test]
 fn distribution_is_independent_of_mutability_and_cannot_be_restored() {
     let read = grant(Operations::Share(ShareRights::OPEN));
-    let final_read = Limits { distributable: Distributable::No, ..read };
+    let final_read = Limits {
+        distributable: Distributable::No,
+        ..read
+    };
     assert!(read.permits_child(final_read));
     assert!(!final_read.permits_child(final_read));
     assert!(read.permits_narrowing(final_read));
     assert!(!final_read.permits_narrowing(read));
-    let write = Limits { modifiable: Modifiable::Yes, ..final_read };
+    let write = Limits {
+        modifiable: Modifiable::Yes,
+        ..final_read
+    };
     assert!(!write.permits_child(final_read));
     assert!(!read.permits_child(write));
     assert!(write.permits_narrowing(final_read));
@@ -71,11 +86,22 @@ fn distribution_is_independent_of_mutability_and_cannot_be_restored() {
 
 #[test]
 fn object_free_permission_never_admits_a_data_window_or_mutable_access() {
-    let calls = grant(Operations::None(CreationRights::FLAT | CreationRights::NEST));
+    let calls = grant(Operations::None(
+        CreationRights::FLAT | CreationRights::NEST,
+    ));
     assert!(calls.valid());
     for invalid in [
-        Limits { range: PendRange::Pages { offset: 0, count: 1 }, ..calls },
-        Limits { modifiable: Modifiable::Yes, ..calls },
+        Limits {
+            range: PendRange::Pages {
+                offset: 0,
+                count: 1,
+            },
+            ..calls
+        },
+        Limits {
+            modifiable: Modifiable::Yes,
+            ..calls
+        },
     ] {
         assert!(!invalid.valid());
         assert_eq!(Limits::of(invalid.words()), None);
@@ -94,7 +120,10 @@ fn info_rejects_a_valid_permission_for_the_wrong_target() {
         status: PendStatus::Active,
     };
     assert_eq!(PendInfo::from_bytes(&info.to_bytes()), Some(info));
-    let forged = PendInfo { limits: grant(Operations::Flat(FlatRights::INSPECT)), ..info };
+    let forged = PendInfo {
+        limits: grant(Operations::Flat(FlatRights::INSPECT)),
+        ..info
+    };
     assert_eq!(PendInfo::from_bytes(&forged.to_bytes()), None);
 }
 
@@ -102,8 +131,17 @@ fn info_rejects_a_valid_permission_for_the_wrong_target() {
 fn sign_permissions_are_control_rights_not_mutable_memory() {
     let listen = grant(Operations::Sign(SignRights::LISTEN));
     for invalid in [
-        Limits { modifiable: Modifiable::Yes, ..listen },
-        Limits { range: PendRange::Pages { offset: 0, count: 1 }, ..listen },
+        Limits {
+            modifiable: Modifiable::Yes,
+            ..listen
+        },
+        Limits {
+            range: PendRange::Pages {
+                offset: 0,
+                count: 1,
+            },
+            ..listen
+        },
     ] {
         assert_eq!(Limits::of(invalid.words()), None);
     }
@@ -129,7 +167,11 @@ fn nest_delegation_can_withhold_destruction_distribution_and_write_access() {
     assert!(root.permits_child(worker));
     assert!(!worker.permits_child(worker));
     assert!(!worker.permits_narrowing(root));
-    assert!(!worker.operations.contains(Operations::Nest(NestRights::DELETE)));
+    assert!(
+        !worker
+            .operations
+            .contains(Operations::Nest(NestRights::DELETE))
+    );
     let observer = Limits {
         modifiable: Modifiable::No,
         ..grant(Operations::Nest(NestRights::INSPECT))

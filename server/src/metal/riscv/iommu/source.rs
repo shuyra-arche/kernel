@@ -68,16 +68,14 @@ pub(crate) unsafe fn bind(
     });
     let tables = [a?, b?, c?, d?];
     // All allocation precedes consuming the exclusive controller slot.
-    let mut storage = Box::try_new(core::mem::MaybeUninit::<Bound>::uninit())
-        .map_err(|_| Error::OutOfMemory)?;
+    let mut storage =
+        Box::try_new(core::mem::MaybeUninit::<Bound>::uninit()).map_err(|_| Error::OutOfMemory)?;
     let mut controllers = CONTROLLERS.lock();
     let adapter = unsafe {
-        controllers.as_mut().ok_or(Error::InvalidState)?.bind(
-            controller,
-            requester,
-            tables,
-            proof,
-        )
+        controllers
+            .as_mut()
+            .ok_or(Error::InvalidState)?
+            .bind(controller, requester, tables, proof)
     }
     .map_err(|_| Error::InvalidState)?;
     storage.write(Bound { adapter });

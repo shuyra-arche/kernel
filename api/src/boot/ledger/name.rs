@@ -7,9 +7,15 @@ pub enum Name {
     Trap(Trap),
     Call(Call),
     Page(Page),
-    Interrupt { controller: u64, source: u32 },
+    Interrupt {
+        controller: u64,
+        source: u32,
+    },
     /// Descriptive boot topology. Only the accompanying Pend grants access.
-    Nest { controller: u64, requester: u32 },
+    Nest {
+        controller: u64,
+        requester: u32,
+    },
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Trap {
@@ -56,7 +62,10 @@ impl Name {
         assert_eq!(out.len(), Self::WIDTH);
         let route = match *self {
             Self::Interrupt { controller, source } => Some((4, controller, source)),
-            Self::Nest { controller, requester } => Some((5, controller, requester)),
+            Self::Nest {
+                controller,
+                requester,
+            } => Some((5, controller, requester)),
             _ => None,
         };
         if let Some((class, controller, source)) = route {
@@ -92,7 +101,10 @@ impl Name {
             }
             return match bytes[0] {
                 4 if source != 0 => Some(Self::Interrupt { controller, source }),
-                5 => Some(Self::Nest { controller, requester: source }),
+                5 => Some(Self::Nest {
+                    controller,
+                    requester: source,
+                }),
                 _ => None,
             };
         }

@@ -28,7 +28,8 @@ fn request(token: PendId) -> [u8; UnitCreate::WIDTH] {
         nest: Some(token),
         kind: ProgramKind::User,
         guard: ControlId::NONE,
-    }.to_bytes()
+    }
+    .to_bytes()
 }
 pub(super) fn run() {
     build(false);
@@ -46,7 +47,10 @@ fn build(cascade: bool) {
     let root = nest::create(crate::license::get()).unwrap();
     let mut observation = [0; NestInfo::WIDTH];
     nest::inspect(root, VirtAddr::new(observation.as_mut_ptr() as usize)).unwrap();
-    assert_eq!(NestInfo::from_bytes(&observation).unwrap().kind, NestKind::Internal);
+    assert_eq!(
+        NestInfo::from_bytes(&observation).unwrap().kind,
+        NestKind::Internal
+    );
     let descriptor = AccordRequest {
         src: root,
         target: AccordTarget::Caller,
@@ -57,7 +61,8 @@ fn build(cascade: bool) {
             range: PendRange::Inherit,
         },
         mark: Mark::NONE,
-    }.to_bytes();
+    }
+    .to_bytes();
     let child = pend::accord(ptr(&descriptor)).unwrap();
     assert!(unit::create(ptr(&request(child))).is_err());
     assert!(unit::create(ptr(&request(root))).is_err());
@@ -76,21 +81,33 @@ fn build(cascade: bool) {
     delete(raw_memo(staging, 0).object);
     let source = share_view::create(crate::license::get(), reference, Modifiable::No).unwrap();
     let descriptor = CellCreate::Memo {
-        source: CellSource::Pend { token: source, offset: 0, count: 1 },
+        source: CellSource::Pend {
+            token: source,
+            offset: 0,
+            count: 1,
+        },
         destination: MemoDestination::Internal {
             team,
             placement: Placement::lowest(4096).unwrap(),
             access: 10,
             control: MappingControl::Caller,
         },
-    }.to_bytes();
-    let CreatedCell::Memo { mapping, address } = cell::create(PendId::NONE, ptr(&descriptor)).unwrap()
-    else { panic!("expected Memo") };
+    }
+    .to_bytes();
+    let CreatedCell::Memo { mapping, address } =
+        cell::create(PendId::NONE, ptr(&descriptor)).unwrap()
+    else {
+        panic!("expected Memo")
+    };
     let position = CellPosition {
-        object: CellObject::Memo { target: MappingTarget::Cpu(team), mapping },
+        object: CellObject::Memo {
+            target: MappingTarget::Cpu(team),
+            mapping,
+        },
         page: 0,
         generation: 2,
-    }.to_bytes();
+    }
+    .to_bytes();
     // Association advances the initial vacant generation once.
     cell::publish(ptr(&position)).unwrap();
     let descriptor = UnitCreate::Task {
@@ -99,7 +116,8 @@ fn build(cascade: bool) {
         args: VirtAddr::new(0),
         count: 0,
         stack: VirtAddr::new(0),
-    }.to_bytes();
+    }
+    .to_bytes();
     let mut tasks = [TaskId::new(0); 8];
     for task in &mut tasks {
         let UnitTarget::Task(id) = unit::create(ptr(&descriptor)).unwrap() else {
@@ -107,8 +125,12 @@ fn build(cascade: bool) {
         };
         *task = id;
     }
-    if cascade { return; }
-    for task in tasks { unit::resume(UnitTarget::Task(task)).unwrap(); }
+    if cascade {
+        return;
+    }
+    for task in tasks {
+        unit::resume(UnitTarget::Task(task)).unwrap();
+    }
     for task in tasks {
         assert!(crate::lifecycle::wait_task(task));
         assert_eq!(crate::lifecycle::result(task), (1, 83));
@@ -127,7 +149,10 @@ fn build(cascade: bool) {
             Ok(()) => break,
             Err(error) => {
                 assert_eq!(error.source, kernel_api::abi::call::unit::UnitFail::Busy);
-                assert!(kernel_client::call::room::clock() < deadline, "Team retirement stalled");
+                assert!(
+                    kernel_client::call::room::clock() < deadline,
+                    "Team retirement stalled"
+                );
                 kernel_client::call::room::yield_();
             }
         }
