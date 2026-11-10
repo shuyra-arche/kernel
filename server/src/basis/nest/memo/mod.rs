@@ -9,12 +9,12 @@ use kernel_api::address::VirtAddr;
 use kernel_api::model::cell::{CellInfo, CellState};
 use publication::{Phase, Publication};
 #[derive(Clone, Copy)]
-pub(crate) enum MemoFlight {
+enum MemoFlight {
     Publishing,
     Retracting,
 }
 impl MemoFlight {
-    pub(super) fn observation(self) -> kernel_api::model::cell::CellState {
+    fn observation(self) -> kernel_api::model::cell::CellState {
         use kernel_api::model::cell::CellState;
         match self {
             Self::Publishing => CellState::Publishing,
@@ -23,14 +23,13 @@ impl MemoFlight {
     }
 }
 pub(crate) struct Memo {
-    pub(crate) generation: crate::basis::name::Generation,
-    pub(crate) page: Option<Arc<Page>>,
+    generation: crate::basis::name::Generation,
+    page: Option<Arc<Page>>,
     /// Retraction closes admission before removing PTEs; Ready keeps this freeze.
-    pub(in crate::basis::nest) freeze: Option<Freeze>,
-    pub(crate) flight: Option<MemoFlight>,
-    pub(in crate::basis::nest) publication: Option<Publication>,
+    freeze: Option<Freeze>,
+    flight: Option<MemoFlight>,
+    publication: Option<Publication>,
     controlled: bool,
-    pub(in crate::basis::nest) fault: Option<crate::metal::generic::iommu::Fault>,
 }
 impl Memo {
     pub(crate) const fn vacant() -> Self {
@@ -41,7 +40,6 @@ impl Memo {
             flight: None,
             publication: None,
             controlled: false,
-            fault: None,
         }
     }
     pub(crate) fn associate(&mut self, expected: u64, page: Arc<Page>) -> Result<(), NestError> {
@@ -72,7 +70,24 @@ impl Memo {
         freeze: Arc<Change>,
         publishing: bool,
     ) -> Result<Arc<Page>, NestError> {
-        if self.generation.get() != expected || self.flight.is_some() {
+        if self.flight.is_some() || publishing == self.publication.is_some() {
+            return Err(NestError::Busy);
+        }
+        let flight = if publishing {
+            MemoFlight::Publishing
+        } else {
+            MemoFlight::Retracting
+        };
+        self.begin(expected, freeze, flight)
+    }
+
+    fn begin(
+        &mut self,
+        expected: u64,
+        freeze: Arc<Change>,
+        flight: MemoFlight,
+    ) -> Result<Arc<Page>, NestError> {
+        if self.generation.get() != expected {
             return Err(NestError::Busy);
         }
         let page = self.page().ok_or(NestError::Missing)?;
@@ -83,12 +98,69 @@ impl Memo {
         self.controlled = true;
         self.page = Some(page.clone());
         self.freeze = Some(Freeze::new(freeze));
-        self.flight = Some(if publishing {
-            MemoFlight::Publishing
-        } else {
-            MemoFlight::Retracting
-        });
+        self.flight = Some(flight);
         Ok(page)
+    }
+
+    pub(super) fn publish_external(
+        &mut self,
+        expected: u64,
+        change: Arc<Change>,
+        publication: Publication,
+    ) -> Result<(), NestError> {
+        if self.busy() || !Arc::ptr_eq(change.page(), publication.cell()) {
+            return Err(NestError::Busy);
+        }
+        self.begin(expected, change, MemoFlight::Publishing)?;
+        self.install(publication);
+        Ok(())
+    }
+
+    pub(super) fn retract_external(
+        &mut self,
+        expected: u64,
+        change: Arc<Change>,
+    ) -> Result<(), NestError> {
+        if self.publication.is_none() || self.retracting() {
+            return Err(NestError::Busy);
+        }
+        // Explicit retraction may supersede a still-publishing leaf. All
+        // validation precedes replacing its generation, freeze and flight.
+        self.begin(expected, change, MemoFlight::Retracting)?;
+        Ok(())
+    }
+
+    pub(super) fn retracting(&self) -> bool {
+        matches!(self.flight, Some(MemoFlight::Retracting))
+    }
+
+    pub(super) fn busy(&self) -> bool {
+        self.flight.is_some() || self.publication.is_some()
+    }
+
+    pub(super) fn publication(&self) -> Option<&Publication> {
+        self.publication.as_ref()
+    }
+
+    pub(super) fn publication_mut(&mut self) -> Option<&mut Publication> {
+        self.publication.as_mut()
+    }
+
+    fn install(&mut self, publication: Publication) {
+        assert!(self.publication.is_none());
+        if let Some(page) = &self.page {
+            assert!(Arc::ptr_eq(page, publication.cell()));
+        }
+        self.publication = Some(publication);
+    }
+
+    pub(super) fn settle_external(&mut self) {
+        assert!(
+            self.publication()
+                .is_some_and(|p| p.phase() == Phase::Settled)
+        );
+        self.publication = None;
+        self.finish();
     }
 
     pub(super) fn finish(&mut self) {
@@ -139,8 +211,10 @@ impl Memo {
             external: page
                 .is_some_and(|p| p.exposure() == crate::basis::cell::page::Exposure::External),
             address,
-            fault_cause: self.fault.map_or(0, |f| f.cause as u64),
-            fault_address: self.fault.map_or(0, |f| f.address),
+            // Device fault evidence belongs to the binding, which reports it
+            // without assigning it to an inferred Memo generation.
+            fault_cause: 0,
+            fault_address: 0,
         }
     }
 }

@@ -73,7 +73,9 @@ impl Payload {
         let view = Sharing::from_source(self.source.clone(), size, receiver)?;
         let pend = PendEntry::try_new(View::Share(view.clone()), Mark::NONE, Modifiable::No, None)?;
         view.attach_source(&source);
-        source.adopt(&view, pend.token(), pend.authority().clone())?;
+        source
+            .begin_withdraw()?
+            .adopt(&view, pend.token(), pend.authority().clone())?;
         source.consume();
         view.commit_source();
         Ok(pend)

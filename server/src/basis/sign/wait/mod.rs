@@ -393,6 +393,41 @@ pub fn redeem() -> bool {
     ) > 0
 }
 
+/// Reserve the Site and exact timeout ticket before changing Task ownership.
+fn prepare_wait(
+    task: &Arc<Task>,
+    key: WakeKey,
+    life: &Weak<Anchor>,
+    dur: Duration,
+    call: Option<&WaitCall>,
+) -> Result<Ticket, ()> {
+    #[cfg(debug_assertions)]
+    crate::basis::assert_held();
+    let result = (|| {
+        {
+            let mut table = sites(key).lock();
+            Site::ensure(&mut table, key, life)?.admit()?;
+        }
+        let ticket = Ticket::next_id().ok_or(())?;
+        let at = call.map_or_else(
+            || (dur != Duration::MAX).then(|| clock::now().add(dur).as_ticks()),
+            |call| call.deadline(dur),
+        );
+        if let Some(at) = at {
+            hold(ticket, key, task)?;
+            if deadline::insert(ticket.raw(), at).is_err() {
+                void(ticket);
+                return Err(());
+            }
+        }
+        Ok(ticket)
+    })();
+    if result.is_err() {
+        prune_empty(key);
+    }
+    result
+}
+
 pub(crate) fn requeue<E: Copy>(
     task: &Arc<Task>,
     key: WakeKey,
@@ -401,20 +436,7 @@ pub(crate) fn requeue<E: Copy>(
     call: WaitCall,
     oom: E,
 ) -> Result<(), E> {
-    {
-        let mut table = sites(key).lock();
-        Site::ensure(&mut table, key, &life)
-            .and_then(|site| site.admit())
-            .map_err(|()| oom)?;
-    }
-    let ticket = Ticket::next_id().ok_or(oom)?;
-    if let Some(at) = call.deadline(dur) {
-        hold(ticket, key, task).map_err(|_| oom)?;
-        if deadline::insert(ticket.raw(), at).is_err() {
-            void(ticket);
-            return Err(oom);
-        }
-    }
+    let ticket = prepare_wait(task, key, &life, dur, Some(&call)).map_err(|()| oom)?;
     task.block(key, ticket, Some(call));
     let mut table = sites(key).lock();
     let site = table.get_mut(&key).expect("requeued site");

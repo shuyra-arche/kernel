@@ -16,7 +16,7 @@ impl Memos {
     pub(in crate::basis::nest) fn idle(&self) -> bool {
         self.entries
             .iter()
-            .all(|(_, memo)| memo.publication.is_none())
+            .all(|(_, memo)| memo.publication().is_none())
     }
     fn key(span: &Span, page: usize) -> (usize, usize) {
         (span.identity(), page)
@@ -57,7 +57,7 @@ impl Memos {
         span: &Span,
         page: usize,
     ) -> Option<&Publication> {
-        self.get(span, page).and_then(|m| m.publication.as_ref())
+        self.get(span, page).and_then(Memo::publication)
     }
     pub(in crate::basis::nest) fn published<'a>(
         &'a self,
@@ -67,7 +67,7 @@ impl Memos {
         self.entries
             .iter()
             .filter(move |((owner, _), _)| *owner == id)
-            .filter_map(|((_, page), memo)| memo.publication.as_ref().map(|p| (*page, p)))
+            .filter_map(|((_, page), memo)| memo.publication().map(|p| (*page, p)))
     }
     pub(in crate::basis::nest) fn publish(
         &mut self,
@@ -87,12 +87,7 @@ impl Memos {
                 at
             }
         };
-        let memo = &mut self.entries[at].1;
-        assert!(memo.publication.is_none());
-        if let Some(page) = &memo.page {
-            assert!(alloc::sync::Arc::ptr_eq(page, publication.cell()));
-        }
-        memo.publication = Some(publication);
+        self.entries[at].1.install(publication);
     }
     pub(in crate::basis::nest) fn take_publication(
         &mut self,
@@ -121,7 +116,7 @@ impl Memos {
     pub(in crate::basis::nest) fn complete(&mut self, span: &Span) {
         for ((id, _), memo) in &mut self.entries {
             if *id == span.identity() {
-                if let Some(publication) = &mut memo.publication {
+                if let Some(publication) = memo.publication_mut() {
                     publication.complete();
                 }
             }

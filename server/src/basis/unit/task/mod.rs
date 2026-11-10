@@ -13,7 +13,6 @@ use crate::basis::sign::WakeKey;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::team::Team;
-use crate::basis::unit::team::TeamPhase;
 use crate::metal::hart::HartId;
 use crate::metal::sync::SpinLock;
 
@@ -306,14 +305,13 @@ impl Task {
         }
     }
 
-    pub(crate) fn oust(&self, team: TeamId) -> Option<Arc<Team>> {
+    pub(crate) fn detach_heir(&self, team: TeamId) -> Option<Arc<Team>> {
         let _commit = commit();
         let child = {
             let mut heirs = self.heir.lock();
             let at = heirs.iter().position(|t| t.id == team)?;
             heirs.remove(at)
         };
-        child.node.state.lock().phase = TeamPhase::Ousted;
         child.node.clear(self.ident.id, Some(team));
         Some(child)
     }
@@ -362,7 +360,7 @@ impl Task {
                     });
             });
         }
-        found.filter(|team| !team.node.state.lock().phase.ousted())
+        found.filter(|team| !team.node.state.lock().ousted())
     }
 
     pub(crate) fn life(&self) -> Weak<Anchor> {

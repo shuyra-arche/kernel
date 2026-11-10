@@ -23,12 +23,13 @@ pub(super) struct Hand {
 pub(super) enum Slot {
     Reserved(usize, usize),
     Ready(Hand),
+    Reading(Hand),
 }
 
 impl Slot {
     pub(super) fn hand(&self) -> Option<&Hand> {
         match self {
-            Self::Ready(hand) => Some(hand),
+            Self::Ready(hand) | Self::Reading(hand) => Some(hand),
             Self::Reserved(..) => None,
         }
     }
@@ -42,18 +43,17 @@ pub(super) enum Pending {
 #[derive(Default)]
 pub(super) struct Queue {
     pub(super) hands: VecDeque<Slot>,
-    pub(super) taking: bool,
     pub(super) bytes: usize,
 }
 
 impl Queue {
     pub(super) fn ready(&self, dir: CloneCondition, limits: &CloneLimits) -> bool {
         match dir {
-            CloneCondition::Pull => self.head().is_some() && !self.taking,
+            CloneCondition::Pull => matches!(self.hands.front(), Some(Slot::Ready(_))),
             CloneCondition::Push => {
                 self.hands.len() < limits.max_messages && self.bytes < limits.max_bytes
             }
-            CloneCondition::Empty => self.hands.is_empty() && !self.taking,
+            CloneCondition::Empty => self.hands.is_empty(),
         }
     }
 

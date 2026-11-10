@@ -43,24 +43,7 @@ pub(crate) fn block_with_call<E: WaitFail>(
     if take_beacon(key) {
         return Ok(Blocked::Resume);
     }
-    {
-        let mut sites = sites(key).lock();
-        Site::ensure(&mut sites, key, &life)
-            .and_then(|site| site.admit())
-            .map_err(|()| E::oom())?;
-    }
-    let ticket = Ticket::next_id().ok_or_else(E::oom)?;
-    let at = wait.as_ref().map_or_else(
-        || (dur != Duration::MAX).then(|| clock::now().add(dur).as_ticks()),
-        |call| call.deadline(dur),
-    );
-    if let Some(at) = at {
-        hold(ticket, key, &me).map_err(|()| E::oom())?;
-        if deadline::insert(ticket.raw(), at).is_err() {
-            void(ticket);
-            return Err(E::oom());
-        }
-    }
+    let ticket = prepare_wait(&me, key, &life, dur, wait.as_ref()).map_err(|()| E::oom())?;
     drop(me);
     let (task, next_pa) = current().handoff(
         crate::basis::room::scheduler::slot::Departure::Wait {

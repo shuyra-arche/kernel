@@ -26,11 +26,14 @@ impl<H: Hardware<PageId>> Target<H> {
         writable: bool,
         change: Option<&Change>,
     ) -> Result<(), Error> {
-        self.backend
-            .prepare(&mut self.publication, page, address, writable, change)
+        let publication =
+            self.backend
+                .prepare(self.publication.is_some(), page, address, writable, change)?;
+        self.publication = Some(publication);
+        Ok(())
     }
     pub(crate) fn publish(&mut self) -> Result<(), Error> {
-        self.backend.submit(&mut self.publication)
+        self.backend.submit(self.publication.as_mut())
     }
     pub(crate) fn phase(&self) -> Option<Phase> {
         self.publication.as_ref().map(Publication::phase)
@@ -39,7 +42,7 @@ impl<H: Hardware<PageId>> Target<H> {
         if !self.backend.open() {
             return Err(Error::Closed);
         }
-        self.backend.progress(&mut self.publication, false)?;
+        self.progress()?;
         Ok(self.phase() == Some(Phase::Mapped))
     }
     pub(crate) fn fault(&mut self) -> Result<Option<Fault>, Error> {
@@ -51,7 +54,7 @@ impl<H: Hardware<PageId>> Target<H> {
         if let Some(Phase::Waiting(batch)) = self.phase() {
             return Ok(Some(batch));
         }
-        self.backend.progress(&mut self.publication, false)?;
+        self.progress()?;
         Ok(match self.phase() {
             Some(Phase::Waiting(batch)) => Some(batch),
             _ => None,
@@ -61,18 +64,22 @@ impl<H: Hardware<PageId>> Target<H> {
         if self.publication.is_none() {
             return Err(Error::UnknownBinding);
         }
-        Ok(matches!(
-            self.backend.progress(&mut self.publication, false)?,
-            Progress::Withdrawn
-        ))
+        Ok(matches!(self.progress()?, Progress::Withdrawn))
     }
     pub(crate) fn advance_close(&mut self) -> Result<bool, Error> {
         self.backend.close();
-        self.backend.progress(&mut self.publication, false)?;
+        self.progress()?;
         if self.publication.is_none() {
             self.backend.finish_close()?;
         }
         Ok(self.backend.settled())
+    }
+    fn progress(&mut self) -> Result<Progress, Error> {
+        let progress = self.backend.progress(self.publication.as_mut(), false)?;
+        if matches!(progress, Progress::Withdrawn) {
+            self.publication = None;
+        }
+        Ok(progress)
     }
     pub(crate) fn settled(&self) -> bool {
         self.backend.settled()

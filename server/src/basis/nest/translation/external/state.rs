@@ -65,33 +65,29 @@ impl<H: Hardware<PageId>> External<H> {
     }
     pub(crate) fn prepare(
         &self,
-        publication: &mut Option<Publication>,
+        occupied: bool,
         page: &Arc<Page>,
         address: usize,
         writable: bool,
         change: Option<&Change>,
-    ) -> Result<(), Error> {
+    ) -> Result<Publication, Error> {
         if !self.open() {
             return Err(Error::Closed);
         }
-        if publication.is_some() {
+        if occupied {
             return Err(Error::Overlap);
         }
         let hardware = self.hardware.as_ref().ok_or(Error::UnknownDomain)?;
         if hardware.capacity() == 0 {
             return Err(Error::Capacity);
         }
-        *publication = Some(Publication::prepare_external(
-            hardware, page, address, writable, change,
-        )?);
-        Ok(())
+        Publication::prepare_external(hardware, page, address, writable, change)
     }
-    pub(crate) fn submit(&mut self, publication: &mut Option<Publication>) -> Result<(), Error> {
+    pub(crate) fn submit(&mut self, publication: Option<&mut Publication>) -> Result<(), Error> {
         if !self.open() {
             return Err(Error::Closed);
         }
         let result = publication
-            .as_mut()
             .ok_or(Error::UnknownBinding)?
             .submit(self.hardware.as_mut().ok_or(Error::UnknownDomain)?);
         if let Err(error) = result {
@@ -122,7 +118,7 @@ impl<H: Hardware<PageId>> External<H> {
     /// Completion never comes from a caller Ack.
     pub(crate) fn progress(
         &mut self,
-        publication: &mut Option<Publication>,
+        publication: Option<&mut Publication>,
         retracting: bool,
     ) -> Result<Progress, Error> {
         let result = self.step(publication, retracting);
@@ -134,7 +130,7 @@ impl<H: Hardware<PageId>> External<H> {
     }
     fn step(
         &mut self,
-        publication: &mut Option<Publication>,
+        publication: Option<&mut Publication>,
         retracting: bool,
     ) -> Result<Progress, Error> {
         if self.admission == Admission::Closed {
@@ -158,7 +154,6 @@ impl<H: Hardware<PageId>> External<H> {
                     }
                 }
                 if receipt.phase() == Phase::Settled {
-                    *publication = None;
                     return Ok(Progress::Withdrawn);
                 }
             } else if receipt.phase() == Phase::Publishing && receipt.ready(hardware)? {

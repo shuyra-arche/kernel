@@ -4,7 +4,7 @@ use crate::basis::unit::control::Request;
 
 /// 团队的相位：活着、被收下、注定要死，或已被撤离。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TeamPhase {
+enum TeamPhase {
     Live,
     Paused,
     Doomed,
@@ -14,26 +14,17 @@ pub(crate) enum TeamPhase {
 impl TeamPhase {
     /// Pure group-control decision. The Team applies scheduling effects only
     /// after publishing the selected phase under the commit boundary.
-    pub(crate) fn transition(
-        self,
-        request: crate::basis::unit::control::Request,
-    ) -> Result<Self, kernel_api::abi::call::unit::UnitFail> {
-        use crate::basis::unit::control::Request;
+    fn transition(self, request: Request) -> Result<Self, UnitFail> {
         match (self, request) {
-            (Self::Doomed | Self::Ousted, _) => Err(kernel_api::abi::call::unit::UnitFail::Denied),
+            (Self::Doomed | Self::Ousted, _) => Err(UnitFail::Denied),
             (_, Request::Pause) => Ok(Self::Paused),
             (_, Request::Resume) => Ok(Self::Live),
         }
     }
 
     /// 注定要死或已被撤离：这两种相位都不再接新的事。
-    pub(crate) fn terminal(&self) -> bool {
-        matches!(self, TeamPhase::Doomed | TeamPhase::Ousted)
-    }
-
-    /// 已被撤离：名字与家长位都不再指向它。
-    pub(crate) fn ousted(&self) -> bool {
-        matches!(self, TeamPhase::Ousted)
+    fn terminal(self) -> bool {
+        matches!(self, Self::Doomed | Self::Ousted)
     }
 }
 
@@ -45,24 +36,16 @@ pub(crate) enum TeamStage {
 
 // Membership admission is independent of whether existing executions may run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Admission {
+enum Admission {
     Open,
     Closed,
-}
-impl Admission {
-    pub(crate) fn finish(self) -> Self {
-        Self::Closed
-    }
-    pub(crate) fn permits(self) -> bool {
-        self == Self::Open
-    }
 }
 
 /// 团队状态机：阶段（`TeamStage`）、相位（`TeamPhase`）与成员准入。
 pub(crate) struct TeamState {
-    pub(crate) stage: TeamStage,
-    pub(crate) admission: Admission,
-    pub(crate) phase: TeamPhase,
+    stage: TeamStage,
+    admission: Admission,
+    phase: TeamPhase,
 }
 
 unsafe impl Send for TeamState {}
@@ -78,6 +61,44 @@ impl TeamState {
 
     pub(crate) fn terminal(&self) -> bool {
         self.phase.terminal()
+    }
+
+    pub(crate) fn admitting(&self) -> bool {
+        self.admission == Admission::Open
+    }
+
+    pub(crate) fn paused(&self) -> bool {
+        self.phase == TeamPhase::Paused
+    }
+
+    pub(crate) fn ousted(&self) -> bool {
+        self.phase == TeamPhase::Ousted
+    }
+
+    pub(crate) fn finish(&mut self) {
+        self.admission = Admission::Closed;
+    }
+
+    pub(crate) fn doom(&mut self) {
+        if !self.terminal() {
+            self.finish();
+            self.phase = TeamPhase::Doomed;
+        }
+    }
+
+    /// The coordinator has retired the Nest and checked the completion cohort.
+    pub(crate) fn oust(&mut self) -> Result<(), UnitFail> {
+        if !self.terminal() {
+            return Err(UnitFail::Busy);
+        }
+        self.discard();
+        Ok(())
+    }
+
+    /// Final Team drop can also discard an unpublished or empty live Team.
+    pub(crate) fn discard(&mut self) {
+        self.finish();
+        self.phase = TeamPhase::Ousted;
     }
 
     pub(crate) fn ready(&self) -> bool {
@@ -96,6 +117,14 @@ impl TeamState {
     }
 
     pub(crate) fn set_default_entry(&mut self, va: usize) {
+        assert!(
+            !self.terminal()
+                && matches!(
+                    self.stage,
+                    TeamStage::Constructing | TeamStage::Ready { default_entry: 0 }
+                ),
+            "default entry can only be installed on a live Team with no entry"
+        );
         self.stage = TeamStage::Ready { default_entry: va };
     }
 

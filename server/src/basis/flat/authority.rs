@@ -54,7 +54,9 @@ pub(crate) fn create(
         return Err(PendFail::Dead);
     }
     meta.attach_source(&source);
-    source.adopt(&meta, entry.token(), entry.authority().clone())?;
+    source
+        .begin_withdraw()?
+        .adopt(&meta, entry.token(), entry.authority().clone())?;
     source.consume();
     meta.commit_source();
     registration.publish();

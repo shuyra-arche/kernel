@@ -32,7 +32,8 @@ impl<R: Registers> Domain<R> {
     /// # Safety
     /// Caller is the trusted Kernel device-binding path: the device ID is correct,
     /// every access from it traverses this IOMMU, and no device uses bypass or
-    /// retained ATS translations. CPU/device borrowing and residency have been
+    /// retained ATS translations. The adapter has validated this exact engine,
+    /// tables, projection and device before taking ownership. CPU/device borrowing and residency have been
     /// authorized for the complete Page. The payload obligation must already be
     /// published and retained until this Domain and platform access are settled.
     pub(super) unsafe fn new(
@@ -40,8 +41,7 @@ impl<R: Registers> Domain<R> {
         pages: [Retention; 4],
         projection: Projection,
         device: u32,
-    ) -> Result<Self, EngineError> {
-        Self::validate(&engine, &pages, projection, device)?;
+    ) -> Self {
         let cap = engine.registers.read64(CAP);
         let stride = if cap & (1 << 22) != 0 { 64 } else { 32 };
         let iova = projection.iova.get();
@@ -67,7 +67,7 @@ impl<R: Registers> Domain<R> {
         result.write(1, (iova >> 30) & 511, pointer(&p[2]));
         result.write(2, (iova >> 21) & 511, pointer(&p[3]));
         result.write_leaf(projection);
-        Ok(result)
+        result
     }
 
     /// Complete all fallible metadata allocations before any payload publication.
@@ -287,7 +287,11 @@ impl<R: Registers> Domain<R> {
     ) -> Result<crate::metal::iommu::BatchId, EngineError> {
         self.validate_leaf(p)?;
         self.write_leaf(p);
-        self.engine.invalidate()
+        let result = self.engine.invalidate();
+        if self.engine.phase() == Phase::Failed {
+            self.fail();
+        }
+        result
     }
     pub(super) fn withdraw_leaf(
         &mut self,

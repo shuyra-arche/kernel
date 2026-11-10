@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 #[derive(Clone, Copy)]
 enum Publication {
     Starting,
+    Unconfirmed,
     Flushing(BatchId),
     Ready,
 }
@@ -26,16 +27,26 @@ struct Leaf {
     withdrawal: Option<(BatchId, Withdrawal)>,
 }
 
+enum Context<R: Registers> {
+    Setup(Engine<R>, [Retention; 4]),
+    Domain(Domain<R>),
+}
+
+enum Binding<R: Registers> {
+    Open(Context<R>),
+    Closing {
+        context: Context<R>,
+        ticket: Retirement,
+    },
+    Closed(Option<Engine<R>>),
+}
+
 pub(crate) struct Adapter<R: Registers, Q: Quiescence> {
-    setup: Option<(Engine<R>, [Retention; 4])>,
-    domain: Option<Domain<R>>,
-    returned: Option<Engine<R>>,
+    binding: Binding<R>,
     device: u32,
     controller: usize,
     proof: Q,
     leaves: Vec<Leaf>,
-    closing: Option<Retirement>,
-    closed: bool,
 }
 
 impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
@@ -61,14 +72,10 @@ impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
         };
         Ok(Self {
             controller: engine.physical_base(),
-            setup: Some((engine, tables)),
-            domain: None,
-            returned: None,
+            binding: Binding::Open(Context::Setup(engine, tables)),
             device,
             proof,
             leaves,
-            closing: None,
-            closed: false,
         })
     }
     fn index(&self, p: Projection) -> Result<usize, HardwareError> {
@@ -77,10 +84,22 @@ impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
             .position(|leaf| leaf.projection == p)
             .ok_or(HardwareError::Fault)
     }
+    fn domain(&mut self) -> Result<&mut Domain<R>, HardwareError> {
+        match &mut self.binding {
+            Binding::Open(Context::Domain(domain))
+            | Binding::Closing {
+                context: Context::Domain(domain),
+                ..
+            } => Ok(domain),
+            _ => Err(HardwareError::Fault),
+        }
+    }
     fn publication(&mut self, at: usize) -> Result<bool, HardwareError> {
-        let domain = self.domain.as_mut().ok_or(HardwareError::Fault)?;
-        let ready = match self.leaves[at].publication {
+        let phase = self.leaves[at].publication;
+        let domain = self.domain()?;
+        let ready = match phase {
             Publication::Starting => domain.step().map_err(failure)? == DomainPhase::Active,
+            Publication::Unconfirmed => return Err(HardwareError::Fault),
             Publication::Flushing(batch) => domain.observe_leaf(batch).map_err(failure)?,
             Publication::Ready => true,
         };
@@ -92,7 +111,10 @@ impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
     /// Only shutdown, after the exact Binding proof, makes this engine available
     /// for reuse. Dropping an unclosed adapter quarantines its live obligations.
     pub(crate) fn take_engine(&mut self) -> Option<Engine<R>> {
-        self.returned.take()
+        match &mut self.binding {
+            Binding::Closed(engine) => engine.take(),
+            _ => None,
+        }
     }
 }
 fn failure(error: EngineError) -> HardwareError {
@@ -107,10 +129,18 @@ fn failure(error: EngineError) -> HardwareError {
 // Closing a context requires every leaf settled and a separate Binding proof.
 unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
     fn capacity(&self) -> usize {
-        if self.closing.is_some() || self.closed {
-            0
-        } else {
-            512 - self.leaves.len()
+        match &self.binding {
+            Binding::Open(Context::Setup(..)) => 512,
+            Binding::Open(Context::Domain(domain))
+                if domain.phase() != DomainPhase::Failed
+                    && !self
+                        .leaves
+                        .iter()
+                        .any(|leaf| matches!(leaf.publication, Publication::Unconfirmed)) =>
+            {
+                512 - self.leaves.len()
+            }
+            _ => 0,
         }
     }
     fn validate(&self, p: Projection) -> Result<(), HardwareError> {
@@ -127,35 +157,43 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
         {
             return Err(HardwareError::Unavailable);
         }
-        if let Some((engine, tables)) = &self.setup {
-            Domain::validate(engine, tables, p, self.device).map_err(failure)
-        } else {
-            let domain = self.domain.as_ref().ok_or(HardwareError::Unavailable)?;
-            if !domain.idle() {
-                return Err(HardwareError::Unavailable);
+        match &self.binding {
+            Binding::Open(Context::Setup(engine, tables)) => {
+                Domain::validate(engine, tables, p, self.device).map_err(failure)
             }
-            domain.validate_leaf(p).map_err(failure)
+            Binding::Open(Context::Domain(domain)) if domain.idle() => {
+                domain.validate_leaf(p).map_err(failure)
+            }
+            _ => Err(HardwareError::Unavailable),
         }
     }
     fn publish(&mut self, p: Projection) -> Result<(), HardwareError> {
         self.validate(p)?;
-        // Reserve before the first write; partial failure never loses this identity.
+        let first = matches!(self.binding, Binding::Open(Context::Setup(..)));
+        // A later leaf can reach the page table before its own fence submits.
+        // It cannot inherit readiness from the already-active context.
         self.leaves.push(Leaf {
             projection: p,
-            publication: Publication::Starting,
+            publication: if first {
+                Publication::Starting
+            } else {
+                Publication::Unconfirmed
+            },
             withdrawal: None,
         });
-        if let Some((engine, tables)) = self.setup.take() {
-            let domain = unsafe { Domain::new(engine, tables, p, self.device) }.map_err(failure)?;
-            self.domain = Some(domain);
-            self.domain.as_mut().unwrap().start().map_err(failure)
+        if first {
+            let Binding::Open(Context::Setup(engine, tables)) =
+                core::mem::replace(&mut self.binding, Binding::Closed(None))
+            else {
+                unreachable!("validated setup")
+            };
+            // SAFETY: validate checked this exact context and projection above;
+            // no other writer can replace this exclusive binding.
+            let domain = unsafe { Domain::new(engine, tables, p, self.device) };
+            self.binding = Binding::Open(Context::Domain(domain));
+            self.domain()?.start().map_err(failure)
         } else {
-            let batch = self
-                .domain
-                .as_mut()
-                .ok_or(HardwareError::Fault)?
-                .publish_leaf(p)
-                .map_err(failure)?;
+            let batch = self.domain()?.publish_leaf(p).map_err(failure)?;
             self.leaves.last_mut().unwrap().publication = Publication::Flushing(batch);
             Ok(())
         }
@@ -187,13 +225,21 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
             .iter()
             .position(|leaf| leaf.withdrawal.is_some_and(|(b, _)| b == batch))
             .ok_or(HardwareError::Fault)?;
-        if !self.publication(at)? {
+        // Withdrawing a leaf with no submitted publication fence can still
+        // succeed: clear its PTE, then prove withdrawal with a fresh fence.
+        // This path never certifies that the failed publication was ready.
+        if !matches!(self.leaves[at].publication, Publication::Unconfirmed)
+            && !self.publication(at)?
+        {
             return Ok(None);
         }
         let p = self.leaves[at].projection;
         match self.leaves[at].withdrawal.unwrap().1 {
             Withdrawal::Requested => {
-                let domain = self.domain.as_mut().ok_or(HardwareError::Fault)?;
+                let domain = self.domain()?;
+                if domain.phase() == DomainPhase::Failed {
+                    return Err(HardwareError::Fault);
+                }
                 if !domain.idle() {
                     return Ok(None);
                 }
@@ -201,13 +247,7 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
                 self.leaves[at].withdrawal = Some((batch, Withdrawal::Flushing(fence)));
             }
             Withdrawal::Flushing(fence) => {
-                if self
-                    .domain
-                    .as_mut()
-                    .ok_or(HardwareError::Fault)?
-                    .observe_leaf(fence)
-                    .map_err(failure)?
-                {
+                if self.domain()?.observe_leaf(fence).map_err(failure)? {
                     self.leaves[at].withdrawal = Some((batch, Withdrawal::Proof));
                 }
             }
@@ -227,68 +267,73 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
         Ok(None)
     }
     fn fault(&mut self) -> Result<Option<Fault>, HardwareError> {
-        match self.domain.as_mut() {
-            Some(domain) => domain.fault().map_err(failure),
-            None => Ok(None),
+        match self.domain() {
+            Ok(domain) => domain.fault().map_err(failure),
+            Err(_) => Ok(None),
         }
     }
     fn shutdown(&mut self) -> Result<bool, HardwareError> {
-        if self.closed {
+        if matches!(self.binding, Binding::Closed(_)) {
             return Ok(true);
         }
         if !self.leaves.is_empty() {
             return Ok(false);
         }
-        if self.closing.is_none() {
-            self.closing = Some(Retirement::new(
+        if matches!(self.binding, Binding::Open(_)) {
+            let ticket = Retirement::new(
                 self.controller,
                 self.device,
                 BindingId::allocate().map_err(|_| HardwareError::Unavailable)?,
                 BatchId::allocate().map_err(|_| HardwareError::Unavailable)?,
-            ));
+            );
+            let Binding::Open(context) =
+                core::mem::replace(&mut self.binding, Binding::Closed(None))
+            else {
+                unreachable!("open binding")
+            };
+            self.binding = Binding::Closing { context, ticket };
         }
-        if let Some((engine, _)) = self.setup.as_mut() {
-            // Even an unpublished binding may have delayed requests queued in
-            // its device. Reassignment still needs the independent Binding proof.
-            let ticket = self.closing.unwrap();
-            match self.proof.prove(ticket)? {
-                None => return Ok(false),
-                Some(proof) if proof == ticket => {}
-                Some(_) => return Err(HardwareError::Fault),
-            }
-            if engine.fault().map_err(failure)?.is_some() {
+        let Binding::Closing { context, ticket } = &mut self.binding else {
+            unreachable!("closing binding")
+        };
+        if let Context::Domain(domain) = context {
+            if domain.phase() != DomainPhase::Closed {
+                match domain.phase() {
+                    DomainPhase::Active => domain.revoke().map_err(failure)?,
+                    DomainPhase::Blocked => domain.close().map_err(failure)?,
+                    _ => {
+                        domain.step().map_err(failure)?;
+                    }
+                }
                 return Ok(false);
             }
-            self.returned = Some(self.setup.take().unwrap().0);
-            self.closed = true;
-            return Ok(true);
         }
-        let domain = self.domain.as_mut().ok_or(HardwareError::Fault)?;
-        match domain.phase() {
-            DomainPhase::Active => domain.revoke().map_err(failure)?,
-            DomainPhase::Blocked => domain.close().map_err(failure)?,
-            DomainPhase::Closed => {
-                let ticket = self.closing.unwrap();
-                match self.proof.prove(ticket)? {
-                    None => {}
-                    Some(proof) if proof == ticket => {
-                        // Drain diagnostic records before the engine is reassigned.
-                        // Bounded polls retain the context if more evidence remains.
-                        if domain.fault().map_err(failure)?.is_some() {
-                            return Ok(false);
-                        }
-                        self.returned =
-                            Some(unsafe { self.domain.take().unwrap().settle() }.map_err(failure)?);
-                        self.closed = true;
-                        return Ok(true);
-                    }
-                    Some(_) => return Err(HardwareError::Fault),
-                }
-            }
-            _ => {
-                domain.step().map_err(failure)?;
-            }
+        // Even an unpublished context needs separate Binding proof before
+        // reassignment. Drain faults after proof and before returning the Engine.
+        match self.proof.prove(*ticket)? {
+            None => return Ok(false),
+            Some(proof) if proof == *ticket => {}
+            Some(_) => return Err(HardwareError::Fault),
         }
-        Ok(false)
+        let fault = match context {
+            Context::Setup(engine, _) => engine.fault(),
+            Context::Domain(domain) => domain.fault(),
+        };
+        if fault.map_err(failure)?.is_some() {
+            return Ok(false);
+        }
+        let Binding::Closing { context, .. } =
+            core::mem::replace(&mut self.binding, Binding::Closed(None))
+        else {
+            unreachable!("proved closing binding")
+        };
+        let engine = match context {
+            Context::Setup(engine, _) => engine,
+            // SAFETY: the closed Domain and exact platform proof were checked
+            // under this exclusive adapter borrow before taking the context.
+            Context::Domain(domain) => unsafe { domain.settle() }.map_err(failure)?,
+        };
+        self.binding = Binding::Closed(Some(engine));
+        Ok(true)
     }
 }

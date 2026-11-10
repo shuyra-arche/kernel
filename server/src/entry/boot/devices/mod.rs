@@ -72,7 +72,9 @@ fn grant_region(
     let authorization =
         SourceAuthorization::new(source, Access::READ | Access::WRITE, TaskId::new(0))?;
     meta.attach_source(&authorization);
-    authorization.adopt(&meta, root.token(), root.authority().clone())?;
+    authorization
+        .begin_withdraw()?
+        .adopt(&meta, root.token(), root.authority().clone())?;
     registry
         .register(Name::Page(Page::Region(base as u64)), root)
         .map_err(|e| e.into_parts().0)
