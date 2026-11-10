@@ -33,26 +33,6 @@ pub(crate) fn service(pending: usize) {
     }
 }
 
-pub(crate) fn persist(frame: &TrapContext) -> bool {
-    let Some(i) = ident() else {
-        return false;
-    };
-    let Some(task) = i.live() else {
-        return false;
-    };
-    if !task.team.nest.asid().is_kernel() {
-        return false;
-    }
-    let Some(pa) = i.trap() else {
-        return false;
-    };
-    let dst = pa.as_usize() as *mut TrapContext;
-    unsafe {
-        (*dst).copy_registers_from(frame);
-    }
-    true
-}
-
 pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapContext {
     #[cfg(feature = "latency")]
     crate::metal::measure::enter();
@@ -100,8 +80,6 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
             }
             drop(ident);
             if from_task {
-                run() as *mut TrapContext
-            } else if persist(frame) {
                 run() as *mut TrapContext
             } else {
                 deadline::arm(deadline::blind_deadline());
@@ -246,11 +224,17 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
     resume(next)
 }
 
+fn is_task_frame(frame: *const TrapContext) -> bool {
+    crate::basis::room::scheduler::slot::current()
+        .running_task()
+        .is_some_and(|task| task.ident.frame_pa.as_usize() == frame as usize)
+}
+
 pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
     if let Some(route) = crate::basis::room::interrupt::external() {
         route.advance();
     }
-    if !unsafe { (*next).address_space() }.is_kernel() {
+    if is_task_frame(next) {
         let slot = crate::basis::room::scheduler::slot::current();
         // Pause/Stop already owns a publication. An ordinary Task repeatedly
         // making calls must acknowledge it at this safe return boundary too,
@@ -266,7 +250,7 @@ pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
     #[cfg(feature = "latency")]
     let mut observed = None;
     let space = unsafe { (*next).address_space() };
-    if !space.is_kernel() {
+    if is_task_frame(next) {
         let task = crate::basis::room::scheduler::slot::current()
             .running_task()
             .expect("return without Task owner");

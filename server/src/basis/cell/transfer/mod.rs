@@ -1,5 +1,5 @@
 //! Atomic Slot movement. Page identity and existing Memo obligations survive.
-//! Withdrawal is an explicit Memo Pull, never an implicit ownership effect.
+//! Withdrawal is an explicit Memo Retract, never an implicit ownership effect.
 mod error;
 
 pub use error::TransferError;

@@ -7,12 +7,12 @@ error[E0277]: the trait bound `kernel_api::abi::call::unit::operations::Exit: Ke
   = help: the following other types implement trait `KernelCall`:
             kernel_api::abi::call::cell::operations::Create
             kernel_api::abi::call::cell::operations::Delete
+            kernel_api::abi::call::cell::operations::Insert
             kernel_api::abi::call::cell::operations::Inspect
             kernel_api::abi::call::cell::operations::Merge
             kernel_api::abi::call::cell::operations::Protect
             kernel_api::abi::call::cell::operations::Publish
             kernel_api::abi::call::cell::operations::Pull
-            kernel_api::abi::call::cell::operations::Push
           and $N others
 note: required by a bound in `returning`
  --> tests/abi/fixtures/fail/terminal_call.rs:3:17

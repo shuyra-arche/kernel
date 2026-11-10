@@ -13,6 +13,7 @@ Use [the Kernel API](../api/README.md) for current public contracts.
 | How does a call reach its owner? | [ABI calls](../api/src/abi/call/) | [Entry](../server/src/entry/) |
 | How is external access admitted and delegated? | [Nest model](../api/src/model/nest/), [Pend model](../api/src/model/pend/) | [Boot admission](../server/src/entry/boot/devices/external.rs), [Nest](../server/src/basis/nest/) and [RISC-V IOMMU](../server/src/metal/riscv/iommu/) |
 | What proves that hardware effects are complete? | Selected [public contracts](../api/) and [trusted boot model](../api/src/boot/) | [Metal](../server/src/metal/), including the selected architecture backend |
+| Where does a consumer observe global memory without gaining control? | [Versioned memory snapshot](../api/src/model/memory.rs), [Boot Ledger](../api/src/boot/ledger/) | [Kernel observer Task](../server/src/entry/observe/), [Allocator](../server/src/metal/allocator/frame/) and [Page retirement statistics](../server/src/basis/cell/page/reclaim/statistics.rs) |
 | Where are these behaviors verified? | [API tests](../api/tests/) | [Server tests](../server/tests/), product scenarios in [Vanllia](https://github.com/shuyra-arche/vanllia) |
 
 These are **navigational paths as of the current source layout**, not a

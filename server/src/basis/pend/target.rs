@@ -31,6 +31,7 @@ pub(crate) enum Target {
     View(View),
     Flat(Arc<Sharing>),
     Sign(Arc<Endpoint>),
+    Memo(Arc<crate::basis::nest::authority::memo::Memo>),
     Nest {
         owner: TaskId,
         nest: Arc<crate::basis::nest::Nest>,
@@ -45,6 +46,7 @@ impl Target {
     pub(crate) fn identity(&self) -> Identity {
         match self {
             Self::None { .. } => Identity::None,
+            Self::Memo(memo) => Identity::Memo(memo.id),
             Self::View(view) => Identity::View(match view.kind() {
                 ViewKind::Clone => ViewTarget::Clone(ViewId::new(view.id())),
                 ViewKind::Share => ViewTarget::Share(ViewId::new(view.id())),
@@ -64,6 +66,7 @@ impl Target {
         match self {
             Self::None { owner } | Self::Nest { owner, .. } => *owner,
             Self::Flat(meta) => meta.owner(),
+            Self::Memo(memo) => memo.owner,
             Self::View(view) => view.owner(),
             Self::Sign(sign) => sign.owner(),
         }
@@ -71,6 +74,7 @@ impl Target {
     pub(crate) fn alive(&self) -> bool {
         match self {
             Self::None { .. } => true,
+            Self::Memo(memo) => memo.alive(),
             Self::Nest { nest, .. } => !nest.is_closed(),
             Self::Flat(meta) => meta.alive(),
             Self::View(view) => view.alive(),
@@ -79,7 +83,7 @@ impl Target {
     }
     pub(crate) fn seal(&self) -> Result<(), PendFail> {
         match self {
-            Self::None { .. } => {}
+            Self::None { .. } | Self::Memo(_) => {}
             Self::Flat(meta) => crate::basis::flat::sharing::seal(meta),
             Self::View(view) => view.seal(),
             Self::Sign(sign) => endpoint::seal(sign),
@@ -95,7 +99,7 @@ impl Target {
     }
     pub(crate) fn wake(&self) -> Option<(WakeKey, Weak<Anchor>)> {
         Some(match self {
-            Self::None { .. } => return None,
+            Self::None { .. } | Self::Memo(_) => return None,
             Self::Nest { nest, .. } => (WakeKey::ExternalNest { id: nest.id() }, nest.life()),
             Self::Flat(meta) => (WakeKey::seal(ViewKind::Share, meta.id), meta.life()),
             Self::View(view) => (WakeKey::seal(view.kind(), view.id()), view.life()),
@@ -136,6 +140,7 @@ impl Target {
     pub(crate) fn same(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Flat(a), Self::Flat(b)) => Arc::ptr_eq(a, b),
+            (Self::Memo(a), Self::Memo(b)) => Arc::ptr_eq(a, b),
             (Self::View(a), Self::View(b)) => a.same(b),
             (Self::Sign(a), Self::Sign(b)) => Arc::ptr_eq(a, b),
             (Self::Nest { nest: a, .. }, Self::Nest { nest: b, .. }) => Arc::ptr_eq(a, b),
@@ -157,6 +162,12 @@ impl Target {
                     Distributable::Yes,
                 )
             }
+            Self::Memo(memo) => Pend::try_new_window(
+                modifiable,
+                window.or(Some((PageOffset::ZERO, memo.count))),
+                Operations::Memo(kernel_api::model::pend::MemoRights::all()),
+                Distributable::Yes,
+            ),
             Self::Flat(meta) => {
                 let authority = Pend::try_new_window(
                     modifiable,
@@ -188,7 +199,7 @@ impl Target {
     pub(crate) fn release_pend(&self, token: PendId) {
         crate::basis::room::interrupt::withdraw(token);
         match self {
-            Self::None { .. } | Self::Nest { .. } => {}
+            Self::None { .. } | Self::Nest { .. } | Self::Memo(_) => {}
             Self::Flat(meta) => meta.release_pend(token),
             Self::View(view) => view.release_pend(token),
             Self::Sign(sign) => endpoint::release_authority(sign, token),

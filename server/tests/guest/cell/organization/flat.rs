@@ -70,7 +70,7 @@ pub(super) fn run() {
     delete(raw_memo(staging, 0).object);
     let receiver = allocate(1);
     // Transfer remains a separate right; the exact delegated branch supplies it.
-    handoff(crate::memo(mapping, 0), slot(receiver, 0), false);
+    handoff(slot(sliced, 0), slot(receiver, 0), false);
     handoff(slot(donor, 0), slot(sliced, 0), false);
     delete(raw_memo(mapping, 0).object);
     pend::revoke(crate::lifecycle::self_id(), child).unwrap();
@@ -110,8 +110,8 @@ pub(super) fn run() {
     let destination = allocate(1);
     assert!(
         cell::push(ptr(&CellHandoff {
-            source: slot(one, 0),
-            target: slot(destination, 0)
+            local: slot(one, 0),
+            remote: slot(destination, 0)
         }
         .to_bytes()))
         .is_err()

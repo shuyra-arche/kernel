@@ -124,20 +124,18 @@ fn build(case: Case) {
             team,
             placement: Placement::lowest(4096).unwrap(),
             access: 10,
-            control: MappingControl::Caller,
         },
     }
     .to_bytes();
-    let CreatedCell::Memo { mapping, address } =
-        cell::create(PendId::NONE, ptr(&descriptor)).unwrap()
+    let CreatedCell::Memo {
+        token: mapping,
+        address,
+    } = cell::create(PendId::NONE, ptr(&descriptor)).unwrap()
     else {
         panic!("expected Memo")
     };
     let position = CellPosition {
-        object: CellObject::Memo {
-            target: MappingTarget::Cpu(team),
-            mapping,
-        },
+        object: CellObject::Memo(mapping),
         page: 0,
         generation: 2,
     }

@@ -21,7 +21,7 @@ pub(crate) fn allocate(level: usize, count: usize) -> SlotId {
     };
     slot
 }
-pub(crate) fn attach_large(slot_id: SlotId) -> (MappingId, VirtAddr) {
+pub(crate) fn attach_large(slot_id: SlotId) -> (kernel_api::model::identity::PendId, VirtAddr) {
     let (mapping, address) = crate::reserve(slot_id, 512);
     handoff(slot(slot_id, 0), memo(mapping, 0), false);
     assert_eq!(info(raw_memo(mapping, 0)).level.get(), 1);
@@ -38,7 +38,7 @@ fn absent(slot_id: SlotId) {
         .is_err()
     );
 }
-fn reserve_huge(reference: SlotId) -> (MappingId, VirtAddr) {
+fn reserve_huge(reference: SlotId) -> (kernel_api::model::identity::PendId, VirtAddr) {
     let request = CellCreate::Memo {
         source: CellSource::Slot(ReferenceRange {
             reference,
@@ -49,11 +49,13 @@ fn reserve_huge(reference: SlotId) -> (MappingId, VirtAddr) {
             team: TeamId::new(0),
             placement: Placement::lowest(1 << 30).unwrap(),
             access: 6,
-            control: MappingControl::Caller,
         },
     }
     .to_bytes();
-    let CreatedCell::Memo { mapping, address } = cell::create(PendId::NONE, ptr(&request)).unwrap()
+    let CreatedCell::Memo {
+        token: mapping,
+        address,
+    } = cell::create(PendId::NONE, ptr(&request)).unwrap()
     else {
         panic!("Memo expected")
     };
@@ -90,7 +92,6 @@ pub(crate) fn run() {
             team: TeamId::new(0),
             placement: Placement::lowest(4096).unwrap(),
             access: 6,
-            control: MappingControl::Caller,
         },
     }
     .to_bytes();
@@ -141,13 +142,13 @@ pub(crate) fn run() {
     delete(CellObject::Slot(fresh));
     let huge = allocate(2, 1);
     let (mapping, address) = reserve_huge(huge);
-    let request = CellHandoff {
+    let request = CellAssociation {
         source: slot(huge, 0),
         target: memo(mapping, 0),
     }
     .to_bytes();
     if cfg!(feature = "large") {
-        cell::push(ptr(&request)).unwrap();
+        cell::insert(ptr(&request)).unwrap();
         publish(mapping, 0);
         assert_eq!(read(address, (1 << 30) - 8), 0);
         write(address, 0, 0x17);
@@ -173,7 +174,7 @@ pub(crate) fn run() {
         );
     } else {
         assert_eq!(
-            cell::push(ptr(&request)).unwrap_err().source,
+            cell::insert(ptr(&request)).unwrap_err().source,
             kernel_api::abi::call::cell::CellFail::OutOfMemory
         );
         assert_eq!(info(slot(huge, 0)).state, CellState::Vacant);

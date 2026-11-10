@@ -90,7 +90,6 @@ pub(super) fn run() {
             team: TeamId::new(0),
             placement: Placement::lowest(4096).unwrap(),
             access: 2,
-            control: MappingControl::Caller,
         },
     }
     .to_bytes();

@@ -177,7 +177,7 @@ fn external_mapping_requires_a_target_pend_and_retired_device_abi_is_rejected() 
     for slot in 0..10 {
         assert!(EnvCall::from_wire((13usize << 32) | slot, &[1; 6]).is_err());
     }
-    for slot in 10..20 {
+    for slot in 12..20 {
         assert!(
             EnvCall::from_wire(kernel_api::abi::PREFIX | (2usize << 32) | slot, &[1; 6]).is_err()
         );

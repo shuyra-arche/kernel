@@ -40,11 +40,14 @@ mod basis {
 mod completion;
 mod engine;
 mod hardware;
+#[path = "../support/lock.rs"]
+mod host_lock;
 mod lifecycle;
 mod retirement;
 #[path = "../memory/support.rs"]
 mod support;
 mod metal {
+    pub(crate) use crate::host_lock as sync;
     pub(crate) mod generic {
         pub(crate) use crate::iommu::contract as iommu;
     }

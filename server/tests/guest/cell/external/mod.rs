@@ -17,6 +17,7 @@ use kernel_api::{
     },
 };
 use kernel_client::call::{cell, nest, pend, room, sign};
+mod block;
 mod exit;
 mod levels;
 mod publication;
@@ -86,14 +87,8 @@ fn returned(token: PendId) {
     }
 }
 fn alias(pos: CellPosition, token: PendId) -> CellPosition {
-    let CellObject::Memo { mapping, .. } = pos.object else {
-        panic!("Memo expected")
-    };
     CellPosition {
-        object: CellObject::Memo {
-            target: MappingTarget::Io(token),
-            mapping,
-        },
+        object: CellObject::Memo(token),
         ..pos
     }
 }
@@ -139,16 +134,13 @@ fn reserve(
         },
     }
     .to_bytes();
-    let CreatedCell::Memo { mapping, .. } =
+    let CreatedCell::Memo { token: mapping, .. } =
         cell::create(PendId::NONE, super::ptr(&bytes)).map_err(|error| error.source)?
     else {
         panic!("Memo expected")
     };
     Ok(CellPosition {
-        object: CellObject::Memo {
-            target: MappingTarget::Io(token),
-            mapping,
-        },
+        object: CellObject::Memo(mapping),
         page: 0,
         generation: 1,
     })
@@ -210,13 +202,16 @@ fn transfer(bar: VirtAddr, address: usize, writing: bool) {
     complete(bar);
 }
 fn source(pos: CellPosition, published: bool) -> SignSource {
-    let CellObject::Memo {
-        target: MappingTarget::Io(token),
-        mapping,
-    } = pos.object
-    else {
+    let CellObject::Memo(token) = pos.object else {
         panic!("external position")
     };
+    let mut bytes = [0; kernel_api::model::pend::PendInfo::SIZE];
+    pend::inspect(token, VirtAddr::new(bytes.as_mut_ptr() as usize)).unwrap();
+    let observation = kernel_api::model::pend::PendInfo::from_bytes(&bytes).unwrap();
+    let kernel_api::model::pend::Target::Memo(id) = observation.target else {
+        panic!("Memo target")
+    };
+    let mapping = MappingId::from_bytes(&(id.get() as u64).to_le_bytes()).unwrap();
     if published {
         SignSource::MappingPublished { token, mapping }
     } else {

@@ -1,19 +1,14 @@
 //! Slot and Memo identity, positions and handoff descriptors.
 
-use super::{MappingId, MappingTarget, SlotId};
-use crate::abi::{
-    layout::{fetch_words, store_words},
-    register::Wire,
-};
+use super::SlotId;
+use crate::abi::layout::{fetch_words, store_words};
 use crate::address::BASE_PAGE_SIZE;
+use crate::model::identity::PendId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CellObject {
     Slot(SlotId),
-    Memo {
-        target: MappingTarget,
-        mapping: MappingId,
-    },
+    Memo(PendId),
 }
 
 impl CellObject {
@@ -30,11 +25,7 @@ impl CellObject {
     pub(crate) fn words(self) -> [usize; 4] {
         match self {
             Self::Slot(id) => [0, id.get(), 0, 0],
-            Self::Memo { target, mapping } => {
-                let mut words = [0; 6];
-                target.pack(&mut words, &mut 0);
-                [1, words[0], words[1], mapping.get()]
-            }
+            Self::Memo(token) => [1, token.get(), 0, 0],
         }
     }
     pub(crate) fn of(w: [usize; 4]) -> Option<Self> {
@@ -42,11 +33,8 @@ impl CellObject {
             [0, id, 0, 0] if id != 0 && id <= isize::MAX as usize => {
                 Some(Self::Slot(SlotId::new(id)))
             }
-            [1, tag, 0, mapping] if mapping != 0 && mapping <= isize::MAX as usize => {
-                Some(Self::Memo {
-                    target: MappingTarget::unpack(&[tag, 0, 0, 0, 0, 0], &mut 0).ok()?,
-                    mapping: MappingId::new(mapping),
-                })
+            [1, token, 0, 0] if token != 0 && token <= isize::MAX as usize => {
+                Some(Self::Memo(PendId::new(token)))
             }
             _ => None,
         }
@@ -90,13 +78,41 @@ impl CellPosition {
     }
 }
 
+/// Transfer the unique holding. Push moves local → remote; Pull moves remote → local.
+/// Both endpoints must be Slots and each requires independent transfer authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellHandoff {
+    pub local: CellPosition,
+    pub remote: CellPosition,
+}
+
+impl CellHandoff {
+    pub const WIDTH: usize = CellPosition::WIDTH * 2;
+    pub fn to_bytes(self) -> [u8; Self::WIDTH] {
+        let mut bytes = [0; Self::WIDTH];
+        bytes[..48].copy_from_slice(&self.local.to_bytes());
+        bytes[48..].copy_from_slice(&self.remote.to_bytes());
+        bytes
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != Self::WIDTH {
+            return None;
+        }
+        Some(Self {
+            local: CellPosition::from_bytes(&bytes[..48])?,
+            remote: CellPosition::from_bytes(&bytes[48..])?,
+        })
+    }
+}
+
+/// Insert a Page association without transferring its owning Slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellAssociation {
     pub source: CellPosition,
     pub target: CellPosition,
 }
 
-impl CellHandoff {
+impl CellAssociation {
     pub const WIDTH: usize = CellPosition::WIDTH * 2;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut bytes = [0; Self::WIDTH];

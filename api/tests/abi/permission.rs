@@ -4,8 +4,8 @@ use kernel_api::model::{
     modifiable::Modifiable,
     nest::NestId,
     pend::{
-        CloneRights, CreationRights, Distributable, FlatRights, Limits, NestRights, Operations,
-        PendInfo, PendRange, PendStatus, ShareRights, Target, ViewTarget,
+        CloneRights, CreationRights, Distributable, FlatRights, Limits, MemoRights, NestRights,
+        Operations, PendInfo, PendRange, PendStatus, ShareRights, Target, ViewTarget,
     },
     sign::{SignId, SignRights},
     view::ViewId,
@@ -23,6 +23,10 @@ fn grant(operations: Operations) -> Limits {
 #[test]
 fn each_operation_family_requires_its_own_target() {
     let kinds = [
+        (
+            Target::Memo(kernel_api::model::cell::MemoId::new(7).unwrap()),
+            Operations::Memo(MemoRights::INSPECT),
+        ),
         (
             Target::Sign(SignId::new(7)),
             Operations::Sign(SignRights::LISTEN),
@@ -183,4 +187,24 @@ fn nest_delegation_can_withhold_destruction_distribution_and_write_access() {
     assert!(Operations::of([4, 16]).is_none());
     // ATTACH remains meaningful only for consuming an Internal Nest into Team.
     assert_eq!(NestRights::from_bits(8), Some(NestRights::ATTACH));
+}
+
+#[test]
+fn observation_and_access_cannot_supply_transfer_or_block_authority() {
+    assert!(
+        !Operations::Share(ShareRights::all()).contains(Operations::Flat(FlatRights::TRANSFER))
+    );
+    assert!(!Operations::Flat(FlatRights::ASSOCIATE).contains(Operations::Flat(FlatRights::BLOCK)));
+    let inspect = grant(Operations::Memo(MemoRights::INSPECT));
+    for operation in [
+        MemoRights::INSERT,
+        MemoRights::REMOVE,
+        MemoRights::PUBLISH,
+        MemoRights::RETRACT,
+        MemoRights::PROTECT,
+        MemoRights::DELETE,
+    ] {
+        assert!(!inspect.permits_child(grant(Operations::Memo(operation))));
+    }
+    assert_eq!(Operations::of([7, 128]), None);
 }

@@ -71,7 +71,10 @@ mod external_error;
 #[path = "../../src/basis/nest/memo/publication/identity.rs"]
 mod external_identity;
 use external_error::Error;
+#[path = "../support/lock.rs"]
+mod host_lock;
 mod metal {
+    pub(crate) use crate::host_lock as sync;
     pub(crate) mod generic {
         pub(crate) use crate::contract as iommu;
     }

@@ -13,7 +13,7 @@ use crate::basis::sign::WakeKey;
 use crate::basis::unit::task::Task;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
-use kernel_api::model::pend::{Limits, PendRange};
+use kernel_api::model::pend::Limits;
 
 /// Resolve the window while the source/target transaction locks are held.
 fn effective_window(
@@ -25,6 +25,23 @@ fn effective_window(
         super::Window::Parent(kernel_api::model::pend::PendRange::Inherit)
     ) {
         return Ok(pend_entry.authority().window());
+    }
+    if let super::Target::Memo(memo) = pend_entry.target() {
+        let outer = pend_entry
+            .authority()
+            .window()
+            .unwrap_or((PageOffset::ZERO, memo.count));
+        let window = requested.resolve(outer)?;
+        if memo.nest.is_external() && window != (PageOffset::ZERO, memo.count) {
+            return Err(PendFail::NotAligned);
+        }
+        if !memo.nest.is_external() {
+            memo.span()
+                .map_err(|_| PendFail::Denied)?
+                .range(window.0, window.1)
+                .map_err(|_| PendFail::NotAligned)?;
+        }
+        return Ok(Some(window));
     }
     let meta = pend_entry.target().memory().ok_or(PendFail::Denied)?;
     let outer = pend_entry
@@ -182,23 +199,22 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
     {
         return Err(PendFail::Busy);
     }
-    let window = match range {
-        PendRange::Inherit => observed.authority().window(),
-        _ => {
-            let meta = share.as_ref().ok_or(PendFail::Denied)?;
-            let outer = observed.authority().window().unwrap_or((
-                kernel_api::address::PageOffset::ZERO,
-                meta.source().page_count(),
-            ));
-            Some(super::Window::Parent(range).resolve(outer)?)
-        }
-    };
+    let window = effective_window(&observed, super::Window::Parent(range))?;
+    if let super::Target::Memo(memo) = observed.target() {
+        memo.withdraw(&observed)?;
+    }
     if let (Some(meta), Some((offset, count))) = (&share, window) {
         meta.source()
             .range(offset, count)
             .map_err(|_| PendFail::Invalid)?;
     }
     let authorization = share.as_ref().and_then(|meta| meta.authorization());
+    if authorization
+        .as_ref()
+        .is_some_and(|source| source.blocked_by(observed.authority()))
+    {
+        return Err(PendFail::Busy);
+    }
     // No in-flight publication may cross the narrowing commit.
     {
         let _commit = crate::basis::commit();

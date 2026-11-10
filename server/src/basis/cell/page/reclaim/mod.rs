@@ -2,8 +2,9 @@
 
 pub(in super::super) mod change;
 mod retention;
+pub(crate) mod statistics;
 
-pub(crate) use change::{Change, Freeze};
+pub(crate) use change::{Block, Change, Freeze};
 pub(crate) use retention::Retention;
 
 use super::Exposure;
@@ -269,6 +270,13 @@ impl Reclaim {
     pub(super) fn abandon(&self) {
         self.apply(Event::Abandon)
             .expect("quarantine never rejects");
+    }
+    pub(super) fn hardware_idle(&self) -> bool {
+        let state = State::decode(self.0.load(Ordering::Acquire));
+        !state.quarantined
+            && state.cpu_readers == 0
+            && state.cpu_writers == 0
+            && state.external == 0
     }
     pub(super) fn allows_return(&self) -> bool {
         self.0.load(Ordering::Acquire) == 0

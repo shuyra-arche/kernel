@@ -1,8 +1,6 @@
 //! Caller snapshots for creating a Slot or a Memo.
 
-use super::{
-    Allocation, MappingControl, MappingId, MappingTarget, Placement, ReferenceRange, SlotId, pages,
-};
+use super::{Allocation, MappingTarget, Placement, ReferenceRange, SlotId, pages};
 use crate::abi::{
     layout::{fetch_words, store_words},
     register::Wire,
@@ -32,7 +30,6 @@ pub enum MemoDestination {
         team: TeamId,
         placement: Placement,
         access: u64,
-        control: MappingControl,
     },
     External {
         authority: PendId,
@@ -76,19 +73,15 @@ impl CellCreate {
                 destination,
             } => {
                 let target = destination.target();
-                let (placement, access, control) = match destination {
+                let (placement, access) = match destination {
                     MemoDestination::Internal {
-                        placement,
-                        access,
-                        control,
-                        ..
-                    } => (placement.encode(), access, control),
+                        placement, access, ..
+                    } => (placement.encode(), access),
                     MemoDestination::External {
                         address, access, ..
                     } => (
                         [2, address.get(), 4096],
                         if access == Modifiable::Yes { 6 } else { 2 },
-                        MappingControl::Caller,
                     ),
                 };
                 words[0] = 1;
@@ -105,9 +98,6 @@ impl CellCreate {
                 });
                 words[7..10].copy_from_slice(&placement);
                 words[10] = access as usize;
-                let mut control_words = [0; 6];
-                control.pack(&mut control_words, &mut 0);
-                words[11] = control_words[0];
             }
         }
         let mut bytes = [0; Self::WIDTH];
@@ -133,20 +123,21 @@ impl CellCreate {
                 pages(w[5], w[6])?;
                 let target = MappingTarget::unpack(&[w[1], w[2], 0, 0, 0, 0], &mut 0).ok()?;
                 let placement = Placement::decode([w[7], w[8], w[9]]).ok()?;
-                let control = MappingControl::unpack(&[w[11], 0, 0, 0, 0, 0], &mut 0).ok()?;
+                if w[11] != 0 {
+                    return None;
+                }
                 let destination = match target {
                     MappingTarget::Cpu(team) => MemoDestination::Internal {
                         team,
                         placement,
                         access: w[10] as u64,
-                        control,
                     },
                     MappingTarget::Io(authority) => {
                         let super::PlacementAt::Exact(address) = placement.at() else {
                             return None;
                         };
                         // External publication has one whole Cell, one exact address and caller authority.
-                        if control != MappingControl::Caller || (w[3] == 0 && w[5] != 0) {
+                        if w[3] == 0 && w[5] != 0 {
                             return None;
                         }
                         let access = match w[10] {
@@ -186,10 +177,7 @@ impl CellCreate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CreatedCell {
     Slot(SlotId),
-    Memo {
-        mapping: MappingId,
-        address: VirtAddr,
-    },
+    Memo { token: PendId, address: VirtAddr },
 }
 
 impl CreatedCell {
@@ -201,7 +189,7 @@ impl CreatedCell {
         match kind {
             0 if address == 0 => Some(Self::Slot(SlotId::new(id))),
             1 if address.is_multiple_of(4096) => Some(Self::Memo {
-                mapping: MappingId::new(id),
+                token: PendId::new(id),
                 address: VirtAddr::new(address),
             }),
             _ => None,

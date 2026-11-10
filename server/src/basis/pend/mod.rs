@@ -19,7 +19,9 @@ pub(crate) use ledger::{
     PendEntry, Table, accede, available, doom, insert, locate, notify, retire, return_, revoke,
     vestor,
 };
-pub(crate) use source::{ExternalBorrow, Geometry, Hold, HoldTable, SourceAuthorization};
+pub(crate) use source::{
+    ExternalBorrow, Geometry, Hold, HoldTable, RangeBlock, SourceAuthorization,
+};
 pub(crate) use window::Window;
 
 pub(crate) fn live(task: &Task) -> bool {

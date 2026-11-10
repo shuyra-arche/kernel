@@ -54,7 +54,7 @@ extern "C" fn publisher() -> ! {
     // Leave a vacant reservation as well as the active mapping.
     reserve(root, slot, ADDRESS + 4096, true).unwrap();
     publish(pos);
-    let CellObject::Memo { mapping, .. } = pos.object else {
+    let CellObject::Memo(mapping) = pos.object else {
         unreachable!();
     };
     MEMO.store(mapping.get(), Ordering::Release);
@@ -105,7 +105,7 @@ pub(in super::super) fn death(at: usize, count: usize) {
     let old_mapping = loop {
         let mapping = MEMO.load(Ordering::Acquire);
         if mapping != 0 {
-            break MappingId::from_bytes(&(mapping as u64).to_le_bytes()).unwrap();
+            break PendId::mint(mapping);
         }
         assert!(
             room::clock() < until,
@@ -124,20 +124,14 @@ pub(in super::super) fn death(at: usize, count: usize) {
     assert!(super::super::lifecycle::wait_task(task));
     assert_eq!(super::super::lifecycle::result(task), (1, 77));
     let pos = CellPosition {
-        object: CellObject::Memo {
-            target: MappingTarget::Io(root),
-            mapping: old_mapping,
-        },
+        object: CellObject::Memo(old_mapping),
         page: 0,
         generation: 1,
     };
-    let until = room::clock() + 2_000_000_000;
-    while observed(pos).is_some() {
-        assert_eq!(context(root).id, identity);
-        assert_eq!(context(root).phase, NestPhase::Bound);
-        assert!(room::clock() < until, "dead branch retirement stalled");
-        room::yield_();
-    }
+    // A numeric token from another Task conveys no Memo authority. Actual
+    // retirement is established by delete's Reclaimed wait below, followed by
+    // the device-idle observation and reuse by a new owner of the same Nest.
+    assert!(observed(pos).is_none());
     super::super::lifecycle::delete(task);
     assert_eq!(context(root).id, identity);
     assert_eq!(context(root).phase, NestPhase::Bound);

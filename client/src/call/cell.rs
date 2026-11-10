@@ -17,6 +17,8 @@ typed_calls! {
     fallible fn delete(object: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Delete { object };
     fallible fn push(request: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Push { request };
     fallible fn pull(request: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Pull { request };
+    fallible fn insert(request: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Insert { request };
+    fallible fn remove(position: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Remove { position };
     fallible fn publish(position: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Publish { position };
     fallible fn retract(position: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Retract { position };
     fallible fn protect(position: VirtAddr, access: u64) -> Result<(), erra::Error<CellFail>> = op::Protect { position, access };

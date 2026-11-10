@@ -1,8 +1,5 @@
-//! 目标地址空间里一段关系的句柄（0 = 无效哨兵）。
-//!
-//! 与 [`SlotId`](super::SlotId) 同族，但定位还多一层约束：号只在
-//! **目标地址空间那张表**里解析得动，所以每次定位都必须同时给出目标域。
-//! 数字身份可跨线程传递；它本身不授予控制权。
+//! Descriptive mapping identity used by completion observations. Ordinary Cell
+//! operations locate a Memo through its Pend, never through this numeric ID.
 
 use crate::abi::register::{Decode, Wire};
 use crate::abi::reply::FromPair;
@@ -73,40 +70,8 @@ impl FromPair for (MappingId, VirtAddr) {
     }
 }
 
-/// 一次 `Attach` 的控制权选择：这段映射由谁控制。
-///
-/// 默认 `Caller`（发起 `Attach` 的那个 Task）；`SpaceMembers` 是目标 Space 成员，
-/// 只在发起者同时通过来源授权与目标域授权时才可选，且**逐映射**生效——
-/// 它把这一段登记到目标 Space 自己的控制记录上，不是“同 Space 自动全控”，
-/// 也不给任何来源/其它映射 加权限。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MappingControl {
-    /// 发起 `Attach` 的那个 Task（普通私有映射的默认）。
-    Caller,
-    /// 目标 Space 的成员（显式选择，逐映射生效）。
-    SpaceMembers,
-}
-
-impl Wire for MappingControl {
-    const WORDS: usize = 1;
-    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
-        let word = match self {
-            Self::Caller => 0usize,
-            Self::SpaceMembers => 1usize,
-        };
-        word.pack(s, i);
-    }
-    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
-        match usize::unpack(s, i)? {
-            0 => Ok(Self::Caller),
-            1 => Ok(Self::SpaceMembers),
-            _ => Err(Decode::Invalid),
-        }
-    }
-}
-
 /// A CPU space selected by Team control, or an I/O space selected by a trusted
-/// MMIO View's Pend. Numeric addresses never mint an external routing authority.
+/// External Nest Pend. Numeric addresses never mint an external routing authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MappingTarget {
     Cpu(TeamId),

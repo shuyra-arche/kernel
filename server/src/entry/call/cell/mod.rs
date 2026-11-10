@@ -141,7 +141,6 @@ fn create_memo(
     team: kernel_api::model::identity::TeamId,
     placement: kernel_api::model::cell::Placement,
     access: u64,
-    control: kernel_api::model::cell::MappingControl,
     ident: &Arc<TaskIdent>,
 ) -> Result<(usize, usize), CellFail> {
     let caller_task = caller(ident).ok_or(CellFail::Denied)?;
@@ -266,21 +265,18 @@ fn create_memo(
         return Err(CellFail::OutOfMemory);
     }
     // 发布前先占住登记槽、来源成员位与在途号：容量都在这一处备齐，提交只填已备位置。
-    if let Err(error) =
-        space
-            .mappings
-            .claim(id, &space, ident.id, control, authorization.clone(), branch)
+    if let Err(error) = space
+        .mappings
+        .claim(id, &space, ident.id, authorization.clone(), branch)
     {
         rollback(&space, id, Some(reservation), None);
         return Err(source_fail(error));
     }
-    if control == kernel_api::model::cell::MappingControl::Caller
-        && let Err(error) = caller_task.controls.insert(&space, id)
-    {
+    if let Err(error) = caller_task.controls.insert(&space, id) {
         rollback(&space, id, Some(reservation), None);
         return Err(error.into());
     }
-    if let Err(error) = authorization.enter_publish(id, authority.as_deref(), access) {
+    if let Err(error) = authorization.enter_publish(id, authority.as_deref(), access, used, count) {
         rollback(&space, id, Some(reservation), None);
         return Err(source_fail(error));
     }
@@ -363,13 +359,7 @@ fn with_mapping<T>(
     // 控制者与分支读同一份快照：两段不会来自两次不同的读。
     let control = entry.control.as_ref().ok_or(CellFail::Denied)?;
     let (controller, _) = control.control();
-    let allowed = match control.scope() {
-        kernel_api::model::cell::MappingControl::Caller => controller == ident.id,
-        // 显式把这一段交给本 Nest 成员；不是“同 Nest 自动全控”。
-        kernel_api::model::cell::MappingControl::SpaceMembers => {
-            Arc::ptr_eq(&ident.team.nest, &space)
-        }
-    };
+    let allowed = controller == ident.id;
     if !allowed {
         return Err(CellFail::Denied);
     }
@@ -419,12 +409,6 @@ enum SourceSpec {
     Allocation(kernel_api::model::cell::Allocation),
     Source {
         token: kernel_api::model::identity::PendId,
-        offset: usize,
-        count: usize,
-    },
-    Mapping {
-        team: kernel_api::model::identity::TeamId,
-        mapping: kernel_api::model::cell::MappingId,
         offset: usize,
         count: usize,
     },
@@ -511,56 +495,6 @@ fn resolve_source(
                 Some((token, authority)),
             )
         }
-        SourceSpec::Mapping {
-            team,
-            mapping,
-            offset,
-            count,
-        } => with_mapping(team, mapping, ident, |_target, entry| {
-            // 从已授权的关系取得它的来源范围；域、所属关系与来源授权都要核，
-            // MappingId 或可读 VA 本身不是凭证。
-            let mapping = entry.mapping().ok_or(CellFail::Denied)?.clone();
-            let authorization = entry.source.clone();
-            let count = PageCount::new(count).ok_or(CellFail::NotAligned)?;
-            let source = mapping
-                .source()
-                .range(PageOffset::new(offset), count)
-                .map_err(|_| CellFail::NoRegion)?;
-            let base = authorization.index().ok_or(CellFail::Denied)?;
-            let offset = PageOffset::new(
-                source
-                    .index()
-                    .get()
-                    .checked_sub(base.get())
-                    .ok_or(CellFail::NotAligned)?,
-            );
-            let (offset, count) = self::window(&authorization, offset.get(), count.get())?;
-            let ceiling = entry
-                .mapping()
-                .map_or(Access::all(), |_| authorization.ceiling());
-            let branch = if let Some((meta, root_token, _)) = authorization.root() {
-                let (_, branch) = entry.control.as_ref().ok_or(CellFail::Denied)?.control();
-                let token = branch.unwrap_or(root_token);
-                let pend = crate::basis::pend::locate(&task, token).ok_or(CellFail::Denied)?;
-                let authority = meta.authority(token).ok_or(CellFail::Denied)?;
-                if !pend.associates()
-                    || !pend.modifiable().allows(Modifiable::No)
-                    || !Arc::ptr_eq(pend.authority(), &authority)
-                {
-                    return Err(CellFail::Denied);
-                }
-                Some((token, authority))
-            } else {
-                if !authorization.private_owner(ident.id) {
-                    return Err(CellFail::Denied);
-                }
-                None
-            };
-            // 从已授权关系取引用也不是发表：只核子段。
-            authorization.ensure_internal().map_err(source_fail)?;
-
-            Ok((authorization, offset, count, ceiling, branch))
-        })?,
     };
     task.pend
         .references
@@ -715,7 +649,13 @@ fn transfer(
         for (hold, window) in &ends {
             let (offset, count) = window.window();
             hold.source()
-                .check_publish(offset, count)
+                .check_move(offset, count, hold.authority().map(Arc::as_ref))
+                .map_err(source_fail)?;
+        }
+        for (hold, window) in &ends {
+            let (offset, count) = window.window();
+            hold.source()
+                .retain_blocked(offset, count, &source_page)
                 .map_err(source_fail)?;
         }
         let mut at = 0;

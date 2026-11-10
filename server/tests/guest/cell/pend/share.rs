@@ -174,7 +174,10 @@ fn reader_team() -> (TeamId, SlotId, PendId, VirtAddr) {
     crate::retract(staging, 0);
     crate::delete(crate::raw_memo(staging, 0).object);
     let source = share_view::create(crate::license::get(), code, Modifiable::No).unwrap();
-    let CreatedCell::Memo { mapping, address } = cell::create(
+    let CreatedCell::Memo {
+        token: mapping,
+        address,
+    } = cell::create(
         PendId::NONE,
         crate::ptr(
             &CellCreate::Memo {
@@ -187,20 +190,17 @@ fn reader_team() -> (TeamId, SlotId, PendId, VirtAddr) {
                     team,
                     placement: Placement::lowest(4096).unwrap(),
                     access: 10,
-                    control: MappingControl::Caller,
                 },
             }
             .to_bytes(),
         ),
     )
-    .unwrap() else {
+    .unwrap()
+    else {
         panic!("expected an executable Memo")
     };
     let position = CellPosition {
-        object: CellObject::Memo {
-            target: MappingTarget::Cpu(team),
-            mapping,
-        },
+        object: CellObject::Memo(mapping),
         page: 0,
         generation: 2,
     };

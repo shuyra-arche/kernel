@@ -101,10 +101,11 @@ impl Entry {
     pub fn valid(&self) -> bool {
         self.handle != 0
             && match (self.name, self.view) {
-                (Name::Interrupt { .. }, Some((crate::model::view::ViewKind::Share, view))) => {
-                    view != 0 && view != self.handle
-                }
-                (Name::Interrupt { .. }, _) => false,
+                (
+                    Name::Interrupt { .. } | Name::Memory,
+                    Some((crate::model::view::ViewKind::Share, view)),
+                ) => view != 0 && view != self.handle,
+                (Name::Interrupt { .. } | Name::Memory, _) => false,
                 (_, None) => true,
                 _ => false,
             }
@@ -115,7 +116,7 @@ impl Entry {
             )
     }
 }
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 #[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub version: u32,

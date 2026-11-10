@@ -47,10 +47,10 @@ realtime_worker_start:
     ebreak
     li t0, 1
     bne a0, t0, worker_fail
-    sd t0, 128(sp)            // CellPosition: Memo/Cpu(0)/mapping/page/generation
-    sd zero, 136(sp)
+    sd t0, 128(sp)            // CellPosition: Memo/token/reserved/reserved/page/generation
+    sd a1, 136(sp)
     sd zero, 144(sp)
-    sd a1, 152(sp)
+    sd zero, 152(sp)
     sd zero, 160(sp)
     li t0, 2
     sd t0, 168(sp)

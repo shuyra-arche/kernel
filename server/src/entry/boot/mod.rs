@@ -57,6 +57,7 @@ pub fn start() -> Result<(), BootError> {
 
     if let Some(entry) = spawn_entry()? {
         crate::basis::room::shutdown::watch(&entry);
+        crate::entry::observe::start()?;
     }
 
     crate::basis::unit::lifecycle::tally::rooted();
@@ -144,6 +145,10 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
             operation: ResourceOperation::Traps,
             source,
         }
+    })?;
+    crate::entry::observe::register(&mut registry).map_err(|source| BootError::Resources {
+        operation: ResourceOperation::Traps,
+        source,
     })?;
     let resources = registry.freeze().map_err(|e| BootError::Resources {
         operation: ResourceOperation::Freeze,

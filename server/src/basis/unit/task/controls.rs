@@ -4,7 +4,7 @@ use crate::basis::nest::{Nest, NestError};
 use crate::metal::sync::SpinLock;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use kernel_api::model::{cell::MappingControl, identity::TaskId};
+use kernel_api::model::identity::TaskId;
 
 pub(crate) struct Controls {
     inner: SpinLock<Entries>,
@@ -53,9 +53,10 @@ impl Controls {
         };
         let target = nest.upgrade().and_then(|nest| {
             let entry = nest.mappings.registered(id)?;
-            let owned = entry.control.as_ref().is_some_and(|control| {
-                control.control().0 == actor && control.scope() == MappingControl::Caller
-            });
+            let owned = entry
+                .control
+                .as_ref()
+                .is_some_and(|control| control.control().0 == actor);
             owned.then_some((nest, entry))
         });
         if let Some((nest, entry)) = target {

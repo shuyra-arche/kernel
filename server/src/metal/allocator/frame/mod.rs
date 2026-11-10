@@ -42,6 +42,7 @@ unsafe impl Allocator for FrameAllocator {
             let size = layout.size().max(PAGE_SIZE);
             let power = block_power(size.max(layout.align()));
             let index = unsafe { frame.split_block(power) }.ok_or(AllocError)?;
+            frame.allocated += PAGE_SIZE << power;
             let addr = frame.frame_addr(index) as *mut u8;
             #[cfg(debug_assertions)]
             {
@@ -99,6 +100,10 @@ unsafe impl Allocator for FrameAllocator {
                 let index = frame.frame_index(addr);
                 crate::metal::allocator::statistics::record_frame_give(index);
                 frame.merge_block(index, power);
+                frame.allocated = frame
+                    .allocated
+                    .checked_sub(PAGE_SIZE << power)
+                    .expect("balanced frame bytes");
             })
         }
     }
@@ -153,4 +158,16 @@ pub(crate) unsafe fn repartition(
             );
         }
     });
+}
+
+/// A coherent allocator observation in bytes. Repartition changes receipts,
+/// not these byte totals. Available includes free blocks of every order.
+pub(crate) fn snapshot() -> (u64, u64, u64) {
+    instance().inner.with(|frame| {
+        (
+            frame.capacity as u64,
+            (frame.capacity - frame.allocated) as u64,
+            frame.allocated as u64,
+        )
+    })
 }

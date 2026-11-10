@@ -8,6 +8,7 @@ mod interrupt;
 mod levels;
 mod license;
 mod lifecycle;
+mod observe;
 mod organization;
 mod pend;
 #[cfg(feature = "realtime")]
@@ -64,7 +65,7 @@ fn allocate(count: usize) -> SlotId {
     };
     slot
 }
-fn reserve(reference: SlotId, count: usize) -> (MappingId, VirtAddr) {
+fn reserve(reference: SlotId, count: usize) -> (kernel_api::model::identity::PendId, VirtAddr) {
     let spec = CellCreate::Memo {
         source: CellSource::Slot(ReferenceRange {
             reference,
@@ -75,7 +76,6 @@ fn reserve(reference: SlotId, count: usize) -> (MappingId, VirtAddr) {
             team: TeamId::new(0),
             placement: Placement::lowest(4096).unwrap(),
             access: 6,
-            control: MappingControl::Caller,
         },
     }
     .to_bytes();
@@ -87,7 +87,11 @@ fn reserve(reference: SlotId, count: usize) -> (MappingId, VirtAddr) {
                 count
             )
         });
-    let CreatedCell::Memo { mapping, address } = made else {
+    let CreatedCell::Memo {
+        token: mapping,
+        address,
+    } = made
+    else {
         panic!("expected Memo")
     };
     (mapping, address)
@@ -99,52 +103,63 @@ fn slot(reference: SlotId, page: usize) -> CellPosition {
         generation: 0,
     }
 }
-fn raw_memo(mapping: MappingId, page: usize) -> CellPosition {
+fn raw_memo(mapping: kernel_api::model::identity::PendId, page: usize) -> CellPosition {
     CellPosition {
-        object: CellObject::Memo {
-            target: MappingTarget::Cpu(TeamId::new(0)),
-            mapping,
-        },
+        object: CellObject::Memo(mapping),
         page,
         generation: 0,
     }
 }
+#[track_caller]
 fn info(pos: CellPosition) -> CellInfo {
     let position = pos.to_bytes();
     let mut bytes = [0; CellInfo::WIDTH];
     cell::inspect(ptr(&position), VirtAddr::new(bytes.as_mut_ptr() as usize)).unwrap();
     CellInfo::from_bytes(&bytes).unwrap()
 }
-fn memo(mapping: MappingId, page: usize) -> CellPosition {
+fn memo(mapping: kernel_api::model::identity::PendId, page: usize) -> CellPosition {
     let mut pos = raw_memo(mapping, page);
     pos.generation = info(pos).generation;
     pos
 }
+#[track_caller]
 fn handoff(source: CellPosition, target: CellPosition, pull: bool) {
-    let spec = CellHandoff { source, target }.to_bytes();
-    if pull {
-        cell::pull(ptr(&spec))
+    if matches!(target.object, CellObject::Memo(_)) {
+        cell::insert(ptr(&CellAssociation { source, target }.to_bytes()))
+    } else if pull {
+        cell::pull(ptr(&CellHandoff {
+            local: target,
+            remote: source,
+        }
+        .to_bytes()))
     } else {
-        cell::push(ptr(&spec))
+        cell::push(ptr(&CellHandoff {
+            local: source,
+            remote: target,
+        }
+        .to_bytes()))
     }
     .unwrap_or_else(|error| panic!("handoff {source:?} -> {target:?}: {error:?}"));
 }
-fn publish(mapping: MappingId, page: usize) {
+#[track_caller]
+fn publish(mapping: kernel_api::model::identity::PendId, page: usize) {
     let pos = memo(mapping, page).to_bytes();
     cell::publish(ptr(&pos)).unwrap();
     assert_eq!(info(raw_memo(mapping, page)).state, CellState::Published);
 }
-fn retract(mapping: MappingId, page: usize) {
+#[track_caller]
+fn retract(mapping: kernel_api::model::identity::PendId, page: usize) {
     let pos = memo(mapping, page).to_bytes();
     cell::retract(ptr(&pos)).unwrap();
     let info = info(raw_memo(mapping, page));
     assert_eq!(info.state, CellState::Ready);
     assert!(info.frozen);
 }
+#[track_caller]
 fn delete(object: CellObject) {
     cell::delete(ptr(&object.to_bytes())).unwrap();
 }
-fn attach(reference: SlotId, count: usize) -> (MappingId, VirtAddr) {
+fn attach(reference: SlotId, count: usize) -> (kernel_api::model::identity::PendId, VirtAddr) {
     let (mapping, address) = reserve(reference, count);
     for page in 0..count {
         assert_eq!(info(raw_memo(mapping, page)).state, CellState::Vacant);
@@ -172,6 +187,7 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     #[cfg(feature = "irq")]
     interrupt::run(args, count);
     license::run();
+    observe::run(args, count);
     #[cfg(feature = "realtime")]
     realtime::run();
     let _ = writeln!(Console, "START cell-kernel");
@@ -190,14 +206,14 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     assert!(info(slot(b, 1)).frozen);
     // A Memo does not mint ownership: its declared source Slot is now empty.
     let denied = CellHandoff {
-        source: memo(mapping, 0),
-        target: slot(a, 0),
+        remote: memo(mapping, 0),
+        local: slot(a, 0),
     }
     .to_bytes();
     assert!(cell::pull(ptr(&denied)).is_err());
     handoff(slot(b, 1), slot(a, 0), true);
-    // Memo -> Slot moves its actual controlled Slot, leaving the Memo unchanged.
-    handoff(memo(mapping, 0), slot(b, 0), true);
+    // The current owning Slot must be named explicitly.
+    handoff(slot(a, 0), slot(b, 0), true);
     assert_eq!(info(raw_memo(mapping, 0)).page, original.page);
     handoff(slot(b, 0), slot(a, 0), false);
     let (alias, _) = reserve(a, 2);

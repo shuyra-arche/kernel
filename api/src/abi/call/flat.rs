@@ -41,5 +41,17 @@ pub mod operations {
     pub struct Delete {
         pub token: super::PendId,
     }
+    /// Close admission for the effective Flat window. Busy retains the block.
+    #[operation(slot=4,output=(),error=FlatFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Block {
+        pub token: super::PendId,
+    }
+    /// Reopen only this exact branch's block; never restores revoked authority.
+    #[operation(slot=5,output=(),error=FlatFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Allow {
+        pub token: super::PendId,
+    }
 }
 pub use operations::{FlatCall, FlatFail};

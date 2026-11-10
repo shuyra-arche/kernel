@@ -4,10 +4,11 @@
 
 extern crate alloc;
 
-#[allow(dead_code)]
+#[allow(dead_code, unused_imports)]
 #[path = "../../../src/basis/cell/page/mod.rs"]
 mod cell;
 mod dma;
+mod lock;
 use kernel_hardware_fixture::{Edu, Uart, finish};
 #[allow(dead_code)]
 #[path = "../../support/iommu/mod.rs"]
@@ -154,6 +155,7 @@ fn progress(engine: &mut Engine<mmio::Mmio>, target: Phase) {
 }
 
 mod metal {
+    pub(crate) use crate::lock as sync;
     pub(crate) mod generic {
         pub(crate) use crate::iommu::contract as iommu;
     }

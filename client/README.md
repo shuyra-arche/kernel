@@ -38,7 +38,8 @@ holder's branch through Kernel retirement; Busy means cleanup is still pending.
 The old `derive`, `same`, `release` and ReleaseMode interfaces are removed.
 
 Cell calls take fixed descriptors from `model::cell`: Create uses CellCreate,
-Push/Pull use CellHandoff, Publish/Retract/Protect use CellPosition, Delete uses
+Push/Pull use CellHandoff `{ local, remote }`, Insert uses CellAssociation,
+Remove/Publish/Retract/Protect use CellPosition, Delete uses
 CellObject, and Inspect writes CellInfo. Use their explicit byte codecs. Inspect
 supplies the generation for the next transition; preserve the absolute deadline
 when retrying Busy. Native calls do not hide retries, publication or ownership.
@@ -57,7 +58,7 @@ before updating a consumer's Kernel pin.
 Resource creation calls take an explicit None-target Pend license. Sign handles are
 PendIds; use Pend Accord/Narrow/Revoke/Return with Operations::Sign instead
 of the removed Sign authorization calls. SignId is descriptive only. Boot Ledger
-v8 provides Name::Call(Call::Create); managers must explicitly delegate creation
+v9 provides Name::Call(Call::Create); managers must explicitly delegate creation
 permissions to new Tasks. Rebuild all users and capsule ABI declarations together.
 
 `call::unit::exit(value, reason, note, len, scope)` requires an explicit
@@ -65,7 +66,7 @@ permissions to new Tasks. Rebuild all users and capsule ABI declarations togethe
 member of a Team configured with `member_exit`. The typed client treats a
 return as a terminal-call contract violation.
 
-`call::flat::{create, inspect, slice, delete}` uses a Flat Pend; `slice` returns a
+`call::flat::{create, inspect, slice, delete, block, allow}` uses a Flat Pend; `slice` returns a
 checked SlotId. `call::nest::create(license)` creates an Internal Nest only.
 Team creation may consume that owned root through `UnitCreate::Team::nest`.
 External Nests instead arrive as authenticated boot grants named
@@ -93,7 +94,7 @@ Use `Allocation::at_level` for Cell Create. `cell::split(slot)` and
 replacement. They require an exclusive complete contiguous collection; mapping
 leaf changes remain separate.
 
-Hardware dispatch is read from Ledger v8 as an explicit `(View, Sign)` pair;
+Hardware dispatch is read from Ledger v9 as an explicit `(View, Sign)` pair;
 the pair layout introduced in v7 is unchanged. For an admitted device this is a
 Share View Pend plus Sign Pend. Delegate the full writable View before the
 non-distributable Listen/Consume Sign, rolling back View on failure before
@@ -103,3 +104,18 @@ Return/Revoke either Pend closes delivery. Sign retains its slots and payloads
 under the current ABI prefix; consumption does not synchronously wait for controller
 completion. Raw device/configuration authority must be withdrawn separately
 before reassigning a device; Pend distribution alone proves no DMA quiescence.
+
+ABI 9 Memo objects carry a PendId. Store `CreatedCell::Memo { token, address }`,
+then explicitly Accord Memo operations and position windows to another Task.
+Push moves local to remote; Pull moves remote to local. Both require owning
+Slots. Insert/Remove only change associations; they never transfer ownership.
+Keep the exact Flat BLOCK branch while retrying Block. Allow reopens only its
+own block and does not implicitly Publish. Read the API's completion rules
+before reusing a Page or IOVA.
+
+For global statistics, discover `Name::Memory` with `Entry::dispatch()`, Open
+its Share and retain that mapping while reading `model::memory::SnapshotPage`.
+`read()` is a bounded atomic attempt; None calls for a later retry. LISTEN and
+CONSUME use ordinary Sign semantics; consume then recheck Snapshot.epoch to avoid
+missing coalesced updates. A/D values are UNKNOWN. Statistics assist policy,
+but cannot authorize a transfer or certify hardware retirement.

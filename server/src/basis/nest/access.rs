@@ -29,6 +29,11 @@ impl Nest {
 
     /// 取一段指令的首字节：取不到就没有可取的长度。
     pub(crate) fn instruction_byte(&self, at: VirtAddr) -> Option<u8> {
+        if self.asid().is_kernel() && crate::metal::image::is_code(at.get()) {
+            // Kernel Team tasks execute resident identity-mapped image text.
+            // Ordinary address spaces still use their owned executable records.
+            return Some(unsafe { (at.get() as *const u8).read() });
+        }
         let mut byte = [0];
         (Self::user_range(at, byte.len()) && self.copy_from(at, &mut byte, Access::EXECUTE))
             .then_some(byte[0])

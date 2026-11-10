@@ -8,18 +8,7 @@ use kernel_api::{
 #[test]
 fn positions_reject_bad_identity_reserved_words_and_stale_slot_tags() {
     let slot = SlotId::from_bytes(&1u64.to_le_bytes()).unwrap();
-    let mapping = MappingId::from_bytes(&7u64.to_le_bytes()).unwrap();
-    for object in [
-        CellObject::Slot(slot),
-        CellObject::Memo {
-            target: MappingTarget::Cpu(TeamId::new(0)),
-            mapping,
-        },
-        CellObject::Memo {
-            target: MappingTarget::Io(PendId::mint(2)),
-            mapping,
-        },
-    ] {
+    for object in [CellObject::Slot(slot), CellObject::Memo(PendId::mint(7))] {
         let p = CellPosition {
             object,
             page: 3,
@@ -51,8 +40,8 @@ fn positions_reject_bad_identity_reserved_words_and_stale_slot_tags() {
     assert!(CellPosition::from_bytes(&bad).is_none());
     assert!(CellPosition::from_bytes(&[0; 47]).is_none());
     let request = CellHandoff {
-        source: p,
-        target: p,
+        local: p,
+        remote: p,
     };
     assert_eq!(CellHandoff::from_bytes(&request.to_bytes()), Some(request));
     assert!(CellHandoff::from_bytes(&request.to_bytes()[..95]).is_none());
@@ -77,7 +66,6 @@ fn creation_is_one_canonical_snapshot_for_geometry_and_authority() {
                 team: TeamId::new(0),
                 placement: Placement::exact(VirtAddr::new(0x8000), 4096).unwrap(),
                 access: 6,
-                control: MappingControl::Caller,
             },
         };
         let bytes = spec.to_bytes();

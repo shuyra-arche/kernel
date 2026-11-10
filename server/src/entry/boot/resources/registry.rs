@@ -136,7 +136,21 @@ impl Frozen {
             }
         }
         for (name, root) in &self.entries {
-            let entry = if let Name::Interrupt { .. } = name {
+            let entry = if *name == Name::Memory {
+                let view = self
+                    .entries
+                    .iter()
+                    .find(|(name, _)| *name == Name::Page(kernel_api::boot::ledger::Page::Memory))
+                    .expect("memory data registered before event")
+                    .1
+                    .token();
+                Entry::pair(
+                    *name,
+                    kernel_api::model::view::ViewKind::Share,
+                    view.get(),
+                    root.token().get(),
+                )
+            } else if let Name::Interrupt { .. } = name {
                 let view = root
                     .target()
                     .sign()
@@ -210,6 +224,7 @@ fn valid(name: Name, pend_entry: &PendEntry) -> bool {
             .target()
             .kind()
             .is_some_and(|kind| name.kind() == kind.into())
+            || matches!(name, Name::Memory if pend_entry.target().sign().is_some_and(|s| crate::entry::observe::identifies(&s)))
             || matches!(name, Name::Nest { .. } if pend_entry.target().nest().is_some_and(|nest| nest.is_external()))
             || matches!(name, Name::Interrupt { controller, source } if pend_entry.target().sign().is_some_and(|s| crate::basis::room::interrupt::identifies(&s, controller, source))))
         && pend_entry.alive()

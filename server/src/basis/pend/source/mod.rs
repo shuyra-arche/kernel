@@ -25,12 +25,13 @@ use crate::basis::pend::Pend;
 use crate::metal::sync::{SpinLock, SpinLockGuard};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
-use kernel_api::address::PageIndex;
 use kernel_api::address::PageOffset;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::modifiable::Modifiable;
 
+mod admission;
+pub(crate) use admission::RangeBlock;
 mod external;
 mod geometry;
 mod hold;
@@ -114,6 +115,7 @@ pub(crate) struct SourceAuthorization {
     /// 事实：只有显式结清（`Nest::retire_mapping` / `reap_mappings`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
     bindings: SpinLock<Vec<Arc<RangeBinding>>>,
+    blocks: SpinLock<Vec<Arc<RangeBlock>>>,
     phase: SpinLock<Phase>,
 }
 
@@ -143,6 +145,7 @@ impl SourceAuthorization {
             inflight: SpinLock::new(Vec::new()),
             revoked: SpinLock::new(false),
             bindings: SpinLock::new(Vec::new()),
+            blocks: SpinLock::new(Vec::new()),
             phase: SpinLock::new(Phase::Private(range)),
         })
         .map_err(|_| PendFail::OutOfMemory)
@@ -241,11 +244,6 @@ impl SourceAuthorization {
         self.root().map(|(meta, _, _)| meta.source())
     }
 
-    /// 整段来源的页起点（子范围 Acquire 要把视图的坐标换成相对本来源的坐标）。
-    pub(crate) fn index(&self) -> Option<PageIndex> {
-        self.full_range().map(|range| range.index())
-    }
-
     /// Current CPU authority. Revocation and an active private external borrow
     /// both close CPU access, even while the source is still retained.
     pub(crate) fn modifiable(&self) -> Option<Modifiable> {
@@ -302,8 +300,18 @@ impl SourceAuthorization {
         id: usize,
         branch: Option<&Pend>,
         access: Access,
+        offset: PageOffset,
+        count: PageCount,
     ) -> Result<(), PendFail> {
-        self.enter_flight(id, None, branch, access)
+        let gate = self.revoked.lock();
+        if *gate || !self.branch_permits(branch, access) {
+            return Err(PendFail::Denied);
+        }
+        self.check_blocks(offset, count, None)?;
+        let mut inflight = self.inflight.lock();
+        inflight.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+        inflight.push((id, None));
+        Ok(())
     }
 
     /// 同一条在途登记，但这次发表**占住了**这一段窗口：
@@ -396,6 +404,10 @@ impl SourceAuthorization {
     }
 
     fn check_window(&self, offset: PageOffset, count: PageCount) -> Result<(), PendFail> {
+        self.check_blocks(offset, count, None)?;
+        self.check_unblocked_window(offset, count)
+    }
+    fn check_unblocked_window(&self, offset: PageOffset, count: PageCount) -> Result<(), PendFail> {
         self.ensure_internal()?;
         self.full_range()
             .and_then(|range| range.range(offset, count).ok())

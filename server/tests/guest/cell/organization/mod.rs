@@ -1,4 +1,5 @@
 mod flat;
+mod memo;
 mod nest;
 pub(super) fn run(at: usize, count: usize) {
     use kernel_api::boot::{
@@ -15,6 +16,7 @@ pub(super) fn run(at: usize, count: usize) {
         .find(Name::Call(Call::Build))
         .unwrap();
     flat::run();
+    memo::run();
     nest::run();
     let owner = crate::lifecycle::spawn(nest::cascade as *const () as usize);
     crate::license::delegate(owner);
