@@ -9,6 +9,16 @@ on:
 permissions:
   contents: read
 
+# PR updates supersede old work. Other runs have unique groups: main and
+# reusable release checks must neither cancel nor evict one another from a queue.
+concurrency:
+  group: kernel-check-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
 env:
   RUSTUP_TOOLCHAIN: nightly
 
@@ -16,10 +26,26 @@ jobs:
   build:
     name: RV64 build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Test QEMU partition contract
+        run: python3 server/tests/hardware/tests/shard.py
       - name: Install CI toolchain
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rust-src,rustfmt,clippy --target riscv64gc-unknown-none-elf
+      - name: Identify compiler
+        id: compiler
+        run: echo "hash=$(rustc -Vv | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Cache Rust build
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.hash }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/check.yml') }}
+          restore-keys: |
+            rust-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.hash }}-
       - name: Test workspace on host
         run: cargo test --locked --workspace --target x86_64-unknown-linux-gnu
       - name: Build workspace (debug)
@@ -27,17 +53,22 @@ jobs:
       - name: Build workspace (release)
         run: cargo build --locked --workspace --release --target riscv64gc-unknown-none-elf
 
-  guest:
-    name: Guest tests (QEMU)
+  guest_shard:
+    name: QEMU / ${{ matrix.shard }}
     runs-on: ubuntu-latest
     container: debian:trixie
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [memory, io, scheduling, context]
     steps:
       - name: Install guest test tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv python3 zstd
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
-          sh /tmp/rustup.sh -y --profile minimal --default-toolchain nightly --target riscv64gc-unknown-none-elf
+          sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN" --target riscv64gc-unknown-none-elf
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Fetch external QEMU fixture
@@ -50,6 +81,26 @@ jobs:
             platform/riscv
             tests/platform
           persist-credentials: false
+      - name: Identify compiler
+        id: compiler
+        run: echo "hash=$(rustc -Vv | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Cache Rust guest builds
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          # Select compiler output directories, never target/evidence or initrd.
+          # Shards cannot share mutable images, build locks or evidence paths.
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            server/tests/guest/*/target/debug
+            server/tests/guest/*/target/release
+            server/tests/guest/*/target/riscv64gc-unknown-none-elf
+            server/tests/guest/cell/target/boot
+            server/tests/guest/cell/target/platform
+          key: rust-qemu-v1-${{ runner.os }}-${{ runner.arch }}-trixie-${{ matrix.shard }}-${{ steps.compiler.outputs.hash }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/check.yml') }}
+          restore-keys: |
+            rust-qemu-v1-${{ runner.os }}-${{ runner.arch }}-trixie-${{ matrix.shard }}-${{ steps.compiler.outputs.hash }}-
       - name: Bind fixture to the Kernel under test
         run: |
           for relative in platform/riscv tests/platform/qemu; do
@@ -65,11 +116,27 @@ jobs:
           echo "KERNEL_BOOT_MANIFEST=$GITHUB_WORKSPACE/.integration/vanllia/platform/riscv/Cargo.toml" >> "$GITHUB_ENV"
           echo "KERNEL_PLATFORM_MANIFEST=$GITHUB_WORKSPACE/.integration/vanllia/tests/platform/qemu/Cargo.toml" >> "$GITHUB_ENV"
       - name: Run environment-dependent tests
-        run: cargo test --locked --workspace --target x86_64-unknown-linux-gnu -- --ignored --nocapture
+        env:
+          QEMU_SHARD: ${{ matrix.shard }}
+        run: python3 server/tests/hardware/shard.py "$QEMU_SHARD"
       - name: Preserve hardware evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: guest-evidence
+          name: guest-evidence-${{ matrix.shard }}
           path: server/tests/guest/*/target/evidence/
-          if-no-files-found: warn
+          if-no-files-found: error
+
+  # Keep the existing required-check identity while failing closed on any
+  # failed, cancelled or skipped shard. No scenario is moved out of PR checks.
+  guest:
+    name: Guest tests (QEMU)
+    needs: guest_shard
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every QEMU shard
+        env:
+          SHARD_RESULT: ${{ needs.guest_shard.result }}
+        run: test "$SHARD_RESULT" = success

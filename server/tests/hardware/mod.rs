@@ -201,8 +201,10 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str, watchdog: Duration)
     std::fs::write(evidence.join(format!("{name}-stderr.log")), &output.stderr).unwrap();
     assert!(
         !timed_out,
-        "{name}: QEMU deadline; evidence at {}",
-        evidence.display()
+        "{name}: QEMU deadline; evidence at {}\nserial:\n{}\nstderr:\n{}",
+        evidence.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
     output
 }
