@@ -108,18 +108,15 @@ impl Nest {
             return Err(Error::InvalidState);
         };
         let memo = memos.get_mut(span, 0).map_err(|_| Error::OutOfMemory)?;
-        external.prepare(
-            &mut memo.publication,
+        let publication = external.prepare(
+            memo.publication().is_some(),
             page,
             span.initial_start().get(),
             writable,
             Some(&change),
         )?;
-        if let Err(_) = memo.transition(expected, change, true) {
-            memo.publication = None; // no hardware effects during preparation
-            return Err(Error::InvalidState);
-        }
-        Ok(())
+        memo.publish_external(expected, change, publication)
+            .map_err(|_| Error::InvalidState)
     }
 
     pub(crate) fn submit_external(&self, span: &Arc<Span>) -> Result<(), Error> {
@@ -133,7 +130,7 @@ impl Nest {
             return Err(Error::InvalidState);
         };
         let memo = memos.get_mut(span, 0).map_err(|_| Error::OutOfMemory)?;
-        external.submit(&mut memo.publication)
+        external.submit(memo.publication_mut())
     }
 
     pub(crate) fn close_external(&self) -> Result<(), Error> {
@@ -156,14 +153,10 @@ impl Nest {
             return Err(Error::InvalidState);
         };
         let memo = memos.get_mut(span, 0).map_err(|_| Error::OutOfMemory)?;
-        match external.progress(
-            &mut memo.publication,
-            matches!(
-                memo.flight,
-                Some(super::super::memo::MemoFlight::Retracting)
-            ),
-        )? {
-            state::Progress::Published | state::Progress::Withdrawn => memo.finish(),
+        let retracting = memo.retracting();
+        match external.progress(memo.publication_mut(), retracting)? {
+            state::Progress::Published => memo.finish(),
+            state::Progress::Withdrawn => memo.settle_external(),
             state::Progress::Pending | state::Progress::Closed => {}
         }
         if memos.idle() {
@@ -194,7 +187,7 @@ impl Nest {
             if state
                 .memos
                 .get(span, 0)
-                .is_some_and(|m| m.publication.is_some() || m.flight.is_some())
+                .is_some_and(super::super::memo::Memo::busy)
             {
                 return Err(NestError::Busy);
             }
@@ -249,17 +242,6 @@ impl Nest {
     ) -> Result<(), NestError> {
         let mut state = self.state.lock();
         let memo = state.memos.get_mut(span, 0)?;
-        // A publication can still be in flight when its owner explicitly retracts.
-        // Check the public generation before replacing that flight with withdrawal.
-        if memo.generation.get() != expected {
-            return Err(NestError::Busy);
-        }
-        // A failed replacement must preserve the previous in-flight state.
-        let previous = memo.flight.take();
-        if let Err(error) = memo.transition(expected, change, false) {
-            memo.flight = previous;
-            return Err(error);
-        }
-        Ok(())
+        memo.retract_external(expected, change)
     }
 }

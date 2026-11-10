@@ -70,8 +70,17 @@ pub(crate) fn accord(
     } else {
         None
     };
+    let check_source = |window: Option<(PageOffset, PageCount)>| {
+        if let Some(meta) = &share_view
+            && let Some(authorization) = meta.authorization()
+        {
+            let (offset, count) = window.unwrap_or((PageOffset::ZERO, meta.source().page_count()));
+            authorization.check_publish(offset, count)?;
+        }
+        Ok::<(), PendFail>(())
+    };
     let token = with_pair_uncommitted(caller, &target, || {
-        let (pend_entry, granted, registration) = {
+        let (pend_entry, granted, registration, window) = {
             let _commit = crate::basis::commit();
             if !super::live(caller) || !super::live(&target) {
                 return Err(PendFail::Dead);
@@ -94,15 +103,7 @@ pub(crate) fn accord(
                 mark
             };
             let window = effective_window(&pend_entry, requested)?;
-            // 授权发布操作的是这一段窗口：这一段的子段或别人的独立持有仍在占用就不建
-            // 新分支，也不隐式裁到剩余范围（建新授权不享受“持有人自己”那一档）。
-            if let Some(meta) = &share_view
-                && let Some(authorization) = meta.authorization()
-            {
-                let (offset, count) =
-                    window.unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-                authorization.check_publish(offset, count)?;
-            }
+            check_source(window)?;
             if share_view.is_some() {
                 pend_entry.authority().can_borrow(subset)?;
             }
@@ -117,7 +118,7 @@ pub(crate) fn accord(
                 heirs.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
             }
             let registration = target.pend.prepare(granted.clone())?;
-            (pend_entry, granted, registration)
+            (pend_entry, granted, registration, window)
         };
         // Prepared metadata and table capacity cannot fail after withdrawal. The
         // source/recipient tables stay locked, but remote TLB completion never
@@ -132,6 +133,8 @@ pub(crate) fn accord(
         if !super::live(caller) || !super::live(&target) {
             return Err(PendFail::Dead);
         }
+        // Other source operations could run while the CPU mappings withdrew.
+        check_source(window)?;
         let token = granted.token();
         // For Share a mutable parent loses all CPU access before lending. Readers
         // may coexist; a writer is always exclusive. Clone owns independent payloads.

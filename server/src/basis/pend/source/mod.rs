@@ -22,7 +22,7 @@ use crate::basis::nest::Access;
 use crate::basis::nest::Nest;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::Pend;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::{SpinLock, SpinLockGuard};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -246,9 +246,13 @@ impl SourceAuthorization {
         self.full_range().map(|range| range.index())
     }
 
-    /// 该来源当前的权限幅面；`None` = 已撤销。
+    /// Current CPU authority. Revocation and an active private external borrow
+    /// both close CPU access, even while the source is still retained.
     pub(crate) fn modifiable(&self) -> Option<Modifiable> {
-        let _gate = self.revoked.lock();
+        let gate = self.revoked.lock();
+        if *gate || self.external.load(Ordering::Acquire) {
+            return None;
+        }
         self.permission_ungated()
     }
 
@@ -332,14 +336,12 @@ impl SourceAuthorization {
         Ok(())
     }
 
-    pub(crate) fn begin_withdraw(
-        &self,
-    ) -> Result<crate::metal::sync::spin::SpinLockGuard<'_, bool>, PendFail> {
+    pub(crate) fn begin_withdraw(&self) -> Result<Withdrawal<'_>, PendFail> {
         let gate = self.revoked.lock();
         if !self.inflight.lock().is_empty() {
             return Err(PendFail::Busy);
         }
-        Ok(gate)
+        Ok(Withdrawal { source: self, gate })
     }
 
     /// 在途登记失效（提交或回滚都走这一步）：同一笔键的两条一次撤完。
@@ -380,12 +382,20 @@ impl SourceAuthorization {
         }
     }
 
-    /// External responsibility and overlapping in-flight ownership changes block publication.
+    /// Snapshot for a caller that keeps COMMIT through the authorization
+    /// effect. If it leaves COMMIT for hardware work, it must recheck.
     pub(crate) fn check_publish(
         &self,
         offset: PageOffset,
         count: PageCount,
     ) -> Result<(), PendFail> {
+        if self.revoked() {
+            return Err(PendFail::Denied);
+        }
+        self.check_window(offset, count)
+    }
+
+    fn check_window(&self, offset: PageOffset, count: PageCount) -> Result<(), PendFail> {
         self.ensure_internal()?;
         self.full_range()
             .and_then(|range| range.range(offset, count).ok())
@@ -539,32 +549,57 @@ impl SourceAuthorization {
     pub(crate) fn consume(&self) {
         self.qualification.consume();
     }
+}
 
-    /// 把私有根交给新根 Pend：真实范围同时从授权记录转出（从此由 Share 持有），
-    /// 并返回私有阶段已建的关系，让创建事务把它们登到新 token 下。
-    /// 已经接手过就拒（一个来源只有一条根）。
+/// Holding the source gate excludes new flights while a branch is withdrawn or
+/// the source changes hands. A revoked source can still be drained.
+pub(crate) struct Withdrawal<'a> {
+    source: &'a SourceAuthorization,
+    gate: SpinLockGuard<'a, bool>,
+}
+
+impl Withdrawal<'_> {
+    pub(super) fn check_publish(
+        &self,
+        offset: PageOffset,
+        count: PageCount,
+    ) -> Result<(), PendFail> {
+        if *self.gate {
+            return Err(PendFail::Denied);
+        }
+        self.source.check_window(offset, count)
+    }
+
+    /// Move the exact private range to the root's authority. The former range
+    /// is returned for rollback while this same admission gate is held.
     pub(crate) fn adopt(
         &self,
         meta: &Arc<Sharing>,
         token: PendId,
         authority: Arc<Pend>,
-    ) -> Result<(), PendFail> {
-        let mut phase = self.phase.lock();
-        if matches!(&*phase, Phase::Root { .. }) {
+    ) -> Result<FlatRange, PendFail> {
+        if *self.gate || self.source.external.load(Ordering::Acquire) {
             return Err(PendFail::Denied);
         }
-        // 真实范围先交给 Share，再改相位：交接期间授权记录不再强持来源。
+        let mut phase = self.source.phase.lock();
+        let Phase::Private(range) = &*phase else {
+            return Err(PendFail::Denied);
+        };
+        if !range.same_range(&meta.source()) {
+            return Err(PendFail::Denied);
+        }
+        let range = range.clone();
         *phase = Phase::Root {
             meta: Arc::downgrade(meta),
             token,
             authority,
         };
-        Ok(())
+        Ok(range)
     }
 
-    /// 事务中途失败：把刚交出去的范围放回私有阶段。
-    pub(crate) fn restore_private(&self, range: FlatRange) {
-        let mut phase = self.phase.lock();
+    pub(crate) fn restore_private(&self, token: PendId, range: FlatRange) {
+        let mut phase = self.source.phase.lock();
+        assert!(matches!(&*phase, Phase::Root { token: current, .. } if *current == token));
         *phase = Phase::Private(range);
     }
 }

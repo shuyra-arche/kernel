@@ -8,6 +8,13 @@ use crate::metal::generic::mmu::{
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use identity::Asid;
 
+#[repr(u8)]
+enum ReleasePhase {
+    Held,
+    Fencing,
+    Released,
+}
+
 pub(crate) struct Domain {
     instance: usize,
     identifier: Asid,
@@ -30,7 +37,11 @@ impl Contract for Domain {
             identifier,
             geometry: mode::geometry(mode::mode()),
             published: AtomicBool::new(false),
-            release: AtomicU8::new(if kernel { 2 } else { 0 }),
+            release: AtomicU8::new(if kernel {
+                ReleasePhase::Released as u8
+            } else {
+                ReleasePhase::Held as u8
+            }),
         })
     }
     fn identifier(&self) -> Asid {
@@ -46,21 +57,30 @@ impl Contract for Domain {
         self.published.load(Ordering::Acquire)
     }
     fn released(&self) -> bool {
-        self.release.load(Ordering::Acquire) == 2
+        self.release.load(Ordering::Acquire) == ReleasePhase::Released as u8
     }
     fn release(&self) -> Result<(), NestError> {
-        match self
-            .release
-            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
-        {
+        match self.release.compare_exchange(
+            ReleasePhase::Held as u8,
+            ReleasePhase::Fencing as u8,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
             Ok(_) => {}
-            Err(2) => return Ok(()),
-            Err(_) => return Err(NestError::Busy),
+            Err(phase) if phase == ReleasePhase::Released as u8 => return Ok(()),
+            Err(phase) => {
+                debug_assert_eq!(phase, ReleasePhase::Fencing as u8);
+                return Err(NestError::Busy);
+            }
         }
         // No Nest/Address lock is held while SBI waits for remote CPUs.
         let result = identity::deallocate(self.identifier).map_err(|_| NestError::Shootdown);
-        self.release
-            .store(if result.is_ok() { 2 } else { 0 }, Ordering::Release);
+        let phase = if result.is_ok() {
+            ReleasePhase::Released
+        } else {
+            ReleasePhase::Held
+        };
+        self.release.store(phase as u8, Ordering::Release);
         result
     }
 }
@@ -85,7 +105,7 @@ unsafe impl Shootdown for Domain {
 }
 impl Drop for Domain {
     fn drop(&mut self) {
-        if !self.published() && !self.identifier.is_kernel() {
+        if !self.published() && *self.release.get_mut() == ReleasePhase::Held as u8 {
             Asid::release_unpublished(self.identifier);
         }
         // A published but unfinished domain deliberately keeps its ASID reserved.

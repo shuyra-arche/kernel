@@ -437,6 +437,98 @@ fn another_requesters_platform_receipt_cannot_settle_a_domain() {
 }
 
 #[test]
+fn leaf_written_before_failed_submission_needs_its_own_withdrawal_fence() {
+    use crate::iommu::contract::{BindingId, IoAddress};
+    use crate::iommu::{BatchId, Hardware, Projection};
+    use crate::publication::Publication;
+
+    let (mut engine, device, _) = engine();
+    start(&mut engine);
+    let mut controllers = Controllers::new([CONTROLLER]).unwrap();
+    controllers
+        .install(engine)
+        .map_err(|(error, _)| error)
+        .unwrap();
+    let tables = core::array::from_fn(|_| {
+        Page::from_internal(PageOwner::Kernel, Pool::new(0).page().unwrap()).unwrap()
+    });
+    let leaf = tables[3].physical_address() as *const u64;
+    let evidence = Arc::new(Mutex::new(Evidence::default()));
+    let mut adapter =
+        unsafe { controllers.bind(CONTROLLER, 8, tables, Proof(evidence.clone())) }.unwrap();
+    let page =
+        || Arc::new(Page::from_internal(PageOwner::Kernel, Pool::new(0).page().unwrap()).unwrap());
+    let first = page();
+    let mut receipt =
+        Publication::prepare_external(&adapter, &first, 0x400000, true, None).unwrap();
+    receipt.submit(&mut adapter).unwrap();
+    for _ in 0..20 {
+        complete(&device);
+        if receipt.ready(&mut adapter).unwrap() {
+            break;
+        }
+    }
+    assert_eq!(receipt.phase(), Phase::Mapped);
+
+    let second = page();
+    let projection = Projection {
+        id: BindingId::allocate().unwrap(),
+        cell: second.id(),
+        iova: IoAddress::page(0x401000).unwrap(),
+        physical: second.physical_address(),
+        size: second.size(),
+        modifiable: true,
+    };
+    let mut keep = second.prepare_external(true).unwrap();
+    keep.publish();
+    let directory = device.read64(DDTP);
+    let tail = device.read32(CQT);
+    device.clone().write64(DDTP, directory | 16);
+    assert_eq!(adapter.publish(projection), Err(HardwareError::Fault));
+    assert_ne!(unsafe { leaf.add(1).read_volatile() } & 1, 0);
+    assert_eq!(device.read32(CQT), tail);
+    device.clone().write64(DDTP, directory);
+
+    assert_eq!(adapter.ready(projection), Err(HardwareError::Fault));
+    assert_eq!(adapter.capacity(), 0);
+    let batch = BatchId::allocate().unwrap();
+    adapter.revoke(projection).unwrap();
+    adapter.fence(projection, batch).unwrap();
+    assert_eq!(adapter.observe(batch), Ok(None));
+    assert_eq!(unsafe { leaf.add(1).read_volatile() }, 0);
+    assert_ne!(device.read32(CQT), tail);
+    assert_eq!(adapter.observe(batch), Ok(None));
+    assert!(evidence.lock().unwrap().requests.is_empty());
+    assert_eq!(second.exposure(), Exposure::External);
+    complete(&device);
+    assert_eq!(adapter.observe(batch), Ok(None));
+    assert_eq!(adapter.observe(batch), Ok(None));
+    evidence.lock().unwrap().outcomes.push_back(Ok(true));
+    assert_eq!(adapter.observe(batch), Ok(Some(batch)));
+    unsafe { keep.retire().settle() };
+    assert_eq!(second.exposure(), Exposure::Internal);
+    assert_ne!(unsafe { leaf.read_volatile() } & 1, 0);
+
+    receipt.revoke(&mut adapter).unwrap();
+    evidence.lock().unwrap().outcomes.push_back(Ok(true));
+    for _ in 0..20 {
+        complete(&device);
+        if receipt.poll(&mut adapter).unwrap() {
+            break;
+        }
+    }
+    assert_eq!(receipt.phase(), Phase::Settled);
+    evidence.lock().unwrap().outcomes.push_back(Ok(true));
+    for _ in 0..20 {
+        complete(&device);
+        if adapter.shutdown().unwrap() {
+            break;
+        }
+    }
+    assert!(adapter.take_engine().is_some());
+}
+
+#[test]
 fn leaves_retire_independently_and_context_reuse_requires_binding_proof() {
     use crate::iommu::Hardware;
     use crate::iommu::contract::RetirementScope;

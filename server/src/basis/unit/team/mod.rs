@@ -23,7 +23,7 @@ mod membership;
 
 pub(crate) use builder::{TeamBuilder, init_kernel, kernel};
 pub(crate) use lifecycle::exit;
-pub(crate) use lifecycle::{Clearance, TeamNode, TeamPhase};
+pub(crate) use lifecycle::{Clearance, TeamNode};
 pub(crate) use membership::{Member, Receipt, Tasks};
 
 pub(crate) const MAX_DEPTH: usize = 32;
@@ -124,11 +124,7 @@ impl Team {
             // member has already published reclaimed before pruning.
             self.cells.close();
             self.external.close();
-            let mut state = self.node.state.lock();
-            if !state.terminal() {
-                state.phase = TeamPhase::Doomed;
-            }
-            drop(state);
+            self.node.state.lock().doom();
             if members
                 .iter()
                 .any(|member| !member.reclaimed.load(core::sync::atomic::Ordering::Acquire))
@@ -145,9 +141,7 @@ impl Team {
         let _commit = commit();
         // Every descendant admission checks its ancestors. One root transition
         // fixes the whole cohort without walking it under COMMIT.
-        let mut state = self.node.state.lock();
-        state.admission = state.admission.finish();
-        drop(state);
+        self.node.state.lock().finish();
         self.node.notify();
     }
 
@@ -218,7 +212,7 @@ impl Drop for Team {
     fn drop(&mut self) {
         self.cells.close();
         let _commit = commit();
-        self.node.state.lock().phase = TeamPhase::Ousted;
+        self.node.state.lock().discard();
         self.node.prune();
     }
 }
@@ -277,18 +271,15 @@ pub(crate) fn oust(me: &Arc<Task>, id: TeamId) -> Result<(), UnitFail> {
     let child = me.clan(id).ok_or(UnitFail::Denied)?;
     child.retire().map_err(|_| UnitFail::Busy)?;
     let operation = child.operation().ok_or(UnitFail::Busy)?;
-    {
+    let retired = {
         let _commit = commit();
         if !child.all_reaped() {
             return Err(UnitFail::Busy);
         }
-    }
-    let retired = {
-        let _commit = commit();
-        child.node.state.lock().phase = TeamPhase::Ousted;
+        child.node.state.lock().oust()?;
         child.node.clear(me.ident.id, None);
         let sire = child.sire.upgrade();
-        let detached = sire.as_ref().and_then(|sire| sire.oust(id));
+        let detached = sire.as_ref().and_then(|sire| sire.detach_heir(id));
         (sire, detached)
     };
     drop(operation);

@@ -31,19 +31,19 @@ impl Reading<'_> {
             let Pending::Queue(q) = &mut *pending else {
                 return Err(CloneFail::Dead);
             };
-            if !q.taking
-                || !q
-                    .head()
-                    .is_some_and(|head| Arc::ptr_eq(&head.buf, &self.bytes))
+            if self.finished
+                || !matches!(
+                    q.hands.front(),
+                    Some(Slot::Reading(head)) if Arc::ptr_eq(&head.buf, &self.bytes)
+                )
             {
                 return Err(CloneFail::Busy);
             }
             publish();
-            let Some(Slot::Ready(hand)) = q.hands.pop_front() else {
+            let Some(Slot::Reading(hand)) = q.hands.pop_front() else {
                 unreachable!("validated queue head")
             };
             q.bytes -= hand.buf.len();
-            q.taking = false;
             self.finished = true;
             hand
         };
@@ -60,7 +60,17 @@ impl Drop for Reading<'_> {
             let _ = sign::wake(key(self.meta, CloneCondition::Push), &self.meta.life());
             let _ = sign::wake(key(self.meta, CloneCondition::Pull), &self.meta.life());
         } else {
-            back(self.meta);
+            {
+                let mut pending = self.meta.pending.lock();
+                if let Pending::Queue(q) = &mut *pending {
+                    let Some(Slot::Reading(hand)) = q.hands.pop_front() else {
+                        unreachable!("live reading owns its queue head");
+                    };
+                    assert!(Arc::ptr_eq(&hand.buf, &self.bytes));
+                    q.hands.push_front(Slot::Ready(hand));
+                }
+            }
+            let _ = sign::wake(key(self.meta, CloneCondition::Pull), &self.meta.life());
         }
     }
 }
@@ -71,17 +81,19 @@ pub(crate) fn read(meta: &CloneView) -> Result<Reading<'_>, CloneFail> {
         Pending::Queue(queue) => queue,
         Pending::Dead => return Err(CloneFail::Dead),
     };
-    if queue.taking {
+    if !matches!(queue.hands.front(), Some(Slot::Ready(_))) {
         return Err(CloneFail::Busy);
     }
-    let head = queue.head().ok_or(CloneFail::Busy)?;
+    let Some(Slot::Ready(hand)) = queue.hands.pop_front() else {
+        unreachable!("validated queue head")
+    };
     let reading = Reading {
         meta,
-        from: head.from,
-        bytes: head.buf.clone(),
+        from: hand.from,
+        bytes: hand.buf.clone(),
         finished: false,
     };
-    queue.taking = true;
+    queue.hands.push_front(Slot::Reading(hand));
     Ok(reading)
 }
 
@@ -101,14 +113,4 @@ pub(crate) fn peek(meta: &CloneView) -> Result<(usize, TaskId, usize), CloneFail
         },
         Pending::Dead => Err(CloneFail::Dead),
     }
-}
-
-fn back(meta: &CloneView) {
-    {
-        let mut pending = meta.pending.lock();
-        if let Pending::Queue(q) = &mut *pending {
-            q.taking = false;
-        }
-    }
-    let _ = sign::wake(key(meta, CloneCondition::Pull), &meta.life());
 }

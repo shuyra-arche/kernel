@@ -14,7 +14,7 @@ pub(crate) use clearance::Clearance;
 use super::Member;
 pub(super) use exit::ExitPolicy;
 pub(super) use state::TeamStage;
-pub(crate) use state::{TeamPhase, TeamState};
+pub(crate) use state::TeamState;
 
 pub(crate) struct TeamNode {
     pub id: TeamId,
@@ -33,13 +33,11 @@ impl TeamNode {
         self.exit.protected() || self.parent.as_ref().is_some_and(|p| p.protected())
     }
     pub fn paused(&self) -> bool {
-        let local = matches!(self.state.lock().phase, TeamPhase::Paused);
+        let local = self.state.lock().paused();
         local || self.parent.as_ref().is_some_and(|p| p.paused())
     }
     pub(crate) fn admitting(&self) -> bool {
-        let state = self.state.lock();
-        let local = state.admission.permits() && !state.terminal();
-        drop(state);
+        let local = self.state.lock().admitting();
         local && self.parent.as_ref().is_none_or(|parent| parent.admitting())
     }
     pub fn closed(&self) -> bool {
@@ -116,7 +114,7 @@ impl TeamNode {
         let _commit = crate::basis::commit();
         let mut node = self;
         loop {
-            if !node.state.lock().phase.ousted()
+            if !node.state.lock().ousted()
                 || !node.tasks.lock().is_empty()
                 || !node.children.lock().is_empty()
             {

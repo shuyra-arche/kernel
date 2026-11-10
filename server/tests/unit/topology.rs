@@ -2,7 +2,7 @@
 //! notification boundaries. Lock counters detect unrelated subtree traversal.
 use crate::{
     basis::unit::anchor::Anchor,
-    lifecycle::{TeamNode, TeamPhase, TeamStage, TeamState, exit},
+    lifecycle::{TeamNode, TeamStage, TeamState, exit},
     membership::{Member, Receipt},
     metal::sync::SpinLock,
     registration::{TaskState, TaskWeak},
@@ -60,8 +60,8 @@ fn unobserved_members_remain_until_reclaimed_then_only_empty_ancestors_detach() 
     let parent = node(2, Some(&root));
     let leaf = node(3, Some(&parent));
     let sibling = node(4, Some(&root));
-    parent.state.lock().phase = TeamPhase::Ousted;
-    leaf.state.lock().phase = TeamPhase::Ousted;
+    parent.state.lock().discard();
+    leaf.state.lock().discard();
     let task = member(&leaf, 9, &[1]);
     let untouched = sibling.tasks.locks();
     assert!(task.receive(TaskId::new(1)));
@@ -83,7 +83,7 @@ fn unobserved_members_remain_until_reclaimed_then_only_empty_ancestors_detach() 
 fn reclaimed_members_keep_each_observers_exit_result_until_its_receipt_is_removed() {
     let root = node(1, None);
     let child = node(2, Some(&root));
-    child.state.lock().phase = TeamPhase::Ousted;
+    child.state.lock().discard();
     let task = member(&child, 9, &[1, 2]);
     task.reclaim();
     assert!(task.receive(TaskId::new(1)));
@@ -101,7 +101,7 @@ fn owner_clear_does_not_skip_siblings_removed_during_traversal() {
     let root = node(1, None);
     for id in 2..8 {
         let child = node(id, Some(&root));
-        child.state.lock().phase = TeamPhase::Ousted;
+        child.state.lock().discard();
         member(&child, id, &[1]).reclaim();
     }
     let live = node(8, Some(&root));
@@ -120,7 +120,7 @@ fn owner_clear_does_not_skip_siblings_removed_during_traversal() {
 fn clearing_one_root_preserves_other_receipt_roots_and_unreclaimed_members() {
     let root = node(1, None);
     let child = node(2, Some(&root));
-    child.state.lock().phase = TeamPhase::Ousted;
+    child.state.lock().discard();
     let task = member(&child, 9, &[1]);
     task.receipts.lock()[0].roots.push(root.id);
     task.reclaim();
@@ -136,7 +136,7 @@ fn receipt_clearance_advances_one_member_and_keeps_other_owners_results() {
     let root = node(1, None);
     let child = node(2, Some(&root));
     let sibling = node(3, Some(&root));
-    child.state.lock().phase = TeamPhase::Ousted;
+    child.state.lock().discard();
     let first = member(&child, 4, &[1]);
     let second = member(&child, 5, &[1]);
     let retained = member(&sibling, 6, &[1, 7]);
@@ -164,4 +164,33 @@ fn receipt_clearance_advances_one_member_and_keeps_other_owners_results() {
     assert!(retained.pending(TaskId::new(7)));
     assert_eq!(*retained.result.lock(), Some(83));
     assert_eq!(root.children.lock().len(), 1);
+}
+
+#[test]
+fn finishing_keeps_pause_independent_and_oust_never_reopens_admission() {
+    use kernel_api::abi::call::unit::UnitFail;
+
+    let mut state = TeamState::new(TeamStage::Constructing);
+    assert!(state.admitting());
+    assert!(state.constructing());
+    assert_eq!(state.oust(), Err(UnitFail::Busy));
+    state.set_default_entry(0x1000);
+    state.debark().unwrap();
+    state.finish();
+    assert!(state.paused());
+    assert!(state.ready());
+    assert!(!state.admitting());
+    state.embark().unwrap();
+    assert!(!state.paused());
+    assert!(!state.admitting());
+    state.doom();
+    state.doom();
+    assert_eq!(state.embark(), Err(UnitFail::Denied));
+    assert_eq!(state.debark(), Err(UnitFail::Denied));
+    assert_eq!(state.default_entry(), 0);
+    state.oust().unwrap();
+    state.doom();
+    state.oust().unwrap();
+    assert!(state.ousted());
+    assert!(!state.admitting());
 }

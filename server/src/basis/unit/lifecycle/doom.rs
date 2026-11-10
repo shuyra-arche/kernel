@@ -117,12 +117,7 @@ fn request(node: &Arc<TeamNode>, cause: TaskExitCause, reason: usize) {
     if !matches!(*node.termination.lock(), Termination::Idle) {
         return;
     }
-    {
-        let mut state = node.state.lock();
-        if !state.terminal() {
-            state.phase = crate::basis::unit::team::TeamPhase::Doomed;
-        }
-    }
+    node.state.lock().doom();
     OUTSTANDING.fetch_add(1, Ordering::Release);
     pending.push(
         node.clone(),

@@ -128,12 +128,12 @@ pub(crate) fn create_share(
         let registration = task.pend.prepare(pend.clone())?;
 
         let _commit = crate::basis::commit();
-        let _publication = authorization.begin_withdraw()?;
+        let withdrawal = authorization.begin_withdraw()?;
         if !pend::live(task) || !authorization.private_owner(task.ident.id) {
             return Err(PendFail::Denied);
         }
         meta.attach_source(&authorization);
-        authorization.adopt(&meta, token, pend.authority().clone())?;
+        let private = withdrawal.adopt(&meta, token, pend.authority().clone())?;
         let transition = (|| {
             for (space, mapping) in inputs {
                 meta.adopt_input(token, &space, mapping);
@@ -148,7 +148,7 @@ pub(crate) fn create_share(
             Ok(token)
         })();
         if transition.is_err() {
-            authorization.restore_private(source.clone());
+            withdrawal.restore_private(token, private);
         }
         transition
     })();
