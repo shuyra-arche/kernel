@@ -72,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [memory, io, scheduling, context]
+        shard: [memory, io, scheduling, coordination, context, vector]
     steps:
       - name: Install guest test tools
         run: |
