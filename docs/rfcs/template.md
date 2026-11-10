@@ -1,10 +1,10 @@
-# RFC: <short, precise title>
+# RFC: [Short, precise title]
 
-- RFC: <assigned number, after allocation>
+- RFC: TBD (assign before merging)
 - Status: Proposed
-- Related Issues: <links>
-- Author: <author or team>
-- Created: <YYYY-MM-DD>
+- Related Issues: Links to Issues and PRs
+- Author: Author or team
+- Created: YYYY-MM-DD
 - Supersedes: None
 
 ## Problem
@@ -56,8 +56,8 @@ implementation commitments.
 
 Complete this section when reviewed:
 
-- Decision: <accepted, rejected, or deferred; date and rationale>
-- Implementation PRs: <links, or pending>
-- Contract updates: <links, or none>
-- Verification evidence and remaining limits: <links or summary>
-- Replacement RFC: <link, if superseded>
+- Decision: Decision, date, and rationale
+- Implementation PRs: Linked PRs or pending
+- Contract updates: Linked contract updates or none
+- Verification evidence and remaining limits: Evidence and remaining limitations
+- Replacement RFC: Link to replacement, if any
