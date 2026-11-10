@@ -599,7 +599,7 @@ fn preemption(fixture: &Fixture) {
     assert_eq!(before.replenishment, after.replenishment);
     assert!(
         after.remaining > 0,
-        "higher priority waited for budget exhaustion"
+        "higher priority waited for budget exhaustion: before={before:?}, after={after:?}"
     );
     high.finish(106);
     low.stop();

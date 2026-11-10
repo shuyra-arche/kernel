@@ -6,7 +6,11 @@ use core::{
 use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     abi::call::{cell::CellFail, nest::NestFail, sign::SignReply},
-    model::{identity::TaskId, pend::ShareRights, unit::UnitTarget},
+    model::{
+        identity::TaskId,
+        pend::ShareRights,
+        unit::{UnitQuery, UnitTarget},
+    },
 };
 use kernel_client::call::{share_view, unit};
 static BAR: AtomicUsize = AtomicUsize::new(0);
@@ -103,8 +107,14 @@ pub(in super::super) fn death(at: usize, count: usize) {
         if mapping != 0 {
             break MappingId::from_bytes(&(mapping as u64).to_le_bytes()).unwrap();
         }
-        assert!(room::clock() < until, "publisher stalled");
-        room::yield_();
+        assert!(
+            room::clock() < until,
+            "publisher stalled: {:?}",
+            super::super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task)))
+        );
+        // A runnable controller would keep a single Hart out of idle while
+        // the publisher waits for its external mapping to settle.
+        room::sleep_until((room::clock() + 1_000_000).min(until)).unwrap();
     };
     assert_eq!(
         reserve(root, contender, ADDRESS + 8192, true),

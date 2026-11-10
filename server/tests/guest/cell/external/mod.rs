@@ -157,7 +157,8 @@ fn wait(pos: CellPosition, state: CellState) {
     let until = room::clock() + 2_000_000_000;
     while super::info(pos).state != state {
         assert!(room::clock() < until, "Memo deadline {state:?}");
-        room::yield_();
+        // Let the idle path drive external maintenance on a single Hart.
+        room::sleep_until((room::clock() + 1_000_000).min(until)).unwrap();
     }
 }
 fn publish(pos: CellPosition) {

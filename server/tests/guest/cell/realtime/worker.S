@@ -144,7 +144,17 @@ realtime_compute_begin:
 .global realtime_compute_end
 realtime_compute_end:
     nop
-    j worker_spin
+    // Preserve the remaining budget after the preemption checkpoint while
+    // the controller observes it and requests termination.
+    mv a0, s3
+    li a1, 2
+    li a2, 0
+    li a7, {listen}
+    ebreak
+    li t0, 9
+    bne a0, t0, worker_fail
+    li s8, 100
+    j worker_reply
 worker_listen:
     mv a0, s3
     li a1, 2
