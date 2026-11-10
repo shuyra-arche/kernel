@@ -674,16 +674,27 @@ fn transfer(
             .references
             .get(reference.get())
             .ok_or(CellFail::Denied)?;
-        if let Some(authority) = hold.authority()
-            && matches!(
-                authority.limits().operations,
-                kernel_api::model::pend::Operations::Flat(_)
-            )
-            && (!authority.permits(kernel_api::model::pend::Operations::Flat(
-                kernel_api::model::pend::FlatRights::TRANSFER,
-            )) || authority.modifiable() != Some(Modifiable::Yes))
-        {
+        if !hold.source().branch_check(
+            hold.authority().map(Arc::as_ref),
+            Access::READ | Access::WRITE,
+        ) {
             return Err(CellFail::Denied);
+        }
+        if let Some((token, authority)) = hold.branch() {
+            use kernel_api::model::pend::{FlatRights, Operations};
+            let owns = match authority.limits().operations {
+                Operations::Flat(_) => authority.permits(Operations::Flat(FlatRights::TRANSFER)),
+                // A Share association can name the backing Page. Only its
+                // owning root can use that association for a Slot handoff.
+                Operations::Share(_) => hold
+                    .source()
+                    .root()
+                    .is_some_and(|(_, root, _)| token == root),
+                _ => false,
+            };
+            if !owns {
+                return Err(CellFail::Denied);
+            }
         }
         let offset = PageOffset::new(
             hold.window()

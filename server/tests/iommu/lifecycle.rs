@@ -104,7 +104,7 @@ fn a_change_authorizes_only_its_exact_page_and_does_not_end_external_access() {
     let other =
         Arc::new(Page::from_internal(PageOwner::Kernel, other_pool.page().unwrap()).unwrap());
     let change = page.begin().unwrap();
-    let freeze = crate::cell::Freeze::new(change.clone());
+    let freeze = crate::cell::Freeze::new(change.clone(), None).unwrap();
     let (mut hardware, trace) = Scripted::new();
     assert!(matches!(
         Publication::prepare_external(&hardware, &page, 4096, true, None),

@@ -32,7 +32,6 @@ fn logical_closure_rejects_unvisited_descendants_and_keeps_siblings_alive() {
         assert_eq!(leaf.modifiable(), None);
         assert_eq!(leaf.status(), PendStatus::Retiring);
         assert_eq!(leaf.retain_route(), Err(PendFail::Dead));
-        assert_eq!(leaf.can_borrow(No), Err(PendFail::Dead));
         assert!(sibling.permits(operations));
         assert!(parent.permits(operations));
     }

@@ -164,9 +164,9 @@ fn persistent_freezes_block_publication_through_another_logical_position() {
     let pool = Pool::new(0);
     let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let change = page.begin().unwrap();
-    let original = Freeze::new(change.clone());
+    let original = Freeze::new(change.clone(), None).unwrap();
     assert!(page.frozen());
-    let other = Freeze::new(change.clone());
+    let other = Freeze::new(change.clone(), None).unwrap();
     assert_eq!(change.hardware(true).unwrap_err(), RetainError::Busy);
     assert_eq!(change.external(true).unwrap_err(), RetainError::Busy);
     drop(original);
@@ -180,4 +180,35 @@ fn persistent_freezes_block_publication_through_another_logical_position() {
     assert!(!page.frozen());
     drop(page);
     assert_eq!(pool.gives(), 1);
+}
+
+#[test]
+fn freeze_waits_for_other_writers_even_after_their_withdrawal_begins() {
+    use super::cell::Freeze;
+    let pool = Pool::new(0);
+    let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let reader = page.prepare_hardware(false).unwrap();
+    let mut target = page.prepare_hardware(true).unwrap();
+    let mut alias = page.prepare_hardware(true).unwrap();
+    target.publish();
+    alias.publish();
+    let change = page.begin().unwrap();
+    let alias = alias.retire();
+    assert!(matches!(
+        Freeze::new(change.clone(), Some(true)),
+        Err(RetainError::Busy)
+    ));
+    assert!(!page.frozen());
+    // SAFETY: host tests install no hardware mappings.
+    unsafe { alias.settle() };
+    let freeze = Freeze::new(change.clone(), Some(true)).unwrap();
+    assert!(target.writable());
+    assert!(!page.frozen());
+    unsafe { target.retire().settle() };
+    assert!(page.frozen());
+    assert_eq!(change.external(true).unwrap_err(), RetainError::Borrowed);
+    drop(reader);
+    drop(freeze);
+    drop(change);
+    assert!(page.allows_return());
 }

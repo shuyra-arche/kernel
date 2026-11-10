@@ -67,26 +67,22 @@ can retain it even if the queue closes. A worker that exits after Pull
 does not cause automatic redelivery. Processing and retry policy belong
 to the communicating domains.
 
-== A borrowed request
+== A shared request
 
 Suppose instead the request consists of a range of existing Cells and
 the worker needs to operate on that storage directly. The producer
 delegates a Share Pend for the required window. The worker opens its
 branch to establish a mapping within that scope.
 
-Readers may coexist. A writable borrower excludes other borrowers of
-that Share. In the current model, a mutable parent is suspended while
-any child remains, even when the child covers a narrower window. The
-Kernel withdraws conflicting CPU mappings before granting the borrow.
-Returning or revoking the branch restores the parent's access only
-after the descendants and applicable hardware obligations have settled.
-A pending withdrawal therefore delays handback even if the worker
-has already reported that it finished.
+Both branches may remain mapped. Each Pend controls the range and write
+permission of its own mapping. A read-only recipient can observe writes
+by the producer; the application coordinates when data is ready to read.
+Returning or revoking a branch withdraws its mappings and those of its
+descendants. Other branches keep their mappings.
 
-The backing Page keeps its identity through the borrow. Granting access
-changes who may use it and under what conditions. Mapping publishes
-an address for that access. The borrow, the mapping, and the backing
-allocation can each end at a different time.
+The backing Page keeps its identity through the grant. Authorization,
+mapping, and backing allocation have separate lifetimes. Hardware
+withdrawal must settle before the Page can be reclaimed.
 
 == Notify the worker
 

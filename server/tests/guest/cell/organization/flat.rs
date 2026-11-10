@@ -56,7 +56,7 @@ pub(super) fn run() {
     );
     assert_eq!(inspect(child).id, identity);
     assert_eq!(inspect(child).offset, 1);
-    assert!(!accessible(original)); // mutable loan suspends the parent's old Slot
+    assert!(accessible(original)); // Derivation preserves the parent Slot.
     let sliced = flat::slice(child, 0, 1).unwrap();
     assert!(flat::slice(child, 1, 1).is_err());
     assert!(share_view::create(crate::license::get(), sliced, Modifiable::No).is_err());
@@ -85,7 +85,7 @@ pub(super) fn run() {
     let (address, size) = share_view::open(share).unwrap();
     assert_eq!(size, 4096);
     assert_eq!(read(address, 0), 0x84);
-    assert!(!accessible(one));
+    assert!(accessible(one));
     pend::return_(share).unwrap();
     assert!(accessible(one));
     // Existing handles cannot retain a window or operation after Narrow.

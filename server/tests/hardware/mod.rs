@@ -169,9 +169,13 @@ fn iommu_on_real_qemu_registers() {
 
 fn run(mut command: Command, evidence: &PathBuf, name: &str, watchdog: Duration) -> Output {
     let started = Instant::now();
+    let serial = evidence.join(format!("{name}-serial.log"));
+    let stderr = evidence.join(format!("{name}-stderr.log"));
+    // Keep output flowing while the watchdog waits, even when the guest emits
+    // more than a pipe can buffer before shutdown.
     let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::from(std::fs::File::create(&serial).unwrap()))
+        .stderr(Stdio::from(std::fs::File::create(&stderr).unwrap()))
         .spawn()
         .expect("start QEMU");
     // Traced debug IRQ/IOMMU images take 24–26 s locally, including firmware,
@@ -187,7 +191,11 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str, watchdog: Duration)
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    let output = child.wait_with_output().expect("QEMU output");
+    let output = Output {
+        status: child.wait().expect("QEMU status"),
+        stdout: std::fs::read(serial).expect("QEMU serial output"),
+        stderr: std::fs::read(stderr).expect("QEMU stderr"),
+    };
     std::fs::write(
         evidence.join(format!("{name}-elapsed.txt")),
         format!(
@@ -197,8 +205,6 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str, watchdog: Duration)
         ),
     )
     .unwrap();
-    std::fs::write(evidence.join(format!("{name}-serial.log")), &output.stdout).unwrap();
-    std::fs::write(evidence.join(format!("{name}-stderr.log")), &output.stderr).unwrap();
     assert!(
         !timed_out,
         "{name}: QEMU deadline; evidence at {}\nserial:\n{}\nstderr:\n{}",
@@ -207,6 +213,23 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str, watchdog: Duration)
         String::from_utf8_lossy(&output.stderr)
     );
     output
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn watchdog_captures_output_larger_than_a_pipe() {
+    let evidence = std::env::temp_dir().join(format!("kernel-qemu-output-{}", std::process::id()));
+    std::fs::create_dir_all(&evidence).unwrap();
+    let mut command = Command::new("sh");
+    command.args([
+        "-c",
+        "head -c 1048576 /dev/zero && head -c 1048576 /dev/zero >&2",
+    ]);
+    let output = run(command, &evidence, "output", Duration::from_secs(10));
+    std::fs::remove_dir_all(evidence).unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout.len(), 1_048_576);
+    assert_eq!(output.stderr.len(), 1_048_576);
 }
 
 mod image;

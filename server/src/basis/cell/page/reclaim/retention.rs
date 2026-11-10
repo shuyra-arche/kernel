@@ -13,7 +13,7 @@ enum Phase {
     Settled,
 }
 
-/// 内核持有的硬件访问责任和读写互斥预留。
+/// 内核持有的单份硬件访问责任。
 /// 它落实已获授权的访问，不创建授权；不能复制为两个完成凭证。
 #[derive(Debug)]
 pub(crate) struct Retention {
@@ -54,6 +54,10 @@ impl Retention {
 
     pub(crate) fn cell(&self) -> &Arc<Page> {
         self.cell.as_ref().expect("live retention")
+    }
+
+    pub(crate) fn writable(&self) -> bool {
+        self.modifiable
     }
 
     /// 必须先于首条硬件可见发布。此后 Drop 不再视为安全取消。

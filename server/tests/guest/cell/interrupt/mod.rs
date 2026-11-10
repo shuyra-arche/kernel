@@ -323,7 +323,9 @@ pub(super) fn run(at: usize, count: usize) {
     sign::attach(routed, source, 0).unwrap();
     assert_eq!(WATCH_OBSERVED.load(Ordering::Acquire), 0);
     let load = Load::start();
-    let until = room::clock().saturating_add(2_000_000_000);
+    // This batch checks delivery to all observers under contention. Latency
+    // is measured separately, so allow host scheduling headroom for the batch.
+    let until = room::clock().saturating_add(5_000_000_000);
     write(1, 2);
     assert_eq!(
         sign::listen(routed, Wait::At(until)).unwrap(),

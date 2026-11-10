@@ -1,5 +1,6 @@
 mod permission;
 mod retirement;
+mod share;
 
 use kernel_api::model::unit::ExitScope;
 use kernel_api::{
@@ -76,12 +77,13 @@ extern "C" fn recipient() -> ! {
 pub(super) fn run() {
     permission::run();
     retirement::run();
+    share::run();
     let reference = super::allocate(8);
     let root = share_view::create(crate::license::get(), reference, Modifiable::Yes).unwrap();
     let (address, len) = share_view::open(root).unwrap();
     assert_eq!(len, 8 * 4096);
     super::write(address, 3 * 4096, 0x13579);
-    share_view::shut(root).unwrap();
+    let parent_address = address;
 
     let child = accord(
         root,
@@ -97,7 +99,7 @@ pub(super) fn run() {
         PendRange::pages(1, 1).unwrap(),
     )
     .unwrap();
-    assert_eq!(inspect(root).status, PendStatus::Suspended);
+    assert_eq!(inspect(root).status, PendStatus::Active);
     assert_ne!(child, leaf);
     assert_eq!(inspect(child).target, inspect(leaf).target);
     assert_eq!(
@@ -148,6 +150,22 @@ pub(super) fn run() {
     let (address, len) = share_view::open(leaf).unwrap();
     assert_eq!(len, 4096);
     assert_eq!(super::read(address, 0), 0x13579);
+    super::write(parent_address, 3 * 4096 + 8, 0x24680);
+    assert_eq!(super::read(address, 8), 0x24680);
+    let writer = accord(
+        root,
+        AccordTarget::Caller,
+        Modifiable::Yes,
+        PendRange::pages(3, 1).unwrap(),
+    )
+    .unwrap();
+    let (alias, _) = share_view::open(writer).unwrap();
+    super::write(alias, 8, 0x34567);
+    assert_eq!(super::read(parent_address, 3 * 4096 + 8), 0x34567);
+    assert_eq!(super::read(address, 8), 0x34567);
+    pend::return_(writer).unwrap();
+    super::write(parent_address, 3 * 4096 + 8, 0x45678);
+    assert_eq!(super::read(address, 8), 0x45678);
     {
         use kernel_api::model::{cell::*, identity::TeamId};
         use kernel_client::call::cell;
@@ -184,9 +202,20 @@ pub(super) fn run() {
             target: super::slot(empty, 0),
         }
         .to_bytes();
-        assert!(cell::pull(super::ptr(&spec)).is_err());
+        assert_eq!(
+            cell::pull(super::ptr(&spec)).unwrap_err().source,
+            kernel_api::abi::call::cell::CellFail::Denied
+        );
         super::publish(mapping, 0);
         assert_eq!(super::read(_address, 0), 0x13579);
+        let published = super::info(super::raw_memo(mapping, 0));
+        let position = super::memo(mapping, 0).to_bytes();
+        assert_eq!(
+            cell::retract(super::ptr(&position)).unwrap_err().source,
+            kernel_api::abi::call::cell::CellFail::Busy
+        );
+        assert_eq!(super::info(super::raw_memo(mapping, 0)), published);
+        share_view::shut(root).unwrap();
         super::retract(mapping, 0);
         super::delete(super::raw_memo(mapping, 0).object);
         super::delete(CellObject::Slot(empty));
@@ -222,7 +251,7 @@ pub(super) fn run() {
     unit::resume(UnitTarget::Task(task)).unwrap();
     assert!(super::lifecycle::wait_task(task));
     super::lifecycle::delete(task);
-    assert_eq!(inspect(root).status, PendStatus::Suspended);
+    assert_eq!(inspect(root).status, PendStatus::Active);
     assert_eq!(
         narrow(child, Modifiable::No, PendRange::pages(1, 1).unwrap())
             .unwrap_err()

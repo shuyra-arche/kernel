@@ -94,10 +94,18 @@ impl Memo {
         if !Arc::ptr_eq(&page, freeze.page()) {
             return Err(NestError::Busy);
         }
-        self.generation = self.generation.next().ok_or(NestError::OutOfMemory)?;
+        let generation = self.generation.next().ok_or(NestError::OutOfMemory)?;
+        let retracts = match flight {
+            MemoFlight::Publishing => None,
+            MemoFlight::Retracting => {
+                Some(self.publication.as_ref().ok_or(NestError::Busy)?.writable())
+            }
+        };
+        let freeze = Freeze::new(freeze, retracts)?;
+        self.generation = generation;
         self.controlled = true;
         self.page = Some(page.clone());
-        self.freeze = Some(Freeze::new(freeze));
+        self.freeze = Some(freeze);
         self.flight = Some(flight);
         Ok(page)
     }
