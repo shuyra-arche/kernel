@@ -26,7 +26,18 @@ fn now() -> u64 {
 }
 extern "C" fn run() -> ! {
     let mut epoch = 0u64;
-    while !crate::basis::room::shutdown::active() {
+    loop {
+        // Shutdown lookup temporarily holds a Hart-tracked TaskWeak. Unlike a
+        // trap handler, this ordinary Kernel Task runs with interrupts enabled:
+        // keep that lookup on its originating Hart until all copies drop. No
+        // guard or Task reference may cross the explicit SleepUntil below.
+        let stopping = {
+            let _commit = crate::basis::commit();
+            crate::basis::room::shutdown::active()
+        };
+        if stopping {
+            break;
+        }
         let Some(next) = epoch.checked_add(1) else {
             break;
         };
