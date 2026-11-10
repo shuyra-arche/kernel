@@ -1,63 +1,63 @@
-# RFC: [Short, precise title]
+# RFC [GitHub Issue number]: [Short, precise title]
 
-- RFC: TBD (assign before merging)
-- Status: Proposed
-- Related Issues: Links to Issues and PRs
-- Author: Author or team
-- Created: YYYY-MM-DD
-- Supersedes: None
+- **Tracking Issue:** [Link to the numbered GitHub Issue]
+- **Areas:** [Relevant architectural concerns, not source directories]
+- **Supersedes:** None
+
+> Drafts are reviewed as pull requests. A document merged into `docs/rfcs/`
+> records an accepted direction, not a claim of completed implementation.
+> Do not manually duplicate decision or implementation status here.
 
 ## Problem
 
-Which architectural problem or conflict requires a decision?
-Describe the current state without assuming that a proposal is implemented.
+Which architectural conflict or unmet requirement requires a decision?
+Describe the current contract honestly, including what is not implemented.
 
 ## Goals and non-goals
 
-What must change, and what remains outside this decision?
+What must change, and which responsibilities are deliberately unchanged?
 
 ## Invariants and trust boundary
 
-Who owns each authoritative fact? Which permission, lifecycle, identity,
-or hardware-completion conditions must never be bypassed?
+Who owns each authoritative fact? Which permission, identity, lifetime,
+ordering, or retirement conditions must remain true after the change?
 
 ## Proposal
 
-Explain the model, relevant states, legal transitions, and public effects.
-Include diagrams only where they make a boundary or invariant clearer.
+Define the model, states, legal transitions, effect boundaries, and
+externally observable changes. Prefer a focused diagram only when it
+makes a boundary or invariant clearer.
 
 ## Alternatives
 
-Describe viable alternatives and why each was or was not selected.
-Include the option of keeping the existing design when relevant.
+Describe credible alternatives, including keeping the present model.
+Explain why the proposal is preferable and under which assumptions.
 
 ## Costs and failure modes
 
-What complexity, performance, migration, concurrency, safety, or
-recovery costs does this introduce? What happens after partial failure,
-timeout, or caller death?
+What new complexity or performance cost does the model introduce?
+Who remains responsible after partial failure, cancellation, stale
+completion, timeout, or caller death?
 
 ## Compatibility and migration
 
-Which API/ABI contracts, consumers, boot formats, or integrations change?
-State the order in which providers and consumers must be updated.
+Which public API/ABI, boot contracts, providers, or integrations change?
+Link to the affected work and record an ordered migration if needed.
 
-## Validation
+## Validation and acceptance
 
-Which invariant or observable contract would demonstrate correctness?
-Separate Host, target compilation, QEMU, and physical hardware evidence.
+What observable properties and failure cases must be verified?
+Distinguish Host, target compilation, QEMU, and real hardware evidence.
+Do not claim the entire RFC was implemented merely because a linked
+implementation PR merged.
 
 ## Open questions
 
-List unresolved decisions explicitly. Do not turn them into hidden
-implementation commitments.
+List any decisions that must be settled before acceptance. Do not treat
+an unresolved issue as an implicit implementation promise.
 
-## Decision and implementation record
+## References
 
-Complete this section when reviewed:
-
-- Decision: Decision, date, and rationale
-- Implementation PRs: Linked PRs or pending
-- Contract updates: Linked contract updates or none
-- Verification evidence and remaining limits: Evidence and remaining limitations
-- Replacement RFC: Link to replacement, if any
+Link the proposal Issue, previous RFCs and related PRs. Implementation
+progress and verification evidence live in linked Issues/PRs and the
+contract/tests that own the behavior, rather than in an RFC status diary.
