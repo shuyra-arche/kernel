@@ -58,9 +58,10 @@ established solely by emulation. Each design claim must identify the
 smallest adequate verification boundary and the remaining assumptions.
 
 External access requires an authenticated hardware requester, scoped
-authority, and trusted retirement evidence. The current public `Port`
-interface is under review in
-#link("https://github.com/shuyra-arche/kernel/issues/124")[Kernel Issue 124].
+authority, and trusted retirement evidence. Trusted boot admits an External
+Nest for the requester and supplies its root Pend. A derived Pend delegates
+a subset of that authority. The hardware backend supplies the evidence
+needed to settle former access before the affected memory can be reused.
 
 The precise current operations, encoding, and supported hardware limits
 are specified in the Kernel API and implementation, rather than in this

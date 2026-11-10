@@ -11,18 +11,18 @@ Use [the Kernel API](../api/README.md) for current public contracts.
 | What grants access across an isolation boundary? | [View model](../api/src/model/view/), [Pend model](../api/src/model/pend/) | [View](../server/src/basis/view/), [Pend](../server/src/basis/pend/) |
 | What retains or routes a control event? | [Sign model](../api/src/model/sign/), [Sign calls](../api/src/abi/call/sign.rs) | [Sign](../server/src/basis/sign/) and [Room interrupt coordination](../server/src/basis/room/interrupt/) |
 | How does a call reach its owner? | [ABI calls](../api/src/abi/call/) | [Entry](../server/src/entry/) |
+| How is external access admitted and delegated? | [Nest model](../api/src/model/nest/), [Pend model](../api/src/model/pend/) | [Boot admission](../server/src/entry/boot/devices/external.rs), [Nest](../server/src/basis/nest/) and [RISC-V IOMMU](../server/src/metal/riscv/iommu/) |
 | What proves that hardware effects are complete? | Selected [public contracts](../api/) and [trusted boot model](../api/src/boot/) | [Metal](../server/src/metal/), including the selected architecture backend |
 | Where are these behaviors verified? | [API tests](../api/tests/) | [Server tests](../server/tests/), product scenarios in [Vanllia](https://github.com/shuyra-arche/vanllia) |
 
 These are **navigational paths as of the current source layout**, not a
 promise that each path corresponds to one architectural concept.
 
-The current code still exposes a public
-[Port model](../api/src/model/port/) and
-[Port calls](../api/src/abi/call/port.rs). Their long-term public
-necessity is disputed in [Issue #124](https://github.com/shuyra-arche/kernel/issues/124).
-The Kernel must continue to authenticate real hardware requesters and retain
-hardware settlement responsibilities regardless of that decision.
+Trusted boot authenticates hardware requesters, admits External Nests, and
+supplies their root Pends. Nest holds the address space, Pend bounds the
+authority that can be delegated, and the IOMMU backend binds the requester
+and supplies retirement evidence. See the [ABI migration notes](../api/README.md#migration-from-abi-v5--ledger-v7-to-abi-v6--ledger-v8)
+for the change from Port.
 
 The distinction between `basis`, `entry`, and `metal` describes
 implementation responsibilities:
