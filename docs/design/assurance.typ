@@ -39,7 +39,7 @@ evidence appropriate to their respective backends.
 
 For each protocol, specify the current state, incoming event, permitted
 transition, and effects to perform. A useful conceptual shape is
-`transition(state, event) -> decision`. The commit owner must revalidate
+`transition(state, event) → decision`. The commit owner must revalidate
 observations that could have changed before applying the decision.
 In-flight effects require further completion or failure events.
 

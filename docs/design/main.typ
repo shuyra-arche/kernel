@@ -7,6 +7,8 @@
 )
 #set page(paper: "a4", margin: (x: 2.5cm, y: 2.7cm), numbering: "1")
 #set text(size: 10.5pt)
+// Use the prose font family for inline terms in PDF previews.
+#show raw.where(block: false): set text(font: "Libertinus Serif", weight: "semibold")
 #set par(justify: true)
 #set heading(numbering: "1.")
 
