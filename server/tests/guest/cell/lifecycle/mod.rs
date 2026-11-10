@@ -1,3 +1,5 @@
+pub(super) mod entry;
+
 use kernel_api::{
     abi::reply::SignReply,
     address::VirtAddr,

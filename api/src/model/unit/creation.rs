@@ -18,11 +18,18 @@ pub enum UnitCreate {
         member_exit: bool,
     },
     /// None selects the caller's Team; other Teams require management authority.
+    ///
+    /// On RV64, `a0` points to the copied argument words and `a1` holds their
+    /// count. The words occupy the end of the writable stack, so its exclusive
+    /// upper bound is `a0 + a1 * 8`, including when `a1` is zero. The initial
+    /// `sp` is `a0` rounded down to a 16-byte boundary.
     Task {
         team: Option<TeamId>,
         entry: VirtAddr,
         args: VirtAddr,
         count: u64,
+        /// Stack size in bytes, rounded up to a base page. Zero selects the
+        /// default size. The writable stack has an unmapped guard below it.
         stack: VirtAddr,
     },
 }

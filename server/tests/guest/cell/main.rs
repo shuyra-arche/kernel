@@ -240,6 +240,7 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     let _ = writeln!(Console, "PASS cell-kernel swap=1 cleanup=1");
     levels::run();
     organization::run(args, count);
+    lifecycle::entry::run();
     pend::run();
     sign::run();
     room::run();
