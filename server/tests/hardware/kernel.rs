@@ -331,6 +331,7 @@ fn run(mode: &str) {
                 "PASS cell-kernel swap=1 cleanup=1",
                 "PASS cell-levels contiguous=1 boundary=1 movement=1 split=1 merge=1 stale=1 zero=1 capacity=1",
                 "PASS organization flat=1 window=1 transfer=1 share=1 revoke=1 internal-nest=1 retirement=8 cascade=8 team-exit=1",
+                "PASS task-entry stack=1 arguments=1",
                 "PASS room-kernel atomic-wait=1 wake=1 deadline=1",
                 "PASS pend-kernel range=1 return=1 inspect=1 collect=1",
                 "task: all tasks exited",
