@@ -74,21 +74,22 @@ extern "C" fn observer() -> ! {
 static ENTERED: AtomicU32 = AtomicU32::new(0);
 static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
 static WATCH_TOKEN: AtomicUsize = AtomicUsize::new(0);
-static WATCH_ENTERED: AtomicUsize = AtomicUsize::new(0);
-static WATCH_ARMED: AtomicU32 = AtomicU32::new(0);
+static WATCH_ENTERED: AtomicU32 = AtomicU32::new(0);
+static WATCH_OBSERVED: AtomicU32 = AtomicU32::new(0);
 extern "C" fn watch() -> ! {
     let token = PendId::mint(WATCH_TOKEN.load(Ordering::Acquire));
     WATCH_ENTERED.fetch_add(1, Ordering::Release);
-    // Fixture preparation is not part of IRQ service latency or the four
-    // competing Yield workers. Park until every observer has been constructed.
-    while WATCH_ARMED.load(Ordering::Acquire) == 0 {
-        crate::room::wait(&WATCH_ARMED, 0, Wait::Infinite);
-    }
+    room::wake_value(VirtAddr::new(WATCH_ENTERED.as_ptr() as usize), true).unwrap();
+    // The controller first confirms every observer is blocked here, then starts
+    // contention and the IRQ. Its shared delivery deadline bounds all observers;
+    // no observer spends an IRQ service timeout waiting for fixture preparation.
     assert!(matches!(
-        sign::listen(token, deadline()).unwrap(),
+        sign::listen(token, Wait::Infinite).unwrap(),
         SignReply::Triggered { .. }
     ));
     assert!(sign::consume(token, 1).is_err());
+    WATCH_OBSERVED.fetch_add(1, Ordering::Release);
+    room::wake_value(VirtAddr::new(WATCH_OBSERVED.as_ptr() as usize), true).unwrap();
     unit::exit(0, 0, VirtAddr::new(0), 0)
 }
 fn write(offset: usize, byte: u8) {
@@ -282,6 +283,9 @@ pub(super) fn run(at: usize, count: usize) {
     let pending = receive(token, deadline());
     write(1, 0);
     sign::consume(token, pending).unwrap();
+    load.finish();
+    // Prepare observers without the synthetic Yield load. Both the initial
+    // pending IRQ above and actual notification delivery below retain that load.
     // More listeners than a notification batch must all progress. Observation
     // and forwarding preserve pending work; only the processing branch consumes.
     let watchers: [TaskId; 6] = core::array::from_fn(|index| {
@@ -296,8 +300,20 @@ pub(super) fn run(at: usize, count: usize) {
         WATCH_TOKEN.store(observer.get(), Ordering::Release);
         unit::resume(UnitTarget::Task(task)).unwrap();
         let until = room::clock() + 2_000_000_000;
-        while WATCH_ENTERED.load(Ordering::Acquire) != index + 1 {
-            assert!(room::clock() < until);
+        loop {
+            let entered = WATCH_ENTERED.load(Ordering::Acquire);
+            if entered == (index + 1) as u32 {
+                break;
+            }
+            assert!(room::clock() < until, "IRQ observer {index} did not enter");
+            crate::room::wait(&WATCH_ENTERED, entered, Wait::At(until));
+        }
+        // Entry acknowledges ownership of WATCH_TOKEN. Waiting proves the
+        // observer has registered on Sign, not merely reached a staging gate.
+        while super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task))).state
+            != UnitState::Waiting
+        {
+            assert!(room::clock() < until, "IRQ observer {index} did not block");
             room::yield_();
         }
         task
@@ -305,15 +321,26 @@ pub(super) fn run(at: usize, count: usize) {
     let routed = sign::create(crate::license::get()).unwrap();
     let source = kernel_api::model::sign::SignSource::Sign { token };
     sign::attach(routed, source, 0).unwrap();
-    WATCH_ARMED.store(1, Ordering::Release);
-    room::wake_value(VirtAddr::new(WATCH_ARMED.as_ptr() as usize), true).unwrap();
-    room::sleep_until(room::clock() + 2_000_000).unwrap();
+    assert_eq!(WATCH_OBSERVED.load(Ordering::Acquire), 0);
+    let load = Load::start();
+    let until = room::clock().saturating_add(2_000_000_000);
     write(1, 2);
     assert_eq!(
-        sign::listen(routed, deadline()).unwrap(),
+        sign::listen(routed, Wait::At(until)).unwrap(),
         SignReply::Source { source, fail: None }
     );
-    let observed = receive(token, deadline());
+    let observed = receive(token, Wait::At(until));
+    loop {
+        let seen = WATCH_OBSERVED.load(Ordering::Acquire);
+        if seen == watchers.len() as u32 {
+            break;
+        }
+        assert!(
+            room::clock() < until,
+            "UART notification batch stalled: observed {seen}/6"
+        );
+        crate::room::wait(&WATCH_OBSERVED, seen, Wait::At(until));
+    }
     for task in watchers {
         assert!(super::lifecycle::wait_task(task));
         assert_eq!(super::lifecycle::result(task), (1, 0));
