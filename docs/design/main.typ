@@ -5,7 +5,7 @@
   author: ("Shuyra",),
   description: [The architectural motivation and safety arguments of Shuyra Kernel.],
 )
-#set page(paper: "a4", margin: (x: 2.5cm, y: 2.7cm))
+#set page(paper: "a4", margin: (x: 2.5cm, y: 2.7cm), numbering: "1")
 #set text(size: 10.5pt)
 #set par(justify: true)
 #set heading(numbering: "1.")
@@ -17,7 +17,7 @@
   #text(size: 14pt)[A Design for Coherence]
 
   #v(1em)
-  #text(size: 9pt)[Architectural draft — not a stable ABI specification]
+  #text(size: 9pt)[Architectural draft]
 ]
 
 #v(2em)
@@ -25,5 +25,7 @@
 #pagebreak()
 
 #include "motivation.typ"
+#pagebreak(weak: true)
 #include "composition.typ"
+#pagebreak(weak: true)
 #include "assurance.typ"

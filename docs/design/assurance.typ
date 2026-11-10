@@ -1,4 +1,5 @@
 = Safety and completion obligations
+<assurance>
 
 == Identity and authority
 
@@ -56,10 +57,10 @@ requires target execution. A claim about a physical controller cannot be
 established solely by emulation. Each design claim must identify the
 smallest adequate verification boundary and the remaining assumptions.
 
-The public `Port` object is currently being reconsidered in Kernel
-Issue #124. The enduring requirement is authenticated external request
-identity, scoped authority, and trusted retirement. Whether a separate
-public Port should exist is not a premise of this design.
+External access requires an authenticated hardware requester, scoped
+authority, and trusted retirement evidence. The current public `Port`
+interface is under review in
+#link("https://github.com/shuyra-arche/kernel/issues/124")[Kernel Issue 124].
 
 The precise current operations, encoding, and supported hardware limits
 are specified in the Kernel API and implementation, rather than in this
