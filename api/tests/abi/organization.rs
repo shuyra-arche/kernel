@@ -5,7 +5,6 @@ use kernel_api::{
             EnvCall,
             flat::{FlatCall, operations as flat},
             nest::{NestCall, operations as nest},
-            port::{PortCall, operations as port},
         },
         operation::RegisterCall,
     },
@@ -14,11 +13,10 @@ use kernel_api::{
         flat::{FlatId, FlatInfo},
         identity::PendId,
         nest::{NestId, NestInfo, NestKind, NestPhase},
-        port::{PortId, PortInfo},
     },
 };
 #[test]
-fn runtime_calls_keep_distinct_domains_and_reject_bad_kinds() {
+fn runtime_calls_keep_distinct_domains_and_reject_retired_bindings() {
     let license = PendId::mint(7);
     let create = flat::Create {
         license,
@@ -36,32 +34,32 @@ fn runtime_calls_keep_distinct_domains_and_reject_bad_kinds() {
             level: 0,
         })
     );
-    let create = nest::Create {
-        license,
-        kind: NestKind::Internal,
-    };
+    let create = nest::Create { license };
     assert_eq!(
         EnvCall::from_wire(nest::Create::SLOT, &create.pack()).unwrap(),
-        EnvCall::Nest(NestCall::Create {
-            license,
-            kind: NestKind::Internal
-        })
+        EnvCall::Nest(NestCall::Create { license })
     );
-    let mut words = create.pack();
-    words[1] = 2;
-    assert!(EnvCall::from_wire(nest::Create::SLOT, &words).is_err());
-    let inspect = port::Inspect {
+    let inspect = nest::Inspect {
         token: license,
         out: VirtAddr::new(4096),
     };
     assert_eq!(
-        EnvCall::from_wire(port::Inspect::SLOT, &inspect.pack()).unwrap(),
-        EnvCall::Port(PortCall::Inspect {
+        EnvCall::from_wire(nest::Inspect::SLOT, &inspect.pack()).unwrap(),
+        EnvCall::Nest(NestCall::Inspect {
             token: license,
             out: VirtAddr::new(4096)
         })
     );
-    assert!(EnvCall::from_wire(abi::PREFIX | (14 << 32) | 1, &[0; 6]).is_err());
+    for number in [
+        abi::PREFIX | (14 << 32),
+        abi::PREFIX | (14 << 32) | 1,
+        abi::PREFIX | (13 << 32) | 2,
+        abi::PREFIX | (13 << 32) | 3,
+        (5usize << 48) | (13 << 32),
+        (5usize << 48) | (14 << 32),
+    ] {
+        assert!(EnvCall::from_wire(number, &[7, 8, 0, 0, 0, 0]).is_err());
+    }
 }
 #[test]
 fn organization_snapshots_reject_unknown_identity_geometry_and_phase() {
@@ -82,26 +80,19 @@ fn organization_snapshots_reject_unknown_identity_geometry_and_phase() {
         id: NestId::new(8).unwrap(),
         kind: NestKind::External,
         phase: NestPhase::Closing,
-        port: 9,
         fault_sequence: 2,
         fault_cause: 13,
         fault_address: 0x4000,
         fault_requester: 8,
     };
+    assert_eq!(NestInfo::WIDTH, 56);
     assert_eq!(NestInfo::from_bytes(&nest.to_bytes()), Some(nest));
-    let mut bad = nest.to_bytes();
-    bad[16] = 5;
-    assert!(NestInfo::from_bytes(&bad).is_none());
-    let port = PortInfo {
-        id: PortId::new(9).unwrap(),
-        controller: 1,
-        requester: 8,
-        address_bits: 38,
-        page_size: 4096,
-        window_size: 1 << 21,
-    };
-    assert_eq!(PortInfo::from_bytes(&port.to_bytes()), Some(port));
-    let mut bad = port.to_bytes();
-    bad[32] = 1;
-    assert!(PortInfo::from_bytes(&bad).is_none());
+    for (at, value) in [(0, 0), (8, 2), (16, 5)] {
+        let mut bad = nest.to_bytes();
+        bad[at] = value;
+        assert!(NestInfo::from_bytes(&bad).is_none());
+    }
+    for len in 0..NestInfo::WIDTH {
+        assert!(NestInfo::from_bytes(&nest.to_bytes()[..len]).is_none());
+    }
 }

@@ -3,7 +3,7 @@ use kernel_api::{
     abi::call::pend::PendFail,
     model::{
         modifiable::Modifiable::{No, Yes},
-        pend::{CreationRights, Distributable, Operations, PendStatus},
+        pend::{CreationRights, Distributable, Limits, NestRights, Operations, PendStatus},
         sign::SignRights,
     },
 };
@@ -16,6 +16,7 @@ fn logical_closure_rejects_unvisited_descendants_and_keeps_siblings_alive() {
     for operations in [
         Operations::None(CreationRights::all()),
         Operations::Sign(SignRights::all()),
+        Operations::Nest(NestRights::all()),
     ] {
         let parent = root(operations);
         let branch = root(operations);
@@ -86,4 +87,82 @@ fn ledger_closure_invalidates_unvisited_descendants_without_reopening_a_borrow()
         parent.held_by(&Arc::new(AtomicBool::new(false))),
         Err(PendFail::Denied)
     );
+}
+
+#[test]
+fn retirement_retention_does_not_freeze_narrowing_or_restore_authority() {
+    let parent = root(Operations::Nest(NestRights::all()));
+    parent.retain_retirement().unwrap();
+    let limit = Limits {
+        operations: Operations::Nest(NestRights::INSPECT),
+        distributable: Distributable::No,
+        ..parent.limits()
+    };
+    assert_eq!(parent.can_narrow(limit), Ok(()));
+    parent.narrow(limit, None).unwrap();
+    assert!(parent.permits(limit.operations));
+    assert!(!parent.permits(Operations::Nest(NestRights::PUBLISH)));
+    assert!(!parent.limits().permits_child(limit));
+    parent.invalidate();
+    assert_eq!(parent.status(), PendStatus::Retiring);
+    assert_eq!(parent.settle(), Err(PendFail::Busy));
+    assert_eq!(parent.retain_retirement(), Err(PendFail::Dead));
+    // Host supplies a logical discharge; actual hardware proof is exercised
+    // by the IOMMU backend and Kernel guest tests, not by this state test.
+    unsafe { parent.release_retirement() };
+    assert!(!parent.external_pending());
+    parent.settle().unwrap();
+    assert_eq!(parent.status(), PendStatus::Dead);
+    assert!(!parent.permits(limit.operations));
+}
+
+#[test]
+fn publication_permission_cannot_narrow_until_its_exact_route_returns() {
+    let branch = root(Operations::Nest(NestRights::all()));
+    branch.retain_retirement().unwrap();
+    branch.retain_route().unwrap();
+    let limit = Limits {
+        operations: Operations::Nest(NestRights::INSPECT),
+        ..branch.limits()
+    };
+    assert_eq!(branch.can_narrow(limit), Err(PendFail::Busy));
+    assert_eq!(branch.narrow(limit, None), Err(PendFail::Busy));
+    unsafe { branch.release_route() };
+    branch.narrow(limit, None).unwrap();
+    assert!(branch.external_pending());
+    branch.invalidate();
+    assert_eq!(branch.settle(), Err(PendFail::Busy));
+    unsafe { branch.release_retirement() };
+    branch.settle().unwrap();
+}
+
+#[test]
+fn child_retirement_does_not_discharge_root_or_sibling_obligations() {
+    let operations = Operations::Nest(NestRights::all());
+    let parent = root(operations);
+    parent.retain_retirement().unwrap();
+    let first = root(operations);
+    first.inherit(&parent).unwrap();
+    let other = root(operations);
+    other.inherit(&parent).unwrap();
+    first.retain_route().unwrap();
+    other.retain_route().unwrap();
+    first.invalidate();
+    assert_eq!(first.settle(), Err(PendFail::Busy));
+    assert!(parent.permits(operations));
+    assert!(other.permits(operations));
+    unsafe { first.release_route() };
+    first.settle().unwrap();
+    assert!(parent.external_pending());
+    assert!(other.external_pending());
+    assert!(other.permits(operations));
+    parent.invalidate();
+    assert!(!other.permits(operations));
+    other.invalidate();
+    assert_eq!(other.settle(), Err(PendFail::Busy));
+    unsafe { other.release_route() };
+    other.settle().unwrap();
+    assert_eq!(parent.settle(), Err(PendFail::Busy));
+    unsafe { parent.release_retirement() };
+    parent.settle().unwrap();
 }

@@ -13,7 +13,6 @@ mod flat;
 mod nest;
 mod outcome;
 mod pend;
-mod port;
 mod room;
 pub(crate) mod sign;
 mod unit;
@@ -75,7 +74,6 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
                 EnvCall::Share(_) => ret_err(frame, abi::share_view::ShareFail::Denied),
                 EnvCall::Sign(_) => ret_err(frame, abi::sign::SignFail::Denied),
                 EnvCall::Pend(_) => ret_err(frame, abi::pend::PendFail::Denied),
-                EnvCall::Port(_) => ret_err(frame, abi::port::PortFail::Denied),
                 EnvCall::Nest(_) => ret_err(frame, abi::nest::NestFail::Denied),
                 EnvCall::Debug(_) => ret_err(frame, abi::debug::DebugFail::Denied),
             }
@@ -98,10 +96,6 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
         }
         EnvCall::Nest(call) => {
             nest::dispatch(frame, call, &ident);
-            Outcome::Resume
-        }
-        EnvCall::Port(call) => {
-            port::dispatch(frame, call, &ident);
             Outcome::Resume
         }
         EnvCall::Pend(call) => {

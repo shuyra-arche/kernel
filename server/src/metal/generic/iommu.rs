@@ -224,16 +224,3 @@ unsafe impl<P: Copy, H: Hardware<P> + ?Sized> Hardware<P> for Box<H> {
 }
 
 pub(crate) type Backend<P> = Box<dyn Hardware<P> + Send>;
-
-/// A trusted exclusive binding to an IOMMU requester. Device business control
-/// lives outside Kernel; publication and withdrawal govern hardware reachability.
-///
-/// # Safety
-/// A bound backend must cover every request issued through the port. After an
-/// irreversible binding attempt, the port must reject a second bind until the
-/// implementation can prove reauthorization safe.
-pub(crate) unsafe trait Port<P: Copy>: Send {
-    type Error;
-
-    fn bind(&mut self) -> Result<Backend<P>, Self::Error>;
-}

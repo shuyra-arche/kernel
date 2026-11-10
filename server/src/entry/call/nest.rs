@@ -1,6 +1,6 @@
 use crate::{
     basis::{
-        nest::{Nest, SpaceKind, authority::binding},
+        nest::{SpaceKind, authority::binding},
         pend,
         unit::task::TaskIdent,
     },
@@ -12,7 +12,6 @@ use kernel_api::{
     model::{
         identity::{Mark, PendId},
         modifiable::Modifiable,
-        nest::NestKind,
         pend::CreationRights,
     },
 };
@@ -33,21 +32,16 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: NestCall, ident: &Arc<Task
             }
             let _commit = crate::basis::commit();
             match call {
-                NestCall::Create { license, kind } => {
+                NestCall::Create { license } => {
                     crate::basis::pend::access::license(&actor, license, CreationRights::NEST)
                         .map_err(|_| NestFail::Denied)?;
-                    let nest = match kind {
-                        NestKind::Internal => {
-                            crate::basis::unit::team::TeamBuilder::prepare_nest(SpaceKind::User)
-                        }
-                        NestKind::External => Nest::external_empty(),
-                    }
-                    .map_err(|_| NestFail::OutOfMemory)?;
+                    let nest = crate::basis::unit::team::TeamBuilder::prepare_nest(SpaceKind::User)
+                        .map_err(|_| NestFail::OutOfMemory)?;
                     let root = Arc::try_new(
                         pend::PendEntry::try_new(
                             pend::Target::Nest {
                                 owner: actor.ident.id,
-                                nest: nest.clone(),
+                                nest,
                             },
                             Mark::NONE,
                             Modifiable::Yes,
@@ -57,15 +51,11 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: NestCall, ident: &Arc<Task
                     )
                     .map_err(|_| NestFail::OutOfMemory)?;
                     let token: PendId = root.token();
-                    let registration = actor
+                    actor
                         .pend
-                        .prepare(root.clone())
-                        .map_err(|_| NestFail::OutOfMemory)?;
-                    if kind == NestKind::External {
-                        binding::register(&nest, &actor, &root)?;
-                    }
-                    registration.publish();
-
+                        .prepare(root)
+                        .map_err(|_| NestFail::OutOfMemory)?
+                        .publish();
                     Ok(token.get())
                 }
                 NestCall::Inspect { token, out } => {
@@ -73,14 +63,6 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: NestCall, ident: &Arc<Task
                     if !ident.team.nest.copy_out(&info.to_bytes(), out) {
                         return Err(NestFail::Denied);
                     }
-                    Ok(0)
-                }
-                NestCall::Attach { token, port } => {
-                    binding::attach(&actor, token, port)?;
-                    Ok(0)
-                }
-                NestCall::Detach { token } => {
-                    binding::detach(&actor, token)?;
                     Ok(0)
                 }
                 NestCall::Delete { .. } => unreachable!(),

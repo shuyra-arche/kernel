@@ -1,7 +1,7 @@
 //! Authorization identity is separate from the target object's identity.
 use super::Operations;
 use crate::model::sign::SignId;
-use crate::model::{flat::FlatId, nest::NestId, port::PortId, view::ViewId};
+use crate::model::{flat::FlatId, nest::NestId, view::ViewId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewTarget {
@@ -14,7 +14,6 @@ pub enum Target {
     View(ViewTarget),
     Flat(FlatId),
     Nest(NestId),
-    Port(PortId),
     Sign(SignId),
 }
 impl Target {
@@ -25,7 +24,6 @@ impl Target {
             Self::View(ViewTarget::Share(id)) => [2, id.get()],
             Self::Flat(id) => [3, id.get()],
             Self::Nest(id) => [4, id.get()],
-            Self::Port(id) => [5, id.get()],
             Self::Sign(id) => [6, id.get()],
         }
     }
@@ -41,7 +39,7 @@ impl Target {
             2 => Self::View(ViewTarget::Share(ViewId::new(id))),
             3 => Self::Flat(FlatId::new(id)?),
             4 => Self::Nest(NestId::new(id)?),
-            5 => Self::Port(PortId::new(id)?),
+            // Kind 5 was Port and remains invalid.
             6 => Self::Sign(SignId::new(id)),
             _ => return None,
         })

@@ -31,16 +31,19 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     if let Some(route) = crate::basis::room::interrupt::external() {
         route.grants(registry)?;
     }
-    for port in crate::basis::port::PORTS.lock().iter() {
+    let nests = core::mem::take(&mut *external::NESTS.lock());
+    for (name, nest) in nests {
         let root = pend::PendEntry::try_new(
-            pend::Target::Port(port.clone()),
+            pend::Target::Nest {
+                owner: TaskId::new(0),
+                nest: nest.clone(),
+            },
             Mark::NONE,
-            Modifiable::No,
+            Modifiable::Yes,
             None,
         )?;
-        registry
-            .register(Name::Port(port.id().get() as u64), root)
-            .map_err(|e| e.into_parts().0)?;
+        crate::basis::nest::authority::binding::register(&nest, root.authority())?;
+        registry.register(name, root).map_err(|e| e.into_parts().0)?;
     }
     let meta = crate::basis::flat::sharing::region(dtb.base, dtb.size, TaskId::new(0))?;
     let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;

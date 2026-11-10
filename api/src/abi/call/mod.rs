@@ -4,7 +4,6 @@ pub mod debug;
 pub mod flat;
 pub mod nest;
 pub mod pend;
-pub mod port;
 pub mod room;
 pub mod sign;
 pub mod unit;
@@ -23,7 +22,6 @@ pub enum EnvCall {
     Share(self::share_view::ShareCall),
     Sign(self::sign::SignCall),
     Pend(self::pend::PendCall),
-    Port(self::port::PortCall),
     Nest(self::nest::NestCall),
     /// 调试面（见 [`self::debug::DebugCall`]）。
     Debug(self::debug::DebugCall),
@@ -53,7 +51,7 @@ impl EnvCall {
             11 => Ok(EnvCall::Sign(self::sign::SignCall::from_wire(slot, regs)?)),
             12 => Ok(EnvCall::Flat(self::flat::FlatCall::from_wire(slot, regs)?)),
             13 => Ok(EnvCall::Nest(self::nest::NestCall::from_wire(slot, regs)?)),
-            14 => Ok(EnvCall::Port(self::port::PortCall::from_wire(slot, regs)?)),
+            // Domain 14 was Port. Never reinterpret an old source capability.
             _ => Err(crate::abi::register::Decode::BadSlot),
         }
     }

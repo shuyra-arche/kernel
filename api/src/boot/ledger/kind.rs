@@ -17,10 +17,11 @@ pub enum ResourceKind {
     /// 空载荷的信号（中断门铃）。
     Sign = 1,
     Clone = 2,
-    /// Kernel-minted execution, device or resource-management qualification.
+    /// Kernel-minted execution or resource-management qualification.
     Control = 4,
     None = 5,
-    Port = 6,
+    /// A trusted address-space Pend, not a requester-number credential.
+    Nest = 7,
 }
 
 impl ResourceKind {
@@ -32,7 +33,8 @@ impl ResourceKind {
             KIND_HOLE => Some(ResourceKind::Clone),
             4 => Some(ResourceKind::Control),
             5 => Some(ResourceKind::None),
-            6 => Some(ResourceKind::Port),
+            // Kind 6 was Port and remains invalid.
+            7 => Some(ResourceKind::Nest),
             _ => None,
         }
     }

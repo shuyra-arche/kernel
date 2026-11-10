@@ -31,9 +31,9 @@ fn ledger_keeps_header_entry_offsets_and_reserved_bytes() {
     let bytes = ledger(&[entry()]);
     let mut expected = vec![0u8; 48];
     expected[..4].copy_from_slice(&VERSION.to_le_bytes());
-    expected[4] = 1; // count
-    expected[8] = 2; // Name::Page class, Dtb item 0
-    expected[32] = 19; // token, after name/kind/seven reserved bytes
+    expected[4] = 1;
+    expected[8] = 2;
+    expected[32] = 19;
     assert_eq!(bytes, expected);
     assert_eq!(kernel_api::boot::ledger::ENTRY_LEN, 40);
     assert_eq!(Header::LEN, 8);
@@ -130,12 +130,16 @@ fn ledger_writer_distinguishes_used_length_from_buffer_capacity() {
 }
 
 #[test]
-fn boot_creation_license_and_sign_are_pend_targets() {
+fn boot_creation_license_sign_and_nest_are_distinct_pend_targets() {
     use kernel_api::boot::ledger::{Call, Trap};
     let values = [
         Entry::new(Name::Call(Call::Create), ResourceKind::None, 31),
         Entry::new(Name::Trap(Trap::SupervisorExternal), ResourceKind::Sign, 32),
-        Entry::new(Name::Port(1), ResourceKind::Port, 33),
+        Entry::new(
+            Name::Nest { controller: 0x30000000, requester: 0 },
+            ResourceKind::Nest,
+            33,
+        ),
     ];
     let bytes = ledger(&values);
     assert_eq!(
@@ -151,6 +155,39 @@ fn boot_creation_license_and_sign_are_pend_targets() {
         31,
     )]);
     assert!(Entries::new(&wrong).is_none());
+}
+
+#[test]
+fn trusted_nest_routes_are_descriptions_not_port_handles() {
+    let name = Name::Nest { controller: 0x30000000, requester: 8 };
+    let record = Entry::new(name, ResourceKind::Nest, 101);
+    let bytes = ledger(&[record]);
+    assert_eq!(Entries::new(&bytes).unwrap().find(name), Some(record));
+    assert_eq!(bytes[8], 5);
+    assert_eq!(bytes[12], 8);
+    assert_eq!(bytes[24], 7);
+    for raw in [0, u32::MAX] {
+        let record = Entry::new(
+            Name::Nest { controller: 0x30000000, requester: raw },
+            ResourceKind::Nest,
+            101,
+        );
+        // The codec does not authenticate topology; trusted admission does.
+        assert!(Entries::new(&ledger(&[record])).is_some());
+    }
+    assert!(Entries::new(&ledger(&[Entry::new(
+        Name::Nest { controller: 0, requester: 8 },
+        ResourceKind::Nest,
+        101,
+    )])).is_none());
+    assert!(Entries::new(&ledger(&[Entry::new(name, ResourceKind::Share, 101)])).is_none());
+    let mut old_kind = bytes.clone();
+    old_kind[24] = 6;
+    assert!(Entries::new(&old_kind).is_none());
+    let mut old_name = bytes;
+    old_name[8] = 3;
+    old_name[12..16].fill(0);
+    assert!(Entries::new(&old_name).is_none());
 }
 
 #[test]
