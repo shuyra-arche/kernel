@@ -1,9 +1,20 @@
 name: Check
 
+# Documentation-only changes do not need Kernel builds or QEMU tests.
+# Mixed source/documentation changes still run the complete checks.
+# workflow_call intentionally remains unfiltered for releases.
 on:
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.mdx'
+      - 'docs/**'
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.mdx'
+      - 'docs/**'
   workflow_call:
 
 permissions:
