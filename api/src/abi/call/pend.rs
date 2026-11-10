@@ -44,8 +44,8 @@ pub mod operations {
         pub dst: super::TaskId,
         pub token: super::PendId,
     }
-    /// The holder retires this Pend and its descendants, returning the parent borrow
-    /// only after all CPU/device access has settled. Busy retains the responsibility.
+    /// Retire this Pend and its descendants. Busy retains the withdrawal
+    /// responsibility until the affected CPU and external accesses settle.
     #[operation(slot = 15, output = (), error = PendFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Return {

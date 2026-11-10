@@ -98,8 +98,6 @@ fn remove(task: &Arc<Task>, entry: &Arc<PendEntry>) -> Result<(), PendFail> {
             return Err(PendFail::Busy);
         }
         drop(heirs);
-        // Return the borrow before removing the edge: another leaf worker must
-        // never observe a childless parent with an unreturned internal borrow.
         entry.authority().settle()?;
         if let (Some(source), Some(parent)) = (entry.sire(), entry.lord().upgrade()) {
             super::remove_heir(&parent, source, entry.token());
@@ -130,7 +128,7 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
     for _ in 0..8 {
         let (holder, entry) = leaf(task, token)?;
         // No ledger or COMMIT guard crosses hardware withdrawal. Busy retains
-        // both the closed authority and its exact mapping/borrow obligations.
+        // both the closed authority and its exact mapping and hardware obligations.
         if let Some(meta) = entry.target().memory() {
             meta.close_maps(Some(entry.token()))?;
         }

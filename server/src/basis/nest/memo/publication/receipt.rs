@@ -43,7 +43,7 @@ impl Publication {
         page: &Arc<Page>,
         address: usize,
         writable: bool,
-        change: Option<&Change>,
+        change: Option<(&Change, bool)>,
     ) -> Result<Self, Error> {
         let projection = Projection {
             id: BindingId::allocate()?,
@@ -60,7 +60,9 @@ impl Publication {
         }
         hardware.validate(projection)?;
         let retention = match change {
-            Some(change) if Arc::ptr_eq(change.page(), page) => change.external(writable)?,
+            Some((change, own_freeze)) if Arc::ptr_eq(change.page(), page) => {
+                change.external(writable, own_freeze)?
+            }
             Some(_) => return Err(Error::InvalidRange),
             None => page.prepare_external(writable)?,
         };

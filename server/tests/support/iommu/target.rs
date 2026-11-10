@@ -26,9 +26,13 @@ impl<H: Hardware<PageId>> Target<H> {
         writable: bool,
         change: Option<&Change>,
     ) -> Result<(), Error> {
-        let publication =
-            self.backend
-                .prepare(self.publication.is_some(), page, address, writable, change)?;
+        let publication = self.backend.prepare(
+            self.publication.is_some(),
+            page,
+            address,
+            writable,
+            change.map(|change| (change, false)),
+        )?;
         self.publication = Some(publication);
         Ok(())
     }

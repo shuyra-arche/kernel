@@ -5,7 +5,6 @@ use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 
-use super::Modifiable;
 use super::PendEntry;
 use super::ledger::{insert_heir, with_pair_uncommitted};
 use crate::basis::flat::sharing::SharingOperation;
@@ -45,7 +44,6 @@ pub(crate) fn accord(
     requested: super::Window,
     permit: Option<(PendId, kernel_api::model::pend::Operations)>,
 ) -> Result<usize, PendFail> {
-    let subset = limits.modifiable;
     let share = permit.is_some_and(|(_, operation)| {
         operation
             == kernel_api::model::pend::Operations::None(
@@ -80,67 +78,44 @@ pub(crate) fn accord(
         Ok::<(), PendFail>(())
     };
     let token = with_pair_uncommitted(caller, &target, || {
-        let (pend_entry, granted, registration, window) = {
-            let _commit = crate::basis::commit();
-            if !super::live(caller) || !super::live(&target) {
-                return Err(PendFail::Dead);
-            }
-            if let Some((token, operation)) = permit {
-                if !super::locate(caller, token).is_some_and(|entry| entry.permits(operation)) {
-                    return Err(PendFail::Denied);
-                }
-            }
-            let pend_entry = super::locate(caller, src).ok_or(PendFail::Denied)?;
-            if !pend_entry.alive() {
-                return Err(PendFail::Dead);
-            }
-            if !derivable(&pend_entry, limits, share) {
-                return Err(PendFail::Denied);
-            }
-            let mark = if mark == Mark::NONE {
-                pend_entry.mark()
-            } else {
-                mark
-            };
-            let window = effective_window(&pend_entry, requested)?;
-            check_source(window)?;
-            if share_view.is_some() {
-                pend_entry.authority().can_borrow(subset)?;
-            }
-            let mut granted = pend_entry.vest_window(mark, limits, window, share)?;
-            granted.parent(src, Arc::downgrade(caller));
-            let granted = Arc::try_new(granted).map_err(|_| PendFail::OutOfMemory)?;
-            {
-                let mut heirs = caller.pend.heirs.lock();
-                if heirs.len() >= 1024 {
-                    return Err(PendFail::OutOfMemory);
-                }
-                heirs.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
-            }
-            let registration = target.pend.prepare(granted.clone())?;
-            (pend_entry, granted, registration, window)
-        };
-        // Prepared metadata and table capacity cannot fail after withdrawal. The
-        // source/recipient tables stay locked, but remote TLB completion never
-        // runs under the global work commit lock.
-        if let Some(meta) = &share_view
-            && pend_entry.modifiable() == Modifiable::Yes
-        {
-            crate::basis::room::interrupt::withdraw(src);
-            meta.close_maps(Some(src))?;
-        }
         let _commit = crate::basis::commit();
         if !super::live(caller) || !super::live(&target) {
             return Err(PendFail::Dead);
         }
-        // Other source operations could run while the CPU mappings withdrew.
-        check_source(window)?;
-        let token = granted.token();
-        // For Share a mutable parent loses all CPU access before lending. Readers
-        // may coexist; a writer is always exclusive. Clone owns independent payloads.
-        if share_view.is_some() {
-            pend_entry.authority().borrow(granted.authority())?;
+        if let Some((token, operation)) = permit {
+            if !super::locate(caller, token).is_some_and(|entry| entry.permits(operation)) {
+                return Err(PendFail::Denied);
+            }
         }
+        let pend_entry = super::locate(caller, src).ok_or(PendFail::Denied)?;
+        if !pend_entry.alive() {
+            return Err(PendFail::Dead);
+        }
+        if !derivable(&pend_entry, limits, share) {
+            return Err(PendFail::Denied);
+        }
+        let mark = if mark == Mark::NONE {
+            pend_entry.mark()
+        } else {
+            mark
+        };
+        if share_view.is_some() && pend_entry.authority().modifiable().is_none() {
+            return Err(PendFail::Busy);
+        }
+        let window = effective_window(&pend_entry, requested)?;
+        check_source(window)?;
+        let mut granted = pend_entry.vest_window(mark, limits, window, share)?;
+        granted.parent(src, Arc::downgrade(caller));
+        let granted = Arc::try_new(granted).map_err(|_| PendFail::OutOfMemory)?;
+        {
+            let mut heirs = caller.pend.heirs.lock();
+            if heirs.len() >= 1024 {
+                return Err(PendFail::OutOfMemory);
+            }
+            heirs.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+        }
+        let registration = target.pend.prepare(granted.clone())?;
+        let token = granted.token();
         crate::basis::room::interrupt::dispatch(&target, &granted)?;
         insert_heir(caller, src, Arc::downgrade(&target), token);
         registration.publish();

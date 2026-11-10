@@ -11,9 +11,9 @@ use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
 const QUARANTINED: usize = 1 << (usize::BITS - 1);
-const MODIFIABLE: usize = 1 << (usize::BITS - 2);
+const EXTERNAL_WRITER: usize = 1 << (usize::BITS - 2);
 const CHANGING: usize = 1 << (usize::BITS - 3);
-const COUNTER_BITS: u32 = (usize::BITS - 3) / 2;
+const COUNTER_BITS: u32 = (usize::BITS - 3) / 4;
 const MAX_USES: usize = (1 << COUNTER_BITS) - 1;
 
 #[derive(Debug, Clone, Copy)]
@@ -34,7 +34,7 @@ pub(crate) enum RetainError {
 #[derive(Clone, Copy)]
 enum Admission {
     Ordinary,
-    Changing,
+    Changing { own_freeze: bool },
 }
 use kernel_api::model::modifiable::Modifiable;
 
@@ -47,6 +47,10 @@ enum Event {
     },
     Begin,
     End,
+    Freeze {
+        retracts: Option<bool>,
+    },
+    Thaw,
     Discharge {
         kind: Kind,
         access: Modifiable,
@@ -56,10 +60,12 @@ enum Event {
 
 #[derive(Clone, Copy)]
 struct State {
-    cpu: usize,
+    cpu_readers: usize,
+    cpu_writers: usize,
     external: usize,
+    freezes: usize,
     quarantined: bool,
-    modifiable: bool,
+    external_writer: bool,
     changing: bool,
 }
 
@@ -83,36 +89,74 @@ impl State {
                 ..
             } if self.changing => Err(RetainError::Busy),
             Event::Register {
-                admission: Admission::Changing,
+                admission: Admission::Changing { .. },
                 ..
             } if !self.changing => Err(RetainError::Unbalanced),
-            Event::Register { kind, access, .. } => {
-                let modifiable = access == Modifiable::Yes;
-                if self.modifiable || (modifiable && (self.cpu != 0 || self.external != 0)) {
-                    return Err(RetainError::Borrowed);
+            Event::Freeze { retracts } => {
+                if self.quarantined {
+                    return Err(RetainError::Quarantined);
                 }
-                let uses = self.uses(kind);
-                if uses == MAX_USES {
+                if retracts.is_some_and(|writable| self.writers() > usize::from(writable)) {
+                    return Err(RetainError::Busy);
+                }
+                if self.freezes == MAX_USES {
                     return Err(RetainError::Exhausted);
                 }
                 Ok(Self {
-                    modifiable,
-                    ..self.with_uses(kind, uses + 1)
+                    freezes: self.freezes + 1,
+                    ..self
                 })
             }
-            Event::Discharge { kind, access } => {
-                let modifiable = access == Modifiable::Yes;
-                if modifiable != self.modifiable {
-                    return Err(RetainError::Unbalanced);
+            Event::Thaw => Ok(Self {
+                freezes: self.freezes.checked_sub(1).ok_or(RetainError::Unbalanced)?,
+                ..self
+            }),
+            Event::Register {
+                kind,
+                access,
+                admission,
+            } => {
+                let writable = access == Modifiable::Yes;
+                let own_freeze = matches!(admission, Admission::Changing { own_freeze: true });
+                if writable && self.freezes > usize::from(own_freeze) {
+                    return Err(RetainError::Busy);
                 }
-                let uses = self
-                    .uses(kind)
-                    .checked_sub(1)
-                    .ok_or(RetainError::Unbalanced)?;
-                Ok(Self {
-                    modifiable: false,
-                    ..self.with_uses(kind, uses)
-                })
+                // CPU mappings share coherent RAM. Preserve the exclusion of
+                // writable external access and of CPU writes during external use.
+                let conflicts = match (kind, writable) {
+                    (Kind::Cpu, false) => self.external_writer,
+                    (Kind::Cpu, true) => self.external != 0,
+                    (Kind::External, false) => self.writers() != 0,
+                    (Kind::External, true) => {
+                        self.external != 0 || self.cpu_readers != 0 || self.cpu_writers != 0
+                    }
+                };
+                if conflicts {
+                    return Err(RetainError::Borrowed);
+                }
+                let mut next = self;
+                let uses = next.uses(kind, writable);
+                if *uses == MAX_USES {
+                    return Err(RetainError::Exhausted);
+                }
+                *uses += 1;
+                if matches!(kind, Kind::External) {
+                    next.external_writer = writable;
+                }
+                Ok(next)
+            }
+            Event::Discharge { kind, access } => {
+                let writable = access == Modifiable::Yes;
+                let mut next = self;
+                if matches!(kind, Kind::External) {
+                    if writable != self.external_writer {
+                        return Err(RetainError::Unbalanced);
+                    }
+                    next.external_writer = false;
+                }
+                let uses = next.uses(kind, writable);
+                *uses = uses.checked_sub(1).ok_or(RetainError::Unbalanced)?;
+                Ok(next)
             }
             Event::Abandon => Ok(Self {
                 quarantined: true,
@@ -121,38 +165,41 @@ impl State {
         }
     }
 
-    fn uses(self, kind: Kind) -> usize {
-        match kind {
-            Kind::Cpu => self.cpu,
-            Kind::External => self.external,
-        }
+    fn writers(self) -> usize {
+        self.cpu_writers + usize::from(self.external_writer)
     }
 
-    fn with_uses(self, kind: Kind, uses: usize) -> Self {
-        match kind {
-            Kind::Cpu => Self { cpu: uses, ..self },
-            Kind::External => Self {
-                external: uses,
-                ..self
-            },
+    fn uses(&mut self, kind: Kind, writable: bool) -> &mut usize {
+        match (kind, writable) {
+            (Kind::Cpu, false) => &mut self.cpu_readers,
+            (Kind::Cpu, true) => &mut self.cpu_writers,
+            (Kind::External, _) => &mut self.external,
         }
     }
 
     fn decode(raw: usize) -> Self {
         Self {
-            cpu: raw & MAX_USES,
-            external: (raw >> COUNTER_BITS) & MAX_USES,
+            cpu_readers: raw & MAX_USES,
+            cpu_writers: (raw >> COUNTER_BITS) & MAX_USES,
+            external: (raw >> (2 * COUNTER_BITS)) & MAX_USES,
+            freezes: (raw >> (3 * COUNTER_BITS)) & MAX_USES,
             quarantined: raw & QUARANTINED != 0,
-            modifiable: raw & MODIFIABLE != 0,
+            external_writer: raw & EXTERNAL_WRITER != 0,
             changing: raw & CHANGING != 0,
         }
     }
 
     fn encode(self) -> usize {
-        self.cpu
-            | (self.external << COUNTER_BITS)
+        self.cpu_readers
+            | (self.cpu_writers << COUNTER_BITS)
+            | (self.external << (2 * COUNTER_BITS))
+            | (self.freezes << (3 * COUNTER_BITS))
             | if self.quarantined { QUARANTINED } else { 0 }
-            | if self.modifiable { MODIFIABLE } else { 0 }
+            | if self.external_writer {
+                EXTERNAL_WRITER
+            } else {
+                0
+            }
             | if self.changing { CHANGING } else { 0 }
     }
 }
@@ -186,11 +233,16 @@ impl Reclaim {
             admission: Admission::Ordinary,
         })
     }
-    pub(super) fn register_during(&self, kind: Kind, modifiable: bool) -> Result<(), RetainError> {
+    pub(super) fn register_during(
+        &self,
+        kind: Kind,
+        modifiable: bool,
+        own_freeze: bool,
+    ) -> Result<(), RetainError> {
         self.apply(Event::Register {
             kind,
             access: mode(modifiable),
-            admission: Admission::Changing,
+            admission: Admission::Changing { own_freeze },
         })
     }
     pub(super) fn begin(&self) -> Result<(), RetainError> {
@@ -199,9 +251,15 @@ impl Reclaim {
     pub(super) fn end(&self) {
         self.apply(Event::End).expect("live change");
     }
+    pub(super) fn freeze(&self, retracts: Option<bool>) -> Result<(), RetainError> {
+        self.apply(Event::Freeze { retracts })
+    }
+    pub(super) fn thaw(&self) {
+        self.apply(Event::Thaw).expect("live freeze");
+    }
     pub(super) fn frozen(&self) -> bool {
         let state = State::decode(self.0.load(Ordering::Acquire));
-        state.changing && !state.modifiable && !state.quarantined
+        state.changing && state.writers() == 0 && !state.quarantined
     }
     pub(super) fn is_changing(&self) -> bool {
         State::decode(self.0.load(Ordering::Acquire)).changing

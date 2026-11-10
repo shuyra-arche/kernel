@@ -41,12 +41,18 @@ fn a_change_preserves_memos_but_cannot_reuse_the_page_until_all_are_withdrawn() 
     let change = page.begin().unwrap();
     assert!(matches!(left.phase(), crate::memo::Phase::Mapped));
     assert_eq!(left.id(), id);
-    assert_eq!(change.external(true).unwrap_err(), RetainError::Borrowed);
+    assert_eq!(
+        change.external(true, false).unwrap_err(),
+        RetainError::Borrowed
+    );
     // SAFETY: host tests publish no hardware; this tests bookkeeping only.
     unsafe { left.retire().settle() };
-    assert_eq!(change.external(true).unwrap_err(), RetainError::Borrowed);
+    assert_eq!(
+        change.external(true, false).unwrap_err(),
+        RetainError::Borrowed
+    );
     unsafe { right.retire().settle() };
-    let mut dma = change.external(true).unwrap();
+    let mut dma = change.external(true, false).unwrap();
     dma.publish();
     assert_eq!(page.exposure(), Exposure::External);
     drop(change); // ending the change is not DMA completion
@@ -95,7 +101,7 @@ fn swap_out_and_in_preserve_bytes_while_reused_frames_receive_new_identity() {
     unsafe { page.as_mut_ptr().write_bytes(0x5a, 4096) };
     let change = page.begin().unwrap();
     unsafe { memo.retire().settle() };
-    let mut io = change.external(false).unwrap();
+    let mut io = change.external(false, false).unwrap();
     io.publish();
     let mut backing = [0u8; 4096];
     unsafe {
@@ -111,7 +117,7 @@ fn swap_out_and_in_preserve_bytes_while_reused_frames_receive_new_identity() {
     assert_eq!(restored.physical_address(), pa);
     assert_ne!(restored.id(), old);
     let change = restored.begin().unwrap();
-    let mut io = change.external(true).unwrap();
+    let mut io = change.external(true, false).unwrap();
     io.publish();
     unsafe {
         restored
@@ -164,11 +170,11 @@ fn persistent_freezes_block_publication_through_another_logical_position() {
     let pool = Pool::new(0);
     let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
     let change = page.begin().unwrap();
-    let original = Freeze::new(change.clone());
+    let original = Freeze::new(change.clone(), None).unwrap();
     assert!(page.frozen());
-    let other = Freeze::new(change.clone());
+    let other = Freeze::new(change.clone(), None).unwrap();
     assert_eq!(change.hardware(true).unwrap_err(), RetainError::Busy);
-    assert_eq!(change.external(true).unwrap_err(), RetainError::Busy);
+    assert_eq!(change.external(true, false).unwrap_err(), RetainError::Busy);
     drop(original);
     let mut writer = change.hardware(true).unwrap();
     writer.publish();
@@ -180,4 +186,36 @@ fn persistent_freezes_block_publication_through_another_logical_position() {
     assert!(!page.frozen());
     drop(page);
     assert_eq!(pool.gives(), 1);
+}
+
+#[test]
+fn freeze_waits_for_other_writers_even_after_their_withdrawal_begins() {
+    use super::cell::Freeze;
+    let pool = Pool::new(0);
+    let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let reader = page.prepare_hardware(false).unwrap();
+    let mut target = page.prepare_hardware(true).unwrap();
+    let mut alias = page.prepare_hardware(true).unwrap();
+    target.publish();
+    alias.publish();
+    let change = page.begin().unwrap();
+    let alias = alias.retire();
+    assert!(matches!(
+        Freeze::new(change.clone(), Some(true)),
+        Err(RetainError::Busy)
+    ));
+    assert!(!page.frozen());
+    // SAFETY: host tests install no hardware mappings.
+    unsafe { alias.settle() };
+    let freeze = Freeze::new(change.clone(), Some(true)).unwrap();
+    assert!(freeze.belongs_to(&change));
+    assert!(target.writable());
+    assert!(!page.frozen());
+    unsafe { target.retire().settle() };
+    assert!(page.frozen());
+    assert_eq!(change.external(true, false).unwrap_err(), RetainError::Busy);
+    drop(reader);
+    drop(freeze);
+    drop(change);
+    assert!(page.allows_return());
 }

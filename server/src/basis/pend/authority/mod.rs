@@ -1,4 +1,4 @@
-//! Live authorization, immutable ancestry and unsettled data borrows.
+//! Live authorization, immutable ancestry and unsettled external access.
 use crate::metal::sync::{OnceLock, SpinLock};
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -14,15 +14,9 @@ mod state;
 use state::{Event, Failure, Phase, State};
 /// A Pend is the live access authority for one View range. Its parent obligation
 /// survives handle removal until CPU withdrawal and any external use are settled.
-#[derive(Clone, Copy)]
-enum BorrowKind {
-    Internal,
-    External,
-}
 struct ParentBorrow {
     parent: Arc<Pend>,
     access: Modifiable,
-    kind: BorrowKind,
 }
 
 pub(crate) struct Pend {
@@ -136,26 +130,7 @@ impl Pend {
         let state = *self.state.lock();
         state.usable().then_some(state.access)
     }
-    pub(crate) fn can_borrow(&self, access: Modifiable) -> Result<(), PendFail> {
-        if !self.alive() {
-            return Err(PendFail::Dead);
-        }
-        if self.routing.load(Ordering::Acquire) != 0 {
-            return Err(PendFail::Busy);
-        }
-        self.state
-            .lock()
-            .transition(Event::Borrow(access))
-            .map(|_| ())
-            .map_err(fail)
-    }
-    pub(crate) fn borrow(self: &Arc<Self>, child: &Arc<Self>) -> Result<(), PendFail> {
-        self.borrow_kind(child, BorrowKind::Internal)
-    }
     pub(crate) fn borrow_external(self: &Arc<Self>, child: &Arc<Self>) -> Result<(), PendFail> {
-        self.borrow_kind(child, BorrowKind::External)
-    }
-    fn borrow_kind(self: &Arc<Self>, child: &Arc<Self>, kind: BorrowKind) -> Result<(), PendFail> {
         if !self.alive() {
             return Err(PendFail::Dead);
         }
@@ -166,13 +141,10 @@ impl Pend {
             return Err(PendFail::Busy);
         }
         *state = state.transition(Event::Borrow(access)).map_err(fail)?;
-        if matches!(kind, BorrowKind::External) {
-            self.external.fetch_add(1, Ordering::Release);
-        }
+        self.external.fetch_add(1, Ordering::Release);
         *child.parent.lock() = Some(ParentBorrow {
             parent: self.clone(),
             access,
-            kind,
         });
         Ok(())
     }
@@ -308,16 +280,9 @@ impl Pend {
         }
         *state = state.transition(event).map_err(fail)?;
         drop(state);
-        if let Some(ParentBorrow {
-            parent,
-            access,
-            kind,
-        }) = self.parent.lock().take()
-        {
+        if let Some(ParentBorrow { parent, access }) = self.parent.lock().take() {
             let mut state = parent.state.lock();
-            if matches!(kind, BorrowKind::External) {
-                parent.external.fetch_sub(1, Ordering::Release);
-            }
+            parent.external.fetch_sub(1, Ordering::Release);
             *state = state
                 .transition(Event::Return(access))
                 .expect("registered child borrow");

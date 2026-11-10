@@ -11,7 +11,7 @@ code or runtime state. There is no Env package or compatibility facade.
 | `address` | PhysAddr, VirtAddr, PageIndex, PageOffset, PageCount and page geometry constants |
 | `model::identity` | TaskId, TeamId, PendId and Mark |
 | `model::cell` | SlotId, MappingId, allocation, Cell objects, positions, handoffs and observations |
-| `model::modifiable` | Modifiable: shared read or exclusive write access |
+| `model::modifiable` | Modifiable: write permission on a Pend |
 | `model::unit` | ProgramKind, UnitTarget, control authorities, creation descriptors, queries and stable results |
 | `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
 | `model::{flat,nest}` | Source and address-space identities and observations; never independent authorization |
@@ -85,7 +85,7 @@ There are no compatibility aliases for retired operations.
 Rust callers match `OutOfMemory` for allocation failures. Each domain uses
 its existing numeric ABI code for this variant.
 
-Call numbers are `(version << 48) | (domain << 32) | operation`. The ABI version is **7**.
+Call numbers are `(version << 48) | (domain << 32) | operation`. The ABI version is **8**.
 Other versions are rejected before dispatch.
 All byte descriptors use fixed little-endian 64-bit words and checked tags and
 reserved fields. Boot Capsule format 2 declares the matching ABI in byte 11;
@@ -105,7 +105,15 @@ old executable capsules are rejected before launch. The resource Ledger is
 | Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo, Inspect |
 | Debug | Put, Get |
 
-### Migration from ABI v6 to ABI v7
+### Migration from ABI v7 to ABI v8
+
+Rebuild executables and regenerate Capsule format 2 with ABI byte 8.
+Call slots, descriptor layouts and the resource Ledger version stay the same.
+Share grants now permit overlapping CPU mappings. Callers that need a stable
+copy can use Clone. Callers that need to freeze the original Page must
+withdraw other writable publications before Cell Retract can succeed.
+
+### Historical migration from ABI v6 to ABI v7
 
 Rebuild executables and regenerate Capsule format 2 with ABI byte 7. The
 resource Ledger stays at version 8. `Unit.Exit` uses slot 5 and takes
@@ -202,7 +210,9 @@ advance a non-wrapping generation. Use Inspect to refresh after Busy; replaying
 an old generation never starts a later cycle. Slot positions use generation zero
 and act on the current holding, not on an alleged historical content snapshot.
 
-Retract retains a persistent freeze in the Memo. `frozen` proves the admission
+Retract returns Busy before changing the Memo if another publication still
+retains write access to the Page. Successful Retract retains a persistent freeze
+in the Memo. `frozen` proves the admission
 gate is closed, no writable hardware responsibility remains, and the Page is
 not quarantined. A sequence check alone proves none of this. Another frozen
 Memo blocks a conflicting writer even through another authorized publication;
@@ -253,11 +263,15 @@ Revoke. Flat Delete seals the source and withdraws associations; Busy keeps clea
 responsibility. Cell Delete of a Slot releases only that handle.
 
 Share Create on a Flat Slice requires None SHARE, Flat SHARE, Distributable Yes
-and a permitted borrow. It creates a Share child in the same Pend tree. Flat
+and a valid source window. It creates a Share child in the same Pend tree. Flat
 ASSOCIATE permits Share OPEN/SHUT/ASSOCIATE; Flat DELETE alone permits the child's
 DELETE right. Generic Accord never changes target kind. Flat TRANSFER is checked
 separately at both ends of Cell Push/Pull into a Slot; it cannot be inferred from
-read/write access. A mutable parent is suspended while its data is lent.
+read/write access. A Share-derived Memo uses the owning root to authorize an
+owning transfer. Deriving a CPU Share Pend preserves the parent's existing
+mappings. Authorized CPU mappings of the same Page may coexist, with write
+permission checked separately for every branch. The caller coordinates writes
+and observations through its shared-memory protocol.
 
 Nest Create takes a None NEST license and returns an Internal root. External
 Nests are created only by trusted boot admission, which authenticates the complete
@@ -304,7 +318,7 @@ branch retirement remain observably different.
 | Flat Create / legacy Slot allocation | None FLAT | Checked allocation geometry |
 | Flat Inspect / Slice / Delete | Flat INSPECT / ASSOCIATE / DELETE | Current window; Delete retains failed withdrawal |
 | Cell Push/Pull to a Flat Slot | Flat TRANSFER on each Flat endpoint | ASSOCIATE handle, Modifiable Yes, movable Page |
-| Share Create from Flat | None SHARE + Flat SHARE | Distributable, narrowing and borrow rules |
+| Share Create from Flat | None SHARE + Flat SHARE | Distributable, narrowing and source qualification |
 | Nest Create | None NEST | Internal only; no hardware source parameter |
 | Team Create with Internal Nest | Build + Nest ATTACH | Exclusive owned root; token consumed |
 | Nest Inspect / Delete | Nest INSPECT / DELETE | External Delete requires the boot root; Busy retains cleanup |
@@ -349,7 +363,7 @@ the caller cannot supply a different target or operation identity to bypass them
 | Clone Pull | Clone PULL | A live queued message; payload becomes an independent read-only Share |
 | Clone Peek / queue condition | Clone PEEK | Live queue |
 | Clone/Share Delete | Matching DELETE | Live branch; closing Share can retry pending withdrawal |
-| Share Open | Share OPEN | Effective range, Modifiable and borrow constraints |
+| Share Open | Share OPEN | Effective range, Modifiable and Page admission |
 | Share Shut | Share SHUT | Matching live branch and mapping |
 | Cell association through Share | Share ASSOCIATE | Same branch/window, Page and publication constraints |
 
@@ -418,13 +432,13 @@ revocable ancestry.
 | Call | Required authority / state | Completion or retained effect |
 | --- | --- | --- |
 | Clone Create | None CLONE license | New queue and root Pend |
-| Share Create | None SHARE license and authorized Slot/source window | New View root or narrower branch; source qualification and borrowing still apply |
+| Share Create | None SHARE license and authorized Slot/source window | New View root or narrower branch; source qualification and range checks apply |
 | Clone/Share Delete | Matching target DELETE | Closes object; unfinished borrows and hardware obligations remain |
 | Clone Push | Clone PUSH and Modifiable Yes; queue limits | Enqueues one copied message or fails; no implicit retry |
 | Clone Pull / Peek | Clone PULL / PEEK | Pull delivers message authority; Peek observes length/sender/count without consuming |
-| Share Open / Shut | Share OPEN / SHUT; range, Modifiable and borrowing | Opens/closes this caller's access using the common Nest publication machinery; Shut neither returns Pend nor deletes View |
+| Share Open / Shut | Share OPEN / SHUT; range, Modifiable and Page admission | Opens/closes this caller's access using the common Nest publication machinery; Shut neither returns Pend nor deletes View |
 | Pend Accord | Delegable parent and non-expanding relative window/access | New local/remote branch; failed preparation does not publish partial authority |
-| Pend Revoke / Return | Direct grantor / holder | Retires branch; Busy keeps obligations and parent data access suspended where lent |
+| Pend Revoke / Return | Direct grantor / holder | Retires the branch and its descendants; Busy retains withdrawal obligations |
 | Pend Narrow | Holder; no live descendants, conflicting data borrow or active publication | Same identity with reduced access/window; retirement-only retention is not live permission |
 | Pend Inspect / Collect | Caller-local table | Single/paged discovery; stable View identity allows comparison, never authorization |
 | Sign Create | None SIGN license | New endpoint and root Sign Pend |

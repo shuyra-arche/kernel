@@ -4,7 +4,7 @@
 use super::super::Page;
 use super::{Kind, RetainError, Retention};
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 static COMPLETED: AtomicBool = AtomicBool::new(false);
 pub(crate) fn take_completion() -> bool {
@@ -21,14 +21,12 @@ enum Phase {
 pub(crate) struct Change {
     page: Arc<Page>,
     phase: Phase,
-    freezes: AtomicUsize,
 }
 impl Change {
     pub(in super::super) fn begin(page: &Arc<Page>) -> Result<Arc<Self>, RetainError> {
         let mut change = Arc::try_new(Self {
             page: page.clone(),
             phase: Phase::Prepared,
-            freezes: AtomicUsize::new(0),
         })
         .map_err(|_| RetainError::Exhausted)?;
         page.reclaim.begin()?;
@@ -39,16 +37,15 @@ impl Change {
         &self.page
     }
     pub(crate) fn hardware(&self, modifiable: bool) -> Result<Retention, RetainError> {
-        if modifiable && self.freezes.load(Ordering::Acquire) > 1 {
-            return Err(RetainError::Busy);
-        }
-        Retention::during(self, Kind::Cpu, modifiable)
+        // CPU Memo publication holds its own freeze before preparing a PTE.
+        Retention::during(self, Kind::Cpu, modifiable, true)
     }
-    pub(crate) fn external(&self, modifiable: bool) -> Result<Retention, RetainError> {
-        if modifiable && self.freezes.load(Ordering::Acquire) > 1 {
-            return Err(RetainError::Busy);
-        }
-        Retention::during(self, Kind::External, modifiable)
+    pub(crate) fn external(
+        &self,
+        modifiable: bool,
+        own_freeze: bool,
+    ) -> Result<Retention, RetainError> {
+        Retention::during(self, Kind::External, modifiable, own_freeze)
     }
 }
 impl Drop for Change {
@@ -66,13 +63,18 @@ pub(crate) struct Freeze {
     change: Arc<Change>,
 }
 impl Freeze {
-    pub(crate) fn new(change: Arc<Change>) -> Self {
-        change.freezes.fetch_add(1, Ordering::AcqRel);
-        Self { change }
+    pub(crate) fn new(change: Arc<Change>, retracts: Option<bool>) -> Result<Self, RetainError> {
+        // Admission and the writer check are one transition. A prepared or
+        // retiring writer still counts until its exact obligation discharges.
+        change.page.reclaim.freeze(retracts)?;
+        Ok(Self { change })
+    }
+    pub(crate) fn belongs_to(&self, change: &Change) -> bool {
+        core::ptr::eq(self.change.as_ref(), change)
     }
 }
 impl Drop for Freeze {
     fn drop(&mut self) {
-        assert!(self.change.freezes.fetch_sub(1, Ordering::AcqRel) > 0);
+        self.change.page.reclaim.thaw();
     }
 }

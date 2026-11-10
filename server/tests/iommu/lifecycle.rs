@@ -104,19 +104,25 @@ fn a_change_authorizes_only_its_exact_page_and_does_not_end_external_access() {
     let other =
         Arc::new(Page::from_internal(PageOwner::Kernel, other_pool.page().unwrap()).unwrap());
     let change = page.begin().unwrap();
-    let freeze = crate::cell::Freeze::new(change.clone());
+    let freeze = crate::cell::Freeze::new(change.clone(), None).unwrap();
     let (mut hardware, trace) = Scripted::new();
     assert!(matches!(
         Publication::prepare_external(&hardware, &page, 4096, true, None),
         Err(Error::Retain(RetainError::Busy))
     ));
     assert!(matches!(
-        Publication::prepare_external(&hardware, &other, 4096, true, Some(&change)),
+        Publication::prepare_external(&hardware, &other, 4096, true, Some((&change, false))),
         Err(Error::InvalidRange)
     ));
     assert!(trace.lock().unwrap().calls.is_empty());
-    let mut external =
-        Publication::prepare_external(&hardware, &page, 4096, true, Some(&change)).unwrap();
+    let mut external = Publication::prepare_external(
+        &hardware,
+        &page,
+        4096,
+        true,
+        Some((&change, freeze.belongs_to(&change))),
+    )
+    .unwrap();
     external.submit(&mut hardware).unwrap();
     drop((freeze, change));
     assert_eq!(page.exposure(), Exposure::External);
