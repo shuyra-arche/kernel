@@ -2,6 +2,10 @@
 
 Shuyra's RV64 kernel, public contracts and typed call transport.
 
+For the conceptual model and safety invariants, start with the
+[documentation guide](docs/README.md). For current operation and
+wire contracts, see the [Kernel API](api/README.md).
+
 ## Layout
 
 | Path | Responsibility |
