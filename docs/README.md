@@ -17,9 +17,10 @@ in the implementation.
 ## Design
 
 The text starts with isolation, then follows a cross-domain request through
-copying or borrowing, delegation, and notification. It closes with the
-evidence required to complete resource retirement safely. The source map
-groups implementation paths under `basis`, `entry`, and `metal`.
+copying or borrowing, delegation, and notification. After introducing the
+conditions for safe retirement, the [memory chapter](design/memory.typ)
+follows one Page through association, publication, and retirement. The source
+map groups implementation paths under `basis`, `entry`, and `metal`.
 
 The design explains enduring constraints and identifies current mechanisms
 where they make an argument concrete. The API owns precise call permissions,

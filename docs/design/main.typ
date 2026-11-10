@@ -29,3 +29,5 @@
 #include "composition.typ"
 #pagebreak(weak: true)
 #include "assurance.typ"
+#pagebreak(weak: true)
+#include "memory.typ"
