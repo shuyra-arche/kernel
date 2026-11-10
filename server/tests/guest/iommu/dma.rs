@@ -94,7 +94,7 @@ pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
     let change = (scenario == "dma-change").then(|| payload.begin().unwrap());
     let freeze = change
         .as_ref()
-        .map(|change| crate::cell::Freeze::new(change.clone()));
+        .map(|change| crate::cell::Freeze::new(change.clone(), None).unwrap());
     if let Some(change) = &change {
         assert!(target.prepare(&payload, IOVA, true, None).is_err());
         target.prepare(&payload, IOVA, true, Some(change)).unwrap();
