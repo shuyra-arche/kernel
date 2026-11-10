@@ -54,11 +54,16 @@ The Kernel guest suite also executes real traps for Cell, Pend, Sign, Unit and R
 [compatibility notes](../api/README.md#source-migration-and-abi-compatibility)
 before updating a consumer's Kernel pin.
 
-ABI v6 creation calls take an explicit None-target Pend license. Sign handles are
+Resource creation calls take an explicit None-target Pend license. Sign handles are
 PendIds; use Pend Accord/Narrow/Revoke/Return with Operations::Sign instead
 of the removed Sign authorization calls. SignId is descriptive only. Boot Ledger
 v8 provides Name::Call(Call::Create); managers must explicitly delegate creation
 permissions to new Tasks. Rebuild all users and capsule ABI declarations together.
+
+`call::unit::exit(value, reason, note, len, scope)` requires an explicit
+`ExitScope`. Select `Task` for a single Task or `Team` from a non-realtime
+member of a Team configured with `member_exit`. The typed client treats a
+return as a terminal-call contract violation.
 
 `call::flat::{create, inspect, slice, delete}` uses a Flat Pend; `slice` returns a
 checked SlotId. `call::nest::create(license)` creates an Internal Nest only.
@@ -95,6 +100,6 @@ non-distributable Listen/Consume Sign, rolling back View on failure before
 resuming the recipient. Initialize the device, Listen and Consume the initial
 notification; thereafter clear each device cause before consuming its sequence.
 Return/Revoke either Pend closes delivery. Sign retains its slots and payloads
-under the ABI v6 prefix; consumption does not synchronously wait for controller
+under the current ABI prefix; consumption does not synchronously wait for controller
 completion. Raw device/configuration authority must be withdrawn separately
 before reassigning a device; Pend distribution alone proves no DMA quiescence.

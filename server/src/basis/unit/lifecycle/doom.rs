@@ -6,6 +6,7 @@ use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskExitCause;
 use crate::basis::unit::task::registry::find;
 use crate::basis::unit::team::Team;
+use crate::basis::unit::team::TeamExit;
 use crate::basis::unit::team::TeamNode;
 use alloc::sync::Arc;
 use kernel_api::model::identity::TaskId;
@@ -111,13 +112,18 @@ impl Queue {
         Some((node, work))
     }
 }
-fn request(node: &Arc<TeamNode>, cause: TaskExitCause, reason: usize) {
+fn request(node: &Arc<TeamNode>, exit: TeamExit) {
     let _commit = crate::basis::commit();
     let mut pending = PENDING.lock();
     if !matches!(*node.termination.lock(), Termination::Idle) {
         return;
     }
-    node.state.lock().doom();
+    node.state.lock().doom(Some(exit));
+    // The initiating Task exits with its own result. Its peers are stopped.
+    let (cause, reason) = match exit.cause {
+        TaskExitCause::Reap => (TaskExitCause::Slay, super::EXIT_DOOM),
+        cause => (cause, exit.reason as usize),
+    };
     OUTSTANDING.fetch_add(1, Ordering::Release);
     pending.push(
         node.clone(),
@@ -160,7 +166,14 @@ pub(super) fn advance() {
             };
             if let Some(child) = child {
                 work.child = child.id.get();
-                request(&child, work.cause, work.reason);
+                request(
+                    &child,
+                    TeamExit {
+                        cause: work.cause,
+                        reason: work.reason as u64,
+                        value: None,
+                    },
+                );
                 true
             } else {
                 false
@@ -179,7 +192,28 @@ pub(super) fn advance() {
 }
 pub(crate) fn cull(roots: &[Arc<Team>], reason: usize) {
     for root in roots {
-        request(&root.node, TaskExitCause::Slay, reason);
+        request(
+            &root.node,
+            TeamExit {
+                cause: TaskExitCause::Slay,
+                reason: reason as u64,
+                value: None,
+            },
+        );
+    }
+}
+
+pub(crate) fn exit_team(team: &Team, value: u64, reason: u64) {
+    let _commit = crate::basis::commit();
+    if !team.node.closed() {
+        request(
+            &team.node,
+            TeamExit {
+                cause: TaskExitCause::Reap,
+                reason,
+                value: Some(value),
+            },
+        );
     }
 }
 pub(crate) fn doom(task: &Arc<Task>) {
@@ -188,7 +222,14 @@ pub(crate) fn doom(task: &Arc<Task>) {
     let mut at = 0;
     while let Some(child) = task.heir_node(at) {
         at += 1;
-        request(&child.node, TaskExitCause::Cascade, super::EXIT_CASCADE);
+        request(
+            &child.node,
+            TeamExit {
+                cause: TaskExitCause::Cascade,
+                reason: super::EXIT_CASCADE as u64,
+                value: None,
+            },
+        );
     }
 }
 pub(crate) fn take_doomed(tid: TaskId) -> Option<usize> {

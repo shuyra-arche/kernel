@@ -27,6 +27,7 @@ pub(in super::super) fn run(at: usize, count: usize) {
     }
     assert!(nest::create(root).is_err());
     let team = UnitCreate::Team {
+        member_exit: false,
         nest: Some(root),
         kind: ProgramKind::User,
         guard: ControlId::NONE,

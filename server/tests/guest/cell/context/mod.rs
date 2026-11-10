@@ -5,6 +5,7 @@ mod vector;
 use super::{Console, lifecycle};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     address::VirtAddr,
     model::{identity::TaskId, unit::UnitTarget, wait::Wait},
@@ -55,7 +56,7 @@ extern "C" fn load_worker() -> ! {
         // TCG, obscuring the register/placement transitions under test.
         core::hint::spin_loop();
     }
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 
 #[repr(C, align(16))]
@@ -132,7 +133,7 @@ fn worker(id: usize) -> ! {
     unsafe { save(&mut observed) };
     assert_eq!(observed.regs, expected.regs);
     assert_eq!(observed.fcsr, expected.fcsr);
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 
 pub(super) fn run() {

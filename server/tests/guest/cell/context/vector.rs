@@ -3,6 +3,7 @@ use core::{
     fmt::Write,
     sync::atomic::{AtomicUsize, Ordering},
 };
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     address::VirtAddr,
     model::{
@@ -20,7 +21,7 @@ static MIGRATION_ENTERED: core::sync::atomic::AtomicBool =
 extern "C" fn probe() -> ! {
     let bytes: usize;
     unsafe { core::arch::asm!("csrr {}, vlenb", out(reg) bytes) };
-    unit::exit(bytes as u64, 0, VirtAddr::new(0), 0)
+    unit::exit(bytes as u64, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 #[cfg(not(feature = "migration"))]
 extern "C" fn one() -> ! {
@@ -101,7 +102,7 @@ fn worker(id: usize, barrier: bool) -> ! {
             ".option pop"
         );
     }
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 
 #[cfg(not(feature = "migration"))]

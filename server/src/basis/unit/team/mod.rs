@@ -23,7 +23,7 @@ mod membership;
 
 pub(crate) use builder::{TeamBuilder, init_kernel, kernel};
 pub(crate) use lifecycle::exit;
-pub(crate) use lifecycle::{Clearance, TeamNode};
+pub(crate) use lifecycle::{Clearance, TeamExit, TeamNode};
 pub(crate) use membership::{Member, Receipt, Tasks};
 
 pub(crate) const MAX_DEPTH: usize = 32;
@@ -124,7 +124,7 @@ impl Team {
             // member has already published reclaimed before pruning.
             self.cells.close();
             self.external.close();
-            self.node.state.lock().doom();
+            self.node.state.lock().doom(None);
             if members
                 .iter()
                 .any(|member| !member.reclaimed.load(core::sync::atomic::Ordering::Acquire))

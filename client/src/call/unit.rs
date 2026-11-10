@@ -5,7 +5,7 @@ use kernel_api::{
     abi::call::unit::UnitFail,
     address::VirtAddr,
     model::identity::{TaskId, TeamId},
-    model::unit::{ControlId, UnitQuery, UnitTarget},
+    model::unit::{ControlId, ExitScope, UnitQuery, UnitTarget},
 };
 
 typed_calls! {
@@ -14,7 +14,6 @@ typed_calls! {
     fallible fn resume(target: UnitTarget) -> Result<(), erra::Error<UnitFail>> = op::Resume { target };
     fallible fn freeze(target: UnitTarget) -> Result<(), erra::Error<UnitFail>> = op::Freeze { target };
     fallible fn stop(target: UnitTarget) -> Result<(), erra::Error<UnitFail>> = op::Stop { target };
-    terminal fn exit(value: u64, reason: u64, note: VirtAddr, len: usize) -> ! = op::Exit { value, reason, note, len };
     fallible fn finish(team: TeamId) -> Result<(), erra::Error<UnitFail>> = op::Finish { team };
     fallible fn inspect(query: UnitQuery, out: VirtAddr) -> Result<bool, erra::Error<UnitFail>> = op::Inspect { query, out };
     fallible fn accord(authority: ControlId, target: TaskId, delegable: bool) -> Result<ControlId, erra::Error<UnitFail>> = op::Accord { authority, target, delegable };
@@ -23,4 +22,19 @@ typed_calls! {
     fallible fn admit(task: TaskId, schedule: VirtAddr) -> Result<(), erra::Error<UnitFail>> = op::Admit { task, schedule };
     fallible fn evict(task: TaskId) -> Result<(), erra::Error<UnitFail>> = op::Evict { task };
     fallible fn profile(task: TaskId, out: VirtAddr) -> Result<(), erra::Error<UnitFail>> = op::Profile { task, out };
+}
+
+/// Exit the caller, or its Team when the Team enables member exit.
+/// A realtime Task may select only Task scope.
+#[inline]
+pub fn exit(value: u64, reason: u64, note: VirtAddr, len: usize, scope: ExitScope) -> ! {
+    unsafe {
+        crate::invoke::invoke_terminal(op::Exit {
+            value,
+            reason,
+            note,
+            len,
+            scope,
+        })
+    }
 }

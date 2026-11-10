@@ -37,25 +37,28 @@ fn typed_and_dispatch_requests_share_encoding_and_validation() {
 
 #[test]
 fn terminal_operations_keep_their_request_abi_without_a_return_decoder() {
-    use kernel_api::abi::call::unit::operations::Exit;
+    use kernel_api::{
+        abi::call::unit::{UnitCall, operations::Exit},
+        model::unit::ExitScope,
+    };
     fn terminal<C: TerminalCall>() {}
     terminal::<Exit>();
-    let request = Exit {
-        value: 17,
-        reason: 2,
-        note: kernel_api::address::VirtAddr::new(0x1234),
-        len: 8,
-    };
     assert_eq!(Exit::SLOT, kernel_api::abi::PREFIX | (1usize << 32) | 5);
-    assert_eq!(request.pack(), [17, 2, 0x1234, 8, 0, 0]);
-    assert!(matches!(
-        kernel_api::abi::call::unit::UnitCall::from_wire(Exit::SLOT, &request.pack()),
-        Ok(kernel_api::abi::call::unit::UnitCall::Exit {
+    for (scope, tag) in [(ExitScope::Task, 0), (ExitScope::Team, 1)] {
+        let request = Exit {
+            value: 17,
             reason: 2,
+            note: kernel_api::address::VirtAddr::new(0x1234),
             len: 8,
-            ..
-        })
-    ));
+            scope,
+        };
+        assert_eq!(request.pack(), [17, 2, 0x1234, 8, tag, 0]);
+        assert!(matches!(
+            UnitCall::from_wire(Exit::SLOT, &request.pack()),
+            Ok(UnitCall::Exit { reason: 2, len: 8, scope: actual, .. }) if actual == scope
+        ));
+    }
+    assert!(UnitCall::from_wire(Exit::SLOT, &[17, 2, 0x1234, 8, 2, 0]).is_err());
 }
 
 #[test]

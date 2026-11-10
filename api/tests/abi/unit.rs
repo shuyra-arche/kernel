@@ -16,6 +16,7 @@ fn creation_variants_use_checked_fixed_width_snapshots() {
             nest: None,
             kind: ProgramKind::User,
             guard: ControlId::NONE,
+            member_exit: false,
         },
         UnitCreate::Task {
             team: Some(TeamId::new(9)),
@@ -28,6 +29,7 @@ fn creation_variants_use_checked_fixed_width_snapshots() {
             nest: Some(kernel_api::model::identity::PendId::mint(9)),
             kind: ProgramKind::User,
             guard: ControlId::NONE,
+            member_exit: true,
         },
     ] {
         let bytes = request.to_bytes();
@@ -38,9 +40,10 @@ fn creation_variants_use_checked_fixed_width_snapshots() {
         nest: None,
         kind: ProgramKind::User,
         guard: ControlId::NONE,
+        member_exit: false,
     }
     .to_bytes();
-    team[32] = 1;
+    team[32] = 2;
     assert!(UnitCreate::from_bytes(&team).is_none());
     team[32] = 0;
     team[8] = 2;

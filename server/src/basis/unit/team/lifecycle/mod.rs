@@ -13,6 +13,7 @@ pub(crate) use clearance::Clearance;
 
 use super::Member;
 pub(super) use exit::ExitPolicy;
+pub(crate) use state::TeamExit;
 pub(super) use state::TeamStage;
 pub(crate) use state::TeamState;
 
@@ -25,6 +26,7 @@ pub(crate) struct TeamNode {
     pub children: SpinLock<Vec<Arc<TeamNode>>>,
     pub life: Arc<Anchor>,
     pub(crate) exit: ExitPolicy,
+    pub(crate) member_exit: bool,
     pub(crate) termination: SpinLock<crate::basis::unit::lifecycle::Termination>,
 }
 

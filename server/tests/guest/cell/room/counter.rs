@@ -1,6 +1,7 @@
 use crate::{Console, lifecycle};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{address::VirtAddr, model::unit::UnitTarget};
 use kernel_client::call::{room, unit};
 
@@ -15,7 +16,7 @@ extern "C" fn load() -> ! {
     while !STOP.load(Ordering::Acquire) {
         core::hint::spin_loop();
     }
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 
 #[unsafe(naked)]
@@ -77,7 +78,7 @@ extern "C" fn receive() -> ! {
         passed,
         "receiving Hart did not observe monotonic clock handoffs"
     );
-    unit::exit(0, 0, VirtAddr::new(0), 0)
+    unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 
 fn check_cross_hart(clock: &room::MonotonicClock) {

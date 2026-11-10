@@ -1,4 +1,5 @@
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use kernel_api::model::unit::ExitScope;
 use kernel_api::{
     abi::{
         call::{pend::PendFail, sign::SignFail},
@@ -33,7 +34,7 @@ extern "C" fn recipient() -> ! {
     while !REVOKE_FINISHED.load(Ordering::Acquire) {
         room::yield_();
     }
-    unit::exit(37, 0, VirtAddr::new(0), 0)
+    unit::exit(37, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 fn accord(
     src: PendId,
