@@ -1,3 +1,5 @@
+#import "style.typ": principle
+
 = Safety and completion obligations
 <assurance>
 
@@ -30,10 +32,12 @@ For resource retirement, four obligations are particularly important:
 + *Reclamation follows:* only after all holders and hardware obligations
   have settled may the underlying capacity be reused.
 
-A device reporting work complete is a statement about its operation, not
-necessarily a proof that old translations, queued requests, or other
-initiators can no longer access memory. CPU and external access need
-evidence appropriate to their respective backends.
+#principle[
+  A device reporting work complete is a statement about its operation, not
+  necessarily a proof that old translations, queued requests, or other
+  initiators can no longer access memory. CPU and external access need
+  evidence appropriate to their respective backends.
+]
 
 == State and effects are separate reasoning steps
 

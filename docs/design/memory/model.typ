@@ -1,4 +1,5 @@
-#import "diagram.typ": amber, drawing, green, label, node, note, rule, wire
+#import "../style.typ": design-table
+#import "diagram.typ": amber, drawing, green, label, node, note, wire
 
 == Cell and its coordinates
 
@@ -23,11 +24,8 @@ generation. A Slot position uses generation zero and refers to the current
 holding. A managed `Page` has its own identity and the allocator's unique
 return receipt. Several records can retain that same Page.
 
-#table(
-  columns: (38mm, 1fr),
-  stroke: 0.5pt + rule,
-  inset: 7pt,
-  [*Quantity*], [*Meaning*],
+#design-table(
+  table.header([*Quantity*], [*Meaning*]),
   [ABI coordinate], [Offsets and spans count fixed 4 KiB units.],
   [Physical allocation], [`CellLevel` sets the size and alignment of a contiguous allocation to #box[4 KiB × 512#super[level]]. Operations address the head and cover the whole Cell.],
   [Translation leaf], [The backend selects a leaf geometry. One large CPU leaf can cover several logical positions with distinct identities and obligations.],
@@ -168,11 +166,8 @@ A position, a hardware publication, and the physical allocation can finish
 at different times. The code keeps the facts needed to decide each of those
 transitions with its responsible object.
 
-#table(
-  columns: (38mm, 1fr),
-  stroke: 0.5pt + rule,
-  inset: 7pt,
-  [*Record*], [*Facts it carries*],
+#design-table(
+  table.header([*Record*], [*Facts it carries*]),
   [`Memo`], [The association, generation, optional freeze and in-flight `MemoFlight`. `Inspect` derives Vacant, Ready, Publishing, Published, Retracting or Failed from these facts and the publication phase. A retracted Memo can be Ready and still frozen.],
   [`Publication`], [The per-publication hardware obligation. `Waiting(BatchId)` remembers which batch is pending. `Failed` preserves an unresolved obligation, so failure still leaves work for retirement.],
   [`Page`], [The physical allocation, owner and reclamation state. The state tracks CPU and external uses, write exclusivity, an active change gate and quarantine.],

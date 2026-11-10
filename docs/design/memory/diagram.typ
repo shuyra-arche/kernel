@@ -1,16 +1,10 @@
-#let ink = rgb("#173D36")
-#let muted = rgb("#465E64")
-#let edge = rgb("#587678")
-#let rule = rgb("#B9CBCA")
-#let green = rgb("#E5F1EA")
-#let amber = rgb("#F8EDDB")
-#let pending = rgb("#8E6227")
+#import "../style.typ": amber, edge, green, ink, muted, pending, rule
 
 #let at(x, y, body) = place(top + left, dx: x, dy: y, body)
 #let drawing(height, body) = block(width: 100%, height: height, body)
 
 #let label(x, y, body, color: muted) = at(x, y, text(
-  size: 9pt, weight: "semibold", fill: color, body,
+  size: 9pt, weight: "semibold", tracking: 0.2pt, fill: color, body,
 ))
 
 #let note(x, y, width, title, body, color: ink) = at(x, y, block(width: width)[
@@ -22,8 +16,11 @@
   width: width,
   height: height,
   fill: fill,
-  stroke: 0.65pt + rule,
-  radius: 1.6mm,
+  stroke: (
+    rest: 0.55pt + rule,
+    left: 1.25pt + if fill == amber { pending } else if fill == green { edge } else { rule },
+  ),
+  radius: 1.9mm,
   inset: (x: 3.8mm, y: 3.3mm),
 )[
   #text(size: 11pt, weight: "semibold", fill: ink, title) \
@@ -37,7 +34,7 @@
     at(x, y, line(
       start: (a.at(0) - x, a.at(1) - y),
       end: (b.at(0) - x, b.at(1) - y),
-      stroke: (paint: color, thickness: 0.85pt, dash: dash),
+      stroke: (paint: color, thickness: 0.95pt, dash: dash),
     ))
   }
   let (x, y) = points.last()
