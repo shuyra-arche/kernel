@@ -27,13 +27,17 @@ SHARDS = {
     ),
     "scheduling": (
         "kernel::clock_backends_rearm_deadlines",
+        "kernel::realtime_reservations_and_service_dependencies",
+    ),
+    "coordination": (
         "kernel::hardware_interrupt_sign_delivers_and_rebinds",
         "kernel::latency_baseline_observes_contended_paths",
-        "kernel::realtime_reservations_and_service_dependencies",
     ),
     "context": (
         "kernel::task_extended_context_isolated",
         "kernel::task_migration_respects_hart_capabilities",
+    ),
+    "vector": (
         "kernel::task_vector_context_isolated",
     ),
 }
