@@ -1,69 +1,70 @@
 # Kernel documentation
 
-This directory explains **why** the Kernel is designed as it is. It should
-help a reader understand the isolation and composition model without requiring
-them to reconstruct its invariants from source code.
+Kernel documentation has **three distinct responsibilities**: architectural
+argument, current public contract, and decision history. They should not
+be maintained as competing descriptions of the same fact.
 
-## Start here
+## Entry points
 
-1. [Kernel](../README.md) — current project scope, source map, build and test
-   entry points.
-2. [Architecture](architecture/README.md) — design goal, system boundary, and
-   how to navigate the model.
-3. [Core model](architecture/model.md) — identities, ownership, authorization,
-   publication, and settlement.
-
-## Where each kind of truth lives
-
-| Question | Canonical owner |
+| Reader's question | Source |
 | --- | --- |
-| Why does the Kernel have this boundary or invariant? | `docs/architecture/` |
-| What public operation, type, layout, error, or compatibility rule exists **now**? | [`api/README.md`](../api/README.md) and [`api/src/`](../api/src/) |
-| How does a typed caller invoke the Kernel? | [`client/README.md`](../client/README.md) and `client/src/` |
-| How does the Server enforce an invariant? | Module documentation and code under [`server/src/`](../server/src/) |
-| What behavior has been verified, on which target? | Tests and scenario notes under [`server/tests/`](../server/tests/) and recorded CI evidence |
-| What is undecided or being replaced? | A linked GitHub Issue or PR, not a speculative ABI reference |
-| How do contributors change the repository? | [`CONTRIBUTING.md`](../CONTRIBUTING.md) and the [organization standards](https://github.com/shuyra-arche/.github/tree/main/docs/engineering) |
+| Why does the Kernel have this model? | [Design narrative (Typst)](design/main.typ) |
+| Where does the source implement each concern? | [Source navigation](source-map.md) |
+| Why was a consequential design decision made? | [RFCs](rfcs/README.md) |
+| What API or ABI exists today? | [Kernel API](../api/README.md) and [API source](../api/src/) |
+| How are calls performed? | [Client](../client/README.md) |
+| How do mechanisms enforce the contract? | [Server source](../server/src/) |
+| What was actually verified? | [Server tests](../server/tests/) and recorded CI evidence |
+| How can I build or contribute? | [Repository README](../README.md) and [Contributing](../CONTRIBUTING.md) |
 
-An architecture document explains stable responsibilities, invariants,
-trust boundaries, and the evidence required for completion. It should not
-reproduce the whole call table or record every temporary implementation step.
-A public contract belongs beside the API that owns it, rather than in a
-second `docs/contracts/` tree. Implementation details stay near their
-enforcing modules, rather than in a source-directory mirror under
-`docs/implementation/`.
+## Design: explain the problem before the mechanisms
 
-## Architecture topics
+`design/main.typ` assembles a coherent argument, currently in three chapters:
 
-The current overview pages are:
+1. Isolation and the problem of composition.
+2. Reconnecting data and control flows.
+3. Safety and completion obligations.
 
-- [Architectural introduction](architecture/README.md)
-- [Core model and safety invariants](architecture/model.md)
+Its chapter boundaries follow questions, consequences, and proofs, **not**
+the current Rust source tree. `basis`, `entry`, and `metal` appear in the
+[source map](source-map.md) only as an implementation navigation aid.
 
-Additional topics should become pages **only when there is substance to
-document and an independent responsibility to explain**:
+The design is a long-lived explanation of the current architectural
+intent; it does not duplicate syscall numbers, field layouts, or transient
+internal function names. A design principle does not claim a feature is
+already implemented. Add a new chapter only when it has an independent
+argument, not just to mirror a new module.
 
-| Intended page | Question it should answer |
-| --- | --- |
-| `architecture/memory.md` | How do Page ownership, Flat holdings, Nest associations, Cell positions, and retirement interact? |
-| `architecture/interaction.md` | How do View, Pend, and Sign authorize, move, share, and observe flows across isolation boundaries? |
-| `architecture/execution.md` | How do Team, Task, and Room manage execution, waiting, results, and cleanup? |
-| `architecture/hardware.md` | Which MMU/IOMMU, interrupt, and platform facts and completion proofs does the Kernel trust? |
+Typst source remains in Git. To render locally with Typst installed:
 
-These are a navigation plan, **not** empty documentation commitments or
-evidence that unimplemented behavior already exists. Do not create placeholder
-files solely to complete a directory tree.
+```sh
+typst compile docs/design/main.typ /tmp/shuyra-kernel.pdf
+```
 
-## Change discipline
+Generated PDFs are publication artifacts, not source files. Do not commit
+them as part of routine design edits. Document-only changes should not
+launch Kernel build or QEMU CI; the path filtering for this policy is
+tracked independently in [PR #126](https://github.com/shuyra-arche/kernel/pull/126).
 
-- Keep **one authoritative description** for every fact, with links where other
-  documents need it. Remove stale copies rather than maintaining duplicates.
-- Mark implemented behavior, enduring invariants, and open proposals separately.
-  A model is not automatically an implemented ABI or a hardware guarantee.
-- Update the API contract and affected tests when observable behavior changes.
-  Update architecture only when a responsibility, boundary, or invariant changes.
-- Use Issues for alternatives and unresolved decisions, PRs for change rationale,
-  and CI artifacts for raw execution evidence.
-- Keep headings and names stable and links relative where possible. Favor
-  short explanations and focused diagrams that make the enforcing owner clear,
-  not an ever-growing chronological design diary.
+## RFCs: preserve decisions, not duplicated specifications
+
+See the [RFC guide](rfcs/README.md) and [template](rfcs/template.md).
+Use them for consequential architecture changes with meaningful alternatives.
+An RFC may be accepted without being implemented; the source code and
+public contract remain authoritative about what is available now.
+
+Issues carry work and unresolved alternatives. PRs carry the final change
+rationale and verification evidence. Raw logs belong with test artifacts,
+not in permanent prose.
+
+## Rules for maintenance
+
+- Each fact has a single enforcing or documenting owner; link rather than copy.
+- Keep architectural invariants, public contracts, and implementation status
+  distinct. Record uncertainty instead of silently promising a future ABI.
+- When behavior changes, update its owning API contract and relevant tests.
+  Update the design only if the problem model or enduring safety reasoning changes.
+- Keep source-module implementation details next to their source; update the
+  source map when implementation responsibilities move.
+- Favor concise arguments and meaningful diagrams over empty placeholder
+  sections or exhaustive inventories of implementation symbols.
