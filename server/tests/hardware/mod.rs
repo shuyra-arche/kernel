@@ -153,7 +153,7 @@ fn iommu_on_real_qemu_registers() {
             format!("{command:?}\n"),
         )
         .unwrap();
-        let output = run(command, &evidence, name);
+        let output = run(command, &evidence, name, Duration::from_secs(60));
         let serial = String::from_utf8_lossy(&output.stdout);
         assert_eq!(output.status.success(), pass, "{name}: {serial}");
         assert!(
@@ -167,7 +167,7 @@ fn iommu_on_real_qemu_registers() {
     println!("QEMU evidence: {}", evidence.display());
 }
 
-fn run(mut command: Command, evidence: &PathBuf, name: &str) -> Output {
+fn run(mut command: Command, evidence: &PathBuf, name: &str, watchdog: Duration) -> Output {
     let started = Instant::now();
     let mut child = command
         .stdout(Stdio::piped())
@@ -177,7 +177,7 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str) -> Output {
     // Traced debug IRQ/IOMMU images take 24–26 s locally, including firmware,
     // FDT admission and shutdown. Leave host-load headroom; guest deadlines and
     // behavioral assertions remain unchanged and process exit is still required.
-    let deadline = started + Duration::from_secs(60);
+    let deadline = started + watchdog;
     let mut timed_out = false;
     while child.try_wait().expect("QEMU status").is_none() {
         if Instant::now() >= deadline {
@@ -191,8 +191,9 @@ fn run(mut command: Command, evidence: &PathBuf, name: &str) -> Output {
     std::fs::write(
         evidence.join(format!("{name}-elapsed.txt")),
         format!(
-            "elapsed_ms={} watchdog_ms=60000 timed_out={timed_out}\n",
-            started.elapsed().as_millis()
+            "elapsed_ms={} watchdog_ms={} timed_out={timed_out}\n",
+            started.elapsed().as_millis(),
+            watchdog.as_millis()
         ),
     )
     .unwrap();

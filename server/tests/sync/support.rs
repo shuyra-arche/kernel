@@ -3,14 +3,29 @@ pub(crate) mod metal {
         pub(crate) mod window {
             std::thread_local! {
                 static NOTICE: std::cell::RefCell<Option<std::sync::mpsc::Sender<()>>> = const { std::cell::RefCell::new(None) };
+                static PAUSE: std::cell::RefCell<Option<std::sync::mpsc::Receiver<()>>> = const { std::cell::RefCell::new(None) };
             }
             pub(crate) fn observe(sender: std::sync::mpsc::Sender<()>) {
                 NOTICE.with_borrow_mut(|notice| *notice = Some(sender));
+            }
+            pub(crate) fn pause(
+                sender: std::sync::mpsc::Sender<()>,
+                resume: std::sync::mpsc::Receiver<()>,
+            ) {
+                observe(sender);
+                PAUSE.with_borrow_mut(|pause| *pause = Some(resume));
             }
             pub(crate) fn poll() {
                 NOTICE.with_borrow_mut(|notice| {
                     if let Some(sender) = notice.take() {
                         sender.send(()).unwrap()
+                    }
+                });
+                PAUSE.with_borrow_mut(|pause| {
+                    if let Some(resume) = pause.take() {
+                        resume
+                            .recv_timeout(std::time::Duration::from_secs(5))
+                            .unwrap();
                     }
                 });
                 std::thread::yield_now();
@@ -64,9 +79,20 @@ pub(crate) mod metal {
                 );
             };
         }
+        macro_rules! depend_check_peer {
+            ($lock:expr, $lower:expr, $caller:expr) => {
+                crate::metal::sync::depend_check!($lock, $caller);
+            };
+        }
+        macro_rules! depend_release {
+            ($lock:expr) => {
+                #[cfg(debug_assertions)]
+                crate::metal::sync::depend::release($lock as *const _ as *const () as usize);
+            };
+        }
         #[cfg(debug_assertions)]
         pub(crate) use depend_enter;
-        pub(crate) use {depend_acquire, depend_check};
+        pub(crate) use {depend_acquire, depend_check, depend_check_peer, depend_release};
         pub(crate) mod depend {
             use std::cell::RefCell;
             std::thread_local! { static HELD: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) }; }

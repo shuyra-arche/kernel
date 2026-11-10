@@ -16,9 +16,6 @@ use crate::metal::hart::HartId;
 /// 每颗 hart 一位：置着 = 它正睡在空闲环里。
 static WAITING: [AtomicUsize; WAITING_WORDS] = [const { AtomicUsize::new(0) }; WAITING_WORDS];
 
-/// 挑核时转着圈从不同的位起，免得总挑到同一颗。
-static PICK_CURSOR: AtomicUsize = AtomicUsize::new(0);
-
 const WAITING_WORDS: usize = crate::metal::layout::MAX_HART_SLOTS / usize::BITS as usize;
 
 pub(crate) fn enter(hart: HartId) {
@@ -50,10 +47,8 @@ pub(super) fn waiting(hart: HartId) -> bool {
 
 /// Rotate within eligible Harts, preferring idle destinations. A sparse
 /// capability set must not inherit the gaps or bias of the physical bitmap.
-pub(super) fn pick(compatible: impl Fn(HartId) -> bool, prefer_remote: bool) -> HartId {
-    let cursor = PICK_CURSOR.fetch_add(1, Ordering::Relaxed);
+pub(super) fn pick(cursor: usize, compatible: impl Fn(HartId) -> bool) -> HartId {
     let n = hart::hart_count();
-    let me = hart::hart_id();
     let eligible = || {
         (0..n)
             .map(HartId::new)
@@ -69,13 +64,6 @@ pub(super) fn pick(compatible: impl Fn(HartId) -> bool, prefer_remote: bool) -> 
         }
         // Idle flags can change between passes; compatibility is stable while
         // the Task is off-Hart. Continue with the complete eligible set.
-    }
-    if prefer_remote {
-        let remote = || eligible().filter(|candidate| *candidate != me);
-        let count = remote().count();
-        if count != 0 {
-            return remote().nth(cursor % count).unwrap();
-        }
     }
     let count = eligible().count();
     assert!(count != 0, "Task has no compatible Hart");

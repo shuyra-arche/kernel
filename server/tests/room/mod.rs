@@ -70,3 +70,23 @@ mod chain;
 mod reservation;
 mod scheduling;
 mod shutdown;
+
+#[allow(dead_code)]
+#[path = "../../src/basis/unit/task/schedule/mod.rs"]
+mod task_schedule;
+#[test]
+fn periodic_placement_progress_is_independent_of_unrelated_wakeups() {
+    let mut periodic = task_schedule::Schedule::new();
+    let mut unrelated = task_schedule::Schedule::new();
+    for turn in 0..64 {
+        assert_eq!(periodic.placement() % 4, turn % 4);
+        // A shared cursor would advance by a multiple of four per cycle and
+        // repeatedly assign the periodic Task to one residue.
+        for _ in 0..3 {
+            unrelated.placement();
+        }
+    }
+    let mut wrapping = task_schedule::Schedule::Ordinary { cursor: usize::MAX };
+    assert_eq!(wrapping.placement(), usize::MAX);
+    assert_eq!(wrapping.placement(), 0);
+}

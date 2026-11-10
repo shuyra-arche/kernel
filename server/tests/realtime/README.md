@@ -18,6 +18,13 @@ The preparation lease also retains retirement: Stop closes live authority
 immediately, but resource retirement waits until preparation releases its lease.
 An Arc to Task alone is not proof that its context page remains resident.
 
+The destination also retains one in-flight preparation identity. No second
+admission can add interference there until it finishes. The bounded response
+calculation runs outside COMMIT over immutable contracts: concurrent exits or
+evictions only make that interference set more conservative. Publication checks
+live authority again and never updates a Task that has since obtained a different
+contract. Every failure releases both preparation obligations.
+
 An administrator with Build qualification and control of the Task calls
 `Unit.Admit`. The Task must be initially held, or individually frozen and fully
 off-Hart after ordinary preparation. It must own no child Teams and run in User
@@ -134,9 +141,12 @@ and context-switch cost, timer/IPI service, cache/memory interference and delays
 from the housekeeping/controller environment. Same-Hart competing budgeted
 execution is already in the sum. Ordinary Tasks on other Harts can still contend
 for shared Kernel resources: merely setting a small B_i does not bound them.
-M2 reception windows preserve interrupt reception during lock contention, but
-provide neither fairness nor a time bound on full scheduling. Those assumptions
-must be independently justified on a deployment; **this PR does not prove them**.
+Reception windows preserve interrupt reception during lock contention. FIFO
+SpinLock/COMMIT admission now bounds predecessor turns to H-1 per reserved outer
+acquisition; it does not supply their durations. The [blocking analysis](../latency/README.md#conditional-blocking-bounds)
+lists per-path work limits and derives cumulative waiting from bounded holder
+durations and invocation counts. Those physical inputs must be independently
+justified on a deployment; **QEMU does not prove them**.
 
 As an illustrative admitted set in milliseconds, Q=2, T=100, B=10 for priorities
 9/5/3/1 with ceilings 9/5/9/9 gives responses 20/24/24/24. Changing a competitor
@@ -164,6 +174,26 @@ remain on one non-boot Hart. Guest assertions also cover budget replenishment,
 Yield/freeze, overload rejection, nested service dependencies, cancellation,
 revocation/rebinding, server exit, cycle/ceiling rejection, restricted calls,
 page faults and prepared versus undeclared floating-point execution.
+
+Dependency/lifecycle fixtures use 100 ms credit in a 1 s period, so debug/TCG
+kernel entry and accounting do not implicitly require a 2 ms physical execution
+bound. The dedicated exhaustion fixture still overrides this with 20 ms credit;
+preemption/overload fixtures retain their own explicit budgets. Event deadlines
+are unchanged. Passing these scenarios establishes their functional assertions,
+not that every admitted minimum budget is sufficient for useful execution on an
+uncalibrated host.
+
+Each realtime boot also runs the complete shared Cell/organization/retirement
+suite afterwards. Its outer process watchdog allows 120 seconds for both phases
+and shutdown; context modes use the same composed-run budget, while other guest
+modes retain 60 seconds. A two-host-CPU diagnostic
+replay reached all assertions at 47 seconds and showed allocator pool flushing
+at 50 seconds before normal exit. Hosted evidence previously reached all four
+realtime PASS markers but exhausted 60 seconds during the common suite. This
+motivates process headroom, not a claim that timeout alone explains every prior
+failure. Per-event deadlines, actual preemption/affinity checks, all common-suite
+assertions and successful process exit remain required. The elapsed record stores
+the selected watchdog explicitly; neither watchdog is a Kernel response bound.
 
 Run the full host suite and builds from the repository root:
 

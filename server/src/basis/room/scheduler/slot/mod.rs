@@ -113,6 +113,8 @@ impl Slot {
         if super::isolated(self.hart) {
             task.schedule.lock().enter(clock::now().as_ticks());
         }
+        #[cfg(feature = "latency")]
+        task.observation.dispatch(crate::metal::measure::stamp());
         task.transform_checked(TaskState::running(self.hart, QUANTUM_TICKS));
         let pa = task.ident.frame_pa.as_usize();
         unsafe {

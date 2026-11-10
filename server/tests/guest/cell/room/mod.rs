@@ -13,6 +13,15 @@ static ALARM: AtomicU32 = AtomicU32::new(0);
 fn address(value: &AtomicU32) -> VirtAddr {
     VirtAddr::new(value as *const _ as usize)
 }
+/// One condition-wait attempt. A concurrent mapping invalidation may reject
+/// the atomic read with Busy; retain the caller's value/deadline and recheck.
+pub(super) fn wait(value: &AtomicU32, expected: u32, until: Wait) {
+    match room::wait_value(address(value), expected, until) {
+        Ok(_) => {}
+        Err(error) if error.source == kernel_api::abi::call::room::RoomFail::Busy => room::yield_(),
+        Err(error) => panic!("value wait: {error:?}"),
+    }
+}
 fn until(value: &AtomicU32, wanted: u32) {
     let deadline = room::clock().saturating_add(1_000_000_000);
     loop {
@@ -21,7 +30,7 @@ fn until(value: &AtomicU32, wanted: u32) {
             return;
         }
         assert!(room::clock() < deadline, "lost value wake");
-        room::wait_value(address(value), old, Wait::At(deadline)).unwrap();
+        wait(value, old, Wait::At(deadline));
     }
 }
 extern "C" fn recipient() -> ! {

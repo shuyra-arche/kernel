@@ -1,16 +1,15 @@
 use ::core::cell::UnsafeCell;
-use ::core::sync::atomic::AtomicBool;
-use ::core::sync::atomic::Ordering;
 
 use super::depend;
 use super::trap::TrapGuard;
+use super::turn::Turns;
 
 mod guard;
 
 pub use guard::SpinLockGuard;
 
 pub struct SpinLock<T: ?Sized> {
-    locked: AtomicBool,
+    turns: Turns,
 
     #[cfg(debug_assertions)]
     level: Option<depend::Level>,
@@ -22,7 +21,7 @@ unsafe impl<T: ?Sized + Send> Sync for SpinLock<T> {}
 impl<T> SpinLock<T> {
     pub const fn new(val: T) -> Self {
         SpinLock {
-            locked: AtomicBool::new(false),
+            turns: Turns::new(),
             #[cfg(debug_assertions)]
             level: None,
             data: UnsafeCell::new(val),
@@ -31,7 +30,7 @@ impl<T> SpinLock<T> {
 
     pub const fn new_level(_level: depend::Level, val: T) -> Self {
         SpinLock {
-            locked: AtomicBool::new(false),
+            turns: Turns::new(),
             #[cfg(debug_assertions)]
             level: Some(_level),
             data: UnsafeCell::new(val),
@@ -40,24 +39,6 @@ impl<T> SpinLock<T> {
 }
 
 impl<T: ?Sized> SpinLock<T> {
-    fn acquire(&self) {
-        loop {
-            while self.locked.load(Ordering::Relaxed) {
-                crate::metal::stop::hush();
-                crate::metal::interrupt::window::poll();
-                ::core::hint::spin_loop();
-            }
-            if self
-                .locked
-                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_ok()
-            {
-                return;
-            }
-            crate::metal::stop::hush();
-            crate::metal::interrupt::window::poll();
-        }
-    }
     #[inline(never)]
     pub fn lock(&self) -> SpinLockGuard<'_, T> {
         #[cfg(debug_assertions)]
@@ -67,7 +48,7 @@ impl<T: ?Sized> SpinLock<T> {
         let start = crate::metal::measure::stamp();
         crate::metal::sync::depend_check!(self, caller);
 
-        self.acquire();
+        self.turns.enter();
         crate::metal::sync::depend_acquire!(self, caller);
 
         {
@@ -90,7 +71,7 @@ impl<T: ?Sized> SpinLock<T> {
         let start = crate::metal::measure::stamp();
         crate::metal::sync::depend_check_peer!(self, _lower, caller);
 
-        self.acquire();
+        self.turns.enter();
         crate::metal::sync::depend_acquire!(self, caller);
 
         {
@@ -108,11 +89,7 @@ impl<T: ?Sized> SpinLock<T> {
         #[cfg(feature = "latency")]
         let start = crate::metal::measure::stamp();
 
-        if self
-            .locked
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
+        if !self.turns.try_enter() {
             return None;
         }
         crate::metal::sync::depend_acquire!(self, caller);

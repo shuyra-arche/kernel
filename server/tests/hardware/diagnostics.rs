@@ -88,7 +88,12 @@ fn crash_evidence_comes_from_the_fault_and_survives_without_an_allocator() {
                     format!("{command:?}\n"),
                 )
                 .unwrap();
-                let output = super::run(command, &evidence, &name);
+                let output = super::run(
+                    command,
+                    &evidence,
+                    &name,
+                    std::time::Duration::from_secs(60),
+                );
                 let serial = String::from_utf8_lossy(&output.stdout);
                 // OpenSBI v1.6 syscon_do_poweroff ignores the SRST reason:
                 // lib/utils/reset/fdt_reset_syscon.c. QEMU's process exit code

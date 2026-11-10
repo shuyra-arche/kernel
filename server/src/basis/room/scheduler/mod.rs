@@ -71,13 +71,15 @@ pub(crate) fn detach_local(task: &Arc<Task>) -> bool {
 
 /// 把一枚就绪任务放到挑中的那颗核上。
 pub(crate) fn insert(task: Arc<Task>) {
-    place(pick(|candidate| task.can_run_on(candidate), true), task);
-}
-
-pub(crate) fn insert_expired(task: Arc<Task>) {
-    // Expiry always runs on the boot Hart. Excluding it when all compatible
-    // Harts are busy would pin a Task compatible with only two Harts.
-    place(pick(|candidate| task.can_run_on(candidate), false), task);
+    let cursor = task
+        .ident
+        .id
+        .get()
+        .wrapping_add(task.schedule.lock().placement());
+    // Explicit wakes and expiry both rotate through the complete eligible set.
+    // Excluding the waker would pin a two-Hart Task to its only remote peer,
+    // regardless of its own placement cursor.
+    place(pick(cursor, |candidate| task.can_run_on(candidate)), task);
 }
 
 /// 把一枚就绪任务放到指定核上：接进它那张就绪队列，必要时叫醒它。

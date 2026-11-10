@@ -22,8 +22,8 @@ Task dispatch delay. Ordinary memory calls retain their non-RT contract.
 ## Exclusion and reception
 
 `SpinLock`, `RelLock` and OnceLock publication waits visit
-`metal/riscv/interrupt/window` on every unsuccessful wait iteration. A failed
-SpinLock CAS also visits the window. A peer performing a CPU fence is waited on
+`metal/riscv/interrupt/window` on every unsuccessful wait iteration. Both exclusion
+locks retain their FIFO turn while visiting it. A peer performing a CPU fence is waited on
 through the same reception mechanism. Boot does not arm windows until the
 Hart's timer, interrupt mask and ROOT execution environment exist; boot is not
 an admitted runtime section.
@@ -53,7 +53,8 @@ ordinary scheduler entry remains responsible for consuming them. An earlier
 implementation reproduced a self-sustaining timer storm in the IRQ/IOMMU guest;
 the callback must not manufacture a new timer for every observed timer.
 
-Lock acquisition is still not fair or time bounded. Interrupt *reception* can
+SpinLock and COMMIT share FIFO turn admission as detailed below. This bounds
+overtaking, without supplying a transaction-duration bound. Interrupt *reception* can
 occur while the caller waits; full handler work and Task scheduling have their
 own admission boundaries. Ordinary trap entry reuses ROOT and is not a generic
 nested kernel entry. A kernel continuation is switched only through existing
@@ -109,6 +110,30 @@ validated against its consumption sequence and live binding.
 
 ## Measurement definitions
 
+### COMMIT admission order
+
+COMMIT's reentrant lock reserves one FIFO turn per waiting Hart. The outermost
+release publishes protected writes and advances that turn; recursive guards
+reuse their Hart's current turn. A nonblocking try succeeds only with an empty
+queue (or for the existing owner). Failed tries reserve nothing, including the
+interval after an owner releases and before the next waiter enters.
+
+With H participating Harts, an outer reservation has at most H−1 earlier turns.
+New requests cannot overtake it. This removes starvation from repeated lock
+reacquisition; it is not priority inheritance or a bound on transaction time.
+Its elapsed wait still includes those preceding outer transactions, any nested
+work, firmware and host/hardware scheduling. A stalled predecessor stalls its
+successors. Waiters retain the stackless reception windows; no Task switch,
+allocation or lock acquisition is introduced in those windows.
+
+Host tests hold waiters at acknowledged reception boundaries to check FIFO
+ordering, protected-write visibility, recursion while queued, non-barging tries
+and the absence of abandoned turns. The QEMU latency workload continues to use
+four competing Yield workers plus real UART IRQ publication and revocation;
+functional assertions and watchdogs are unchanged. Compare observed distributions
+under the same QEMU mode, but do not infer a hardware upper bound from a lower
+maximum in one run.
+
 Enable provider feature `kernel/latency`. Fixed per-Hart histograms use 32 bins,
 relaxed atomic updates and the admitted `time` clock. The probe measures 1024
 pairs of clock reads plus same-layout updates. Counters must not wrap during an
@@ -121,6 +146,7 @@ evidence run. Sampling perturbs execution; it is not an overhead subtraction.
 | spin-wait / spin-hold | IRQ mask to successful acquisition, and guard construction to unlock; failed try is not a successful sample. |
 | commit-wait / commit-hold | RelLock scopes, including recursive scopes; sums are not CPU utilization. |
 | irq-sign | First router attempt through successful retained publication, including deferred admission; excludes deferred waiter notification and device-to-CPU latency. |
+| irq-admit / irq-publish | Partition each successful irq-sign sample at COMMIT admission; the former includes deferred retries, the latter includes controller claim and retained publication. Cancelled/no-claim attempts produce no delivery sample. |
 | ready-run | First ready publication through extension restore/ASID occupancy at Rust user return; preserves the timestamp across queue transfer. |
 | timer-late | Deadline drain observation minus requested tick, not time of user execution. |
 | probe | Measurement floor under the recorded environment, not hardware WCET. |
@@ -161,3 +187,171 @@ historical baseline is linked from #30 / PR #100. Compare only named boundaries
 under recorded environments; changed workloads and mask-window boundaries are
 not direct hardware performance comparisons. Full CI validates the final commit;
 M3 and physical-hardware WCET analysis remain separate work.
+
+## Outer transactions and execution phases
+
+The optional provider now adds `outer-wait` and `outer-hold`: each outer COMMIT
+turn contributes once, regardless of recursive guard count. The original
+`commit-wait`/`commit-hold` metrics retain their original scope semantics. Up to
+eight slowest distinct outer call sites per Hart are retained without allocating,
+locking or formatting during a sample. Each `latency-outer` record pairs the
+largest observed hold at that site with the wait for that same transaction;
+it is a bounded selection, not a complete per-site profile. Attribution uses
+static caller locations forwarded through `commit`/`try_commit`. Reporting reads
+those Hart-local records only after all Harts reach the shutdown barrier.
+
+`ready-queue` runs from first ready-queue publication to final seating;
+`dispatch-run` runs from that seating through extension restoration and ASID
+occupancy at the Rust return boundary. Both use the same endpoint and partition
+`ready-run` for each completed sample. Transfer preserves the original ready
+stamp, reseating replaces the dispatch boundary, and parking cancels the sample.
+These do not measure notification work before ready publication, nor final
+assembly return instructions. Histogram percentiles cannot be added together.
+
+Initial attribution identified Cell Split/Merge (`cell/object::reshape`) and
+Share Open (`flat/sharing::open`) as long outer holders. Split/Merge now retains
+its owner's ledger while preparing and converting its exclusive private source
+outside COMMIT. Admission requires one Hold, no bindings and no in-flight
+publication; the owner ledger prevents a second access and retirement. The
+replacement identity is reserved before receipt movement, so successful movement
+cannot be followed by a fallible publication allocation. Final publication closes
+the old identity; if Stop closed the owner meanwhile, replacement receipts remain
+in its ledger for retirement and caller success is refused.
+
+Share Open now uses its existing operation lease and a source publication window
+across page-table installation and invalidation outside COMMIT. The window is
+registered before translation, excludes overlapping transfer, and prevents
+withdrawal settlement. The shared boundary validates authority and registers the
+binding, then records the completed mapping in a separate short commit. Ledger
+closure during installation rejects success and transfers cleanup to Nest before
+the flight ends. Physical cleanup remains owed on Busy. Reusing an existing map
+also registers the publication window; it does not bypass the same exclusion.
+This preserves the existing authority/withdrawal owner, including borrowed device
+regions whose operation lease serializes direct revocation.
+
+Admission response arithmetic also runs outside COMMIT. One preparation per
+destination excludes concurrent additions; removals can only reduce interference.
+Retained immutable contracts supply the calculation, not a second scheduling
+authority. Final publication revalidates the controller and prepared Task; it
+does not overwrite a removed Task's later admission on another Hart.
+
+IRQ front halves still try COMMIT once. A retained request joins the FIFO at an
+outer trap return or an existing scheduling boundary, so a stream of peer commits
+cannot indefinitely reject it. The stackless reception callback never joins this
+queue or switches a continuation. A successful deferred turn checks the controller
+even when its CPU pending bit disappeared, settling cancelled attempts before a
+later IRQ can reuse their timestamp. Claim, notification and consumption retain
+their existing batch and ownership limits.
+
+## Conditional blocking bounds
+
+Both exclusion locks use the same turn queue. With H online participating Harts,
+each lock has at most H outstanding turns: nonrecursive SpinLock admits one per
+Hart, and recursive COMMIT guards reuse their owner's turn. H is at most the
+boot-admitted 4096 slots and far below the sequence-number modulus. A blocking
+reservation therefore has at most H-1 predecessor turns. Failed tries reserve
+nothing and cannot barge during an owner-to-owner gap. Host handshakes pause a
+real queued waiter in that gap, verify rejection, FIFO entry and protected-write
+visibility for both locks; these are work/order proofs, not timing tests.
+
+Let C_l bound the **wall-clock duration of a complete outer ownership interval**
+for lock l, including nested lock waits, firmware interruption and memory stalls.
+Then one reserved acquisition waits at most `(H - 1) * C_l`, plus bounded queue
+atomic overhead. A try performs one queue observation/CAS. For a finite invocation
+path with n_l outer acquisitions, its cumulative lock blocking is bounded by
+`sum_l n_l * (H - 1) * C_l`. Recursive COMMIT scopes do not add predecessor turns.
+Use the lock-dependency order to derive each C_l from local execution plus its
+bounded nested dependencies; do not count the same wait again as local execution.
+
+| Admitted path | Finite software work and required duration input |
+| --- | --- |
+| Clock / ClockInfo | Resident monotonic read and arithmetic; platform clock read bound. |
+| Yield / return / timer / IPI | At most 32 fixed registrations and pending continuations per pass; bounded selection/relocation; at most H destinations. Bound slot/Task/COMMIT ownership and timer/IPI/context operations. |
+| Direct Sign Listen / Await | One poll/watch/local handoff; the admitted branch cannot take the ordinary beacon retry loop. Authority ancestry is at most 64; dependency analysis has at most 32 origins and 9 visits per origin. A server's later answer is a separate service bound. |
+| Direct Sign Trigger / Consume | One retained state transition; notification queue insertion is O(1), with at most H notifications. Bound endpoint/ledger/queue ownership and IPIs, including competing ordinary mutations. |
+| Unit Exit | One local handoff plus retained retirement publication. Physical memory/IOMMU settlement remains asynchronous and cannot be included as successful synchronous completion. |
+| IRQ to retained Sign | At most 4 claims, each scanning at most 64 sources and bounded authority ancestry. Deferred maintenance visits at most 64 sources, with the existing per-key listener batches. Bound the interrupted ordinary continuation until an outer return, one FIFO admission, controller MMIO and publication. |
+
+These formulas require a healthy platform that eventually executes every admitted
+Hart, finite bounds on each holder's actual work, and finite call/arrival counts
+over the response window. Admission and queue capacities bound software counts;
+they do not establish C_l. Ordinary peers can still hold translation/allocator
+locks for work depending on Span pages/ranges, Nest size, boot memory and admitted
+Sv geometry. Those dependencies must be bounded for the selected deployment,
+even though the admitted Task itself cannot call those operations. A cancelled
+try, reception window or FIFO queue cannot substitute for that evidence.
+
+For M3, add the cumulative result to interrupt/dispatch/platform interference to
+justify `Schedule.latency` over the **whole response window**, not one lock wait.
+Unknown C_l, unbounded external arrivals, offline Harts or uncontrolled host
+descheduling make a finite time guarantee unavailable. QEMU provides observations
+and regression evidence only. #30's strong hardware-dependent acceptance remains
+unproved until these deployment inputs are established; no observed maximum is
+promoted to an upper bound.
+
+Ordinary wake placement also owns its cursor in Task's scheduling state. A shared
+global cursor allowed periodic workers to remain on one residue when unrelated
+wakeups advanced it by the Hart count. Each Task now progresses independently;
+existing compatibility, idle preference and fixed-Hart reservation rules remain.
+Explicit wakes and expiry share this placement path. Both rotate over the complete
+compatible set: excluding the waker pinned observed blocked workers to the sole
+remote Hart in the sparse two-Hart fixture, despite the per-Task cursor.
+The context guest still requires actual traced migration. IRQ observers park
+with WaitValue during construction;
+their event deadlines start after all observers are prepared. The original four
+Yield workers remain the contention load. Common Sign revocation keeps the
+recipient alive until exact-identity Busy retries settle; logical invalidation
+may wake it before physical ledger removal, and immediate exit would race that
+removal. Errors other than Busy still fail the test.
+
+The floating-point guest confirms both workers reached `Waiting` before starting
+the preemption experiment, separating second-Task construction from that deadline.
+It then performs eight explicit WaitValue wakeups, checking all registers and
+traced checkpoint PCs immediately after each handoff. These replace the earlier
+64 floating-point / 128 vector short-sleep rounds: those deadlines could expire
+before Kernel entry and therefore could not alone establish blocking or migration
+coverage. Each retained round proves actual blocking and checks the whole image
+before and after resumption. Timer preemption, Yield, cross-Hart trace assertions,
+fault/reuse cases and the outer QEMU watchdog remain. Timer/deadline semantics
+also retain their dedicated clock and common Room tests.
+
+Vector workers use the same observed handoff with their complete live register
+and control image, including nonzero vstart. Each successful worker performs
+eight blocked handoffs and traces immediately after resumption. The mixed-Hart
+probe can fault before activation; only an activated worker joins the handoff.
+The host still requires actual traced migration and restricts mixed-Hart vector
+checkpoints to the two compatible Harts.
+
+For every handoff the controller parks on an arrival counter while workers execute
+their intervening rounds, then requires every worker's actual `Waiting` state and
+the exact WakeValue count. It briefly sleeps between state inspections instead of
+adding a fifth busy Yield competitor. There is no three-second ordinary-Task
+response assumption; a premature worker exit fails and missing progress hits the
+outer watchdog. The four context load workers remain runnable in user computation,
+requiring timer preemption; their startup also uses an arrival wait. Continuous
+Yield load made a two-host-CPU debug vector boot take 119.63 seconds and another
+expire at 120 seconds after vector checks passed. That lock-convoy stress is
+separate from register/placement coverage: context workers still exercise Yield,
+and IRQ/latency scenarios retain their four continuous Yield competitors.
+Context modes allow
+120 seconds for the composed context, common Cell/retirement and shutdown phases:
+a two-host-CPU run passed context checks but exhausted 60 seconds in the common
+suite. The timer-preemption assertion and actual cross-Hart trace checks remain.
+Condition waits retry only `RoomFail::Busy`, rechecking the same atomic predicate
+and retaining any absolute deadline. A concurrent Nest invalidation can reject
+the resident atomic read after call-entry settlement, without consuming a wake.
+
+The IRQ revocation fixture parks its controller until the driver finishes mapping
+and initial inspection, then requires the driver's actual Sign `Waiting` state.
+That listener has no timeout: only a Dead/Denied authority result satisfies the
+test. This removes an unrelated two-second initialization assumption and a short
+sleep that did not prove blocking. Hardware event waits remain two seconds,
+retirement retries remain five seconds, all four Yield competitors remain active,
+and the outer watchdog remains sixty seconds.
+
+Ordinary Task returns also check already-published Pause/Stop requests. A Task
+that repeatedly calls Kernel must acknowledge control at this exclusion-free
+boundary, without depending solely on a later timer/IPI entry. The existing slot
+transition revalidates and parks/quits it under COMMIT; a temporary ROOT kernel
+continuation is never switched through this check. Uncontrolled ordinary returns
+do not acquire another global COMMIT turn.

@@ -45,9 +45,16 @@ impl<T: ?Sized> Drop for RelLockGuard<'_, T> {
         #[cfg(feature = "latency")]
         crate::metal::measure::elapsed(crate::metal::measure::Metric::CommitHold, self.start);
         if c == 0 {
+            #[cfg(feature = "latency")]
+            if let Some(outer) = unsafe { (*self.lock.outer.get()).take() } {
+                crate::metal::measure::complete(outer);
+            }
             #[cfg(debug_assertions)]
             super::depend::release(self.lock as *const _ as *const () as usize);
-            self.lock.owner.store(Owner::FREE.word(), Ordering::Release);
+            self.lock.owner.store(Owner::FREE.word(), Ordering::Relaxed);
+            // Publish all protected writes before the next reserved Hart may
+            // enter. Recursive releases never advance the queue.
+            self.lock.turns.leave();
         }
     }
 }

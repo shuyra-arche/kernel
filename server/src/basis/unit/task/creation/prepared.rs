@@ -111,7 +111,7 @@ impl PreparedTask {
                 .expect("unique prepare slot")
                 .write(Task {
                     #[cfg(feature = "latency")]
-                    ready_stamp: core::sync::atomic::AtomicU64::new(0),
+                    observation: crate::metal::measure::execution::Execution::new(),
                     ident: self.ident.clone(),
                     life: self.life.clone(),
                     state: self.state.clone(),

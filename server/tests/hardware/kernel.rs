@@ -289,7 +289,14 @@ fn run(mode: &str) {
                 format!("{command:?}\n"),
             )
             .unwrap();
-            let output = super::run(command, &evidence, &name);
+            // Realtime and context modes run their own scenarios before the
+            // complete shared Cell/retirement suite. Two-host-CPU diagnostics
+            // reached their mode's assertions but exhausted 60 s in the common
+            // suite or shutdown. Bound the composed run with host-load headroom;
+            // functional assertions and actual migration remain required.
+            let watchdog =
+                std::time::Duration::from_secs(if realtime || context { 120 } else { 60 });
+            let output = super::run(command, &evidence, &name, watchdog);
             let log = String::from_utf8_lossy(&output.stdout);
             assert!(output.status.success(), "{name}: {log}");
             if latency {

@@ -1,7 +1,7 @@
 //! QEMU virt UART is a real level interrupt, not a software Sign trigger.
 use core::{
     fmt::Write,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
 };
 use kernel_api::{
     abi::reply::SignReply,
@@ -15,7 +15,7 @@ use kernel_api::{
         modifiable::Modifiable,
         pend::{AccordRequest, AccordTarget, Distributable, Limits, Operations, PendRange},
         sign::SignRights,
-        unit::UnitTarget,
+        unit::{UnitQuery, UnitState, UnitTarget},
         wait::Wait,
     },
 };
@@ -71,13 +71,19 @@ extern "C" fn observer() -> ! {
     OBSERVED.store(true, Ordering::Release);
     unit::exit(0, 0, VirtAddr::new(0), 0)
 }
-static ENTERED: AtomicUsize = AtomicUsize::new(0);
+static ENTERED: AtomicU32 = AtomicU32::new(0);
 static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
 static WATCH_TOKEN: AtomicUsize = AtomicUsize::new(0);
 static WATCH_ENTERED: AtomicUsize = AtomicUsize::new(0);
+static WATCH_ARMED: AtomicU32 = AtomicU32::new(0);
 extern "C" fn watch() -> ! {
     let token = PendId::mint(WATCH_TOKEN.load(Ordering::Acquire));
     WATCH_ENTERED.fetch_add(1, Ordering::Release);
+    // Fixture preparation is not part of IRQ service latency or the four
+    // competing Yield workers. Park until every observer has been constructed.
+    while WATCH_ARMED.load(Ordering::Acquire) == 0 {
+        crate::room::wait(&WATCH_ARMED, 0, Wait::Infinite);
+    }
     assert!(matches!(
         sign::listen(token, deadline()).unwrap(),
         SignReply::Triggered { .. }
@@ -220,7 +226,15 @@ extern "C" fn revoked_driver() -> ! {
     open(PendId::mint(VIEW.load(Ordering::Acquire)));
     initial(token);
     ENTERED.store(1, Ordering::Release);
-    assert!(sign::listen(token, deadline()).is_err());
+    room::wake_value(VirtAddr::new(ENTERED.as_ptr() as usize), true).unwrap();
+    // This is a revocation experiment: the controller first observes this
+    // actual blocked listener. Only authority loss may release it.
+    let error = sign::listen(token, Wait::Infinite).unwrap_err();
+    assert!(matches!(
+        error.source,
+        kernel_api::abi::call::sign::SignFail::Dead
+            | kernel_api::abi::call::sign::SignFail::Denied
+    ));
     // Keep this ledger alive until the controller finishes exact-identity
     // retries; Task exit would otherwise race the same physical retirement.
     while !REVOKE_FINISHED.load(Ordering::Acquire) {
@@ -288,10 +302,12 @@ pub(super) fn run(at: usize, count: usize) {
         }
         task
     });
-    room::sleep_until(room::clock() + 2_000_000).unwrap();
     let routed = sign::create(crate::license::get()).unwrap();
     let source = kernel_api::model::sign::SignSource::Sign { token };
     sign::attach(routed, source, 0).unwrap();
+    WATCH_ARMED.store(1, Ordering::Release);
+    room::wake_value(VirtAddr::new(WATCH_ARMED.as_ptr() as usize), true).unwrap();
+    room::sleep_until(room::clock() + 2_000_000).unwrap();
     write(1, 2);
     assert_eq!(
         sign::listen(routed, deadline()).unwrap(),
@@ -396,12 +412,18 @@ pub(super) fn run(at: usize, count: usize) {
         VIEW.store(view.get(), Ordering::Release);
         TOKEN.store(branch.get(), Ordering::Release);
         unit::resume(UnitTarget::Task(task)).unwrap();
-        let until = room::clock() + 2_000_000_000;
+        // Mapping/initial inspection are setup, not the revocation deadline.
+        // Park the controller instead of adding another competing Yield loop.
         while ENTERED.load(Ordering::Acquire) == 0 {
-            assert!(room::clock() < until);
+            crate::room::wait(&ENTERED, 0, Wait::Infinite);
+        }
+        let until = room::clock() + 2_000_000_000;
+        while super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task))).state
+            != UnitState::Waiting
+        {
+            assert!(room::clock() < until, "revocation listener did not block");
             room::yield_();
         }
-        room::sleep_until(room::clock() + 2_000_000).unwrap();
         let token = if revoke_view { view } else { branch };
         let until = room::clock() + 5_000_000_000;
         loop {

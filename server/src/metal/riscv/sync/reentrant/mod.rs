@@ -5,6 +5,7 @@ use crate::metal::hart;
 
 use super::depend;
 use super::trap::TrapGuard;
+use super::turn::Turns;
 
 mod guard;
 mod owner;
@@ -15,8 +16,14 @@ use owner::Owner;
 
 #[derive(Debug)]
 pub struct RelLock<T: ?Sized> {
+    // One outstanding admission per Hart; recursive guards reuse its ticket.
+    // Wrapping sequence numbers remain distinct with fewer than usize::MAX
+    // outstanding Harts. A reservation cannot be cancelled or bypassed.
+    turns: Turns,
     owner: AtomicUsize,
     count: UnsafeCell<usize>,
+    #[cfg(feature = "latency")]
+    outer: UnsafeCell<Option<crate::metal::measure::Transaction>>,
 
     #[cfg(debug_assertions)]
     level: Option<depend::Level>,
@@ -29,8 +36,11 @@ unsafe impl<T: ?Sized + Send> Sync for RelLock<T> {}
 impl<T> RelLock<T> {
     pub const fn new_level(_level: depend::Level, val: T) -> Self {
         RelLock {
+            turns: Turns::new(),
             owner: AtomicUsize::new(0),
             count: UnsafeCell::new(0),
+            #[cfg(feature = "latency")]
+            outer: UnsafeCell::new(None),
             #[cfg(debug_assertions)]
             level: Some(_level),
             data: UnsafeCell::new(val),
@@ -42,6 +52,7 @@ impl<T: ?Sized> RelLock<T> {
     /// One acquisition attempt; a foreign owner is never waited on. Recursive
     /// acquisition stays on the same Hart and creates no second lockdep entry.
     /// A failed attempt drops TrapGuard and restores the caller's IRQ state.
+    #[cfg_attr(feature = "latency", track_caller)]
     #[inline(never)]
     pub fn try_lock(&self) -> Option<RelLockGuard<'_, T>> {
         #[cfg(debug_assertions)]
@@ -50,27 +61,38 @@ impl<T: ?Sized> RelLock<T> {
         #[cfg(feature = "latency")]
         let start = crate::metal::measure::stamp();
         let me = Owner::of(hart::hart_id());
-        match self.owner.compare_exchange(
-            Owner::FREE.word(),
-            me.word(),
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => {
-                crate::metal::sync::depend_check!(self, caller);
-                unsafe { *self.count.get() = 1 };
-                crate::metal::sync::depend_acquire!(self, caller);
+        if Owner::from_word(self.owner.load(Ordering::Relaxed)) == me {
+            self.reenter();
+        } else {
+            // Acquire observes the previous outer release. Reserve only an
+            // empty queue: a failed try creates no abandoned ticket, and a
+            // free owner between turns does not let this caller barge.
+            if !self.turns.try_enter() {
+                return None;
             }
-            Err(owner) if Owner::from_word(owner) == me => unsafe {
-                *self.count.get() = (*self.count.get())
-                    .checked_add(1)
-                    .expect("recursion overflow");
-            },
-            Err(_) => return None,
+            crate::metal::sync::depend_check!(self, caller);
+            self.owner.store(me.word(), Ordering::Relaxed);
+            unsafe { *self.count.get() = 1 };
+            #[cfg(feature = "latency")]
+            unsafe {
+                *self.outer.get() = Some(crate::metal::measure::transaction(
+                    start,
+                    core::panic::Location::caller(),
+                ));
+            }
+            crate::metal::sync::depend_acquire!(self, caller);
         }
         #[cfg(feature = "latency")]
         crate::metal::measure::elapsed(crate::metal::measure::Metric::CommitWait, start);
         Some(RelLockGuard::new(self, trap))
+    }
+
+    fn reenter(&self) {
+        unsafe {
+            *self.count.get() = (*self.count.get())
+                .checked_add(1)
+                .expect("recursion overflow");
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -78,6 +100,7 @@ impl<T: ?Sized> RelLock<T> {
         self.owner.load(Ordering::Relaxed) == Owner::of(hart::hart_id()).word()
     }
 
+    #[cfg_attr(feature = "latency", track_caller)]
     #[inline(never)]
     pub fn lock(&self) -> RelLockGuard<'_, T> {
         #[cfg(debug_assertions)]
@@ -96,39 +119,20 @@ impl<T: ?Sized> RelLock<T> {
             );
         }
 
-        loop {
-            match self.owner.compare_exchange(
-                Owner::FREE.word(),
-                me.word(),
-                Ordering::Acquire,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => {
-                    unsafe { *self.count.get() = 1 };
-                    #[cfg(debug_assertions)]
-                    depend::acquire(
-                        self as *const Self as *const () as usize,
-                        self.level,
-                        caller,
-                    );
-                    break;
-                }
-                Err(cur) if Owner::from_word(cur) == me => {
-                    unsafe {
-                        *self.count.get() = (*self.count.get())
-                            .checked_add(1)
-                            .expect("recursion overflow")
-                    };
-                    break;
-                }
-                Err(_) => {
-                    while self.owner.load(Ordering::Relaxed) != Owner::FREE.word() {
-                        crate::metal::stop::hush();
-                        crate::metal::interrupt::window::poll();
-                        ::core::hint::spin_loop();
-                    }
-                }
+        if Owner::from_word(self.owner.load(Ordering::Relaxed)) == me {
+            self.reenter();
+        } else {
+            self.turns.enter();
+            self.owner.store(me.word(), Ordering::Relaxed);
+            unsafe { *self.count.get() = 1 };
+            #[cfg(feature = "latency")]
+            unsafe {
+                *self.outer.get() = Some(crate::metal::measure::transaction(
+                    start,
+                    core::panic::Location::caller(),
+                ));
             }
+            crate::metal::sync::depend_acquire!(self, caller);
         }
 
         {

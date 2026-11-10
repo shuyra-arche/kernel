@@ -6,7 +6,9 @@ use account::{Account, Contract};
 use alloc::sync::Weak;
 
 pub(crate) enum Schedule {
-    Ordinary,
+    Ordinary {
+        cursor: usize,
+    },
     /// The stopped Task is leased to fallible resource preparation.
     Preparing,
     Fixed {
@@ -18,30 +20,43 @@ pub(crate) enum Schedule {
 }
 impl Schedule {
     pub(crate) const fn new() -> Self {
-        Self::Ordinary
+        Self::Ordinary { cursor: 0 }
+    }
+    /// Wake placement belongs to this Task: unrelated wakeups must not phase
+    /// lock a periodic worker to one residue of a shared global cursor.
+    pub(crate) fn placement(&mut self) -> usize {
+        match self {
+            Self::Ordinary { cursor } => {
+                let next = *cursor;
+                *cursor = cursor.wrapping_add(1);
+                next
+            }
+            Self::Fixed { contract, .. } => contract.spec.hart as usize,
+            Self::Preparing => unreachable!("preparing Task cannot be placed"),
+        }
     }
     pub(crate) fn contract(&self) -> Option<Contract> {
         match self {
-            Self::Ordinary | Self::Preparing => None,
+            Self::Ordinary { .. } | Self::Preparing => None,
             Self::Fixed { contract, .. } => Some(*contract),
         }
     }
     pub(crate) fn priority(&self) -> u8 {
         match self {
-            Self::Ordinary | Self::Preparing => 0,
+            Self::Ordinary { .. } | Self::Preparing => 0,
             Self::Fixed { effective, .. } => *effective,
         }
     }
     pub(crate) fn available(&mut self, now: u64) -> bool {
         match self {
-            Self::Ordinary => true,
+            Self::Ordinary { .. } => true,
             Self::Preparing => false,
             Self::Fixed { account, .. } => account.remaining(now) != 0,
         }
     }
     pub(crate) fn deadline(&mut self, now: u64) -> u64 {
         match self {
-            Self::Ordinary | Self::Preparing => u64::MAX,
+            Self::Ordinary { .. } | Self::Preparing => u64::MAX,
             Self::Fixed { account, .. } => account.deadline(now),
         }
     }
