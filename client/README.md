@@ -54,30 +54,47 @@ The Kernel guest suite also executes real traps for Cell, Pend, Sign, Unit and R
 [compatibility notes](../api/README.md#source-migration-and-abi-compatibility)
 before updating a consumer's Kernel pin.
 
-ABI v5 creation calls take an explicit None-target Pend license. Sign handles are
-now PendIds; use Pend Accord/Narrow/Revoke/Return with Operations::Sign instead
+ABI v6 creation calls take an explicit None-target Pend license. Sign handles are
+PendIds; use Pend Accord/Narrow/Revoke/Return with Operations::Sign instead
 of the removed Sign authorization calls. SignId is descriptive only. Boot Ledger
-v5 provides Name::Call(Call::Create); managers must explicitly delegate creation
+v8 provides Name::Call(Call::Create); managers must explicitly delegate creation
 permissions to new Tasks. Rebuild all users and capsule ABI declarations together.
 
 `call::flat::{create, inspect, slice, delete}` uses a Flat Pend; `slice` returns a
-checked SlotId. `call::nest` creates and observes Internal/External organizations;
-External `attach` requires a separate Port Pend (`call::port::inspect`). Team
-creation may consume an owned Internal Nest root through `UnitCreate::Team::nest`.
+checked SlotId. `call::nest::create(license)` creates an Internal Nest only.
+Team creation may consume that owned root through `UnitCreate::Team::nest`.
+External Nests instead arrive as authenticated boot grants named
+`Name::Nest { controller, requester }`; these names describe topology, not authority.
+There is no `call::port`, runtime external Attach/Detach or caller-supplied
+requester. `nest::inspect` writes a 56-byte NestInfo without a Port identity.
+
+Keep the External Nest root with its manager and delegate limited Pend branches
+for actual users. Returning/revoking a worker branch retires its own Memos,
+including unused reservations, without replacing the Nest or closing other live
+branches. Set Distributable to No for workers that cannot delegate further.
+A different Task can reserve Memos after the former Task's positions have all
+retired and been removed. `nest::delete` requires the boot root to terminate
+an External Nest. Busy retains the close until hardware settlement and Closed
+is terminal. Live descendants, borrows and active publications constrain Narrow.
+
 `Sign::attach` additionally takes a generation: exact Memo generation for
 MappingPublished/Retired, zero for other sources. Use NestFault rather than the
-retired MappingFault. See the API operation matrix and ABI v3 migration table.
+retired MappingFault. Fault observations remain with the same Nest across Pend
+handover; an old MappingId cannot name a later mapping at the same address.
 
 `flat::create(license, size, align, level)` selects physical Cell geometry.
 Use `Allocation::at_level` for Cell Create. `cell::split(slot)` and
 `cell::merge(slot)` consume the old SlotId only on success and return its
 replacement. They require an exclusive complete contiguous collection; mapping
-leaf changes remain separate. ABI v5 requires rebuilding consumer capsules.
+leaf changes remain separate.
 
-Hardware dispatch is read from Ledger v7 as an explicit `(View, Sign)` pair. For
-an admitted device this is a Share View Pend plus Sign Pend. Delegate the full
-writable View before the non-distributable Listen/Consume Sign, rolling back View
-on failure before resuming the recipient. Initialize the device, Listen and Consume
-the initial notification; thereafter clear each device cause before consuming its
-sequence. Return/Revoke either Pend closes delivery. Sign uses its existing ABI v5
-calls; consumption does not synchronously wait for controller completion.
+Hardware dispatch is read from Ledger v8 as an explicit `(View, Sign)` pair;
+the pair layout introduced in v7 is unchanged. For an admitted device this is a
+Share View Pend plus Sign Pend. Delegate the full writable View before the
+non-distributable Listen/Consume Sign, rolling back View on failure before
+resuming the recipient. Initialize the device, Listen and Consume the initial
+notification; thereafter clear each device cause before consuming its sequence.
+Return/Revoke either Pend closes delivery. Sign retains its slots and payloads
+under the ABI v6 prefix; consumption does not synchronously wait for controller
+completion. Raw device/configuration authority must be withdrawn separately
+before reassigning a device; Pend distribution alone proves no DMA quiescence.

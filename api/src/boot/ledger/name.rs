@@ -7,8 +7,15 @@ pub enum Name {
     Trap(Trap),
     Call(Call),
     Page(Page),
-    Port(u64),
-    Interrupt { controller: u64, source: u32 },
+    Interrupt {
+        controller: u64,
+        source: u32,
+    },
+    /// Descriptive boot topology. Only the accompanying Pend grants access.
+    Nest {
+        controller: u64,
+        requester: u32,
+    },
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Trap {
@@ -44,7 +51,7 @@ impl Name {
             Self::Call(_) => ResourceKind::Control,
             Self::Trap(Trap::PageFault) => ResourceKind::Clone,
             Self::Page(_) => ResourceKind::Share,
-            Self::Port(_) => ResourceKind::Port,
+            Self::Nest { .. } => ResourceKind::Nest,
         }
     }
 }
@@ -53,9 +60,17 @@ impl Name {
     /// Write a ledger name into exactly `WIDTH` bytes.
     pub fn store(&self, out: &mut [u8]) {
         assert_eq!(out.len(), Self::WIDTH);
-        if let Self::Interrupt { controller, source } = *self {
+        let route = match *self {
+            Self::Interrupt { controller, source } => Some((4, controller, source)),
+            Self::Nest {
+                controller,
+                requester,
+            } => Some((5, controller, requester)),
+            _ => None,
+        };
+        if let Some((class, controller, source)) = route {
             out.fill(0);
-            out[0] = 4;
+            out[0] = class;
             out[4..8].copy_from_slice(&source.to_le_bytes());
             out[8..16].copy_from_slice(&controller.to_le_bytes());
             return;
@@ -69,8 +84,7 @@ impl Name {
             Self::Page(Page::Dtb) => (2, 0, 0),
             Self::Page(Page::Initrd) => (2, 1, 0),
             Self::Page(Page::Region(base)) => (2, 2, base),
-            Self::Port(id) => (3, 0, id),
-            Self::Interrupt { .. } => unreachable!(),
+            Self::Interrupt { .. } | Self::Nest { .. } => unreachable!(),
         };
         out.fill(0);
         out[0] = class;
@@ -79,11 +93,20 @@ impl Name {
     }
     pub fn fetch(bytes: &[u8]) -> Option<Self> {
         let bytes = bytes.get(..NAME_LEN)?;
-        if bytes[0] == 4 {
+        if matches!(bytes[0], 4 | 5) {
             let source = u32::from_le_bytes(bytes[4..8].try_into().ok()?);
             let controller = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
-            return (bytes[1..4] == [0; 3] && source != 0 && controller != 0)
-                .then_some(Self::Interrupt { controller, source });
+            if bytes[1..4] != [0; 3] || controller == 0 {
+                return None;
+            }
+            return match bytes[0] {
+                4 if source != 0 => Some(Self::Interrupt { controller, source }),
+                5 => Some(Self::Nest {
+                    controller,
+                    requester: source,
+                }),
+                _ => None,
+            };
         }
         if bytes[2..8].iter().any(|b| *b != 0) {
             return None;
@@ -98,7 +121,7 @@ impl Name {
             (2, 0, 0) => Some(Self::Page(Page::Dtb)),
             (2, 1, 0) => Some(Self::Page(Page::Initrd)),
             (2, 2, base) if base != 0 => Some(Self::Page(Page::Region(base))),
-            (3, 0, id) if id > 0 && id <= isize::MAX as u64 => Some(Self::Port(id)),
+            // Class 3 was Port and remains invalid.
             _ => None,
         }
     }

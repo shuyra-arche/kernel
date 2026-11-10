@@ -1,5 +1,5 @@
-//! Authorized roots for external Nests. All position and hardware responsibility
-//! state belongs to the retained Nest; task death only closes admission.
+//! Each Memo retains its creating Pend branch and any published borrow. Task
+//! death or branch revocation withdraws that Memo, not the whole External Nest.
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::PublicationError as Error;
 use crate::basis::nest::{Access, Nest, Span};
@@ -18,6 +18,7 @@ use kernel_api::model::pend::{NestRights, Operations};
 struct Registration {
     actor: Weak<Task>,
     task: TaskId,
+    creator: Arc<pend::PendEntry>,
     target: Option<Arc<pend::PendEntry>>,
     hold: Arc<Hold>,
     nest: Arc<Nest>,
@@ -31,6 +32,25 @@ impl Registration {
     }
     fn idle(&self) -> bool {
         matches!(self.info().state, CellState::Vacant | CellState::Ready) && self.borrow.is_none()
+    }
+    fn orphaned(&self) -> bool {
+        !self.creator.alive()
+            || self
+                .actor
+                .upgrade()
+                .is_none_or(|actor| actor.dead() || actor.ident.team.external.closed())
+    }
+    /// The registry removes this entry immediately after successful discharge.
+    /// A live publication keeps both its address and its creating branch held.
+    fn discard(&self) -> Result<(), CellFail> {
+        if !self.idle() {
+            return Err(CellFail::Busy);
+        }
+        self.nest.delete_external_memo(&self.span)?;
+        // SAFETY: no publication or borrow remains, and deletion has released
+        // this exact Memo's association, freeze and address reservation.
+        unsafe { self.creator.authority().release_retirement() };
+        Ok(())
     }
 }
 static NESTS: SpinLock<Vec<Registration>> = SpinLock::new(Vec::new());
@@ -77,10 +97,9 @@ pub(crate) fn create(
         return Err(CellFail::Denied);
     }
     let nest = target.target().nest().ok_or(CellFail::Denied)?;
-    if !matches!(
-        nest.external_phase(),
-        kernel_api::model::nest::NestPhase::Unbound | kernel_api::model::nest::NestPhase::Bound
-    ) {
+    if nest.external_phase() != kernel_api::model::nest::NestPhase::Bound
+        || (modifiable && target.modifiable() != kernel_api::model::modifiable::Modifiable::Yes)
+    {
         return Err(CellFail::Denied);
     }
     let access = if modifiable {
@@ -89,12 +108,32 @@ pub(crate) fn create(
         Access::READ
     };
     let mut records = NESTS.lock();
+    // The requester can reach every live leaf in this Nest. Another Task
+    // must wait for the current Task's positions, including retiring ones.
+    if records
+        .iter()
+        .any(|record| Arc::ptr_eq(&record.nest, &nest) && record.task != actor.ident.id)
+    {
+        return Err(CellFail::Busy);
+    }
     records.try_reserve(1).map_err(|_| CellFail::OutOfMemory)?;
-    let span = nest.external_memo(iova, pages, access)?;
+    target
+        .authority()
+        .retain_retirement()
+        .map_err(|_| CellFail::Busy)?;
+    let span = match nest.external_memo(iova, pages, access) {
+        Ok(span) => span,
+        Err(error) => {
+            // SAFETY: this attempt has no published or registered Memo.
+            unsafe { target.authority().release_retirement() };
+            return Err(error.into());
+        }
+    };
     let id = span.identity();
     records.push(Registration {
         actor: Arc::downgrade(actor),
         task: actor.ident.id,
+        creator: target,
         target: None,
         hold,
         nest,
@@ -114,7 +153,8 @@ pub(crate) fn associate(
 ) -> Result<(), CellFail> {
     let mut records = NESTS.lock();
     let r = authorized(&mut records, actor, token, id, NestRights::TRANSFER)?;
-    if r.task != actor.ident.id
+    if r.orphaned()
+        || r.task != actor.ident.id
         || !r
             .hold
             .resolve()
@@ -161,7 +201,7 @@ pub(crate) fn owning_hold(
 ) -> Result<(Arc<Hold>, Arc<crate::basis::cell::page::Page>), CellFail> {
     let mut records = NESTS.lock();
     let r = authorized(&mut records, actor, token, id, NestRights::TRANSFER)?;
-    if r.task != actor.ident.id || !r.hold.source().manages(actor) {
+    if r.orphaned() || r.task != actor.ident.id || !r.hold.source().manages(actor) {
         return Err(CellFail::NotTransferable);
     }
     if r.info().generation != expected || !r.idle() {
@@ -181,7 +221,7 @@ pub(crate) fn publish(
     let target = target(actor, token, NestRights::PUBLISH)?;
     let mut records = NESTS.lock();
     let r = authorized(&mut records, actor, token, id, NestRights::PUBLISH)?;
-    if r.task != actor.ident.id {
+    if r.orphaned() || r.task != actor.ident.id {
         return Err(CellFail::Denied);
     }
     if r.info().generation != expected || !r.idle() {
@@ -223,7 +263,9 @@ pub(crate) fn publish(
     }
     r.borrow.as_mut().unwrap().publish();
     if let Err(e) = r.nest.submit_external(&r.span) {
-        close(r);
+        // A partial hardware failure may poison the entire context. Unlike a
+        // branch return, that failure deliberately closes the whole Nest.
+        let _ = r.nest.close_external();
         return Err(failure(e));
     }
     Ok(())
@@ -236,9 +278,6 @@ pub(crate) fn retract(
 ) -> Result<(), CellFail> {
     let mut records = NESTS.lock();
     let r = authorized(&mut records, actor, token, id, NestRights::RETRACT)?;
-    if r.task != actor.ident.id {
-        target(actor, token, NestRights::RETRACT)?;
-    }
     let info = r.info();
     if info.generation != expected
         || !matches!(info.state, CellState::Published | CellState::Publishing)
@@ -256,19 +295,13 @@ pub(crate) fn delete(actor: &Task, token: PendId, id: MappingId) -> Result<(), C
     if r.task != actor.ident.id {
         target(actor, token, NestRights::RETRACT)?;
     }
-    if !r.idle() {
-        return Err(CellFail::Busy);
-    }
-    r.nest.delete_external_memo(&r.span)?;
+    r.discard()?;
     let at = records
         .iter()
         .position(|r| r.span.identity() == id.get())
         .unwrap();
     records.remove(at);
     Ok(())
-}
-fn close(record: &Registration) {
-    let _ = record.nest.close_external();
 }
 pub(crate) fn event(
     actor: &Task,
@@ -321,10 +354,7 @@ fn advance(r: &mut Registration) -> [Option<(TaskId, PendId)>; 2] {
     if r.borrow.is_none() {
         return [None, None];
     }
-    let invalid = r
-        .actor
-        .upgrade()
-        .is_none_or(|a| a.dead() || a.ident.team.external.closed())
+    let invalid = r.orphaned()
         || r.target
             .as_ref()
             .is_none_or(|t| !t.permits(Operations::Nest(NestRights::PUBLISH)))
@@ -357,7 +387,7 @@ pub(crate) fn maintain() -> bool {
     crate::basis::cell::change::maintain();
     static CURSOR: AtomicUsize = AtomicUsize::new(0);
     for _ in 0..4 {
-        let (id, changed, observers) = {
+        let (id, changed, observers, discarded) = {
             let _commit = crate::basis::commit();
             let Some(mut records) = NESTS.try_lock() else {
                 return true;
@@ -371,9 +401,16 @@ pub(crate) fn maintain() -> bool {
             let observers = advance(r);
             let id = r.span.identity();
             let changed = before != r.info();
-            (id, changed, observers)
+            // A branch return retains its creating registration until the
+            // exact Memo is idle and removed. No unrelated leaf is discarded.
+            let remove = r.orphaned() && r.discard().is_ok();
+            let discarded = remove.then_some((r.task, r.creator.token()));
+            if remove {
+                records.remove(at);
+            }
+            (id, changed || remove, observers, discarded)
         };
-        for (task, token) in observers.into_iter().flatten() {
+        for (task, token) in observers.into_iter().flatten().chain(discarded) {
             pend::notify(task, token);
         }
         if changed {
@@ -386,7 +423,7 @@ pub(crate) fn maintain() -> bool {
     super::binding::maintain()
 }
 
-/// Only the vanished root's organization can discard unobserved ready positions.
+/// Whole-Nest deletion discards ready positions only after binding settlement.
 /// Published/retiring positions retain their source and address for later progress.
 pub(super) fn discard(nest: &Arc<Nest>) -> bool {
     let mut records = NESTS.lock();
@@ -399,7 +436,7 @@ pub(super) fn discard(nest: &Arc<Nest>) -> bool {
     let mut at = 0;
     while at < records.len() {
         if Arc::ptr_eq(&records[at].nest, nest) {
-            if nest.delete_external_memo(&records[at].span).is_err() {
+            if records[at].discard().is_err() {
                 return false;
             }
             records.remove(at);

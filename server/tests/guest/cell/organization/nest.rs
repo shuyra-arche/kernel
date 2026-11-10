@@ -42,11 +42,9 @@ pub(super) extern "C" fn cascade() -> ! {
     unit::exit(84, 0, VirtAddr::new(0), 0)
 }
 fn build(cascade: bool) {
-    let external = nest::create(crate::license::get(), NestKind::External).unwrap();
-    assert!(unit::create(ptr(&request(external))).is_err());
-    nest::delete(external).unwrap();
-    pend::return_(external).unwrap();
-    let root = nest::create(crate::license::get(), NestKind::Internal).unwrap();
+    // Ordinary creation has no External kind or requester arguments. External
+    // Team-adoption rejection is exercised against the real trusted I/O grant.
+    let root = nest::create(crate::license::get()).unwrap();
     let mut observation = [0; NestInfo::WIDTH];
     nest::inspect(root, VirtAddr::new(observation.as_mut_ptr() as usize)).unwrap();
     assert_eq!(
@@ -78,9 +76,7 @@ fn build(cascade: bool) {
     let (staging, address) = attach(reference, 1);
     let start = core::ptr::addr_of!(nest_child_start);
     let length = core::ptr::addr_of!(nest_child_end) as usize - start as usize;
-    unsafe {
-        core::ptr::copy_nonoverlapping(start, address.get() as *mut u8, length);
-    }
+    unsafe { core::ptr::copy_nonoverlapping(start, address.get() as *mut u8, length) };
     retract(staging, 0);
     delete(raw_memo(staging, 0).object);
     let source = share_view::create(crate::license::get(), reference, Modifiable::No).unwrap();
@@ -141,8 +137,7 @@ fn build(cascade: bool) {
     }
     for (at, task) in tasks.iter().copied().enumerate() {
         crate::lifecycle::delete(task);
-        // Reclaiming/removing one member must preserve every other receipt and
-        // its immutable result, even after all executions have already exited.
+        // Removing one member preserves all other retained results.
         for other in &tasks[at + 1..] {
             assert_eq!(crate::lifecycle::result(*other), (1, 83));
         }

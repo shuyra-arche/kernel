@@ -109,10 +109,13 @@ impl Entry {
                 _ => false,
             }
             && self.kind == self.name.kind()
-            && !matches!(self.name, Name::Page(Page::Region(0)))
+            && !matches!(
+                self.name,
+                Name::Page(Page::Region(0)) | Name::Nest { controller: 0, .. }
+            )
     }
 }
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 #[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub version: u32,

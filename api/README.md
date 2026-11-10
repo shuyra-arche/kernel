@@ -14,6 +14,7 @@ code or runtime state. There is no Env package or compatibility facade.
 | `model::modifiable` | Modifiable: shared read or exclusive write access |
 | `model::unit` | ProgramKind, UnitTarget, control authorities, creation descriptors, queries and stable results |
 | `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
+| `model::{flat,nest}` | Source and address-space identities and observations; never independent authorization |
 | `model::{wait,exit}` | Waiting and exit vocabulary |
 | `abi::call` | Operation declarations, domain failures and aggregate dispatch |
 | `abi::operation` | Operation, RegisterCall, KernelCall and TerminalCall traits |
@@ -81,21 +82,21 @@ Cells. ABI coordinates remain 4 KiB units, so a level-1 Cell spans 512 coordinat
 This is a breaking provider redesign of Cell, View, Pend, Sign, Unit and Room.
 There are no compatibility aliases for retired operations.
 
-Rust callers now match `OutOfMemory` for allocation failures. Each domain uses
+Rust callers match `OutOfMemory` for allocation failures. Each domain uses
 its existing numeric ABI code for this variant.
 
-Call numbers are `(version << 48) | (domain << 32) | operation`; version is 5.
-Versions zero through four and unknown versions are rejected before domain dispatch. All byte
-descriptors use fixed little-endian 64-bit words and checked tags/reserved fields.
-Boot capsule format 2 declares the matching ABI in byte 11; old executable
-capsules are rejected before launch. The resource ledger is version 7.
+Call numbers are `(version << 48) | (domain << 32) | operation`; version is **6**.
+Versions zero through five and unknown versions are rejected before dispatch.
+All byte descriptors use fixed little-endian 64-bit words and checked tags and
+reserved fields. Boot Capsule format 2 declares the matching ABI in byte 11;
+old executable capsules are rejected before launch. The resource Ledger is
+**version 8**, with the same 40-byte entry layout introduced in version 7.
 
 | Domain | Current operations |
 | --- | --- |
 | Cell | Create (0), Delete (1), Push (2), Pull (3), Publish (4), Retract (5), Protect (6), Inspect (7), Split (8), Merge (9) |
 | Flat (12) | Create (0), Inspect (1), Slice (2), Delete (3) |
-| Nest (13) | Create (0), Inspect (1), Attach (2), Detach (3), Delete (4) |
-| Port (14) | Inspect (0) |
+| Nest (13) | Create (0, Internal only), Inspect (1), Delete (4); slots 2/3 retired |
 | Pend | Accord, Revoke, Narrow, Return, Inspect, Collect |
 | Clone View | Create, Delete, Push, Pull, Peek |
 | Share View | Create, Delete, Open, Shut |
@@ -104,9 +105,33 @@ capsules are rejected before launch. The resource ledger is version 7.
 | Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo |
 | Debug | Put, Get |
 
-### Migration from ABI v4 to v5
+### Migration from ABI v5 / Ledger v7 to ABI v6 / Ledger v8
 
-| Boundary | ABI v5 | Consumer migration |
+| Previous boundary | Current contract | Consumer migration |
+| --- | --- | --- |
+| Public Port model, rights, calls and Pend target | Removed; domain 14 and target/permission kind 5 remain invalid | Receive a trusted External Nest Pend, not a Port Pend |
+| `Nest.Create(license, kind)` | `Nest.Create(license)` creates Internal only | External Nest comes from trusted boot; no user-supplied requester |
+| `Nest.Attach(nest, port)` / Detach | Slots 2/3 removed | Use Pend branches for handover and the boot root for terminal Delete |
+| Nest ATTACH/DETACH rights | ATTACH remains solely for Internal Nest adoption into Team; DETACH bit 16 invalid | Use ATTACH only for Internal Nest adoption |
+| 64-byte NestInfo with PortId | 56 bytes: NestId, kind, phase and four fault words | Resize output buffers and use the checked codec |
+| Ledger Port name/class 3, kind 6 | `Name::Nest { controller, requester }`, name class 5, resource kind 7 | Treat topology as descriptive; only the accompanying Pend grants access |
+| Per-user Nest creation/binding | One persistent Nest with revocable Pend branches | Retain the manager root; limit operations, Modifiable and Distributable |
+| Driver death closes the whole binding | Its exact Memos retire; unrelated branches and NestId survive | Wait for branch cleanup before unsafe address/Page reuse |
+| Root termination | Root loss or root-only Nest Delete closes the entire Nest | Busy retains cleanup; retry Delete after settlement; Closed never reopens |
+| Capsule ABI 5 / Ledger 7 | Capsule format 2 declaring ABI 6 / Ledger 8 | Rebuild executables, descriptors and ledger readers together |
+
+No new source capability, source Nest or Nest CREATE permission replaces Port.
+MMIO/configuration access remains independently authorized. Distribution does not
+prove exclusive hardware ownership or device quiescence. Trusted integration
+must withdraw old raw device/configuration authority and provide exact platform
+ordering evidence before reassigning access; a new software branch is not proof.
+
+### Historical migration from ABI v4 to v5
+
+The geometry changes below remain in v6. Version references describe that earlier
+migration, not permission to execute v5 binaries against a v6 Kernel.
+
+| Boundary | ABI v5 change retained in v6 | Consumer migration |
 | --- | --- | --- |
 | Allocation | Three register words: size, align, level | Supply `CellLevel`; level 0 retains base-page allocation |
 | CellCreate Slot | Word 3 carries level; still 96 bytes | Use the new descriptor encoding |
@@ -114,18 +139,17 @@ capsules are rejected before launch. The resource ledger is version 7.
 | Flat Create | Fourth argument is level | Pass level explicitly |
 | FlatInfo | 32 bytes, including level | Resize output buffers |
 | Cell Split / Merge | Operations 8 / 9 return a new SlotId | Replace the old handle only on success |
-| Capsules / ledger | ABI v5 / ledger v5 | Rebuild all capsules; ledger format is unchanged |
 
-### Ledger v7 dispatch pairs
+### Ledger dispatch pairs
 
-The syscall ABI remains v5, including all existing Sign slots and rights. Ledger
-v7 entries are 40 bytes: name `[0,16)`, resource kind at 16, optional View tag at
-17 (0 absent, 1 Clone, 2 Share), zero reserved bytes `[18,24)`, primary Pend at
-`[24,32)` and View Pend at `[32,40)`. Handles are little-endian u64 values.
-`Name::Interrupt { controller, source }` requires a Share View and Sign pair;
-`Entry::dispatch()` returns the explicit View kind and both handles. Other entry
-kinds have no paired View. Malformed, incomplete and old-version ledgers fail
-validation. Rebuild ledger readers; no Sign syscall migration is needed.
+Ledger v8 keeps the v7 40-byte entry shape: name `[0,16)`, resource kind at 16,
+optional View tag at 17 (0 absent, 1 Clone, 2 Share), zero reserved bytes
+`[18,24)`, primary Pend at `[24,32)` and View Pend at `[32,40)`. Handles are
+little-endian u64 values. `Name::Interrupt { controller, source }` requires a
+Share View and Sign pair; `Entry::dispatch()` returns the explicit View kind
+and both handles. Other entry kinds, including Nest, have no paired View.
+Malformed, incomplete and old-version ledgers fail validation. Sign operations
+retain their slots and payloads, now under the ABI v6 prefix.
 
 A source admits one non-distributable Listen/Consume branch only when that Task
 holds the matching full writable Share View with Open permission. Listen-only
@@ -183,19 +207,22 @@ Retract completion settles only this mapping. `external` and other retained
 CPU/device obligations may still forbid moving or reclaiming the Page. Physical
 reuse requires all such obligations to settle, independently of business results,
 Sign notifications, timeouts, handle deletion or Task exit. Ready is not a claim
-that memory has been freed. Task death retains hardware records through completion;
-a settled I/O record expires after its creator dies, and later lookup fails.
+that memory has been freed. Task death and creating-branch revocation retain
+hardware records through completion. Their orphaned Memos, including unused
+reservations, are then removed; later lookup of the old MappingId fails.
 
 External Memos use one complete level-0 or level-1 Cell, aligned to its size,
 Caller control and READ or READ|WRITE. Overlapping ranges are rejected.
-One binding supports up to 512 base-page Cells or one level-1 Cell within the aligned 2 MiB
-window selected by its first Memo. Positions outside that window are rejected.
-A settled Memo can be reassociated and republished; retracting one leaf leaves
-other leaves accessible. Page substitution still requires an explicit Cell
-Push/Pull association and a fresh generation from Inspect. Each range retirement
-requires matching invalidation/fence completion and trusted platform ordering;
-context retirement additionally releases the controller before another Nest binds.
-Unsupported aliases, shared controllers, ATS/PRI and noncoherent access are rejected.
+One binding supports up to 512 base-page Cells or one level-1 Cell within the
+aligned 2 MiB window selected by its first Memo. Positions outside that window
+are rejected. Pend handover does not reset this hardware window. A settled Memo
+can be reassociated and republished; retracting one leaf leaves other leaves
+accessible. Page substitution still requires an explicit Cell Push/Pull
+association and a fresh generation from Inspect. Each range retirement requires
+matching invalidation/fence completion and trusted platform ordering. Binding
+retirement is a separate, whole-context boundary; it is not performed on every
+Pend handover. Unsupported aliases, shared controllers, ATS/PRI and noncoherent
+access are rejected.
 
 Public Acquire/Release, Attach/Detach, Begin/End, Traverse, Position, Attachment
 and general Retain authority are removed. Their replacements are Cell objects,
@@ -224,36 +251,45 @@ DELETE right. Generic Accord never changes target kind. Flat TRANSFER is checked
 separately at both ends of Cell Push/Pull into a Slot; it cannot be inferred from
 read/write access. A mutable parent is suspended while its data is lent.
 
-Nest Create takes None NEST and returns a typed Internal or External root.
-Nest Inspect writes 64 bytes with stable NestId, kind, phase, PortId and retained
-fault information. Port Inspect writes 48 bytes with PortId, controller identity,
-requester, address width (38), page size (4096) and window size (2 MiB). These are
-descriptive facts. Port has no user creation operation: trusted platform setup
-mints its root separately from MMIO Share authority in Ledger v5 `Call::Port`.
+Nest Create takes a None NEST license and returns an Internal root. External
+Nests are created only by trusted boot admission, which authenticates the complete
+controller/requester isolation boundary before delivering an ordinary Nest Pend.
+The Ledger name describes that topology; it is not accepted as a runtime credential.
+Nest Inspect writes 56 bytes with stable NestId, kind, phase and retained fault
+information. Public Port identities, rights, calls and a second authorization
+lineage do not exist.
 
-Nest Attach takes Nest ATTACH and Port ATTACH, binding one authorized requester
-exclusively to one External Nest. It retains both exact Pends until context
-settlement; Narrow/redistribution that would invalidate a live binding returns
-Busy. BAR ownership grants no Port rights. A conflicting binding returns Busy;
-wrong targets, fabricated tokens and unsupported geometry are denied.
-The lifecycle is Unbound → Bound → Closing → Closed (or Failed on unsafe hardware
-failure). Detach closes admission, then Kernel advances retirement independently
-of the caller. Closed Nest cannot reopen. Only a fresh Nest may bind the settled
-Port; fresh NestId and Memo generations reject stale software operations, while
-trusted retirement proof independently excludes old bus transactions.
+Keep the External Nest root with its manager. Accord delegates a subset of
+Nest operations, Modifiable and Distributable to workers. A worker cannot widen
+its rights or acquire another source by supplying a raw number. Its death,
+Return or Revoke invalidates the branch and retires its Memos, not the entire
+Nest. The exact creating branch remains retained until its positions are idle
+and removed; a live publication additionally retains its actual publishing
+permission and data borrow. Other branches of the same Task keep their live
+leaves. Only one Task at a time may reserve positions in an External Nest.
+A competing reservation returns Busy until the former Task's positions have
+all been removed. Reusing an old address requires hardware settlement, and
+the replacement Memo receives a different identity.
 
-Sign Attach now includes `generation`. MappingPublished (tag 11) and MappingRetired
+Root loss, Delete by the External Nest root with DELETE permission, or an unsafe backend failure
+closes the entire address space. Delete starts irreversible Closing and returns
+Busy while binding retirement or cleanup remains; retry completes deletion.
+Closed cannot reopen. A private Unbound state exists only during trusted boot
+preparation, never as a user opportunity to attach arbitrary hardware. The
+controller stays assigned until the backend's exact complete binding and platform
+proof; failure retains Pages, table pages and queues. No temporary driver Task
+is the sole owner responsible for completing this cleanup.
+
+Sign Attach includes `generation`. MappingPublished (tag 11) and MappingRetired
 (tag 9) observe the exact Memo generation, including completion before registration.
 The immediate next generation may be armed before publication. An older generation
 reports Gone rather than matching a replacement publication. NestClosed (13) and
 NestFault (12) require generation zero and authorized Nest INSPECT. Hardware FQ
 records have no software Memo generation: the oldest fault is retained at Nest
 scope, subsequent faults increment a saturating sequence, and no unbounded queue
-or guessed Memo attribution is exposed. Listen/Consume does not clear Nest faults;
-only a fresh binding starts a fresh record. MappingFault (tag 10) is retired.
-Driver exit, binding-authority Return/Revoke and root loss close new admission;
-manager observations and Kernel cleanup survive the driver's execution. Failed,
-pending or mismatched retirement proof cannot release Pages, table pages or Port.
+or guessed Memo attribution is exposed. Listen/Consume and Pend handover do not
+clear Nest faults. MappingFault (tag 10) is retired. Whole-Nest close and ordinary
+branch retirement remain observably different.
 
 | Operation | Required permission | Additional boundary |
 | --- | --- | --- |
@@ -261,19 +297,18 @@ pending or mismatched retirement proof cannot release Pages, table pages or Port
 | Flat Inspect / Slice / Delete | Flat INSPECT / ASSOCIATE / DELETE | Current window; Delete retains failed withdrawal |
 | Cell Push/Pull to a Flat Slot | Flat TRANSFER on each Flat endpoint | ASSOCIATE handle, Modifiable Yes, movable Page |
 | Share Create from Flat | None SHARE + Flat SHARE | Distributable, narrowing and borrow rules |
-| Nest Create | None NEST | Explicit Internal/External kind |
+| Nest Create | None NEST | Internal only; no hardware source parameter |
 | Team Create with Internal Nest | Build + Nest ATTACH | Exclusive owned root; token consumed |
-| Port Inspect | Port INSPECT | Descriptive only |
-| Nest Inspect / Attach / Detach / Delete | Nest INSPECT / ATTACH / DETACH / DELETE | Attach also Port ATTACH; Delete requires settled organization |
+| Nest Inspect / Delete | Nest INSPECT / DELETE | External Delete requires the boot root; Busy retains cleanup |
 | External Memo Create / Delete | Nest RESERVE / RELEASE | Source authority; exact supported position |
 | External association / Publish / Retract | Nest TRANSFER / PUBLISH / RETRACT | Exact Memo generation and source access |
-| External Memo Inspect / Sign conditions | Nest INSPECT | Same binding; retained state |
+| External Memo Inspect / Sign conditions | Nest INSPECT | Same Nest; retained state |
 | External Protect | Unsupported | Reject; CPU Protect remains existing Team/source authority |
 
-Nest PROTECT is reserved and has no External implementation. None grants no Port
-creation, raw hardware access or arbitrary syscall permission. For Internal
-Nest, RESERVE/RELEASE/etc. do not create a second mapping API: once adopted by a
-Team, the existing Team/Cell contract controls its CPU Memos.
+Nest PROTECT is reserved and has no External implementation. None grants no
+external source creation, raw hardware access or arbitrary syscall permission.
+For Internal Nest, RESERVE/RELEASE/etc. do not create a second mapping API: once
+adopted by a Team, the existing Team/Cell contract controls its CPU Memos.
 
 ### Authority and control contracts
 
@@ -281,14 +316,15 @@ Pend Accord snapshots an 88-byte request; Narrow snapshots a 64-byte request.
 Both carry typed operation permissions, independent Modifiable/Distributable
 limits, and a checked range. Derivation requires Distributable; neither
 derivation nor narrowing can add operations or change the target family.
-Both Accord and Narrow interpret a
-Pages range relative to the immediate parent's/current effective window.
-Narrow retains identity, rejects live descendants with Busy, withdraws old CPU
-access before committing a smaller window, and refuses outstanding external
-responsibilities. The 112-byte PendInfo identifies its target and includes the
-effective permissions and source window. FlatId and NestId are stable object
-identities; they grant no access on their own.
-None, Sign, Flat, Nest and Port use the same live Pend ledger and derivation tree
+Both Accord and Narrow interpret a Pages range relative to the immediate
+parent's/current effective window. Narrow retains identity, rejects live
+descendants with Busy and withdraws old CPU access before committing a smaller
+window. Active data borrows and publication routes retain their constraints.
+Retirement-only holds keep cleanup responsible without preserving permission or
+permanently preventing Narrow. The 112-byte PendInfo identifies its target and
+includes effective permissions and source window. FlatId and NestId are stable
+object identities; they grant no access on their own.
+None, Sign, Flat and Nest use the same live Pend ledger and derivation tree
 as Views. No descriptive identity grants access. None is object-free call permission: its Modifiable
 must be No, its range Inherit, and it permits only the listed CreationRights.
 The Kernel mints the initial None root for the bootstrap Task in Ledger
@@ -309,16 +345,18 @@ the caller cannot supply a different target or operation identity to bypass them
 | Share Shut | Share SHUT | Matching live branch and mapping |
 | Cell association through Share | Share ASSOCIATE | Same branch/window, Page and publication constraints |
 
-Creation grants all supported operations to the new View's root. Boot grants
-are narrower: fault queues allow PULL/PEEK, memory resources allow
-OPEN/SHUT/ASSOCIATE. Neither permits deleting Kernel-owned resources. Accord
-requires an explicit operation subset and Distributable Yes. Return and Revoke
-continue to follow ownership of the authorization branch and need no extra
-operation grant. Removing data permissions first withdraws existing mappings;
-retained Slot references revalidate the same authority before association.
-Inspect/Collect return identity and state, never a reusable authorization proof.
-Return and Revoke restore parent access only after descendant and hardware
-responsibilities have settled. Busy retains cleanup responsibility.
+Creation grants all supported operations to the new View's root. Boot View
+grants are narrower: fault queues allow PULL/PEEK, memory resources allow
+OPEN/SHUT/ASSOCIATE. Neither permits deleting Kernel-owned Views. The trusted
+External Nest root is separately delivered to its manager, including the ability
+to terminate that Nest; worker branches should omit DELETE. Accord requires an
+explicit operation subset and Distributable Yes. Return and Revoke continue to
+follow ownership of the authorization branch and need no extra operation grant.
+Removing data permissions first withdraws existing mappings; retained Slot
+references revalidate the same authority before association. Inspect/Collect
+return identity and state, never a reusable authorization proof. Return and
+Revoke complete only after descendant and retained hardware responsibilities
+have settled. Busy retains cleanup responsibility.
 
 Wait has exactly Poll, At(monotonic nanoseconds), and Infinite. Deadlines are
 converted once, rounded up, and retained across wake/requeue. WaitValue compares
@@ -372,8 +410,8 @@ Return operate on independent administrative authorities with revocable ancestry
 | Clone Pull / Peek | Clone PULL / PEEK | Pull delivers message authority; Peek observes length/sender/count without consuming |
 | Share Open / Shut | Share OPEN / SHUT; range, Modifiable and borrowing | Opens/closes this caller's access using the common Nest publication machinery; Shut neither returns Pend nor deletes View |
 | Pend Accord | Delegable parent and non-expanding relative window/access | New local/remote branch; failed preparation does not publish partial authority |
-| Pend Revoke / Return | Direct grantor / holder | Retires branch; Busy keeps obligations and parent access suspended |
-| Pend Narrow | Holder; no live descendants or external obligations | Same identity with reduced access/window after old CPU withdrawal |
+| Pend Revoke / Return | Direct grantor / holder | Retires branch; Busy keeps obligations and parent data access suspended where lent |
+| Pend Narrow | Holder; no live descendants, conflicting data borrow or active publication | Same identity with reduced access/window; retirement-only retention is not live permission |
 | Pend Inspect / Collect | Caller-local table | Single/paged discovery; stable View identity allows comparison, never authorization |
 | Sign Create | None SIGN license | New endpoint and root Sign Pend |
 | Sign Delete | Sign DELETE | Closes endpoint and wakes all listeners |
@@ -405,10 +443,10 @@ Sign routing and Room Clock provide their retained core capabilities. Kernel
 crash backtraces and bounded Debug Put/Get remain available.
 
 Consumers must rebuild together with this API and regenerate capsules/ledgers.
-Provider and consumer revisions must move together. The following migration is
-incompatible with both v1 and the interim v2; old call numbers fail before dispatch.
+Provider and consumer revisions must move together. The following historical
+migration describes changes retained from ABI v4; current binaries must use v6.
 
-| Previous interface | ABI v4 / Ledger v5 | Consumer migration |
+| Previous interface | ABI v4 / Ledger v5 change | Consumer migration |
 | --- | --- | --- |
 | Clone/Share Create without permission | Leading `license: PendId` with None CLONE/SHARE | Read boot Create license or receive it through Pend Accord |
 | Sign Create returning SignId | None SIGN license; returns PendId | Use Pend Inspect for descriptive SignId |
@@ -443,25 +481,28 @@ checks protect published slots, encoding, malformed input rejection and typed
 operation boundaries. They do not execute traps. See the root README for RV64
 builds and the separate responsibility for system integration.
 
-### Migration from ABI v3 / Ledger v4
+### Earlier external-interface migration
 
-| Previous contract | Replacement | Required migration |
+The Port-based intermediate contract from #83/#84 is superseded by the ABI v6
+migration above. The following independent changes remain in force:
+
+| Previous contract | Current replacement | Required migration |
 | --- | --- | --- |
-| External authority selected through BAR Share | Nest-target Pend bound using a separate Port Pend | Read both MMIO and Port grants; create/attach Nest before Memo creation |
-| One-shot single-page external route | Repeatable Memo positions under one binding | Retract only the leaf; Detach when retiring the binding |
-| Sign Attach without generation; MappingFault | Generation-qualified MappingPublished/Retired and binding-level NestFault | Pass generation explicitly, use zero for non-Memo sources |
+| External authority selected through BAR Share | Trusted External Nest Pend, independent of MMIO Share | Read the Nest grant and delegate existing Pend branches |
+| One-shot single-page external route | Repeatable Memo positions under one persistent Nest | Retract only the leaf; Delete only to terminate the entire Nest |
+| Sign Attach without generation; MappingFault | Generation-qualified MappingPublished/Retired and NestFault | Pass generation explicitly, use zero for non-Memo sources |
 | Team descriptor word 3 reserved zero | Optional owned Internal Nest root | Existing callers pass None; adopting callers consume root on success |
-| No runtime Flat/Nest/Port calls | Classes 12/13/14 above | Rebuild API, client, executable and capsule ABI byte together |
-| `boot::bind_external` associates MMIO/aperture with requester | `grant_mmio` plus independent ExternalRoute controller/requester/proof | Platform publishes separate trusted facts and Ledger capabilities |
-| Quiescence poll for whole shutdown | `prove(Retirement)` with Range/Binding scope | Exact-token proof; range must drain prior requests without closing the live context |
+| No runtime Flat/Nest calls | Classes 12/13 | Rebuild API, Client, executable and Capsule ABI byte together |
+| MMIO/aperture coupled to requester | `grant_mmio` plus independent trusted ExternalRoute controller/requester/proof | Platform establishes authentic routes before publishing Ledger grants |
+| Quiescence poll for whole shutdown | `prove(Retirement)` with Range/Binding scope | Exact-token proof; range must drain prior requests without closing other live leaves |
 
 The initial coherent RV64/QEMU implementation admits one trusted requester per
 controller and rejects shared/aliased/unsupported isolation. The integration
 owner controls configuration that could bypass isolation. Kernel performs no
 PCI enumeration, BAR allocation, device business control or Board parsing.
-Consumer order is provider commit → external boot/QEMU fixture pin → System and
-remaining users → Kernel CI fixture pin; record full revisions in integration PRs.
-No physical-device validation or #82 IRQ routing is claimed by these tests.
+Kernel-only provider changes do not migrate consumers automatically. Record full
+provider and fixture revisions when validating integration. No physical-device
+proof follows from Host tests or the coherent QEMU fixture.
 
 Debug Put is nonblocking and returns the exact accepted byte prefix (possibly zero).
 It adds no newline and does not rewrite non-UTF-8 bytes. Callers retaining output
@@ -490,13 +531,17 @@ still precede publication. There is no generic ISA enum or second-ISA boot claim
 | `Devices.{authorities, protected, external}` | `Devices.resources: platform::Resources` |
 | `Memory::dtb()` | `Memory::metadata()`; the constructor's fourth argument is opaque firmware storage |
 
-`Platform::dtb()` remains RV64-specific. Physical range units, pre-heap capacities,
-separate static memory/Hart storage and wire encoding are unchanged. Images must
-rebuild against the new source contract. Publish Kernel first, then migrate and
-pin Vanllia `platform/riscv` and `tests/platform/qemu` together. The Host
-second-provider fixture validates common physical inputs without manufacturing
-RISC-V facts; CPU/controller admission for another ISA awaits an actual provider.
+`Platform::dtb()` remains RV64-specific. Physical range units, pre-heap capacities
+and separate static memory/Hart storage are unchanged. Images must rebuild against
+the source contract and the ABI/Ledger versions above. The Host second-provider
+fixture validates common physical inputs without manufacturing RISC-V facts;
+CPU/controller admission for another ISA awaits an actual provider.
 
+`boot::bind_external(ExternalRoute { controller, requester, proof })` is an unsafe
+trusted Rust entry, not a Unit syscall. It allocates the External Nest and binds
+the validated source before Ledger publication. Its signature is unchanged, but
+its output grant is now the Nest root. Ordinary Unit creation cannot authenticate
+or select a hardware source. Failed boot cannot publish partial authorities.
 
 ## Optional CPU reservations and explicit service waits
 
@@ -510,7 +555,8 @@ consumed ns, overruns ns and conditional response ns (104 bytes total).
 Sign slots 10/11/12 are `Assign(token, server, grant)`, `Resign(token)` and
 `Await(token, wait)`. Slots 7–9 remain retired. Await has the same Wait and
 three-register reply encoding as Listen, with an explicit live server dependency.
-The new operations are additive to ABI v5; existing slots/layouts are unchanged.
+These operations were introduced in ABI v5; their slots and payload layouts are
+unchanged under the ABI v6 prefix.
 
 Admit requires Build and Task management authority and a stopped User Task;
 Evict requires the same authority and an initially dormant Task; Profile requires

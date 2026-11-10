@@ -31,7 +31,6 @@ pub(crate) enum Target {
     View(View),
     Flat(Arc<Sharing>),
     Sign(Arc<Endpoint>),
-    Port(Arc<crate::basis::port::Port>),
     Nest {
         owner: TaskId,
         nest: Arc<crate::basis::nest::Nest>,
@@ -52,7 +51,6 @@ impl Target {
             }),
             Self::Flat(meta) => Identity::Flat(meta.source().source_id()),
             Self::Sign(sign) => Identity::Sign(SignId::new(sign.id)),
-            Self::Port(port) => Identity::Port(port.id()),
             Self::Nest { nest, .. } => Identity::Nest(nest.id()),
         }
     }
@@ -65,7 +63,6 @@ impl Target {
     pub(crate) fn owner(&self) -> TaskId {
         match self {
             Self::None { owner } | Self::Nest { owner, .. } => *owner,
-            Self::Port(_) => TaskId::new(0),
             Self::Flat(meta) => meta.owner(),
             Self::View(view) => view.owner(),
             Self::Sign(sign) => sign.owner(),
@@ -73,7 +70,7 @@ impl Target {
     }
     pub(crate) fn alive(&self) -> bool {
         match self {
-            Self::None { .. } | Self::Port(_) => true,
+            Self::None { .. } => true,
             Self::Nest { nest, .. } => !nest.is_closed(),
             Self::Flat(meta) => meta.alive(),
             Self::View(view) => view.alive(),
@@ -82,7 +79,7 @@ impl Target {
     }
     pub(crate) fn seal(&self) -> Result<(), PendFail> {
         match self {
-            Self::None { .. } | Self::Port(_) => {}
+            Self::None { .. } => {}
             Self::Flat(meta) => crate::basis::flat::sharing::seal(meta),
             Self::View(view) => view.seal(),
             Self::Sign(sign) => endpoint::seal(sign),
@@ -98,7 +95,7 @@ impl Target {
     }
     pub(crate) fn wake(&self) -> Option<(WakeKey, Weak<Anchor>)> {
         Some(match self {
-            Self::None { .. } | Self::Port(_) => return None,
+            Self::None { .. } => return None,
             Self::Nest { nest, .. } => (WakeKey::ExternalNest { id: nest.id() }, nest.life()),
             Self::Flat(meta) => (WakeKey::seal(ViewKind::Share, meta.id), meta.life()),
             Self::View(view) => (WakeKey::seal(view.kind(), view.id()), view.life()),
@@ -130,12 +127,6 @@ impl Target {
             _ => None,
         }
     }
-    pub(crate) fn port(&self) -> Option<Arc<crate::basis::port::Port>> {
-        match self {
-            Self::Port(port) => Some(port.clone()),
-            _ => None,
-        }
-    }
     pub(crate) fn nest(&self) -> Option<Arc<crate::basis::nest::Nest>> {
         match self {
             Self::Nest { nest, .. } => Some(nest.clone()),
@@ -147,7 +138,6 @@ impl Target {
             (Self::Flat(a), Self::Flat(b)) => Arc::ptr_eq(a, b),
             (Self::View(a), Self::View(b)) => a.same(b),
             (Self::Sign(a), Self::Sign(b)) => Arc::ptr_eq(a, b),
-            (Self::Port(a), Self::Port(b)) => Arc::ptr_eq(a, b),
             (Self::Nest { nest: a, .. }, Self::Nest { nest: b, .. }) => Arc::ptr_eq(a, b),
             _ => false,
         }
@@ -186,14 +176,6 @@ impl Target {
                     Distributable::Yes,
                 )
             }
-            Self::Port(_) if modifiable == Modifiable::No && window.is_none() => {
-                Pend::try_new_window(
-                    modifiable,
-                    None,
-                    Operations::Port(kernel_api::model::pend::PortRights::all()),
-                    Distributable::Yes,
-                )
-            }
             Self::Nest { .. } if window.is_none() => Pend::try_new_window(
                 modifiable,
                 None,
@@ -206,7 +188,7 @@ impl Target {
     pub(crate) fn release_pend(&self, token: PendId) {
         crate::basis::room::interrupt::withdraw(token);
         match self {
-            Self::None { .. } | Self::Port(_) | Self::Nest { .. } => {}
+            Self::None { .. } | Self::Nest { .. } => {}
             Self::Flat(meta) => meta.release_pend(token),
             Self::View(view) => view.release_pend(token),
             Self::Sign(sign) => endpoint::release_authority(sign, token),

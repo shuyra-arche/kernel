@@ -36,8 +36,10 @@ boundary, not a configuration file.
 `basis` owns scheduling, authorization and retirement records. The local timer
 owns its confirmed comparator setting. CPU retirement accepts an exact domain-instance, attempt and coverage fence
 receipt before settling Pages, tables and address tickets. External access
-uses authorized Nest roots and independent platform Port grants. IRQ delivery only
-requests work, while the installed backend supplies retirement evidence.
+uses trusted boot-admitted Nests and ordinary Pend branches, independently of
+MMIO Share grants. IRQ delivery only requests work, while the installed backend
+supplies retirement evidence. There is no public Port resource or parallel source
+authorization tree.
 
 ## Model boundaries
 
@@ -262,22 +264,42 @@ and perform their own register operations. Kernel never proxies business BAR
 reads or writes.
 
 Cell Memo creation selects MappingTarget::Cpu(TeamId) or Io(PendId). The external
-Pend targets an External Nest, explicitly bound to a separate platform Port Pend.
-MMIO Share authority and Port authority can be delegated/revoked independently.
-Flat, Nest and Port have runtime ABI operations; a Flat Slice retains its exact
-Pend branch, and an Internal Nest may be consumed by Team creation.
+Pend targets a persistent External Nest admitted by trusted boot. The initial
+Ledger delivers that Nest root directly; no PortId, Port Pend or runtime source
+Attach/Detach exists. Ordinary Nest Create constructs Internal Nests only, and
+an owned Internal Nest may be consumed by Team creation. Flat Slice retains its
+exact Pend branch. MMIO Share authority and Nest authority remain independently
+delegable and revocable.
+
+A manager retains the External Nest root and uses normal Pend Accord/Narrow to
+grant subsets of NestRights, Modifiable and Distributable. An External Nest
+admits Memo reservations from one Task at a time. Returning or revoking one
+of that Task's branches retires its Memos while other live branches keep their
+leaves. Task exit retires the Task's Memos and preserves the NestId and backend.
+A different Task can reserve positions after the previous Task's positions
+have all been removed. Each creating branch remains held until its positions
+are idle and removed, including unused reservations. Published positions also
+retain the exact publishing permission and data borrow through hardware retirement.
+Retirement-only retention does not permanently prevent Narrow; live descendants,
+data borrows and active publication retain their transaction constraints.
 
 The same Nest Memo owns the associated Page, generation, freeze and publication
-for CPU and external targets. One binding supports whole level-0 Cells or one level-1 Cell in
-one aligned 2 MiB window, using 4 KiB hardware leaves, with repeated publication after exact range settlement.
-The binding remains active while one Memo retracts. There is no Projection/IoSpace
-or parallel Mapping lifecycle. Source/binding revocation and creator death close
-admission; Kernel retains hardware obligations independently of the dying Task.
-Sign observes generation-qualified MappingPublished/MappingRetired and retained
-NestClosed/NestFault. Hardware faults stay at binding scope rather than being
-assigned a guessed generation. A closed Nest never reopens; a fresh Nest can
-acquire the Port only after matching hardware and platform proof. An interrupt,
-business result or software generation is never a reclamation receipt.
+for CPU and external targets. One binding supports whole level-0 Cells or one
+level-1 Cell in one aligned 2 MiB window, using 4 KiB hardware leaves, with repeated
+publication after exact range settlement. The binding remains active while one
+Memo retracts. Its first selected window persists across Pend handover. There is
+no Projection/IoSpace or parallel Mapping lifecycle. Kernel retains hardware
+obligations independently of a dying Task; a later mapping at the same IOVA has
+a new MappingId, and the old orphaned identity is not revived.
+
+Root authority loss, root-only Nest Delete, or unsafe backend failure closes
+the whole Nest. Delete starts irreversible Closing and returns Busy while the
+hardware binding or cleanup remains; retry completes deletion. Closed never
+reopens and is not the ordinary handover state. Sign observes generation-qualified
+MappingPublished/MappingRetired and retained NestClosed/NestFault. Faults remain
+at Nest scope across delegation rather than being assigned a guessed Memo
+generation. An interrupt, business result, software generation or new Pend branch
+is never a reclamation receipt.
 
 Trusted boot images supply `kernel_api::boot::platform::riscv::Platform`, call unsafe
 `boot::init`, then `boot::configure` with normalized physical authorities and
@@ -290,9 +312,12 @@ The integration owner resolves firmware topology and configures the endpoint.
 After protected controller setup it may call `boot::map_mmio`, then independently
 register `boot::grant_mmio` and
 `boot::bind_external(ExternalRoute { controller, requester, proof })`.
-MMIO grants must fit withheld external windows and cannot expose RAM or protected
-controls. Requester is the normalized IOMMU identity, not a PCI RID. Boot failure
-is terminal and cannot publish partial authorities or start secondary harts.
+The latter installs the backend into an External Nest before Ledger publication.
+`Name::Nest { controller, requester }` describes the route; only its associated
+Pend grants access. MMIO grants must fit withheld external windows and cannot
+expose RAM or protected controls. Requester is the normalized IOMMU identity,
+not a PCI RID. Boot failure is terminal and cannot publish partial authorities
+or start secondary harts.
 
 Kernel never enables/disables PCI Bus Master, reads ECAM, sizes BARs or polls device
 stop registers. Range retirement invalidates only the affected leaf and waits for
@@ -304,6 +329,9 @@ confirmed shutdown boundary. No ordinary Unit can install or forge a provider.
 The external fixture proves queued requests have drained for range reuse and
 endpoint ordering has settled for binding reuse; this assumption is specific to
 that coherent QEMU fixture. See the Quiescence safety contract and pinned spec.
+Trusted integration must also withdraw the old raw device/configuration authority
+before reassignment; Distributable does not prove exclusive device control or
+quiescence. A shared Nest is not hardware isolation between its Pend holders.
 
 Production board parsing and the normal `shuyra` image live in
 [Vanllia platform/riscv](https://github.com/shuyra-arche/vanllia/tree/main/platform/riscv).
@@ -340,25 +368,26 @@ checks only common physical admission; no second ISA backend is implemented.
 Boot consumers must move RV64 imports to `boot::platform::riscv`, place ordinary,
 protected and external ranges in `Devices.resources`, and use `Memory::metadata()`
 where they previously read `Memory::dtb()`. The RV64 `Platform::dtb()` accessor and
-DTB Ledger entry retain their meaning. This source break changes neither syscall
-nor Capsule/Ledger encoding. Vanllia's production image and QEMU fixture must move
-together to the matching provider revision; see API compatibility notes.
+DTB Ledger entry retain their meaning. These earlier source-level changes are
+independent of the ABI/Ledger migration below. Images must select a matching
+provider revision and rebuild; see API compatibility notes.
 
 ATS, PRI, PCI IOMMUs, noncoherent hardware and passthrough remain unsupported.
-PQ is disabled.
-Settled logical records survive for observation/Delete while their creator lives.
-After creator death they expire only when hardware responsibility has settled.
+PQ is disabled. Settled logical records remain observable while their creating
+branch and Task live; orphaned positions expire only after their hardware
+responsibility settles. Routine handover does not replace the controller context.
 
-ABI v5 rejects version-zero through version-four calls and removed domains. Pend Accord
-and Narrow carry target-specific operation permissions, independent Distributable
-and Modifiable limits, and the relative source window. Capsule v2 declares the
-ABI before execution; Ledger v5 supplies an explicit creation license and Sign-target Pends.
-Clone/Share/Sign Create and Slot allocation require a None creation license.
-Sign delegates, narrows, returns and revokes through the single Pend lineage.
-Cell uses fixed descriptor snapshots and generation-qualified transitions.
-Protect is CPU-only; a published I/O binding cannot widen access. The current
-runtime binding supports repeated publication after range settlement. Upper consumers
-must rebuild and migrate separately; this provider change does not update them.
+ABI v6 rejects versions zero through five and removed domains. Port domain 14,
+Port target/permission kind 5 and Nest operation slots 2/3 are retired. Nest
+Inspect is 56 bytes without a Port identity; Create takes only an Internal Nest
+creation license. Pend Accord and Narrow retain target-specific permissions,
+independent Distributable/Modifiable limits and relative windows. Capsule format
+2 declares ABI 6 before execution. Ledger v8 supplies the trusted Nest root,
+explicit creation license and existing View/Sign dispatch pairs. Clone/Share/Sign
+Create and Slot allocation require a None creation license. Cell keeps fixed
+descriptor snapshots and qualified generations. Protect remains CPU-only.
+Consumers must rebuild and migrate separately; this Kernel change does not update
+other repositories. There are no Port compatibility aliases or source factories.
 
 ## Build and verification
 
@@ -418,6 +447,11 @@ windows, Sign revocation, stable Unit results and atomic WaitValue/WakeValue.
 The I/O variants boot the separate test image with the same Kernel library and
 exercise Cell traps against QEMU EDU/IOMMU. They cover DMA permission failure,
 trusted retirement, ownership movement and creator death with a delayed callback.
+They retain a live sibling Memo while another branch of the same Task is revoked.
+A separate case denies a second Task admission while the first holds positions,
+then passes the same Nest to a successor after the first exits. Assertions cover
+old MappingId rejection, address reuse after retirement, unused reservations,
+retained faults and final whole-Nest deletion.
 Each variant preserves its own commands, hashes and logs under `server/tests/guest/cell/target/evidence/`.
 
 The separate no_std IOMMU guest runs ten hardware scenarios covering queues,
@@ -484,10 +518,11 @@ condition after a successful wait. Concurrent mapping transactions report `Busy`
 ### Hardware interrupt dispatch (View, Sign)
 
 The trusted platform admits exclusive level-high PLIC sources and calls
-`boot::grant_interrupt(controller, source, region)` before start. Ledger v7
-publishes the device's `(Share View, Sign)` pair under its controller/source name;
-each handle is an ordinary Pend. Raw IRQ numbers never authorize a user call.
-One router owns driver sources and reserved IOMMU queue interrupts.
+`boot::grant_interrupt(controller, source, region)` before start. Ledger v8
+publishes the device's `(Share View, Sign)` pair under its controller/source name,
+retaining the 40-byte pair layout introduced in v7. Each handle is an ordinary
+Pend. Raw IRQ numbers never authorize a user call. One router owns driver sources
+and reserved IOMMU queue interrupts.
 
 A manager first delegates the full writable MMIO Share View, then a
 non-distributable `Listen | Consume` Sign Pend to the same Task. The source owner
@@ -510,8 +545,9 @@ Pend Return/Revoke, loss of either View or Sign authority, and Task exit close
 delivery. An outstanding controller claim survives the old driver and is completed
 only after the replacement initializes the device and consumes its new initial
 notification. Old or duplicate receipts cannot reopen a replacement. Sign keeps
-its existing operations, rights and ABI v5; there is no hardware Sign variant,
-Claim/Yield/Rearm call, new authority object or public binding generation.
+its existing operations, rights and payloads under the ABI v6 prefix; there is no
+hardware Sign variant, Claim/Yield/Rearm call, new authority object or public
+binding generation.
 
 Up to 64 sources are admitted; an IRQ entry claims at most four. Sign publication
 allocates nothing and notification propagation is deferred in fixed batches

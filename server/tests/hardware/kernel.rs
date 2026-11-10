@@ -26,7 +26,7 @@ fn task_vector_context_isolated() {
     run("vector")
 }
 #[test]
-#[ignore = "requires RVV-capable QEMU and OpenSBI"]
+#[ignore = "requires RV64 QEMU and OpenSBI"]
 fn task_migration_respects_hart_capabilities() {
     run("migration")
 }
@@ -411,9 +411,9 @@ fn run(mode: &str) {
             if io {
                 assert!(
                     log.contains(if mode == "io-exit" {
-                        "PASS cell-io-exit owner=dead pending=1 retained=1 late-access=denied rebind=1"
+                        "PASS cell-io-exit owner=dead pending=1 retained=1 late-access=denied handover=1 same-nest=1 exclusive=1"
                     } else {
-                        "PASS cell-io external=1 readonly=1 fault=1 fenced=1 ownership=1"
+                        "PASS cell-io external=1 readonly=1 fault=1 fenced=1 ownership=1 multi=2 repeat=1 handover=1 same-nest=1 events=1 revoke=1 orphan=1"
                     }),
                     "{name}: {log}"
                 );

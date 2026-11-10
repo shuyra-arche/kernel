@@ -1,9 +1,10 @@
-//! Retained authorization for a Nest's exclusive source binding. Translation,
-//! Page and Memo state stay in Nest; this registry retains the responsible Pends.
+//! A trusted external Nest retains one root authorization and hardware binding.
+//! Child Pends govern their own Memo publications; losing a child never closes
+//! this address space. The boot root and backend govern full retirement.
 use crate::{
     basis::{
         nest::Nest,
-        pend::{self, PendEntry},
+        pend::{self, Pend, PendEntry},
         unit::task::Task,
     },
     metal::{iommu::Fault, sync::SpinLock},
@@ -13,28 +14,26 @@ use alloc::{
     vec::Vec,
 };
 use kernel_api::{
-    abi::call::nest::NestFail,
+    abi::call::{nest::NestFail, pend::PendFail},
     model::{
-        identity::PendId,
+        identity::{PendId, TaskId},
         nest::{NestInfo, NestKind, NestPhase},
-        pend::{NestRights, Operations, PortRights},
+        pend::{NestRights, Operations},
     },
 };
-struct Lease {
-    actor: Weak<Task>,
-    nest: Arc<PendEntry>,
-    port: Arc<PendEntry>,
-}
+
 struct Organization {
     nest: Arc<Nest>,
-    owner: Weak<Task>,
-    root: Weak<PendEntry>,
-    lease: Option<Lease>,
-    port: usize,
+    root: Weak<Pend>,
+    // The same authority, retained only until the complete binding settles.
+    // This is an outstanding obligation, not a second authorization record.
+    binding: Option<Arc<Pend>>,
+    notification: Option<(TaskId, Weak<PendEntry>)>,
     fault: Option<Fault>,
     fault_sequence: u64,
 }
 static ORGANIZATIONS: SpinLock<Vec<Organization>> = SpinLock::new(Vec::new());
+
 pub(crate) fn authorized(
     actor: &Task,
     token: PendId,
@@ -44,76 +43,48 @@ pub(crate) fn authorized(
         .filter(|e| e.permits(Operations::Nest(rights)) && e.target().nest().is_some())
         .ok_or(NestFail::Denied)
 }
-pub(crate) fn register(
-    nest: &Arc<Nest>,
-    owner: &Arc<Task>,
-    root: &Arc<PendEntry>,
-) -> Result<(), NestFail> {
+
+/// Trusted boot has already bound the complete, authenticated isolation domain.
+/// Register before publishing the root; ordinary Unit creation cannot call this.
+pub(crate) fn register(nest: &Arc<Nest>, root: &Arc<Pend>) -> Result<(), PendFail> {
     let mut records = ORGANIZATIONS.lock();
-    records.try_reserve(1).map_err(|_| NestFail::OutOfMemory)?;
+    if !nest.is_external()
+        || nest.external_phase() != NestPhase::Bound
+        || records.iter().any(|r| Arc::ptr_eq(&r.nest, nest))
+    {
+        return Err(PendFail::Denied);
+    }
+    records.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+    root.retain_retirement()?;
     records.push(Organization {
         nest: nest.clone(),
-        owner: Arc::downgrade(owner),
         root: Arc::downgrade(root),
-        lease: None,
-        port: 0,
+        binding: Some(root.clone()),
+        notification: None,
         fault: None,
         fault_sequence: 0,
     });
     Ok(())
 }
-pub(crate) fn attach(actor: &Arc<Task>, token: PendId, port: PendId) -> Result<(), NestFail> {
-    let nest = authorized(actor, token, NestRights::ATTACH)?;
-    let port = pend::locate(actor, port)
-        .filter(|e| e.permits(Operations::Port(PortRights::ATTACH)))
-        .ok_or(NestFail::Denied)?;
-    let source = port.target().port().ok_or(NestFail::Denied)?;
-    let target = nest.target().nest().ok_or(NestFail::Denied)?;
-    if !target.is_external() || actor.ident.team.external.closed() {
-        return Err(NestFail::Denied);
-    }
+
+/// Finish the boot handoff after every fallible ledger preparation succeeded.
+/// The holder is a notification destination, not the lifetime of a driver lease.
+pub(crate) fn deliver(root: &Arc<PendEntry>, holder: TaskId) {
     let mut records = ORGANIZATIONS.lock();
     let record = records
         .iter_mut()
-        .find(|r| Arc::ptr_eq(&r.nest, &target))
-        .ok_or(NestFail::Denied)?;
-    if record.lease.is_some() || target.external_phase() != NestPhase::Unbound {
-        return Err(NestFail::Busy);
-    }
-    nest.authority()
-        .retain_route()
-        .map_err(|_| NestFail::Busy)?;
-    if port.authority().retain_route().is_err() {
-        unsafe { nest.authority().release_route() };
-        return Err(NestFail::Busy);
-    }
-    let hardware = match source.bind() {
-        Ok(hardware) => hardware,
-        Err(_) => {
-            unsafe {
-                nest.authority().release_route();
-                port.authority().release_route();
-            }
-            return Err(NestFail::Busy);
-        }
-    };
-    // The same COMMIT transaction prevents another binding or close here.
-    if let Err((_, hardware)) = target.bind_external(hardware) {
-        drop(hardware); // failed backend Drop retains its hardware obligations
-        unsafe {
-            nest.authority().release_route();
-            port.authority().release_route();
-        }
-        return Err(NestFail::Busy);
-    }
-    record.port = source.id().get();
-    record.lease = Some(Lease {
-        actor: Arc::downgrade(actor),
-        nest,
-        port,
-    });
-    Ok(())
+        .find(|r| r.root.ptr_eq(&Arc::downgrade(root.authority())))
+        .expect("registered external Nest root");
+    let entry = Arc::downgrade(root);
+    assert!(
+        record
+            .notification
+            .as_ref()
+            .is_none_or(|(task, known)| *task == holder && known.ptr_eq(&entry))
+    );
+    record.notification = Some((holder, entry));
 }
+
 pub(crate) fn inspect(actor: &Task, token: PendId) -> Result<NestInfo, NestFail> {
     let entry = authorized(actor, token, NestRights::INSPECT)?;
     let nest = entry.target().nest().ok_or(NestFail::Denied)?;
@@ -125,7 +96,6 @@ pub(crate) fn inspect(actor: &Task, token: PendId) -> Result<NestInfo, NestFail>
             NestKind::Internal
         },
         phase: nest.external_phase(),
-        port: 0,
         fault_sequence: 0,
         fault_cause: 0,
         fault_address: 0,
@@ -137,7 +107,6 @@ pub(crate) fn inspect(actor: &Task, token: PendId) -> Result<NestInfo, NestFail>
             .iter()
             .find(|r| Arc::ptr_eq(&r.nest, &nest))
             .ok_or(NestFail::Denied)?;
-        info.port = record.port;
         info.fault_sequence = record.fault_sequence;
         if let Some(fault) = record.fault {
             info.fault_cause = fault.cause as u64;
@@ -147,34 +116,37 @@ pub(crate) fn inspect(actor: &Task, token: PendId) -> Result<NestInfo, NestFail>
     }
     Ok(info)
 }
-pub(crate) fn detach(actor: &Task, token: PendId) -> Result<(), NestFail> {
-    let nest = authorized(actor, token, NestRights::DETACH)?
-        .target()
-        .nest()
-        .ok_or(NestFail::Denied)?;
-    nest.close_external().map_err(|_| NestFail::Denied)
-}
+
 pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), NestFail> {
-    let nest = authorized(actor, token, NestRights::DELETE)?
-        .target()
-        .nest()
-        .ok_or(NestFail::Denied)?;
+    let entry = authorized(actor, token, NestRights::DELETE)?;
+    let nest = entry.target().nest().ok_or(NestFail::Denied)?;
+    if !nest.is_external() {
+        // CPU invalidation must not run under the global commit lock.
+        return nest.delete_organization().map_err(|_| NestFail::Busy);
+    }
+    if entry.sire().is_some() {
+        return Err(NestFail::Denied);
+    }
+    let _commit = crate::basis::commit();
     let mut records = ORGANIZATIONS.lock();
-    if records
+    let at = records
         .iter()
-        .any(|r| Arc::ptr_eq(&r.nest, &nest) && r.lease.is_some())
-    {
+        .position(|r| Arc::ptr_eq(&r.nest, &nest))
+        .ok_or(NestFail::Denied)?;
+    nest.close_external().map_err(|_| NestFail::Denied)?;
+    if records[at].binding.is_some() || !super::external::discard(&nest) {
         return Err(NestFail::Busy);
     }
     nest.delete_organization().map_err(|_| NestFail::Busy)?;
-    records.retain(|r| !Arc::ptr_eq(&r.nest, &nest));
+    records.remove(at);
     Ok(())
 }
+
 pub(crate) fn maintain() -> bool {
     use core::sync::atomic::{AtomicUsize, Ordering};
     static CURSOR: AtomicUsize = AtomicUsize::new(0);
     for _ in 0..4 {
-        let mut notices = None;
+        let mut notice = None;
         let changed;
         let _commit = crate::basis::commit();
         let Some(mut records) = ORGANIZATIONS.try_lock() else {
@@ -187,51 +159,42 @@ pub(crate) fn maintain() -> bool {
         let record = &mut records[at];
         let before = (record.nest.external_phase(), record.fault_sequence);
         let id = record.nest.id();
-        let invalid = record.owner.upgrade().is_none_or(|a| a.dead())
-            || record.root.upgrade().is_none()
-            || record.lease.as_ref().is_some_and(|lease| {
-                lease
-                    .actor
-                    .upgrade()
-                    .is_none_or(|a| a.dead() || a.ident.team.external.closed())
-                    || !lease.nest.permits(Operations::Nest(NestRights::ATTACH))
-                    || !lease.port.permits(Operations::Port(PortRights::ATTACH))
-            });
+        let invalid = record.root.upgrade().is_none_or(|root| !root.alive());
         if invalid {
             let _ = record.nest.close_external();
         }
-        if record.lease.is_some() {
-            for _ in 0..4 {
-                match record.nest.external_fault() {
-                    Ok(Some(fault)) => {
-                        // Hardware records have no software generation. Retain at
-                        // binding scope; never stamp a new Memo with an old fault.
-                        record.fault.get_or_insert(fault);
-                        record.fault_sequence = record.fault_sequence.saturating_add(1);
-                    }
-                    Ok(None) => break,
-                    Err(_) => {
-                        let _ = record.nest.close_external();
-                        break;
+        if record.binding.is_some() {
+            if before.0 != NestPhase::Closed {
+                for _ in 0..4 {
+                    match record.nest.external_fault() {
+                        Ok(Some(fault)) => {
+                            // A hardware fault has no Memo generation. Retain it
+                            // at binding scope without guessing a publication.
+                            record.fault.get_or_insert(fault);
+                            record.fault_sequence = record.fault_sequence.saturating_add(1);
+                        }
+                        Ok(None) => break,
+                        Err(_) => {
+                            let _ = record.nest.close_external();
+                            break;
+                        }
                     }
                 }
             }
             if record.nest.progress_external_close().unwrap_or(false) {
-                if let Some(lease) = record.lease.take() {
-                    unsafe {
-                        lease.nest.authority().release_route();
-                        lease.port.authority().release_route();
-                    }
-                    notices = lease
-                        .actor
-                        .upgrade()
-                        .map(|actor| (actor.ident.id, lease.nest.token(), lease.port.token()));
+                if let Some(root) = record.binding.take() {
+                    // SAFETY: Nest observed the exact complete binding proof,
+                    // including all payloads, queues, tables and platform ordering.
+                    unsafe { root.release_retirement() };
+                    notice = record.notification.as_ref().and_then(|(task, entry)| {
+                        entry.upgrade().map(|entry| (*task, entry.token()))
+                    });
                 }
             }
         }
         changed = before != (record.nest.external_phase(), record.fault_sequence);
-        if record.lease.is_none()
-            && record.root.upgrade().is_none()
+        if invalid
+            && record.binding.is_none()
             && record.nest.external_settled()
             && super::external::discard(&record.nest)
             && record.nest.delete_organization().is_ok()
@@ -240,15 +203,14 @@ pub(crate) fn maintain() -> bool {
         }
         drop(records);
         drop(_commit);
-        if let Some((task, nest, port)) = notices {
-            pend::notify(task, nest);
-            pend::notify(task, port);
+        if let Some((task, token)) = notice {
+            pend::notify(task, token);
         }
         if changed {
             crate::basis::sign::signal(crate::basis::sign::WakeKey::ExternalNest { id });
         }
     }
-    ORGANIZATIONS.lock().iter().any(|r| r.lease.is_some())
+    ORGANIZATIONS.lock().iter().any(|r| r.binding.is_some())
 }
 
 pub(crate) fn event(

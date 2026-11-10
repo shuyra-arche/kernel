@@ -25,7 +25,8 @@ impl Registry {
         // Boot grants access to Kernel-owned endpoints, not permission to
         // destroy them or inject synthetic hardware/fault notifications.
         use kernel_api::model::pend::{CloneRights, Operations, ShareRights};
-        let mut limits = root.authority().limits();
+        let original = root.authority().limits();
+        let mut limits = original;
         limits.operations = match root.target().kind() {
             Some(kernel_api::model::view::ViewKind::Clone) => {
                 Operations::Clone(CloneRights::PULL | CloneRights::PEEK)
@@ -35,11 +36,15 @@ impl Registry {
             }
             None => limits.operations,
         };
-        if let Err(reason) = root.narrow(limits, root.authority().window()) {
-            return Err(Failure {
-                reason,
-                value: (name, root),
-            });
+        // An unchanged contract is not a narrowing transaction. In particular,
+        // a trusted Nest root already retains its binding retirement obligation.
+        if limits != original {
+            if let Err(reason) = root.narrow(limits, root.authority().window()) {
+                return Err(Failure {
+                    reason,
+                    value: (name, root),
+                });
+            }
         }
         let reason = if !valid(name, &root) || self.entries.iter().any(|(n, _)| *n == name) {
             Some(PendFail::Denied)
@@ -159,6 +164,13 @@ impl Frozen {
             };
             ledger.push(entry);
         }
+        // No failure remains between publishing the binding's observation
+        // destination and the initial Task's authority table.
+        for (name, root) in &self.entries {
+            if matches!(name, Name::Nest { .. }) {
+                crate::basis::nest::authority::binding::deliver(root, target.ident.id);
+            }
+        }
         for registration in registrations {
             registration.publish();
         }
@@ -198,7 +210,7 @@ fn valid(name: Name, pend_entry: &PendEntry) -> bool {
             .target()
             .kind()
             .is_some_and(|kind| name.kind() == kind.into())
-            || matches!(name, Name::Port(id) if pend_entry.target().port().is_some_and(|p| p.id().get() as u64 == id))
+            || matches!(name, Name::Nest { .. } if pend_entry.target().nest().is_some_and(|nest| nest.is_external()))
             || matches!(name, Name::Interrupt { controller, source } if pend_entry.target().sign().is_some_and(|s| crate::basis::room::interrupt::identifies(&s, controller, source))))
         && pend_entry.alive()
         && pend_entry.sire().is_none()

@@ -5,9 +5,8 @@ use kernel_api::model::{
     nest::NestId,
     pend::{
         CloneRights, CreationRights, Distributable, FlatRights, Limits, NestRights, Operations,
-        PendInfo, PendRange, PendStatus, PortRights, ShareRights, Target, ViewTarget,
+        PendInfo, PendRange, PendStatus, ShareRights, Target, ViewTarget,
     },
-    port::PortId,
     sign::{SignId, SignRights},
     view::ViewId,
 };
@@ -45,10 +44,6 @@ fn each_operation_family_requires_its_own_target() {
             Target::Nest(NestId::new(7).unwrap()),
             Operations::Nest(NestRights::INSPECT),
         ),
-        (
-            Target::Port(PortId::new(7).unwrap()),
-            Operations::Port(PortRights::INSPECT),
-        ),
     ];
     for (i, (target, operations)) in kinds.iter().enumerate() {
         assert_eq!(Target::of(target.words()), Some(*target));
@@ -57,9 +52,11 @@ fn each_operation_family_requires_its_own_target() {
             assert_eq!(grant(*operations).permits_child(grant(*requested)), i == j);
         }
     }
-    for words in [[0, 1], [1, 0], [3, usize::MAX], [99, 7]] {
+    for words in [[0, 1], [1, 0], [3, usize::MAX], [5, 7], [99, 7]] {
         assert_eq!(Target::of(words), None);
     }
+    assert_eq!(Operations::of([5, 1]), None);
+    assert_eq!(Operations::of([5, 2]), None);
 }
 
 #[test]
@@ -152,4 +149,38 @@ fn sign_permissions_are_control_rights_not_mutable_memory() {
     assert!(all.permits_child(listen));
     assert!(!listen.permits_child(grant(Operations::Sign(SignRights::CONSUME))));
     assert!(!listen.permits_child(grant(Operations::Sign(SignRights::DELETE))));
+}
+
+#[test]
+fn nest_delegation_can_withhold_destruction_distribution_and_write_access() {
+    let root = Limits {
+        modifiable: Modifiable::Yes,
+        ..grant(Operations::Nest(NestRights::all()))
+    };
+    let worker = Limits {
+        operations: Operations::Nest(
+            NestRights::INSPECT | NestRights::RESERVE | NestRights::PUBLISH | NestRights::RETRACT,
+        ),
+        distributable: Distributable::No,
+        ..root
+    };
+    assert!(root.permits_child(worker));
+    assert!(!worker.permits_child(worker));
+    assert!(!worker.permits_narrowing(root));
+    assert!(
+        !worker
+            .operations
+            .contains(Operations::Nest(NestRights::DELETE))
+    );
+    let observer = Limits {
+        modifiable: Modifiable::No,
+        ..grant(Operations::Nest(NestRights::INSPECT))
+    };
+    assert!(root.permits_child(observer));
+    assert!(!observer.permits_child(worker));
+    assert!(!observer.permits_child(grant(Operations::None(CreationRights::NEST))));
+    assert!(NestRights::from_bits(16).is_none());
+    assert!(Operations::of([4, 16]).is_none());
+    // ATTACH remains meaningful only for consuming an Internal Nest into Team.
+    assert_eq!(NestRights::from_bits(8), Some(NestRights::ATTACH));
 }

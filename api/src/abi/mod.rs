@@ -6,7 +6,7 @@ pub mod operation;
 pub mod register;
 pub mod reply;
 
-/// Incompatible register and descriptor contract. Version zero is retired.
-pub const VERSION: u16 = 5;
+/// Version 6 removes Port and runtime external binding. Older calls are rejected.
+pub const VERSION: u16 = 6;
 /// The call number packs `version[63:48]`, `domain[47:32]` and `operation[31:0]`.
 pub const PREFIX: usize = (VERSION as usize) << 48;

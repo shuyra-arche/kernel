@@ -7,11 +7,12 @@ pub(crate) mod adapter;
 pub(crate) mod controllers;
 pub(crate) mod domain;
 mod engine;
+mod source;
 
 pub(crate) use engine::{Engine, EngineError, Phase, fence_complete, registers};
+pub(crate) use source::bind;
 
 pub(crate) mod mmio;
-pub(crate) mod port;
 
 use crate::basis::cell::page::PageId;
 pub(crate) use crate::metal::generic::iommu::{BatchId, Fault, HardwareError};

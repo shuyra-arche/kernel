@@ -47,18 +47,15 @@ bitflags::bitflags! {
         const INSPECT = 1;
         const RESERVE = 2;
         const RELEASE = 4;
+        /// Consume an exclusive Internal Nest when constructing a Team.
+        /// This does not authorize external source discovery or binding.
         const ATTACH = 8;
-        const DETACH = 16;
+        // Bit 16 formerly authorized external Detach and remains invalid.
         const TRANSFER = 32;
         const PUBLISH = 64;
         const RETRACT = 128;
         const PROTECT = 256;
         const DELETE = 512;
-    }
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct PortRights: u32 {
-        const INSPECT = 1;
-        const ATTACH = 2;
     }
 }
 
@@ -71,7 +68,6 @@ pub enum Operations {
     Share(ShareRights),
     Flat(FlatRights),
     Nest(NestRights),
-    Port(PortRights),
     Sign(SignRights),
 }
 
@@ -83,7 +79,6 @@ impl Operations {
             Self::Share(r) => [2, r.bits() as usize],
             Self::Flat(r) => [3, r.bits() as usize],
             Self::Nest(r) => [4, r.bits() as usize],
-            Self::Port(r) => [5, r.bits() as usize],
             Self::Sign(r) => [6, r.bits() as usize],
         }
     }
@@ -95,7 +90,6 @@ impl Operations {
             2 => Self::Share(ShareRights::from_bits(bits)?),
             3 => Self::Flat(FlatRights::from_bits(bits)?),
             4 => Self::Nest(NestRights::from_bits(bits)?),
-            5 => Self::Port(PortRights::from_bits(bits)?),
             6 => Self::Sign(SignRights::from_bits(bits)?),
             _ => return None,
         })
@@ -152,10 +146,8 @@ impl Limits {
         result.valid().then_some(result)
     }
     pub fn valid(self) -> bool {
-        if matches!(
-            self.operations,
-            Operations::None(_) | Operations::Sign(_) | Operations::Port(_)
-        ) && self.modifiable != Modifiable::No
+        if matches!(self.operations, Operations::None(_) | Operations::Sign(_))
+            && self.modifiable != Modifiable::No
         {
             return false;
         }

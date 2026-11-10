@@ -48,27 +48,27 @@ impl Wire for NestKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(usize)]
 pub enum NestPhase {
+    /// Private boot preparation, never an untrusted hardware-binding opportunity.
     Unbound = 0,
     Bound = 1,
     Closing = 2,
     Closed = 3,
     Failed = 4,
 }
-/// Retained context observation. Binding identity is the never-reused NestId;
-/// a closed external Nest cannot be rebound. A new Nest may acquire the settled Port.
+/// Retained address-space observation. Pend delegation preserves this identity.
+/// Closing the whole Nest is irreversible; a branch return is not a Nest close.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NestInfo {
     pub id: NestId,
     pub kind: NestKind,
     pub phase: NestPhase,
-    pub port: usize,
     pub fault_sequence: u64,
     pub fault_cause: u64,
     pub fault_address: u64,
     pub fault_requester: u64,
 }
 impl NestInfo {
-    pub const WIDTH: usize = 64;
+    pub const WIDTH: usize = 56;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut bytes = [0; Self::WIDTH];
         crate::abi::layout::store_words(
@@ -76,7 +76,6 @@ impl NestInfo {
                 self.id.get(),
                 self.kind as usize,
                 self.phase as usize,
-                self.port,
                 self.fault_sequence as usize,
                 self.fault_cause as usize,
                 self.fault_address as usize,
@@ -87,7 +86,7 @@ impl NestInfo {
         bytes
     }
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let w: [usize; 8] = crate::abi::layout::fetch_words(bytes)?;
+        let w: [usize; 7] = crate::abi::layout::fetch_words(bytes)?;
         Some(Self {
             id: NestId::new(w[0])?,
             kind: match w[1] {
@@ -103,11 +102,10 @@ impl NestInfo {
                 4 => NestPhase::Failed,
                 _ => return None,
             },
-            port: w[3],
-            fault_sequence: w[4] as u64,
-            fault_cause: w[5] as u64,
-            fault_address: w[6] as u64,
-            fault_requester: w[7] as u64,
+            fault_sequence: w[3] as u64,
+            fault_cause: w[4] as u64,
+            fault_address: w[5] as u64,
+            fault_requester: w[6] as u64,
         })
     }
 }

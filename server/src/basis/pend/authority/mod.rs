@@ -33,6 +33,8 @@ pub(crate) struct Pend {
     // separately the data-access obligation returned only after settlement.
     ancestor: OnceLock<Arc<Pend>>,
     holder: OnceLock<Arc<AtomicBool>>,
+    // External borrows and retained object retirement both prevent settlement.
+    // A retirement hold alone grants no operation and does not block narrowing.
     external: AtomicUsize,
     routing: AtomicUsize,
 }
@@ -234,10 +236,34 @@ impl Pend {
     pub(crate) fn external_pending(&self) -> bool {
         self.external.load(Ordering::Acquire) != 0 || self.routing.load(Ordering::Acquire) != 0
     }
-    /// Retain one binding or Memo obligation without lending data access.
-    /// Operation permission is checked by the caller against its typed target.
-    /// Caller holds work commit; publication must either cancel or retain this
-    /// obligation until the matching Nest completion has settled.
+    /// Retain the object's retirement responsibility, not permission to keep
+    /// performing an operation. Caller serializes admission with revocation.
+    /// The root may still narrow; invalidation starts the object's own cleanup.
+    pub(crate) fn retain_retirement(&self) -> Result<(), PendFail> {
+        if !self.alive() {
+            return Err(PendFail::Dead);
+        }
+        let state = self.state.lock();
+        if !state.usable() {
+            return Err(PendFail::Denied);
+        }
+        self.external
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                count.checked_add(1)
+            })
+            .map(|_| ())
+            .map_err(|_| PendFail::Busy)
+    }
+    /// # Safety
+    /// The matching object was never made reachable, or all of its hardware
+    /// obligations have settled. One call discharges exactly one retained hold.
+    pub(crate) unsafe fn release_retirement(&self) {
+        assert!(self.external.fetch_sub(1, Ordering::AcqRel) > 0);
+    }
+    /// Retain one live Memo publication without lending data access. Operation
+    /// permission is checked by the caller against its typed target. Unlike a
+    /// retirement-only hold, this prevents narrowing a permission still in use.
+    /// Caller holds work commit until publication is cancelled or retained.
     pub(crate) fn retain_route(&self) -> Result<(), PendFail> {
         if !self.alive() {
             return Err(PendFail::Dead);
@@ -277,7 +303,7 @@ impl Pend {
     }
     fn finish(&self, event: Event) -> Result<(), PendFail> {
         let mut state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) != 0 {
+        if self.external_pending() {
             return Err(PendFail::Busy);
         }
         *state = state.transition(event).map_err(fail)?;
