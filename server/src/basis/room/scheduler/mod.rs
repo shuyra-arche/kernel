@@ -62,6 +62,16 @@ pub(crate) fn isolated(hart: HartId) -> bool {
         .get()
         .is_some_and(|all| all[hart.get()].isolated.load(Ordering::Acquire))
 }
+
+pub(crate) fn ordinary_capacity() -> usize {
+    // Admission and release both publish isolation under COMMIT.
+    let _commit = crate::basis::commit();
+    schedulers()
+        .iter()
+        .filter(|slot| hart::online(slot.hart) && !slot.isolated.load(Ordering::Acquire))
+        .count()
+}
+
 pub(crate) fn detach_local(task: &Arc<Task>) -> bool {
     let Some(contract) = task.schedule.lock().contract() else {
         return false;

@@ -2,7 +2,14 @@
 use core::fmt::Write;
 use kernel_api::model::unit::ExitScope;
 use kernel_api::{
-    abi::{call::unit::UnitFail, reply::SignReply},
+    abi::{
+        call::{
+            room::{RoomQuery, operations::Inspect},
+            unit::UnitFail,
+        },
+        operation::RegisterCall,
+        reply::SignReply,
+    },
     address::VirtAddr,
     model::{
         cell::*,
@@ -26,7 +33,8 @@ const fn call(class: usize, slot: usize) -> usize {
 core::arch::global_asm!(include_str!("worker.S"),
     collect=const call(7,18), trigger=const call(11,3), consume=const call(11,4),
     listen=const call(11,2), await_=const call(11,12), yield_=const call(0,0),
-    clock=const call(0,4), wait_value=const call(0,2), sleep=const call(0,1), exit=const call(1,5), create_memo=const call(2,0), publish=const call(2,4));
+    clock=const call(0,4), wait_value=const call(0,2), inspect_room=const Inspect::SLOT,
+    sleep=const call(0,1), exit=const call(1,5), create_memo=const call(2,0), publish=const call(2,4));
 unsafe extern "C" {
     static realtime_worker_start: u8;
     static realtime_worker_end: u8;
@@ -356,6 +364,7 @@ pub(super) fn run() {
     match admit(worker.id, spec) {
         Err(UnitFail::Denied) => {
             // The harness verifies this branch only on the single-Hart image.
+            assert_eq!(room::inspect(RoomQuery::Ordinary).unwrap(), 1);
             unit::stop(UnitTarget::Task(worker.id)).unwrap();
             assert!(crate::lifecycle::wait_task(worker.id));
             crate::lifecycle::delete(worker.id);
@@ -401,6 +410,7 @@ pub(super) fn run() {
     }
     worker.stop();
     worker.join(100);
+    ordinary_capacity(&fixture, spec);
     let _ = writeln!(
         crate::Console,
         "PASS realtime budget=1 replenishment=1 yield=1 freeze=1 supervisor=denied"
@@ -424,6 +434,23 @@ pub(super) fn run() {
         crate::Console,
         "PASS realtime resident=1 restricted=1 fault=1 prepared-float=1 cleanup=1"
     );
+}
+
+fn ordinary_capacity(fixture: &Fixture, spec: Schedule) {
+    let first = fixture.worker(1, 0, None, None);
+    let second = fixture.worker(1, 0, None, None);
+    let capacity = || room::inspect(RoomQuery::Ordinary).unwrap();
+    let before = capacity();
+    assert!(before > 1);
+    admit(first.id, spec).unwrap();
+    assert_eq!(capacity(), before - 1);
+    admit(second.id, spec).unwrap();
+    assert_eq!(capacity(), before - 1);
+    first.cancel();
+    assert_eq!(capacity(), before - 1);
+    second.cancel();
+    assert_eq!(capacity(), before);
+    writeln!(crate::Console, "PASS room-inspect ordinary={before}").unwrap();
 }
 extern "C" fn supervisor_exit() -> ! {
     unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
@@ -572,7 +599,7 @@ fn preemption(fixture: &Fixture) {
     assert_eq!(before.replenishment, after.replenishment);
     assert!(
         after.remaining > 0,
-        "higher priority waited for budget exhaustion"
+        "higher priority waited for budget exhaustion: before={before:?}, after={after:?}"
     );
     high.finish(106);
     low.stop();
