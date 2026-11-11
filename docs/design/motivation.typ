@@ -1,3 +1,5 @@
+#import "style.typ": principle
+
 = Isolation and the problem of composition
 
 == What is being isolated?
@@ -29,8 +31,10 @@ For any crossing, the design must answer:
 - *When* is the transition committed and visible to its participants?
 - *What survives* cancellation, failure, exit, or an unfinished hardware action?
 
-The Kernel's purpose is not to make isolation invisible. It is to make
-composition explicit enough that safe behavior can be reasoned about.
+#principle[
+  The Kernel's purpose is not to make isolation invisible. It is to make
+  composition explicit enough that safe behavior can be reasoned about.
+]
 
 == Scope and non-goals
 

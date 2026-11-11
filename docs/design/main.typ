@@ -5,23 +5,15 @@
   author: ("Shuyra",),
   description: [The architectural motivation and safety arguments of Shuyra Kernel.],
 )
-#set page(paper: "a4", margin: (x: 2.5cm, y: 2.7cm), numbering: "1")
-#set text(size: 10.5pt)
-#set par(justify: true)
-#set heading(numbering: "1.")
+#import "style.typ": cover, editorial, eyebrow, rule
+#show: editorial
 
-#align(center)[
-  #text(size: 24pt, weight: "bold")[Shuyra Kernel]
-
-  #v(0.5em)
-  #text(size: 14pt)[A Design for Coherence]
-
-  #v(1em)
-  #text(size: 9pt)[Architectural draft]
-]
-
-#v(2em)
-#outline(title: [Contents], depth: 2)
+#cover
+#v(6mm)
+#eyebrow([CONTENTS])
+#v(1.5mm)
+#line(length: 100%, stroke: 0.55pt + rule)
+#outline(title: none, depth: 2)
 #pagebreak()
 
 #include "motivation.typ"
@@ -29,3 +21,5 @@
 #include "composition.typ"
 #pagebreak(weak: true)
 #include "assurance.typ"
+#pagebreak(weak: true)
+#include "memory.typ"

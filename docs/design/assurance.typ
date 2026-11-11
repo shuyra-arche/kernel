@@ -1,3 +1,5 @@
+#import "style.typ": principle
+
 = Safety and completion obligations
 <assurance>
 
@@ -30,16 +32,18 @@ For resource retirement, four obligations are particularly important:
 + *Reclamation follows:* only after all holders and hardware obligations
   have settled may the underlying capacity be reused.
 
-A device reporting work complete is a statement about its operation, not
-necessarily a proof that old translations, queued requests, or other
-initiators can no longer access memory. CPU and external access need
-evidence appropriate to their respective backends.
+#principle[
+  A device reporting work complete is a statement about its operation, not
+  necessarily a proof that old translations, queued requests, or other
+  initiators can no longer access memory. CPU and external access need
+  evidence appropriate to their respective backends.
+]
 
 == State and effects are separate reasoning steps
 
 For each protocol, specify the current state, incoming event, permitted
 transition, and effects to perform. A useful conceptual shape is
-`transition(state, event) -> decision`. The commit owner must revalidate
+`transition(state, event) → decision`. The commit owner must revalidate
 observations that could have changed before applying the decision.
 In-flight effects require further completion or failure events.
 
