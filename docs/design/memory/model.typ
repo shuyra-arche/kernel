@@ -106,7 +106,8 @@ permission to operate on them.
 
 A logical ABI coordinate is a fixed 4 KiB unit, *not* a promise that
 physical Cells or translation leaves are all 4 KiB. `CellLevel` chooses
-contiguous physical geometry of $4096 times 512^("level")$ bytes, subject
+contiguous physical geometry of 4 KiB multiplied by 512 to the selected
+level, subject
 to the active Sv mode and physical capacity. Hardware backends choose
 their own translation leaves. In the current implementation External
 Memos admit complete level-0 or level-1 Cells, with 4 KiB IOMMU leaves.
