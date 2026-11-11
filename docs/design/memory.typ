@@ -5,8 +5,14 @@
 = Memory from allocation to reuse
 <memory>
 
-Flat organizes physical holdings. Nest organizes addresses and their access
-paths. Cell gives operations a shared way to select positions in either.
+A Page can outlive the Slot that first held it, a Memo can outlive the
+association it once recorded, and a hardware publication can outlive the
+Task that requested it. Treating all three as a single mapping lifetime
+would permit premature reuse after a handoff, fault, or device exit.
+
+The model below derives the separation of holding, address, and access
+responsibility from these failures. The subsequent example follows those
+three lifetimes during External DMA retirement.
 
 #include "memory/model.typ"
 #pagebreak()
@@ -44,7 +50,7 @@ queued. Follow the holding, the mapping, and the work left for the Kernel.
     A Slot-sourced Memo starts with an address reservation.
   ])
   #wire(((54mm, 142mm), (105mm, 142mm)))
-  #label(64mm, 133mm, [Associate with Push])
+  #label(64mm, 133mm, [Insert association])
   #node(105mm, 129mm, 55mm, 26mm, [Ready], [
     The address now has backing. Publication can follow.
   ], fill: green)
