@@ -179,14 +179,13 @@ pub(super) fn run() {
                 team: TeamId::new(0),
                 placement: Placement::lowest(4096).unwrap(),
                 access: 2,
-                control: MappingControl::Caller,
             },
         }
         .to_bytes();
         let made =
             cell::create(kernel_api::model::identity::PendId::NONE, super::ptr(&spec)).unwrap();
         let CreatedCell::Memo {
-            mapping,
+            token: mapping,
             address: _address,
         } = made
         else {
@@ -198,8 +197,8 @@ pub(super) fn run() {
         );
         let empty = super::allocate(1);
         let spec = CellHandoff {
-            source: super::memo(mapping, 0),
-            target: super::slot(empty, 0),
+            remote: super::memo(mapping, 0),
+            local: super::slot(empty, 0),
         }
         .to_bytes();
         assert_eq!(

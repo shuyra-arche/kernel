@@ -16,3 +16,6 @@ pub use view::clone as clone_view;
 
 pub mod flat;
 pub mod nest;
+
+/// Read-only global memory observation protocol.
+pub mod memory;

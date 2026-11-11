@@ -30,6 +30,7 @@ pub(crate) struct Memo {
     flight: Option<MemoFlight>,
     publication: Option<Publication>,
     controlled: bool,
+    publisher: Option<Arc<crate::basis::pend::Pend>>,
 }
 impl Memo {
     pub(crate) const fn vacant() -> Self {
@@ -40,7 +41,16 @@ impl Memo {
             flight: None,
             publication: None,
             controlled: false,
+            publisher: None,
         }
+    }
+    pub(super) fn published_by(&self, authority: &Arc<crate::basis::pend::Pend>) -> bool {
+        self.publisher
+            .as_ref()
+            .is_some_and(|publisher| Arc::ptr_eq(publisher, authority))
+    }
+    pub(super) fn publisher(&mut self, authority: Arc<crate::basis::pend::Pend>) {
+        self.publisher = Some(authority);
     }
     pub(crate) fn associate(&mut self, expected: u64, page: Arc<Page>) -> Result<(), NestError> {
         if self.flight.is_some() || self.publication.is_some() || self.generation.get() != expected
@@ -50,6 +60,20 @@ impl Memo {
         let next = self.generation.next().ok_or(NestError::OutOfMemory)?;
         self.controlled = true;
         self.page = Some(page);
+        self.freeze = None;
+        self.generation = next;
+        Ok(())
+    }
+
+    /// Association and hardware responsibility have separate lifetimes. A failed
+    /// or incomplete withdrawal must keep its Page and exact generation.
+    pub(crate) fn remove(&mut self, expected: u64) -> Result<(), NestError> {
+        if self.busy() || self.generation.get() != expected {
+            return Err(NestError::Busy);
+        }
+        let next = self.generation.next().ok_or(NestError::OutOfMemory)?;
+        self.controlled = true;
+        self.page = None;
         self.freeze = None;
         self.generation = next;
         Ok(())
@@ -176,6 +200,8 @@ impl Memo {
         self.flight = None;
         if published {
             self.freeze = None;
+        } else {
+            self.publisher = None;
         }
     }
 }

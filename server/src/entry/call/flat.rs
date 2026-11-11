@@ -29,6 +29,8 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: FlatCall, ident: &Arc<Task
                 offset,
                 count,
             } => authority::slice(&task, token, offset, count),
+            FlatCall::Block { token } => authority::block(&task, token).map(|()| 0),
+            FlatCall::Allow { token } => authority::allow(&task, token).map(|()| 0),
             FlatCall::Delete { token } => authority::delete(&task, token).map(|()| 0),
         }
     })();

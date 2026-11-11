@@ -120,7 +120,6 @@ pub(crate) mod basis {
     }
     pub(crate) mod nest {
         use super::super::*;
-        use kernel_api::model::cell::MappingControl;
         use std::{
             collections::BTreeMap,
             sync::{Mutex, Weak},
@@ -130,13 +129,10 @@ pub(crate) mod basis {
             Busy,
             OutOfMemory,
         }
-        pub(crate) struct Control(pub TaskId, pub MappingControl);
+        pub(crate) struct Control(pub TaskId);
         impl Control {
             pub(crate) fn control(&self) -> (TaskId, ()) {
                 (self.0, ())
-            }
-            pub(crate) fn scope(&self) -> MappingControl {
-                self.1
             }
         }
         pub(crate) struct Entry {
@@ -175,7 +171,7 @@ pub(crate) mod basis {
                     nest.mappings.0.lock().unwrap().insert(
                         id,
                         Arc::new(Entry {
-                            control: Some(Control(actor, MappingControl::Caller)),
+                            control: Some(Control(actor)),
                             id,
                         }),
                     );

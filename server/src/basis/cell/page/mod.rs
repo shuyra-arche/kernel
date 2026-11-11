@@ -23,7 +23,7 @@ use kernel_api::model::cell::PAGE_SIZE;
 use kernel_api::model::cell::PageOwner;
 
 pub(crate) use identity::PageId;
-pub(crate) use reclaim::{Change, Freeze, RetainError, Retention};
+pub(crate) use reclaim::{Block, Change, Freeze, RetainError, Retention};
 
 /// 分配器交出的唯一承载。构造 Page 后只有 Page 保留这份回收凭证。
 pub(crate) type InternalPage = Box<UnsafeCell<[u8; PAGE_SIZE]>, &'static (dyn Allocator + Sync)>;
@@ -223,3 +223,5 @@ impl Drop for Page {
 // InternalPage requires a Sync allocator so reclamation may occur on any hart.
 unsafe impl Send for Page {}
 unsafe impl Sync for Page {}
+
+pub(crate) use reclaim::statistics;

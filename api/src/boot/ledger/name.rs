@@ -4,6 +4,7 @@ pub const NAME_LEN: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Name {
+    Memory,
     Trap(Trap),
     Call(Call),
     Page(Page),
@@ -32,6 +33,7 @@ pub enum Call {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
+    Memory,
     Dtb,
     Initrd,
     Region(u64),
@@ -46,7 +48,9 @@ impl Name {
     }
     pub const fn kind(self) -> ResourceKind {
         match self {
-            Self::Trap(Trap::SupervisorExternal) | Self::Interrupt { .. } => ResourceKind::Sign,
+            Self::Memory | Self::Trap(Trap::SupervisorExternal) | Self::Interrupt { .. } => {
+                ResourceKind::Sign
+            }
             Self::Call(Call::Create) => ResourceKind::None,
             Self::Call(_) => ResourceKind::Control,
             Self::Trap(Trap::PageFault) => ResourceKind::Clone,
@@ -76,6 +80,8 @@ impl Name {
             return;
         }
         let (class, item, at): (u8, u8, u64) = match *self {
+            Self::Memory => (6, 0, 0),
+            Self::Page(Page::Memory) => (2, 3, 0),
             Self::Trap(Trap::SupervisorExternal) => (0, 0, 0),
             Self::Trap(Trap::PageFault) => (0, 1, 0),
             Self::Call(Call::Build) => (1, 0, 0),
@@ -113,6 +119,8 @@ impl Name {
         }
         let at = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
         match (bytes[0], bytes[1], at) {
+            (6, 0, 0) => Some(Self::Memory),
+            (2, 3, 0) => Some(Self::Page(Page::Memory)),
             (0, 0, 0) => Some(Self::Trap(Trap::SupervisorExternal)),
             (0, 1, 0) => Some(Self::Trap(Trap::PageFault)),
             (1, 0, 0) => Some(Self::Call(Call::Build)),

@@ -177,20 +177,16 @@ impl Fixture {
                 team,
                 placement: Placement::exact(VirtAddr::new(ADDRESS), 4096).unwrap(),
                 access: 10,
-                control: MappingControl::Caller,
             },
         }
         .to_bytes();
-        let CreatedCell::Memo { mapping, .. } =
+        let CreatedCell::Memo { token: mapping, .. } =
             cell::create(PendId::NONE, crate::ptr(&bytes)).unwrap()
         else {
             panic!("Memo")
         };
         let bytes = CellPosition {
-            object: CellObject::Memo {
-                target: MappingTarget::Cpu(team),
-                mapping,
-            },
+            object: CellObject::Memo(mapping),
             page: 0,
             generation: 2,
         }
@@ -224,7 +220,6 @@ impl Fixture {
                 team: TeamId::new(0),
                 placement: Placement::exact(VirtAddr::new(ADDRESS + 4096), 4096).unwrap(),
                 access: 6,
-                control: MappingControl::SpaceMembers,
             },
         }
         .to_bytes();

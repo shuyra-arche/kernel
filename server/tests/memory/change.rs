@@ -212,3 +212,58 @@ fn freeze_waits_for_other_writers_even_after_their_withdrawal_begins() {
     drop(change);
     assert!(page.allows_return());
 }
+
+#[test]
+fn window_blocks_cover_existing_changes_and_reopen_only_after_last_owner() {
+    let pool = Pool::new(0);
+    let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let mut publication = page.prepare_hardware(false).unwrap();
+    publication.publish();
+    let change = page.begin().unwrap();
+    let first = super::cell::Block::new(change.clone()).unwrap();
+    let second = super::cell::Block::new(change.clone()).unwrap();
+    assert!(!first.settled());
+    assert_eq!(change.hardware(false).unwrap_err(), RetainError::Busy);
+    assert_eq!(change.external(false).unwrap_err(), RetainError::Busy);
+    unsafe { publication.retire().settle() };
+    assert!(first.settled());
+    drop(first);
+    assert_eq!(change.hardware(false).unwrap_err(), RetainError::Busy);
+    drop(second);
+    drop(change.hardware(false).unwrap());
+    drop(change);
+    assert!(page.allows_return());
+    drop(page);
+    assert_eq!(pool.gives(), 1);
+}
+
+#[test]
+fn concurrent_block_and_hardware_preparation_keep_the_winning_obligation() {
+    for _ in 0..128 {
+        let pool = Pool::new(0);
+        let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+        let change = page.begin().unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let (other, gate) = (change.clone(), barrier.clone());
+        let publisher = std::thread::spawn(move || {
+            gate.wait();
+            other.hardware(false)
+        });
+        barrier.wait();
+        let block = super::cell::Block::new(change.clone()).unwrap();
+        let responsibility = publisher.join().unwrap();
+        match responsibility {
+            Ok(receipt) => {
+                assert!(!block.settled());
+                drop(receipt);
+            }
+            Err(error) => assert_eq!(error, RetainError::Busy),
+        }
+        assert!(block.settled());
+        assert_eq!(change.hardware(false).unwrap_err(), RetainError::Busy);
+        drop(block);
+        drop(change);
+        drop(page);
+        assert_eq!(pool.gives(), 1);
+    }
+}

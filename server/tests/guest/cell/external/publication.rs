@@ -148,7 +148,7 @@ pub(in super::super) fn run(at: usize, count: usize) {
     let (cpu_r, address_r) = super::super::attach(replacement, 1);
     super::super::write(address_r, 0, 0xc3c3c3c3);
     super::super::retract(cpu_r, 0);
-    super::super::handoff(current(first), super::super::slot(empty, 0), true);
+    super::super::handoff(super::super::slot(a, 0), super::super::slot(empty, 0), true);
     super::super::handoff(
         super::super::slot(replacement, 0),
         super::super::slot(a, 0),
@@ -198,7 +198,7 @@ pub(in super::super) fn run(at: usize, count: usize) {
     // sibling leaf and the persistent root remain usable.
     publish(first);
     publish(second);
-    let old_mapping = alias(current(first), root);
+    let old_mapping = current(first);
     start(bar, ADDRESS, true);
     let until = room::clock() + 2_000_000_000;
     loop {
@@ -222,7 +222,7 @@ pub(in super::super) fn run(at: usize, count: usize) {
     let fresh = create(next, a, ADDRESS, false);
     publish(fresh);
     transfer(bar, ADDRESS, false);
-    assert!(observed(alias(old_mapping, next)).is_none());
+    assert!(observed(old_mapping).is_none());
     assert_eq!(super::super::info(fresh).fault_cause, 0);
     retract(fresh);
     retract(second);
@@ -234,13 +234,14 @@ pub(in super::super) fn run(at: usize, count: usize) {
     let unused = branch(root);
     let position = create(unused, empty, ADDRESS + 8192, false);
     returned(unused);
-    assert!(observed(alias(position, root)).is_none());
+    assert!(observed(position).is_none());
     assert_eq!(context(root).id, identity);
     assert_eq!(context(root).phase, NestPhase::Bound);
     for token in [published, after, retired, faults] {
         sign::delete(token).unwrap();
         returned(token);
     }
+    super::block::run(root);
     super::levels::run(bar, root);
     // Whole-Nest deletion is separate from all of the successful handovers.
     let final_position = create(root, a, ADDRESS, false);

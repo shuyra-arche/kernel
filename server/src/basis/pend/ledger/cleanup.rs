@@ -131,6 +131,10 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
         // both the closed authority and its exact mapping and hardware obligations.
         if let Some(meta) = entry.target().memory() {
             meta.close_maps(Some(entry.token()))?;
+            crate::basis::flat::authority::retire_block(&meta, entry.authority())?;
+        }
+        if let crate::basis::pend::Target::Memo(memo) = entry.target() {
+            memo.withdraw(&entry)?;
         }
         remove(&holder, &entry)?;
         if Arc::ptr_eq(&root, &entry) {

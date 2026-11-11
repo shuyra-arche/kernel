@@ -710,20 +710,49 @@ impl Nest {
             .associate(expected, page)
     }
 
+    pub(crate) fn remove_memo(
+        &self,
+        mapping: &Arc<Span>,
+        index: usize,
+        expected: u64,
+    ) -> Result<(), NestError> {
+        let mut state = self.ready_state()?;
+        self.ensure_owned(mapping, &state)?;
+        mapping
+            .state
+            .lock()
+            .memo_address(mapping.initial_start(), index)?;
+        state.memos.get_mut(mapping, index)?.remove(expected)
+    }
+
     pub(crate) fn transition_memo(
         &self,
         mapping: &Arc<Span>,
         index: usize,
         expected: u64,
         freeze: Arc<Change>,
-        publishing: bool,
+        publisher: Option<Arc<crate::basis::pend::Pend>>,
     ) -> Result<Arc<Page>, NestError> {
         let mut state = self.ready_state()?;
         self.ensure_owned(mapping, &state)?;
-        state
+        let memo = state.memos.get_mut(mapping, index)?;
+        let page = memo.transition(expected, freeze, publisher.is_some())?;
+        if let Some(publisher) = publisher {
+            memo.publisher(publisher);
+        }
+        Ok(page)
+    }
+    pub(crate) fn memo_published_by(
+        &self,
+        mapping: &Arc<Span>,
+        index: usize,
+        authority: &Arc<crate::basis::pend::Pend>,
+    ) -> bool {
+        self.state
+            .lock()
             .memos
-            .get_mut(mapping, index)?
-            .transition(expected, freeze, publishing)
+            .get(mapping, index)
+            .is_some_and(|memo| memo.published_by(authority))
     }
 
     pub(crate) fn finish_memo(&self, mapping: &Arc<Span>, index: usize) {

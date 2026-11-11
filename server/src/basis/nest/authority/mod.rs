@@ -4,6 +4,7 @@
 pub(crate) mod admission;
 pub(crate) mod binding;
 pub(crate) mod external;
+pub(crate) mod memo;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -14,7 +15,6 @@ use crate::basis::pend::SourceAuthorization;
 use crate::basis::unit::task::registry;
 use crate::metal::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
-use kernel_api::model::cell::MappingControl;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 
@@ -46,25 +46,15 @@ impl RangeBinding {
 }
 
 pub(crate) struct RangeControl {
-    scope: MappingControl,
     control: SpinLock<(TaskId, Option<PendId>)>,
 }
 
 impl RangeControl {
-    pub(crate) fn new(
-        controller: TaskId,
-        scope: MappingControl,
-        branch: Option<PendId>,
-    ) -> Result<Arc<Self>, PendFail> {
+    pub(crate) fn new(controller: TaskId, branch: Option<PendId>) -> Result<Arc<Self>, PendFail> {
         Arc::try_new(Self {
-            scope,
             control: SpinLock::new((controller, branch)),
         })
         .map_err(|_| PendFail::OutOfMemory)
-    }
-
-    pub(crate) fn scope(&self) -> MappingControl {
-        self.scope
     }
 
     pub(crate) fn control(&self) -> (TaskId, Option<PendId>) {
@@ -108,11 +98,10 @@ impl RangeRegistry {
         id: usize,
         nest: &Arc<Nest>,
         controller: TaskId,
-        scope: MappingControl,
         source: Arc<SourceAuthorization>,
         branch: Option<PendId>,
     ) -> Result<(), PendFail> {
-        let control = RangeControl::new(controller, scope, branch)?;
+        let control = RangeControl::new(controller, branch)?;
         self.claim_entry(id, nest, source, Some(control))
     }
 
@@ -227,9 +216,7 @@ impl Nest {
     fn settle(entry: RangeEntry) {
         let id = entry.binding.id();
         entry.source.release_binding(&entry.binding);
-        if let Some(control) = &entry.control
-            && control.scope() == kernel_api::model::cell::MappingControl::Caller
-        {
+        if let Some(control) = &entry.control {
             let (controller, _) = control.control();
             if let Some(task) = registry::find(controller).and_then(|task| task.upgrade()) {
                 task.controls.remove(id);

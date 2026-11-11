@@ -9,8 +9,8 @@ mod target;
 pub use accord::{AccordRequest, AccordTarget, NarrowRequest};
 pub use info::{PendInfo, PendStatus};
 pub use permission::{
-    CloneRights, CreationRights, Distributable, FlatRights, Limits, NestRights, Operations,
-    ShareRights,
+    CloneRights, CreationRights, Distributable, FlatRights, Limits, MemoRights, NestRights,
+    Operations, ShareRights,
 };
 pub use range::PendRange;
 pub use target::{Target, ViewTarget};

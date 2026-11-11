@@ -118,17 +118,11 @@ global_asm!(
     "    csrw  sstatus, t0",
     "    ld    t0, 0x138(sp)",
     "    csrw  sepc, t0",
-    "    ld    t0,  0x28(sp)",
-    "    srli  t1,  t0, 44",
-    "    slli  t1,  t1, 48",
-    "    bnez  t1, 1f",
-    "    ld    t0, 0x08(tp)",
-    "    csrw  sscratch, t0",
-    "    j     2f",
-    "1:",
+    // The frame, not its ASID, identifies an execution context. Kernel Team
+    // tasks use ASID zero too; restoring the hart frame here would erase their
+    // Task boundary and turn their next call into a fatal core trap.
     "    ld    t0,  0x140(sp)",
     "    csrw  sscratch, t0",
-    "2:",
     "    fence rw, rw",
     "    ld    t0, {instruction_sync}(tp)",
     "    beqz  t0, 3f",

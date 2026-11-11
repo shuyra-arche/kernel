@@ -9,7 +9,6 @@ use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
 
 use crate::basis::unit::task::TaskIdent;
-use kernel_api::address::PhysAddr;
 
 use crate::basis::room::scheduler;
 
@@ -30,13 +29,6 @@ impl Identity {
         match self {
             Identity::Live(t) => t.team.id.get(),
             Identity::Last { team, .. } => team.get(),
-        }
-    }
-
-    pub fn trap(&self) -> Option<PhysAddr> {
-        match self {
-            Identity::Live(t) => Some(t.frame_pa),
-            Identity::Last { .. } => None,
         }
     }
 

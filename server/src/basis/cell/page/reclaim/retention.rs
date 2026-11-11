@@ -30,6 +30,7 @@ impl Retention {
         modifiable: bool,
     ) -> Result<Self, RetainError> {
         cell.reclaim.register(kind, modifiable)?;
+        super::statistics::register(kind, cell.pages() * 4096);
         Ok(Self {
             cell: Some(cell.clone()),
             phase: Phase::Prepared,
@@ -44,6 +45,7 @@ impl Retention {
         modifiable: bool,
     ) -> Result<Self, RetainError> {
         change.page().reclaim.register_during(kind, modifiable)?;
+        super::statistics::register(kind, change.page().pages() * 4096);
         Ok(Self {
             cell: Some(change.page().clone()),
             phase: Phase::Prepared,
@@ -69,6 +71,7 @@ impl Retention {
     /// 开始撤销；即使提交或同步失败，仍保留责任直至可信结清。
     pub(crate) fn retire(mut self) -> Self {
         assert_eq!(self.phase, Phase::Published);
+        super::statistics::retire(self.cell().pages() * 4096);
         self.phase = Phase::Retiring;
         self
     }
@@ -79,6 +82,7 @@ impl Retention {
     pub(crate) unsafe fn settle(mut self) {
         assert_eq!(self.phase, Phase::Retiring);
         self.cell().reclaim.discharge(self.kind, self.modifiable);
+        super::statistics::discharge(self.kind, self.cell().pages() * 4096, true);
         self.phase = Phase::Settled;
     }
 }
@@ -93,12 +97,16 @@ impl Deref for Retention {
 impl Drop for Retention {
     fn drop(&mut self) {
         match self.phase {
-            Phase::Prepared => self.cell().reclaim.discharge(self.kind, self.modifiable),
+            Phase::Prepared => {
+                self.cell().reclaim.discharge(self.kind, self.modifiable);
+                super::statistics::discharge(self.kind, self.cell().pages() * 4096, false);
+            }
             Phase::Settled => {}
             Phase::Published | Phase::Retiring => {
                 // 非正常遗失责任时永久隔离：保留身份、账目和物理分配，禁止新登记。
                 // 这是无分配的 fail-closed 兜底，不是可枚举/可恢复的隔离队列。
                 self.cell().reclaim.abandon();
+                super::statistics::abandon(self.cell().pages() * 4096);
                 core::mem::forget(self.cell.take());
             }
         }

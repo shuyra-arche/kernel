@@ -41,6 +41,17 @@ bitflags::bitflags! {
         const ASSOCIATE = 4;
         const SHARE = 8;
         const DELETE = 16;
+        const BLOCK = 32;
+    }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct MemoRights: u32 {
+        const INSPECT = 1;
+        const INSERT = 2;
+        const REMOVE = 4;
+        const PUBLISH = 8;
+        const RETRACT = 16;
+        const PROTECT = 32;
+        const DELETE = 64;
     }
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct NestRights: u32 {
@@ -69,6 +80,7 @@ pub enum Operations {
     Flat(FlatRights),
     Nest(NestRights),
     Sign(SignRights),
+    Memo(MemoRights),
 }
 
 impl Operations {
@@ -80,6 +92,7 @@ impl Operations {
             Self::Flat(r) => [3, r.bits() as usize],
             Self::Nest(r) => [4, r.bits() as usize],
             Self::Sign(r) => [6, r.bits() as usize],
+            Self::Memo(r) => [7, r.bits() as usize],
         }
     }
     pub fn of([kind, bits]: [usize; 2]) -> Option<Self> {
@@ -91,6 +104,7 @@ impl Operations {
             3 => Self::Flat(FlatRights::from_bits(bits)?),
             4 => Self::Nest(NestRights::from_bits(bits)?),
             6 => Self::Sign(SignRights::from_bits(bits)?),
+            7 => Self::Memo(MemoRights::from_bits(bits)?),
             _ => return None,
         })
     }
@@ -154,8 +168,10 @@ impl Limits {
         match self.range {
             PendRange::Inherit => true,
             PendRange::Pages { offset, count } => {
-                matches!(self.operations, Operations::Share(_) | Operations::Flat(_))
-                    && PendRange::pages(offset, count).is_some()
+                matches!(
+                    self.operations,
+                    Operations::Share(_) | Operations::Flat(_) | Operations::Memo(_)
+                ) && PendRange::pages(offset, count).is_some()
             }
         }
     }

@@ -11,6 +11,8 @@ static STALE_RM: ::core::sync::atomic::AtomicUsize = ::core::sync::atomic::Atomi
 pub(super) struct FrameInner {
     freelist: Vec<Option<NonNull<Link>>>,
     pagemeta: Vec<Option<u8>>,
+    pub(super) capacity: usize,
+    pub(super) allocated: usize,
     pub(super) base: usize,
     pub(super) edge: usize,
 }
@@ -23,6 +25,8 @@ impl FrameInner {
         Self {
             freelist: Vec::new(),
             pagemeta: Vec::new(),
+            capacity: 0,
+            allocated: 0,
             base: 0,
             edge: 0,
         }
@@ -65,6 +69,7 @@ impl FrameInner {
                 unsafe {
                     self.push_link(self.frame_index(start), power);
                 }
+                self.capacity += PAGE_SIZE << power;
                 start += PAGE_SIZE << power;
                 available = true;
             }

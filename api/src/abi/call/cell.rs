@@ -40,13 +40,13 @@ pub mod operations {
     pub struct Delete {
         pub object: super::VirtAddr,
     }
-    /// Give a Page according to one CellHandoff snapshot; never publish implicitly.
+    /// Move the unique Slot holding from local to remote; no implicit Memo/PTE changes.
     #[operation(slot = 2, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Push {
         pub request: super::VirtAddr,
     }
-    /// Take a Page according to one CellHandoff snapshot; never retract implicitly.
+    /// Move the unique Slot holding from remote to local; no implicit Memo/PTE changes.
     #[operation(slot = 3, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Pull {
@@ -88,6 +88,18 @@ pub mod operations {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Merge {
         pub slot: crate::model::cell::SlotId,
+    }
+    /// Associate the source Page with the target Memo using CellAssociation.
+    #[operation(slot = 10, output = (), error = CellFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Insert {
+        pub request: super::VirtAddr,
+    }
+    /// Clear an unpublished, generation-qualified Memo association.
+    #[operation(slot = 11, output = (), error = CellFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Remove {
+        pub position: super::VirtAddr,
     }
 }
 pub use operations::CellCall;

@@ -147,3 +147,126 @@ pub(crate) fn delete(task: &Arc<Task>, token: PendId) -> Result<(), PendFail> {
     };
     crate::basis::flat::sharing::close(&meta)
 }
+
+/// First commit admission closure, then withdraw hardware outside COMMIT. Busy
+/// keeps the branch-owned record and all Page gates so a retry cannot reopen it.
+pub(crate) fn block(task: &Arc<Task>, token: PendId) -> Result<(), PendFail> {
+    let _serial = task.pend.lock();
+    let entry = control(task, token)?;
+    let meta = entry.target().memory().ok_or(PendFail::Denied)?;
+    let source = meta.authorization().ok_or(PendFail::Denied)?;
+    let (offset, count) = entry
+        .authority()
+        .window()
+        .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
+    let block = source.block(entry.authority(), offset, count)?;
+    let _operation = SharingOperation::acquire(&meta).ok_or(PendFail::Busy)?;
+    settle_block(&meta, &source, &block)?;
+    if entry.alive() {
+        Ok(())
+    } else {
+        Err(PendFail::Dead)
+    }
+}
+/// A closed branch still owns its block until its original hardware users have
+/// drained. The caller already serializes the Sharing operation.
+pub(crate) fn retire_block(
+    meta: &Arc<Sharing>,
+    authority: &Arc<pend::Pend>,
+) -> Result<(), PendFail> {
+    let Some(source) = meta.authorization() else {
+        return Ok(());
+    };
+    if let Some(block) = source.blocking(authority) {
+        settle_block(meta, &source, &block)?;
+        source.allow(authority);
+    }
+    Ok(())
+}
+fn settle_block(
+    meta: &Arc<Sharing>,
+    source: &Arc<SourceAuthorization>,
+    block: &Arc<pend::RangeBlock>,
+) -> Result<(), PendFail> {
+    if source.moving() {
+        return Err(PendFail::Busy);
+    }
+    let (offset, count) = block.window();
+    let selected = meta
+        .source()
+        .range(offset, count)
+        .map_err(|_| PendFail::NotAligned)?;
+    for (_, page) in selected.materialized_cells().map_err(|_| PendFail::Busy)? {
+        block.retain(page)?;
+    }
+    for binding in source.bindings()? {
+        let Some(nest) = binding.nest().upgrade() else {
+            return Err(PendFail::Busy);
+        };
+        let Some(record) = nest.mappings.registered(binding.id()) else {
+            continue;
+        };
+        let Some(span) = record.mapping() else {
+            return Err(PendFail::Busy);
+        };
+        let _mapping = span.operation().ok_or(PendFail::Busy)?;
+        nest.retry_invalidation().map_err(|_| PendFail::Busy)?;
+        let base = span.source().index().get();
+        let low = selected.index().get().max(base);
+        let high = (selected.index().get() + selected.page_count().get())
+            .min(base + span.source().page_count().get());
+        for index in (low..high).step_by(selected.grain()) {
+            let page = index - base;
+            if let Some(data) = nest.memo_page(span, page).map_err(|_| PendFail::Busy)? {
+                block.retain(data.clone())?;
+                nest.unpublish_page(
+                    span,
+                    kernel_api::address::VirtAddr::new(
+                        span.initial_start().get() + page * PAGE_SIZE,
+                    ),
+                    &data,
+                )
+                .map_err(|_| PendFail::Busy)?;
+                nest.finish_memo(span, page);
+            }
+        }
+    }
+    crate::basis::nest::authority::external::block_source(&source, &selected, &block)?;
+    if block.settled() {
+        Ok(())
+    } else {
+        Err(PendFail::Busy)
+    }
+}
+pub(crate) fn allow(task: &Arc<Task>, token: PendId) -> Result<(), PendFail> {
+    let _serial = task.pend.lock();
+    let _commit = crate::basis::commit();
+    let entry = control(task, token)?;
+    let source = entry
+        .target()
+        .memory()
+        .and_then(|m| m.authorization())
+        .ok_or(PendFail::Denied)?;
+    source.allow(entry.authority());
+    Ok(())
+}
+
+/// Admission control is independent of temporary data-access suspension by an
+/// External borrower. Only the live Flat branch and its BLOCK bit authorize it.
+fn control(task: &Arc<Task>, token: PendId) -> Result<Arc<pend::PendEntry>, PendFail> {
+    if !pend::live(task) {
+        return Err(PendFail::Dead);
+    }
+    let entry = pend::locate(task, token).ok_or(PendFail::Denied)?;
+    if !entry.alive()
+        || !matches!(entry.target(), pend::Target::Flat(_))
+        || !entry
+            .authority()
+            .limits()
+            .operations
+            .contains(Operations::Flat(FlatRights::BLOCK))
+    {
+        return Err(PendFail::Denied);
+    }
+    Ok(entry)
+}

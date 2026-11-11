@@ -24,12 +24,6 @@ pub struct TrapContext {
 }
 
 impl TrapContext {
-    pub(crate) fn copy_registers_from(&mut self, frame: &Self) {
-        self.gpr = frame.gpr;
-        self.sstatus = frame.sstatus;
-        self.sepc = frame.sepc;
-    }
-
     pub(crate) fn status(&self) -> usize {
         self.sstatus.bits()
     }

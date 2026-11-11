@@ -13,3 +13,5 @@ mod version;
 mod permission;
 
 mod organization;
+
+mod memory;

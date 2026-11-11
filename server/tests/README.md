@@ -60,7 +60,7 @@ Generated evidence lives under each guest's `target/evidence/` directory:
 
 | Guest | What it exercises |
 | --- | --- |
-| [Cell](guest/cell/) | Kernel calls, CPU and IOMMU mappings, interrupts, scheduling, and task state. |
+| [Cell](guest/cell/) | Kernel calls, CPU and IOMMU mappings, interrupts, scheduling, and task state. Includes a separate-Team, window-limited Memo delegate; Flat Block/Allow and holder transfer; read-only memory snapshot/Sign with real level-1 allocation. |
 | [IOMMU](guest/iommu/) | The hardware backend directly, including queue completion and denied DMA after reuse. |
 | [Diagnostics](guest/diagnostics/) | Panic, illegal instruction, pre-allocator failure and recursive reporting. |
 
