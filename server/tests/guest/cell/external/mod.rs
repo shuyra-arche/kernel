@@ -22,6 +22,7 @@ mod block;
 mod exit;
 mod levels;
 mod publication;
+mod reservation;
 pub(super) use exit::death;
 pub(super) use publication::run;
 const ADDRESS: usize = 0x400000;

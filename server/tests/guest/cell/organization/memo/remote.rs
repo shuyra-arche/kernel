@@ -11,6 +11,8 @@ use kernel_api::{
     },
 };
 use kernel_client::call::{nest, share_view, unit};
+const _: () = assert!(kernel_api::model::pend::PendInfo::SIZE <= 128);
+const _: () = assert!(CellPosition::WIDTH == 32 && CellInfo::WIDTH <= 64);
 const fn call(class: usize, slot: usize) -> usize {
     ((kernel_api::abi::VERSION as usize) << 48) | (class << 32) | slot
 }

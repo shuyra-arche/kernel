@@ -69,9 +69,14 @@ Generated evidence lives under each guest's `target/evidence/` directory:
 
 | Guest | What it exercises |
 | --- | --- |
-| [Cell](guest/cell/) | Kernel calls, CPU and IOMMU mappings, interrupts, scheduling, and task state. Includes a separate-Team, window-limited Memo delegate; Flat Block/Allow and holder transfer; read-only memory snapshot/Sign with real level-1 allocation. |
+| [Cell](guest/cell/) | Kernel calls, scoped Nest authority, source-free reservations, unrelated per-position sources, sticky read-only copies, original-source Task retirement, CPU and IOMMU mappings, interrupts, scheduling, and task state. Includes a separate-Team, window-limited mapping delegate; Flat Block/Allow and holder transfer; read-only memory snapshot/Sign with real level-1 allocation. |
 | [IOMMU](guest/iommu/) | The hardware backend directly, including queue completion and denied DMA after reuse. |
 | [Diagnostics](guest/diagnostics/) | Panic, illegal instruction, pre-allocator failure and recursive reporting. |
+
+The Cell cases require real read/write-fault probes after source withdrawal or
+read-only delegation, and retain delayed-DMA and exact-fence checks. The
+write-to-execute update case checks new instruction results without a guest
+`FENCE.I`; QEMU execution is not proof of physical instruction-cache coherence.
 
 CI uploads each group's evidence as a `guest-evidence-*` artifact. The
 [latency](latency/README.md) and [real-time](realtime/README.md) notes describe

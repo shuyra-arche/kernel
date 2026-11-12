@@ -29,6 +29,8 @@ use kernel_api::{
     },
 };
 use kernel_client::call::{pend, room, share_view, sign, unit};
+const _: () = assert!(128 + 7 * kernel_api::model::pend::PendInfo::SIZE <= 1024);
+const _: () = assert!(CellPosition::WIDTH == 32 && CellAssociation::WIDTH == 64);
 const fn call(class: usize, slot: usize) -> usize {
     ((kernel_api::abi::VERSION as usize) << 48) | (class << 32) | slot
 }

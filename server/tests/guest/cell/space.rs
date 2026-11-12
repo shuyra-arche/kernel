@@ -17,6 +17,39 @@ use kernel_api::{
 };
 use kernel_client::call::{nest, pend};
 
+mod association;
+mod protection;
+mod retirement;
+mod scope;
+mod source;
+
+pub(crate) fn run() {
+    scope::run();
+    association::run();
+    protection::run();
+    retirement::run();
+    source::run();
+}
+
+pub(crate) fn accord(src: PendId, target: AccordTarget, limits: Limits) -> PendId {
+    let bytes = AccordRequest {
+        src,
+        target,
+        limits,
+        mark: Mark::NONE,
+    }
+    .to_bytes();
+    pend::accord(crate::ptr(&bytes)).unwrap()
+}
+
+pub(crate) fn id(token: PendId) -> kernel_api::model::cell::MappingId {
+    let PendScope::Nest(NestScope::Mapping { id, .. }) = crate::pend::inspect(token).limits.scope
+    else {
+        panic!("mapping scope expected")
+    };
+    id
+}
+
 pub(crate) fn boot(at: usize, count: usize) {
     assert_eq!(count, args::LEN);
     let words = unsafe { core::slice::from_raw_parts(at as *const usize, count) };

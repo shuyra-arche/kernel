@@ -62,6 +62,7 @@ pub(in super::super) fn run(at: usize, count: usize) {
     );
     assert_eq!(context(root).phase, NestPhase::Bound);
     returned(delegated_delete);
+    super::reservation::run(root);
 
     let first_branch = branch(root);
     let second_branch = branch(root);
@@ -109,6 +110,16 @@ pub(in super::super) fn run(at: usize, count: usize) {
     .unwrap();
     publish(first);
     publish(second);
+    for position in [first, second] {
+        let before = super::super::info(position);
+        assert_eq!(
+            cell::protect(super::super::ptr(&current(position).to_bytes()), 2)
+                .unwrap_err()
+                .source,
+            kernel_api::abi::call::cell::CellFail::Denied
+        );
+        assert_eq!(super::super::info(position), before);
+    }
     event(published, source(first, true));
     let after = sign::create(crate::license::get()).unwrap();
     sign::attach(after, source(second, true), current(second).generation).unwrap();
@@ -148,12 +159,18 @@ pub(in super::super) fn run(at: usize, count: usize) {
     let (cpu_r, address_r) = super::super::attach(replacement, 1);
     super::super::write(address_r, 0, 0xc3c3c3c3);
     super::super::retract(cpu_r, 0);
+    let retained = super::super::info(first);
     super::super::handoff(super::super::slot(a, 0), super::super::slot(empty, 0), true);
+    assert_eq!(super::super::info(first), retained);
+    assert!(cell::publish(super::super::ptr(&current(first).to_bytes())).is_err());
+    assert_eq!(super::super::info(first), retained);
     super::super::handoff(
         super::super::slot(replacement, 0),
         super::super::slot(a, 0),
         false,
     );
+    assert!(cell::publish(super::super::ptr(&current(first).to_bytes())).is_err());
+    assert_eq!(super::super::info(first), retained);
     super::super::delete(super::super::raw_memo(cpu_r, 0).object);
     super::super::handoff(super::super::slot(a, 0), current(first), false);
     let stale = current(first);
@@ -232,7 +249,8 @@ pub(in super::super) fn run(at: usize, count: usize) {
     returned(second_branch);
     // Returning a branch that never published must also remove its reservation.
     let unused = branch(root);
-    let position = create(unused, empty, ADDRESS + 8192, false);
+    let position = reserve(unused, empty, ADDRESS + 8192, false).unwrap();
+    assert_eq!(super::super::info(position).state, CellState::Vacant);
     returned(unused);
     assert!(observed(position).is_none());
     assert_eq!(context(root).id, identity);

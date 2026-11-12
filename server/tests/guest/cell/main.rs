@@ -169,6 +169,7 @@ fn write(address: VirtAddr, offset: usize, value: usize) {
 #[unsafe(no_mangle)]
 extern "C" fn run(args: usize, count: usize) -> ! {
     space::boot(args, count);
+    space::run();
     #[cfg(feature = "context")]
     context::run();
     if cfg!(feature = "io-exit") {
