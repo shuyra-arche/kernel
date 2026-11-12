@@ -3,6 +3,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::boot::ledger::{Entry, Name};
+use kernel_api::model::pend::{NestScope, PendScope};
 
 use crate::basis::pend::PendEntry;
 use crate::basis::unit::task::Task;
@@ -39,7 +40,7 @@ impl Registry {
         // An unchanged contract is not a narrowing transaction. In particular,
         // a trusted Nest root already retains its binding retirement obligation.
         if limits != original {
-            if let Err(reason) = root.narrow(limits, root.authority().window()) {
+            if let Err(reason) = root.narrow(limits) {
                 return Err(Failure {
                     reason,
                     value: (name, root),
@@ -217,6 +218,12 @@ pub(crate) type FreezeError = Failure<Registry>;
 pub(crate) type DeliveryError = Failure<Frozen>;
 
 fn valid(name: Name, pend_entry: &PendEntry) -> bool {
+    let cpu_space = name == Name::Space
+        && pend_entry
+            .target()
+            .nest()
+            .is_some_and(|nest| !nest.is_external() && nest.is_open() && nest.is_adopted())
+        && pend_entry.authority().scope() == PendScope::Nest(NestScope::Whole);
     let mut bytes = [0u8; kernel_api::boot::ledger::NAME_LEN];
     name.store(&mut bytes);
     Name::fetch(&bytes) == Some(name)
@@ -225,6 +232,7 @@ fn valid(name: Name, pend_entry: &PendEntry) -> bool {
             .kind()
             .is_some_and(|kind| name.kind() == kind.into())
             || matches!(name, Name::Memory if pend_entry.target().sign().is_some_and(|s| crate::entry::observe::identifies(&s)))
+            || cpu_space
             || matches!(name, Name::Nest { .. } if pend_entry.target().nest().is_some_and(|nest| nest.is_external()))
             || matches!(name, Name::Interrupt { controller, source } if pend_entry.target().sign().is_some_and(|s| crate::basis::room::interrupt::identifies(&s, controller, source))))
         && pend_entry.alive()

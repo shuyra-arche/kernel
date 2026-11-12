@@ -7,7 +7,6 @@ use alloc::sync::Arc;
 pub(super) enum Retirement {
     Heirs { after: usize },
     Pends,
-    Controls,
     Memory,
     Receipts(crate::basis::unit::team::Clearance),
     Settled,
@@ -49,10 +48,6 @@ impl Task {
             }
             Retirement::Pends => {
                 crate::basis::pend::retire(self).map_err(|_| NestError::Busy)?;
-                *phase = Retirement::Controls;
-            }
-            Retirement::Controls => {
-                self.controls.retire(self.ident.id)?;
                 *phase = Retirement::Memory;
             }
             Retirement::Memory => {

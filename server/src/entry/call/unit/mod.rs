@@ -1,19 +1,27 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use kernel_api::abi::call::pend::PendFail;
 use kernel_api::abi::call::unit::UnitCall;
 use kernel_api::abi::call::unit::UnitFail;
-use kernel_api::model::unit::UnitTarget;
+use kernel_api::model::identity::Mark;
+use kernel_api::model::modifiable::Modifiable;
+use kernel_api::model::pend::{
+    Distributable, Limits, NestRights, NestScope, Operations, PendScope,
+};
+use kernel_api::model::unit::{CreatedUnit, UnitTarget};
 
 use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::SpaceKind;
+use crate::basis::pend::{self, PendEntry, Target};
 use crate::basis::unit::task::MAX_ARGS;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
 use crate::basis::unit::task::TaskWeak;
 use crate::basis::unit::task::registry::find;
+use crate::basis::unit::team::TeamBuilder;
 use crate::metal::switcher::context::Gprs;
 use crate::metal::switcher::context::TrapContext;
 use kernel_api::address::VirtAddr as KVirt;
@@ -34,6 +42,14 @@ fn map_err(e: NestError) -> UnitFail {
         | NestError::DramOverlap
         | NestError::Shootdown
         | NestError::Pinned => UnitFail::Denied,
+    }
+}
+
+fn map_pend_err(error: PendFail) -> UnitFail {
+    match error {
+        PendFail::OutOfMemory => UnitFail::OutOfMemory,
+        PendFail::Busy => UnitFail::Busy,
+        _ => UnitFail::Denied,
     }
 }
 
@@ -120,13 +136,15 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
         UnitCall::Create { request } => {
             let result = create(&me, request);
             match result {
-                Ok(UnitTarget::Task(id)) => {
+                Ok(CreatedUnit::Task(id)) => {
                     frame.gpr.set_x(Gprs::A0, 0);
                     frame.gpr.set_x(Gprs::A1, id.get());
+                    frame.gpr.set_x(Gprs::A2, 0);
                 }
-                Ok(UnitTarget::Team(id)) => {
+                Ok(CreatedUnit::Team { team, nest }) => {
                     frame.gpr.set_x(Gprs::A0, 1);
-                    frame.gpr.set_x(Gprs::A1, id.get());
+                    frame.gpr.set_x(Gprs::A1, team.get());
+                    frame.gpr.set_x(Gprs::A2, nest.get());
                 }
                 Err(error) => return Outcome::fail(frame, error),
             }
@@ -313,7 +331,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: UnitCall, ident: Arc<TaskI
     }
     Outcome::Resume
 }
-fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
+fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
     let mut bytes = [0; UnitCreate::WIDTH];
     if !me.ident.team.nest.copy_in(&mut bytes, request) {
         return Err(UnitFail::Denied);
@@ -340,7 +358,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
                 words,
                 stack.get(),
             )?;
-            Ok(UnitTarget::Task(task.ident.id))
+            Ok(CreatedUnit::Task(task.ident.id))
         }
         UnitCreate::Team {
             kind,
@@ -364,15 +382,21 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
             {
                 return Err(UnitFail::Denied);
             }
+            let kind = SpaceKind::from(kind);
             let sire = TaskWeak::stored(Arc::downgrade(me), Origin::Sire);
-            let selected = if let Some(token) = nest {
-                let entry = crate::basis::pend::locate(me, token).ok_or(UnitFail::Denied)?;
+            let builder = TeamBuilder::new(kind)
+                .sire(sire)
+                .creator(me.ident.id)
+                .constructing()
+                .member_exit(member_exit)
+                .guarded(guarded);
+            let (team, token) = if let Some(token) = nest {
+                let entry = pend::locate(me, token).ok_or(UnitFail::Denied)?;
                 if entry.sire().is_some()
                     || entry.target().owner() != me.ident.id
-                    || !entry.permits(kernel_api::model::pend::Operations::Nest(
-                        kernel_api::model::pend::NestRights::ATTACH,
-                    ))
-                    || entry.modifiable() != kernel_api::model::modifiable::Modifiable::Yes
+                    || entry.authority().scope() != PendScope::Nest(NestScope::Whole)
+                    || !entry.permits(Operations::Nest(NestRights::ATTACH))
+                    || entry.modifiable() != Modifiable::Yes
                     || me
                         .pend
                         .heirs
@@ -383,44 +407,63 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<UnitTarget, UnitFail> {
                 {
                     return Err(UnitFail::Denied);
                 }
-                Some(entry.target().nest().ok_or(UnitFail::Denied)?)
+                let selected = entry.target().nest().ok_or(UnitFail::Denied)?;
+                if selected.is_external()
+                    || !selected.is_open()
+                    || selected.is_adopted()
+                    || selected.kind().is_supervisor() != kind.is_supervisor()
+                {
+                    return Err(UnitFail::Denied);
+                }
+                let mut limits = entry.authority().limits();
+                let Operations::Nest(rights) = limits.operations else {
+                    return Err(UnitFail::Denied);
+                };
+                limits.operations =
+                    Operations::Nest(rights & (NestRights::INSPECT | NestRights::RESERVE));
+                let limited = entry
+                    .authority()
+                    .prepare_limit(limits)
+                    .map_err(map_pend_err)?;
+                // spawn_in only stages metadata and binds the Nest; no hardware fence
+                // or Pend access can run while the prepared State lock is held.
+                let team = builder.spawn_in(selected).map_err(map_err)?;
+                limited.commit();
+                (team, token)
             } else {
-                None
-            };
-            let builder = crate::basis::unit::team::TeamBuilder::new(SpaceKind::from(kind))
-                .sire(sire)
-                .creator(me.ident.id)
-                .constructing()
-                .member_exit(member_exit);
-            let team = if let Some(selected) = selected {
-                builder.spawn_in(selected)
-            } else {
-                builder.spawn()
-            }
-            .map_err(map_err)?;
-            let consumed = nest.map(|token| {
-                let entry = me
-                    .pend
-                    .entries
-                    .lock()
-                    .remove(token)
-                    .expect("serialized Nest root");
-                entry.invalidate();
-
+                let selected = TeamBuilder::prepare_nest(kind).map_err(map_err)?;
+                let entry = PendEntry::try_new(
+                    Target::Nest {
+                        owner: me.ident.id,
+                        nest: selected.clone(),
+                    },
+                    Mark::NONE,
+                    Modifiable::Yes,
+                    None,
+                )
+                .map_err(map_pend_err)?;
                 entry
-            });
-            // New empty Team: guard selection is immutable and cannot race a member exit.
-            if guard != ControlId::NONE {
-                crate::basis::unit::team::exit::arm(&team.node, me.ident.id)
-                    .expect("new empty guarded Team");
-            }
+                    .narrow(Limits {
+                        operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
+                        modifiable: Modifiable::Yes,
+                        distributable: Distributable::Yes,
+                        scope: PendScope::Nest(NestScope::Whole),
+                    })
+                    .map_err(map_pend_err)?;
+                let token = entry.token();
+                let entry = Arc::try_new(entry).map_err(|_| UnitFail::OutOfMemory)?;
+                let registration = me.pend.prepare(entry).map_err(map_pend_err)?;
+                let team = builder.spawn_in(selected).map_err(map_err)?;
+                registration.publish();
+                (team, token)
+            };
             drop(_commit);
             drop(serial);
-            if let Some(entry) = consumed {
-                crate::basis::pend::notify(me.ident.id, entry.token());
-                drop(entry);
-            }
-            Ok(UnitTarget::Team(team.id))
+            pend::notify(me.ident.id, token);
+            Ok(CreatedUnit::Team {
+                team: team.id,
+                nest: token,
+            })
         }
     }
 }
