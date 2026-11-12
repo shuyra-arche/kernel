@@ -20,7 +20,7 @@ use kernel_api::address::VirtAddr;
 
 use super::super::Span;
 use crate::basis::flat::FlatRange;
-use crate::basis::nest::NestError;
+use crate::basis::nest::{NestError, authority::RangeBinding};
 
 // 关联里的一条：这段来源窗口被这个关系压着。
 //
@@ -29,6 +29,7 @@ use crate::basis::nest::NestError;
 struct Record {
     source_id: kernel_api::model::flat::FlatId,
     mapping: Weak<Span>,
+    binding: Option<Weak<RangeBinding>>,
     next: Option<alloc::boxed::Box<Record>>,
 }
 
@@ -53,7 +54,12 @@ fn rebuild(head: &mut Option<Box<Record>>, mut keep: impl FnMut(&Record)) {
     let mut cursor = head.take();
     while let Some(mut node) = cursor {
         cursor = node.next.take();
-        if node.mapping.strong_count() == 0 {
+        if node.mapping.strong_count() == 0
+            || node
+                .binding
+                .as_ref()
+                .is_some_and(|binding| binding.strong_count() == 0)
+        {
             continue;
         }
         keep(&node);
@@ -85,12 +91,17 @@ pub(crate) fn forget() {
 ///
 /// 关系的首条 PTE 之前调用；失败即整次安装失败，不留半条。
 /// 键按**强持的** `FlatRange` 取（调用方持有它），不缓存可回收的裸身份。
-pub(crate) fn register(source: &FlatRange, mapping: &Arc<Span>) -> Result<(), NestError> {
+pub(crate) fn register(
+    source: &FlatRange,
+    mapping: &Arc<Span>,
+    binding: Option<&Arc<RangeBinding>>,
+) -> Result<(), NestError> {
     let source_id = source.source_id();
     // 先备好节点：锁内不分配也不升级任何强引用。
     let record = Box::try_new(Record {
         source_id,
         mapping: Arc::downgrade(mapping),
+        binding: binding.map(Arc::downgrade),
         next: None,
     })
     .map_err(|_| NestError::OutOfMemory)?;
@@ -98,7 +109,14 @@ pub(crate) fn register(source: &FlatRange, mapping: &Arc<Span>) -> Result<(), Ne
     let mut head = registry().head.lock();
     let mut duplicate = false;
     rebuild(&mut head, |known| {
-        if known.source_id == source_id && known.mapping.as_ptr() == identity {
+        if known.source_id == source_id
+            && known.mapping.as_ptr() == identity
+            && match (&known.binding, binding) {
+                (None, None) => true,
+                (Some(known), Some(binding)) => known.as_ptr() == Arc::as_ptr(binding),
+                _ => false,
+            }
+        {
             duplicate = true;
         }
     });
@@ -196,12 +214,16 @@ fn distinct(mappings: &mut Vec<Weak<Span>>) {
 
 /// 这段关系把来源 `source` 上的 `page` 放在哪个虚拟页上；不是它的窗口就没有。
 fn pressing_page(mapping: &Span, source: &FlatRange, page: PageIndex) -> Option<VirtAddr> {
-    let inner = mapping.state.lock();
-    if inner.source.source_id() != source.source_id() {
+    let Some(selected) = mapping.source() else {
+        // Manual positions are independent; the weak snapshot is an upper bound
+        // for wakeups only. A waiter rechecks its actual position and authority.
+        return Some(mapping.initial_start());
+    };
+    if selected.source_id() != source.source_id() {
         return None;
     }
-    let offset = page.get().checked_sub(inner.source.index().get())?;
-    if offset >= inner.source.page_count().get() {
+    let offset = page.get().checked_sub(selected.index().get())?;
+    if offset >= selected.page_count().get() {
         return None;
     }
     let address = mapping
@@ -215,6 +237,7 @@ fn pressing_page(mapping: &Span, source: &FlatRange, page: PageIndex) -> Option<
 /// for this bounded traversal, never as identity or authority. Removed mappings
 /// have no live waiter; newly added waiters recheck the already-open predicate.
 pub(crate) fn wake_all() {
+    forget();
     let mut cursor = 0;
     loop {
         let candidate = {

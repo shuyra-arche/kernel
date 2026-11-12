@@ -159,20 +159,11 @@ impl SourceAuthorization {
         if !self.private_owner(task) {
             return Err(PendFail::Denied);
         }
+        if self.pending_cpu() {
+            return Err(PendFail::Busy);
+        }
         let gate = self.revoked.lock();
-        if *gate
-            || self.bindings.lock().iter().any(|binding| {
-                binding.nest().upgrade().is_none_or(|space| {
-                    space.has_pending_invalidation()
-                        || space.mappings.registered(binding.id()).is_none_or(|entry| {
-                            entry
-                                .mapping()
-                                .is_none_or(|mapping| space.has_published(mapping))
-                        })
-                })
-            })
-            || !self.inflight.lock().is_empty()
-        {
+        if *gate || !self.inflight.lock().is_empty() {
             return Err(PendFail::Busy);
         }
         self.external
@@ -360,9 +351,6 @@ impl SourceAuthorization {
     /// 备下一条成员的位置（可失败的准备；调用方在同一提交段里紧接着写入）。
     pub(crate) fn reserve_binding(&self) -> Result<(), PendFail> {
         let mut members = self.bindings.lock();
-        if members.len() >= 1024 {
-            return Err(PendFail::OutOfMemory);
-        }
         members.try_reserve(1).map_err(|_| PendFail::OutOfMemory)
     }
 
@@ -425,6 +413,19 @@ impl SourceAuthorization {
 
     pub(crate) fn first_binding(&self) -> Option<Arc<RangeBinding>> {
         self.bindings.lock().first().cloned()
+    }
+
+    /// Query outside source/Nest locks; upgrading a last Nest may run retirement.
+    pub(crate) fn pending_cpu(&self) -> bool {
+        let Ok(bindings) = self.bindings() else {
+            return true;
+        };
+        bindings.iter().any(|binding| {
+            binding
+                .nest()
+                .upgrade()
+                .is_none_or(|nest| !nest.is_external() && nest.binding_pending(binding))
+        })
     }
 
     /// 未结 CPU 身份的快照；不复制关系或物理持有。

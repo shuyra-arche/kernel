@@ -101,11 +101,11 @@ impl ExternalBorrow {
         let (loan, parent, observer) = if let Some((meta, root, authority)) = root {
             let (token, authority) = hold.branch().unwrap_or((root, &authority));
             let _operation = SharingOperation::acquire(&meta).ok_or(PendFail::Busy)?;
+            let pending_cpu = authority.configured() == Modifiable::Yes
+                && (meta.pending_maps(token) || source.pending_cpu());
             let withdrawal = source.begin_withdraw()?;
             withdrawal.check_publish(offset, count)?;
-            // A writable parent must explicitly unmap before external publication.
-            // Immutable parents and their read-only CPU aliases may coexist.
-            if authority.configured() == Modifiable::Yes && meta.pending_maps(token) {
+            if pending_cpu {
                 return Err(PendFail::Busy);
             }
             let loan = Pend::try_new_scope(

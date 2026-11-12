@@ -3,7 +3,7 @@
 //! revalidates the exact Pend branch and window; hardware residency is separate.
 
 use crate::metal::sync::SpinLock;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
 
@@ -117,6 +117,7 @@ unsafe impl Sync for Hold {}
 
 pub(crate) struct HoldTable {
     holds: SpinLock<Vec<Arc<Hold>>>,
+    sources: SpinLock<Vec<Weak<SourceAuthorization>>>,
 }
 
 /// 铸一个全局唯一的引用号；耗尽（或超出符号上界）即明确失败，不回收旧号。
@@ -130,6 +131,7 @@ impl HoldTable {
     pub(crate) const fn new() -> Self {
         Self {
             holds: SpinLock::new(Vec::new()),
+            sources: SpinLock::new(Vec::new()),
         }
     }
 
@@ -150,9 +152,20 @@ impl HoldTable {
             return Err(PendFail::OutOfMemory);
         }
         holds.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+        let mut sources = self.sources.lock();
+        sources.retain(|source| source.strong_count() != 0);
+        let known = sources
+            .iter()
+            .any(|known| known.as_ptr() == Arc::as_ptr(&source));
+        if !known {
+            sources.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+        }
         let id = next_id()?;
         let hold = Arc::try_new(Hold::new(id, source, offset, count, ceiling, branch))
             .map_err(|_| PendFail::OutOfMemory)?;
+        if !known {
+            sources.push(Arc::downgrade(hold.source()));
+        }
         hold.source().claim_hold();
         holds.push(hold);
         Ok(id)
@@ -176,15 +189,49 @@ impl HoldTable {
         Some(hold)
     }
 
-    /// Task 走到尽头：结清本表全部引用，未消费的资格随之结束。
-    pub(crate) fn clear(&self) -> bool {
+    /// A removed Slot can still source foreign publications. Keep discovery until
+    /// this actor's exact uses settle, before discarding its last ledger/husk.
+    pub(crate) fn retire(
+        &self,
+        task: &Arc<crate::basis::unit::task::Task>,
+    ) -> Result<bool, PendFail> {
+        let mut retired = 0;
+        for _ in 0..4 {
+            let source = {
+                let mut sources = self.sources.lock();
+                sources.retain(|source| source.strong_count() != 0);
+                sources.first().and_then(Weak::upgrade)
+            };
+            let Some(source) = source else {
+                break;
+            };
+            for binding in source.bindings().map_err(|_| PendFail::Busy)? {
+                let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
+                if nest
+                    .binding_source(&binding)
+                    .is_some_and(|selected| selected.belongs_to(task.ident.id))
+                {
+                    nest.withdraw_source(&binding, &source, None, Some(task.ident.id), true)?;
+                    retired += 1;
+                    if retired == 4 {
+                        return Ok(false);
+                    }
+                }
+            }
+            self.sources
+                .lock()
+                .retain(|known| known.as_ptr() != Arc::as_ptr(&source));
+        }
+        if !self.sources.lock().is_empty() {
+            return Ok(false);
+        }
         for _ in 0..4 {
             let Some(hold) = self.holds.lock().pop() else {
-                return true;
+                return Ok(true);
             };
             hold.source().release_hold();
         }
-        self.holds.lock().is_empty()
+        Ok(self.holds.lock().is_empty())
     }
 }
 
