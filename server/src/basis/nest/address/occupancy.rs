@@ -272,6 +272,11 @@ impl Occupancy {
         Ok(ticket)
     }
 
+    /// Caller proved every hardware obligation of this reservation settled.
+    pub(crate) fn release_settled(&mut self, id: usize) {
+        self.spans.retain(|span| span.id != id);
+    }
+
     /// 结算一票退休：同步完成后移走这张票占用的地址。
     pub(crate) fn reclaim(&mut self, ticket: usize) {
         self.spans.retain(|slot| slot.ticket != ticket);

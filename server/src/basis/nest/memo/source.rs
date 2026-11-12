@@ -103,6 +103,34 @@ impl Source {
             .ok_or(CellFail::Denied)
     }
 
+    pub(in crate::basis::nest) fn begin_cpu(
+        &self,
+        id: usize,
+        need: Access,
+    ) -> Result<PublicationFlight, CellFail> {
+        let root = self.source().root();
+        let operation = root
+            .as_ref()
+            .map(|(meta, _, _)| {
+                crate::basis::flat::sharing::SharingOperation::acquire(meta).ok_or(CellFail::Busy)
+            })
+            .transpose()?;
+        let actor = self.actor().ok_or(CellFail::Denied)?;
+        self.check(need)?;
+        let authority = self.authority(&actor)?;
+        self.source()
+            .check_publish(self.offset, self.count)
+            .map_err(failure)?;
+        self.source()
+            .enter_publish(id, authority.as_deref(), need, self.offset, self.count)
+            .map_err(failure)?;
+        Ok(PublicationFlight {
+            source: self.source().clone(),
+            id,
+            _operation: operation,
+        })
+    }
+
     pub(crate) fn limited(&self, ceiling: Access) -> Self {
         Self {
             ceiling: self.ceiling & ceiling,
@@ -142,6 +170,20 @@ impl Source {
 
     pub(crate) fn belongs_to(&self, task: TaskId) -> bool {
         self.task == task
+    }
+
+    /// Logical source loss, independent of a legitimate external borrow's suspension.
+    pub(in crate::basis::nest) fn retiring(&self) -> bool {
+        self.actor().is_none()
+            || self.source().revoked()
+            || self
+                .hold
+                .branch()
+                .is_some_and(|(_, authority)| authority.retiring())
+            || self
+                .source()
+                .root()
+                .is_some_and(|(meta, _, authority)| !meta.alive() || authority.retiring())
     }
 
     pub(crate) fn same_page(&self, page: &Arc<Page>) -> Result<FlatRange, CellFail> {
@@ -217,6 +259,19 @@ impl Source {
             return Err(CellFail::Denied);
         }
         Ok(Some(authority.clone()))
+    }
+}
+
+pub(in crate::basis::nest) struct PublicationFlight {
+    source: Arc<SourceAuthorization>,
+    id: usize,
+    _operation: Option<crate::basis::flat::sharing::SharingOperation>,
+}
+
+impl Drop for PublicationFlight {
+    fn drop(&mut self) {
+        let _commit = crate::basis::commit();
+        self.source.leave_publish(self.id);
     }
 }
 

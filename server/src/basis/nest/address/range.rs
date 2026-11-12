@@ -31,7 +31,7 @@ impl NestRange {
         offset: PageOffset,
         count: PageCount,
     ) -> Result<Self, NestError> {
-        let grain = mapping.source().grain();
+        let grain = mapping.grain();
         if !offset.get().is_multiple_of(grain) || !count.get().is_multiple_of(grain) {
             return Err(NestError::NotAligned);
         }
@@ -87,6 +87,9 @@ impl NestRange {
             ),
             Self::Pages { offset, count, .. } => (*offset, *count),
         };
-        Ok(mapping.source().range(offset, count)?)
+        Ok(mapping
+            .source()
+            .ok_or(NestError::Missing)?
+            .range(offset, count)?)
     }
 }

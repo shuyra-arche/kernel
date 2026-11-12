@@ -42,6 +42,7 @@ pub(super) struct NestState {
     pub(super) index: Index,
     pub(super) retirement: Retirement,
     pub(super) phase: ClosePhase,
+    pub(super) team: Option<kernel_api::model::identity::TeamId>,
 }
 
 impl NestState {
@@ -53,7 +54,16 @@ impl NestState {
             index: Index::new(),
             retirement: Retirement::new(),
             phase: ClosePhase::Open,
+            team: None,
         }
+    }
+
+    pub(super) fn is_open(&self) -> bool {
+        self.phase.is_open()
+            && match &self.root {
+                Storage::Cpu(_) => true,
+                Storage::External(external) => external.open(),
+            }
     }
 
     /// Complete the current fence and close the address space if needed.
@@ -211,13 +221,12 @@ impl NestState {
                     (expected & mask).bits(),
                     "hardware PTE modifiability differ from Span state at {start:?}"
                 );
-                if inner.source.is_borrowed() {
+                if let Some(source) = inner.source.as_ref().filter(|source| source.is_borrowed()) {
                     let offset = start
                         .as_usize()
                         .checked_sub(mapping.initial_start().as_usize())
                         .expect("borrowed leaf precedes Span start");
-                    let page = inner
-                        .source
+                    let page = source
                         .materialize()
                         .expect("borrowed source materializes")
                         .physical(PageOffset::new(offset / PAGE_SIZE))
@@ -263,7 +272,13 @@ impl NestState {
         page: &Arc<Page>,
         change: &Change,
     ) -> Result<(), NestError> {
+        if !self.is_open() {
+            return Err(NestError::NoRegion);
+        }
         let inner = mapping.state.lock();
+        if inner.phase != super::address::span::MappingPhase::Open {
+            return Err(NestError::NoRegion);
+        }
         let index = mapping.page_index(address);
         if self.memos.publication(mapping, index).is_some() {
             return Err(NestError::AlreadyMapped);
@@ -274,8 +289,12 @@ impl NestState {
             .find(|range| range.contains(address.as_usize()))
             .ok_or(NestError::NoRegion)?;
         let flags = mapping.leaf_attributes(range.current);
-        let mut memo =
-            Publication::prepare(page, range.ceiling.contains(Access::WRITE), Some(change))?;
+        let retained = if inner.source.is_some() {
+            range.ceiling
+        } else {
+            range.current
+        };
+        let mut memo = Publication::prepare(page, retained.contains(Access::WRITE), Some(change))?;
         self.memos.reserve(1)?;
         self.retirement
             .mappings
@@ -285,6 +304,9 @@ impl NestState {
         self.root
             .cpu_mut()?
             .prepare_range_geometry(address, physical, page.size(), geometry)?;
+        if let Some(position) = self.memos.existing_mut(mapping, index) {
+            position.attempted();
+        }
         memo.publish();
         self.root.cpu_mut()?.map_range_prepared_geometry(
             address,
@@ -356,12 +378,13 @@ impl NestState {
         mapping: &Arc<Span>,
         window: (usize, usize),
         request: Protection,
+        replacement: Option<(usize, Publication)>,
     ) -> Result<(), NestError> {
         let mut inner = mapping.state.lock();
         let transition =
             inner.protection_transition(mapping.initial_start(), window, request, |p| {
                 self.memos
-                    .publication(mapping, p / inner.source.grain() * inner.source.grain())
+                    .publication(mapping, p / mapping.grain() * mapping.grain())
                     .is_some()
             })?;
 
@@ -379,8 +402,26 @@ impl NestState {
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
 
+        if let Some((page, _)) = &replacement {
+            if self.memos.publication(mapping, *page).is_none() {
+                return Err(NestError::Busy);
+            }
+            self.retirement
+                .cells
+                .try_reserve(1)
+                .map_err(|_| NestError::OutOfMemory)?;
+        }
         // 从此处开始提交不再分配：即使 shootdown 失败，保留映射与 Dirty/Failed 状态。
         self.retirement.mappings.push(mapping.clone());
+        if let Some((page, mut publication)) = replacement {
+            let old = self
+                .memos
+                .take_publication(mapping, page)
+                .expect("prepared publication");
+            publication.publish();
+            self.memos.publish(mapping, page, publication);
+            self.retirement.cells.push(old.retire());
+        }
         for update in transition.updates {
             self.root.cpu_mut()?.set_permissions_prepared_geometry(
                 update.address,

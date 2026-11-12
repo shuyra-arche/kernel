@@ -32,11 +32,25 @@ pub(crate) enum Cell {
 }
 
 impl Cell {
+    pub(crate) fn level(&self) -> CellLevel {
+        match self {
+            Self::Flat(range) => range.level(),
+            Self::Nest(range) => range.mapping().level(),
+        }
+    }
+
+    pub(crate) fn grain(&self) -> usize {
+        self.level().pages().expect("admitted Cell geometry")
+    }
+
     pub(crate) fn page(
         &self,
         offset: usize,
     ) -> Result<alloc::sync::Arc<Page>, crate::basis::nest::NestError> {
         use crate::basis::nest::NestError;
+        if !offset.is_multiple_of(self.grain()) {
+            return Err(NestError::NotAligned);
+        }
         match self {
             Self::Flat(range) => range
                 .cell(kernel_api::address::PageOffset::new(offset))?

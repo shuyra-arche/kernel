@@ -11,6 +11,7 @@ pub(super) use layout::Layout;
 pub(crate) use layout::RegionKind;
 pub(crate) use placement::{Placement, PlacementAt};
 pub use reservation::Reservation;
+pub(crate) use reservation::ReservedMapping;
 
 pub(crate) mod span;
 pub(crate) use range::NestRange;

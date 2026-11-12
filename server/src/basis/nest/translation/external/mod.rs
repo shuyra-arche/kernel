@@ -1,17 +1,16 @@
 mod state;
-use super::super::address::{Layout, Placement};
-use super::super::{Access, IndexNode, Nest, NestError, Span};
+use super::super::address::Layout;
+use super::super::memo::Publisher;
+use super::super::{Nest, NestError, Span};
 use super::{ClosePhase, NestState, Storage};
 use crate::basis::cell::page::{Change, Page};
-use crate::basis::flat::FlatRange;
 use crate::basis::nest::PublicationError as Error;
+use crate::basis::pend::ExternalBorrow;
 use crate::basis::unit::anchor::Anchor;
 use crate::metal::iommu::{Backend, Fault};
 use crate::metal::sync::{Level, SpinLock};
-use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::mem::ManuallyDrop;
-use kernel_api::address::VirtAddr;
 pub(super) use state::External;
 
 impl NestState {
@@ -22,6 +21,7 @@ impl NestState {
             index: super::super::index::Index::new(),
             retirement: super::retirement::Retirement::new(),
             phase: ClosePhase::Open,
+            team: None,
         }
     }
 }
@@ -42,45 +42,6 @@ impl Nest {
     pub(crate) fn is_external(&self) -> bool {
         self.cpu.is_none()
     }
-    pub(crate) fn external_memo(
-        self: &Arc<Self>,
-        address: usize,
-        source: FlatRange,
-        access: Access,
-    ) -> Result<Arc<Span>, NestError> {
-        let size = source
-            .page_count()
-            .checked_bytes()
-            .ok_or(NestError::NotAligned)?;
-        if size > 1 << 21
-            || source.page_count().get() != source.grain()
-            || !self.is_external()
-            || address == 0
-            || address >= 1usize << 38
-            || !address.is_multiple_of(size)
-        {
-            return Err(NestError::NotAligned);
-        }
-        let reservation = self.reserve(Placement::fixed(VirtAddr::new(address), size)?)?;
-        self.create_memo(reservation, source, access, access)
-    }
-    pub(in crate::basis::nest) fn commit_external(
-        &self,
-        span: &Arc<Span>,
-    ) -> Result<(), NestError> {
-        let mut state = self.state.lock();
-        let Storage::External(external) = &state.root else {
-            return Err(NestError::NoRegion);
-        };
-        if !external.open() || !span.state.lock().explicit {
-            return Err(NestError::Busy);
-        }
-        let node =
-            Box::try_new(IndexNode::new(span.clone())?).map_err(|_| NestError::OutOfMemory)?;
-        state.memos.get_mut(span, 0)?;
-        state.index.insert(node);
-        Ok(())
-    }
     /// Install a trusted backend once. The caller keeps it even if later preparation fails.
     pub(crate) fn bind_external(&self, hardware: Backend) -> Result<(), (Error, Backend)> {
         let mut state = self.state.lock();
@@ -97,8 +58,13 @@ impl Nest {
         page: &Arc<Page>,
         change: Arc<Change>,
         writable: bool,
+        publisher: &mut Option<Publisher>,
+        borrow: &mut Option<ExternalBorrow>,
     ) -> Result<(), Error> {
         let mut state = self.state.lock();
+        if !state.is_open() || !span.is_open() {
+            return Err(Error::Closed);
+        }
         let NestState {
             root: Storage::External(external),
             memos,
@@ -115,8 +81,14 @@ impl Nest {
             writable,
             Some(&change),
         )?;
-        memo.publish_external(expected, change, publication)
-            .map_err(|_| Error::InvalidState)
+        memo.begin_publish(expected, change)
+            .map_err(|_| Error::InvalidState)?;
+        memo.retain(
+            publisher.take().expect("prepared publishing route"),
+            borrow.take(),
+        );
+        memo.install(publication);
+        Ok(())
     }
 
     pub(crate) fn submit_external(&self, span: &Arc<Span>) -> Result<(), Error> {
@@ -129,7 +101,8 @@ impl Nest {
         else {
             return Err(Error::InvalidState);
         };
-        let memo = memos.get_mut(span, 0).map_err(|_| Error::OutOfMemory)?;
+        let memo = memos.existing_mut(span, 0).ok_or(Error::UnknownBinding)?;
+        memo.attempted();
         external.submit(memo.publication_mut())
     }
 
@@ -152,21 +125,35 @@ impl Nest {
         else {
             return Err(Error::InvalidState);
         };
-        let memo = memos.get_mut(span, 0).map_err(|_| Error::OutOfMemory)?;
+        let Some(memo) = memos.existing_mut(span, 0) else {
+            external.progress(None, false)?;
+            return Ok(());
+        };
         let retracting = memo.retracting();
-        match external.progress(memo.publication_mut(), retracting)? {
+        let settled = match external.progress(memo.publication_mut(), retracting)? {
             state::Progress::Published => memo.finish(),
             state::Progress::Withdrawn => memo.settle_external(),
-            state::Progress::Pending | state::Progress::Closed => {}
-        }
+            state::Progress::Pending | state::Progress::Closed => {
+                super::super::memo::Settled::default()
+            }
+        };
+        drop(state);
+        settled.release();
         // The binding worker owns the final transition and its NestClosed wakeup.
         Ok(())
     }
 
     pub(crate) fn external_phase(&self) -> kernel_api::model::nest::NestPhase {
-        match &self.state.lock().root {
-            Storage::External(e) => e.phase(),
-            _ => kernel_api::model::nest::NestPhase::Bound,
+        let state = self.state.lock();
+        match &state.root {
+            Storage::External(external) => external.phase(),
+            Storage::Cpu(_) => match state.phase {
+                ClosePhase::Open => kernel_api::model::nest::NestPhase::Bound,
+                ClosePhase::Draining | ClosePhase::Closing => {
+                    kernel_api::model::nest::NestPhase::Closing
+                }
+                ClosePhase::Closed => kernel_api::model::nest::NestPhase::Closed,
+            },
         }
     }
     pub(crate) fn progress_external_close(&self) -> Result<bool, Error> {
@@ -178,24 +165,6 @@ impl Nest {
             Storage::External(e) => e.finish_close(),
             _ => Err(Error::InvalidState),
         }
-    }
-    pub(crate) fn delete_external_memo(&self, span: &Arc<Span>) -> Result<(), NestError> {
-        let memo = {
-            let mut state = self.state.lock();
-            if state
-                .memos
-                .get(span, 0)
-                .is_some_and(super::super::memo::Memo::busy)
-            {
-                return Err(NestError::Busy);
-            }
-            state.index.remove(span);
-            span.state.lock().active.clear();
-            state.memos.take_deleted(span)
-        };
-        self.give_back(&span.reservation);
-        drop(memo);
-        Ok(())
     }
     pub(crate) fn delete_organization(&self) -> Result<(), NestError> {
         if !self.is_external() {
@@ -228,18 +197,5 @@ impl Nest {
             return Err(Error::InvalidState);
         };
         e.fault()
-    }
-}
-
-impl Nest {
-    pub(crate) fn retract_external(
-        &self,
-        span: &Arc<Span>,
-        expected: u64,
-        change: Arc<Change>,
-    ) -> Result<(), NestError> {
-        let mut state = self.state.lock();
-        let memo = state.memos.get_mut(span, 0)?;
-        memo.retract_external(expected, change)
     }
 }

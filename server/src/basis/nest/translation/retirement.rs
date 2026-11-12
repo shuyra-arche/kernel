@@ -122,6 +122,14 @@ impl Fenced {
             unsafe { retained.settle() };
         }
         for mapping in &self.mappings {
+            let mut cursor = None;
+            loop {
+                let Some(page) = nest.state.lock().memos.next_page(mapping, cursor) else {
+                    break;
+                };
+                cursor = Some(page);
+                nest.finish_memo(mapping, page);
+            }
             loop {
                 let memo = nest.state.lock().memos.take_deleted(mapping);
                 if memo.is_none() {

@@ -261,14 +261,22 @@ fn audit_mappings(
         "indexed Span belongs to another Nest"
     );
     let state = mapping.state.lock();
+    if let Some(source) = &state.source {
+        assert!(
+            !source.is_borrowed() || memos.published(mapping).next().is_none(),
+            "borrowed Span also holds published Cells"
+        );
+        assert_eq!(
+            source.page_count().checked_bytes(),
+            Some(mapping.initial_size()),
+            "Span source extent differs from its initial range"
+        );
+        assert_eq!(source.level(), mapping.level(), "implicit source geometry");
+    }
     assert!(
-        !state.source.is_borrowed() || memos.published(mapping).next().is_none(),
-        "borrowed Span also holds published Cells"
-    );
-    assert_eq!(
-        state.source.page_count().checked_bytes(),
-        Some(mapping.initial_size()),
-        "Span source extent differs from its initial range"
+        mapping
+            .initial_size()
+            .is_multiple_of(mapping.grain() * PAGE_SIZE)
     );
     for (page, cell) in memos.published(mapping) {
         let address = mapping.initial_start() + page * PAGE_SIZE;

@@ -1,37 +1,115 @@
-//! A stable logical position and its hardware publication. Nest owns this record.
+//! Nest-owned logical positions, their selected sources and exact hardware obligations.
+mod publisher;
+pub(crate) use publisher::Publisher;
+pub(crate) mod publication;
+pub(crate) mod source;
 mod table;
 pub(super) use table::Memos;
-pub(crate) mod publication;
+
 use crate::basis::cell::page::{Change, Freeze, Page};
 use crate::basis::nest::NestError;
+use crate::basis::nest::authority::RangeBinding;
+use crate::basis::pend::{ExternalBorrow, Pend};
 use alloc::sync::Arc;
+use kernel_api::abi::call::{cell::CellFail, pend::PendFail};
 use kernel_api::address::VirtAddr;
 use kernel_api::model::cell::{CellInfo, CellState};
 use publication::{Phase, Publication};
+use source::Source;
+
+struct Association {
+    page: Arc<Page>,
+    source: Source,
+    binding: Arc<RangeBinding>,
+}
+
+enum MemoPage {
+    Implicit(Arc<Page>),
+    Associated(Association),
+}
+
+impl MemoPage {
+    fn page(&self) -> &Arc<Page> {
+        match self {
+            Self::Implicit(page) => page,
+            Self::Associated(association) => &association.page,
+        }
+    }
+}
+
+/// Payload removed only after this position's hardware use has settled.
+pub(in crate::basis::nest) struct Detached {
+    page: Option<MemoPage>,
+    freeze: Option<Freeze>,
+}
+
+impl Detached {
+    pub(in crate::basis::nest) fn release(self) {
+        if let Some(MemoPage::Associated(association)) = &self.page {
+            let _commit = crate::basis::commit();
+            association
+                .source
+                .source()
+                .release_binding(&association.binding);
+        }
+        drop(self.freeze);
+        drop(self.page);
+    }
+}
+
+/// Completion resources leave the Nest lock before inverse owners are touched.
+#[derive(Default)]
+pub(in crate::basis::nest) struct Settled {
+    publisher: Option<Publisher>,
+    borrow: Option<ExternalBorrow>,
+    freeze: Option<Freeze>,
+}
+
+impl Settled {
+    pub(in crate::basis::nest) fn release(self) {
+        let (source_notice, publisher_notice) = {
+            let _commit = crate::basis::commit();
+            // SAFETY: only exact hardware completion or an unpublished cancellation
+            // can construct these completion resources.
+            let source_notice = self.borrow.and_then(|borrow| unsafe { borrow.settle() });
+            let publisher_notice = self
+                .publisher
+                .map(|publisher| unsafe { publisher.settle() });
+            drop(self.freeze);
+            (source_notice, publisher_notice)
+        };
+        for (task, token) in source_notice.into_iter().chain(publisher_notice) {
+            crate::basis::pend::notify(task, token);
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum MemoFlight {
     Publishing,
     Retracting,
 }
+
 impl MemoFlight {
-    fn observation(self) -> kernel_api::model::cell::CellState {
-        use kernel_api::model::cell::CellState;
+    fn observation(self) -> CellState {
         match self {
             Self::Publishing => CellState::Publishing,
             Self::Retracting => CellState::Retracting,
         }
     }
 }
+
 pub(crate) struct Memo {
     generation: crate::basis::name::Generation,
-    page: Option<Arc<Page>>,
+    page: Option<MemoPage>,
     /// Retraction closes admission before removing PTEs; Ready keeps this freeze.
     freeze: Option<Freeze>,
     flight: Option<MemoFlight>,
     publication: Option<Publication>,
-    controlled: bool,
-    publisher: Option<Arc<crate::basis::pend::Pend>>,
+    publisher: Option<Publisher>,
+    borrow: Option<ExternalBorrow>,
 }
+
 impl Memo {
     pub(crate) const fn vacant() -> Self {
         Self {
@@ -40,195 +118,278 @@ impl Memo {
             freeze: None,
             flight: None,
             publication: None,
-            controlled: false,
             publisher: None,
+            borrow: None,
         }
     }
-    pub(super) fn published_by(&self, authority: &Arc<crate::basis::pend::Pend>) -> bool {
+
+    pub(in crate::basis::nest) fn generation(&self) -> u64 {
+        self.generation.get()
+    }
+
+    pub(in crate::basis::nest) fn association(
+        &self,
+    ) -> Option<(Arc<Page>, Source, Arc<RangeBinding>)> {
+        let MemoPage::Associated(association) = self.page.as_ref()? else {
+            return None;
+        };
+        Some((
+            association.page.clone(),
+            association.source.clone(),
+            association.binding.clone(),
+        ))
+    }
+
+    pub(in crate::basis::nest) fn matches(&self, binding: &Arc<RangeBinding>) -> bool {
+        matches!(self.page.as_ref(), Some(MemoPage::Associated(association))
+            if Arc::ptr_eq(&association.binding, binding))
+    }
+
+    pub(in crate::basis::nest) fn published_by(&self, authority: &Arc<Pend>) -> bool {
         self.publisher
             .as_ref()
-            .is_some_and(|publisher| Arc::ptr_eq(publisher, authority))
+            .is_some_and(|publisher| Arc::ptr_eq(publisher.authority(), authority))
     }
-    pub(super) fn publisher(&mut self, authority: Arc<crate::basis::pend::Pend>) {
-        self.publisher = Some(authority);
+
+    pub(in crate::basis::nest) fn principal(&self) -> Option<publisher::Principal> {
+        self.publisher.as_ref().map(Publisher::observe)
     }
-    pub(crate) fn associate(&mut self, expected: u64, page: Arc<Page>) -> Result<(), NestError> {
-        if self.flight.is_some() || self.publication.is_some() || self.generation.get() != expected
-        {
+
+    pub(in crate::basis::nest) fn can_associate(&self, expected: u64) -> Result<(), NestError> {
+        if self.busy() || self.generation.get() != expected {
             return Err(NestError::Busy);
         }
-        let next = self.generation.next().ok_or(NestError::OutOfMemory)?;
-        self.controlled = true;
-        self.page = Some(page);
-        self.freeze = None;
-        self.generation = next;
+        self.generation.next().ok_or(NestError::OutOfMemory)?;
         Ok(())
     }
 
-    /// Association and hardware responsibility have separate lifetimes. A failed
-    /// or incomplete withdrawal must keep its Page and exact generation.
-    pub(crate) fn remove(&mut self, expected: u64) -> Result<(), NestError> {
+    pub(in crate::basis::nest) fn associate(
+        &mut self,
+        expected: u64,
+        page: Arc<Page>,
+        source: Source,
+        binding: Arc<RangeBinding>,
+    ) -> Detached {
+        assert!(self.can_associate(expected).is_ok(), "prepared association");
+        let next = self.generation.next().expect("prepared generation");
+        let old = Detached {
+            page: self.page.replace(MemoPage::Associated(Association {
+                page,
+                source,
+                binding,
+            })),
+            freeze: self.freeze.take(),
+        };
+        self.generation = next;
+        old
+    }
+
+    pub(in crate::basis::nest) fn remove(&mut self, expected: u64) -> Result<Detached, NestError> {
         if self.busy() || self.generation.get() != expected {
             return Err(NestError::Busy);
         }
         let next = self.generation.next().ok_or(NestError::OutOfMemory)?;
-        self.controlled = true;
-        self.page = None;
-        self.freeze = None;
+        let removed = self.clear()?;
         self.generation = next;
+        Ok(removed)
+    }
+
+    /// Forced source/root cleanup is total even for an exhausted generation.
+    pub(in crate::basis::nest) fn clear(&mut self) -> Result<Detached, NestError> {
+        if self.busy() {
+            return Err(NestError::Busy);
+        }
+        self.generation = self.generation.next().unwrap_or(self.generation);
+        Ok(Detached {
+            page: self.page.take(),
+            freeze: self.freeze.take(),
+        })
+    }
+
+    pub(in crate::basis::nest) fn in_flight(&self) -> bool {
+        self.flight.is_some()
+    }
+
+    pub(in crate::basis::nest) fn frozen(&self) -> bool {
+        self.freeze.is_some()
+    }
+
+    pub(in crate::basis::nest) fn can_advance(&self, expected: u64) -> Result<(), NestError> {
+        if self.generation.get() != expected || self.flight.is_some() {
+            return Err(NestError::Busy);
+        }
+        self.generation.next().ok_or(NestError::OutOfMemory)?;
         Ok(())
     }
 
     pub(in crate::basis::nest) fn advance(&mut self, expected: u64) -> Result<(), NestError> {
-        if self.generation.get() != expected || self.flight.is_some() {
-            return Err(NestError::Busy);
-        }
-        self.generation = self.generation.next().ok_or(NestError::OutOfMemory)?;
-        self.controlled = true;
+        self.can_advance(expected)?;
+        self.generation = self.generation.next().expect("checked generation");
         Ok(())
     }
 
-    pub(super) fn transition(
+    pub(in crate::basis::nest) fn begin_publish(
         &mut self,
         expected: u64,
-        freeze: Arc<Change>,
-        publishing: bool,
-    ) -> Result<Arc<Page>, NestError> {
-        if self.flight.is_some() || publishing == self.publication.is_some() {
+        change: Arc<Change>,
+    ) -> Result<(), NestError> {
+        if self.busy() {
             return Err(NestError::Busy);
         }
-        let flight = if publishing {
-            MemoFlight::Publishing
-        } else {
-            MemoFlight::Retracting
-        };
-        self.begin(expected, freeze, flight)
+        self.begin(expected, change, MemoFlight::Publishing, false)
+    }
+
+    pub(in crate::basis::nest) fn retain(
+        &mut self,
+        publisher: Publisher,
+        borrow: Option<ExternalBorrow>,
+    ) {
+        assert!(matches!(self.flight, Some(MemoFlight::Publishing)));
+        assert!(self.publisher.is_none() && self.borrow.is_none());
+        self.publisher = Some(publisher);
+        self.borrow = borrow;
+    }
+
+    pub(in crate::basis::nest) fn begin_retract(
+        &mut self,
+        expected: u64,
+        change: Arc<Change>,
+        forced: bool,
+    ) -> Result<(), NestError> {
+        if self.publication.is_none() || self.retracting() {
+            return Err(NestError::Busy);
+        }
+        self.begin(expected, change, MemoFlight::Retracting, forced)?;
+        Ok(())
     }
 
     fn begin(
         &mut self,
         expected: u64,
-        freeze: Arc<Change>,
+        change: Arc<Change>,
         flight: MemoFlight,
-    ) -> Result<Arc<Page>, NestError> {
+        forced: bool,
+    ) -> Result<(), NestError> {
         if self.generation.get() != expected {
             return Err(NestError::Busy);
         }
         let page = self.page().ok_or(NestError::Missing)?;
-        if !Arc::ptr_eq(&page, freeze.page()) {
+        if !Arc::ptr_eq(&page, change.page()) {
             return Err(NestError::Busy);
         }
-        let generation = self.generation.next().ok_or(NestError::OutOfMemory)?;
+        let generation = match self.generation.next() {
+            Some(generation) => generation,
+            None if forced => self.generation,
+            None => return Err(NestError::OutOfMemory),
+        };
         let retracts = match flight {
             MemoFlight::Publishing => None,
+            MemoFlight::Retracting if forced => None,
             MemoFlight::Retracting => {
                 Some(self.publication.as_ref().ok_or(NestError::Busy)?.writable())
             }
         };
-        let freeze = Freeze::new(freeze, retracts)?;
+        let freeze = Freeze::new(change, retracts)?;
         self.generation = generation;
-        self.controlled = true;
-        self.page = Some(page.clone());
+        if self.page.is_none() {
+            self.page = Some(MemoPage::Implicit(page));
+        }
         self.freeze = Some(freeze);
         self.flight = Some(flight);
-        Ok(page)
-    }
-
-    pub(super) fn publish_external(
-        &mut self,
-        expected: u64,
-        change: Arc<Change>,
-        publication: Publication,
-    ) -> Result<(), NestError> {
-        if self.busy() || !Arc::ptr_eq(change.page(), publication.cell()) {
-            return Err(NestError::Busy);
-        }
-        self.begin(expected, change, MemoFlight::Publishing)?;
-        self.install(publication);
         Ok(())
     }
 
-    pub(super) fn retract_external(
-        &mut self,
-        expected: u64,
-        change: Arc<Change>,
-    ) -> Result<(), NestError> {
-        if self.publication.is_none() || self.retracting() {
-            return Err(NestError::Busy);
+    pub(in crate::basis::nest) fn attempted(&mut self) {
+        if let Some(publisher) = &mut self.publisher {
+            publisher.publish();
         }
-        // Explicit retraction may supersede a still-publishing leaf. All
-        // validation precedes replacing its generation, freeze and flight.
-        self.begin(expected, change, MemoFlight::Retracting)?;
-        Ok(())
+        if let Some(borrow) = &mut self.borrow {
+            borrow.publish();
+        }
     }
 
-    pub(super) fn retracting(&self) -> bool {
+    pub(in crate::basis::nest) fn retracting(&self) -> bool {
         matches!(self.flight, Some(MemoFlight::Retracting))
     }
 
-    pub(super) fn busy(&self) -> bool {
-        self.flight.is_some() || self.publication.is_some()
+    pub(in crate::basis::nest) fn busy(&self) -> bool {
+        self.flight.is_some()
+            || self.publication.is_some()
+            || self.publisher.is_some()
+            || self.borrow.is_some()
     }
 
-    pub(super) fn publication(&self) -> Option<&Publication> {
+    pub(in crate::basis::nest) fn publication(&self) -> Option<&Publication> {
         self.publication.as_ref()
     }
 
-    pub(super) fn publication_mut(&mut self) -> Option<&mut Publication> {
+    pub(in crate::basis::nest) fn publication_mut(&mut self) -> Option<&mut Publication> {
         self.publication.as_mut()
     }
 
-    fn install(&mut self, publication: Publication) {
+    pub(in crate::basis::nest) fn install(&mut self, publication: Publication) {
         assert!(self.publication.is_none());
         if let Some(page) = &self.page {
-            assert!(Arc::ptr_eq(page, publication.cell()));
+            assert!(Arc::ptr_eq(page.page(), publication.cell()));
         }
         self.publication = Some(publication);
     }
 
-    pub(super) fn settle_external(&mut self) {
+    pub(in crate::basis::nest) fn settle_external(&mut self) -> Settled {
         assert!(
             self.publication()
                 .is_some_and(|p| p.phase() == Phase::Settled)
         );
         self.publication = None;
-        self.finish();
+        self.finish()
     }
 
-    pub(super) fn finish(&mut self) {
-        let published = self.publication.is_some();
-        self.flight = None;
-        if published {
-            self.freeze = None;
-        } else {
-            self.publisher = None;
+    /// Caller has the matching CPU fence or external publication/withdrawal proof.
+    pub(in crate::basis::nest) fn finish(&mut self) -> Settled {
+        match self.publication.as_ref().map(Publication::phase) {
+            Some(Phase::Mapped) => {
+                self.flight = None;
+                Settled {
+                    freeze: self.freeze.take(),
+                    ..Settled::default()
+                }
+            }
+            None => {
+                self.flight = None;
+                Settled {
+                    publisher: self.publisher.take(),
+                    borrow: self.borrow.take(),
+                    freeze: None,
+                }
+            }
+            _ => Settled::default(),
         }
     }
-}
 
-impl Memo {
-    pub(super) fn page(&self) -> Option<Arc<Page>> {
+    pub(in crate::basis::nest) fn page(&self) -> Option<Arc<Page>> {
         self.page
-            .clone()
-            .or_else(|| self.publication.as_ref().map(|p| p.cell().clone()))
+            .as_ref()
+            .map(|page| page.page().clone())
+            .or_else(|| {
+                self.publication
+                    .as_ref()
+                    .map(|publication| publication.cell().clone())
+            })
     }
 
-    pub(super) fn inspect(&self, address: VirtAddr) -> CellInfo {
-        let page = self
-            .page
-            .as_ref()
-            .or_else(|| self.publication.as_ref().map(|p| p.cell()));
+    pub(in crate::basis::nest) fn inspect(&self, address: VirtAddr) -> CellInfo {
+        let page = self.page();
         let state = self
             .publication
             .as_ref()
-            .and_then(|p| match p.phase() {
+            .and_then(|publication| match publication.phase() {
                 Phase::Failed => Some(CellState::Failed),
                 Phase::Waiting(_) | Phase::Withdrawing | Phase::Settled => {
                     Some(CellState::Retracting)
                 }
                 _ => None,
             })
-            .or_else(|| self.flight.map(|f| f.observation()))
+            .or_else(|| self.flight.map(MemoFlight::observation))
             .unwrap_or(if self.publication.is_some() {
                 CellState::Published
             } else if page.is_some() {
@@ -237,18 +398,60 @@ impl Memo {
                 CellState::Vacant
             });
         CellInfo {
-            level: page.map_or(kernel_api::model::cell::CellLevel::BASE, |p| p.level()),
+            level: page
+                .as_ref()
+                .map_or(kernel_api::model::cell::CellLevel::BASE, |page| {
+                    page.level()
+                }),
             generation: self.generation.get(),
             state,
-            page: page.map_or(0, |p| p.id().get() as u64),
-            frozen: page.is_some_and(|p| p.frozen()),
-            external: page
-                .is_some_and(|p| p.exposure() == crate::basis::cell::page::Exposure::External),
+            page: page.as_ref().map_or(0, |page| page.id().get() as u64),
+            frozen: page.as_ref().is_some_and(|page| page.frozen()),
+            external: page.as_ref().is_some_and(|page| {
+                page.exposure() == crate::basis::cell::page::Exposure::External
+            }),
             address,
-            // Device fault evidence belongs to the binding, which reports it
-            // without assigning it to an inferred Memo generation.
             fault_cause: 0,
             fault_address: 0,
         }
+    }
+}
+
+pub(super) fn namespace_error(error: PendFail) -> NestError {
+    match error {
+        PendFail::OutOfMemory => NestError::OutOfMemory,
+        PendFail::Busy => NestError::Busy,
+        PendFail::NotAligned => NestError::NotAligned,
+        _ => NestError::Pinned,
+    }
+}
+
+pub(super) fn source_error(error: CellFail) -> NestError {
+    match error {
+        CellFail::OutOfMemory => NestError::OutOfMemory,
+        CellFail::Busy => NestError::Busy,
+        CellFail::NotAligned => NestError::NotAligned,
+        CellFail::NoRegion => NestError::NoRegion,
+        CellFail::SourceEmpty => NestError::Missing,
+        _ => NestError::Pinned,
+    }
+}
+
+pub(super) fn publication_failure(error: super::PublicationError) -> CellFail {
+    use super::PublicationError;
+    match error {
+        PublicationError::OutOfMemory | PublicationError::Capacity => CellFail::OutOfMemory,
+        PublicationError::Overlap => CellFail::AlreadyMapped,
+        PublicationError::InvalidRange => CellFail::NotAligned,
+        _ => CellFail::Busy,
+    }
+}
+
+fn pend_failure(error: PendFail) -> CellFail {
+    match error {
+        PendFail::OutOfMemory => CellFail::OutOfMemory,
+        PendFail::Busy => CellFail::Busy,
+        PendFail::NotAligned => CellFail::NotAligned,
+        _ => CellFail::Denied,
     }
 }
