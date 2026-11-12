@@ -166,8 +166,11 @@ pub(super) fn run() {
     crate::publish(mapping, 1);
     assert_eq!(crate::read(address, 4096), 0x136);
     block(blocked);
-    // Revocation releases this branch's gate after normal CPU withdrawal.
+    // The physical source branch closes along with its block.
     crate::lifecycle::return_pend(blocked);
+    assert_eq!(info(raw_memo(mapping, 1)).state, CellState::Vacant);
+    assert_eq!(info(raw_memo(mapping, 0)).state, CellState::Published);
+    handoff(slot(owner, 1), memo(mapping, 1), false);
     crate::publish(mapping, 1);
     crate::lifecycle::return_pend(reader);
     let narrow = NarrowRequest {

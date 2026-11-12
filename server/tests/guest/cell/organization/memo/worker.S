@@ -52,12 +52,15 @@ memo_remote_start:
     addi a1, sp, 192
     li a7, {inspect}
     ebreak
-    li t0, -4
+    li t0, -3
     bne a0, t0, 9f
     li a0, 136
     j 10f
 9:
-    li a0, 1
+    andi t0, a7, 255
+    slli t0, t0, 8
+    andi a0, a0, 255
+    or a0, t0, a0
 10:
     li a1, 0
     li a2, 0

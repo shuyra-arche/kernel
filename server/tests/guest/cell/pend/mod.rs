@@ -189,7 +189,7 @@ pub(super) fn run() {
         .to_bytes();
         assert_eq!(
             cell::pull(super::ptr(&spec)).unwrap_err().source,
-            kernel_api::abi::call::cell::CellFail::Denied
+            kernel_api::abi::call::cell::CellFail::NotAligned
         );
         super::publish(mapping, 0);
         assert_eq!(super::read(_address, 0), 0x13579);
