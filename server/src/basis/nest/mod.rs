@@ -1060,10 +1060,6 @@ impl Nest {
         self.finish_invalidation()
     }
 
-    pub(crate) fn has_published(&self, span: &Span) -> bool {
-        self.state.lock().memos.published(span).next().is_some()
-    }
-
     pub(crate) fn memo_page(
         &self,
         mapping: &Arc<Span>,

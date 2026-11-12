@@ -287,28 +287,6 @@ impl RangeRegistry {
         }
         None
     }
-
-    pub(crate) fn owned_by(
-        &self,
-        source: &Arc<SourceAuthorization>,
-    ) -> Result<Vec<RangeEntry>, PendFail> {
-        let ranges = self.ranges.lock();
-        let mut result = Vec::new();
-        result
-            .try_reserve(ranges.entries.len())
-            .map_err(|_| PendFail::OutOfMemory)?;
-        result.extend(
-            ranges
-                .entries
-                .iter()
-                .filter(|entry| {
-                    entry.mapping.is_some()
-                        && entry.source().is_some_and(|held| Arc::ptr_eq(held, source))
-                })
-                .cloned(),
-        );
-        Ok(result)
-    }
 }
 
 // PendId is observation metadata in SourceAuthorization, never a transferable handle here.
