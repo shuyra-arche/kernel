@@ -421,7 +421,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
                 };
                 limits.operations =
                     Operations::Nest(rights & (NestRights::INSPECT | NestRights::RESERVE));
-                let limited = entry
+                let limited: pend::PreparedLimit<'_> = entry
                     .authority()
                     .prepare_limit(limits)
                     .map_err(map_pend_err)?;
