@@ -1565,6 +1565,9 @@ impl Nest {
         index: usize,
     ) -> Result<kernel_api::model::cell::CellInfo, NestError> {
         let state = self.state.lock();
+        if mapping.state.lock().phase == address::span::MappingPhase::Gone {
+            return Err(NestError::NoRegion);
+        }
         let level = if mapping.source().is_none() {
             let id = kernel_api::model::cell::MappingId::from_bytes(
                 &(mapping.identity() as u64).to_le_bytes(),
