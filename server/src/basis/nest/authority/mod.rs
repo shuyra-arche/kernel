@@ -411,6 +411,35 @@ impl Nest {
         }
     }
 
+    /// CPU shutdown already proved every PTE absent; finish bounded namespace resources.
+    pub(in crate::basis::nest) fn drain_mapping_resources(&self) -> Result<(), super::NestError> {
+        if !self.is_closed() {
+            return Err(super::NestError::Busy);
+        }
+        for _ in 0..4 {
+            let Some(entry) = self.mappings.progress_entry() else {
+                break;
+            };
+            let Some(mapping) = entry.mapping() else {
+                continue;
+            };
+            if mapping.state.lock().phase == super::address::span::MappingPhase::Gone {
+                continue;
+            }
+            let id = kernel_api::model::cell::MappingId::from_bytes(
+                &(mapping.identity() as u64).to_le_bytes(),
+            )
+            .ok_or(super::NestError::NoRegion)?;
+            self.release_mapping(id)
+                .map_err(super::memo::source_error)?;
+        }
+        if self.mappings_gone() {
+            Ok(())
+        } else {
+            Err(super::NestError::Busy)
+        }
+    }
+
     pub(in crate::basis::nest) fn mappings_gone(&self) -> bool {
         let mut cursor = 0;
         while let Some(entry) = self.mappings.next(cursor) {

@@ -82,7 +82,10 @@ impl Nest {
             Some(&change),
         )?;
         memo.begin_publish(expected, change)
-            .map_err(|_| Error::InvalidState)?;
+            .map_err(|error| match error {
+                NestError::OutOfMemory => Error::OutOfMemory,
+                _ => Error::InvalidState,
+            })?;
         memo.retain(
             publisher.take().expect("prepared publishing route"),
             borrow.take(),

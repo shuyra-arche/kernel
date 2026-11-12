@@ -359,7 +359,7 @@ impl Nest {
 
     /// Close reservation admission before contending for its operation gate.
     pub(crate) fn release_mapping(
-        self: &Arc<Self>,
+        &self,
         id: kernel_api::model::cell::MappingId,
     ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
         use address::span::MappingPhase;
@@ -388,8 +388,17 @@ impl Nest {
             let Some(index) = index else { break };
             cursor = Some(index);
             self.finish_memo(&mapping, index);
-            let page = self.memo_page(&mapping, index)?;
-            if let Some(page) = page {
+            let pending = self
+                .state
+                .lock()
+                .memos
+                .get(&mapping, index)
+                .is_some_and(memo::Memo::busy);
+            if pending {
+                let Some(page) = self.memo_page(&mapping, index)? else {
+                    busy = true;
+                    continue;
+                };
                 let change = match crate::basis::cell::change::acquire(&page) {
                     Ok(change) => change,
                     Err(_) => {
@@ -583,9 +592,21 @@ impl Nest {
             }
             page
         };
-        let change = crate::basis::cell::change::acquire(&page).map_err(|_| PendFail::Busy)?;
-        self.retract_position(mapping, index, None, change, true)
-            .map_err(|_| PendFail::Busy)?;
+        if !self.is_external() {
+            self.finish_invalidation().map_err(|_| PendFail::Busy)?;
+        }
+        self.finish_memo(mapping, index);
+        let pending = self
+            .state
+            .lock()
+            .memos
+            .get(mapping, index)
+            .is_some_and(memo::Memo::busy);
+        if pending {
+            let change = crate::basis::cell::change::acquire(&page).map_err(|_| PendFail::Busy)?;
+            self.retract_position(mapping, index, None, change, true)
+                .map_err(|_| PendFail::Busy)?;
+        }
         if clear {
             let cleared = {
                 let _commit = crate::basis::commit();
@@ -618,6 +639,7 @@ impl Nest {
         access: Access,
         creator: kernel_api::model::identity::TaskId,
     ) -> Result<ReservedMapping, NestError> {
+        self.reap_mappings();
         let cell_size = level.bytes().ok_or(NestError::NotAligned)?;
         if !access.is_leaf_set() || !placement.size().is_multiple_of(cell_size) {
             return Err(NestError::NotAligned);
@@ -1345,7 +1367,7 @@ impl Nest {
 
     /// The caller owns span.operation. Forced cleanup never wraps generation MAX.
     fn retract_position(
-        self: &Arc<Self>,
+        &self,
         mapping: &Arc<Span>,
         index: usize,
         expected: Option<u64>,
@@ -1547,13 +1569,22 @@ impl Nest {
         index: usize,
     ) -> Result<kernel_api::model::cell::CellInfo, NestError> {
         let state = self.state.lock();
+        let level = if mapping.source().is_none() {
+            let id = kernel_api::model::cell::MappingId::from_bytes(
+                &(mapping.identity() as u64).to_le_bytes(),
+            )
+            .ok_or(NestError::NoRegion)?;
+            self.mapping_level(id).ok_or(NestError::NoRegion)?
+        } else {
+            mapping.level()
+        };
         let address = mapping.position(index)?;
         let mut info = state
             .memos
             .get(mapping, index)
             .unwrap_or(&memo::Memo::vacant())
             .inspect(VirtAddr::new(address));
-        info.level = mapping.level();
+        info.level = level;
         Ok(info)
     }
 
@@ -1570,7 +1601,7 @@ impl Nest {
     /// - 承载只在 shootdown 成功之后随退休一起放掉；失败时这一页的退休责任
     ///   留在本 Nest，由 `retry_invalidation` 继续。
     pub(crate) fn unpublish_page(
-        self: &Arc<Self>,
+        &self,
         mapping: &Arc<Span>,
         address: VirtAddr,
         expected: &Arc<Page>,
@@ -1586,7 +1617,7 @@ impl Nest {
             mapping
                 .reservation
                 .nest()
-                .is_some_and(|owner| core::ptr::eq(Arc::as_ptr(&owner), Arc::as_ptr(self))),
+                .is_some_and(|owner| core::ptr::eq(Arc::as_ptr(&owner), self)),
             "unpublish_page requires the mapping's own live nest"
         );
         self.finish_invalidation()?;
@@ -2081,6 +2112,7 @@ impl Nest {
     pub(crate) fn retire(&self) -> Result<(), NestError> {
         if !self.cpu.as_ref().is_none_or(|cpu| cpu.domain.released()) {
             self.close()?;
+            self.drain_mapping_resources()?;
             if self.pending_cleanup.lock().is_some() {
                 return Err(NestError::Busy);
             }

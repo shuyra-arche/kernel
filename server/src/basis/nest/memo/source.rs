@@ -174,16 +174,17 @@ impl Source {
 
     /// Logical source loss, independent of a legitimate external borrow's suspension.
     pub(in crate::basis::nest) fn retiring(&self) -> bool {
+        let root = self.source().root();
         self.actor().is_none()
             || self.source().revoked()
             || self
                 .hold
                 .branch()
                 .is_some_and(|(_, authority)| authority.retiring())
-            || self
-                .source()
-                .root()
+            || root
+                .as_ref()
                 .is_some_and(|(meta, _, authority)| !meta.alive() || authority.retiring())
+            || root.is_none() && self.source().own_range().is_none()
     }
 
     pub(crate) fn same_page(&self, page: &Arc<Page>) -> Result<FlatRange, CellFail> {
