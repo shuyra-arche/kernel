@@ -5,12 +5,11 @@ mod info;
 mod schedule;
 
 pub use control::{ControlId, ControlKind};
-pub use creation::{ProgramKind, UnitCreate};
+pub use creation::{CreatedUnit, ProgramKind, UnitCreate};
 pub use info::{UnitInfo, UnitQuery, UnitState};
 pub use schedule::{Schedule, ScheduleInfo};
 
 use crate::abi::register::{Decode, Wire};
-use crate::abi::reply::FromPair;
 use crate::model::identity::{TaskId, TeamId};
 
 /// A target is explicitly tagged; old TaskId-only encodings are rejected.
@@ -50,20 +49,6 @@ impl Wire for UnitTarget {
             0 => Ok(Self::Task(TaskId::new(id))),
             1 => Ok(Self::Team(TeamId::new(id))),
             _ => Err(Decode::Invalid),
-        }
-    }
-}
-
-impl FromPair for crate::model::unit::UnitTarget {
-    fn from_pair(kind: usize, id: usize) -> Self {
-        assert!(
-            id != 0 && id <= isize::MAX as usize,
-            "invalid Unit Create identity"
-        );
-        match kind {
-            0 => Self::Task(TaskId::new(id)),
-            1 => Self::Team(TeamId::new(id)),
-            _ => panic!("invalid Unit Create kind"),
         }
     }
 }

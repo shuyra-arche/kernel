@@ -2,7 +2,8 @@ use super::{Limits, Target};
 use crate::abi::layout::{WORD_BYTES, fetch_words, store_words};
 use crate::model::identity::{Mark, PendId, TaskId};
 
-/// An observation, never an authorization handle. Live permission stays in the Kernel.
+/// An observation, never an authorization handle. Ranged scopes use resolved
+/// absolute Pages; live permission stays in the Kernel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PendInfo {
     pub token: PendId,
@@ -14,7 +15,7 @@ pub struct PendInfo {
     pub status: PendStatus,
 }
 impl PendInfo {
-    pub const WORDS: usize = 14;
+    pub const WORDS: usize = 16;
     pub const SIZE: usize = Self::WORDS * WORD_BYTES;
     pub fn to_bytes(self) -> [u8; Self::SIZE] {
         let mut bytes = [0; Self::SIZE];
@@ -45,7 +46,9 @@ impl PendInfo {
         }
         let target = Target::of([w[1], w[2]])?;
         let limits = Limits::of(w[7..].try_into().ok()?)?;
-        if !target.accepts(limits.operations) {
+        if !target.accepts(limits.operations)
+            || matches!(limits.scope.range(), Some(super::PendRange::Inherit))
+        {
             return None;
         }
         Some(Self {

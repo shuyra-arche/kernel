@@ -59,8 +59,8 @@ fn infallible_returns_keep_the_high_bit_even_in_a_fallible_domain() {
 #[test]
 fn failures_preserve_the_domain_and_do_not_retry() {
     reply(((-7isize) as usize, 0, 0));
-    let object = kernel_api::address::VirtAddr::new(17);
-    let error = invoke(kernel_api::abi::call::cell::operations::Delete { object }).unwrap_err();
+    let slot = kernel_api::model::cell::SlotId::from_bytes(&17u64.to_le_bytes()).unwrap();
+    let error = invoke(kernel_api::abi::call::cell::operations::Delete { slot }).unwrap_err();
     assert_eq!(error.source, CellFail::Busy);
     called((2usize << 32) | 1, [17, 0, 0, 0, 0, 0]);
 }
@@ -146,9 +146,9 @@ fn generic_invocation_orders_packing_transport_and_decode_once() {
 #[test]
 fn operations_return_their_own_types_without_a_domain_result_enum() {
     use kernel_api::abi::call::{cell::operations::Delete, room::operations::Clock};
-    let object = kernel_api::address::VirtAddr::new(17);
+    let slot = kernel_api::model::cell::SlotId::from_bytes(&17u64.to_le_bytes()).unwrap();
     let released: Result<(), erra::Error<CellFail>> =
-        invoke_with(Delete { object }, |_, _| (0, 0, 0));
+        invoke_with(Delete { slot }, |_, _| (0, 0, 0));
     assert_eq!(released.unwrap(), ());
     let clock: Result<u64, core::convert::Infallible> =
         invoke_with(Clock, |_, _| (usize::MAX, 0, 0));
@@ -234,7 +234,7 @@ fn clone_delivery_returns_authority_and_retires_copy_out_slot() {
 }
 
 #[test]
-fn cell_inspection_uses_an_output_snapshot_and_create_returns_identity() {
+fn cell_inspection_uses_a_snapshot_and_create_passes_allocation_registers() {
     use kernel_api::{
         abi::call::cell::operations::{Create, Inspect},
         address::VirtAddr,
@@ -246,17 +246,18 @@ fn cell_inspection_uses_an_output_snapshot_and_create_returns_identity() {
     })
     .unwrap();
     called((2usize << 32) | 7, [0x4000, 0x5000, 0, 0, 0, 0]);
-    reply((1, 23, 0x6000));
+    reply((23, 0x6000, 99));
+    let allocation = kernel_api::model::cell::Allocation::new(4096, 4096).unwrap();
     let made = invoke(Create {
-        license: kernel_api::model::identity::PendId::mint(9),
-        request: VirtAddr::new(0x4000),
+        license: PendId::mint(9),
+        allocation,
     })
     .unwrap();
     assert_eq!(
         made,
-        kernel_api::model::cell::CreatedCell::decode(1, 23, 0x6000).unwrap()
+        kernel_api::model::cell::SlotId::from_bytes(&23u64.to_le_bytes()).unwrap()
     );
-    called(2usize << 32, [9, 0x4000, 0, 0, 0, 0]);
+    called(2usize << 32, [9, 4096, 4096, 0, 0, 0]);
 }
 
 #[test]
@@ -287,4 +288,157 @@ fn pend_accord_returns_the_new_identity_and_return_preserves_busy() {
         PendFail::Busy
     );
     called((7usize << 32) | 15, [91, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn reserve_snapshots_and_pair_returns_use_one_transport_call_without_publication() {
+    use kernel_api::{
+        abi::call::nest::{
+            NestFail,
+            operations::{Release, Reserve},
+        },
+        address::{PageCount, VirtAddr},
+        model::{
+            cell::{CellLevel, Placement},
+            nest::ReserveRequest,
+        },
+    };
+    let token = PendId::mint(17);
+    let descriptor = ReserveRequest {
+        placement: Placement::lowest(4096).unwrap(),
+        count: PageCount::new(512).unwrap(),
+        level: CellLevel::new(1).unwrap(),
+        access: 6,
+    };
+    let snapshot = descriptor.to_bytes();
+    assert_eq!(snapshot.len(), 48);
+    assert_eq!(ReserveRequest::from_bytes(&snapshot), Some(descriptor));
+    let request = VirtAddr::new(snapshot.as_ptr() as usize);
+    reply((91, 0x8000, 99));
+    assert_eq!(
+        invoke(Reserve { token, request }).unwrap(),
+        (PendId::mint(91), VirtAddr::new(0x8000))
+    );
+    called((13usize << 32) | 5, [17, request.get(), 0, 0, 0, 0]);
+    reply(((-3isize) as usize, 0, 0));
+    assert_eq!(
+        invoke(Release {
+            token: PendId::mint(91)
+        })
+        .unwrap_err()
+        .source,
+        NestFail::Busy
+    );
+    called((13usize << 32) | 6, [91, 0, 0, 0, 0, 0]);
+    reply((0, 0, 0));
+    invoke(Release {
+        token: PendId::mint(91),
+    })
+    .unwrap();
+    called((13usize << 32) | 6, [91, 0, 0, 0, 0, 0]);
+    let _: fn(
+        PendId,
+        Placement,
+        PageCount,
+        CellLevel,
+        u64,
+    ) -> kernel_api::abi::call::nest::NestResult<(PendId, VirtAddr)> =
+        kernel_client::call::nest::reserve;
+    let _: fn(PendId) -> kernel_api::abi::call::nest::NestResult<()> =
+        kernel_client::call::nest::release;
+}
+
+#[test]
+fn unit_create_keeps_the_returned_whole_grant_and_rejects_malformed_replies() {
+    use kernel_api::{
+        abi::call::unit::operations::Create,
+        address::VirtAddr,
+        model::{identity::TeamId, unit::CreatedUnit},
+    };
+    let request = VirtAddr::new(0x4000);
+    reply((1, 23, 91));
+    assert_eq!(
+        invoke(Create { request }).unwrap(),
+        CreatedUnit::Team {
+            team: TeamId::new(23),
+            nest: PendId::mint(91)
+        }
+    );
+    called(1usize << 32, [0x4000, 0, 0, 0, 0, 0]);
+    reply((0, 24, 0));
+    assert_eq!(
+        invoke(Create { request }).unwrap(),
+        CreatedUnit::Task(TaskId::new(24))
+    );
+    called(1usize << 32, [0x4000, 0, 0, 0, 0, 0]);
+    for malformed in [
+        (1, 23, 0),
+        (0, 24, 91),
+        (2, 23, 91),
+        (1, 23, usize::MAX),
+        (0, 0, 0),
+    ] {
+        reply(malformed);
+        assert!(std::panic::catch_unwind(|| invoke(Create { request })).is_err());
+        called(1usize << 32, [0x4000, 0, 0, 0, 0, 0]);
+    }
+    let _: fn(VirtAddr) -> Result<CreatedUnit, erra::Error<kernel_api::abi::call::unit::UnitFail>> =
+        kernel_client::call::unit::create;
+}
+
+#[test]
+fn scoped_pend_descriptors_remain_caller_snapshots() {
+    use kernel_api::{
+        abi::call::pend::operations::{Accord, Narrow},
+        address::VirtAddr,
+        model::{
+            cell::MappingId,
+            identity::Mark,
+            modifiable::Modifiable,
+            pend::{
+                AccordRequest, AccordTarget, Distributable, Limits, NarrowRequest, NestRights,
+                NestScope, Operations, PendRange, PendScope,
+            },
+        },
+    };
+    let limits = Limits {
+        operations: Operations::Nest(NestRights::INSPECT | NestRights::PUBLISH),
+        modifiable: Modifiable::No,
+        distributable: Distributable::No,
+        scope: PendScope::Nest(NestScope::Mapping {
+            id: MappingId::from_bytes(&23u64.to_le_bytes()).unwrap(),
+            range: PendRange::pages(2, 3).unwrap(),
+        }),
+    };
+    let accord = AccordRequest {
+        src: PendId::mint(17),
+        target: AccordTarget::Caller,
+        limits,
+        mark: Mark::NONE,
+    };
+    let snapshot = accord.to_bytes();
+    assert_eq!(snapshot.len(), 104);
+    assert_eq!(AccordRequest::from_bytes(&snapshot), Some(accord));
+    let request = VirtAddr::new(snapshot.as_ptr() as usize);
+    reply((91, 0, 0));
+    assert_eq!(invoke(Accord { request }).unwrap(), PendId::mint(91));
+    called((7usize << 32) | 14, [request.get(), 0, 0, 0, 0, 0]);
+    let narrow = NarrowRequest {
+        token: PendId::mint(91),
+        limits,
+    };
+    let snapshot = narrow.to_bytes();
+    assert_eq!(snapshot.len(), 80);
+    assert_eq!(NarrowRequest::from_bytes(&snapshot), Some(narrow));
+    let request = VirtAddr::new(snapshot.as_ptr() as usize);
+    reply((0, 0, 0));
+    invoke(Narrow { request }).unwrap();
+    called((7usize << 32) | 16, [request.get(), 0, 0, 0, 0, 0]);
+    let _: fn(
+        PendId,
+        kernel_api::model::cell::Allocation,
+    ) -> Result<kernel_api::model::cell::SlotId, erra::Error<CellFail>> =
+        kernel_client::call::cell::create;
+    let _: fn(kernel_api::model::cell::SlotId) -> Result<(), erra::Error<CellFail>> =
+        kernel_client::call::cell::delete;
 }

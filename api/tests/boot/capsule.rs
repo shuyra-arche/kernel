@@ -29,12 +29,21 @@ fn capsule() -> Vec<u8> {
 fn capsule_preserves_entry_and_region_layout() {
     let bytes = capsule();
     let image = Capsule::parse(&bytes).unwrap();
+    assert_eq!(kernel_api::boot::capsule::VERSION, 2);
+    assert_eq!(bytes[11], 10);
     assert_eq!(image.entry, 0x1000);
     assert_eq!(image.count, 1);
     let region = image.region(0).unwrap();
     assert_eq!((region.va, region.pages, region.data_pages), (0x1000, 1, 1));
     assert_eq!((region.payload, region.flags), (PAGE, 10));
     assert!(image.region(1).is_none());
+    for version in
+        (0..kernel_api::abi::VERSION as u8).chain([kernel_api::abi::VERSION as u8 + 1, u8::MAX])
+    {
+        let mut invalid = bytes.clone();
+        invalid[11] = version;
+        assert!(Capsule::parse(&invalid).is_none(), "ABI {version}");
+    }
 }
 
 #[test]

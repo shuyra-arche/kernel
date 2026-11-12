@@ -11,6 +11,9 @@ pub mod operations {
         #[busy]
         Busy = -3,
         OutOfMemory = -4,
+        NotAligned = -5,
+        AlreadyMapped = -6,
+        NoRegion = -7,
     }
     /// Create a private Internal Nest using None(NEST) authority.
     #[operation(slot = 0, output = super::PendId, error = NestFail)]
@@ -30,6 +33,19 @@ pub mod operations {
     #[operation(slot = 4, output = (), error = NestFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Delete {
+        pub token: super::PendId,
+    }
+    /// Atomically reserve vacant positions and return a fresh mapping-scoped root Pend.
+    #[operation(slot = 5, output = (super::PendId, super::VirtAddr), error = NestFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Reserve {
+        pub token: super::PendId,
+        pub request: super::VirtAddr,
+    }
+    /// Retire a mapping's complete original reservation; Busy retains cleanup.
+    #[operation(slot = 6, output = (), error = NestFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Release {
         pub token: super::PendId,
     }
 }

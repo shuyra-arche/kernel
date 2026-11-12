@@ -1,7 +1,6 @@
 //! Memory identities, ranges and placement descriptors.
 
 mod allocation;
-mod creation;
 mod info;
 mod level;
 mod mapping;
@@ -10,10 +9,9 @@ mod placement;
 mod slot;
 
 pub use allocation::Allocation;
-pub use creation::{CellCreate, CellSource, CreatedCell, MemoDestination};
 pub use info::{CellInfo, CellState};
 pub use level::CellLevel;
-pub use mapping::{MappingId, MappingTarget};
+pub use mapping::MappingId;
 pub use object::{CellAssociation, CellHandoff, CellObject, CellPosition};
 pub use placement::{Placement, PlacementAt, PlacementError};
 pub use slot::{ReferenceRange, SlotId};
@@ -41,20 +39,4 @@ pub(crate) fn pages(offset: usize, count: usize) -> Option<()> {
     let end = offset.checked_add(count)?;
     end.checked_mul(PAGE_SIZE)?;
     Some(())
-}
-
-/// Stable Memo identity for observations. Only a Memo Pend authorizes operations.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MemoId(usize);
-impl MemoId {
-    pub const fn new(value: usize) -> Option<Self> {
-        if value != 0 && value <= isize::MAX as usize {
-            Some(Self(value))
-        } else {
-            None
-        }
-    }
-    pub const fn get(self) -> usize {
-        self.0
-    }
 }

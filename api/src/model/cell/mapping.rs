@@ -1,10 +1,9 @@
 //! Descriptive mapping identity used by completion observations. Ordinary Cell
-//! operations locate a Memo through its Pend, never through this numeric ID.
+//! operations require a live mapping-scoped Nest Pend, never this numeric ID alone.
 
 use crate::abi::register::{Decode, Wire};
 use crate::abi::reply::FromPair;
 use crate::address::VirtAddr;
-use crate::model::identity::{PendId, TeamId};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
@@ -67,41 +66,5 @@ impl Wire for MappingId {
 impl FromPair for (MappingId, VirtAddr) {
     fn from_pair(v0: usize, v1: usize) -> Self {
         (MappingId::new(v0), VirtAddr(v1))
-    }
-}
-
-/// A CPU space selected by Team control, or an I/O space selected by a trusted
-/// External Nest Pend. Numeric addresses never mint an external routing authority.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MappingTarget {
-    Cpu(TeamId),
-    Io(PendId),
-}
-
-impl Wire for MappingTarget {
-    const WORDS: usize = 1;
-    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
-        let raw = match *self {
-            Self::Cpu(team) => {
-                assert!(team.get() <= isize::MAX as usize);
-                team.get()
-            }
-            Self::Io(token) => {
-                assert!(token.get() > 0 && token.get() <= isize::MAX as usize);
-                token.get() | (1usize << (usize::BITS - 1))
-            }
-        };
-        raw.pack(s, i);
-    }
-    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
-        let raw = usize::unpack(s, i)?;
-        let tag = 1usize << (usize::BITS - 1);
-        if raw & tag == 0 {
-            Ok(Self::Cpu(TeamId::new(raw)))
-        } else if raw != tag {
-            Ok(Self::Io(PendId::new(raw & !tag)))
-        } else {
-            Err(Decode::Invalid)
-        }
     }
 }

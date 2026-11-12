@@ -9,6 +9,7 @@ use kernel_api::{
 };
 #[test]
 fn old_and_future_versions_cannot_execute_reused_operation_numbers() {
+    assert_eq!(abi::VERSION, 10);
     let call = SleepUntil { at: u64::MAX };
     assert!(EnvCall::from_wire(SleepUntil::SLOT, &call.pack()).is_ok());
     for version in (0..abi::VERSION).chain([abi::VERSION + 1, u16::MAX]) {

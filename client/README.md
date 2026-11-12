@@ -16,106 +16,192 @@ separate from Kernel. The former `__private` adaptation interface is removed.
 
 `invoke_with(call, transport)` packs inputs once, calls the supplied transport
 once and decodes the result once. It is the host-test entry point.
-`unsafe invoke(call)` selects the native trap; its caller must satisfy the
-operation's execution context, pointer validity and resource lifetime contract.
-`invoke_terminal(call)` enters a non-returning fault path if the terminal trap
-unexpectedly returns; it uses neither TLS nor a panic handler.
+`unsafe invoke(call)` selects the native trap; its caller must satisfy execution
+context, pointer validity and resource lifetime requirements. `invoke_terminal`
+enters a non-returning fault path if a terminal trap unexpectedly returns; it
+uses neither TLS nor a panic handler. Named calls do not hide retry, ownership,
+publication or cleanup policy.
 
-Each domain declares its named signatures and imports in its own module under
-`src/call`. The shared macro executes typed requests defined in Kernel API.
-`unit::exit` takes a result, reason and readable diagnostic note buffer.
-The buffer length is bounded by `abi::call::unit::NOTE_MAX`.
-`deadline_after(Duration)` converts a relative timeout once using Room Clock;
-reuse the returned Wait across retries to avoid extending the deadline.
+Each domain declares its named signatures under `src/call`. The shared macro
+executes the typed requests defined in API. `unit::exit` takes result, reason,
+readable diagnostic note and explicit ExitScope; note length is bounded by
+`abi::call::unit::NOTE_MAX`. Task scope exits only the caller. Team scope requires
+a non-realtime member of a Team configured with `member_exit`. A return violates
+the terminal contract. `deadline_after(Duration)` converts once using Room Clock;
+retain the resulting Wait across retries rather than extending the deadline.
 
-`call::pend::accord(request)` takes the address of `AccordRequest::to_bytes()`;
-keep that 88-byte buffer readable until the call returns. Use AccordTarget::Caller
-for local derivation or AccordTarget::Task for delegation. PendRange offsets are
-relative to the parent window. `call::pend::narrow(request)` reads the 64-byte
-NarrowRequest descriptor. Both requests carry typed operation permissions and
-independent mutability/distribution limits. `call::pend::return_(token)` relinquishes the
-holder's branch through Kernel retirement; Busy means cleanup is still pending.
-The old `derive`, `same`, `release` and ReleaseMode interfaces are removed.
+## Migration from ABI 9 / Ledger 9 to ABI 10 / Ledger 10
 
-Cell calls take fixed descriptors from `model::cell`: Create uses CellCreate,
-Push/Pull use CellHandoff `{ local, remote }`, Insert uses CellAssociation,
-Remove/Publish/Retract/Protect use CellPosition, Delete uses
-CellObject, and Inspect writes CellInfo. Use their explicit byte codecs. Inspect
-supplies the generation for the next transition; preserve the absolute deadline
-when retrying Busy. Native calls do not hide retries, publication or ownership.
+Rebuild API, Client, Server and executables together. Capsule format remains 2,
+but byte 11 must declare ABI **10**, and Ledger version is **10**. Old and future
+ABIs reject before dispatch. No compatibility aliases retain MemoId, MemoRights,
+MappingTarget, CellCreate, CellSource, MemoDestination or CreatedCell. Pend target
+and operation kinds 5 (Port) and 7 (Memo) are invalid, not repurposed.
+
+| Previous call | ABI 10 call | Result |
+| --- | --- | --- |
+| `cell::create(license, request)` | `cell::create(license, allocation: Allocation)` | SlotId, ordinary two-register convention |
+| `cell::delete(object_address)` | `cell::delete(slot: SlotId)` | `()` |
+| Cell Create mapping variant | `nest::reserve(token, placement, count: PageCount, level: CellLevel, access: u64)` | `(PendId, VirtAddr)` in two success registers |
+| Mapping deletion | `nest::release(token)` | `()`; Busy retains cleanup |
+| `unit::create(request) -> UnitTarget` | `unit::create(request) -> CreatedUnit` | Three success registers; never discard Team's Nest grant |
+
+Cell class 2 keeps slots 0/1 for allocation/deletion. Create packs
+`[license, size, align, level]`; no caller-memory creation descriptor remains.
+Allocation uses `Allocation::new` or `Allocation::at_level`. Nest class 13 keeps
+Create 0, Inspect 1, Delete 4; Reserve is 5 and Release 6. Slots 2/3 stay invalid.
+NestFail preserves Denied -1, Dead -2, Busy -3, OutOfMemory -4 and adds NotAligned
+-5, AlreadyMapped -6, NoRegion -7.
+
+`nest::reserve` constructs one local 48-byte ReserveRequest snapshot and invokes
+`operations::Reserve { token, request }` once. Its six little-endian u64 words are
+`[placement_tag, address, align, count, level, access]`. Placement is Lowest 0 or
+Highest 1 with address zero, or Exact 2, using existing alignment policy.
+Count is nonzero, its bytes must fit, and it must be a multiple of level.pages().
+API checks representability; Kernel checks the active Sv mode. Access is READ 2 /
+WRITE 4 / EXECUTE 8, nonempty in READ or EXECUTE, with WRITE requiring READ.
+Cell level is not necessarily a hardware leaf. External admission stays Exact
+only, one whole level-0/1 Cell within existing IOVA bounds at most 2 MiB,
+READ or READ|WRITE and unchanged private-source qualification.
+
+Reserve requires Whole RESERVE and atomically returns a source-free **Vacant**
+reservation plus a fresh Mapping-scoped root. It creates no physical Page or
+owning Slot and does not publish. The root has `NestRights::mapping()` operations;
+Modifiable, Distributable and target write access are capped by the creating
+Whole. Only Reserve creates this Whole-to-fresh-Mapping ancestry; it cannot pick
+an existing MappingId. Live mapping descendants block Whole Narrow.
+
+### Scoped delegation and observations
+
+Limits now contains `operations`, `modifiable`, `distributable`, `scope`, not a
+separate range. Use `PendScope::Object` for None/Clone/Sign, `Pages(PendRange)` for
+Flat/Share, and `Nest(NestScope)` for Nest operations. None/Sign require Modifiable
+No. Whole permits only `NestRights::whole()` (INSPECT 1, RESERVE 2, ATTACH 8,
+DELETE 512). Mapping permits only `mapping()` (INSPECT 1, RELEASE 4, PUBLISH 64,
+RETRACT 128, PROTECT 256, INSERT 1024, REMOVE 2048). Bits 16/32 remain invalid;
+`all()` is the union, not valid for either single scope. Generic Accord/Narrow
+cannot switch scope category, convert Whole/Mapping or change MappingId. Rights,
+mutability and distribution only attenuate; read-only and non-distributable
+limits cannot be restored by deriving another grant.
+
+All words below are little-endian u64:
+
+| Descriptor | Layout | Size |
+| --- | --- | --- |
+| PendScope | `[tag, id, range_tag, offset, count]` | 5 words / 40 bytes |
+| Limits | `[operation_kind, operation_bits, modifiable, distributable, Scope...]` | 9 words / 72 bytes |
+| AccordRequest | `[src, recipient_tag, recipient_id, mark, Limits...]` | 13 words / 104 bytes |
+| NarrowRequest | `[token, Limits...]` | 10 words / 80 bytes |
+| PendInfo | `[token, target_kind, target_id, owner, lender, mark, status, Limits...]` | 16 words / 128 bytes |
+
+Scope tags are Object 0 (all payload zero), Pages 1 (id zero), Nest Whole 2
+(all payload zero), Nest Mapping 3 (nonzero valid MappingId). PendRange is
+`[0,0,0]` for Inherit or `[1,offset,count]` for nonempty, nonoverflowing Pages.
+Unknown/reserved/noncanonical payload rejects. Requests accept Inherit and
+relative Pages. The server resolves bounds at commit; pure Limits checks are
+not a substitute. Published PendInfo uses resolved absolute Pages and validates
+the full scope as well as target family. MappingId and NestId are descriptive,
+not capabilities; Team membership/management and raw IDs never replace a Pend.
+
+`pend::accord(request)` takes the address of `AccordRequest::to_bytes()`; retain
+that 104-byte snapshot through return. Use AccordTarget::Caller for local
+derivation or Task for delegation. `pend::narrow(request)` similarly reads an
+80-byte NarrowRequest. Return relinquishes the holder's branch through Kernel
+retirement. Busy retains cleanup; no call implies safe physical reuse. The old
+derive/same/release and ReleaseMode interfaces do not exist.
+
+### Cell endpoints and mapping lifetime
+
+| Descriptor | Layout | Size |
+| --- | --- | --- |
+| CellObject | `[tag, id]`, tag 0 Slot / 1 Pend | 16 bytes |
+| CellPosition | `[object_tag, id, page, generation]` | 32 bytes |
+| CellHandoff | `[local_position..., remote_position...]` | 64 bytes |
+| CellAssociation | `[source_position..., target_position...]` | 64 bytes |
+| CellInfo | Existing generation/state/geometry observation | 64 bytes |
+
+Slot generation must be zero. Kernel validates a Pend's actual family and
+generation. Push moves local to remote; Pull moves remote to local, and decoding
+requires two owning Slots. Insert accepts a Slot or Flat/Share ASSOCIATE or Nest
+Mapping INSERT source; the destination requires Mapping INSERT. Insert/Remove
+change associations, never transfer ownership or extract a Slot from a live Pend.
+Other mapping transitions require their corresponding scoped Nest rights.
+Inspect supplies a fresh generation; native calls never retry automatically.
+
+A mapping-level Insert preserves the original physical source branch and a
+sticky ceiling equal to the minimum of the original association/source mapping
+ceiling and supplying grant Modifiable. It creates neither a second owner nor
+an extra permission family. Later supplying mapping Return/Narrow does not revoke
+the independent destination association; actual original-source grant revocation
+does. After physical ownership moves, an old association/Page/generation remains
+observable, but new Publish fails if that source no longer holds the same exact
+Page. Insert from the new source is required.
+
+Release requires RELEASE plus the complete original window. A full-span child
+may Release; child Return only retires that branch. Root Return retires the full
+original reservation even when narrowed. Busy forbids reuse and retains retry
+metadata. Closing rejects new admission/Accord but keeps inspection, retry and
+cleanup. External Protect stays unsupported; External Delete needs the exact
+boot Whole root. Keep that root with its manager and delegate only needed rights.
+Returning/revoking a worker Whole branch retires its descendant mappings, not an
+unrelated Nest root. Competing External reservers wait until the old Task's
+positions have all retired and been removed.
+
+### Team creation and boot discovery
+
+`CreatedUnit::Task(task)` decodes `[0, task_id, 0]`.
+`CreatedUnit::Team { team, nest }` decodes `[1, team_id, nest_pend]`.
+IDs must be nonzero and at most isize::MAX; unknown/cross-kind replies reject.
+The Team result includes live Whole INSPECT|RESERVE under its old limits. Optional
+`UnitCreate::Team::nest` adopts an empty exclusive Internal root with no children
+or borrows: success preserves its live identity, consumes ATTACH/DELETE and binds
+it once. Automatic allocation returns a fresh limited Whole. Kernel prepares the
+grant before publishing the Team; failure leaves the table and any old adoption
+grant unchanged. Team owns Nest lifetime; generic grants cannot restore consumed
+rights. Ordinary Task creation supplies no default grants.
+
+`nest::create(license)` creates Internal only. External Nests arrive through
+trusted boot as `Name::Nest { controller, requester }` (name class 5).
+`Name::Space` (class 7, item 0, all other bytes zero) is the initial current CPU
+Whole INSPECT|RESERVE grant, ResourceKind::Nest. Neither name nor membership is
+authority. There is no runtime external Attach/Detach, caller-supplied requester
+or ambient Team destination. `nest::inspect` writes 56-byte NestInfo.
+
+Sign Attach keeps `{ token, mapping }` for MappingPublished/Retired and requires
+Mapping-scoped Nest INSPECT for that same ID/range and expected generation; a
+Whole grant plus a raw MappingId cannot substitute. NestFault/Closed use Whole
+INSPECT and generation zero. Existing External-only support is unchanged;
+MappingFault stays retired. Fault observations survive Pend handover.
+
+Resource creation requires explicit None-target licenses. Boot Ledger v10 keeps
+`Name::Call(Call::Create)`; managers must delegate creation rights to new Tasks.
+Memory keeps its existing Share/Sign dispatch pair and 40-byte Ledger entries.
+Discover `Name::Memory` through `Entry::dispatch()`, Open its Share and retain it
+while reading `model::memory::SnapshotPage`. `read()` is one bounded atomic
+attempt; None asks for a later retry. Consume then recheck Snapshot.epoch to avoid
+coalescing races. A/D is UNKNOWN; statistics authorize neither transfer nor reuse.
+
+Hardware dispatch is still an explicit `(View, Sign)` pair. Delegate a device's
+full writable Share before its non-distributable Listen/Consume Sign, rolling
+back the View on failure before resuming a recipient. Initialize the device,
+Listen and Consume the initial notification; thereafter clear the device cause
+before consuming its sequence. Return/Revoke either Pend closes delivery.
+Consumption is not controller completion, and raw device/configuration authority
+must be withdrawn separately before reassignment. Pend distribution proves no
+DMA quiescence. Retain the exact Flat BLOCK branch across Busy; Allow reopens
+only its own block and never republishes. `cell::split/merge` replace an exclusive
+complete contiguous owning collection only on success; hardware leaves are separate.
+
+## Verification
 
 ```sh
 cargo check --locked -p kernel-client --target riscv64gc-unknown-none-elf
 cargo test --locked -p kernel-client --test call --target x86_64-unknown-linux-gnu
 ```
 
-Tests exercise public `invoke_with` with a recording transport. They do not
-execute the named native-trap wrappers; RV64 compilation checks those wrappers.
-The Kernel guest suite also executes real traps for Cell, Pend, Sign, Unit and Room. See the API
-[compatibility notes](../api/README.md#source-migration-and-abi-compatibility)
-before updating a consumer's Kernel pin.
-
-Resource creation calls take an explicit None-target Pend license. Sign handles are
-PendIds; use Pend Accord/Narrow/Revoke/Return with Operations::Sign instead
-of the removed Sign authorization calls. SignId is descriptive only. Boot Ledger
-v9 provides Name::Call(Call::Create); managers must explicitly delegate creation
-permissions to new Tasks. Rebuild all users and capsule ABI declarations together.
-
-`call::unit::exit(value, reason, note, len, scope)` requires an explicit
-`ExitScope`. Select `Task` for a single Task or `Team` from a non-realtime
-member of a Team configured with `member_exit`. The typed client treats a
-return as a terminal-call contract violation.
-
-`call::flat::{create, inspect, slice, delete, block, allow}` uses a Flat Pend; `slice` returns a
-checked SlotId. `call::nest::create(license)` creates an Internal Nest only.
-Team creation may consume that owned root through `UnitCreate::Team::nest`.
-External Nests instead arrive as authenticated boot grants named
-`Name::Nest { controller, requester }`; these names describe topology, not authority.
-There is no `call::port`, runtime external Attach/Detach or caller-supplied
-requester. `nest::inspect` writes a 56-byte NestInfo without a Port identity.
-
-Keep the External Nest root with its manager and delegate limited Pend branches
-for actual users. Returning/revoking a worker branch retires its own Memos,
-including unused reservations, without replacing the Nest or closing other live
-branches. Set Distributable to No for workers that cannot delegate further.
-A different Task can reserve Memos after the former Task's positions have all
-retired and been removed. `nest::delete` requires the boot root to terminate
-an External Nest. Busy retains the close until hardware settlement and Closed
-is terminal. Live descendants, borrows and active publications constrain Narrow.
-
-`Sign::attach` additionally takes a generation: exact Memo generation for
-MappingPublished/Retired, zero for other sources. Use NestFault rather than the
-retired MappingFault. Fault observations remain with the same Nest across Pend
-handover; an old MappingId cannot name a later mapping at the same address.
-
-`flat::create(license, size, align, level)` selects physical Cell geometry.
-Use `Allocation::at_level` for Cell Create. `cell::split(slot)` and
-`cell::merge(slot)` consume the old SlotId only on success and return its
-replacement. They require an exclusive complete contiguous collection; mapping
-leaf changes remain separate.
-
-Hardware dispatch is read from Ledger v9 as an explicit `(View, Sign)` pair;
-the pair layout introduced in v7 is unchanged. For an admitted device this is a
-Share View Pend plus Sign Pend. Delegate the full writable View before the
-non-distributable Listen/Consume Sign, rolling back View on failure before
-resuming the recipient. Initialize the device, Listen and Consume the initial
-notification; thereafter clear each device cause before consuming its sequence.
-Return/Revoke either Pend closes delivery. Sign retains its slots and payloads
-under the current ABI prefix; consumption does not synchronously wait for controller
-completion. Raw device/configuration authority must be withdrawn separately
-before reassigning a device; Pend distribution alone proves no DMA quiescence.
-
-ABI 9 Memo objects carry a PendId. Store `CreatedCell::Memo { token, address }`,
-then explicitly Accord Memo operations and position windows to another Task.
-Push moves local to remote; Pull moves remote to local. Both require owning
-Slots. Insert/Remove only change associations; they never transfer ownership.
-Keep the exact Flat BLOCK branch while retrying Block. Allow reopens only its
-own block and does not implicitly Publish. Read the API's completion rules
-before reusing a Page or IOVA.
-
-For global statistics, discover `Name::Memory` with `Entry::dispatch()`, Open
-its Share and retain that mapping while reading `model::memory::SnapshotPage`.
-`read()` is a bounded atomic attempt; None calls for a later retry. LISTEN and
-CONSUME use ordinary Sign semantics; consume then recheck Snapshot.epoch to avoid
-missing coalesced updates. A/D values are UNKNOWN. Statistics assist policy,
-but cannot authorize a transfer or certify hardware retirement.
+Tests exercise `invoke_with` with recording transports, including a local
+ReserveRequest snapshot, scoped descriptors and typed replies. They do not
+execute named native traps; RV64 compilation checks those wrappers. The Kernel
+guest suite executes actual traps separately. Read API's
+[compatibility and completion rules](../api/README.md#source-migration-and-abi-compatibility)
+before updating a consumer pin or reusing a Page/IOVA.

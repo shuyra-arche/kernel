@@ -1,6 +1,6 @@
 //! Operation permissions are typed by their target. They never identify an object.
 //! Distribution is independent of data mutability; narrowing cannot change a target's kind.
-use super::PendRange;
+use super::{NestScope, PendScope};
 use crate::model::modifiable::Modifiable;
 use crate::model::sign::SignRights;
 
@@ -44,29 +44,38 @@ bitflags::bitflags! {
         const BLOCK = 32;
     }
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct MemoRights: u32 {
-        const INSPECT = 1;
-        const INSERT = 2;
-        const REMOVE = 4;
-        const PUBLISH = 8;
-        const RETRACT = 16;
-        const PROTECT = 32;
-        const DELETE = 64;
-    }
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct NestRights: u32 {
         const INSPECT = 1;
         const RESERVE = 2;
         const RELEASE = 4;
-        /// Consume an exclusive Internal Nest when constructing a Team.
+        /// Adopt an empty, exclusive Internal Nest when constructing a Team.
         /// This does not authorize external source discovery or binding.
         const ATTACH = 8;
-        // Bit 16 formerly authorized external Detach and remains invalid.
-        const TRANSFER = 32;
         const PUBLISH = 64;
         const RETRACT = 128;
         const PROTECT = 256;
         const DELETE = 512;
+        const INSERT = 1024;
+        const REMOVE = 2048;
+    }
+}
+
+impl NestRights {
+    pub const fn whole() -> Self {
+        Self::INSPECT
+            .union(Self::RESERVE)
+            .union(Self::ATTACH)
+            .union(Self::DELETE)
+    }
+
+    pub const fn mapping() -> Self {
+        Self::INSPECT
+            .union(Self::RELEASE)
+            .union(Self::PUBLISH)
+            .union(Self::RETRACT)
+            .union(Self::PROTECT)
+            .union(Self::INSERT)
+            .union(Self::REMOVE)
     }
 }
 
@@ -80,7 +89,6 @@ pub enum Operations {
     Flat(FlatRights),
     Nest(NestRights),
     Sign(SignRights),
-    Memo(MemoRights),
 }
 
 impl Operations {
@@ -92,7 +100,6 @@ impl Operations {
             Self::Flat(r) => [3, r.bits() as usize],
             Self::Nest(r) => [4, r.bits() as usize],
             Self::Sign(r) => [6, r.bits() as usize],
-            Self::Memo(r) => [7, r.bits() as usize],
         }
     }
     pub fn of([kind, bits]: [usize; 2]) -> Option<Self> {
@@ -104,7 +111,6 @@ impl Operations {
             3 => Self::Flat(FlatRights::from_bits(bits)?),
             4 => Self::Nest(NestRights::from_bits(bits)?),
             6 => Self::Sign(SignRights::from_bits(bits)?),
-            7 => Self::Memo(MemoRights::from_bits(bits)?),
             _ => return None,
         })
     }
@@ -122,25 +128,21 @@ pub struct Limits {
     pub operations: Operations,
     pub modifiable: Modifiable,
     pub distributable: Distributable,
-    pub range: PendRange,
+    pub scope: PendScope,
 }
 impl Limits {
-    pub const WORDS: usize = 7;
+    pub const WORDS: usize = 9;
     pub fn words(self) -> [usize; Self::WORDS] {
         let [kind, operations] = self.operations.words();
-        let range = match self.range {
-            PendRange::Inherit => [0, 0, 0],
-            PendRange::Pages { offset, count } => [1, offset, count],
-        };
-        [
+        let mut words = [0; Self::WORDS];
+        words[..4].copy_from_slice(&[
             kind,
             operations,
             self.modifiable.bits() as usize,
             self.distributable as usize,
-            range[0],
-            range[1],
-            range[2],
-        ]
+        ]);
+        words[4..].copy_from_slice(&self.scope.words());
+        words
     }
     pub fn of(w: [usize; Self::WORDS]) -> Option<Self> {
         let result = Self {
@@ -151,42 +153,44 @@ impl Limits {
                 1 => Distributable::Yes,
                 _ => return None,
             },
-            range: match [w[4], w[5], w[6]] {
-                [0, 0, 0] => PendRange::Inherit,
-                [1, offset, count] => PendRange::pages(offset, count)?,
-                _ => return None,
-            },
+            scope: PendScope::of(w[4..].try_into().ok()?)?,
         };
         result.valid().then_some(result)
     }
     pub fn valid(self) -> bool {
-        if matches!(self.operations, Operations::None(_) | Operations::Sign(_))
-            && self.modifiable != Modifiable::No
+        if Operations::of(self.operations.words()) != Some(self.operations)
+            || PendScope::of(self.scope.words()) != Some(self.scope)
+            || (matches!(self.operations, Operations::None(_) | Operations::Sign(_))
+                && self.modifiable != Modifiable::No)
         {
             return false;
         }
-        match self.range {
-            PendRange::Inherit => true,
-            PendRange::Pages { offset, count } => {
-                matches!(
-                    self.operations,
-                    Operations::Share(_) | Operations::Flat(_) | Operations::Memo(_)
-                ) && PendRange::pages(offset, count).is_some()
+        match (self.operations, self.scope) {
+            (
+                Operations::None(_) | Operations::Clone(_) | Operations::Sign(_),
+                PendScope::Object,
+            )
+            | (Operations::Share(_) | Operations::Flat(_), PendScope::Pages(_)) => true,
+            (Operations::Nest(rights), PendScope::Nest(NestScope::Whole)) => {
+                NestRights::whole().contains(rights)
             }
+            (Operations::Nest(rights), PendScope::Nest(NestScope::Mapping { .. })) => {
+                NestRights::mapping().contains(rights)
+            }
+            _ => false,
         }
     }
-    /// Range coordinates are relative to the parent's effective window; the
-    /// holder must resolve those under the same commit as this permission check.
+    /// Checks attenuation and scope identity, not relative range bounds. The
+    /// server resolves ranges within the parent's effective window at commit.
     pub fn permits_child(self, child: Self) -> bool {
-        self.valid()
-            && child.valid()
-            && self.distributable == Distributable::Yes
-            && self.operations.contains(child.operations)
-            && self.modifiable.allows(child.modifiable)
+        self.permits_narrowing(child) && self.distributable == Distributable::Yes
     }
+    /// Whole and Mapping scopes, or different MappingIds, never attenuate into
+    /// one another. Relative range bounds must also be checked by the server.
     pub fn permits_narrowing(self, child: Self) -> bool {
         self.valid()
             && child.valid()
+            && self.scope.same_kind(child.scope)
             && self.operations.contains(child.operations)
             && self.modifiable.allows(child.modifiable)
             && (self.distributable == Distributable::Yes

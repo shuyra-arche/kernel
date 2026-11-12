@@ -21,8 +21,8 @@ pub struct AccordRequest {
 }
 
 impl AccordRequest {
-    /// Source, recipient tag/ID, mark, then seven checked permission words.
-    pub const WIDTH: usize = 88;
+    /// Source, recipient tag/ID, mark, then nine checked permission words.
+    pub const WIDTH: usize = 104;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let (tag, id) = match self.target {
             AccordTarget::Caller => (0, 0),
@@ -65,7 +65,7 @@ pub struct NarrowRequest {
     pub limits: Limits,
 }
 impl NarrowRequest {
-    pub const WIDTH: usize = 64;
+    pub const WIDTH: usize = 80;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut bytes = [0; Self::WIDTH];
         store_words([self.token.get()], &mut bytes[..8]);

@@ -29,22 +29,28 @@ impl PendRange {
         end.checked_mul(PAGE_SIZE)?;
         Some(Self::Pages { offset, count })
     }
+
+    pub const fn words(self) -> [usize; Self::WORDS] {
+        match self {
+            Self::Inherit => [0, 0, 0],
+            Self::Pages { offset, count } => [1, offset, count],
+        }
+    }
+
+    pub fn of(words: [usize; Self::WORDS]) -> Option<Self> {
+        match words {
+            [0, 0, 0] => Some(Self::Inherit),
+            [1, offset, count] => Self::pages(offset, count),
+            _ => None,
+        }
+    }
 }
 
 impl Wire for PendRange {
     const WORDS: usize = PendRange::WORDS;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
-        match *self {
-            Self::Inherit => {
-                0usize.pack(s, i);
-                0usize.pack(s, i);
-                0usize.pack(s, i);
-            }
-            Self::Pages { offset, count } => {
-                1usize.pack(s, i);
-                offset.pack(s, i);
-                count.pack(s, i);
-            }
+        for word in self.words() {
+            word.pack(s, i);
         }
     }
 
@@ -52,10 +58,6 @@ impl Wire for PendRange {
         let tag = usize::unpack(s, i)?;
         let offset = usize::unpack(s, i)?;
         let count = usize::unpack(s, i)?;
-        match tag {
-            0 if offset == 0 && count == 0 => Ok(Self::Inherit),
-            1 => Self::pages(offset, count).ok_or(Decode::Invalid),
-            _ => Err(Decode::Invalid),
-        }
+        Self::of([tag, offset, count]).ok_or(Decode::Invalid)
     }
 }

@@ -5,7 +5,7 @@ use kernel_api::{
     abi::call::cell::CellFail,
     address::VirtAddr,
     model::{
-        cell::{CreatedCell, SlotId},
+        cell::{Allocation, SlotId},
         identity::PendId,
     },
 };
@@ -13,8 +13,8 @@ use kernel_api::{
 typed_calls! {
     fallible fn split(slot: SlotId) -> Result<SlotId, erra::Error<CellFail>> = op::Split { slot };
     fallible fn merge(slot: SlotId) -> Result<SlotId, erra::Error<CellFail>> = op::Merge { slot };
-    fallible fn create(license: PendId, request: VirtAddr) -> Result<CreatedCell, erra::Error<CellFail>> = op::Create { license, request };
-    fallible fn delete(object: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Delete { object };
+    fallible fn create(license: PendId, allocation: Allocation) -> Result<SlotId, erra::Error<CellFail>> = op::Create { license, allocation };
+    fallible fn delete(slot: SlotId) -> Result<(), erra::Error<CellFail>> = op::Delete { slot };
     fallible fn push(request: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Push { request };
     fallible fn pull(request: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Pull { request };
     fallible fn insert(request: VirtAddr) -> Result<(), erra::Error<CellFail>> = op::Insert { request };

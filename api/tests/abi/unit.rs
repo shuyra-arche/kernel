@@ -4,8 +4,8 @@ use kernel_api::{
     model::{
         identity::{TaskId, TeamId},
         unit::{
-            ControlId, ExitCause, ProgramKind, UnitCreate, UnitInfo, UnitQuery, UnitState,
-            UnitTarget,
+            ControlId, CreatedUnit, ExitCause, ProgramKind, UnitCreate, UnitInfo, UnitQuery,
+            UnitState, UnitTarget,
         },
     },
 };
@@ -93,4 +93,46 @@ fn query_and_result_encoding_preserve_identity_and_independent_cleanup() {
         bad[index] = 9;
         assert!(UnitInfo::from_bytes(&bad).is_none());
     }
+}
+
+#[test]
+fn create_reply_preserves_team_nest_authority_and_rejects_malformed_triples() {
+    use kernel_api::{
+        abi::{call::unit::operations::Create, operation::KernelCall},
+        model::identity::PendId,
+    };
+    let task = CreatedUnit::Task(TaskId::new(7));
+    let team = CreatedUnit::Team {
+        team: TeamId::new(8),
+        nest: PendId::mint(9),
+    };
+    for (words, expected) in [((0, 7, 0), task), ((1, 8, 9), team)] {
+        assert_eq!(
+            CreatedUnit::decode(words.0, words.1, words.2),
+            Some(expected)
+        );
+        assert_eq!(Create::decode_return(words).unwrap(), expected);
+    }
+    for (kind, id, nest) in [
+        (2, 7, 0),
+        (2, 8, 9),
+        (0, 0, 0),
+        (1, 0, 9),
+        (0, usize::MAX, 0),
+        (1, usize::MAX, 9),
+        (0, 7, 9),
+        (1, 8, 0),
+        (1, 8, usize::MAX),
+    ] {
+        assert_eq!(CreatedUnit::decode(kind, id, nest), None);
+        assert!(std::panic::catch_unwind(|| Create::decode_return((kind, id, nest))).is_err());
+    }
+    assert_eq!(
+        CreatedUnit::decode(0, isize::MAX as usize, 0),
+        Some(CreatedUnit::Task(TaskId::new(isize::MAX as usize)))
+    );
+    assert!(matches!(
+        CreatedUnit::decode(1, isize::MAX as usize, isize::MAX as usize),
+        Some(CreatedUnit::Team { .. })
+    ));
 }

@@ -4,6 +4,8 @@ pub const NAME_LEN: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Name {
+    /// Initial current CPU Nest grant; the name itself grants no access.
+    Space,
     Memory,
     Trap(Trap),
     Call(Call),
@@ -55,7 +57,7 @@ impl Name {
             Self::Call(_) => ResourceKind::Control,
             Self::Trap(Trap::PageFault) => ResourceKind::Clone,
             Self::Page(_) => ResourceKind::Share,
-            Self::Nest { .. } => ResourceKind::Nest,
+            Self::Space | Self::Nest { .. } => ResourceKind::Nest,
         }
     }
 }
@@ -80,6 +82,7 @@ impl Name {
             return;
         }
         let (class, item, at): (u8, u8, u64) = match *self {
+            Self::Space => (7, 0, 0),
             Self::Memory => (6, 0, 0),
             Self::Page(Page::Memory) => (2, 3, 0),
             Self::Trap(Trap::SupervisorExternal) => (0, 0, 0),
@@ -119,6 +122,7 @@ impl Name {
         }
         let at = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
         match (bytes[0], bytes[1], at) {
+            (7, 0, 0) => Some(Self::Space),
             (6, 0, 0) => Some(Self::Memory),
             (2, 3, 0) => Some(Self::Page(Page::Memory)),
             (0, 0, 0) => Some(Self::Trap(Trap::SupervisorExternal)),
