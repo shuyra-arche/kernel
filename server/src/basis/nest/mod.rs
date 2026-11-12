@@ -1267,6 +1267,9 @@ impl Nest {
         principal.check(self, mapping, index, access)?;
         let prepared = {
             let mut state = self.state.lock();
+            if !state.retirement.invalidation().is_clean() {
+                return Err(CellFail::Busy);
+            }
             if !state.is_open() || !mapping.is_open() {
                 return Err(CellFail::Denied);
             }
@@ -1462,28 +1465,15 @@ impl Nest {
         let flight = source.begin_cpu(mapping.identity(), access)?;
         let lease = range.reside_during(&change)?;
         let writable = access.contains(Access::WRITE);
-        let mut operation_freeze = if retained.is_some() {
-            Some(Freeze::new(change.clone(), None).map_err(NestError::from)?)
-        } else {
-            None
-        };
-        let replacement = if retained.is_some_and(|old| old != writable) {
-            Some((
-                index,
-                Publication::prepare(&page, writable, Some(&change)).map_err(NestError::from)?,
-            ))
-        } else {
-            None
-        };
-        // A new permission passes the actual Page gate. Changed writer accounting
-        // is replaced atomically with its PTE and retires behind the same fence.
-        let admission = if retained.is_some() && replacement.is_none() {
-            Some(change.hardware(writable).map_err(NestError::from)?)
-        } else {
-            None
-        };
+        let admission;
         let result = {
             let mut state = self.state.lock();
+            if !state.retirement.invalidation().is_clean() {
+                return Err(CellFail::Busy);
+            }
+            if !state.is_open() || !mapping.is_open() {
+                return Err(CellFail::Denied);
+            }
             let memo = state
                 .memos
                 .existing_mut(mapping, index)
@@ -1491,6 +1481,26 @@ impl Nest {
             if !memo.matches(&binding) {
                 return Err(CellFail::Busy);
             }
+            let mut operation_freeze = if retained.is_some() {
+                Some(Freeze::new(change.clone(), None).map_err(NestError::from)?)
+            } else {
+                None
+            };
+            let replacement = if retained.is_some_and(|old| old != writable) {
+                Some((
+                    index,
+                    Publication::prepare(&page, writable, Some(&change))
+                        .map_err(NestError::from)?,
+                ))
+            } else {
+                None
+            };
+            // Admission and PTE edits share the checked retirement batch.
+            admission = if retained.is_some() && replacement.is_none() {
+                Some(change.hardware(writable).map_err(NestError::from)?)
+            } else {
+                None
+            };
             let selection = mapping.range(PageOffset::new(index), count)?;
             state.protect(
                 self.geometry(),

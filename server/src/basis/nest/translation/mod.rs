@@ -102,6 +102,9 @@ impl NestState {
     /// Withdraw the indexed mappings in one locked transition and retain
     /// their obligations until the covering fence succeeds.
     pub(super) fn close_mappings(&mut self, geometry: Geometry) -> Result<(), NestError> {
+        if !self.retirement.invalidation().is_clean() {
+            return Err(NestError::Busy);
+        }
         // One indexed Span per service turn. Its admitted Page/active-range
         // geometry bounds the backend work; no complete-Nest snapshot is made.
         self.phase = ClosePhase::Draining;
@@ -272,6 +275,9 @@ impl NestState {
         page: &Arc<Page>,
         change: &Change,
     ) -> Result<(), NestError> {
+        if !self.retirement.invalidation().is_clean() {
+            return Err(NestError::Busy);
+        }
         if !self.is_open() {
             return Err(NestError::NoRegion);
         }
@@ -380,7 +386,16 @@ impl NestState {
         request: Protection,
         replacement: Option<(usize, Publication)>,
     ) -> Result<(), NestError> {
+        if !self.retirement.invalidation().is_clean() {
+            return Err(NestError::Busy);
+        }
+        if !self.is_open() {
+            return Err(NestError::NoRegion);
+        }
         let mut inner = mapping.state.lock();
+        if inner.phase != super::address::span::MappingPhase::Open {
+            return Err(NestError::NoRegion);
+        }
         let transition =
             inner.protection_transition(mapping.initial_start(), window, request, |p| {
                 self.memos
