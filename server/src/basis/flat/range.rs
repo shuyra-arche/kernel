@@ -60,6 +60,14 @@ impl FlatRange {
     pub(crate) fn cell(&self, offset: PageOffset) -> Result<Self, FlatError> {
         self.range(offset, PageCount::new(self.grain()).unwrap())
     }
+    pub(crate) fn page(&self, offset: PageOffset) -> Result<Option<Arc<Page>>, FlatError> {
+        Ok(self
+            .cell(offset)?
+            .materialized_cells()?
+            .into_iter()
+            .next()
+            .map(|(_, page)| page))
+    }
     /// 相对偏移选择子范围。
     pub fn range(&self, offset: PageOffset, count: PageCount) -> Result<Self, FlatError> {
         let end = offset

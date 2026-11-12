@@ -77,7 +77,6 @@ impl Payload {
             .begin_withdraw()?
             .adopt(&view, pend.token(), pend.authority().clone())?;
         source.consume();
-        view.commit_source();
         Ok(pend)
     }
 }

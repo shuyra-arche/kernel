@@ -1,13 +1,6 @@
+use super::{Sharing, seal};
 use alloc::sync::Arc;
-
 use kernel_api::abi::call::pend::PendFail;
-
-use crate::basis::nest::authority::RangeBinding;
-use crate::basis::pend::SourceAuthorization;
-
-use super::Sharing;
-use super::pend_map_error;
-use super::seal;
 
 pub(crate) fn pending_close(meta: &Sharing) -> bool {
     meta.has_maps()
@@ -16,7 +9,7 @@ pub(crate) fn pending_close(meta: &Sharing) -> bool {
             .is_some_and(|source| source.pending_close())
 }
 
-/// 调用者持有根资源的操作租约；CPU 关闭不在全局提交锁下等待。
+/// Hardware withdrawal runs outside COMMIT and source locks.
 pub(crate) fn close(root: &Arc<Sharing>) -> Result<(), PendFail> {
     let Some(source) = root.authorization() else {
         return root.close_maps(None);
@@ -31,52 +24,12 @@ pub(crate) fn close(root: &Arc<Sharing>) -> Result<(), PendFail> {
         let Some(binding) = source.first_binding() else {
             return Ok(());
         };
-        close_binding(&source, binding)?;
+        let space = binding.nest().upgrade().ok_or(PendFail::Busy)?;
+        space.withdraw_source(&binding, &source, None, None, true)?;
     }
     if source.pending_close() {
         Err(PendFail::Busy)
     } else {
         Ok(())
     }
-}
-
-fn close_binding(
-    source: &Arc<SourceAuthorization>,
-    binding: Arc<RangeBinding>,
-) -> Result<(), PendFail> {
-    let (space, mapping) = {
-        let _commit = crate::basis::commit();
-        if !source.owns_binding(&binding) {
-            return Ok(());
-        }
-        let space = binding.nest().upgrade().ok_or(PendFail::Busy)?;
-        let entry = space
-            .mappings
-            .registered(binding.id())
-            .ok_or(PendFail::Busy)?;
-        if !Arc::ptr_eq(&entry.source, source) || !Arc::ptr_eq(&entry.binding, &binding) {
-            return Err(PendFail::Busy);
-        }
-        (space, entry.mapping().cloned())
-    };
-    let id = binding.id();
-    if !space.settled(id)
-        && let Err(error) = space.retry_invalidation()
-        && !space.settled(id)
-    {
-        return Err(pend_map_error(error));
-    }
-    if !space.settled(id) {
-        let mapping = mapping.ok_or(PendFail::Busy)?;
-        if let Err(error) = space.detach(mapping.whole())
-            && !space.settled(id)
-        {
-            return Err(pend_map_error(error));
-        }
-    }
-    if !space.settled(id) {
-        return Err(PendFail::Busy);
-    }
-    space.retire_mapping(id);
-    Ok(())
 }

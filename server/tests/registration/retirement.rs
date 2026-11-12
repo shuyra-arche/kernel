@@ -59,6 +59,32 @@ fn child(
 }
 
 #[test]
+fn returned_mapping_roots_reap_scripted_metadata_after_real_authority_settlement() {
+    let (task, nest, whole) = setup(Yes, Distributable::Yes);
+    for raw in 1..=64 {
+        let root = {
+            let _serial = task.pend.lock();
+            let count = PageCount::new(1).unwrap();
+            let prepared = ledger::prepare_mapping(&task, &whole, id(raw), count).unwrap();
+            let root = prepared.entry().clone();
+            let _commit = basis::commit();
+            nest.install(id(raw), count, CellLevel::BASE, root.authority());
+            prepared.publish();
+            root
+        };
+        nest.retire_mapping(raw);
+        assert!(nest.mapping(id(raw)).is_some());
+        ledger::return_(&task, root.token()).unwrap();
+        assert_eq!(root.authority().status(), PendStatus::Dead);
+        assert!(ledger::locate(&task, root.token()).is_none());
+        assert!(nest.mapping(id(raw)).is_none());
+        assert!(nest.mappings.lock().unwrap().is_empty());
+        assert!(task.pend.heirs.lock().is_empty());
+        assert!(whole.alive());
+    }
+}
+
+#[test]
 fn mapping_owner_is_nest_creator_and_lender_is_the_actual_reserving_parent() {
     let (creator, nest, whole) = setup(Yes, Distributable::Yes);
     let worker = Task::new(2);

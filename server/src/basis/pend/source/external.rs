@@ -144,19 +144,8 @@ impl ExternalBorrow {
             observer,
         })
     }
-    pub(crate) fn cell(&self) -> &Arc<Page> {
-        &self.cell
-    }
     pub(crate) fn publish(&mut self) {
         self.published = true;
-    }
-    pub(crate) fn revoked(&self) -> bool {
-        self.parent.as_ref().is_some_and(|parent| parent.retiring())
-            || self.source.as_ref().is_some_and(|source| {
-                source.revoked()
-                    || self.parent.is_some()
-                        && source.root().is_none_or(|(meta, _, _)| !meta.alive())
-            })
     }
     /// # Safety
     /// Matching Nest completion has settled this exact device relationship;

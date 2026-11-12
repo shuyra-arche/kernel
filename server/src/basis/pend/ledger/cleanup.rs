@@ -116,6 +116,11 @@ fn remove(task: &Arc<Task>, entry: &Arc<PendEntry>) -> Result<(), PendFail> {
         Ok(())
     })?;
     entry.release();
+    if let crate::basis::pend::Target::Nest { nest, .. } = entry.target()
+        && let PendScope::Nest(NestScope::Mapping { id, .. }) = entry.scope()
+    {
+        nest.retire_mapping(id.get());
+    }
     super::notify(task.ident.id, entry.token());
     if let (Some(source), Some(parent)) = (entry.sire(), entry.lord().upgrade()) {
         super::notify(parent.ident.id, source);

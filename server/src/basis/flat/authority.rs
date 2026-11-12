@@ -58,7 +58,6 @@ pub(crate) fn create(
         .begin_withdraw()?
         .adopt(&meta, entry.token(), entry.authority().clone())?;
     source.consume();
-    meta.commit_source();
     registration.publish();
 
     Ok(entry.token())
@@ -200,6 +199,9 @@ fn settle_block(
         block.retain(page)?;
     }
     for binding in source.bindings()? {
+        if binding.page().is_some() {
+            continue;
+        }
         let Some(nest) = binding.nest().upgrade() else {
             return Err(PendFail::Busy);
         };
@@ -211,10 +213,13 @@ fn settle_block(
         };
         let _mapping = span.operation().ok_or(PendFail::Busy)?;
         nest.retry_invalidation().map_err(|_| PendFail::Busy)?;
-        let base = span.source().index().get();
+        let Some(affine) = span.source() else {
+            continue;
+        };
+        let base = affine.index().get();
         let low = selected.index().get().max(base);
         let high = (selected.index().get() + selected.page_count().get())
-            .min(base + span.source().page_count().get());
+            .min(base + affine.page_count().get());
         for index in (low..high).step_by(selected.grain()) {
             let page = index - base;
             if let Some(data) = nest.memo_page(span, page).map_err(|_| PendFail::Busy)? {
@@ -231,7 +236,7 @@ fn settle_block(
             }
         }
     }
-    crate::basis::nest::authority::external::block_source(&source, &selected, &block)?;
+    crate::basis::nest::authority::withdraw_source_window(source, block)?;
     if block.settled() {
         Ok(())
     } else {

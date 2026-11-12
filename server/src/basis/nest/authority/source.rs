@@ -1,15 +1,10 @@
 //! Withdraw source-qualified uses without destroying independent reservations.
-use alloc::sync::Arc;
-use kernel_api::{
-    abi::call::pend::PendFail,
-    address::{PageCount, PageOffset},
-    model::identity::PendId,
-};
-
 use crate::basis::{
     flat::sharing::Sharing,
-    pend::{Pend, SourceAuthorization},
+    pend::{RangeBlock, SourceAuthorization},
 };
+use alloc::sync::Arc;
+use kernel_api::{abi::call::pend::PendFail, model::identity::PendId};
 
 pub(crate) fn withdraw_source_branch(
     meta: &Arc<Sharing>,
@@ -42,41 +37,43 @@ pub(crate) fn withdraw_source(
 
 pub(crate) fn withdraw_source_window(
     source: &Arc<SourceAuthorization>,
-    (offset, count): (PageOffset, PageCount),
-    except: Option<&Arc<Pend>>,
+    block: &RangeBlock,
 ) -> Result<(), PendFail> {
+    let (offset, count) = block.window();
     let end = offset
         .get()
         .checked_add(count.get())
         .ok_or(PendFail::NotAligned)?;
     for binding in source.bindings()? {
-        if binding.page().is_none() {
-            continue;
-        }
-        let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
-        let Some(selected) = nest.binding_source(&binding) else {
+        let Some(page) = binding.page() else {
             continue;
         };
-        let (base, size) = selected.window();
-        let limit = base
-            .get()
-            .checked_add(size.get())
-            .ok_or(PendFail::NotAligned)?;
-        if base.get() >= end || limit <= offset.get() {
-            continue;
-        }
-        let parent = selected
-            .hold()
-            .authority()
-            .cloned()
-            .or_else(|| selected.source().root().map(|(_, _, authority)| authority));
-        if except.is_some_and(|except| {
-            parent
-                .as_ref()
-                .is_some_and(|parent| Arc::ptr_eq(parent, except))
-        }) {
-            continue;
-        }
+        let nest = {
+            let _commit = crate::basis::commit();
+            let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
+            let Some(selected) = nest.binding_source(&binding) else {
+                continue;
+            };
+            let (base, size) = selected.window();
+            let limit = base
+                .get()
+                .checked_add(size.get())
+                .ok_or(PendFail::NotAligned)?;
+            if !Arc::ptr_eq(selected.source(), source) || base.get() >= end || limit <= offset.get()
+            {
+                continue;
+            }
+            let entry = nest
+                .mappings
+                .registered(binding.id())
+                .ok_or(PendFail::Busy)?;
+            let span = entry.mapping().ok_or(PendFail::Busy)?;
+            let Some((data, _)) = nest.association(span, page).map_err(|_| PendFail::Busy)? else {
+                continue;
+            };
+            block.retain(data)?;
+            nest
+        };
         nest.withdraw_source(&binding, source, None, None, false)?;
     }
     Ok(())

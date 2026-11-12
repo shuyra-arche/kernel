@@ -237,6 +237,25 @@ impl Nest {
             .1 = PendStatus::Dead;
         Ok(())
     }
+    pub(crate) fn retire_mapping(&self, raw: usize) {
+        let removable = self.spans.lock().unwrap().iter().any(|(id, _, root)| {
+            id.get() == raw
+                && self.mapping_status(*id) == PendStatus::Dead
+                && root
+                    .upgrade()
+                    .is_none_or(|root| root.status() == PendStatus::Dead)
+        });
+        if removable {
+            self.spans
+                .lock()
+                .unwrap()
+                .retain(|(id, _, _)| id.get() != raw);
+            self.mappings
+                .lock()
+                .unwrap()
+                .retain(|(id, _)| id.get() != raw);
+        }
+    }
     pub(crate) fn retire(&self) -> Result<(), ()> {
         self.open.store(false, Ordering::Release);
         self.closed.store(true, Ordering::Release);
