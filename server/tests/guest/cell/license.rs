@@ -7,7 +7,7 @@ use kernel_api::{
         modifiable::Modifiable,
         pend::{
             AccordRequest, AccordTarget, CreationRights, Distributable, Limits, NarrowRequest,
-            Operations, PendInfo, PendRange, Target,
+            Operations, PendInfo, PendScope, Target,
         },
     },
 };
@@ -55,7 +55,7 @@ pub(super) fn delegate(task: TaskId) {
             operations: Operations::None(CreationRights::all()),
             modifiable: Modifiable::No,
             distributable: Distributable::Yes,
-            range: PendRange::Inherit,
+            scope: PendScope::Object,
         },
     }
     .to_bytes();
@@ -78,7 +78,7 @@ pub(super) fn run() {
             operations: Operations::None(CreationRights::SIGN),
             modifiable: Modifiable::No,
             distributable: Distributable::No,
-            range: PendRange::Inherit,
+            scope: PendScope::Object,
         },
     }
     .to_bytes();

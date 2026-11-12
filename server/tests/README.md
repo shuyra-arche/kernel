@@ -42,6 +42,15 @@ done
 
 ## Run the guest tests
 
+The Cell guest consumes ABI v10. Its bootstrap CPU authority comes from the
+ledger's `Name::Space` entry; `Name::Nest` entries describe external topology.
+Ordinary Tasks start with no grants. Fixtures explicitly delegate creation,
+Whole-Nest reservation or mapping-scoped authority before resuming a worker.
+Reservations use `Nest.Reserve` without a source, then `Cell.Insert` and
+`Cell.Publish`. A `MappingId` is read from `PendInfo.limits.scope`, never used as
+a capability. `Nest.Release` closes a complete mapping reservation; returning a
+child grant withdraws only that branch's publications.
+
 Run the full ignored hardware suite in the same shell:
 
 ```sh

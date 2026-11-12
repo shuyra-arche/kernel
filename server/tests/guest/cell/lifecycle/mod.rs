@@ -6,7 +6,7 @@ use kernel_api::{
     model::{
         identity::{PendId, TaskId},
         sign::SignSource,
-        unit::{UnitCreate, UnitInfo, UnitQuery, UnitState, UnitTarget},
+        unit::{CreatedUnit, UnitCreate, UnitInfo, UnitQuery, UnitState, UnitTarget},
         wait::Wait,
     },
 };
@@ -20,7 +20,8 @@ pub(super) fn spawn(entry: usize) -> TaskId {
         stack: VirtAddr::new(0),
     }
     .to_bytes();
-    let UnitTarget::Task(id) = unit::create(VirtAddr::new(bytes.as_ptr() as usize)).unwrap() else {
+    let CreatedUnit::Task(id) = unit::create(VirtAddr::new(bytes.as_ptr() as usize)).unwrap()
+    else {
         panic!("created wrong kind")
     };
     id

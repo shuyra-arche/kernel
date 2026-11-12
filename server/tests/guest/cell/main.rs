@@ -15,13 +15,11 @@ mod pend;
 mod realtime;
 mod room;
 mod sign;
+mod space;
 use core::fmt::Write;
 use kernel_api::model::unit::ExitScope;
-use kernel_api::{
-    address::VirtAddr,
-    model::{cell::*, identity::TeamId},
-};
-use kernel_client::call::{cell, debug, unit};
+use kernel_api::{address::VirtAddr, model::cell::*};
+use kernel_client::call::{cell, debug, nest, room as room_call, unit};
 core::arch::global_asm!(
     ".section .text.entry",
     ".global _start",
@@ -58,43 +56,21 @@ fn ptr(bytes: &[u8]) -> VirtAddr {
     VirtAddr::new(bytes.as_ptr() as usize)
 }
 fn allocate(count: usize) -> SlotId {
-    let spec = CellCreate::Slot(Allocation::new(count * 4096, 4096).unwrap()).to_bytes();
-    let made = cell::create(crate::license::get(), ptr(&spec)).unwrap();
-    let CreatedCell::Slot(slot) = made else {
-        panic!("expected Slot")
-    };
-    slot
+    cell::create(
+        crate::license::get(),
+        Allocation::new(count * 4096, 4096).unwrap(),
+    )
+    .unwrap()
 }
 fn reserve(reference: SlotId, count: usize) -> (kernel_api::model::identity::PendId, VirtAddr) {
-    let spec = CellCreate::Memo {
-        source: CellSource::Slot(ReferenceRange {
-            reference,
-            offset: 0,
-            count,
-        }),
-        destination: MemoDestination::Internal {
-            team: TeamId::new(0),
-            placement: Placement::lowest(4096).unwrap(),
-            access: 6,
-        },
-    }
-    .to_bytes();
-    let made =
-        cell::create(kernel_api::model::identity::PendId::NONE, ptr(&spec)).unwrap_or_else(|e| {
-            panic!(
-                "Memo create source={} count={} {e:?}",
-                reference.get(),
-                count
-            )
-        });
-    let CreatedCell::Memo {
-        token: mapping,
-        address,
-    } = made
-    else {
-        panic!("expected Memo")
-    };
-    (mapping, address)
+    let level = info(slot(reference, 0)).level;
+    space::reserve(
+        space::get(),
+        Placement::lowest(level.bytes().unwrap()).unwrap(),
+        count,
+        level,
+        6,
+    )
 }
 fn slot(reference: SlotId, page: usize) -> CellPosition {
     CellPosition {
@@ -105,7 +81,7 @@ fn slot(reference: SlotId, page: usize) -> CellPosition {
 }
 fn raw_memo(mapping: kernel_api::model::identity::PendId, page: usize) -> CellPosition {
     CellPosition {
-        object: CellObject::Memo(mapping),
+        object: CellObject::Pend(mapping),
         page,
         generation: 0,
     }
@@ -124,7 +100,7 @@ fn memo(mapping: kernel_api::model::identity::PendId, page: usize) -> CellPositi
 }
 #[track_caller]
 fn handoff(source: CellPosition, target: CellPosition, pull: bool) {
-    if matches!(target.object, CellObject::Memo(_)) {
+    if matches!(target.object, CellObject::Pend(_)) {
         cell::insert(ptr(&CellAssociation { source, target }.to_bytes()))
     } else if pull {
         cell::pull(ptr(&CellHandoff {
@@ -157,7 +133,22 @@ fn retract(mapping: kernel_api::model::identity::PendId, page: usize) {
 }
 #[track_caller]
 fn delete(object: CellObject) {
-    cell::delete(ptr(&object.to_bytes())).unwrap();
+    match object {
+        CellObject::Slot(slot) => cell::delete(slot).unwrap(),
+        CellObject::Pend(token) => {
+            let deadline = room_call::clock() + 5_000_000_000;
+            loop {
+                match nest::release(token) {
+                    Ok(()) => break,
+                    Err(error) => {
+                        assert_eq!(error.source, kernel_api::abi::call::nest::NestFail::Busy);
+                        assert!(room_call::clock() < deadline, "mapping release stalled");
+                        room_call::yield_();
+                    }
+                }
+            }
+        }
+    }
 }
 fn attach(reference: SlotId, count: usize) -> (kernel_api::model::identity::PendId, VirtAddr) {
     let (mapping, address) = reserve(reference, count);
@@ -177,6 +168,7 @@ fn write(address: VirtAddr, offset: usize, value: usize) {
 }
 #[unsafe(no_mangle)]
 extern "C" fn run(args: usize, count: usize) -> ! {
+    space::boot(args, count);
     #[cfg(feature = "context")]
     context::run();
     if cfg!(feature = "io-exit") {
@@ -248,7 +240,7 @@ extern "C" fn run(args: usize, count: usize) -> ! {
     assert_eq!(read(address, 0), saved);
     assert_eq!(read(address, 4096), 0xabcdef);
     delete(CellObject::Slot(c));
-    assert!(cell::delete(ptr(&raw_memo(mapping, 0).object.to_bytes())).is_err());
+    assert!(nest::delete(mapping).is_err());
     retract(mapping, 0);
     retract(mapping, 1);
     delete(raw_memo(mapping, 0).object);

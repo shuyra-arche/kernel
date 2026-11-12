@@ -1,5 +1,5 @@
 use kernel_api::{
-    address::VirtAddr,
+    address::{PageCount, VirtAddr},
     boot::{
         args,
         ledger::{Entries, Name, Page, ResourceKind},
@@ -10,7 +10,8 @@ use kernel_api::{
         modifiable::Modifiable,
         nest::{NestInfo, NestKind, NestPhase},
         pend::{
-            AccordRequest, AccordTarget, Distributable, Limits, NestRights, Operations, PendRange,
+            AccordRequest, AccordTarget, Distributable, Limits, NestRights, NestScope, Operations,
+            PendScope,
         },
         sign::SignSource,
         wait::Wait,
@@ -55,12 +56,10 @@ fn context(token: PendId) -> NestInfo {
 }
 fn limits() -> Limits {
     Limits {
-        operations: Operations::Nest(
-            NestRights::all() & !(NestRights::DELETE | NestRights::ATTACH),
-        ),
+        operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
         modifiable: Modifiable::Yes,
         distributable: Distributable::No,
-        range: PendRange::Inherit,
+        scope: PendScope::Nest(NestScope::Whole),
     }
 }
 fn branch(root: PendId) -> PendId {
@@ -88,7 +87,7 @@ fn returned(token: PendId) {
 }
 fn alias(pos: CellPosition, token: PendId) -> CellPosition {
     CellPosition {
-        object: CellObject::Memo(token),
+        object: CellObject::Pend(token),
         ..pos
     }
 }
@@ -116,34 +115,22 @@ fn reserve(
     slot: SlotId,
     address: usize,
     writable: bool,
-) -> Result<CellPosition, kernel_api::abi::call::cell::CellFail> {
-    let bytes = CellCreate::Memo {
-        source: CellSource::Slot(ReferenceRange {
-            reference: slot,
-            offset: 0,
-            count: super::info(super::slot(slot, 0)).level.pages().unwrap(),
-        }),
-        destination: MemoDestination::External {
-            authority: token,
-            address: VirtAddr::new(address),
-            access: if writable {
-                Modifiable::Yes
-            } else {
-                Modifiable::No
-            },
-        },
-    }
-    .to_bytes();
-    let CreatedCell::Memo { token: mapping, .. } =
-        cell::create(PendId::NONE, super::ptr(&bytes)).map_err(|error| error.source)?
-    else {
-        panic!("Memo expected")
-    };
-    Ok(CellPosition {
-        object: CellObject::Memo(mapping),
-        page: 0,
-        generation: 1,
-    })
+) -> Result<CellPosition, kernel_api::abi::call::nest::NestFail> {
+    let level = super::info(super::slot(slot, 0)).level;
+    let (mapping, reserved) = nest::reserve(
+        token,
+        Placement::exact(VirtAddr::new(address), level.bytes().unwrap()).unwrap(),
+        PageCount::new(level.pages().unwrap()).unwrap(),
+        level,
+        if writable { 6 } else { 2 },
+    )
+    .map_err(|error| error.source)?;
+    assert_eq!(reserved.get(), address);
+    let position = super::memo(mapping, 0);
+    let observation = super::info(position);
+    assert_eq!(observation.state, CellState::Vacant);
+    assert_eq!(observation.level, level);
+    Ok(position)
 }
 fn wait(pos: CellPosition, state: CellState) {
     let until = room::clock() + 2_000_000_000;
@@ -202,16 +189,15 @@ fn transfer(bar: VirtAddr, address: usize, writing: bool) {
     complete(bar);
 }
 fn source(pos: CellPosition, published: bool) -> SignSource {
-    let CellObject::Memo(token) = pos.object else {
+    let CellObject::Pend(token) = pos.object else {
         panic!("external position")
     };
     let mut bytes = [0; kernel_api::model::pend::PendInfo::SIZE];
     pend::inspect(token, VirtAddr::new(bytes.as_mut_ptr() as usize)).unwrap();
     let observation = kernel_api::model::pend::PendInfo::from_bytes(&bytes).unwrap();
-    let kernel_api::model::pend::Target::Memo(id) = observation.target else {
-        panic!("Memo target")
+    let PendScope::Nest(NestScope::Mapping { id: mapping, .. }) = observation.limits.scope else {
+        panic!("mapping-scoped Nest grant expected")
     };
-    let mapping = MappingId::from_bytes(&(id.get() as u64).to_le_bytes()).unwrap();
     if published {
         SignSource::MappingPublished { token, mapping }
     } else {

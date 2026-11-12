@@ -166,7 +166,7 @@ fn accord(
             operations,
             modifiable,
             distributable: Distributable::No,
-            range: PendRange::Inherit,
+            scope: crate::space::range(crate::pend::inspect(root).limits.scope, PendRange::Inherit),
         },
     }
     .to_bytes();

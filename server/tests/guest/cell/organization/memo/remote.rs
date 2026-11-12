@@ -6,11 +6,11 @@ use kernel_api::{
         cell::*,
         identity::PendId,
         modifiable::Modifiable,
-        pend::{AccordTarget, MemoRights, Operations},
-        unit::{ControlId, ProgramKind, UnitCreate, UnitTarget},
+        pend::{AccordTarget, NestRights, Operations},
+        unit::{ControlId, CreatedUnit, ProgramKind, UnitCreate, UnitTarget},
     },
 };
-use kernel_client::call::{cell, nest, share_view, unit};
+use kernel_client::call::{nest, share_view, unit};
 const fn call(class: usize, slot: usize) -> usize {
     ((kernel_api::abi::VERSION as usize) << 48) | (class << 32) | slot
 }
@@ -28,7 +28,8 @@ pub(super) fn run(target: PendId) {
         guard: ControlId::NONE,
     }
     .to_bytes();
-    let UnitTarget::Team(team) = unit::create(crate::ptr(&descriptor)).unwrap() else {
+    let CreatedUnit::Team { team, nest: whole } = unit::create(crate::ptr(&descriptor)).unwrap()
+    else {
         panic!("Team expected");
     };
     let code = crate::allocate(1);
@@ -42,26 +43,14 @@ pub(super) fn run(target: PendId) {
     crate::retract(staging, 0);
     crate::delete(crate::raw_memo(staging, 0).object);
     let share = share_view::create(crate::license::get(), code, Modifiable::No).unwrap();
-    let descriptor = CellCreate::Memo {
-        source: CellSource::Pend {
-            token: share,
-            offset: 0,
-            count: 1,
-        },
-        destination: MemoDestination::Internal {
-            team,
-            placement: Placement::lowest(4096).unwrap(),
-            access: 10,
-        },
-    }
-    .to_bytes();
-    let CreatedCell::Memo {
-        token: execution,
-        address,
-    } = cell::create(PendId::NONE, crate::ptr(&descriptor)).unwrap()
-    else {
-        panic!("Memo expected");
-    };
+    let (execution, address) = crate::space::reserve(
+        whole,
+        Placement::lowest(4096).unwrap(),
+        1,
+        CellLevel::BASE,
+        10,
+    );
+    crate::handoff(crate::raw_memo(share, 0), crate::memo(execution, 0), false);
     crate::publish(execution, 0);
     let descriptor = UnitCreate::Task {
         team: Some(team),
@@ -71,13 +60,13 @@ pub(super) fn run(target: PendId) {
         stack: VirtAddr::new(0),
     }
     .to_bytes();
-    let UnitTarget::Task(task) = unit::create(crate::ptr(&descriptor)).unwrap() else {
+    let CreatedUnit::Task(task) = unit::create(crate::ptr(&descriptor)).unwrap() else {
         panic!("Task expected");
     };
     super::grant(
         target,
         AccordTarget::Task(task),
-        Operations::Memo(MemoRights::INSPECT | MemoRights::RETRACT),
+        Operations::Nest(NestRights::INSPECT | NestRights::RETRACT),
         1,
         1,
     );
@@ -99,6 +88,7 @@ pub(super) fn run(target: PendId) {
     }
 
     crate::lifecycle::return_pend(execution);
+    crate::lifecycle::return_pend(whole);
     crate::lifecycle::return_pend(share);
     crate::delete(CellObject::Slot(code));
     assert_eq!(

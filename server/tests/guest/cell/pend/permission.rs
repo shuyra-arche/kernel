@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn run() {
     use kernel_api::model::clone_view::CloneLimits;
-    use kernel_api::model::pend::{CloneRights, Distributable, Operations, ShareRights};
+    use kernel_api::model::pend::{CloneRights, Distributable, Operations, PendScope, ShareRights};
     use kernel_client::call::clone_view;
     let reference = super::super::allocate(1);
     let root = share_view::create(crate::license::get(), reference, Modifiable::Yes).unwrap();
@@ -10,7 +10,7 @@ pub(super) fn run() {
         operations: Operations::Share(ShareRights::OPEN | ShareRights::SHUT),
         modifiable: Modifiable::No,
         distributable: Distributable::No,
-        range: PendRange::Inherit,
+        scope: PendScope::Pages(PendRange::Inherit),
     };
     let bytes = AccordRequest {
         src: root,
@@ -50,6 +50,7 @@ pub(super) fn run() {
         token: child,
         limits: Limits {
             operations: Operations::Clone(CloneRights::PUSH),
+            scope: PendScope::Object,
             ..limits
         },
     }
@@ -79,27 +80,25 @@ pub(super) fn run() {
     }
     .to_bytes();
     pend::narrow(super::super::ptr(&bytes)).unwrap();
-    use kernel_api::model::{cell::*, identity::TeamId};
-    let bytes = CellCreate::Memo {
-        source: CellSource::Slot(ReferenceRange {
-            reference,
-            offset: 0,
-            count: 1,
-        }),
-        destination: MemoDestination::Internal {
-            team: TeamId::new(0),
-            placement: Placement::lowest(4096).unwrap(),
-            access: 2,
-        },
+    use kernel_api::model::cell::*;
+    let (mapping, _) = crate::space::reserve(
+        crate::space::get(),
+        Placement::lowest(4096).unwrap(),
+        1,
+        CellLevel::BASE,
+        2,
+    );
+    let bytes = CellAssociation {
+        source: crate::slot(reference, 0),
+        target: crate::memo(mapping, 0),
     }
     .to_bytes();
-    assert!(
-        kernel_client::call::cell::create(
-            kernel_api::model::identity::PendId::NONE,
-            super::super::ptr(&bytes)
-        )
-        .is_err()
+    assert!(kernel_client::call::cell::insert(crate::ptr(&bytes)).is_err());
+    assert_eq!(
+        crate::info(crate::raw_memo(mapping, 0)).state,
+        CellState::Vacant
     );
+    crate::delete(crate::raw_memo(mapping, 0).object);
     share_view::open(root).unwrap();
     share_view::shut(root).unwrap();
     pend::return_(root).unwrap();
@@ -114,7 +113,7 @@ pub(super) fn run() {
             operations: Operations::Clone(CloneRights::PEEK),
             modifiable: Modifiable::No,
             distributable: Distributable::No,
-            range: PendRange::Inherit,
+            scope: PendScope::Object,
         },
         mark: Mark::NONE,
     }
@@ -145,7 +144,7 @@ pub(super) fn run() {
             operations: Operations::Clone(CloneRights::DELETE),
             modifiable: Modifiable::No,
             distributable: Distributable::No,
-            range: PendRange::Inherit,
+            scope: PendScope::Object,
         },
         mark: Mark::NONE,
     }

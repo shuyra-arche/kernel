@@ -5,7 +5,7 @@ use core::{
 };
 use kernel_api::model::unit::ExitScope;
 use kernel_api::{
-    abi::call::{cell::CellFail, nest::NestFail, sign::SignReply},
+    abi::call::{nest::NestFail, sign::SignReply},
     model::{
         identity::TaskId,
         pend::ShareRights,
@@ -26,7 +26,10 @@ fn delegate(root: PendId, task: TaskId, operations: Operations, modifiable: Modi
             operations,
             modifiable,
             distributable: Distributable::No,
-            range: PendRange::Inherit,
+            scope: crate::space::range(
+                crate::pend::inspect(root).limits.scope,
+                kernel_api::model::pend::PendRange::Inherit,
+            ),
         },
     }
     .to_bytes();
@@ -34,6 +37,7 @@ fn delegate(root: PendId, task: TaskId, operations: Operations, modifiable: Modi
 }
 fn prepare(bar: PendId, root: PendId, task: TaskId) -> PendId {
     crate::license::delegate(task);
+    crate::space::delegate(crate::space::get(), task);
     let bar_child = delegate(
         bar,
         task,
@@ -54,7 +58,7 @@ extern "C" fn publisher() -> ! {
     // Leave a vacant reservation as well as the active mapping.
     reserve(root, slot, ADDRESS + 4096, true).unwrap();
     publish(pos);
-    let CellObject::Memo(mapping) = pos.object else {
+    let CellObject::Pend(mapping) = pos.object else {
         unreachable!();
     };
     MEMO.store(mapping.get(), Ordering::Release);
@@ -118,13 +122,13 @@ pub(in super::super) fn death(at: usize, count: usize) {
     };
     assert_eq!(
         reserve(root, contender, ADDRESS + 8192, true),
-        Err(CellFail::Busy)
+        Err(NestFail::Busy)
     );
     EXIT.store(1, Ordering::Release);
     assert!(super::super::lifecycle::wait_task(task));
     assert_eq!(super::super::lifecycle::result(task), (1, 77));
     let pos = CellPosition {
-        object: CellObject::Memo(old_mapping),
+        object: CellObject::Pend(old_mapping),
         page: 0,
         generation: 1,
     };

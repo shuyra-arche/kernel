@@ -2,24 +2,12 @@ use crate::{
     Console, delete, handoff, info, memo, ptr, publish, raw_memo, read, retract, slot, write,
 };
 use core::fmt::Write;
-use kernel_api::{
-    address::VirtAddr,
-    model::{
-        cell::*,
-        identity::{PendId, TeamId},
-    },
-};
+use kernel_api::{address::VirtAddr, model::cell::*};
 use kernel_client::call::cell;
 mod authority;
 pub(crate) fn allocate(level: usize, count: usize) -> SlotId {
-    let request =
-        CellCreate::Slot(Allocation::at_level(CellLevel::new(level).unwrap(), count).unwrap())
-            .to_bytes();
-    let CreatedCell::Slot(slot) = cell::create(crate::license::get(), ptr(&request)).unwrap()
-    else {
-        panic!("Slot expected")
-    };
-    slot
+    let allocation = Allocation::at_level(CellLevel::new(level).unwrap(), count).unwrap();
+    cell::create(crate::license::get(), allocation).unwrap()
 }
 pub(crate) fn attach_large(slot_id: SlotId) -> (kernel_api::model::identity::PendId, VirtAddr) {
     let (mapping, address) = crate::reserve(slot_id, 512);
@@ -39,27 +27,13 @@ fn absent(slot_id: SlotId) {
     );
 }
 fn reserve_huge(reference: SlotId) -> (kernel_api::model::identity::PendId, VirtAddr) {
-    let request = CellCreate::Memo {
-        source: CellSource::Slot(ReferenceRange {
-            reference,
-            offset: 0,
-            count: 1 << 18,
-        }),
-        destination: MemoDestination::Internal {
-            team: TeamId::new(0),
-            placement: Placement::lowest(1 << 30).unwrap(),
-            access: 6,
-        },
-    }
-    .to_bytes();
-    let CreatedCell::Memo {
-        token: mapping,
-        address,
-    } = cell::create(PendId::NONE, ptr(&request)).unwrap()
-    else {
-        panic!("Memo expected")
-    };
-    (mapping, address)
+    crate::space::reserve(
+        crate::space::get(),
+        Placement::lowest(1 << 30).unwrap(),
+        1 << 18,
+        info(slot(reference, 0)).level,
+        6,
+    )
 }
 pub(crate) fn run() {
     authority::run();
@@ -82,20 +56,22 @@ pub(crate) fn run() {
         )
         .is_err()
     );
-    let partial = CellCreate::Memo {
-        source: CellSource::Slot(ReferenceRange {
-            reference: a,
-            offset: 0,
-            count: 1,
-        }),
-        destination: MemoDestination::Internal {
-            team: TeamId::new(0),
-            placement: Placement::lowest(4096).unwrap(),
-            access: 6,
-        },
+    let (partial, _) = crate::space::reserve(
+        crate::space::get(),
+        Placement::lowest(4096).unwrap(),
+        1,
+        CellLevel::BASE,
+        6,
+    );
+    assert_eq!(info(raw_memo(partial, 0)).state, CellState::Vacant);
+    let association = CellAssociation {
+        source: slot(a, 0),
+        target: memo(partial, 0),
     }
     .to_bytes();
-    assert!(cell::create(PendId::NONE, ptr(&partial)).is_err());
+    assert!(cell::insert(ptr(&association)).is_err());
+    assert_eq!(info(raw_memo(partial, 0)).state, CellState::Vacant);
+    delete(raw_memo(partial, 0).object);
     handoff(slot(a, 0), slot(b, 0), false);
     assert_eq!(info(slot(b, 0)).page, old_id);
     assert!(cell::split(b).is_err());
@@ -181,9 +157,8 @@ pub(crate) fn run() {
         delete(raw_memo(mapping, 0).object);
         delete(CellObject::Slot(huge));
     }
-    let request =
-        CellCreate::Slot(Allocation::at_level(CellLevel::new(5).unwrap(), 1).unwrap()).to_bytes();
-    assert!(cell::create(crate::license::get(), ptr(&request)).is_err());
+    let allocation = Allocation::at_level(CellLevel::new(5).unwrap(), 1).unwrap();
+    assert!(cell::create(crate::license::get(), allocation).is_err());
     let _ = writeln!(
         Console,
         "PASS cell-levels contiguous=1 boundary=1 movement=1 split=1 merge=1 stale=1 zero=1 capacity=1"

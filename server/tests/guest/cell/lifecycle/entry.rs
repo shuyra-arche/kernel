@@ -1,7 +1,7 @@
 use core::fmt::Write;
 use kernel_api::{
     address::{PAGE_SIZE, VirtAddr},
-    model::unit::{ExitScope, UnitCreate, UnitTarget},
+    model::unit::{CreatedUnit, ExitScope, UnitCreate, UnitTarget},
 };
 use kernel_client::call::unit;
 
@@ -23,10 +23,10 @@ pub(crate) fn run() {
         }
         .to_bytes();
         let target = unit::create(crate::ptr(&bytes)).unwrap();
-        let UnitTarget::Task(task) = target else {
+        let CreatedUnit::Task(task) = target else {
             panic!("expected Task");
         };
-        unit::resume(target).unwrap();
+        unit::resume(UnitTarget::Task(task)).unwrap();
         assert!(super::wait_task(task));
         assert_eq!(super::result(task), (1, count + 2));
         super::delete(task);

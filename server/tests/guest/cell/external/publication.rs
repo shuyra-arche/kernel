@@ -38,7 +38,7 @@ pub(in super::super) fn run(at: usize, count: usize) {
     let narrow = NarrowRequest {
         token: root,
         limits: Limits {
-            operations: Operations::Nest(NestRights::all() & !NestRights::ATTACH),
+            operations: Operations::Nest(NestRights::whole() & !NestRights::ATTACH),
             distributable: Distributable::Yes,
             ..limits()
         },

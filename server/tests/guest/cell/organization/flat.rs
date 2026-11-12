@@ -8,7 +8,7 @@ use kernel_api::{
         modifiable::Modifiable,
         pend::{
             AccordRequest, AccordTarget, Distributable, FlatRights, Limits, NarrowRequest,
-            Operations, PendRange,
+            Operations, PendRange, PendScope,
         },
     },
 };
@@ -26,7 +26,7 @@ fn derive(root: PendId, rights: FlatRights, offset: usize, count: usize) -> Pend
             operations: Operations::Flat(rights),
             modifiable: Modifiable::Yes,
             distributable: Distributable::No,
-            range: PendRange::Pages { offset, count },
+            scope: PendScope::Pages(PendRange::Pages { offset, count }),
         },
         mark: Mark::NONE,
     }
@@ -97,10 +97,10 @@ pub(super) fn run() {
             ),
             modifiable: Modifiable::Yes,
             distributable: Distributable::No,
-            range: PendRange::Pages {
+            scope: PendScope::Pages(PendRange::Pages {
                 offset: 1,
                 count: 1,
-            },
+            }),
         },
     }
     .to_bytes();

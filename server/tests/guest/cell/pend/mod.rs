@@ -28,7 +28,7 @@ fn accord(
         target,
         limits: Limits {
             modifiable: subset,
-            range,
+            scope: crate::space::range(inspect(src).limits.scope, range),
             ..inspect(src).limits
         },
         mark: Mark::NONE,
@@ -46,7 +46,7 @@ fn narrow(
         token,
         limits: Limits {
             modifiable,
-            range,
+            scope: crate::space::range(inspect(token).limits.scope, range),
             ..inspect(token).limits
         },
     }
@@ -167,30 +167,16 @@ pub(super) fn run() {
     super::write(parent_address, 3 * 4096 + 8, 0x45678);
     assert_eq!(super::read(address, 8), 0x45678);
     {
-        use kernel_api::model::{cell::*, identity::TeamId};
+        use kernel_api::model::cell::*;
         use kernel_client::call::cell;
-        let spec = CellCreate::Memo {
-            source: CellSource::Pend {
-                token: leaf,
-                offset: 0,
-                count: 1,
-            },
-            destination: MemoDestination::Internal {
-                team: TeamId::new(0),
-                placement: Placement::lowest(4096).unwrap(),
-                access: 2,
-            },
-        }
-        .to_bytes();
-        let made =
-            cell::create(kernel_api::model::identity::PendId::NONE, super::ptr(&spec)).unwrap();
-        let CreatedCell::Memo {
-            token: mapping,
-            address: _address,
-        } = made
-        else {
-            panic!("expected Memo")
-        };
+        let (mapping, _address) = crate::space::reserve(
+            crate::space::get(),
+            Placement::lowest(4096).unwrap(),
+            1,
+            CellLevel::BASE,
+            2,
+        );
+        crate::handoff(crate::raw_memo(leaf, 0), crate::memo(mapping, 0), false);
         assert_eq!(
             super::info(super::raw_memo(mapping, 0)).state,
             CellState::Ready
@@ -259,7 +245,10 @@ pub(super) fn run() {
     );
     pend::return_(leaf).unwrap();
     narrow(child, Modifiable::No, PendRange::pages(1, 1).unwrap()).unwrap();
-    assert_eq!(inspect(child).limits.range, PendRange::pages(3, 1).unwrap());
+    assert_eq!(
+        inspect(child).limits.scope.range(),
+        Some(PendRange::pages(3, 1).unwrap())
+    );
     let (narrowed, len) = share_view::open(child).unwrap();
     assert_eq!(len, 4096);
     assert_eq!(super::read(narrowed, 0), 0x13579);

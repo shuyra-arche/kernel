@@ -15,8 +15,6 @@ memo_remote_start:
     sd t1, 136(sp)
     sd zero, 144(sp)
     sd zero, 152(sp)
-    sd zero, 160(sp)
-    sd zero, 168(sp)
 1:
     addi a0, sp, 128
     addi a1, sp, 192
@@ -24,7 +22,7 @@ memo_remote_start:
     ebreak
     bnez a0, 9f
     ld t0, 192(sp)
-    sd t0, 168(sp)
+    sd t0, 152(sp)
     ld t0, 200(sp)
     li t1, 1
     beq t0, t1, 3f
@@ -49,7 +47,7 @@ memo_remote_start:
     li t0, -1
     bne a0, t0, 9f
     li t0, 1
-    sd t0, 160(sp)
+    sd t0, 144(sp)
     addi a0, sp, 128
     addi a1, sp, 192
     li a7, {inspect}

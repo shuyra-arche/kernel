@@ -8,8 +8,8 @@ use kernel_api::{
         identity::{Mark, PendId},
         modifiable::Modifiable,
         pend::{
-            AccordRequest, AccordTarget, Distributable, FlatRights, Limits, MemoRights,
-            NarrowRequest, Operations, PendInfo, PendRange,
+            AccordRequest, AccordTarget, Distributable, FlatRights, Limits, NarrowRequest,
+            NestRights, Operations, PendInfo, PendRange,
         },
         unit::{ExitScope, UnitTarget},
     },
@@ -30,7 +30,10 @@ fn grant(
             operations,
             modifiable: Modifiable::Yes,
             distributable: Distributable::No,
-            range: PendRange::Pages { offset, count },
+            scope: crate::space::range(
+                crate::pend::inspect(root).limits.scope,
+                PendRange::Pages { offset, count },
+            ),
         },
     }
     .to_bytes()))
@@ -71,7 +74,7 @@ pub(super) fn run() {
     let reader = grant(
         mapping,
         AccordTarget::Caller,
-        Operations::Memo(MemoRights::INSPECT),
+        Operations::Nest(NestRights::INSPECT),
         1,
         1,
     );
@@ -88,12 +91,12 @@ pub(super) fn run() {
         .is_err()
     );
     assert!(cell::remove(ptr(&memo(reader, 0).to_bytes())).is_err());
-    assert!(cell::delete(ptr(&CellObject::Memo(reader).to_bytes())).is_err());
+    assert!(kernel_client::call::nest::release(reader).is_err());
     let task = crate::lifecycle::spawn(recipient as *const () as usize);
     grant(
         mapping,
         AccordTarget::Task(task),
-        Operations::Memo(MemoRights::INSPECT),
+        Operations::Nest(NestRights::INSPECT),
         1,
         1,
     );
@@ -104,11 +107,11 @@ pub(super) fn run() {
     let manager = grant(
         mapping,
         AccordTarget::Caller,
-        Operations::Memo(MemoRights::all()),
+        Operations::Nest(NestRights::mapping()),
         1,
         1,
     );
-    assert!(cell::delete(ptr(&CellObject::Memo(manager).to_bytes())).is_err());
+    assert!(kernel_client::call::nest::release(manager).is_err());
     crate::retract(mapping, 1);
     let before = memo(manager, 0);
     cell::remove(ptr(&before.to_bytes())).unwrap();
@@ -140,7 +143,7 @@ pub(super) fn run() {
     .to_bytes();
     assert!(cell::insert(ptr(&bypass)).is_err());
     assert_eq!(info(raw_memo(alias, 1)).state, CellState::Vacant);
-    delete(CellObject::Memo(alias));
+    delete(CellObject::Pend(alias));
     assert_eq!(info(raw_memo(mapping, 0)).state, CellState::Published);
     assert_eq!(info(raw_memo(mapping, 1)).state, CellState::Ready);
     assert!(cell::publish(ptr(&memo(mapping, 1).to_bytes())).is_err());
@@ -170,13 +173,16 @@ pub(super) fn run() {
     let narrow = NarrowRequest {
         token: mapping,
         limits: Limits {
-            operations: Operations::Memo(MemoRights::INSPECT | MemoRights::RETRACT),
+            operations: Operations::Nest(NestRights::INSPECT | NestRights::RETRACT),
             modifiable: Modifiable::No,
             distributable: Distributable::No,
-            range: PendRange::Pages {
-                offset: 0,
-                count: 1,
-            },
+            scope: crate::space::mapping(
+                mapping,
+                PendRange::Pages {
+                    offset: 0,
+                    count: 1,
+                },
+            ),
         },
     }
     .to_bytes();
