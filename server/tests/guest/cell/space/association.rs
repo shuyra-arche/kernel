@@ -99,20 +99,20 @@ fn protect_denied(mapping: PendId) {
     assert_eq!(crate::info(position), before);
 }
 
-fn readonly() {
+fn readonly(source_access: u64, source_modifiable: Modifiable, supplying_modifiable: Modifiable) {
     let slot = crate::allocate(1);
     let (staging, address) = crate::attach(slot, 1);
     crate::write(address, 0, 0xabcdef);
     crate::retract(staging, 0);
     crate::delete(CellObject::Pend(staging));
     crate::lifecycle::return_pend(staging);
-    let share = share_view::create(crate::license::get(), slot, Modifiable::No).unwrap();
+    let share = share_view::create(crate::license::get(), slot, source_modifiable).unwrap();
     let (source, _) = reserve(
         get(),
         Placement::lowest(4096).unwrap(),
         1,
         CellLevel::BASE,
-        2,
+        source_access,
     );
     let invalid = CellAssociation {
         source: kernel_api::model::cell::CellPosition {
@@ -129,7 +129,7 @@ fn readonly() {
         AccordTarget::Caller,
         Limits {
             operations: Operations::Nest(NestRights::INSPECT | NestRights::INSERT),
-            modifiable: Modifiable::No,
+            modifiable: supplying_modifiable,
             distributable: Distributable::No,
             scope: mapping(source, PendRange::Inherit),
         },
@@ -214,6 +214,12 @@ fn readonly() {
 
 pub(super) fn run() {
     sources();
-    readonly();
-    writeln!(crate::Console, "PASS nest-association unrelated=2 replacement=1 stale=1 moved-source=1 readonly-copies=2 write-fault=1 alias-return=1").unwrap();
+    for (access, source, supplying) in [
+        (6, Modifiable::Yes, Modifiable::No),
+        (2, Modifiable::Yes, Modifiable::Yes),
+        (6, Modifiable::No, Modifiable::Yes),
+    ] {
+        readonly(access, source, supplying);
+    }
+    writeln!(crate::Console, "PASS nest-association unrelated=2 replacement=1 stale=1 moved-source=1 readonly-copies=2 write-fault=1 alias-return=1 ceilings=3").unwrap();
 }

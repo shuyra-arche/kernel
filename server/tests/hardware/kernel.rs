@@ -338,7 +338,7 @@ fn run(mode: &str) {
             }
             for marker in [
                 "PASS nest-scope sourceless=1 level=1 identity=1 attenuation=1 licensed=1 empty-ledger=1",
-                "PASS nest-association unrelated=2 replacement=1 stale=1 moved-source=1 readonly-copies=2 write-fault=1 alias-return=1",
+                "PASS nest-association unrelated=2 replacement=1 stale=1 moved-source=1 readonly-copies=2 write-fault=1 alias-return=1 ceilings=3",
                 "PASS nest-protection foreign-freeze=1 busy-unchanged=1 remove-thaw=1 execution-update=1",
                 "PASS nest-retirement child-return=1 full-release=1 partial-denied=1 sibling=1 narrowed-root=1 original-span=1",
                 "PASS nest-source-exit foreign-cpu=1 deleted-slot=1 alias-return=1 alias-narrow=1 vacant-before-reclaim=1 stale-pte-fault=1 sibling=1 reservation=1",
