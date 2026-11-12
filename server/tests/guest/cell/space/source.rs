@@ -216,13 +216,24 @@ pub(super) fn run() {
     );
     let probe = crate::lifecycle::spawn(stale_read as *const () as usize);
     unit::resume(UnitTarget::Task(probe)).unwrap();
-    assert!(crate::lifecycle::wait_task(probe));
-    let result = crate::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(probe)));
-    assert!(
-        matches!(result.exit, Some((ExitCause::Fault, _))),
-        "stale PTE survived: {result:?}"
-    );
-    crate::lifecycle::delete(probe);
+    // Vacant retains its reservation: the fault waits until mapping Release.
+    let deadline = room::clock() + 5_000_000_000;
+    loop {
+        let result = crate::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(probe)));
+        assert_ne!(
+            result.state,
+            UnitState::Exited,
+            "stale PTE survived: {result:?}"
+        );
+        if result.state == UnitState::Waiting {
+            break;
+        }
+        assert!(
+            room::clock() < deadline,
+            "stale read did not fault: {result:?}"
+        );
+        room::yield_();
+    }
     assert_eq!(crate::info(crate::raw_memo(observer, 1)), sibling);
     assert_eq!(crate::read(address, 4096), 0x2468ace0);
     assert!(crate::lifecycle::wait_task(a));
@@ -230,6 +241,13 @@ pub(super) fn run() {
     crate::lifecycle::delete(a);
     crate::lifecycle::return_pend(observer);
     CLEANUP.store(1, Ordering::Release);
+    assert!(crate::lifecycle::wait_task(probe));
+    let result = crate::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(probe)));
+    assert!(
+        matches!(result.exit, Some((ExitCause::Fault, _))),
+        "released mapping did not terminate the fault wait: {result:?}"
+    );
+    crate::lifecycle::delete(probe);
     assert!(crate::lifecycle::wait_task(b));
     assert_eq!(crate::lifecycle::result(b), (1, 78));
     crate::lifecycle::delete(b);

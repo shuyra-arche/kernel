@@ -377,6 +377,10 @@ an unresolved hardware error. Insertion/removal, publication, retraction and
 protection advance a non-wrapping generation. Inspect refreshes after Busy;
 replaying an old generation never starts a later cycle. Slot positions use
 generation zero and act on the current holding, not a historical snapshot.
+A source-free reservation never materializes or publishes backing through a CPU
+page fault. A fault on a Vacant position waits for explicit Insert/Publish while
+the reservation remains live; Release makes that wait invalid. The missing PTE
+is not permission to remove or reuse the reservation.
 
 Retract returns Busy before changing the mapping if another publication still
 retains write access to the Page. Successful Retract retains a persistent freeze
