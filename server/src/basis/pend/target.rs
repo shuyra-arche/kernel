@@ -17,7 +17,10 @@ use kernel_api::{
     model::{
         identity::{PendId, TaskId},
         modifiable::Modifiable,
-        pend::{Distributable, Operations, Target as Identity, ViewTarget},
+        pend::{
+            Distributable, NestRights, NestScope, Operations, PendRange, PendScope,
+            Target as Identity, ViewTarget,
+        },
         sign::{SignId, SignRights},
         view::{ViewId, ViewKind},
     },
@@ -31,7 +34,6 @@ pub(crate) enum Target {
     View(View),
     Flat(Arc<Sharing>),
     Sign(Arc<Endpoint>),
-    Memo(Arc<crate::basis::nest::authority::memo::Memo>),
     Nest {
         owner: TaskId,
         nest: Arc<crate::basis::nest::Nest>,
@@ -46,7 +48,6 @@ impl Target {
     pub(crate) fn identity(&self) -> Identity {
         match self {
             Self::None { .. } => Identity::None,
-            Self::Memo(memo) => Identity::Memo(memo.id),
             Self::View(view) => Identity::View(match view.kind() {
                 ViewKind::Clone => ViewTarget::Clone(ViewId::new(view.id())),
                 ViewKind::Share => ViewTarget::Share(ViewId::new(view.id())),
@@ -66,7 +67,6 @@ impl Target {
         match self {
             Self::None { owner } | Self::Nest { owner, .. } => *owner,
             Self::Flat(meta) => meta.owner(),
-            Self::Memo(memo) => memo.owner,
             Self::View(view) => view.owner(),
             Self::Sign(sign) => sign.owner(),
         }
@@ -74,8 +74,7 @@ impl Target {
     pub(crate) fn alive(&self) -> bool {
         match self {
             Self::None { .. } => true,
-            Self::Memo(memo) => memo.alive(),
-            Self::Nest { nest, .. } => !nest.is_closed(),
+            Self::Nest { nest, .. } => nest.is_open(),
             Self::Flat(meta) => meta.alive(),
             Self::View(view) => view.alive(),
             Self::Sign(sign) => sign.alive(),
@@ -83,23 +82,16 @@ impl Target {
     }
     pub(crate) fn seal(&self) -> Result<(), PendFail> {
         match self {
-            Self::None { .. } | Self::Memo(_) => {}
+            Self::None { .. } | Self::Nest { .. } => {}
             Self::Flat(meta) => crate::basis::flat::sharing::seal(meta),
             Self::View(view) => view.seal(),
             Self::Sign(sign) => endpoint::seal(sign),
-            Self::Nest { nest, .. } => {
-                if nest.is_external() {
-                    nest.close_external().map_err(|_| PendFail::Busy)?;
-                } else {
-                    nest.retire().map_err(|_| PendFail::Busy)?;
-                }
-            }
         }
         Ok(())
     }
     pub(crate) fn wake(&self) -> Option<(WakeKey, Weak<Anchor>)> {
         Some(match self {
-            Self::None { .. } | Self::Memo(_) => return None,
+            Self::None { .. } => return None,
             Self::Nest { nest, .. } => (WakeKey::ExternalNest { id: nest.id() }, nest.life()),
             Self::Flat(meta) => (WakeKey::seal(ViewKind::Share, meta.id), meta.life()),
             Self::View(view) => (WakeKey::seal(view.kind(), view.id()), view.life()),
@@ -140,7 +132,6 @@ impl Target {
     pub(crate) fn same(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Flat(a), Self::Flat(b)) => Arc::ptr_eq(a, b),
-            (Self::Memo(a), Self::Memo(b)) => Arc::ptr_eq(a, b),
             (Self::View(a), Self::View(b)) => a.same(b),
             (Self::Sign(a), Self::Sign(b)) => Arc::ptr_eq(a, b),
             (Self::Nest { nest: a, .. }, Self::Nest { nest: b, .. }) => Arc::ptr_eq(a, b),
@@ -151,55 +142,71 @@ impl Target {
         &self,
         modifiable: Modifiable,
         token: PendId,
-        window: Option<(PageOffset, PageCount)>,
+        scope: Option<PendScope>,
     ) -> Result<Arc<Pend>, PendFail> {
-        match self {
-            Self::None { .. } if modifiable == Modifiable::No && window.is_none() => {
-                Pend::try_new_window(
-                    modifiable,
-                    None,
+        let (scope, operations) = match self {
+            Self::None { .. }
+                if modifiable == Modifiable::No
+                    && scope.is_none_or(|scope| scope == PendScope::Object) =>
+            {
+                (
+                    PendScope::Object,
                     Operations::None(kernel_api::model::pend::CreationRights::all()),
-                    Distributable::Yes,
                 )
             }
-            Self::Memo(memo) => Pend::try_new_window(
-                modifiable,
-                window.or(Some((PageOffset::ZERO, memo.count))),
-                Operations::Memo(kernel_api::model::pend::MemoRights::all()),
-                Distributable::Yes,
-            ),
             Self::Flat(meta) => {
-                let authority = Pend::try_new_window(
-                    modifiable,
-                    window,
+                let scope = scope.unwrap_or(PendScope::Pages(PendRange::Pages {
+                    offset: 0,
+                    count: meta.source().page_count().get(),
+                }));
+                let PendScope::Pages(PendRange::Pages { offset, count }) = scope else {
+                    return Err(PendFail::Denied);
+                };
+                meta.source()
+                    .range(
+                        PageOffset::new(offset),
+                        PageCount::new(count).ok_or(PendFail::Denied)?,
+                    )
+                    .map_err(|_| PendFail::NotAligned)?;
+                (
+                    scope,
                     Operations::Flat(kernel_api::model::pend::FlatRights::all()),
-                    Distributable::Yes,
-                )?;
-                meta.register_pend(token, authority.clone())?;
-                Ok(authority)
-            }
-            Self::View(view) => view.new_pend(modifiable, token, window),
-            Self::Sign(_) if modifiable == Modifiable::No && window.is_none() => {
-                Pend::try_new_window(
-                    modifiable,
-                    None,
-                    Operations::Sign(SignRights::all()),
-                    Distributable::Yes,
                 )
             }
-            Self::Nest { .. } if window.is_none() => Pend::try_new_window(
-                modifiable,
-                None,
-                Operations::Nest(kernel_api::model::pend::NestRights::all()),
-                Distributable::Yes,
-            ),
-            _ => Err(PendFail::Denied),
+            Self::View(view) => return view.new_pend(modifiable, token, scope),
+            Self::Sign(_)
+                if modifiable == Modifiable::No
+                    && scope.is_none_or(|scope| scope == PendScope::Object) =>
+            {
+                (PendScope::Object, Operations::Sign(SignRights::all()))
+            }
+            Self::Nest { nest, .. } => {
+                let scope = scope.unwrap_or(PendScope::Nest(NestScope::Whole));
+                let rights = match scope {
+                    PendScope::Nest(NestScope::Whole) if nest.is_adopted() => {
+                        NestRights::INSPECT | NestRights::RESERVE
+                    }
+                    PendScope::Nest(NestScope::Whole) => NestRights::whole(),
+                    PendScope::Nest(NestScope::Mapping {
+                        range: PendRange::Pages { .. },
+                        ..
+                    }) if PendScope::of(scope.words()) == Some(scope) => NestRights::mapping(),
+                    _ => return Err(PendFail::Denied),
+                };
+                (scope, Operations::Nest(rights))
+            }
+            _ => return Err(PendFail::Denied),
+        };
+        let authority = Pend::try_new_scope(modifiable, scope, operations, Distributable::Yes)?;
+        if let Self::Flat(meta) = self {
+            meta.register_pend(token, authority.clone())?;
         }
+        Ok(authority)
     }
     pub(crate) fn release_pend(&self, token: PendId) {
         crate::basis::room::interrupt::withdraw(token);
         match self {
-            Self::None { .. } | Self::Nest { .. } | Self::Memo(_) => {}
+            Self::None { .. } | Self::Nest { .. } => {}
             Self::Flat(meta) => meta.release_pend(token),
             Self::View(view) => view.release_pend(token),
             Self::Sign(sign) => endpoint::release_authority(sign, token),

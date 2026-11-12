@@ -3,20 +3,36 @@ use kernel_api::{
     abi::call::pend::PendFail,
     model::{
         modifiable::Modifiable::{No, Yes},
-        pend::{CreationRights, Distributable, Limits, NestRights, Operations, PendStatus},
+        pend::{
+            CreationRights, Distributable, Limits, NestRights, NestScope, Operations, PendRange,
+            PendScope, PendStatus,
+        },
         sign::SignRights,
     },
 };
 use std::sync::Arc;
 fn root(operations: Operations) -> Arc<Pend> {
-    Pend::try_new_window(No, None, operations, Distributable::Yes).unwrap()
+    let scope = match operations {
+        Operations::Nest(rights) if NestRights::whole().contains(rights) => {
+            PendScope::Nest(NestScope::Whole)
+        }
+        Operations::Nest(_) => PendScope::Nest(NestScope::Mapping {
+            id: kernel_api::model::cell::MappingId::from_bytes(&1u64.to_le_bytes()).unwrap(),
+            range: PendRange::Pages {
+                offset: 0,
+                count: 8,
+            },
+        }),
+        _ => PendScope::Object,
+    };
+    Pend::try_new_scope(No, scope, operations, Distributable::Yes).unwrap()
 }
 #[test]
 fn logical_closure_rejects_unvisited_descendants_and_keeps_siblings_alive() {
     for operations in [
         Operations::None(CreationRights::all()),
         Operations::Sign(SignRights::all()),
-        Operations::Nest(NestRights::all()),
+        Operations::Nest(NestRights::whole()),
     ] {
         let parent = root(operations);
         let branch = root(operations);
@@ -56,7 +72,8 @@ fn ancestry_is_immutable_acyclic_and_has_an_admission_bound() {
 #[test]
 fn logical_closure_does_not_return_a_hardware_borrow() {
     let operations = Operations::None(CreationRights::empty());
-    let parent = Pend::try_new_window(Yes, None, operations, Distributable::Yes).unwrap();
+    let parent =
+        Pend::try_new_scope(Yes, PendScope::Object, operations, Distributable::Yes).unwrap();
     let leaf = root(operations);
     parent.borrow_external(&leaf).unwrap();
     parent.invalidate();
@@ -90,7 +107,7 @@ fn ledger_closure_invalidates_unvisited_descendants_without_reopening_a_borrow()
 
 #[test]
 fn retirement_retention_does_not_freeze_narrowing_or_restore_authority() {
-    let parent = root(Operations::Nest(NestRights::all()));
+    let parent = root(Operations::Nest(NestRights::whole()));
     parent.retain_retirement().unwrap();
     let limit = Limits {
         operations: Operations::Nest(NestRights::INSPECT),
@@ -98,7 +115,7 @@ fn retirement_retention_does_not_freeze_narrowing_or_restore_authority() {
         ..parent.limits()
     };
     assert_eq!(parent.can_narrow(limit), Ok(()));
-    parent.narrow(limit, None).unwrap();
+    parent.narrow(limit).unwrap();
     assert!(parent.permits(limit.operations));
     assert!(!parent.permits(Operations::Nest(NestRights::PUBLISH)));
     assert!(!parent.limits().permits_child(limit));
@@ -117,17 +134,17 @@ fn retirement_retention_does_not_freeze_narrowing_or_restore_authority() {
 
 #[test]
 fn publication_permission_cannot_narrow_until_its_exact_route_returns() {
-    let branch = root(Operations::Nest(NestRights::all()));
+    let branch = root(Operations::Nest(NestRights::whole()));
     branch.retain_retirement().unwrap();
     branch.retain_route().unwrap();
     let limit = Limits {
         operations: Operations::Nest(NestRights::INSPECT),
         ..branch.limits()
     };
-    assert_eq!(branch.can_narrow(limit), Err(PendFail::Busy));
-    assert_eq!(branch.narrow(limit, None), Err(PendFail::Busy));
+    assert_eq!(branch.can_narrow(limit), Ok(()));
+    assert_eq!(branch.narrow(limit), Err(PendFail::Busy));
     unsafe { branch.release_route() };
-    branch.narrow(limit, None).unwrap();
+    branch.narrow(limit).unwrap();
     assert!(branch.external_pending());
     branch.invalidate();
     assert_eq!(branch.settle(), Err(PendFail::Busy));
@@ -137,7 +154,7 @@ fn publication_permission_cannot_narrow_until_its_exact_route_returns() {
 
 #[test]
 fn child_retirement_does_not_discharge_root_or_sibling_obligations() {
-    let operations = Operations::Nest(NestRights::all());
+    let operations = Operations::Nest(NestRights::whole());
     let parent = root(operations);
     parent.retain_retirement().unwrap();
     let first = root(operations);

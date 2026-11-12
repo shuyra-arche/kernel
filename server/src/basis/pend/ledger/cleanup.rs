@@ -3,7 +3,13 @@
 use super::entry::PendEntry;
 use crate::basis::{flat::sharing::SharingOperation, unit::task::Task};
 use alloc::sync::{Arc, Weak};
-use kernel_api::{abi::call::pend::PendFail, model::identity::PendId};
+use kernel_api::{
+    abi::call::{cell::CellFail, pend::PendFail},
+    model::{
+        identity::PendId,
+        pend::{NestScope, PendScope},
+    },
+};
 
 /// Only the leaf's ledger and its immediate parent's ledger participate. A
 /// failed try acquires no responsibility and the retained root can be retried.
@@ -131,10 +137,26 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
         // both the closed authority and its exact mapping and hardware obligations.
         if let Some(meta) = entry.target().memory() {
             meta.close_maps(Some(entry.token()))?;
+            crate::basis::nest::authority::withdraw_source_branch(&meta, entry.token(), true)?;
             crate::basis::flat::authority::retire_block(&meta, entry.authority())?;
         }
-        if let crate::basis::pend::Target::Memo(memo) = entry.target() {
-            memo.withdraw(&entry)?;
+        if let crate::basis::pend::Target::Nest { nest, .. } = entry.target() {
+            match entry.scope() {
+                PendScope::Nest(NestScope::Mapping { id, .. }) => {
+                    if nest.mapping_root(id, entry.authority()) {
+                        nest.release_mapping(id).map_err(mapping_failure)?;
+                    } else {
+                        let window = entry.authority().window().ok_or(PendFail::Denied)?;
+                        nest.withdraw_mapping(id, window, entry.authority())?;
+                    }
+                }
+                PendScope::Nest(NestScope::Whole)
+                    if entry.sire().is_none() && !nest.is_adopted() && !nest.is_external() =>
+                {
+                    nest.retire().map_err(|_| PendFail::Busy)?;
+                }
+                _ => {}
+            }
         }
         remove(&holder, &entry)?;
         if Arc::ptr_eq(&root, &entry) {
@@ -142,6 +164,14 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
         }
     }
     Err(PendFail::Busy)
+}
+
+fn mapping_failure(error: CellFail) -> PendFail {
+    match error {
+        CellFail::Busy => PendFail::Busy,
+        CellFail::OutOfMemory => PendFail::OutOfMemory,
+        _ => PendFail::Denied,
+    }
 }
 
 pub(crate) fn return_(task: &Arc<Task>, token: PendId) -> Result<(), PendFail> {
@@ -178,19 +208,21 @@ pub(crate) fn doom(task: &Arc<Task>) {
 pub(crate) fn retire(task: &Arc<Task>) -> Result<(), PendFail> {
     let entry = task.pend.entries.lock().iter().next().cloned();
     let Some(entry) = entry else {
-        return if task.pend.references.clear() {
+        return if task.pend.references.retire(task)? {
             Ok(())
         } else {
             Err(PendFail::Busy)
         };
     };
-    if task.ident.id.get() != 0 && entry.target().owner() == task.ident.id {
-        // Keep a Nest registration until its retained close stages complete.
+    if task.ident.id.get() != 0
+        && entry.target().owner() == task.ident.id
+        && !matches!(entry.target(), crate::basis::pend::Target::Nest { .. })
+    {
         entry.target().seal()?;
     }
     cull(task, entry.token(), None)?;
     if task.pend.entries.lock().len() == 0 {
-        if task.pend.references.clear() {
+        if task.pend.references.retire(task)? {
             Ok(())
         } else {
             Err(PendFail::Busy)

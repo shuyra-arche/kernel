@@ -7,9 +7,15 @@ use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 
+use super::table::{HeirRegistration, Registration};
 use crate::basis::pend::Target;
 use crate::basis::unit::task::Task;
-use kernel_api::model::pend::{Limits, Operations};
+use kernel_api::abi::call::pend::PendFail;
+use kernel_api::address::PageCount;
+use kernel_api::model::cell::MappingId;
+use kernel_api::model::pend::{
+    Limits, NestRights, NestScope, Operations, PendRange, PendScope, PendStatus,
+};
 
 use crate::basis::pend::{Modifiable, Need};
 
@@ -49,14 +55,53 @@ impl PendEntry {
         self.mark
     }
 
+    pub(crate) fn scope(&self) -> PendScope {
+        self.authority.scope()
+    }
+
     pub(crate) fn alive(&self) -> bool {
-        self.meta.alive() && self.authority.alive()
+        self.meta.alive()
+            && self.authority.alive()
+            && match self.scope() {
+                PendScope::Nest(NestScope::Mapping { id, .. }) => {
+                    self.meta.nest().is_some_and(|nest| nest.mapping_open(id))
+                }
+                _ => true,
+            }
+    }
+
+    pub(crate) fn status(&self) -> PendStatus {
+        let status = self.authority.status();
+        if let Target::Nest { nest, .. } = &self.meta {
+            if let PendScope::Nest(NestScope::Mapping { id, .. }) = self.scope() {
+                match nest.mapping_status(id) {
+                    PendStatus::Dead => return PendStatus::Dead,
+                    PendStatus::Retiring if status != PendStatus::Dead => {
+                        return PendStatus::Retiring;
+                    }
+                    _ => {}
+                }
+            }
+            if nest.is_closed() {
+                PendStatus::Dead
+            } else if !nest.is_open() && status != PendStatus::Dead {
+                PendStatus::Retiring
+            } else {
+                status
+            }
+        } else if self.meta.alive() {
+            status
+        } else {
+            PendStatus::Dead
+        }
     }
 
     pub(crate) fn allows(&self, need: Need) -> bool {
-        self.authority
-            .modifiable()
-            .is_some_and(|access| need.allowed_by(access))
+        self.alive()
+            && self
+                .authority
+                .modifiable()
+                .is_some_and(|access| need.allowed_by(access))
     }
 
     pub(crate) fn permits(&self, operations: Operations) -> bool {
@@ -67,17 +112,61 @@ impl PendEntry {
         &self.meta
     }
 
-    /// 同 `vest`，但给这一枚子分支一个**有效窗口**（相对来源起点的绝对页偏移与页数）。
-    pub(crate) fn vest_window(
+    pub(crate) fn derives(&self, limits: Limits, share: bool) -> bool {
+        use kernel_api::model::pend::{Distributable, FlatRights, ShareRights};
+        let parent = self.authority.limits();
+        if share && matches!(self.meta, Target::Flat(_)) {
+            let Operations::Flat(rights) = parent.operations else {
+                return false;
+            };
+            let Operations::Share(requested) = limits.operations else {
+                return false;
+            };
+            let mut permitted = ShareRights::empty();
+            if rights.contains(FlatRights::ASSOCIATE) {
+                permitted |= ShareRights::OPEN | ShareRights::SHUT | ShareRights::ASSOCIATE;
+            }
+            if rights.contains(FlatRights::DELETE) {
+                permitted |= ShareRights::DELETE;
+            }
+            parent.valid()
+                && limits.valid()
+                && matches!(
+                    (parent.scope, limits.scope),
+                    (PendScope::Pages(_), PendScope::Pages(_))
+                )
+                && parent.distributable == Distributable::Yes
+                && parent.modifiable.allows(limits.modifiable)
+                && rights.contains(FlatRights::SHARE)
+                && permitted.contains(requested)
+        } else {
+            parent.permits_child(limits)
+        }
+    }
+
+    pub(crate) fn vest_scope(
         &self,
         mark: Mark,
         limits: Limits,
-        window: Option<(
-            kernel_api::address::PageOffset,
-            kernel_api::address::PageCount,
-        )>,
         share: bool,
-    ) -> Result<PendEntry, kernel_api::abi::call::pend::PendFail> {
+    ) -> Result<PendEntry, PendFail> {
+        if !self.alive() {
+            return Err(PendFail::Dead);
+        }
+        if !self.derives(limits, share) {
+            return Err(PendFail::Denied);
+        }
+        if let Some(range) = limits.scope.range() {
+            let PendRange::Pages { offset, count } = range else {
+                return Err(PendFail::Denied);
+            };
+            if !self.authority.contains(
+                kernel_api::address::PageOffset::new(offset),
+                PageCount::new(count).ok_or(PendFail::Denied)?,
+            ) {
+                return Err(PendFail::Denied);
+            }
+        }
         let target = if share && matches!(self.meta, Target::Flat(_)) {
             Target::View(crate::basis::view::View::Share(
                 self.meta
@@ -87,9 +176,14 @@ impl PendEntry {
         } else {
             self.meta.clone()
         };
-        let entry =
-            PendEntry::try_new_window(target, mark, limits.modifiable, Some(self.token), window)?;
-        entry.authority.narrow(limits, window)?;
+        let entry = PendEntry::scoped(
+            target,
+            mark,
+            limits.modifiable,
+            Some(self.token),
+            Some(limits.scope),
+        )?;
+        entry.authority.narrow(limits)?;
         entry.authority.inherit(&self.authority)?;
         Ok(entry)
     }
@@ -102,26 +196,22 @@ impl PendEntry {
         modifiable: Modifiable,
         sire: Option<PendId>,
     ) -> Result<PendEntry, kernel_api::abi::call::pend::PendFail> {
-        Self::try_new_window(meta, mark, modifiable, sire, None)
+        Self::scoped(meta, mark, modifiable, sire, None)
     }
 
-    /// 带**有效窗口**的一枚：窗口相对来源起点，只在建这一枚时给定。
-    pub(crate) fn try_new_window(
+    fn scoped(
         meta: impl Into<Target>,
         mark: Mark,
         modifiable: Modifiable,
         sire: Option<PendId>,
-        window: Option<(
-            kernel_api::address::PageOffset,
-            kernel_api::address::PageCount,
-        )>,
-    ) -> Result<PendEntry, kernel_api::abi::call::pend::PendFail> {
+        scope: Option<PendScope>,
+    ) -> Result<PendEntry, PendFail> {
         let meta = meta.into();
         let token = next_id()?;
         Ok(PendEntry {
             released: core::sync::atomic::AtomicBool::new(false),
             token,
-            authority: meta.new_pend(modifiable, token, window)?,
+            authority: meta.new_pend(modifiable, token, scope)?,
             mark,
             sire,
             lord: Weak::new(),
@@ -148,18 +238,11 @@ impl PendEntry {
         self.lord = task;
     }
 
-    pub(crate) fn narrow(
-        &self,
-        limits: Limits,
-        window: Option<(
-            kernel_api::address::PageOffset,
-            kernel_api::address::PageCount,
-        )>,
-    ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
+    pub(crate) fn narrow(&self, limits: Limits) -> Result<(), PendFail> {
         if !self.alive() {
-            return Err(kernel_api::abi::call::pend::PendFail::Dead);
+            return Err(PendFail::Dead);
         }
-        self.authority.narrow(limits, window)?;
+        self.authority.narrow(limits)?;
         self.meta.changed(
             self.token,
             limits
@@ -169,6 +252,80 @@ impl PendEntry {
                 )),
         );
         Ok(())
+    }
+}
+
+/// Caller holds the Task's Pend serial through preparation and final COMMIT.
+pub(crate) fn prepare_mapping<'a>(
+    task: &'a Arc<Task>,
+    parent: &Arc<PendEntry>,
+    id: MappingId,
+    count: PageCount,
+) -> Result<PreparedMapping<'a>, PendFail> {
+    if !super::live(task) || !parent.alive() {
+        return Err(PendFail::Dead);
+    }
+    let current = locate(task, parent.token()).ok_or(PendFail::Denied)?;
+    if !Arc::ptr_eq(&current, parent)
+        || parent.scope() != PendScope::Nest(NestScope::Whole)
+        || !parent.permits(Operations::Nest(NestRights::RESERVE))
+    {
+        return Err(PendFail::Denied);
+    }
+    let ceiling = parent.authority().limits();
+    let scope = PendScope::Nest(NestScope::Mapping {
+        id,
+        range: PendRange::Pages {
+            offset: 0,
+            count: count.get(),
+        },
+    });
+    let limits = Limits {
+        operations: Operations::Nest(NestRights::mapping()),
+        modifiable: ceiling.modifiable,
+        distributable: ceiling.distributable,
+        scope,
+    };
+    let mut entry = PendEntry::scoped(
+        parent.target().clone(),
+        Mark::NONE,
+        limits.modifiable,
+        Some(parent.token()),
+        Some(scope),
+    )?;
+    entry.authority.narrow(limits)?;
+    entry.authority.inherit(parent.authority())?;
+    entry.parent(parent.token(), Arc::downgrade(task));
+    let entry = Arc::try_new(entry).map_err(|_| PendFail::OutOfMemory)?;
+    let heir = task
+        .pend
+        .prepare_heir(parent.token(), Arc::downgrade(task), entry.token())?;
+    let registration = task.pend.prepare(entry.clone())?;
+    Ok(PreparedMapping {
+        entry,
+        _parent: parent.clone(),
+        heir,
+        registration,
+    })
+}
+
+#[must_use = "an unpublished Mapping rolls back its ledger and heir reservations"]
+pub(crate) struct PreparedMapping<'a> {
+    entry: Arc<PendEntry>,
+    _parent: Arc<PendEntry>,
+    heir: HeirRegistration<'a>,
+    registration: Registration<'a>,
+}
+
+impl PreparedMapping<'_> {
+    pub(crate) fn entry(&self) -> &Arc<PendEntry> {
+        &self.entry
+    }
+
+    /// The caller has committed the Namespace record under the same COMMIT guard.
+    pub(crate) fn publish(self) {
+        self.heir.publish();
+        self.registration.publish();
     }
 }
 

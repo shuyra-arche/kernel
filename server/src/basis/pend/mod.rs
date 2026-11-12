@@ -1,11 +1,11 @@
-//! Authority over View ranges and the records that bind it to a Task.
+//! Scoped authority, immutable derivation and Task-local registrations.
 
 pub(crate) mod access;
 mod authority;
 mod branch;
 mod ledger;
 mod source;
-pub(crate) use authority::Pend;
+pub(crate) use authority::{Pend, PreparedLimit};
 mod target;
 mod window;
 pub(crate) use target::Target;
@@ -16,8 +16,8 @@ use crate::basis::unit::task::Task;
 
 pub(crate) use branch::{accord, reduce};
 pub(crate) use ledger::{
-    PendEntry, Table, accede, available, doom, insert, locate, notify, retire, return_, revoke,
-    vestor,
+    PendEntry, PreparedMapping, Table, accede, available, doom, insert, locate, notify,
+    prepare_mapping, retire, return_, revoke, vestor,
 };
 pub(crate) use source::{
     ExternalBorrow, Geometry, Hold, HoldTable, RangeBlock, SourceAuthorization,

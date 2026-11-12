@@ -4,8 +4,9 @@ mod cleanup;
 mod entry;
 mod table;
 pub(crate) use table::Table;
+pub(super) use table::{with_pair, with_pair_uncommitted};
 
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::PendId;
@@ -14,47 +15,15 @@ use crate::basis::unit::task::Task;
 
 use super::{HoldTable, live};
 pub(crate) use cleanup::{doom, retire, return_, revoke};
-pub(crate) use entry::{PendEntry, accede, locate, vestor};
+pub(crate) use entry::{PendEntry, PreparedMapping, accede, locate, prepare_mapping, vestor};
 
 const RETRIES: usize = 8;
-
-pub(super) fn with_pair<T>(a: &Task, b: &Task, run: impl FnOnce() -> T) -> Result<T, PendFail> {
-    with_pair_uncommitted(a, b, || {
-        let _commit = crate::basis::commit();
-        Ok(run())
-    })?
-}
-
-pub(super) fn with_pair_uncommitted<T>(
-    a: &Task,
-    b: &Task,
-    run: impl FnOnce() -> T,
-) -> Result<T, PendFail> {
-    let (first, second) = if a.ident.id.get() <= b.ident.id.get() {
-        (a, b)
-    } else {
-        (b, a)
-    };
-    let _first = first.pend.try_lock().ok_or(PendFail::Busy)?;
-    let _second = if first.ident.id == second.ident.id {
-        None
-    } else {
-        Some(second.pend.try_lock().ok_or(PendFail::Busy)?)
-    };
-    Ok(run())
-}
 
 pub(crate) fn available(pend_entry: &PendEntry) -> Result<(), PendFail> {
     if pend_entry.authority().modifiable().is_none() {
         return Err(PendFail::HandedOver);
     }
     Ok(())
-}
-
-pub(super) fn insert_heir(task: &Task, parent: PendId, child: Weak<Task>, token: PendId) {
-    let mut heirs = task.pend.heirs.lock();
-    let at = heirs.partition_point(|(source, _, _)| source.get() <= parent.get());
-    heirs.insert(at, (parent, child, token));
 }
 
 pub(super) fn remove_heir(task: &Task, parent: PendId, token: PendId) {

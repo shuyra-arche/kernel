@@ -1,5 +1,5 @@
 //! Live authorization, immutable ancestry and unsettled device access.
-use crate::metal::sync::{OnceLock, SpinLock};
+use crate::metal::sync::{OnceLock, SpinLock, SpinLockGuard};
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::{
@@ -208,14 +208,23 @@ impl Pend {
             .map_err(fail)
     }
     pub(crate) fn narrow(&self, limits: Limits) -> Result<(), PendFail> {
+        self.prepare_limit(limits)?.commit();
+        Ok(())
+    }
+
+    /// Caller holds COMMIT; no hardware withdrawal may cross this State guard.
+    pub(crate) fn prepare_limit(&self, limits: Limits) -> Result<PreparedLimit<'_>, PendFail> {
         if !limits.valid() {
             return Err(PendFail::Denied);
         }
-        let mut state = self.state.lock();
+        if !self.alive() {
+            return Err(PendFail::Dead);
+        }
+        let state = self.state.lock();
         if self.routing.load(Ordering::Acquire) != 0 {
             return Err(PendFail::Busy);
         }
-        *state = state
+        let next = state
             .transition(Event::Limit {
                 access: limits.modifiable,
                 operations: limits.operations,
@@ -223,7 +232,7 @@ impl Pend {
                 distributable: limits.distributable,
             })
             .map_err(fail)?;
-        Ok(())
+        Ok(PreparedLimit { state, next })
     }
     pub(crate) fn external_pending(&self) -> bool {
         self.external.load(Ordering::Acquire) != 0 || self.routing.load(Ordering::Acquire) != 0
@@ -252,7 +261,7 @@ impl Pend {
     pub(crate) unsafe fn release_retirement(&self) {
         assert!(self.external.fetch_sub(1, Ordering::AcqRel) > 0);
     }
-    /// Retain one live Memo publication without lending data access. Operation
+    /// Retain one live mapping publication without lending data access. Operation
     /// permission is checked by the caller against its typed target. Unlike a
     /// retirement-only hold, this prevents narrowing a permission still in use.
     /// Caller holds work commit until publication is cancelled or retained.
@@ -315,6 +324,18 @@ impl Pend {
                 .expect("registered child borrow");
         }
         Ok(())
+    }
+}
+
+#[must_use = "an uncommitted limit leaves the current authority unchanged"]
+pub(crate) struct PreparedLimit<'a> {
+    state: SpinLockGuard<'a, State>,
+    next: State,
+}
+
+impl PreparedLimit<'_> {
+    pub(crate) fn commit(mut self) {
+        *self.state = self.next;
     }
 }
 

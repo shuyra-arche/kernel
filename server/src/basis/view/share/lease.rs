@@ -6,7 +6,7 @@ use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::cell::SlotId;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
-use kernel_api::model::pend::{Operations, ShareRights};
+use kernel_api::model::pend::{Operations, PendRange, PendScope, ShareRights};
 
 use crate::basis::nest::Access;
 use crate::basis::pend;
@@ -69,6 +69,7 @@ pub(crate) fn create_share(
             &Arc::downgrade(task),
             kernel_api::model::pend::Limits {
                 modifiable: requested,
+                scope: PendScope::Pages(PendRange::Inherit),
                 ..limits
             },
             Mark::NONE,

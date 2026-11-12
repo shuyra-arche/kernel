@@ -8,6 +8,7 @@ use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::modifiable::Modifiable;
+use kernel_api::model::pend::{PendRange, PendScope};
 use kernel_api::model::view::ViewKind;
 
 use crate::basis::pend::Pend;
@@ -97,22 +98,41 @@ impl View {
         &self,
         modifiable: Modifiable,
         token: PendId,
-        window: Option<(
-            kernel_api::address::PageOffset,
-            kernel_api::address::PageCount,
-        )>,
+        scope: Option<PendScope>,
     ) -> Result<Arc<Pend>, PendFail> {
-        let operations = match self {
-            View::Clone(_) => kernel_api::model::pend::Operations::Clone(
-                kernel_api::model::pend::CloneRights::all(),
+        let (scope, operations) = match self {
+            View::Clone(_) if scope.is_none_or(|scope| scope == PendScope::Object) => (
+                PendScope::Object,
+                kernel_api::model::pend::Operations::Clone(
+                    kernel_api::model::pend::CloneRights::all(),
+                ),
             ),
-            View::Share(_) => kernel_api::model::pend::Operations::Share(
-                kernel_api::model::pend::ShareRights::all(),
-            ),
+            View::Share(meta) => {
+                let scope = scope.unwrap_or(PendScope::Pages(PendRange::Pages {
+                    offset: 0,
+                    count: meta.source().page_count().get(),
+                }));
+                let PendScope::Pages(PendRange::Pages { offset, count }) = scope else {
+                    return Err(PendFail::Denied);
+                };
+                meta.source()
+                    .range(
+                        kernel_api::address::PageOffset::new(offset),
+                        kernel_api::address::PageCount::new(count).ok_or(PendFail::Denied)?,
+                    )
+                    .map_err(|_| PendFail::NotAligned)?;
+                (
+                    scope,
+                    kernel_api::model::pend::Operations::Share(
+                        kernel_api::model::pend::ShareRights::all(),
+                    ),
+                )
+            }
+            _ => return Err(PendFail::Denied),
         };
-        let authority = Pend::try_new_window(
+        let authority = Pend::try_new_scope(
             modifiable,
-            window,
+            scope,
             operations,
             kernel_api::model::pend::Distributable::Yes,
         )?;
