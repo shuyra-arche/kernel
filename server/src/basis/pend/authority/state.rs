@@ -1,7 +1,9 @@
 //! Pure borrow decisions. Hardware withdrawal must complete before Borrow or Settle
 //! is committed; failure retains the previous obligation and never resumes a parent.
 use kernel_api::model::modifiable::Modifiable;
-use kernel_api::model::pend::{CreationRights, Distributable, Operations};
+use kernel_api::model::pend::{
+    CreationRights, Distributable, Limits, Operations, PendRange, PendScope,
+};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     Active,
@@ -12,6 +14,7 @@ pub(crate) enum Phase {
 pub(crate) struct State {
     pub(crate) access: Modifiable,
     pub(crate) operations: Operations,
+    pub(crate) scope: PendScope,
     pub(crate) distributable: Distributable,
     pub(crate) phase: Phase,
     readers: usize,
@@ -25,6 +28,7 @@ pub(crate) enum Event {
     Limit {
         access: Modifiable,
         operations: Operations,
+        scope: PendScope,
         distributable: Distributable,
     },
     Retire,
@@ -42,6 +46,7 @@ impl State {
         Self {
             access,
             operations: Operations::None(CreationRights::empty()),
+            scope: PendScope::Object,
             distributable: Distributable::No,
             phase: Phase::Active,
             readers: 0,
@@ -50,13 +55,41 @@ impl State {
     }
     pub(crate) fn authorized(
         access: Modifiable,
+        scope: PendScope,
         operations: Operations,
         distributable: Distributable,
     ) -> Self {
         Self {
             operations,
+            scope,
             distributable,
             ..Self::new(access)
+        }
+    }
+    pub(crate) fn limits(self) -> Limits {
+        Limits {
+            operations: self.operations,
+            modifiable: self.access,
+            distributable: self.distributable,
+            scope: self.scope,
+        }
+    }
+    fn contains_scope(self, scope: PendScope) -> bool {
+        match (self.scope.range(), scope.range()) {
+            (None, None) | (Some(PendRange::Inherit), Some(PendRange::Inherit)) => true,
+            (
+                Some(PendRange::Pages { offset, count }),
+                Some(PendRange::Pages {
+                    offset: next_offset,
+                    count: next_count,
+                }),
+            ) => offset.checked_add(count).is_some_and(|end| {
+                offset <= next_offset
+                    && next_offset
+                        .checked_add(next_count)
+                        .is_some_and(|next_end| next_end <= end)
+            }),
+            _ => false,
         }
     }
     pub(crate) fn permits(self, operations: Operations) -> bool {
@@ -111,16 +144,21 @@ impl State {
             Event::Limit {
                 access,
                 operations,
+                scope,
                 distributable,
             } => {
-                if !next.operations.contains(operations)
-                    || (next.distributable == Distributable::No
-                        && distributable == Distributable::Yes)
-                {
+                let limits = Limits {
+                    operations,
+                    modifiable: access,
+                    distributable,
+                    scope,
+                };
+                if !next.limits().permits_narrowing(limits) || !next.contains_scope(scope) {
                     return Err(Failure::Denied);
                 }
                 next = next.transition(Event::Narrow(access))?;
                 next.operations = operations;
+                next.scope = scope;
                 next.distributable = distributable;
             }
             Event::Narrow(access) => {
