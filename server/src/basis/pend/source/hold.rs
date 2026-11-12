@@ -77,21 +77,32 @@ impl Hold {
 
     /// Resolve current source and branch authority without creating a hardware hold.
     pub(crate) fn resolve(&self) -> Option<FlatRange> {
+        self.resolve_window(self.offset, self.count)
+    }
+
+    /// Absolute source coordinates stay within this Hold's immutable bounds.
+    pub(crate) fn resolve_window(&self, offset: PageOffset, count: PageCount) -> Option<FlatRange> {
+        let end = offset.get().checked_add(count.get())?;
+        let limit = self.offset.get().checked_add(self.count.get())?;
+        if offset.get() < self.offset.get()
+            || end > limit
+            || !self
+                .source
+                .branch_check(self.authority().map(Arc::as_ref), Access::READ)
+        {
+            return None;
+        }
         if let Some((_, authority)) = &self.branch {
-            authority.modifiable()?;
-            if !authority.associates() {
-                return None;
-            }
-            if !authority.contains(self.offset, self.count) {
+            if !authority.associates() || !authority.contains(offset, count) {
                 return None;
             }
             let (meta, _, _) = self.source.root()?;
             if !meta.alive() {
                 return None;
             }
-            return meta.source().range(self.offset, self.count).ok();
+            return meta.source().range(offset, count).ok();
         }
-        self.source.window(self.offset, self.count)
+        self.source.window(offset, count)
     }
 }
 

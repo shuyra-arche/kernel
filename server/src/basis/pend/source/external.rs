@@ -4,16 +4,18 @@ use super::SourceAuthorization;
 use super::hold::Hold;
 use crate::basis::cell::page::Exposure;
 use crate::basis::cell::page::Page;
-use crate::basis::flat::Pages;
 use crate::basis::flat::sharing::SharingOperation;
+use crate::basis::flat::{FlatError, Pages};
 use crate::basis::nest::Access;
 use crate::basis::pend;
 use crate::basis::pend::Pend;
 use crate::basis::unit::task::Task;
 use alloc::sync::Arc;
 use kernel_api::abi::call::pend::PendFail;
+use kernel_api::address::{PageCount, PageOffset};
 use kernel_api::model::cell::PageOwner;
 use kernel_api::model::modifiable::Modifiable;
+use kernel_api::model::pend::{CreationRights, Distributable, Operations, PendRange, PendScope};
 
 pub(crate) struct ExternalBorrow {
     source: Option<Arc<SourceAuthorization>>,
@@ -32,10 +34,12 @@ pub(crate) struct ExternalBorrow {
 unsafe impl Send for ExternalBorrow {}
 
 impl ExternalBorrow {
-    /// Caller holds the work commit boundary and the live Task's Pend table lock.
+    /// Caller holds COMMIT and the source Task's Pend serial, but no Nest/source lock.
     pub(crate) fn prepare(
         hold: &Hold,
         task: &Task,
+        offset: PageOffset,
+        count: PageCount,
         modifiable: bool,
         change: Option<&crate::basis::cell::page::Change>,
     ) -> Result<Self, PendFail> {
@@ -49,51 +53,69 @@ impl ExternalBorrow {
         } else {
             Access::READ
         };
-        if !hold.ceiling().contains(need) {
-            return Err(PendFail::Denied);
-        }
         let source = hold.source();
-        let range = hold.resolve().ok_or(PendFail::Denied)?;
-        if range.page_count().get() != range.grain() || range.is_borrowed() {
+        if !pend::live(task) || !hold.ceiling().contains(need) || !source.ceiling().contains(need) {
             return Err(PendFail::Denied);
         }
-        let pages = if let Some(change) = change {
-            Pages::new(range.reside_during(change).map_err(|_| PendFail::Busy)?)
-        } else {
-            range.materialize().map_err(|_| PendFail::OutOfMemory)?
-        };
-        let cells = range
-            .materialized_cells()
-            .map_err(|_| PendFail::OutOfMemory)?;
-        let [(_, cell)] = cells.as_slice() else {
-            return Err(PendFail::Denied);
-        };
-        if change.is_some_and(|change| !Arc::ptr_eq(change.page(), cell)) {
+        source.ensure_internal()?;
+        let range = hold.resolve_window(offset, count).ok_or(PendFail::Denied)?;
+        if range.page_count().get() != range.grain()
+            || range.is_borrowed()
+            || !source.branch_check(hold.authority().map(Arc::as_ref), need)
+        {
             return Err(PendFail::Denied);
         }
-        let (loan, parent, observer) = if let Some((meta, root, authority)) = source.root() {
-            let (token, authority) = hold.branch().unwrap_or((root, &authority));
+        let root = source.root();
+        if let Some((meta, root, authority)) = &root {
+            let (token, authority) = hold.branch().unwrap_or((*root, authority));
             let entry = pend::locate(task, token).ok_or(PendFail::Denied)?;
-            if !entry.associates() || !Arc::ptr_eq(entry.authority(), authority) || source.revoked()
+            if !entry.associates()
+                || !Arc::ptr_eq(entry.authority(), authority)
+                || !authority.contains(offset, count)
+                || entry
+                    .target()
+                    .memory()
+                    .is_none_or(|target| !Arc::ptr_eq(&target, meta))
+                || meta
+                    .authority(token)
+                    .is_none_or(|registered| !Arc::ptr_eq(&registered, authority))
             {
                 return Err(PendFail::Denied);
             }
+        } else if hold.branch().is_some() || !source.private_owner(task.ident.id) {
+            return Err(PendFail::Denied);
+        }
+        let pages = if let Some(change) = change {
+            Pages::new(range.reside_during(change).map_err(failure)?)
+        } else {
+            range.materialize().map_err(failure)?
+        };
+        let cells = range.materialized_cells().map_err(failure)?;
+        let [(at, cell)] = cells.as_slice() else {
+            return Err(PendFail::Denied);
+        };
+        if *at != PageOffset::ZERO || change.is_some_and(|change| !Arc::ptr_eq(change.page(), cell))
+        {
+            return Err(PendFail::Denied);
+        }
+        let (loan, parent, observer) = if let Some((meta, root, authority)) = root {
+            let (token, authority) = hold.branch().unwrap_or((root, &authority));
             let _operation = SharingOperation::acquire(&meta).ok_or(PendFail::Busy)?;
             let withdrawal = source.begin_withdraw()?;
-            let (offset, count) = hold.window();
             withdrawal.check_publish(offset, count)?;
             // A writable parent must explicitly unmap before external publication.
             // Immutable parents and their read-only CPU aliases may coexist.
             if authority.configured() == Modifiable::Yes && meta.pending_maps(token) {
                 return Err(PendFail::Busy);
             }
-            let loan = Pend::try_new_window(
+            let loan = Pend::try_new_scope(
                 access,
-                Some(hold.window()),
-                kernel_api::model::pend::Operations::None(
-                    kernel_api::model::pend::CreationRights::empty(),
-                ),
-                kernel_api::model::pend::Distributable::No,
+                PendScope::Pages(PendRange::Pages {
+                    offset: offset.get(),
+                    count: count.get(),
+                }),
+                Operations::None(CreationRights::empty()),
+                Distributable::No,
             )?;
             authority.borrow_external(&loan)?;
             (
@@ -158,6 +180,15 @@ impl ExternalBorrow {
         self.observer
     }
 }
+fn failure(error: FlatError) -> PendFail {
+    match error {
+        FlatError::OutOfMemory => PendFail::OutOfMemory,
+        FlatError::Busy => PendFail::Busy,
+        FlatError::NotAligned => PendFail::NotAligned,
+        FlatError::OutOfRange | FlatError::Missing => PendFail::Denied,
+    }
+}
+
 impl Drop for ExternalBorrow {
     fn drop(&mut self) {
         if self.published {
