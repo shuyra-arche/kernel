@@ -1,143 +1,141 @@
 use super::*;
+use crate::basis::nest::memo::source::Source;
+use kernel_api::model::pend::{NestScope, PendScope};
 
-/// Keeps the source Memo authority and generation serialized until the target
-/// association commits. A readable Page/Slot observation cannot authorize this.
+fn materialize(source: Source) -> Result<(Arc<Page>, Source), CellFail> {
+    let range = source.range()?;
+    let (offset, count) = source.window();
+    source
+        .source()
+        .check_move(offset, count, source.hold().authority().map(Arc::as_ref))
+        .map_err(source_fail)?;
+    let page = match range.page(PageOffset::ZERO)? {
+        Some(page) => page,
+        None => {
+            let _pages = range.materialize()?;
+            range.page(PageOffset::ZERO)?.ok_or(CellFail::SourceEmpty)?
+        }
+    };
+    source.same_page(&page)?;
+    source
+        .source()
+        .retain_blocked(offset, count, &page)
+        .map_err(source_fail)?;
+    Ok((page, source))
+}
+
 fn with_source<T>(
+    actor: &Arc<Task>,
     pos: CellPosition,
-    ident: &Arc<TaskIdent>,
-    run: impl FnOnce(FlatRange, Arc<Page>, Option<Arc<pend::Pend>>) -> Result<T, CellFail>,
+    count: PageCount,
+    run: impl FnOnce(Arc<Page>, Source) -> Result<T, CellFail>,
 ) -> Result<T, CellFail> {
-    let actor = caller(ident).ok_or(CellFail::Denied)?;
     match pos.object {
-        CellObject::Slot(id) => {
+        CellObject::Slot(slot) => {
             let hold = actor
                 .pend
                 .references
-                .get(id.get())
+                .get(slot.get())
                 .ok_or(CellFail::Denied)?;
-
-            let range = hold
-                .resolve()
-                .ok_or(CellFail::Denied)?
-                .cell(PageOffset::new(pos.page))?;
-            let (base, _) = hold.window();
-            hold.source()
-                .check_move(
-                    PageOffset::new(base.get() + pos.page),
-                    range.page_count(),
-                    hold.authority().map(Arc::as_ref),
-                )
-                .map_err(source_fail)?;
-            let cell = crate::basis::cell::Cell::Flat(range.clone());
-            let page = match cell.page(0) {
-                Ok(page) => page,
-                Err(NestError::Missing) => {
-                    let _pages = range.materialize()?;
-                    cell.page(0)?
-                }
-                Err(e) => return Err(e.into()),
-            };
-            let _commit = crate::basis::commit();
-            if !pend::live(&actor) || hold.resolve().is_none() {
-                return Err(CellFail::Denied);
-            }
-            hold.source()
-                .check_move(
-                    PageOffset::new(base.get() + pos.page),
-                    range.page_count(),
-                    hold.authority().map(Arc::as_ref),
-                )
-                .map_err(source_fail)?;
-            hold.source()
-                .retain_blocked(
-                    PageOffset::new(base.get() + pos.page),
-                    range.page_count(),
-                    &page,
-                )
-                .map_err(source_fail)?;
-            run(range, page, hold.authority().cloned())
+            let source = Source::new(actor, hold, PageOffset::new(pos.page), count)?;
+            let (page, source) = materialize(source)?;
+            run(page, source)
         }
-        CellObject::Memo(token) => with_memo(pos, MemoRights::INSERT, ident, |lease, page| {
-            if lease.memo().nest.is_external() {
-                if page != 0 {
-                    return Err(CellFail::NoRegion);
-                }
-                let _commit = crate::basis::commit();
-                let (source, data) =
-                    external::page(&actor, token, lease.memo().mapping, pos.generation)?;
-                run(source, data, None)
-            } else {
-                cpu(lease, |_, entry| {
-                    check(entry, &actor)?;
-                    let selected = index(entry, page)?;
-                    if selected.mapping().inspect_memo(page)?.generation != pos.generation {
-                        return Err(CellFail::Busy);
+        CellObject::Pend(token) => {
+            let entry = pend::locate(actor, token).ok_or(CellFail::Denied)?;
+            match entry.scope() {
+                PendScope::Pages(_) => {
+                    if pos.generation != 0 || !entry.associates() {
+                        return Err(CellFail::Denied);
                     }
-                    let source = selected.source()?;
-                    run(
-                        source,
-                        crate::basis::cell::Cell::Nest(selected).page(0)?,
-                        None,
-                    )
-                })
+                    let base = entry.authority().window().ok_or(CellFail::Denied)?.0;
+                    let offset = base
+                        .get()
+                        .checked_add(pos.page)
+                        .ok_or(CellFail::NotAligned)?;
+                    let temporary = resolve_source(
+                        actor,
+                        SourceSpec::Source {
+                            token,
+                            offset,
+                            count: count.get(),
+                        },
+                    )?;
+                    let result = (|| {
+                        let hold = actor
+                            .pend
+                            .references
+                            .get(temporary)
+                            .ok_or(CellFail::Denied)?;
+                        let source = Source::new(actor, hold, PageOffset::ZERO, count)?;
+                        let (page, source) = materialize(source)?;
+                        run(page, source)
+                    })();
+                    actor.pend.references.remove(temporary);
+                    result
+                }
+                PendScope::Nest(NestScope::Mapping { .. }) => {
+                    let mapping =
+                        Mapping::acquire(actor, token, NestRights::INSERT).map_err(source_fail)?;
+                    let page = mapping.page(pos.page).map_err(source_fail)?;
+                    let span = mapping.span().map_err(source_fail)?;
+                    let (data, source) = {
+                        let _operation = span.operation().ok_or(CellFail::Busy)?;
+                        if span.inspect_memo(page)?.generation != pos.generation {
+                            return Err(CellFail::Busy);
+                        }
+                        let (data, source) = mapping
+                            .nest()
+                            .association(&span, page)?
+                            .ok_or(CellFail::SourceEmpty)?;
+                        if data.pages() != count.get() {
+                            return Err(CellFail::NotAligned);
+                        }
+                        let (mut ceiling, _) = span.access(page)?;
+                        if mapping.entry().modifiable() != Modifiable::Yes {
+                            ceiling.remove(Access::WRITE);
+                        }
+                        (data, source.limited(ceiling))
+                    };
+                    source.same_page(&data)?;
+                    run(data, source)
+                }
+                _ => Err(CellFail::Denied),
             }
-        }),
+        }
     }
 }
+
 pub(super) fn associate(spec: CellAssociation, ident: &Arc<TaskIdent>) -> Result<usize, CellFail> {
     let actor = caller(ident).ok_or(CellFail::Denied)?;
     let _serial = actor.pend.lock();
-    // Resolve the target first so an invalid destination cannot materialize a source.
-    with_memo(spec.target, MemoRights::INSERT, ident, |lease, page| {
-        with_source(spec.source, ident, |source, data, block_owner| {
-            if lease.memo().nest.is_external() {
-                if page != 0 {
-                    return Err(CellFail::NoRegion);
-                }
-                let _commit = crate::basis::commit();
-                external::associate(
-                    &actor,
-                    lease.0.token(),
-                    lease.memo().mapping,
-                    spec.target.generation,
-                    &source,
-                    data,
-                    block_owner.as_deref(),
-                )?;
-                Ok(0)
-            } else {
-                cpu(lease, |nest, entry| {
-                    check(entry, &actor)?;
-                    let selected = index(entry, page)?;
-                    if !selected.source()?.same_range(&source) {
-                        return Err(CellFail::Denied);
-                    }
-                    let root = entry.source.root();
-                    let _operation = root
-                        .as_ref()
-                        .map(|(meta, _, _)| SharingOperation::acquire(meta).ok_or(CellFail::Busy))
-                        .transpose()?;
-                    check(entry, &actor)?;
-                    let _commit = crate::basis::commit();
-                    let base = entry
-                        .source
-                        .full_range()
-                        .ok_or(CellFail::Denied)?
-                        .index()
-                        .get();
-                    let offset = PageOffset::new(source.index().get() - base);
-                    entry
-                        .source
-                        .check_move(offset, source.page_count(), block_owner.as_deref())
-                        .map_err(source_fail)?;
-                    entry
-                        .source
-                        .retain_blocked(offset, source.page_count(), &data)
-                        .map_err(source_fail)?;
-                    nest.associate(selected.mapping(), page, spec.target.generation, data)?;
-                    Ok(0)
-                })
-            }
-        })
+    let _commit = crate::basis::commit();
+    let CellObject::Pend(token) = spec.target.object else {
+        return Err(CellFail::Denied);
+    };
+    let mapping = Mapping::acquire(&actor, token, NestRights::INSERT).map_err(source_fail)?;
+    let page = mapping.page(spec.target.page).map_err(source_fail)?;
+    let span = mapping.span().map_err(source_fail)?;
+    let info = span.inspect_memo(page)?;
+    if info.generation != spec.target.generation
+        || !matches!(info.state, CellState::Vacant | CellState::Ready)
+    {
+        return Err(CellFail::Busy);
+    }
+    let count = PageCount::new(span.grain()).ok_or(CellFail::NotAligned)?;
+    with_source(&actor, spec.source, count, |data, source| {
+        if !pend::live(&actor)
+            || !mapping
+                .entry()
+                .permits(kernel_api::model::pend::Operations::Nest(
+                    NestRights::INSERT,
+                ))
+        {
+            return Err(CellFail::Denied);
+        }
+        mapping
+            .nest()
+            .associate(&span, page, spec.target.generation, data, source)?;
+        Ok(0)
     })
 }

@@ -309,7 +309,7 @@ impl Router {
             )?;
             let mut limits = root.authority().limits();
             limits.operations = Operations::Sign(SignRights::LISTEN | SignRights::CONSUME);
-            root.narrow(limits, None)?;
+            root.narrow(limits)?;
             registry
                 .register(
                     Name::Interrupt {

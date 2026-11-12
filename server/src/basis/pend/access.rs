@@ -97,3 +97,103 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
     }
     Ok(0)
 }
+
+/// Retains an authority route while the caller holds its ledger serial.
+pub(crate) struct Mapping {
+    entry: alloc::sync::Arc<PendEntry>,
+}
+
+impl Mapping {
+    pub(crate) fn acquire(
+        actor: &alloc::sync::Arc<crate::basis::unit::task::Task>,
+        token: PendId,
+        rights: kernel_api::model::pend::NestRights,
+    ) -> Result<Self, PendFail> {
+        use kernel_api::model::pend::{NestRights, NestScope, PendScope};
+        let _commit = crate::basis::commit();
+        if !pend::live(actor) {
+            return Err(PendFail::Dead);
+        }
+        let entry = pend::locate(actor, token).ok_or(PendFail::Denied)?;
+        let PendScope::Nest(NestScope::Mapping { id, .. }) = entry.scope() else {
+            return Err(PendFail::Denied);
+        };
+        if !entry.authority().permits(Operations::Nest(rights)) {
+            return Err(PendFail::Denied);
+        }
+        let nest = entry.target().nest().ok_or(PendFail::Denied)?;
+        let span = nest.mapping(id).ok_or(PendFail::Dead)?;
+        let cleanup = rights == NestRights::INSPECT
+            || rights == NestRights::RETRACT
+            || rights == NestRights::REMOVE;
+        if !cleanup && (!nest.is_open() || !nest.mapping_open(id)) {
+            return Err(PendFail::Dead);
+        }
+        let (offset, count) = entry.authority().window().ok_or(PendFail::Denied)?;
+        span.range(offset, count)
+            .map_err(|_| PendFail::NotAligned)?;
+        if nest.is_external()
+            && (offset.get() != 0 || count.checked_bytes() != Some(span.initial_size()))
+        {
+            return Err(PendFail::NotAligned);
+        }
+        entry.authority().retain_route()?;
+        Ok(Self { entry })
+    }
+
+    pub(crate) fn entry(&self) -> &alloc::sync::Arc<PendEntry> {
+        &self.entry
+    }
+
+    pub(crate) fn nest(&self) -> &alloc::sync::Arc<crate::basis::nest::Nest> {
+        let pend::Target::Nest { nest, .. } = self.entry.target() else {
+            unreachable!("a Mapping retains its immutable Nest target")
+        };
+        nest
+    }
+
+    pub(crate) fn id(&self) -> kernel_api::model::cell::MappingId {
+        let kernel_api::model::pend::PendScope::Nest(kernel_api::model::pend::NestScope::Mapping {
+            id,
+            ..
+        }) = self.entry.scope()
+        else {
+            unreachable!("scope attenuation preserves Mapping identity")
+        };
+        id
+    }
+
+    pub(crate) fn span(&self) -> Result<alloc::sync::Arc<crate::basis::nest::Span>, PendFail> {
+        self.nest().mapping(self.id()).ok_or(PendFail::Dead)
+    }
+
+    pub(crate) fn page(&self, relative: usize) -> Result<usize, PendFail> {
+        let span = self.span()?;
+        let (offset, count) = self.entry.authority().window().ok_or(PendFail::Denied)?;
+        let grain = span.grain();
+        if !relative.is_multiple_of(grain)
+            || relative
+                .checked_add(grain)
+                .is_none_or(|end| end > count.get())
+        {
+            return Err(PendFail::NotAligned);
+        }
+        let page = offset
+            .get()
+            .checked_add(relative)
+            .ok_or(PendFail::NotAligned)?;
+        span.range(
+            kernel_api::address::PageOffset::new(page),
+            kernel_api::address::PageCount::new(grain).ok_or(PendFail::NotAligned)?,
+        )
+        .map_err(|_| PendFail::NotAligned)?;
+        Ok(page)
+    }
+}
+
+impl Drop for Mapping {
+    fn drop(&mut self) {
+        // No operation keeps this transient route after its ledger guard ends.
+        unsafe { self.entry.authority().release_route() };
+    }
+}
