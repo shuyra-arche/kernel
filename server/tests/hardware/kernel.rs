@@ -395,6 +395,10 @@ fn run(mode: &str) {
                     "{name}: {log}"
                 );
                 assert!(
+                    log.contains("PASS external-publisher reserver-diff=1 source-diff=1 holder-events=2 queued=1 fenced=1"),
+                    "{name}: {log}"
+                );
+                assert!(
                     log.contains("PASS cell-io-levels last-leaf=1 retirement=1 split=1"),
                     "{name}: {log}"
                 );

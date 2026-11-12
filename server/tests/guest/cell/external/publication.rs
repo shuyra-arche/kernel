@@ -63,6 +63,7 @@ pub(in super::super) fn run(at: usize, count: usize) {
     assert_eq!(context(root).phase, NestPhase::Bound);
     returned(delegated_delete);
     super::reservation::run(root);
+    super::publisher::run(bar, root);
 
     let first_branch = branch(root);
     let second_branch = branch(root);
