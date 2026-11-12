@@ -45,14 +45,16 @@ realtime_worker_start:
     mv a1, s10
     li a7, {reserve}
     ebreak
-    bnez a0, worker_fail
+    blez a0, worker_fail
+    li t0, 0x41000
+    bne a1, t0, worker_fail
     li t0, 1
     sd t0, 128(sp)            // source: Share Pend, relative page, generation zero
     sd s9, 136(sp)
     sd zero, 144(sp)
     sd zero, 152(sp)
     sd t0, 160(sp)            // target: mapping Pend, relative page, exact generation
-    sd a1, 168(sp)
+    sd a0, 168(sp)
     sd zero, 176(sp)
     sd zero, 184(sp)
     addi a0, sp, 160
