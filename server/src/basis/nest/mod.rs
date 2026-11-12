@@ -16,7 +16,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::mem::ManuallyDrop;
 
-use crate::basis::cell::page::{Change, Page};
+use crate::basis::cell::page::{Change, Freeze, Page};
 use crate::basis::flat::Pages;
 use crate::basis::sign::{self, WakeKey};
 use crate::basis::unit::anchor::Anchor;
@@ -1221,6 +1221,7 @@ impl Nest {
             if memo.generation() != expected || memo.busy() {
                 return Err(CellFail::Busy);
             }
+            memo.can_advance(expected)?;
             memo.association().ok_or(CellFail::SourceEmpty)?
         };
         if !Arc::ptr_eq(&page, change.page()) || page.level() != mapping.level() {
@@ -1461,6 +1462,11 @@ impl Nest {
         let flight = source.begin_cpu(mapping.identity(), access)?;
         let lease = range.reside_during(&change)?;
         let writable = access.contains(Access::WRITE);
+        let mut operation_freeze = if retained.is_some() {
+            Some(Freeze::new(change.clone(), None).map_err(NestError::from)?)
+        } else {
+            None
+        };
         let replacement = if retained.is_some_and(|old| old != writable) {
             Some((
                 index,
@@ -1471,7 +1477,7 @@ impl Nest {
         };
         // A new permission passes the actual Page gate. Changed writer accounting
         // is replaced atomically with its PTE and retires behind the same fence.
-        let admission = if replacement.is_none() {
+        let admission = if retained.is_some() && replacement.is_none() {
             Some(change.hardware(writable).map_err(NestError::from)?)
         } else {
             None
@@ -1497,12 +1503,14 @@ impl Nest {
                 .memos
                 .existing_mut(mapping, index)
                 .expect("prepared Memo")
-                .advance(expected)
-                .expect("prepared generation");
+                .protect(expected, operation_freeze.take());
             Ok::<(), CellFail>(())
         };
         drop(commit);
-        let result = result.and_then(|()| self.finish_invalidation().map_err(CellFail::from));
+        let mut result = result.and_then(|()| self.finish_invalidation().map_err(CellFail::from));
+        if result.is_ok() && access.contains(Access::EXECUTE) {
+            result = identity::sync_instructions().map_err(CellFail::from);
+        }
         drop(admission);
         let valid = {
             let _commit = crate::basis::commit();

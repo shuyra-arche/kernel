@@ -228,6 +228,16 @@ impl Memo {
         Ok(())
     }
 
+    pub(in crate::basis::nest) fn protect(&mut self, expected: u64, freeze: Option<Freeze>) {
+        self.advance(expected)
+            .expect("prepared protection generation");
+        if let Some(freeze) = freeze {
+            assert!(self.publication.is_some() && self.freeze.is_none());
+            self.freeze = Some(freeze);
+            self.flight = Some(MemoFlight::Publishing);
+        }
+    }
+
     pub(in crate::basis::nest) fn begin_publish(
         &mut self,
         expected: u64,
