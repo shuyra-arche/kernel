@@ -177,7 +177,7 @@ Mapping to Whole, or one MappingId to another.
 
 Nest class 13 keeps Create 0, Inspect 1 and Delete 4; slots 2/3 stay invalid.
 Reserve 5 takes `(token: PendId, request: VirtAddr)` and returns `(PendId, VirtAddr)`
-in the ordinary two success registers. Release 6 takes `(token: PendId)` and
+in `a0`/`a1`, without a leading status word. Release 6 takes `(token: PendId)` and
 returns `()`. NestFail keeps Denied -1, Dead -2, Busy -3, OutOfMemory -4, and adds
 NotAligned -5, AlreadyMapped -6, NoRegion -7.
 
@@ -188,30 +188,34 @@ must fit, and count is a multiple of CellLevel.pages(). API checks representable
 levels; Kernel checks the active Sv mode. Access uses READ 2 / WRITE 4 / EXECUTE 8,
 requires READ or EXECUTE and forbids WRITE without READ. Cell level does not
 require a matching hardware leaf. External admission remains exact-only, one
-whole level-0 or level-1 Cell, existing IOVA bounds at most 2 MiB, READ or READ|WRITE,
-and unchanged private-source qualification.
+whole level-0 or level-1 Cell within the existing IOVA bounds and aligned 2 MiB
+window, READ or READ|WRITE, and unchanged private-source qualification.
 
 Reserve atomically creates a source-free **Vacant** reservation and fresh
 Mapping-scoped root Pend. It allocates no physical Page, materializes no Slot
 and never publishes. The mapping root has `mapping()` operations; Modifiable,
 Distributable and target write access are capped by its creating Whole. Only
 Reserve establishes this special Whole-to-fresh-Mapping ancestry; it cannot
-select an existing MappingId. Live mapping descendants prevent Whole Narrow.
+select an existing MappingId. Its real parent-child ledger edge prevents Whole
+Narrow and empty-root adoption while mapping descendants remain live.
 Release requires RELEASE over the full original mapping window; a full-span
-child may Release, but child Return does not Release. Root Return retires the
-full original span even after Narrow. Busy retains metadata and forbids reuse;
-retry/inspection/cleanup remain available while Closing rejects fresh admission
-and Accord.
+child may Release the entire relation, but child Return does not Release.
+Root Return retires the full original span even after Narrow. Busy retains
+metadata and forbids reuse; retry/inspection/cleanup remain available while
+Closing rejects fresh admission and Accord.
 
 Cell class 2 Create 0 takes `[license, size, align, level]` and returns SlotId
-in the ordinary two-register convention; Delete 1 takes SlotId directly.
-CellObject is `[tag, id]`, tag 0 Slot / 1 Pend (16 bytes). CellPosition adds
-`[page, generation]` (32 bytes); Slot generation must be zero, and Kernel checks
-a Pend's actual family/generation. CellHandoff and CellAssociation each contain
-two positions (64 bytes). Handoff decoding rejects either Pend endpoint.
+through the ordinary API pair decoder: `a0` holds SlotId, not a fixed zero status
+prefix. Delete 1 takes SlotId directly. CellObject is `[tag, id]`, tag 0 Slot /
+1 Pend (16 bytes). CellPosition adds `[page, generation]` (32 bytes); Slot
+generation must be zero, and Kernel checks a Pend's actual family/generation.
+Flat/Share source positions for Insert also require generation zero.
+CellHandoff and CellAssociation each contain two positions (64 bytes).
+Handoff decoding rejects either Pend endpoint.
 
-Unit Create uses three success registers. `CreatedUnit::Task(task)` is
-`[0, task_id, 0]`; `CreatedUnit::Team { team, nest }` is `[1, team_id, nest_pend]`.
+Unit Create uses `[a0, a1, a2] = [kind, id, nest_pend]` on success.
+`CreatedUnit::Task(task)` is `[0, task_id, 0]`;
+`CreatedUnit::Team { team, nest }` is `[1, team_id, nest_pend]`.
 IDs must be nonzero and at most isize::MAX; unknown kinds and cross-kind payloads
 reject. Team's Nest is a live Whole INSPECT|RESERVE grant under the old limits,
 not a Team number accepted as authority. Explicit empty-root adoption preserves
@@ -304,6 +308,12 @@ Share View and Sign pair; `Entry::dispatch()` returns the explicit View kind
 and both handles. `Name::Memory` also requires a Share/Sign pair. Its companion
 `Name::Page(Page::Memory)` names the same Share. Other entry kinds, including
 Nest, have no paired View.
+
+`Name::Space` is name class 7/item 0 with all remaining name bytes zero, and
+ResourceKind::Nest. It supplies the initial current CPU Nest's live Whole
+INSPECT|RESERVE grant, with no ATTACH/DELETE. `Name::Nest { controller, requester }`
+(class 5) instead names a trusted External Nest root. Neither name, topology nor
+Team membership is accepted as authority; callers must retain the actual Pend.
 Malformed, incomplete and old-version ledgers fail validation. Sign operations
 retain their slots and payloads under the current ABI prefix.
 
@@ -322,8 +332,9 @@ Cell Create is allocation-only and returns a Task-local SlotId. Nest Reserve is
 source-free and returns a mapping root Pend plus virtual address. MappingId and
 PageId are descriptions, not authority. CellObject::Pend accepts only a live
 Pend in the calling Task's ledger; Kernel checks its actual family and scope.
-Positions are relative to that grant's current effective window; windows cover
-complete physical Cells. Team membership and management alone confer no control.
+Pend positions are relative to that grant's current effective window; Slot
+positions are relative to their owning handle. Windows cover complete physical
+Cells. Team membership and management alone confer no control.
 
 | Call | Required authority and state | Effect |
 | --- | --- | --- |
@@ -344,12 +355,12 @@ Push/Pull decode only two owning Slot endpoints. Insert accepts a Slot or
 qualified source Pend and requires a Mapping-scoped destination. A mapping
 observation cannot extract an owning Slot; resolve and independently authorize
 the actual owning Slot for a transfer. Mapping-to-mapping Insert copies an
-association, retaining the **original physical source branch**. Its sticky
-mutability ceiling is the minimum of the original association/source mapping
-ceiling and the supplying grant's Modifiable. There is no new owning Slot or
-second permission family. Later Return/Narrow of the supplying mapping grant
-does not retroactively revoke this independent destination association; actual
-original-source grant revocation still does.
+association, retaining the **original physical source branch, actor and Page**.
+Its sticky mutability ceiling is the minimum of the original association/source
+mapping ceiling and the supplying grant's Modifiable. There is no new owning
+Slot or second permission family. Later Return/Narrow of the supplying mapping
+grant does not retroactively revoke this independent destination association;
+loss of the actual original-source branch or actor still withdraws its uses.
 
 Physical ownership movement preserves the old association, Page and generation,
 but a new Publish fails when the selected source no longer holds that exact Page.
@@ -357,7 +368,8 @@ Insert from the new source is required. Returning/revoking a child mapping grant
 withdraws publications made through that branch, not a sibling's publication.
 Inspector-only branches own no publication. Child Return never releases the whole
 mapping. Root Return retires its full **original** reservation even after Narrow;
-RELEASE can also be delegated to a child retaining the complete original window.
+RELEASE can also be delegated to a child retaining the complete original window,
+whose Release destroys the entire relation rather than only that branch.
 
 Mapping identity survives reassociation. Stable states are Vacant, Ready(Page)
 and Published(Page); Publishing/Retracting are retained flights, Failed retains
@@ -399,10 +411,12 @@ and trusted platform ordering. Binding retirement is a separate, whole-context
 boundary, not performed on every Pend handover. Unsupported aliases, shared
 controllers, ATS/PRI and noncoherent access are rejected.
 
-Public Acquire/Release, Attach/Detach, Begin/End, Traverse, Position, Attachment
-and general Retain authority are removed. Their replacements are Cell objects,
-qualified transitions and kernel-owned hardware retirement, not a public change
-receipt or duplicate reference lifecycle.
+The former Cell Acquire/Release receipt interface, Attach/Detach, Begin/End,
+Traverse, Position, Attachment and general Retain authority are removed. Their
+replacements are Cell objects, qualified transitions and kernel-owned hardware
+retirement, not a public change receipt or duplicate reference lifecycle.
+Nest Release retires a mapping reservation; it does not restore that receipt
+interface.
 
 Split/Merge operate on owning Slot collections, not PTE leaves. Flat/Share roots
 are not eligible. Every source Slot must be materialized; merge requires physical
@@ -527,8 +541,9 @@ is the sole owner responsible for completing this cleanup.
 
 Sign Attach includes `generation`. MappingPublished (tag 11) and MappingRetired
 (tag 9) retain `{ token, mapping }`, but require live **Mapping-scoped Nest INSPECT**
-for that same MappingId/range and expected generation. The raw MappingId is an
-observation consistency check; Whole INSPECT plus a raw ID never substitutes.
+for that same MappingId and the full original mapping window, with the expected
+generation. The raw MappingId is an observation consistency check; Whole INSPECT
+plus a raw ID never substitutes.
 Existing External-only observation support is unchanged. Completion before
 registration is retained; the immediate next generation may be armed before
 publication. Older generations report Gone rather than matching replacements.
@@ -551,7 +566,8 @@ exposed. Listen/Consume and Pend handover do not clear Nest faults. MappingFault
 | Nest Reserve | Whole RESERVE | Fresh source-free Mapping root, never arbitrary existing ID |
 | Nest Release | Mapping RELEASE | Complete original window; Busy is not reuse permission |
 | Cell Insert / Remove / Publish / Retract | Mapping INSERT / REMOVE / PUBLISH / RETRACT | Qualified source, exact generation and original source access |
-| Cell mapping Inspect / Sign mapping conditions | Mapping INSPECT | Same mapping identity/window and expected generation |
+| Cell mapping Inspect | Mapping INSPECT | Same mapping identity and effective window; observes the current generation |
+| Sign mapping conditions | Mapping INSPECT | External only; same MappingId, full original window and expected generation |
 | External Protect | Unsupported | Reject; CPU Protect requires Mapping PROTECT |
 
 External Protect stays unsupported; External Delete requires its exact boot
@@ -572,10 +588,11 @@ window; the server resolves bounds at commit. Published 128-byte PendInfo uses
 absolute Pages and reports target identity, full scope and effective limits.
 FlatId, NestId and MappingId are stable descriptions, never authority.
 
-Narrow retains identity, rejects live descendants with Busy and withdraws old CPU
-access before committing a smaller window. This includes mapping descendants of
-a creating Whole grant. Active data borrows and publication routes retain their
-constraints. Retirement-only holds keep cleanup responsible without preserving
+Narrow retains identity and rejects live descendants with Busy, including mapping
+descendants of a creating Whole grant. It withdraws publications made through the
+narrowed branch before committing reduced limits; a sibling's publication is not
+that branch's use. Active data borrows and publication routes must settle where
+required. Retirement-only holds keep cleanup responsible without preserving
 permission or permanently preventing Narrow.
 
 None, Sign, Flat, Nest and Views share one live Pend ledger and derivation tree.
@@ -676,7 +693,7 @@ revocable ancestry.
 | Share Open / Shut | Share OPEN / SHUT; range, Modifiable and Page admission | Opens/closes this caller's access using the common Nest publication machinery; Shut neither returns Pend nor deletes View |
 | Pend Accord | Delegable parent and non-expanding relative window/access | New local/remote branch; failed preparation does not publish partial authority |
 | Pend Revoke / Return | Direct grantor / holder | Retires the branch and its descendants; Busy retains withdrawal obligations |
-| Pend Narrow | Holder; no live descendants, conflicting data borrow or active publication | Same identity with reduced access/window; retirement-only retention is not live permission |
+| Pend Narrow | Holder; no live descendants or conflicting data borrow | Withdraw own publications before reducing limits; Busy retains routes; retirement-only retention is not live permission |
 | Pend Inspect / Collect | Caller-local table | Single/paged discovery; stable View identity allows comparison, never authorization |
 | Sign Create | None SIGN license | New endpoint and root Sign Pend |
 | Sign Delete | Sign DELETE | Closes endpoint and wakes all listeners |

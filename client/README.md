@@ -48,6 +48,8 @@ and operation kinds 5 (Port) and 7 (Memo) are invalid, not repurposed.
 
 Cell class 2 keeps slots 0/1 for allocation/deletion. Create packs
 `[license, size, align, level]`; no caller-memory creation descriptor remains.
+The ordinary API pair decoder takes SlotId from `a0`, not from a payload after a
+fixed zero status. Reserve returns its PendId in `a0` and virtual address in `a1`.
 Allocation uses `Allocation::new` or `Allocation::at_level`. Nest class 13 keeps
 Create 0, Inspect 1, Delete 4; Reserve is 5 and Release 6. Slots 2/3 stay invalid.
 NestFail preserves Denied -1, Dead -2, Busy -3, OutOfMemory -4 and adds NotAligned
@@ -61,15 +63,16 @@ Count is nonzero, its bytes must fit, and it must be a multiple of level.pages()
 API checks representability; Kernel checks the active Sv mode. Access is READ 2 /
 WRITE 4 / EXECUTE 8, nonempty in READ or EXECUTE, with WRITE requiring READ.
 Cell level is not necessarily a hardware leaf. External admission stays Exact
-only, one whole level-0/1 Cell within existing IOVA bounds at most 2 MiB,
-READ or READ|WRITE and unchanged private-source qualification.
+only, one whole level-0/1 Cell within the existing IOVA bounds and aligned
+2 MiB window, READ or READ|WRITE and unchanged private-source qualification.
 
 Reserve requires Whole RESERVE and atomically returns a source-free **Vacant**
 reservation plus a fresh Mapping-scoped root. It creates no physical Page or
 owning Slot and does not publish. The root has `NestRights::mapping()` operations;
 Modifiable, Distributable and target write access are capped by the creating
 Whole. Only Reserve creates this Whole-to-fresh-Mapping ancestry; it cannot pick
-an existing MappingId. Live mapping descendants block Whole Narrow.
+an existing MappingId. The real parent-child ledger edge makes live mapping
+descendants block Whole Narrow and empty-root Team adoption.
 
 ### Scoped delegation and observations
 
@@ -108,7 +111,7 @@ that 104-byte snapshot through return. Use AccordTarget::Caller for local
 derivation or Task for delegation. `pend::narrow(request)` similarly reads an
 80-byte NarrowRequest. Return relinquishes the holder's branch through Kernel
 retirement. Busy retains cleanup; no call implies safe physical reuse. The old
-derive/same/release and ReleaseMode interfaces do not exist.
+Pend derive/same/release and ReleaseMode interfaces do not exist.
 
 ### Cell endpoints and mapping lifetime
 
@@ -121,27 +124,33 @@ derive/same/release and ReleaseMode interfaces do not exist.
 | CellInfo | Existing generation/state/geometry observation | 64 bytes |
 
 Slot generation must be zero. Kernel validates a Pend's actual family and
-generation. Push moves local to remote; Pull moves remote to local, and decoding
-requires two owning Slots. Insert accepts a Slot or Flat/Share ASSOCIATE or Nest
-Mapping INSERT source; the destination requires Mapping INSERT. Insert/Remove
-change associations, never transfer ownership or extract a Slot from a live Pend.
+generation; Flat/Share source positions for Insert also use generation zero.
+Positions are relative to the Slot handle or the Pend's effective window.
+Push moves local to remote; Pull moves remote to local, and decoding requires
+two owning Slots. Insert accepts a Slot or Flat/Share ASSOCIATE or Nest Mapping
+INSERT source; the destination requires Mapping INSERT. Insert/Remove change
+associations, never transfer ownership or extract a Slot from a live Pend.
 Other mapping transitions require their corresponding scoped Nest rights.
-Inspect supplies a fresh generation; native calls never retry automatically.
+Inspect ignores the supplied mapping generation and observes the current one;
+native calls never retry automatically.
 
-A mapping-level Insert preserves the original physical source branch and a
-sticky ceiling equal to the minimum of the original association/source mapping
-ceiling and supplying grant Modifiable. It creates neither a second owner nor
-an extra permission family. Later supplying mapping Return/Narrow does not revoke
-the independent destination association; actual original-source grant revocation
-does. After physical ownership moves, an old association/Page/generation remains
-observable, but new Publish fails if that source no longer holds the same exact
-Page. Insert from the new source is required.
+A mapping-level Insert preserves the original physical source branch, actor and
+Page, with a sticky ceiling equal to the minimum of the original association/source
+mapping ceiling and supplying grant Modifiable. It creates neither a second owner
+nor an extra permission family. Later supplying mapping Return/Narrow does not
+revoke the independent destination association; loss of the actual original-source
+branch or actor does withdraw its uses. After physical ownership moves, an old
+association/Page/generation remains observable, but new Publish fails if that source
+no longer holds the same exact Page. Insert from the new source is required.
 
 Release requires RELEASE plus the complete original window. A full-span child
-may Release; child Return only retires that branch. Root Return retires the full
-original reservation even when narrowed. Busy forbids reuse and retains retry
-metadata. Closing rejects new admission/Accord but keeps inspection, retry and
-cleanup. External Protect stays unsupported; External Delete needs the exact
+may Release the entire relation. Child Return/Revoke instead withdraws that
+branch's and its descendants' publications, not a sibling's; an inspector-only
+branch owns no publication. Root Return retires the full original reservation
+even when narrowed. Busy forbids reuse and retains retry metadata. Closing rejects
+new admission/Accord but keeps inspection, retry and cleanup. Sign notifications,
+Task death and device acknowledgements are not exact CPU/IOMMU retirement receipts.
+External Protect stays unsupported; External Delete needs the exact
 boot Whole root. Keep that root with its manager and delegate only needed rights.
 Returning/revoking a worker Whole branch retires its descendant mappings, not an
 unrelated Nest root. Competing External reservers wait until the old Task's
@@ -149,6 +158,7 @@ positions have all retired and been removed.
 
 ### Team creation and boot discovery
 
+Unit Create success uses `[a0, a1, a2] = [kind, id, nest_pend]`.
 `CreatedUnit::Task(task)` decodes `[0, task_id, 0]`.
 `CreatedUnit::Team { team, nest }` decodes `[1, team_id, nest_pend]`.
 IDs must be nonzero and at most isize::MAX; unknown/cross-kind replies reject.
@@ -168,9 +178,10 @@ authority. There is no runtime external Attach/Detach, caller-supplied requester
 or ambient Team destination. `nest::inspect` writes 56-byte NestInfo.
 
 Sign Attach keeps `{ token, mapping }` for MappingPublished/Retired and requires
-Mapping-scoped Nest INSPECT for that same ID/range and expected generation; a
-Whole grant plus a raw MappingId cannot substitute. NestFault/Closed use Whole
-INSPECT and generation zero. Existing External-only support is unchanged;
+Mapping-scoped Nest INSPECT for that same MappingId and full original mapping
+window, with the expected generation; a Whole grant plus a raw MappingId cannot
+substitute. NestFault/Closed use Whole INSPECT and generation zero.
+Existing External-only support is unchanged;
 MappingFault stays retired. Fault observations survive Pend handover.
 
 Resource creation requires explicit None-target licenses. Boot Ledger v10 keeps
