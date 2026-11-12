@@ -28,7 +28,7 @@ pub(crate) fn node(id: usize, parent: Option<&Arc<TeamNode>>) -> Arc<TeamNode> {
     }
     node
 }
-fn member(node: &Arc<TeamNode>, id: usize, owners: &[usize]) -> Arc<Member> {
+pub(crate) fn member(node: &Arc<TeamNode>, id: usize, owners: &[usize]) -> Arc<Member> {
     let member = Arc::new(Member {
         id: TaskId::new(id),
         team: node.id,
@@ -173,7 +173,8 @@ fn finishing_keeps_pause_independent_and_oust_never_reopens_admission() {
 
     let mut state = TeamState::new(TeamStage::Constructing);
     assert!(state.admitting());
-    assert!(state.constructing());
+    assert!(!state.ready());
+    assert_eq!(state.default_entry(), 0);
     assert_eq!(state.oust(), Err(UnitFail::Busy));
     state.set_default_entry(0x1000);
     state.debark().unwrap();
