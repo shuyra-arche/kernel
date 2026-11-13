@@ -4,6 +4,31 @@
 use super::FlatId;
 use core::num::NonZeroU64;
 
+/// Observation of the original Flat maintenance record. Held excludes the old
+/// accesses; it does not promise that the maintenance actor cannot write.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u64)]
+pub enum BlockPhase {
+    Draining = 0,
+    Held = 1,
+    Releasing = 2,
+    Closed = 3,
+    Orphaned = 4,
+}
+
+impl BlockPhase {
+    pub const fn from_tag(tag: u64) -> Option<Self> {
+        match tag {
+            0 => Some(Self::Draining),
+            1 => Some(Self::Held),
+            2 => Some(Self::Releasing),
+            3 => Some(Self::Closed),
+            4 => Some(Self::Orphaned),
+            _ => None,
+        }
+    }
+}
+
 /// Non-wrapping generation of one maintenance record. Takeover advances it;
 /// an old generation never becomes usable again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

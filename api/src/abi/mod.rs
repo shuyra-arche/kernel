@@ -2,6 +2,8 @@
 pub mod call;
 pub mod error;
 pub mod layout;
+/// Inactive next-memory-ABI descriptors; not accepted by current dispatch.
+pub mod memory;
 pub mod operation;
 pub mod register;
 pub mod reply;

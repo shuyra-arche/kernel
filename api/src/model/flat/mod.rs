@@ -2,7 +2,7 @@
 mod maintenance;
 mod position;
 
-pub use maintenance::{BlockGeneration, BlockRef};
+pub use maintenance::{BlockGeneration, BlockPhase, BlockRef};
 pub use position::{SlotPosition, SlotVersion};
 
 use crate::abi::register::{Decode, Wire};

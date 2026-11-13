@@ -1,5 +1,8 @@
 //! Next-memory-ABI value contracts. These do not exercise server authorization,
 //! publication, maintenance or retirement, and do not activate a new call ABI.
+mod reply;
+mod request;
+
 use kernel_api::{
     abi::{self, call::EnvCall},
     address::BASE_PAGE_SIZE,

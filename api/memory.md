@@ -1,8 +1,9 @@
 # Flat/Nest memory contract and migration
 
 Status: **M1 implementation preparation for [#142](https://github.com/shuyra-arche/kernel/issues/142)**.
-The identity and revision value codecs below are implemented. The next syscall
-ABI, Server state machines and consumer migration are not implemented or frozen.
+The identity/revision value codecs and the [settled-operation request/result
+codecs](memory-wire.md) are implemented. The next syscall ABI is not activated;
+Server state machines and consumer migration are not implemented or frozen.
 This document does not mark M1–M6 complete. Current executable contracts remain
 [ABI v10 / Ledger v10](README.md#source-migration-and-abi-compatibility).
 
@@ -74,8 +75,9 @@ promise to split a larger physical Page or a hardware translation leaf.
 
 ## Next call boundary
 
-The following is an allocation proposal for the next coordinated ABI bump,
-not callable declarations. Reserve ABI 11 only if still free when the provider
+The following allocates the next coordinated ABI bump, not callable declarations.
+The implemented subset and exact wire encoding are in [memory-wire.md](memory-wire.md).
+Reserve ABI 11 only if still free when the provider
 is activated. If another change has consumed it, choose a fresh version and
 update all consumers together. Do not make production dispatch accept a
 partially implemented next ABI.
@@ -127,8 +129,8 @@ No descriptor accepts a bare TeamId as a substitute for either endpoint's Pend.
 
 ### Results and failures
 
-The next ABI must distinguish these outcomes before assigning final numeric
-status codes and byte layouts:
+The [request/result codec](memory-wire.md) assigns exact numeric codes and layouts
+for the implemented operations, distinguishing these outcomes:
 
 | Outcome | Meaning | Recovery |
 | --- | --- | --- |
@@ -142,8 +144,9 @@ Required distinguishable causes are Denied, Dead, Busy, OutOfMemory,
 NotAligned, NoRegion, Stale, SourceEmpty, DestinationOccupied, NotTransferable,
 Unsupported, VersionExhausted, RequestMismatch, ResultExpired and ReplyFault.
 An accepted Block/Allow cannot be represented as an ordinary no-effect Busy.
-A possible encoding is a successful Pending reply with its request identity;
-the final choice must be reflected in API decoders and Client before activation.
+The implemented result codec uses a Pending outcome with the request identity,
+separate from register delivery status. Client and Server must integrate that
+distinction before activation.
 
 Inspect must expose the current phase and revisions, including Fresh/Resident/
 Missing and in-flight Slot states, logical Memo source separately from physical
@@ -194,11 +197,11 @@ It is distinct from any Slot/Memo version. The caller knows it before dispatch,
 so failure to copy a reply cannot erase the only way to identify an accepted call.
 All next-memory mutations, including creation and deletion, participate.
 
-Use a bounded per-Task result window with a monotonically increasing accepted
-high-water mark. The exact capacity and descriptor bound remain an activation
-decision; expose the limits through Inspect rather than relying on unbounded
-allocation. Store canonical operation inputs, result and Pending/Committed/Failed
-state. Output-buffer addresses are delivery details, not operation identity.
+Use a per-Task window of 16 result records and a monotonically increasing accepted
+high-water mark, as specified by `abi::memory::RESULT_CAPACITY`. Requests are
+bounded at 256 bytes and replies at 128. Store canonical operation inputs,
+result and Pending/Committed/Failed state. Output-buffer addresses are delivery
+details, not operation identity.
 Reserve capacity before side effects. Never evict a Pending result to admit work.
 
 Within the window, identical retransmission only observes or advances the same
@@ -274,20 +277,21 @@ dependency; inspect that pin and its fixtures rather than assuming it tracks the
 provider. Do not mix old executable descriptors with a new dispatch prefix.
 Rollback requires the complete old provider/consumer/image set.
 
-Remaining M1 work is explicit: final per-operation descriptor and reply sizes,
-numeric status/error codes, query variants, retry-window bounds and result
-recovery rules, Split/Merge revision bookkeeping, the fault registration/wait
-protocol and backend-specific proof interfaces. The tables above constrain that
+Remaining M1 work is explicit: descriptors for whole-object and geometry-changing
+calls, object/Slot/Memo/Block observation variants, Split/Merge revision bookkeeping,
+the fault registration/wait protocol and backend-specific proof interfaces. The tables above constrain that
 work; they do not silently freeze untested numeric encodings or authorize claiming
 service integration. Subsequent changes should implement coherent slices of
 M2–M5 and record which M1 contracts they finalize.
 
 ## Verification boundary
 
-`api/tests/abi/memory_contract.rs` verifies exact byte layouts, identity/sentinel
+`api/tests/abi/memory_contract/` verifies exact byte layouts, identity/sentinel
 rejection, full-width non-wrapping revisions, unchanged coordinate meaning after
 window narrowing, complete large-Page geometry and continued rejection of ABI 11
-by current dispatch. It uses the production public codecs and no runtime fixture.
+by current dispatch. The request/reply suites also verify the implemented call
+payloads, failure/status combinations, delivery status and canonical encodings.
+They use the production public codecs and no runtime fixture.
 
 It does not prove live Pend validation, races, atomic commits, orphan recovery,
 request replay, retirement, data visibility, QEMU or hardware behavior. Those
