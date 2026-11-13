@@ -1,4 +1,4 @@
-//! Staged next-version provider. Dispatch remains disabled by the active ABI.
+//! Native memory provider; dispatch requires the coherent memory-v11 image feature.
 //! Mutations use the actual Task's bounded result journal; finite event reads
 //! retain a scheduler continuation and revalidate the exact live route on delivery.
 #[path = "next_memory/receipt.rs"]

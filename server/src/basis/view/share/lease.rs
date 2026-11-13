@@ -55,7 +55,7 @@ pub(crate) fn create_share(
             }
             let mut rights_out = ShareRights::empty();
             if rights.contains(FlatRights::ASSOCIATE) {
-                rights_out |= ShareRights::OPEN | ShareRights::SHUT | ShareRights::ASSOCIATE;
+                rights_out |= ShareRights::association();
             }
             if rights.contains(FlatRights::DELETE) {
                 rights_out |= ShareRights::DELETE;

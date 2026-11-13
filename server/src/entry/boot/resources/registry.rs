@@ -33,7 +33,7 @@ impl Registry {
                 Operations::Clone(CloneRights::PULL | CloneRights::PEEK)
             }
             Some(kernel_api::model::view::ViewKind::Share) => {
-                Operations::Share(ShareRights::OPEN | ShareRights::SHUT | ShareRights::ASSOCIATE)
+                Operations::Share(ShareRights::association())
             }
             None => limits.operations,
         };

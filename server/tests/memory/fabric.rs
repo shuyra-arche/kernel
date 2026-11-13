@@ -264,3 +264,38 @@ fn failed_membership_preparation_never_registers_a_phantom_obligation() {
     );
     assert_eq!(page.obligations(), 0);
 }
+
+#[test]
+fn local_instruction_qualification_requires_no_writer_or_external_peer() {
+    let page = page();
+    let closed = topology(&page, &[&[0]]);
+    let change = page.begin().unwrap();
+    let execute = Access::new(10).unwrap();
+    assert!(change.qualified(&closed, cpu(), execute, None).is_err());
+    // SAFETY: host decision fixture; never used as hardware proof.
+    let qualified = unsafe { closed.with_local_instructions() };
+    let writer = change
+        .qualified(&qualified, cpu(), Access::new(6).unwrap(), None)
+        .unwrap();
+    assert!(change.qualified(&qualified, cpu(), execute, None).is_err());
+    drop(writer);
+    let code = change.qualified(&qualified, cpu(), execute, None).unwrap();
+    assert!(
+        change
+            .qualified(&qualified, cpu(), Access::new(6).unwrap(), None)
+            .is_err()
+    );
+    assert!(
+        change
+            .qualified(&qualified, device(0), Access::new(2).unwrap(), None)
+            .is_err()
+    );
+    drop(code);
+    let external = change
+        .qualified(&qualified, device(0), Access::new(2).unwrap(), None)
+        .unwrap();
+    assert!(change.qualified(&qualified, cpu(), execute, None).is_err());
+    drop(external);
+    drop(change);
+    assert!(page.allows_return());
+}

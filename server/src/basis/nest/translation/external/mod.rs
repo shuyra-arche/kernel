@@ -26,6 +26,23 @@ impl NestState {
     }
 }
 impl Nest {
+    /// Caller holds COMMIT and has checked this exact in-flight generation.
+    pub(crate) fn retain_result(
+        &self,
+        span: &Arc<Span>,
+        index: usize,
+        generation: u64,
+        completion: crate::basis::unit::task::memory_result::Completion,
+    ) {
+        let mut state = self.state.lock();
+        let memo = state
+            .memos
+            .existing_mut(span, index)
+            .expect("accepted Memo");
+        assert_eq!(memo.generation(), generation);
+        assert!(memo.in_flight() && memo.completion.is_none());
+        memo.completion = Some(completion);
+    }
     /// Empty external address organization, before any requester is admitted.
     pub(crate) fn external_empty() -> Result<Arc<Self>, NestError> {
         Arc::try_new(Self {
@@ -171,6 +188,14 @@ impl Nest {
         let progress = external.progress(memo.publication_mut(), retracting);
         if progress.is_err() && memo.inspect(span.initial_start()) != before {
             span.changed();
+        }
+        if let Err(error) = progress {
+            let completion = memo.completion.take();
+            drop(state);
+            if let Some(completion) = completion {
+                completion.fail();
+            }
+            return Err(error);
         }
         let settled = match progress? {
             state::Progress::Published => memo.finish(),

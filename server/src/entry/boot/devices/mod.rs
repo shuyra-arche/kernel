@@ -1,4 +1,5 @@
 mod admission;
+pub(super) mod entry_mmio;
 pub(super) mod external;
 mod iommu;
 pub(super) use admission::{admit, configured, ready};

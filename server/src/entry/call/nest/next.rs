@@ -58,7 +58,11 @@ pub(in crate::entry::call) fn effect(
             } else {
                 span.access(index).map_err(nest_error)?.1
             };
-            if access.contains(Access::EXECUTE) {
+            if access.contains(Access::EXECUTE)
+                && (route.nest().is_external()
+                    || !crate::metal::memory::topology()
+                        .is_some_and(|t| t.allows_local_instructions()))
+            {
                 return Err(Failure::Unsupported);
             }
         }
@@ -149,7 +153,7 @@ pub(in crate::entry::call) fn effect(
         })
     };
     let maintenance_check = maintenance.clone();
-    let result = match action {
+    let mut result = match action {
         Action::Publish { .. } => {
             let change = basis::cell::change::acquire(data.as_ref().expect("selected Page"))
                 .map_err(cell_error)?;
@@ -200,6 +204,62 @@ pub(in crate::entry::call) fn effect(
         }
         _ => unreachable!(),
     };
+    // A CQ step is not synchronous completion. Preserve the accepted request
+    // until this exact Memo reaches Published/retired; never turn Pending into
+    // a terminal Busy merely because one bounded backend poll did not finish.
+    if route.nest().is_external()
+        && receipt.started().is_some()
+        && matches!(
+            result,
+            Ok(()) | Err(kernel_api::abi::call::cell::CellFail::Busy)
+        )
+    {
+        route
+            .nest()
+            .progress_external(&span)
+            .map_err(|_| Failure::Hardware)?;
+        let _commit = basis::commit();
+        let status = route
+            .nest()
+            .inspect_logical(&span, index)
+            .map_err(nest_error)?;
+        let pending = matches!(
+            (action, status.phase),
+            (
+                Action::Publish { .. },
+                kernel_api::model::nest::MemoPhase::Publishing
+            ) | (
+                Action::Retract { .. },
+                kernel_api::model::nest::MemoPhase::Retiring
+            )
+        );
+        if pending {
+            let value = receipt.started().unwrap();
+            if value
+                != (Value::Memo {
+                    generation: status.generation,
+                })
+            {
+                return Err(Failure::Stale);
+            }
+            route
+                .nest()
+                .retain_result(&span, index, status.generation.get(), receipt.defer());
+            return Ok(value);
+        }
+        if matches!(
+            (action, status.phase),
+            (
+                Action::Publish { .. },
+                kernel_api::model::nest::MemoPhase::Published
+            ) | (
+                Action::Retract { .. },
+                kernel_api::model::nest::MemoPhase::Associated
+            )
+        ) {
+            result = Ok(());
+        }
+    }
     result.map_err(|error| {
         if receipt.started().is_none() && span.version().next().is_none() {
             Failure::VersionExhausted

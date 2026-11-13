@@ -2,6 +2,18 @@
 //! They do not model authorization, Task scheduling, COMMIT or hardware fences.
 pub(crate) use crate::name;
 pub(crate) fn commit() {}
+pub(crate) mod unit {
+    pub(crate) mod task {
+        pub(crate) mod memory_result {
+            pub(crate) struct Completion;
+            impl Completion {
+                pub(crate) fn finish(self, _: bool) {
+                    panic!("Task journal outside Memo fixture; covered by invocation tests")
+                }
+            }
+        }
+    }
+}
 pub(crate) mod cell {
     pub(crate) use crate::cell as page;
     pub(crate) use crate::changes as change;

@@ -59,10 +59,16 @@ jobs:
             rust-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.hash }}-
       - name: Test workspace on host
         run: cargo test --locked --workspace --target x86_64-unknown-linux-gnu
+      - name: Test native ABI selection
+        run: cargo test --locked -p kernel-api --features memory-v11 --test native --target x86_64-unknown-linux-gnu
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --target riscv64gc-unknown-none-elf
       - name: Build workspace (release)
         run: cargo build --locked --workspace --release --target riscv64gc-unknown-none-elf
+      - name: Build native provider and client
+        run: |
+          cargo build --locked -p kernel -p kernel-client --features kernel/memory-v11,kernel-client/memory-v11 --target riscv64gc-unknown-none-elf
+          cargo build --locked -p kernel -p kernel-client --features kernel/memory-v11,kernel-client/memory-v11 --release --target riscv64gc-unknown-none-elf
 
   guest_shard:
     name: QEMU / ${{ matrix.shard }}

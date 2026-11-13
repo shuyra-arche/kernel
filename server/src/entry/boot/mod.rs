@@ -14,7 +14,8 @@ pub use error::MapOperation;
 pub use error::ResourceOperation;
 pub use error::fail;
 pub use init::{
-    bind_external, configure, grant_interrupt, grant_mmio, init, map_mmio, qualify_memory,
+    bind_external, configure, grant_interrupt, grant_mmio, init, map_entry_mmio, map_mmio,
+    qualify_memory,
 };
 
 use alloc::sync::Arc;
@@ -128,6 +129,8 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
             source,
         }
     })?;
+
+    devices::entry_mmio::install(&team.nest).map_err(BootError::Bootstrap)?;
 
     let mapping_size = region.size.next_multiple_of(PAGE_SIZE);
     let mapping = map_borrowed(&team.nest, PhysAddr::from_raw(region.base), mapping_size).map_err(

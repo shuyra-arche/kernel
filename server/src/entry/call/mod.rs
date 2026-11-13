@@ -37,8 +37,8 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
         frame.gpr.x(Gprs::A4),
         frame.gpr.x(Gprs::A5),
     ];
-    // Staged provider: this branch cannot run while Capsule/Ledger/ABI are v10.
-    // Activation still requires the remaining memory and platform milestones.
+    // The image selects one ABI for calls, Capsule and Ledger. Default v10
+    // never dispatches native descriptors; memory-v11 rejects legacy adapters.
     if kernel_api::abi::VERSION as u64 == kernel_api::abi::memory::VERSION
         && kernel_api::abi::memory::Opcode::from_call_number(number as u64).is_some()
     {

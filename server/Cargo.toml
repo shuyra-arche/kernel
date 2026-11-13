@@ -29,4 +29,5 @@ erra = { workspace = true }
 kernel-api = { workspace = true }
 
 [features]
+memory-v11 = ["kernel-api/memory-v11"]
 latency = []

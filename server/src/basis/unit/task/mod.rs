@@ -23,6 +23,7 @@ pub(crate) mod chain;
 mod creation;
 mod execution;
 mod identity;
+pub(crate) mod memory_result;
 pub(crate) mod registry;
 mod retirement;
 pub(crate) mod schedule;

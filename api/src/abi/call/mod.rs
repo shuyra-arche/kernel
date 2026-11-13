@@ -34,6 +34,13 @@ impl EnvCall {
             return Err(crate::abi::register::Decode::BadSlot);
         }
         let class = (slot >> 32) & 0xffff;
+        // Native memory has only bounded Flat/Nest descriptors. Old operation
+        // slots cannot fall through into the v10 register adapter.
+        if cfg!(feature = "memory-v11")
+            && (matches!(class, 2 | 12 | 13) || (class == 10 && slot as u32 != 1))
+        {
+            return Err(crate::abi::register::Decode::BadSlot);
+        }
         match class {
             0 => Ok(EnvCall::Room(self::room::RoomCall::from_wire(slot, regs)?)),
             1 => Ok(EnvCall::Unit(self::unit::UnitCall::from_wire(slot, regs)?)),

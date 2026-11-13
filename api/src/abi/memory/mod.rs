@@ -1,5 +1,5 @@
 //! Next-memory-ABI contracts and domain calls. These do not implement RegisterCall
-//! or enable ABI 11 in the running v10 dispatcher. Every decoded token
+//! themselves select ABI 11. The coordinated `memory-v11` feature selects it; every token
 //! still requires caller-local live authorization at the server commit point.
 
 mod call;
@@ -15,11 +15,11 @@ pub use request::{Action, Maintenance, Request, Source};
 
 use core::num::NonZeroU64;
 
-/// Proposed activation version; distinct from the currently supported ABI.
+/// Native memory version; default builds remain v10 until consumer migration.
 pub const VERSION: u64 = 11;
 
 /// Frozen next-version rights. Keeping them outside the v10 bitflag definition
-/// preserves rejection by the running Pend wire decoder.
+/// preserves rejection by the default v10 Pend wire decoder.
 pub mod rights {
     use crate::model::pend::{FlatRights, Limits, Operations};
     pub const OCCUPY: FlatRights = FlatRights::from_bits_retain(1 << 6);

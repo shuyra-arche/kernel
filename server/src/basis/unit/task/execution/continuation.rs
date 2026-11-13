@@ -16,6 +16,8 @@ pub(crate) enum WaitCall {
 pub(crate) enum Resumption {
     Complete,
     Waiting,
+    /// The continuation transferred the detached Task to death cleanup.
+    Terminated,
 }
 
 impl WaitCall {

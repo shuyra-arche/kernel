@@ -54,6 +54,7 @@ impl Detached {
 /// Completion resources leave the Nest lock before inverse owners are touched.
 #[derive(Default)]
 pub(in crate::basis::nest) struct Settled {
+    completion: Option<(crate::basis::unit::task::memory_result::Completion, bool)>,
     publisher: Option<Publisher>,
     borrow: Option<ExternalBorrow>,
     freeze: Option<Freeze>,
@@ -64,6 +65,9 @@ pub(in crate::basis::nest) struct Settled {
 
 impl Settled {
     pub(in crate::basis::nest) fn release(self) {
+        if let Some((completion, published)) = self.completion {
+            completion.finish(published);
+        }
         let (source_notice, publisher_notice) = {
             let _commit = crate::basis::commit();
             // SAFETY: only exact hardware completion or an unpublished cancellation
@@ -100,6 +104,8 @@ impl MemoFlight {
 }
 
 pub(crate) struct Memo {
+    pub(in crate::basis::nest) completion:
+        Option<crate::basis::unit::task::memory_result::Completion>,
     pub(in crate::basis::nest) provenance: Option<Arc<crate::basis::pend::Provenance>>,
     pub(in crate::basis::nest) maintenance: Option<Arc<crate::basis::pend::MaintenanceUse>>,
     generation: crate::basis::name::Generation,
@@ -121,6 +127,7 @@ pub(crate) struct Memo {
 impl Memo {
     pub(crate) const fn vacant() -> Self {
         Self {
+            completion: None,
             maintenance: None,
             provenance: None,
             generation: crate::basis::name::Generation::first(),
@@ -406,6 +413,7 @@ impl Memo {
             Some(Phase::Mapped) => {
                 self.flight = None;
                 Settled {
+                    completion: self.completion.take().map(|c| (c, true)),
                     freeze: self.freeze.take(),
                     ..Settled::default()
                 }
@@ -418,6 +426,7 @@ impl Memo {
                     None
                 };
                 Settled {
+                    completion: self.completion.take().map(|c| (c, false)),
                     publisher: self.publisher.take(),
                     borrow: self.borrow.take(),
                     freeze,

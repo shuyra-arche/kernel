@@ -7,7 +7,7 @@ use kernel_api::abi::memory::{self, Failure, Outcome, Reply, Request, journal::A
 pub(in crate::entry::call) struct Receipt<'a> {
     actor: &'a Arc<Task>,
     request: Request,
-    accepted: Accepted,
+    accepted: Option<Accepted>,
     started: Option<memory::Value>,
 }
 
@@ -16,7 +16,7 @@ impl<'a> Receipt<'a> {
         Self {
             actor,
             request,
-            accepted,
+            accepted: Some(accepted),
             started: None,
         }
     }
@@ -33,6 +33,17 @@ impl<'a> Receipt<'a> {
         self.started
     }
 
+    pub(in crate::entry::call) fn defer(
+        &mut self,
+    ) -> crate::basis::unit::task::memory_result::Completion {
+        crate::basis::unit::task::memory_result::Completion::new(
+            self.actor,
+            self.request,
+            self.accepted.take().expect("single completion owner"),
+            self.started.expect("accepted work"),
+        )
+    }
+
     fn record(&self, outcome: Outcome) -> Reply {
         let _commit = basis::commit();
         let reply = Reply::new(
@@ -46,12 +57,28 @@ impl<'a> Receipt<'a> {
             .lock()
             .as_mut()
             .expect("admitted Task journal")
-            .record(&self.accepted, reply)
+            .record(self.accepted.as_ref().expect("owned completion"), reply)
             .expect("record accepted operation before output");
         reply
     }
 
     pub(super) fn finish(self, result: Result<memory::Value, Failure>) -> [u8; Reply::WIDTH] {
+        if self.accepted.is_none() {
+            return self
+                .actor
+                .memory_results
+                .lock()
+                .as_ref()
+                .unwrap()
+                .inspect(
+                    self.actor.ident.id,
+                    self.request.action().opcode().domain(),
+                    self.request.id().unwrap(),
+                )
+                .expect("retained result")
+                .expect("accepted result")
+                .to_bytes();
+        }
         self.record(match result {
             Ok(value) => Outcome::Committed(value),
             Err(failure) => match self.started {

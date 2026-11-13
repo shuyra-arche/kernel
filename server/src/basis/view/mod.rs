@@ -124,7 +124,8 @@ impl View {
                 (
                     scope,
                     kernel_api::model::pend::Operations::Share(
-                        kernel_api::model::pend::ShareRights::all(),
+                        kernel_api::model::pend::ShareRights::association()
+                            | kernel_api::model::pend::ShareRights::DELETE,
                     ),
                 )
             }

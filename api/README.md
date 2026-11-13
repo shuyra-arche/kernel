@@ -889,3 +889,6 @@ response analysis assumptions and reproducible validation. In particular,
 Profile.response covers conditional runnable CPU service, not arbitrary external
 service completion. Unit Exit from this class retains result/reason but ignores
 the diagnostic note; safe physical reclamation remains asynchronous.
+
+The [M6 integration record](memory-m6.md) describes the opt-in ABI 11 image,
+real Team/CPU/IOMMU/Virtqueue checks, performance scope and unverified hardware.
