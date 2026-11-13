@@ -277,10 +277,9 @@ dependency; inspect that pin and its fixtures rather than assuming it tracks the
 provider. Do not mix old executable descriptors with a new dispatch prefix.
 Rollback requires the complete old provider/consumer/image set.
 
-Remaining M1 work is explicit: descriptors for whole-object and geometry-changing
-calls, object/Slot/Memo/Block observation variants, Split/Merge revision bookkeeping,
-the fault registration/wait protocol and backend-specific proof interfaces. The tables above constrain that
-work; they do not silently freeze untested numeric encodings or authorize claiming
+Remaining M1 work is explicit: Split/Merge descriptors and revision bookkeeping,
+the fault registration/wait protocol and backend-specific proof interfaces. The
+tables above constrain that work; they do not silently freeze untested numeric encodings or authorize claiming
 service integration. Subsequent changes should implement coherent slices of
 M2–M5 and record which M1 contracts they finalize.
 

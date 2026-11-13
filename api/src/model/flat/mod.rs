@@ -1,9 +1,11 @@
 //! Stable flat identity. A numeric identity is descriptive and never grants access.
 mod maintenance;
 mod position;
+mod status;
 
 pub use maintenance::{BlockGeneration, BlockPhase, BlockRef};
 pub use position::{SlotPosition, SlotVersion};
+pub use status::{BlockStatus, FlatPhase, FlatStatus, FlatVersion, SlotPhase, SlotStatus};
 
 use crate::abi::register::{Decode, Wire};
 

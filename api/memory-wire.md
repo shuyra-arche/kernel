@@ -1,4 +1,4 @@
-# Next memory request and result encoding
+# Next memory request, result and observation encoding
 
 Status: implemented **value codecs**, awaiting Server/Client integration and ABI
 activation. These are the M1 request/result contracts for the settled transitions
@@ -7,8 +7,9 @@ in [#142](https://github.com/shuyra-arche/kernel/issues/142), extending the
 or change the current ABI/Ledger v10. Host codec tests do not prove execution,
 request deduplication, live authorization or hardware settlement.
 
-`abi::memory` owns `Request`, `Reply`, `Delivery`, `Opcode`, `RequestId`, `Failure`,
-and the action/result variants. `model::flat` owns `BlockPhase`. No new Pend
+`abi::memory` owns `Request`, `Reply`, `Observation`, `Delivery`, `Opcode`,
+`RequestId`, `Failure`, and the action/result/query variants. `model::{flat,nest}`
+own the semantic status, phase and revision types. No new Pend
 target, general transaction syscall or second resource-state authority is added.
 There are no `RegisterCall`/`KernelCall` implementations for these drafts.
 
@@ -35,7 +36,7 @@ The first four request words are:
 | 0 | Version = 11 |
 | 1 | Domain = Flat 12 or Nest 13 |
 | 2 | Operation slot below |
-| 3 | Nonzero RequestId for a mutation; zero for InspectResult |
+| 3 | Nonzero RequestId for a mutation; zero for every Inspect query |
 
 `Request::from_call(number, bytes)` checks the actual trap number against the
 descriptor's operation and domain. Entry must use that check rather than trusting
@@ -66,6 +67,12 @@ Server's trace of the exact Page and original authority can validate that case.
 
 | Domain / slot | Action | Payload after the four-word header |
 | --- | --- | --- |
+| Flat 12 / 16 | CreateFlat | `[license, count, level]` |
+| Flat 12 / 17 | DeleteFlat | `[flat_pend, flat_id, expected_flat_version]` |
+| Nest 13 / 16 | CreateNest | `[license]` |
+| Nest 13 / 17 | DeleteNest | `[nest_pend, nest_id, expected_nest_version]` |
+| Nest 13 / 19 | Reserve | `[nest_pend, nest_id, expected_nest_version, reservation...]` |
+| Nest 13 / 20 | Release | `[mapping_pend, nest_id, mapping_id, expected_mapping_version]` |
 | Flat 12 / 19 | Occupy | `[S..., V]` |
 | Flat 12 / 20 | Vacate | `[S..., V, H...]` |
 | Flat 12 / 21 | Block | `[S..., count, Optional B...]` |
@@ -79,11 +86,10 @@ Server's trace of the exact Page and original authority can validate that case.
 | Nest 13 / 25 | Protect | `[M..., G, access]` |
 | Flat 12 or Nest 13 / 18 | InspectResult | `[query_tag = 3, requested_id]`; header RequestId is zero |
 
-Create/Delete, Reserve/Release, Split/Merge and object/position observation
-variants are not encoded by this revision. Their proposed slots remain in the
-migration document; these codecs reject them. This does not retire those v10
-operations. The largest currently implemented payload is the maintenance
-Push/Pull request: 17 total words (136 bytes); all remaining bytes are zero.
+Split/Merge are not encoded by this revision; their proposed slots remain in
+the migration document and these codecs reject them. This does not retire those
+v10 operations. The largest implemented request is maintenance Push/Pull:
+17 total words (136 bytes); all remaining bytes are zero.
 
 Block's range is nonempty and fixed-origin; byte and coordinate overflow reject.
 A recovery B must name the same Flat as S. Fresh Block has no previous maintenance
@@ -97,6 +103,45 @@ positions are representable; Server still checks both grants and actual geometry
 Protect's access uses READ=2, WRITE=4, EXECUTE=8, requires READ or EXECUTE and
 requires READ for WRITE. Representability does not bypass data ceilings, W/X or
 backend restrictions.
+
+### Object creation, reservation and retirement
+
+CreateFlat's count is a nonempty number of 4 KiB coordinates, divisible by the
+physical level's grain. It creates logical Fresh positions; it does not allocate
+Pages or publish mappings. CreateNest has no kind or hardware-requester field:
+it creates Internal only. Both require the appropriate live None license.
+
+Reserve embeds `model::nest::ReserveRequest`'s six little-endian words:
+`[placement_tag, address, align, count, level, access]`, with its existing
+Exact/Anywhere placement rules. Exact placement also checks address plus the
+entire byte length for overflow. Reserve atomically creates source-free Empty
+Memo positions and a fresh Mapping-scoped Nest Pend under Whole RESERVE. No
+Page, logical source or publication is implied. Failed Create/Reserve exposes no
+partial grant; a committed grant remains recoverable by the original RequestId
+if copying its result fails.
+
+DeleteFlat/DeleteNest begin irreversible Closing; Release begins Releasing.
+Pending retains the affected identity and accepted revision. Completion requires
+all relevant publication/maintenance responsibilities to settle before resource
+or address reuse. A failure keeps the known identity and Closing/Releasing or
+Failed phase. Rejected has no effects; failure after acceptance cannot reopen
+admission or hide unfinished cleanup. Live rights, branch scope and hardware
+settlement remain Server checks, not facts proved by these encodings.
+
+`FlatVersion`, `NestVersion` and `MappingVersion` are distinct nonzero u64 values
+with checked, non-wrapping successors. FlatVersion covers structural/lifecycle
+changes including holding and geometry changes. NestVersion covers reservation
+topology and space lifecycle. MappingVersion covers changes anywhere in the
+reservation, including logical association and publication transitions; Release
+must not rely on one Memo's generation. These are separate from SlotVersion,
+MemoGeneration, request sequences and ordinary memory content.
+
+A provider must reserve the required successor revisions before accepting a new
+change and report no-effect VersionExhausted when it cannot. Completion of an
+already accepted retirement belongs to its accepted generation and must still
+finish; forced cleanup cannot wrap a counter or reopen a dead identity. A
+revision alone does not prove a phase or settlement. Codec `next()` tests prove
+only checked arithmetic; Server must implement the invalidation rules.
 
 ### Insert sources
 
@@ -142,6 +187,12 @@ Value tags and payloads are:
 | 2 | `[local_version, remote_version, page_id]` | Push/Pull; page identity is nonzero |
 | 3 | `[memo_generation]` | Insert/Remove/Publish/Retract/Protect |
 | 4 | `[B..., block_phase]` | Block/Allow |
+| 5 | `[flat_pend, flat_id, flat_version]` | CreateFlat |
+| 6 | `[nest_pend, nest_id, nest_version]` | CreateNest |
+| 7 | `[mapping_pend, nest_id, nest_version, mapping_id, mapping_version, address]` | Reserve |
+| 8 | `[flat_id, flat_version, flat_phase]` | DeleteFlat |
+| 9 | `[nest_id, nest_version, nest_phase]` | DeleteNest |
+| 10 | `[nest_id, mapping_id, mapping_version, mapping_phase]` | Release |
 
 Page IDs are descriptive positive identities at most `isize::MAX`; they confer
 no rights. Slot/Memo versions are nonzero u64. A result's Value must match its
@@ -149,10 +200,14 @@ operation. Constructors and decoders reject these additional impossible claims:
 
 - Occupy Committed with a zero Page; Vacate Committed with a retained Page.
 - Vacate Pending with a zero Page; this would imply release before settlement.
-- Pending Occupy, Push/Pull, Insert or Remove. These logical transitions either
+- Pending CreateFlat/CreateNest, Reserve, Occupy, Push/Pull, Insert or Remove. These logical transitions either
   commit atomically or return a rejection/failure, with no exposed partial state.
 - Block Pending other than Draining, or Block Committed other than Held.
 - Allow Pending other than Releasing, or Allow Committed other than Closed.
+- Delete Pending other than Closing, or Delete Committed other than Closed.
+- Release Pending other than Releasing, or Release Committed other than Released.
+- Failed CreateFlat/CreateNest or Reserve with a partial result Value.
+- Failed Delete/Release without the corresponding retained lifecycle Value.
 
 BlockPhase tags are Draining=0, Held=1, Releasing=2, Closed=3, Orphaned=4. A Failed
 Block/Allow result must retain its known reference and Draining/Releasing phase
@@ -171,7 +226,8 @@ or hardware-proof substitute.
 
 ### Register return
 
-`Delivery` encodes a0–a2 as `[0, 128, 0]` when a complete Reply was copied, or
+`Delivery` encodes a0–a2 as `[0, 128, 0]` when a complete Reply or Observation
+was copied, or
 `[failure_code, 0, 0]` when delivery failed. Unknown codes, a wrong byte count,
 nonzero reserved registers and positive status values reject. Pending is a Reply
 outcome, not an overloaded positive register status.
@@ -203,6 +259,77 @@ Busy in Rejected means no resource transition was accepted. Draining Block or
 Releasing Allow instead returns Pending, preserving their effects. ResultExpired
 has its own outcome because the original effect is unknown. ReplyFault belongs
 to delivery, not the stored mutation outcome.
+
+## Object and position inspection
+
+Inspect uses operation 18 and a zero header RequestId. These six queries carry
+no expected revision; they resolve a live grant and return a current snapshot
+within its effective scope. Block's existing generation is part of its record
+identity, not a new request sequence. A stale BlockRef cannot name a replacement
+record. Query tag 3 remains the separate retained-result query described below.
+
+| Domain | Query tag | Request payload after tag | Snapshot |
+| --- | ---: | --- | --- |
+| Flat | 0 | `[flat_pend, flat_id]` | FlatStatus |
+| Flat | 1 | `[S...]` | SlotStatus |
+| Flat | 2 | `[H...]` | BlockStatus |
+| Nest | 0 | `[nest_pend, nest_id]` | NestStatus |
+| Nest | 1 | `[M...]` | MemoStatus |
+| Nest | 2 | `[mapping_pend, nest_id, mapping_id]` | MappingStatus |
+
+An `Observation` is exactly 128 bytes. Its six-word header is
+`[11, domain, 18, 0, query_tag, 0]`; the payload below is followed by zero padding.
+It is disjoint from a mutation Reply, which requires a nonzero RequestId.
+`Observation::matches(request)` checks query kind and identity/position, not live
+permission. Inspection failure uses Delivery with no valid output snapshot.
+
+| Snapshot | Payload after header |
+| --- | --- |
+| Flat | `[flat_id, flat_version, offset, count, flat_phase]` |
+| Slot | `[flat_id, coordinate, slot_version, level, slot_phase, page_id, obligations, blocked]` |
+| Block | `[B..., block_phase, offset, count, actor_task, ordinary, maintenance, failed]` |
+| Nest | `[nest_id, nest_version, kind, nest_phase, fault_sequence, fault_cause, fault_address, fault_requester]` |
+| Memo | `[nest_id, mapping_id, coordinate, memo_generation, memo_phase, source_flat, source_coordinate, page_id, access, level]` |
+| Mapping | `[nest_id, mapping_id, mapping_version, offset, count, original_address, level, access, mapping_phase]` |
+
+Booleans accept only 0/1. Phases and kind accept only known tags:
+
+| Type | Tags |
+| --- | --- |
+| FlatPhase | Open=0, Closing=1, Closed=2, Failed=3 |
+| SlotPhase | Fresh=0, Resident=1, Missing=2, Occupying=3, Moving=4, Vacating=5, Failed=6 |
+| BlockPhase | Draining=0, Held=1, Releasing=2, Closed=3, Orphaned=4 |
+| NestPhase | Unbound=0, Bound=1, Closing=2, Closed=3, Failed=4 |
+| NestKind | Internal=0, External=1 |
+| MemoPhase | Empty=0, Associated=1, Publishing=2, Published=3, Retiring=4, Failed=5 |
+| MappingPhase | Open=0, Releasing=1, Released=2, Failed=3 |
+
+Flat/Mapping ranges use original-origin coordinates and checked nonempty spans.
+A Mapping's address is its original reservation base, even for a narrowed
+window; adding the full window extent must not overflow. Its range covers whole
+physical grains. Slot and Memo positions must be physical-grain heads.
+
+Slot's Page is its current unique holding, or zero. Missing may retain historical
+publication obligations for a Page that moved elsewhere. Fresh/Occupying have
+no current Page or publication obligations; Resident/Vacating require a Page.
+Moving/Failed may retain a holding. Counts are descriptive and cannot authorize
+reuse. Block Held requires zero ordinary obligations but may retain controlled
+maintenance publications. Closed requires both counts zero and no failure;
+Orphaned may still retain responsibilities. These aggregate observations do not
+replace per-publication retirement proofs.
+
+Memo source fields describe the resolved original logical Flat position. An
+absent source is `[0, 0]`. Empty has no source, Page or access; Associated has a
+source but no physical publication. Publishing/Published/Retiring require a
+source, Page and valid access. Failed retains its source and may retain a physical
+publication. Share/Memo authority lineage remains in Kernel: equal source
+coordinates never establish equal authority, and an associated Missing/Fresh
+source is not an implicit Page allocation.
+
+Nest's four fault fields preserve all 64 bits, including on narrower hosts.
+This observation does not register a handler or wait for a new fault. Every
+snapshot can become stale immediately; neither a revision, count, source identity
+nor a Page ID proves content immutability, permission or hardware completion.
 
 ## Result inspection and bounded retention
 
@@ -247,8 +374,7 @@ reply correlation, exact lengths and canonical encodings after byte mutations.
 Delivery and stored outcome are separately tested. Existing tests keep active
 v10 dispatch rejecting next-ABI calls.
 
-Remaining M1 work includes whole-object and geometry-changing call descriptors,
-object/Slot/Memo/Block observation payloads, fault registration and bounded waits,
-and backend-specific proof interfaces. The bounded journal, permission checks,
+Remaining M1 work includes Split/Merge call descriptors and revision bookkeeping,
+fault registration and bounded waits, and backend-specific proof interfaces. The bounded journal, permission checks,
 atomic state changes and hardware effects described above require Server work;
 the codecs alone do not implement them. All M1–M6 milestones remain open.

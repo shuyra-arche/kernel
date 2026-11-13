@@ -2,9 +2,11 @@
 //! and do not enable ABI 11 in the running v10 dispatcher. Every decoded token
 //! still requires caller-local live authorization at the server commit point.
 
+mod observation;
 mod reply;
 mod request;
 
+pub use observation::{Observation, Query, Snapshot};
 pub use reply::{Delivery, Outcome, Reply, Value};
 pub use request::{Action, Maintenance, Request, Source};
 
@@ -60,7 +62,11 @@ impl Domain {
 /// retired Cell domain or generic transaction command is accepted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Opcode {
+    Create(Domain),
+    Delete(Domain),
     Inspect(Domain),
+    Reserve,
+    Release,
     Occupy,
     Vacate,
     Block,
@@ -89,21 +95,27 @@ impl Opcode {
 
     pub const fn domain(self) -> Domain {
         match self {
-            Self::Inspect(domain) => domain,
+            Self::Create(domain) | Self::Delete(domain) | Self::Inspect(domain) => domain,
             Self::Occupy | Self::Vacate | Self::Block | Self::Allow | Self::Push | Self::Pull => {
                 Domain::Flat
             }
-            Self::Insert | Self::Remove | Self::Publish | Self::Retract | Self::Protect => {
-                Domain::Nest
-            }
+            Self::Reserve
+            | Self::Release
+            | Self::Insert
+            | Self::Remove
+            | Self::Publish
+            | Self::Retract
+            | Self::Protect => Domain::Nest,
         }
     }
 
     pub const fn slot(self) -> u64 {
         match self {
+            Self::Create(_) => 16,
+            Self::Delete(_) => 17,
             Self::Inspect(_) => 18,
-            Self::Occupy => 19,
-            Self::Vacate => 20,
+            Self::Occupy | Self::Reserve => 19,
+            Self::Vacate | Self::Release => 20,
             Self::Block | Self::Insert => 21,
             Self::Allow | Self::Remove => 22,
             Self::Push | Self::Publish => 23,
@@ -114,6 +126,8 @@ impl Opcode {
 
     pub fn of(domain: u64, slot: u64) -> Option<Self> {
         Some(match (Domain::of(domain)?, slot) {
+            (domain, 16) => Self::Create(domain),
+            (domain, 17) => Self::Delete(domain),
             (domain, 18) => Self::Inspect(domain),
             (Domain::Flat, 19) => Self::Occupy,
             (Domain::Flat, 20) => Self::Vacate,
@@ -121,6 +135,8 @@ impl Opcode {
             (Domain::Flat, 22) => Self::Allow,
             (Domain::Flat, 23) => Self::Push,
             (Domain::Flat, 24) => Self::Pull,
+            (Domain::Nest, 19) => Self::Reserve,
+            (Domain::Nest, 20) => Self::Release,
             (Domain::Nest, 21) => Self::Insert,
             (Domain::Nest, 22) => Self::Remove,
             (Domain::Nest, 23) => Self::Publish,
@@ -205,6 +221,11 @@ impl<'a> Reader<'a> {
     fn token(&mut self) -> Option<crate::model::identity::PendId> {
         let value = self.size()?;
         valid_token(value).then(|| crate::model::identity::PendId::mint(value))
+    }
+
+    fn mapping(&mut self) -> Option<crate::model::cell::MappingId> {
+        let value = self.size()?;
+        valid_token(value).then(|| crate::model::cell::MappingId::new(value))
     }
 
     fn finish(self) -> Option<()> {

@@ -1,8 +1,12 @@
 //! Stable nest identity. A numeric identity is descriptive and never grants access.
 mod position;
 mod reserve;
+mod status;
 pub use position::{MemoGeneration, MemoPosition};
 pub use reserve::ReserveRequest;
+pub use status::{
+    MappingPhase, MappingStatus, MappingVersion, MemoPhase, MemoStatus, NestStatus, NestVersion,
+};
 
 use crate::abi::register::{Decode, Wire};
 

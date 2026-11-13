@@ -104,6 +104,7 @@ fn mutations() -> Vec<Action> {
             source,
         });
     }
+    actions.extend(super::objects::mutations());
     actions
 }
 
@@ -114,6 +115,12 @@ pub(super) fn set_word(bytes: &mut [u8], index: usize, value: u64) {
 #[test]
 fn settled_operations_have_distinct_domain_and_slot_contracts() {
     for (opcode, domain, slot) in [
+        (Opcode::Create(Domain::Flat), 12, 16),
+        (Opcode::Delete(Domain::Flat), 12, 17),
+        (Opcode::Create(Domain::Nest), 13, 16),
+        (Opcode::Delete(Domain::Nest), 13, 17),
+        (Opcode::Reserve, 13, 19),
+        (Opcode::Release, 13, 20),
         (Opcode::Inspect(Domain::Flat), 12, 18),
         (Opcode::Inspect(Domain::Nest), 13, 18),
         (Opcode::Occupy, 12, 19),
@@ -138,8 +145,8 @@ fn settled_operations_have_distinct_domain_and_slot_contracts() {
         (2, 0),
         (12, 0),
         (12, 25),
-        (13, 19),
-        (13, 20),
+        (13, 26),
+        (13, 27),
         (14, 21),
         (12, u64::MAX),
         (u64::MAX, 21),

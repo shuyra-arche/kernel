@@ -2,11 +2,12 @@
 //! header names the domain and operation; unused bytes have one canonical zero
 //! representation, suitable for comparing duplicate request identities.
 
-use super::{Domain, Opcode, Reader, RequestId, VERSION, Writer, valid_token};
+use super::{Domain, Opcode, Query, Reader, RequestId, VERSION, Writer, valid_token};
 use crate::model::{
-    flat::{BlockRef, SlotPosition, SlotVersion},
+    cell::{CellLevel, MappingId},
+    flat::{BlockRef, FlatId, FlatVersion, SlotPosition, SlotVersion},
     identity::PendId,
-    nest::{MemoGeneration, MemoPosition},
+    nest::{MappingVersion, MemoGeneration, MemoPosition, NestId, NestVersion, ReserveRequest},
     view::ViewId,
 };
 
@@ -122,6 +123,37 @@ impl Source {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    CreateFlat {
+        license: PendId,
+        count: usize,
+        level: CellLevel,
+    },
+    DeleteFlat {
+        token: PendId,
+        flat: FlatId,
+        expected: FlatVersion,
+    },
+    CreateNest {
+        license: PendId,
+    },
+    DeleteNest {
+        token: PendId,
+        nest: NestId,
+        expected: NestVersion,
+    },
+    Reserve {
+        token: PendId,
+        nest: NestId,
+        expected: NestVersion,
+        reservation: ReserveRequest,
+    },
+    Release {
+        token: PendId,
+        nest: NestId,
+        mapping: MappingId,
+        expected: MappingVersion,
+    },
+    Inspect(Query),
     /// Query tag 3; resolves only the actual caller's retained result. No live
     /// resource token is necessary after an accepted deletion or revocation.
     InspectResult {
@@ -188,6 +220,13 @@ pub enum Action {
 impl Action {
     pub const fn opcode(self) -> Opcode {
         match self {
+            Self::CreateFlat { .. } => Opcode::Create(Domain::Flat),
+            Self::DeleteFlat { .. } => Opcode::Delete(Domain::Flat),
+            Self::CreateNest { .. } => Opcode::Create(Domain::Nest),
+            Self::DeleteNest { .. } => Opcode::Delete(Domain::Nest),
+            Self::Reserve { .. } => Opcode::Reserve,
+            Self::Release { .. } => Opcode::Release,
+            Self::Inspect(query) => Opcode::Inspect(query.domain()),
             Self::InspectResult { domain, .. } => Opcode::Inspect(domain),
             Self::Occupy { .. } => Opcode::Occupy,
             Self::Vacate { .. } => Opcode::Vacate,
@@ -205,6 +244,39 @@ impl Action {
 
     fn valid(self) -> bool {
         match self {
+            Self::CreateFlat {
+                license,
+                count,
+                level,
+            } => {
+                valid_token(license.get())
+                    && crate::model::cell::pages(0, count).is_some()
+                    && level
+                        .pages()
+                        .is_some_and(|grain| count.is_multiple_of(grain))
+            }
+            Self::CreateNest { license } => valid_token(license.get()),
+            Self::DeleteFlat { token, .. } | Self::DeleteNest { token, .. } => {
+                valid_token(token.get())
+            }
+            Self::Reserve {
+                token, reservation, ..
+            } => {
+                valid_token(token.get())
+                    && reservation.valid()
+                    && match reservation.placement.at() {
+                        crate::model::cell::PlacementAt::Exact(address) => reservation
+                            .count
+                            .checked_bytes()
+                            .and_then(|bytes| address.get().checked_add(bytes))
+                            .is_some(),
+                        _ => true,
+                    }
+            }
+            Self::Release { token, mapping, .. } => {
+                valid_token(token.get()) && valid_token(mapping.get())
+            }
+            Self::Inspect(query) => query.valid(),
             Self::Vacate { maintenance, .. } | Self::Allow { maintenance } => maintenance.valid(),
             Self::Block {
                 start,
@@ -241,6 +313,57 @@ impl Action {
 
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
         match self {
+            Self::CreateFlat {
+                license,
+                count,
+                level,
+            } => {
+                out.word(license.get() as u64)?;
+                out.word(count as u64)?;
+                out.word(level.get() as u64)
+            }
+            Self::DeleteFlat {
+                token,
+                flat,
+                expected,
+            } => {
+                out.word(token.get() as u64)?;
+                out.word(flat.get() as u64)?;
+                out.word(expected.get())
+            }
+            Self::CreateNest { license } => out.word(license.get() as u64),
+            Self::DeleteNest {
+                token,
+                nest,
+                expected,
+            } => {
+                out.word(token.get() as u64)?;
+                out.word(nest.get() as u64)?;
+                out.word(expected.get())
+            }
+            Self::Reserve {
+                token,
+                nest,
+                expected,
+                reservation,
+            } => {
+                out.word(token.get() as u64)?;
+                out.word(nest.get() as u64)?;
+                out.word(expected.get())?;
+                out.bytes(&reservation.to_bytes())
+            }
+            Self::Release {
+                token,
+                nest,
+                mapping,
+                expected,
+            } => {
+                out.word(token.get() as u64)?;
+                out.word(nest.get() as u64)?;
+                out.word(mapping.get() as u64)?;
+                out.word(expected.get())
+            }
+            Self::Inspect(query) => query.write(out),
             Self::InspectResult { request, .. } => {
                 out.word(3)?;
                 out.word(request.get())
@@ -318,13 +441,45 @@ impl Action {
 
     fn read(opcode: Opcode, input: &mut Reader<'_>) -> Option<Self> {
         Some(match opcode {
+            Opcode::Create(Domain::Flat) => Self::CreateFlat {
+                license: input.token()?,
+                count: input.size()?,
+                level: CellLevel::new(input.size()?)?,
+            },
+            Opcode::Delete(Domain::Flat) => Self::DeleteFlat {
+                token: input.token()?,
+                flat: FlatId::new(input.size()?)?,
+                expected: FlatVersion::new(input.word()?)?,
+            },
+            Opcode::Create(Domain::Nest) => Self::CreateNest {
+                license: input.token()?,
+            },
+            Opcode::Delete(Domain::Nest) => Self::DeleteNest {
+                token: input.token()?,
+                nest: NestId::new(input.size()?)?,
+                expected: NestVersion::new(input.word()?)?,
+            },
+            Opcode::Reserve => Self::Reserve {
+                token: input.token()?,
+                nest: NestId::new(input.size()?)?,
+                expected: NestVersion::new(input.word()?)?,
+                reservation: ReserveRequest::from_bytes(input.bytes::<48>()?)?,
+            },
+            Opcode::Release => Self::Release {
+                token: input.token()?,
+                nest: NestId::new(input.size()?)?,
+                mapping: input.mapping()?,
+                expected: MappingVersion::new(input.word()?)?,
+            },
             Opcode::Inspect(domain) => {
-                if input.word()? != 3 {
-                    return None;
-                }
-                Self::InspectResult {
-                    domain,
-                    request: RequestId::new(input.word()?)?,
+                let tag = input.word()?;
+                if tag == 3 {
+                    Self::InspectResult {
+                        domain,
+                        request: RequestId::new(input.word()?)?,
+                    }
+                } else {
+                    Self::Inspect(Query::read(domain, tag, input)?)
                 }
             }
             Opcode::Occupy => {
@@ -427,7 +582,7 @@ impl Request {
     pub const WIDTH: usize = 256;
 
     pub fn new(id: Option<RequestId>, action: Action) -> Option<Self> {
-        let inspection = matches!(action, Action::InspectResult { .. });
+        let inspection = matches!(action, Action::InspectResult { .. } | Action::Inspect(_));
         (id.is_none() == inspection && action.valid()).then_some(Self { id, action })
     }
 

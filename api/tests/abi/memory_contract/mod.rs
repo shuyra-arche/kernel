@@ -1,5 +1,7 @@
 //! Next-memory-ABI value contracts. These do not exercise server authorization,
 //! publication, maintenance or retirement, and do not activate a new call ABI.
+mod objects;
+mod observation;
 mod reply;
 mod request;
 
