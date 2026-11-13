@@ -90,7 +90,9 @@ for next-version transitions (including Split/Merge) and object lifecycles,
 including exact status codes,
 result inspection, scoped Flat/Slot/Block/Nest/Memo/Mapping observations, and
 Mapping fault route/event descriptors with checked finite deadlines.
-It is not accepted by current `EnvCall` and has no invocation traits.
+The [M1 acceptance record](memory-m1.md) also covers the bounded request journal
+and trusted backend proof interface. These are not accepted by current `EnvCall`
+and have no invocation traits; live integration remains unimplemented.
 
 This is a breaking provider redesign of Cell, View, Pend, Sign, Unit and Room.
 There are no compatibility aliases for retired operations.

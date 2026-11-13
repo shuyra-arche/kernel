@@ -592,10 +592,16 @@ has been revoked. InspectResult returns the stored mutation's opcode and origina
 ID, not an Inspect-wrapped second result. An expired query whose old opcode is no
 longer known uses Inspect for the requested domain with Outcome::Expired.
 `Reply::matches(request)` checks these correlation rules, not authorization.
+If the journal reports an accepted request with no public result yet (preparing
+an atomic operation), return `Delivery::Failed(Busy)` with no output payload.
+This means the identity is already in flight; it is not a no-effect Rejected
+receipt and must not be resubmitted under a new ID. The same rule handles a
+concurrent duplicate before the first result is recorded.
 
 `RESULT_CAPACITY = 16` specifies the next provider's maximum retained records per
-Task across Flat and Nest. It is a contract bound, not an implemented journal in
-this change. A provider must allocate/reserve record capacity before effects and
+Task across Flat and Nest. It is enforced by the fixed-capacity
+`abi::memory::journal::Journal`, not yet attached to live Tasks. A provider must
+reserve record capacity before effects and
 retain canonical request bytes and the last result. Completed/rejected/failed
 records may be evicted; Pending records may not. Fill all 16 with Pending work
 and the next mutation gets no-effect Busy before admission. Resource cleanup
@@ -626,10 +632,12 @@ reply correlation, exact lengths and canonical encodings after byte mutations.
 Delivery and stored outcome are separately tested. Existing tests keep active
 v10 dispatch rejecting next-ABI calls.
 
-Remaining M1 work includes backend-specific proof interfaces. Fault route/event
-codecs and deadline arithmetic do not implement fault queues, wait registration,
-notification races, terminal Task behavior or recovery scheduling. Live geometry/revision bookkeeping and atomic
+The [M1 acceptance record](memory-m1.md) links the completed contract deliverables
+and [backend interfaces](memory-backend.md). Fault route/event codecs and deadline
+arithmetic do not implement fault queues, wait registration, notification races,
+terminal Task behavior or recovery scheduling. Live geometry/revision bookkeeping and atomic
 allocation-receipt conversion still require Server/allocator integration. The
-bounded journal, permission checks, atomic state changes and hardware effects
+journal attachment, permission checks, atomic state changes and hardware effects
 described above require Server work;
-the codecs alone do not implement them. All M1–M6 milestones remain open.
+the codecs alone do not implement them. M1 is complete as a contract deliverable
+pending merge; M2–M6 remain open.

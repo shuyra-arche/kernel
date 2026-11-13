@@ -2,6 +2,7 @@
 //! and do not enable ABI 11 in the running v10 dispatcher. Every decoded token
 //! still requires caller-local live authorization at the server commit point.
 
+pub mod journal;
 mod observation;
 mod reply;
 mod request;

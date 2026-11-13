@@ -20,6 +20,10 @@ use state::slot;
 mod scope;
 mod translation;
 
+mod evidence;
+#[path = "../../src/metal/generic/memory/mod.rs"]
+pub mod proof;
+
 // Resolve production module paths using the real types, without loading the
 // RV64-specific address-space machinery into the host harness.
 #[allow(dead_code, unused_imports)]

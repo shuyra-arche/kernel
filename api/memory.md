@@ -1,11 +1,11 @@
 # Flat/Nest memory contract and migration
 
-Status: **M1 implementation preparation for [#142](https://github.com/shuyra-arche/kernel/issues/142)**.
-The identity/revision value codecs and the [settled-operation request/result
-codecs](memory-wire.md) are implemented. The next syscall ABI is not activated;
-Server state machines and consumer migration are not implemented or frozen.
-This document does not mark M1–M6 complete. Current executable contracts remain
-[ABI v10 / Ledger v10](README.md#source-migration-and-abi-compatibility).
+Status: **M1 contract deliverables complete in [PR #145](https://github.com/shuyra-arche/kernel/pull/145), pending merge**, for [#142](https://github.com/shuyra-arche/kernel/issues/142).
+See the [M1 acceptance matrix and activation plan](memory-m1.md) for each section 9
+requirement and its evidence. Value codecs, bounded journal transitions and the
+trusted backend proof interface are implemented and tested. The next syscall ABI
+is not activated; Task/resource integration and physical backends remain M2–M6.
+Current executable contracts remain [ABI v10 / Ledger v10](README.md#source-migration-and-abi-compatibility).
 
 The reviewed source baseline is Kernel
 `f61164b594226978d15040fbd9e5847e7974b738`
@@ -77,7 +77,7 @@ promise to split a larger physical Page or a hardware translation leaf.
 
 ## Next call boundary
 
-The following allocates the next coordinated ABI bump, not callable declarations.
+The following reserves the next coordinated ABI bump, not callable declarations.
 The implemented subset and exact wire encoding are in [memory-wire.md](memory-wire.md).
 Reserve ABI 11 only if still free when the provider
 is activated. If another change has consumed it, choose a fresh version and
@@ -198,15 +198,17 @@ layout before changing the allocation. Memo logical spans survive; an incompatib
 new geometry makes Publish fail explicitly until repaired. No implicit rewriting
 of other Memo associations or PageOwner is permitted.
 
-### Bounded retry proposal
+### Bounded retry contract
 
 A request identity is `(calling Task identity, nonzero monotonic u64 sequence)`.
 It is distinct from any Slot/Memo version. The caller knows it before dispatch,
 so failure to copy a reply cannot erase the only way to identify an accepted call.
 All next-memory mutations, including creation and deletion, participate.
 
-Use a per-Task window of 16 result records and a monotonically increasing accepted
-high-water mark, as specified by `abi::memory::RESULT_CAPACITY`. Requests are
+The independently tested `abi::memory::journal::Journal` implements a fixed
+window of 16 records and a monotonically increasing accepted
+high-water mark, as specified by `abi::memory::RESULT_CAPACITY`. The live Task
+attachment and resource commit integration are still unimplemented. Requests are
 bounded at 256 bytes and replies at 128. Store canonical operation inputs,
 result and Pending/Committed/Failed state. Output-buffer addresses are delivery
 details, not operation identity.
@@ -227,6 +229,10 @@ Block takeover requires original range/branch management authority, drains old
 maintenance accesses, advances generation and invalidates the old credential.
 
 ## Hardware and service activation gates
+
+The [backend proof contract](memory-backend.md) specifies exact identities,
+independent evidence kinds, safe combiners, refusal defaults and platform-specific
+obligations. Its compiled Rust interface is not an enabled hardware provider.
 
 Whole-group compatibility must use trusted platform facts for the exact physical
 range, memory attributes and every requester. Two pairwise CPU-coherent relations
@@ -287,13 +293,10 @@ dependency; inspect that pin and its fixtures rather than assuming it tracks the
 provider. Do not mix old executable descriptors with a new dispatch prefix.
 Rollback requires the complete old provider/consumer/image set.
 
-Remaining M1 work is explicit: backend-specific proof interfaces. Fault routing
-and bounded waiting now have value contracts; queues, scheduler/Sign integration
-and terminal fault behavior remain unimplemented. Split/Merge now have codecs and checked
-revision arithmetic; live geometry bookkeeping and allocation conversion still
-require Server/allocator implementation. The tables above constrain that work;
-they do not authorize claiming service integration. Subsequent changes should
-implement coherent slices of M2–M5 and record which M1 contracts they finalize.
+The [M1 acceptance record](memory-m1.md) closes the contract/encoding decisions.
+Fault queues, scheduler/Sign integration, actual geometry bookkeeping, allocation
+conversion and physical proof implementations remain M2–M6. New work implements
+those owners against the fixed contract and records any deliberate contract change.
 
 ## Verification boundary
 
@@ -302,7 +305,9 @@ rejection, full-width non-wrapping revisions, unchanged coordinate meaning after
 window narrowing, complete large-Page geometry and continued rejection of ABI 11
 by current dispatch. The request/reply suites also verify the implemented call
 payloads, failure/status combinations, delivery status and canonical encodings.
-They use the production public codecs and no runtime fixture.
+They use the production public codecs and the actual bounded journal.
+The backend evidence tests compile the production Rust proof interface with
+explicitly synthetic attestations; they do not claim a physical implementation.
 
 It does not prove live Pend validation, races, atomic commits, orphan recovery,
 request replay, retirement, data visibility, QEMU or hardware behavior. Those
