@@ -138,8 +138,29 @@ fn handoff(source: CellPosition, target: CellPosition, pull: bool) {
 }
 #[track_caller]
 fn publish(mapping: kernel_api::model::identity::PendId, page: usize) {
-    let pos = memo(mapping, page).to_bytes();
-    cell::publish(ptr(&pos)).unwrap();
+    let deadline = room_call::clock().saturating_add(5_000_000_000);
+    loop {
+        let current = info(raw_memo(mapping, page)); // Also progresses accepted retirement.
+        if current.state == CellState::Published {
+            break;
+        }
+        let pos = CellPosition {
+            generation: current.generation,
+            ..raw_memo(mapping, page)
+        }
+        .to_bytes();
+        match cell::publish(ptr(&pos)) {
+            Ok(()) => break,
+            Err(error) if error.source == kernel_api::abi::call::cell::CellFail::Busy => {
+                assert!(
+                    room_call::clock() < deadline,
+                    "Cell.Publish continuation timed out"
+                );
+                room_call::yield_();
+            }
+            Err(error) => panic!("Cell.Publish: {error:?}"),
+        }
+    }
     assert_eq!(info(raw_memo(mapping, page)).state, CellState::Published);
 }
 #[track_caller]
