@@ -2,7 +2,7 @@
 //! caller holds its ledger serial and COMMIT through resource/result commit.
 use crate::basis::{
     self,
-    nest::{Access, memo::source::Source},
+    nest::memo::source::Source,
     pend::{self, access::Reservation},
     unit::task::Task,
 };
@@ -10,10 +10,7 @@ use alloc::sync::Arc;
 use kernel_api::{
     abi::memory::{self, Action, Failure, Observation, Query, Snapshot, Value},
     address::{PageCount, PageOffset},
-    model::{
-        modifiable::Modifiable,
-        pend::{FlatRights, NestRights, Operations},
-    },
+    model::pend::{FlatRights, NestRights, Operations},
 };
 
 pub(in crate::entry::call) fn inspect(
@@ -154,11 +151,7 @@ fn select(
                 .logical_source(&span, index, expected.get())
                 .map_err(nest_error)?
                 .ok_or(Failure::SourceEmpty)?;
-            let (mut ceiling, _) = span.access(index).map_err(nest_error)?;
-            if mapping.entry().modifiable() != Modifiable::Yes {
-                ceiling.remove(Access::WRITE);
-            }
-            let source = source.limited(ceiling);
+            let source = source.export(actor, &mapping, index).map_err(cell_error)?;
             source.range().map_err(cell_error)?;
             Ok(source)
         }

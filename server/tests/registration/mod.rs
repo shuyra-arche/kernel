@@ -13,6 +13,7 @@ mod branch;
 #[allow(dead_code)]
 #[path = "../../src/basis/unit/control/mod.rs"]
 pub(crate) mod control;
+mod exports;
 #[allow(dead_code, unused_imports)]
 #[path = "../../src/basis/pend/ledger/mod.rs"]
 mod ledger;
@@ -56,7 +57,8 @@ mod basis {
         }
     }
     pub(crate) mod pend {
-        pub(crate) use crate::authority::Pend;
+        pub(crate) use crate::authority::{Export, Pend};
+        pub(crate) use crate::ledger::{PendEntry, locate};
         pub(crate) use crate::target::Target;
         pub(crate) use kernel_api::model::modifiable::Modifiable;
         pub(crate) enum Need {
@@ -73,7 +75,7 @@ mod basis {
         }
     }
     pub(crate) mod nest {
-        pub(crate) use crate::support::Nest;
+        pub(crate) use crate::support::{Nest, Span};
         pub(crate) mod authority {
             pub(crate) fn withdraw_source_branch(
                 _: &std::sync::Arc<crate::support::Sharing>,

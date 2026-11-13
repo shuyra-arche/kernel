@@ -12,7 +12,7 @@ use crate::basis::nest::Access;
 use crate::basis::pend::Pend;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
-use kernel_api::model::identity::PendId;
+use kernel_api::model::identity::{PendId, TaskId};
 
 use super::SourceAuthorization;
 use super::tracking::Tracking;
@@ -182,6 +182,18 @@ impl HoldTable {
     /// before an association can expose this source through any Nest.
     pub(crate) fn track(&self, source: &Arc<SourceAuthorization>) -> Result<(), PendFail> {
         self.sources.lock().remember(source)
+    }
+
+    /// Called after branch admission closes. Derived Memos in foreign Nests
+    /// retain this Task's route until their own exact hardware retirement.
+    pub(crate) fn withdraw_exports(
+        &self,
+        task: TaskId,
+        token: kernel_api::model::identity::PendId,
+    ) -> Result<(), PendFail> {
+        crate::basis::nest::memo::source::exports::withdraw(&self.sources, |source| {
+            source.exported_by(task, token)
+        })
     }
 
     pub(crate) fn get(&self, id: usize) -> Option<Arc<Hold>> {

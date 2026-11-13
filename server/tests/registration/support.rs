@@ -41,6 +41,10 @@ impl HoldTable {
     pub(crate) fn retire(&self, _: &Arc<Task>) -> Result<bool, PendFail> {
         Ok(true)
     }
+    // This fixture owns no logical sources and executes no Memo/hardware cleanup.
+    pub(crate) fn withdraw_exports(&self, _: TaskId, _: PendId) -> Result<(), PendFail> {
+        Ok(())
+    }
 }
 
 pub(crate) struct Team {
@@ -99,8 +103,12 @@ pub(crate) struct Nest {
 pub(crate) struct Span {
     count: PageCount,
     level: CellLevel,
+    pub(crate) open: AtomicBool,
 }
 impl Span {
+    pub(crate) fn is_open(&self) -> bool {
+        self.open.load(Ordering::Acquire)
+    }
     pub(crate) fn range(&self, offset: PageOffset, count: PageCount) -> Result<(), ()> {
         let grain = self.level.pages().ok_or(())?;
         if !offset.get().is_multiple_of(grain)
@@ -144,7 +152,11 @@ impl Nest {
             .push((id, PendStatus::Active));
         self.spans.lock().unwrap().push((
             id,
-            Arc::new(Span { count, level }),
+            Arc::new(Span {
+                count,
+                level,
+                open: AtomicBool::new(true),
+            }),
             Arc::downgrade(root),
         ));
     }

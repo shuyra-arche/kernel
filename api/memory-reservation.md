@@ -53,7 +53,7 @@ the staged OCCUPY/VACATE/RESHAPE/FAULT additions.
 | Joint Target/Scope/Operations validation | Host test exercises 168 combinations through actual PendInfo decoding; original scope, range, unknown-bit and geometry tests remain | Next-version Pend additions and coordinated boot/image tests |
 | Whole/Reservation separation and creation lineage | Existing production Pend/ledger preparation tests now use Reservation names, retain real creator ancestry and parent limits, and reject ordinary cross-scope attenuation | Actual Reserve entry and hardware lifecycle integration |
 | Fixed identity, coordinate and correlated observations | Golden wire tests retain numeric layout; a different ReservationId at the same address/revision rejects old observations; fixed-origin Narrow tests remain | Actual Release/re-reserve with stale Pend, fault, waiter and request delivery |
-| Read-only and non-distributable multi-hop sources | Existing attenuation tests remain; no claim that source export is complete | Audit and enforce live distribution qualification on Memo/Share export, with original and intermediate lineage restrictions; race with Narrow/Revoke |
+| Read-only and non-distributable multi-hop sources | Staged Memo export retains original Flat/Share and intermediate Reservation qualifications; production Pend/ledger tests cover distribution, read-only limits, revocation, foreign ledgers and allocation failure | Actual Memo/Share entry, Insert/Publish races and CPU/External cleanup integration; next Pend encoding |
 | Complete resource controls and independent permissions | Existing scoped Pend/registration tests remain | Complete §14.8 Task, multi-reservation, fault, maintenance and CPU/External retirement scenarios |
 
 The new identity-correlation tests execute codecs, not actual address reuse.
@@ -61,3 +61,39 @@ Registration tests execute production Pend ancestry and ledger preparation with
 Namespace/hardware fixtures. Host checks and RV64 builds do not establish guest,
 QEMU or physical retirement behavior. No additional issue checkbox is completed
 on the strength of naming changes alone. M3–M6 remain open.
+
+## Retained Memo export lineage
+
+The staged native `Source::Memo` path checks the original Flat/Share ASSOCIATE
+grant and each exporting Reservation PUBLISH grant for live Distributable::Yes.
+Each node retains the actual Pend and a fixed range selection; every later use
+resolves that token in its original Task ledger and checks exact authority
+identity, ancestor liveness, scope and data limits again. Read-only restrictions
+and source/Reservation access ceilings cannot be widened by another export.
+The chain is bounded to 64 nodes including the original source; exhaustion
+rejects preparation before changing the destination association.
+
+A logical export guard keeps its Pend unsettled until the last associated
+source copy is removed. While exports remain, Narrow returns Busy without
+changing the grant; remove dependent associations or revoke the branch to make
+progress. Revoke closes permission immediately, then uses the original source's
+binding index to find and retire dependent Memos. This guard is a logical
+dependency, not proof of hardware completion or a second permission snapshot.
+Existing publication retirement retains the concrete Page until its own proof.
+
+Task and Reservation indexes hold weak references for cleanup discovery.
+Reservation Release closes admission, clears its own Memos and drains exports
+before address reuse. Task/branch cleanup also discovers foreign destinations.
+Each drain handles at most four matching Memos and returns Busy for retry;
+failed retirement retains the binding and dependency. Lineage nodes use weak
+Task/Reservation references so exporting into the same Nest creates no ownership
+cycle. Preparation failure leaves the prior destination association intact.
+
+Host tests execute production export guards and lineage checks against actual
+Pend and Task ledger code, with Namespace lifetime fixtures. They also cover
+serialized Narrow/export contention, ancestor and intermediate revocation,
+bounded depth, allocation rollback and weak ownership. They do not execute the
+whole Memo export/cleanup pipeline or establish hardware retirement. Flat/Share
+distribution tests here exercise their real Pend selection, not Share creation.
+The staged native path remains inactive; the v10 Cell adapter keeps its existing
+behavior. This follow-up does not complete section 14.8 or activate ABI 11.

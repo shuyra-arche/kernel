@@ -440,6 +440,12 @@ impl Nest {
         if busy {
             return Err(CellFail::Busy);
         }
+        // Own Memos have been removed, including same-Reservation exports.
+        // Foreign destinations must retire before this address can be reused.
+        memo::source::exports::withdraw(&mapping.exports, |source| {
+            source.uses_reservation(&mapping)
+        })
+        .map_err(memo::pend_failure)?;
         {
             let _commit = crate::basis::commit();
             let mut layout = self.layout.lock();

@@ -9,18 +9,18 @@ use kernel_api::abi::call::pend::PendFail;
 
 pub(super) const CAPACITY: usize = 1024;
 
-pub(super) struct Tracking<T> {
+pub(crate) struct Tracking<T> {
     sources: Vec<Weak<T>>,
 }
 
 impl<T> Tracking<T> {
-    pub(super) const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             sources: Vec::new(),
         }
     }
 
-    pub(super) fn remember(&mut self, source: &Arc<T>) -> Result<(), PendFail> {
+    pub(crate) fn remember(&mut self, source: &Arc<T>) -> Result<(), PendFail> {
         self.sources.retain(|known| known.strong_count() != 0);
         if self
             .sources
@@ -44,6 +44,16 @@ impl<T> Tracking<T> {
         // only dead entries here, never a live source whose cleanup may fail.
         self.sources.retain(|known| known.strong_count() != 0);
         self.sources.iter().find_map(Weak::upgrade)
+    }
+
+    /// Allocation-free discovery traversal. Pointer order is only a cursor,
+    /// never an authorization identity. Admission is closed before draining.
+    pub(crate) fn after(&self, cursor: usize) -> Option<Arc<T>> {
+        self.sources
+            .iter()
+            .filter_map(Weak::upgrade)
+            .filter(|source| Arc::as_ptr(source) as usize > cursor)
+            .min_by_key(|source| Arc::as_ptr(source) as usize)
     }
 
     pub(super) fn forget(&mut self, source: &Arc<T>) {
