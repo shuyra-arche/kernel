@@ -21,6 +21,51 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 type Space = Target<Adapter<Device, Proof>>;
+
+#[test]
+fn publish_and_withdraw_partial_hardware_failure_retain_every_owner() {
+    use super::registers::Submission;
+    for withdrawal in [false, true] {
+        for injection in [
+            Submission::QueueWritten,
+            Submission::TailWritten,
+            Submission::TailLost,
+        ] {
+            let (mut space, device, pools, cell, proof) = space(8);
+            if withdrawal {
+                publish(&mut space, &cell);
+                active(&mut space, &device);
+                space.revoke().unwrap();
+                device.interrupt_submission(injection);
+                assert!(!space.poll().unwrap());
+            } else {
+                space.prepare(&cell, 0x400000, true, None).unwrap();
+                device.interrupt_submission(injection);
+                space.publish().unwrap();
+            }
+            drop(cell); // Task/driver abandonment is not a completion proof.
+            let observed = if withdrawal {
+                space.poll()
+            } else {
+                space.ready()
+            };
+            if matches!(injection, Submission::TailLost) {
+                assert_eq!(observed, Ok(false));
+            } else {
+                assert_eq!(observed, Err(Error::Hardware(HardwareError::Fault)));
+                assert_eq!(space.phase(), Some(Phase::Failed));
+            }
+            assert_eq!(proof.lock().unwrap().polls, 0);
+            assert!(!space.settled());
+            drop(space);
+            assert!(
+                pools
+                    .iter()
+                    .all(|pool| pool.gives() == 0 && pool.page().is_err())
+            );
+        }
+    }
+}
 #[derive(Default)]
 struct Evidence {
     polls: usize,
