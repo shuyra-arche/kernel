@@ -2969,12 +2969,3 @@ impl SpaceKind {
         matches!(self, SpaceKind::Supervisor)
     }
 }
-
-impl From<kernel_api::model::unit::ProgramKind> for SpaceKind {
-    fn from(k: kernel_api::model::unit::ProgramKind) -> Self {
-        match k {
-            kernel_api::model::unit::ProgramKind::User => SpaceKind::User,
-            kernel_api::model::unit::ProgramKind::Supervisor => SpaceKind::Supervisor,
-        }
-    }
-}

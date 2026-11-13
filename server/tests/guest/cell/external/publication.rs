@@ -8,7 +8,7 @@ use kernel_api::{
     },
     model::{
         pend::NarrowRequest,
-        unit::{ControlId, ProgramKind, UnitCreate},
+        unit::{ControlId, UnitCreate},
     },
 };
 use kernel_client::call::{share_view, unit};
@@ -29,7 +29,6 @@ pub(in super::super) fn run(at: usize, count: usize) {
     let team = UnitCreate::Team {
         member_exit: false,
         nest: Some(root),
-        kind: ProgramKind::User,
         guard: ControlId::NONE,
     }
     .to_bytes();

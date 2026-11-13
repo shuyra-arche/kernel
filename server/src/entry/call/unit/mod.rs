@@ -361,18 +361,13 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
             Ok(CreatedUnit::Task(task.ident.id))
         }
         UnitCreate::Team {
-            kind,
             guard,
             nest,
             member_exit,
         } => {
             let serial = me.pend.lock();
             let _commit = crate::basis::commit();
-            if !crate::basis::pend::live(me)
-                || kind == kernel_api::model::unit::ProgramKind::Supervisor
-                    && !me.ident.team.nest.kind().is_supervisor()
-                || !me.administration.allows(ControlKind::Build)
-            {
+            if !crate::basis::pend::live(me) || !me.administration.allows(ControlKind::Build) {
                 return Err(UnitFail::Denied);
             }
             let guarded = guard != ControlId::NONE;
@@ -382,7 +377,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
             {
                 return Err(UnitFail::Denied);
             }
-            let kind = SpaceKind::from(kind);
+            let kind = SpaceKind::User;
             let sire = TaskWeak::stored(Arc::downgrade(me), Origin::Sire);
             let builder = TeamBuilder::new(kind)
                 .sire(sire)

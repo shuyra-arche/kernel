@@ -100,7 +100,9 @@ The largest implemented request is maintenance Push/Pull:
 
 Block's range is nonempty and fixed-origin; byte and coordinate overflow reject.
 A recovery B must name the same Flat as S. Fresh Block has no previous maintenance
-generation; recovery checks B's generation. The caller's request sequence handles
+generation; recovery checks B's generation. The same live Task/branch may resume
+its exact Draining/Held record without changing epoch; orphan takeover instead
+requires a real ancestor and advances epoch after retirement. The caller's request sequence handles
 duplicate acceptance independently of residency. Block's execution must cover the
 actual complete physical units and follow historical publications.
 

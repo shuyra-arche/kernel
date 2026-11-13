@@ -16,7 +16,7 @@ names without changing the running v10 wire layout or activating ABI 11.
 | `model::identity` | TaskId, TeamId, PendId and Mark |
 | `model::cell` | SlotId, allocation, Cell objects, positions, handoffs and observations |
 | `model::modifiable` | Modifiable: write permission on a Pend |
-| `model::unit` | ProgramKind, UnitTarget, control authorities, creation descriptors, queries and stable results |
+| `model::unit` | User-only creation, UnitTarget, control authorities, creation descriptors, queries and stable results |
 | `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
 | `model::memory` | Bounded, atomic reads of versioned global memory observations |
 | `model::{flat,nest}` | Source, Nest and ReservationId identities and observations; never independent authorization |

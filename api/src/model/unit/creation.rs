@@ -1,7 +1,6 @@
-//! Unit creation snapshots and execution privilege.
+//! Unit creation snapshots. Public Team construction always selects User.
 
 use crate::abi::layout::{fetch_words, store_words};
-use crate::abi::register::{Decode, Wire};
 
 use super::ControlId;
 use crate::{
@@ -42,7 +41,6 @@ impl crate::abi::reply::FromTriple for CreatedUnit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnitCreate {
     Team {
-        kind: ProgramKind,
         guard: ControlId,
         /// Adopt an empty, exclusive Internal Nest root; None allocates a new Nest.
         /// Success retains its identity, consumes ATTACH/DELETE and returns limited Whole authority.
@@ -72,16 +70,12 @@ impl UnitCreate {
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let words = match self {
             Self::Team {
-                kind,
                 guard,
                 nest,
                 member_exit,
             } => [
                 0,
-                match kind {
-                    ProgramKind::User => 0,
-                    ProgramKind::Supervisor => 1,
-                },
+                0, // Retired privilege selector: only canonical zero is accepted.
                 guard.get(),
                 nest.map_or(0, crate::model::identity::PendId::get),
                 member_exit as usize,
@@ -109,12 +103,7 @@ impl UnitCreate {
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let [tag, a, b, c, d, e] = fetch_words(bytes)?;
         match tag {
-            0 if c <= isize::MAX as usize && d <= 1 && e == 0 => Some(Self::Team {
-                kind: match a {
-                    0 => ProgramKind::User,
-                    1 => ProgramKind::Supervisor,
-                    _ => return None,
-                },
+            0 if a == 0 && c <= isize::MAX as usize && d <= 1 && e == 0 => Some(Self::Team {
                 guard: ControlId::new(b),
                 nest: (c != 0).then(|| crate::model::identity::PendId::new(c)),
                 member_exit: d == 1,
@@ -127,35 +116,6 @@ impl UnitCreate {
                 stack: VirtAddr::new(e),
             }),
             _ => None,
-        }
-    }
-}
-
-/// Execution privilege selected by the Team creation authority.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ProgramKind {
-    /// User pages carry the U bit.
-    User,
-    /// Supervisor pages have the U bit clear.
-    Supervisor,
-}
-
-impl Wire for ProgramKind {
-    const WORDS: usize = 1;
-    fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
-        s[*i] = match self {
-            ProgramKind::User => 0,
-            ProgramKind::Supervisor => 1,
-        };
-        *i += 1;
-    }
-    fn unpack(s: &[usize; 6], i: &mut usize) -> Result<Self, Decode> {
-        let v = *s.get(*i).ok_or(Decode::Overflow)?;
-        *i += 1;
-        match v {
-            0 => Ok(ProgramKind::User),
-            1 => Ok(ProgramKind::Supervisor),
-            _ => Err(Decode::Invalid),
         }
     }
 }

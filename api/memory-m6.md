@@ -1,5 +1,7 @@
 # M6：原生镜像集成与性能验收
 
+Later activation and additional acceptance are recorded in [the coordinated follow-up](memory-acceptance.md). Historical delivery status below is not the current remaining-work list.
+
 本轮在 Vanllia `tests/memory` 组合真实 Kernel、Client、初始 Task、第二个 Team、
 CPU MMU、RISC-V IOMMU 和 virtio-blk。测试程序只调用公开 ABI；不把私有 Server
 源码编入 guest，也不以 host fixture 的结果替代硬件运行。

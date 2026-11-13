@@ -1,5 +1,7 @@
 # M1 acceptance and activation plan
 
+Later activation and additional acceptance are recorded in [the coordinated follow-up](memory-acceptance.md). Historical delivery status below is not the current remaining-work list.
+
 **The original M1 deliverables are complete in PR #145, pending merge.** This is completion of
 contracts, migration decisions and their executable checks, not completion of
 runtime integration. ABI/Ledger remain v10. At M1 delivery, M2–M6 remained open;
