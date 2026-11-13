@@ -11,15 +11,33 @@ use crate::model::{
     },
     identity::{PendId, TaskId},
     nest::{
+        FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase, FaultSequence, FaultStatus,
         MappingPhase, MappingStatus, MappingVersion, MemoGeneration, MemoPhase, MemoPosition,
         MemoStatus, NestId, NestInfo, NestKind, NestPhase, NestStatus, NestVersion,
     },
+    wait::Wait,
 };
 
-/// Query identity does not contain an expected version. The token is resolved
-/// afresh under its effective Whole/Mapping/Flat scope at observation time.
+/// State queries do not require the version being observed. Event reads name
+/// an existing route epoch and cursor, never an expected residency version. The
+/// token is resolved afresh under its live scope at observation/delivery time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Query {
+    FaultRoute {
+        token: PendId,
+        nest: NestId,
+        mapping: MappingId,
+    },
+    /// Observe the next retained event without consuming it. Only the actual
+    /// registered handler may read events; timeout never resolves a fault.
+    FaultEvent {
+        token: PendId,
+        nest: NestId,
+        mapping: MappingId,
+        epoch: FaultEpoch,
+        after: u64,
+        wait: Wait,
+    },
     Flat {
         token: PendId,
         flat: FlatId,
@@ -50,15 +68,23 @@ impl Query {
             Self::Flat { .. } | Self::Nest { .. } => 0,
             Self::Slot(_) | Self::Memo(_) => 1,
             Self::Block(_) | Self::Mapping { .. } => 2,
+            Self::FaultRoute { .. } => 4,
+            Self::FaultEvent { .. } => 5,
         }
     }
     pub(super) fn valid(self) -> bool {
         match self {
             Self::Flat { token, .. } | Self::Nest { token, .. } => valid_token(token.get()),
             Self::Block(h) => valid_token(h.token.get()),
-            Self::Mapping { token, mapping, .. } => {
+            Self::Mapping { token, mapping, .. } | Self::FaultRoute { token, mapping, .. } => {
                 valid_token(token.get()) && valid_token(mapping.get())
             }
+            Self::FaultEvent {
+                token,
+                mapping,
+                wait,
+                ..
+            } => valid_token(token.get()) && valid_token(mapping.get()) && wait != Wait::Infinite,
             _ => true,
         }
     }
@@ -83,10 +109,44 @@ impl Query {
                 token,
                 nest,
                 mapping,
+            }
+            | Self::FaultRoute {
+                token,
+                nest,
+                mapping,
             } => {
                 out.word(token.get() as u64)?;
                 out.word(nest.get() as u64)?;
                 out.word(mapping.get() as u64)
+            }
+            Self::FaultEvent {
+                token,
+                nest,
+                mapping,
+                epoch,
+                after,
+                wait,
+            } => {
+                for word in [
+                    token.get() as u64,
+                    nest.get() as u64,
+                    mapping.get() as u64,
+                    epoch.get(),
+                    after,
+                ] {
+                    out.word(word)?;
+                }
+                match wait {
+                    Wait::Poll => {
+                        out.word(0)?;
+                        out.word(0)
+                    }
+                    Wait::At(at) => {
+                        out.word(1)?;
+                        out.word(at)
+                    }
+                    Wait::Infinite => None,
+                }
             }
         }
     }
@@ -111,6 +171,23 @@ impl Query {
                 nest: NestId::new(input.size()?)?,
                 mapping: input.mapping()?,
             },
+            (Domain::Nest, 4) => Self::FaultRoute {
+                token: input.token()?,
+                nest: NestId::new(input.size()?)?,
+                mapping: input.mapping()?,
+            },
+            (Domain::Nest, 5) => Self::FaultEvent {
+                token: input.token()?,
+                nest: NestId::new(input.size()?)?,
+                mapping: input.mapping()?,
+                epoch: FaultEpoch::new(input.word()?)?,
+                after: input.word()?,
+                wait: match (input.word()?, input.word()?) {
+                    (0, 0) => Wait::Poll,
+                    (1, at) => Wait::At(at),
+                    _ => return None,
+                },
+            },
             _ => return None,
         })
     }
@@ -118,6 +195,8 @@ impl Query {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Snapshot {
+    FaultRoute(FaultStatus),
+    FaultEvent(FaultEvent),
     Flat(FlatStatus),
     Slot(SlotStatus),
     Block(BlockStatus),
@@ -138,6 +217,8 @@ impl Snapshot {
             Self::Flat(_) | Self::Nest(_) => 0,
             Self::Slot(_) | Self::Memo(_) => 1,
             Self::Block(_) | Self::Mapping(_) => 2,
+            Self::FaultRoute(_) => 4,
+            Self::FaultEvent(_) => 5,
         }
     }
     fn valid(self) -> bool {
@@ -148,10 +229,30 @@ impl Snapshot {
             Self::Nest(_) => true,
             Self::Memo(s) => s.valid(),
             Self::Mapping(s) => s.valid(),
+            Self::FaultRoute(s) => s.valid(),
+            Self::FaultEvent(s) => s.valid(),
         }
     }
     fn matches(self, query: Query) -> bool {
         match (self, query) {
+            (Self::FaultRoute(s), Query::FaultRoute { nest, mapping, .. }) => {
+                s.nest == nest && s.mapping == mapping
+            }
+            (
+                Self::FaultEvent(s),
+                Query::FaultEvent {
+                    nest,
+                    mapping,
+                    epoch,
+                    after,
+                    ..
+                },
+            ) => {
+                s.nest == nest
+                    && s.mapping == mapping
+                    && s.epoch == epoch
+                    && s.sequence.get() > after
+            }
             (Self::Flat(s), Query::Flat { flat, .. }) => s.id == flat,
             (Self::Slot(s), Query::Slot(p)) => s.flat == p.flat() && s.coordinate == p.page(),
             (Self::Block(s), Query::Block(h)) => s.block == h.block,
@@ -167,6 +268,33 @@ impl Snapshot {
     }
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
         match self {
+            Self::FaultRoute(s) => words(
+                out,
+                &[
+                    s.nest.get() as u64,
+                    s.mapping.get() as u64,
+                    s.epoch.get(),
+                    s.phase as u64,
+                    s.handler.map_or(0, |task| task.get()) as u64,
+                    s.timeout_ns,
+                    s.last_sequence,
+                ],
+            ),
+            Self::FaultEvent(s) => words(
+                out,
+                &[
+                    s.nest.get() as u64,
+                    s.mapping.get() as u64,
+                    s.epoch.get(),
+                    s.sequence.get(),
+                    s.memo_page as u64,
+                    s.generation.get(),
+                    s.flat.get() as u64,
+                    s.slot_page as u64,
+                    s.version.get(),
+                    s.cause as u64 | ((s.access as u64) << 8),
+                ],
+            ),
             Self::Flat(s) => words(
                 out,
                 &[
@@ -254,6 +382,46 @@ impl Snapshot {
     }
     fn read(domain: Domain, tag: u64, input: &mut Reader<'_>) -> Option<Self> {
         Some(match (domain, tag) {
+            (Domain::Nest, 4) => Self::FaultRoute(FaultStatus {
+                nest: NestId::new(input.size()?)?,
+                mapping: input.mapping()?,
+                epoch: FaultEpoch::new(input.word()?)?,
+                phase: FaultPhase::from_tag(input.word()?)?,
+                handler: match input.size()? {
+                    0 => None,
+                    task => Some(TaskId::new(task)),
+                },
+                timeout_ns: input.word()?,
+                last_sequence: input.word()?,
+            }),
+            (Domain::Nest, 5) => {
+                let nest = NestId::new(input.size()?)?;
+                let mapping = input.mapping()?;
+                let epoch = FaultEpoch::new(input.word()?)?;
+                let sequence = FaultSequence::new(input.word()?)?;
+                let memo_page = input.size()?;
+                let generation = MemoGeneration::new(input.word()?)?;
+                let flat = FlatId::new(input.size()?)?;
+                let slot_page = input.size()?;
+                let version = SlotVersion::new(input.word()?)?;
+                let flags = input.word()?;
+                if flags >> 16 != 0 {
+                    return None;
+                }
+                Self::FaultEvent(FaultEvent {
+                    nest,
+                    mapping,
+                    epoch,
+                    sequence,
+                    memo_page,
+                    generation,
+                    flat,
+                    slot_page,
+                    version,
+                    cause: FaultCause::from_tag(flags & 255)?,
+                    access: FaultAccess::from_tag(flags >> 8)?,
+                })
+            }
             (Domain::Flat, 0) => Self::Flat(FlatStatus {
                 id: FlatId::new(input.size()?)?,
                 version: FlatVersion::new(input.word()?)?,

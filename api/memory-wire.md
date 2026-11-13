@@ -88,6 +88,7 @@ a different Flat's maintenance record is not admitted by this first contract.
 | Nest 13 / 23 | Publish | `[M..., G, Optional H...]` |
 | Nest 13 / 24 | Retract | `[M..., G]` |
 | Nest 13 / 25 | Protect | `[M..., G, access]` |
+| Nest 13 / 26 | FaultRoute | `[mapping_pend, nest_id, mapping_id, expected_mapping_version, expected_fault_epoch, enabled, sign_pend?, timeout_ns?]` |
 | Flat 12 or Nest 13 / 18 | InspectResult | `[query_tag = 3, requested_id]`; header RequestId is zero |
 
 The largest implemented request is maintenance Push/Pull:
@@ -243,10 +244,10 @@ two's-complement i64 code in a u64 word.
 
 | Outcome tag | Failure | Value | Meaning |
 | ---: | --- | --- | --- |
-| 0 Rejected | A known negative cause, except ResultExpired/ReplyFault | None | This attempt made no resource change |
+| 0 Rejected | A known negative cause, except ResultExpired/ReplyFault/FaultExpired | None | This attempt made no resource change |
 | 1 Pending | 0 | Required | Accepted work remains; observe/advance the same operation |
 | 2 Committed | 0 | Required | The operation's documented commit/completion condition was reached |
-| 3 Failed | A known negative cause, except ResultExpired/ReplyFault/RequestMismatch | Operation-specific | Accepted work failed; retained hardware/resource responsibility is not erased |
+| 3 Failed | A known negative cause, except ResultExpired/ReplyFault/RequestMismatch/FaultExpired | Operation-specific | Accepted work failed; retained hardware/resource responsibility is not erased |
 | 4 Expired | ResultExpired (-14) | None | The old result cannot be proved; never execute that identity again |
 
 RequestMismatch rejects this conflicting attempt, not an earlier accepted
@@ -270,6 +271,7 @@ Value tags and payloads are:
 | 9 | `[nest_id, nest_version, nest_phase]` | DeleteNest |
 | 10 | `[nest_id, mapping_id, mapping_version, mapping_phase]` | Release |
 | 11 | `[flat_id, flat_version, slot_version, offset, parent_level]` | Split/Merge |
+| 12 | `[nest_id, mapping_id, mapping_version, fault_epoch, fault_phase]` | FaultRoute |
 
 Page IDs are descriptive positive identities at most `isize::MAX`; they confer
 no rights. Slot/Memo versions are nonzero u64. A result's Value must match its
@@ -277,14 +279,14 @@ operation. Constructors and decoders reject these additional impossible claims:
 
 - Occupy Committed with a zero Page; Vacate Committed with a retained Page.
 - Vacate Pending with a zero Page; this would imply release before settlement.
-- Pending CreateFlat/CreateNest, Reserve, Occupy, Push/Pull, Split/Merge, Insert
+- Pending CreateFlat/CreateNest, Reserve, FaultRoute, Occupy, Push/Pull, Split/Merge, Insert
   or Remove. These logical transitions commit atomically or return a
   rejection/failure, with no exposed partial state.
 - Block Pending other than Draining, or Block Committed other than Held.
 - Allow Pending other than Releasing, or Allow Committed other than Closed.
 - Delete Pending other than Closing, or Delete Committed other than Closed.
 - Release Pending other than Releasing, or Release Committed other than Released.
-- Failed CreateFlat/CreateNest or Reserve with a partial result Value.
+- Failed CreateFlat/CreateNest, Reserve or FaultRoute with a partial result Value.
 - Failed Delete/Release without the corresponding retained lifecycle Value.
 
 BlockPhase tags are Draining=0, Held=1, Releasing=2, Closed=3, Orphaned=4. A Failed
@@ -340,16 +342,20 @@ NestFail domains:
 | -6 | NoRegion | -15 | ReplyFault |
 | -7 | Stale | -16 | Invalid |
 | -8 | SourceEmpty | -17 | Hardware |
-| -9 | DestinationOccupied | | |
+| -9 | DestinationOccupied | -18 | TimedOut |
+| -19 | NoHandler | -20 | HandlerGone |
+| -21 | QueueFull | -22 | FaultExpired |
 
 Busy in Rejected means no resource transition was accepted. Draining Block or
 Releasing Allow instead returns Pending, preserving their effects. ResultExpired
 has its own outcome because the original effect is unknown. ReplyFault belongs
-to delivery, not the stored mutation outcome.
+to delivery, not the stored mutation outcome. FaultExpired is a fault-event read
+failure, distinct from expired mutation results; it cannot be a stored rejection
+or failure of a mutation.
 
 ## Object and position inspection
 
-Inspect uses operation 18 and a zero header RequestId. These six queries carry
+Inspect uses operation 18 and a zero header RequestId. The six object/position queries carry
 no expected revision; they resolve a live grant and return a current snapshot
 within its effective scope. Block's existing generation is part of its record
 identity, not a new request sequence. A stale BlockRef cannot name a replacement
@@ -414,9 +420,168 @@ coordinates never establish equal authority, and an associated Missing/Fresh
 source is not an implicit Page allocation.
 
 Nest's four fault fields preserve all 64 bits, including on narrower hosts.
-This observation does not register a handler or wait for a new fault. Every
+The NestStatus observation alone does not register a handler or wait for a new
+fault; the separate Mapping fault protocol below defines those requests. Every
 snapshot can become stale immediately; neither a revision, count, source identity
 nor a Page ID proves content immutability, permission or hardware completion.
+
+## Mapping fault routes and bounded recovery
+
+This is an inactive service-facing protocol, using Nest operations and existing
+Sign endpoints. A route is stored in its Mapping; there is no Fault/Mapping Pend
+target or new data authority. Enabling these codecs alone cannot change v10 fault
+behavior. Scheduler, trap, Sign and Server integration remain unimplemented.
+
+### Registration and authority
+
+FaultRoute (Nest slot 26) installs/replaces a route when `enabled=1`, followed by
+`[sign_pend, timeout_ns]`; `enabled=0` disables it and has no remaining payload.
+Other tags and nonzero unused fields reject. The request has a normal nonzero
+RequestId, expected MappingVersion and expected FaultEpoch. Preparation failure
+leaves the old route intact; commit advances both versions once and records a
+Value tag 12 result. Only Active or Disabled is a committed configuration result,
+with both new versions greater than 1. There is no Pending/partial installation.
+The reply correlates both exact successors and the requested phase/identity.
+
+The proposed **Mapping-only FAULT right is bit 12 (4096)**. It is not enabled in
+v10 NestRights or Limits. Configuration requires this right over the entire
+original reservation, a live Mapping branch and an open Mapping. A Whole grant
+cannot configure an existing Mapping's route. Narrowed subranges cannot replace
+a handler for peers outside their scope. Managers delegate a full Mapping-scoped
+FAULT grant to the chosen service; it must register itself. The request cannot
+nominate a Task by numeric identity.
+
+The actual calling Task becomes the handler. Its Sign grant must carry LISTEN,
+ROUTE and TRIGGER; the route retains the exact live Mapping and Sign branch
+lineages, not table indices that could later be reused. Registration conveys no
+Flat access, Occupy/Vacate, transfer, Insert or Publish permission. Those grants
+must be delegated separately. Event reads require the actual handler plus its
+live full-Mapping INSPECT/FAULT authority and original route binding. Route-status
+reads require full-Mapping INSPECT. Recheck permissions when delivering a read
+that slept, and fail if the handler, branch or route changed meanwhile.
+
+Initial route state is Disabled at FaultEpoch 1. FaultEpoch is nonzero u64;
+replacing/disabling advances it without wrapping. Task death, branch revocation,
+Sign destruction or Mapping close marks an active route Lost immediately and
+ends its waiters with HandlerGone. Lost retains its old actor/budget for diagnosis
+and accepts no new recovery waits. This forced invalidation does not need a new
+epoch at exhaustion; replacement always requires a fresh epoch and MappingVersion.
+Old events/wake callbacks cannot target the replacement generation. Changing or
+disabling a route also ends old waits; it does not transfer them to a new service.
+
+### Queries and exact wire layout
+
+Both queries use the normal 256-byte Inspect request, domain Nest, operation 18,
+header RequestId zero. Query tags 4 and 5 are invalid in the Flat domain.
+
+| Query tag | Payload after tag | Result |
+| ---: | --- | --- |
+| 4 | `[mapping_pend, nest_id, mapping_id]` | FaultStatus |
+| 5 | `[mapping_pend, nest_id, mapping_id, fault_epoch, after_sequence, wait_tag, deadline_ns]` | FaultEvent |
+
+Event reads are non-consuming. `wait_tag=0, deadline_ns=0` polls; `wait_tag=1`
+uses an absolute Room.Clock nanosecond deadline. Infinite and other wait tags
+reject. `fault_read_deadline(wait, now)` checks the dynamic bound: at most
+`MAX_FAULT_NS = 60_000_000_000` ns from now. A past deadline is already expired,
+not an infinite wait. Decoding alone cannot check the current clock.
+
+The 128-byte Observation header remains `[11, 13, 18, 0, query_tag, 0]`:
+
+| Query tag | Payload after the six-word header |
+| ---: | --- |
+| 4 | `[nest_id, mapping_id, fault_epoch, phase, handler_task_or_zero, timeout_ns, last_sequence]`, then zero tail |
+| 5 | `[nest_id, mapping_id, fault_epoch, sequence, memo_page, memo_generation, flat_id, slot_page, slot_version, cause_and_access]` |
+
+FaultPhase is Disabled=0, Active=1, Lost=2. Disabled has zero handler and timeout;
+Active/Lost retain a positive handler identity and a timeout in 1..=MAX_FAULT_NS.
+Active routes and events require epoch greater than 1. FaultSequence is a
+separate nonzero u64, monotonic for the Mapping's entire lifetime and never reset
+on route replacement. `last_sequence` is zero before any event. Counters preserve
+all 64 bits and reject exhaustion with VersionExhausted without reuse. A new
+route cannot reset an exhausted Mapping event sequence.
+
+Event coordinates use original Mapping and Flat origins, not the current grant
+window or raw fault VA. The event identifies the Memo unit and resolved logical
+source seen at fault admission; the provider checks complete physical geometry
+when resolving that source. A Share/Memo source resolves to its original Flat
+coordinates while retaining its real authority chain in Kernel. No Pend or data
+grant is included in the event.
+
+The last event word has cause in bits 0..7 (Fresh=0, Missing=1), attempted access
+in bits 8..15 (Read=2, Write=4, Execute=8), and zero bits 16..63. Attempted access
+is exactly one kind, not a publication mask; Read|Write is invalid. Empty Memo,
+permission denial, blocked admission and unattributable device faults are not
+nonresident events. They follow their explicit denial/failure paths. External
+hardware faults retain the existing diagnostic path; this draft does not promise
+transparent replay or resumption of a device request.
+
+### Queue, notification and timeout rules
+
+Each Mapping retains at most `FAULT_CAPACITY = 16` events. The key for coalescing
+is route epoch, Memo coordinate/generation, source Flat/coordinate/version, cause
+and attempted access. Identical pending faults share one event and its original
+deadline. Waiter storage is bounded to one embedded wait per Task; it is not an
+unbounded list allocated for each repeated fault. Pending events cannot be
+evicted. Terminal events may be evicted to admit new work. A full queue of
+pending events returns QueueFull; it does not lose an existing event or wait.
+
+Read tag 5 returns the lowest retained sequence greater than `after_sequence`
+under the exact epoch. Zero means the oldest retained event, useful after
+resynchronization. A nonzero cursor below the greatest evicted sequence returns
+FaultExpired, not a silently skipped event. A cursor above the issued high-water
+mark returns Invalid. With no newer event, Poll returns Busy and a finite wait
+returns TimedOut at its deadline. A wrong epoch returns Stale; Disabled returns
+NoHandler and Lost returns HandlerGone. Read failures use Delivery and have no
+valid Observation payload. Lost reply copies do not consume events.
+
+Kernel uses the existing Sign direct-trigger slot only as a coalesced wake hint.
+If the slot already has a trigger, the event remains in the Mapping queue and no
+second trigger is necessary. The Sign sequence is independent of FaultSequence.
+Consuming a Sign trigger does not acknowledge, discard or resolve a fault. The
+service consumes an observed direct trigger **before** draining events, reads
+until no newer event is available, then listens with a finite deadline. It must
+not consume a trigger after the final empty read: an intervening event could
+have coalesced into that trigger. Direct event-read waits atomically check the
+queue and register the sleeper; queued events cannot fall between those steps.
+Spurious triggers are harmless because reads recheck authority and retained
+state. A notification error caused by revoked/dead delivery authority loses the
+route; it cannot silently strand waiting Tasks.
+
+For a recoverable CPU nonresident fault, admission first checks the live mapping,
+logical source and access ceilings. With no handler, return NoHandler immediately.
+With a live route, establish the event and its fixed deadline before parking the
+Task. `FaultRoute::deadline(accepted_at)` performs checked addition; overflow
+rejects before waiting. A duplicate fault, a service read, a notification or a
+retry cannot extend that deadline. A newly joining waiter inherits the same
+remaining budget. No locks are held while sleeping. A handler faulting on its
+own route is rejected as Unsupported rather than waiting on itself. Recovery
+code, stack and buffers must already be resident.
+
+Ordinary Publish still returns SourceEmpty for a Fresh/Missing source; it does
+not allocate, park its caller or turn a rejected mutation into Pending. Recovery
+uses independently authorized Occupy/Push, Insert when needed, and Publish.
+Only a valid physical publication can resume CPU access. Its accepted transaction
+must retain the predecessor Memo/source binding and new publication generation;
+completion checks that exact lineage, current authority and actual visibility
+before satisfying the original wait. A Sign notification, supplied Page alone,
+user Ack or timeout is never completion proof.
+
+Insert replacement, Remove or Mapping release invalidates the old logical event;
+it cannot retarget the event to the new source. Supply changes SlotVersion as
+expected, but never authorizes reuse of the old event as a new supply request.
+Service mutations still check their ordinary expected versions and grants. A
+late operation on the old Flat may be independently authorized; it cannot be
+credited as recovery of a different Memo/source or route generation.
+
+A parked CPU Task reaching its fixed deadline or a terminal route/error condition
+leaves recovery with the explicit cause. The first activation policy terminates
+that Task using existing `ExitCause::Fault`, with the next-memory Failure's signed
+code preserved as a two's-complement u64 exit reason. There is no automatic
+instruction retry that silently renews the budget. Existing task observation
+reports the terminal reason. TimedOut, NoHandler, HandlerGone and QueueFull are
+separate outcomes; no path turns Missing into a zero page. These terminal paths
+must be integrated and tested together with removing implicit materialization.
+Fault timeout/route loss never clears Block or physical retirement obligations.
 
 ## Result inspection and bounded retention
 
@@ -461,8 +626,9 @@ reply correlation, exact lengths and canonical encodings after byte mutations.
 Delivery and stored outcome are separately tested. Existing tests keep active
 v10 dispatch rejecting next-ABI calls.
 
-Remaining M1 work includes fault registration and bounded waits, and
-backend-specific proof interfaces. Live geometry/revision bookkeeping and atomic
+Remaining M1 work includes backend-specific proof interfaces. Fault route/event
+codecs and deadline arithmetic do not implement fault queues, wait registration,
+notification races, terminal Task behavior or recovery scheduling. Live geometry/revision bookkeeping and atomic
 allocation-receipt conversion still require Server/allocator integration. The
 bounded journal, permission checks, atomic state changes and hardware effects
 described above require Server work;

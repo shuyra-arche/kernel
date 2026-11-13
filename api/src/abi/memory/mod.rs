@@ -80,6 +80,7 @@ pub enum Opcode {
     Publish,
     Retract,
     Protect,
+    FaultRoute,
 }
 
 impl Opcode {
@@ -112,7 +113,8 @@ impl Opcode {
             | Self::Remove
             | Self::Publish
             | Self::Retract
-            | Self::Protect => Domain::Nest,
+            | Self::Protect
+            | Self::FaultRoute => Domain::Nest,
         }
     }
 
@@ -128,7 +130,7 @@ impl Opcode {
             Self::Push | Self::Publish => 23,
             Self::Pull | Self::Retract => 24,
             Self::Split | Self::Protect => 25,
-            Self::Merge => 26,
+            Self::Merge | Self::FaultRoute => 26,
         }
     }
 
@@ -152,6 +154,7 @@ impl Opcode {
             (Domain::Nest, 23) => Self::Publish,
             (Domain::Nest, 24) => Self::Retract,
             (Domain::Nest, 25) => Self::Protect,
+            (Domain::Nest, 26) => Self::FaultRoute,
             _ => return None,
         })
     }
@@ -179,6 +182,11 @@ pub enum Failure {
     ReplyFault = -15,
     Invalid = -16,
     Hardware = -17,
+    TimedOut = -18,
+    NoHandler = -19,
+    HandlerGone = -20,
+    QueueFull = -21,
+    FaultExpired = -22,
 }
 
 impl Failure {
@@ -205,6 +213,11 @@ impl Failure {
             -15 => Self::ReplyFault,
             -16 => Self::Invalid,
             -17 => Self::Hardware,
+            -18 => Self::TimedOut,
+            -19 => Self::NoHandler,
+            -20 => Self::HandlerGone,
+            -21 => Self::QueueFull,
+            -22 => Self::FaultExpired,
             _ => return None,
         })
     }

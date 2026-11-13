@@ -142,7 +142,7 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
         set_word(&mut bad, 3, 1);
         assert!(Request::from_bytes(&bad).is_none());
         let mut bad = bytes;
-        set_word(&mut bad, 4, 4);
+        set_word(&mut bad, 4, 6);
         assert!(Request::from_bytes(&bad).is_none());
         let mut bad = bytes;
         set_word(&mut bad, 5, 0);

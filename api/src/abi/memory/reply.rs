@@ -9,13 +9,23 @@ use crate::model::{
     cell::{CellLevel, MappingId},
     flat::{BlockPhase, BlockRef, FlatId, FlatPhase, FlatVersion, Reshape, SlotVersion},
     identity::PendId,
-    nest::{MappingPhase, MappingVersion, MemoGeneration, NestId, NestPhase, NestVersion},
+    nest::{
+        FaultEpoch, FaultPhase, MappingPhase, MappingVersion, MemoGeneration, NestId, NestPhase,
+        NestVersion,
+    },
 };
 
 /// Operation-specific observations. Numeric Page identity is descriptive only;
 /// page=0 in a Slot result means Missing, never a newly allocated zero page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Value {
+    FaultRoute {
+        nest: NestId,
+        mapping: MappingId,
+        version: MappingVersion,
+        epoch: FaultEpoch,
+        phase: FaultPhase,
+    },
     /// One atomic reshape. All resulting heads receive `slots`, equal to the
     /// committed Flat revision. Page IDs must be observed under live authority.
     Geometry {
@@ -79,6 +89,21 @@ pub enum Value {
 impl Value {
     fn matches(self, opcode: Opcode) -> bool {
         match (self, opcode) {
+            (
+                Self::FaultRoute {
+                    mapping,
+                    version,
+                    epoch,
+                    phase,
+                    ..
+                },
+                Opcode::FaultRoute,
+            ) => {
+                valid_token(mapping.get())
+                    && version.get() > 1
+                    && epoch.get() > 1
+                    && matches!(phase, FaultPhase::Active | FaultPhase::Disabled)
+            }
             (Self::Geometry { version, slots, .. }, Opcode::Split | Opcode::Merge) => {
                 version.get() > 1 && slots.get() == version.get()
             }
@@ -122,6 +147,25 @@ impl Value {
 
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
         match self {
+            Self::FaultRoute {
+                nest,
+                mapping,
+                version,
+                epoch,
+                phase,
+            } => {
+                for word in [
+                    12,
+                    nest.get() as u64,
+                    mapping.get() as u64,
+                    version.get(),
+                    epoch.get(),
+                    phase as u64,
+                ] {
+                    out.word(word)?;
+                }
+                Some(())
+            }
             Self::Geometry {
                 flat,
                 version,
@@ -232,6 +276,13 @@ impl Value {
 
     fn read(input: &mut Reader<'_>) -> Option<Option<Self>> {
         Some(match input.word()? {
+            12 => Some(Self::FaultRoute {
+                nest: NestId::new(input.size()?)?,
+                mapping: input.mapping()?,
+                version: MappingVersion::new(input.word()?)?,
+                epoch: FaultEpoch::new(input.word()?)?,
+                phase: FaultPhase::from_tag(input.word()?)?,
+            }),
             11 => Some(Self::Geometry {
                 flat: FlatId::new(input.size()?)?,
                 version: FlatVersion::new(input.word()?)?,
@@ -328,15 +379,19 @@ impl Outcome {
             return false;
         }
         match self {
-            Self::Rejected(failure) => {
-                !matches!(failure, Failure::ResultExpired | Failure::ReplyFault)
-            }
+            Self::Rejected(failure) => !matches!(
+                failure,
+                Failure::ResultExpired | Failure::ReplyFault | Failure::FaultExpired
+            ),
             Self::Failed { failure, retained } => {
                 !matches!(
                     failure,
-                    Failure::ResultExpired | Failure::ReplyFault | Failure::RequestMismatch
+                    Failure::ResultExpired
+                        | Failure::ReplyFault
+                        | Failure::RequestMismatch
+                        | Failure::FaultExpired
                 ) && match (opcode, retained) {
-                    (Opcode::Create(_) | Opcode::Reserve, None) => true,
+                    (Opcode::Create(_) | Opcode::Reserve | Opcode::FaultRoute, None) => true,
                     (
                         Opcode::Delete(Domain::Flat),
                         Some(Value::FlatLifecycle {
@@ -541,6 +596,34 @@ impl Reply {
                     return false;
                 }
                 match (action, self.outcome) {
+                    (
+                        Action::FaultRoute {
+                            nest,
+                            mapping,
+                            expected,
+                            epoch,
+                            route,
+                            ..
+                        },
+                        Outcome::Committed(Value::FaultRoute {
+                            nest: actual_nest,
+                            mapping: actual_mapping,
+                            version,
+                            epoch: actual_epoch,
+                            phase,
+                        }),
+                    ) => {
+                        nest == actual_nest
+                            && mapping == actual_mapping
+                            && expected.next() == Some(version)
+                            && epoch.next() == Some(actual_epoch)
+                            && phase
+                                == if route.is_some() {
+                                    FaultPhase::Active
+                                } else {
+                                    FaultPhase::Disabled
+                                }
+                    }
                     (
                         Action::Split {
                             start,

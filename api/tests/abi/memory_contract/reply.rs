@@ -120,6 +120,7 @@ fn results() -> Vec<Reply> {
         .collect();
     replies.extend(super::objects::results());
     replies.extend(super::reshape::results());
+    replies.extend(super::fault::results());
     replies
 }
 
@@ -143,12 +144,17 @@ fn failures_have_explicit_codes_and_unknown_codes_reject() {
         Failure::ReplyFault,
         Failure::Invalid,
         Failure::Hardware,
+        Failure::TimedOut,
+        Failure::NoHandler,
+        Failure::HandlerGone,
+        Failure::QueueFull,
+        Failure::FaultExpired,
     ];
     for (index, failure) in failures.into_iter().enumerate() {
         assert_eq!(failure.code(), -(index as i64) - 1);
         assert_eq!(Failure::from_code(-(index as i64) - 1), Some(failure));
     }
-    for code in [i64::MIN, -18, 0, 1, i64::MAX] {
+    for code in [i64::MIN, -23, 0, 1, i64::MAX] {
         assert!(Failure::from_code(code).is_none());
     }
 }
@@ -333,7 +339,7 @@ fn malformed_reply_tags_statuses_and_tail_words_reject() {
         (5, 1),
         (5, (-17i64) as u64),
         (6, 0),
-        (6, 12),
+        (6, 13),
         (7, 0),
         (8, 0),
         (9, 1),
@@ -389,7 +395,7 @@ fn register_delivery_is_not_the_stored_mutation_outcome() {
         Delivery::from_registers([0, 128, 0]),
         Some(Delivery::Written)
     );
-    for code in -17..=-1 {
+    for code in -22..=-1 {
         let status = Delivery::Failed(Failure::from_code(code).unwrap());
         assert_eq!(status.registers(), [code as u64, 0, 0]);
         assert_eq!(Delivery::from_registers(status.registers()), Some(status));
@@ -399,7 +405,7 @@ fn register_delivery_is_not_the_stored_mutation_outcome() {
         [0, 127, 0],
         [0, 128, 1],
         [1, 0, 0],
-        [(-18i64) as u64, 0, 0],
+        [(-23i64) as u64, 0, 0],
         [(-15i64) as u64, 128, 0],
     ] {
         assert!(Delivery::from_registers(words).is_none());

@@ -115,13 +115,16 @@ slots under the new global version prefix.
 | 23 | Publish | Mapping PUBLISH; MemoPosition + generation; optional live Flat Pend + BlockRef |
 | 24 | Retract | Mapping RETRACT; exact Memo publication generation |
 | 25 | Protect | Mapping PROTECT; generation and requested access within all ceilings |
+| 26 | FaultRoute | Full Mapping FAULT; expected MappingVersion/route epoch; register actual caller or disable |
 
 Retain current Nest Whole/Mapping rights separation and Pend target kind 4.
 Do not reintroduce target kind 7, a Slot root or a maintenance Pend target.
 Flat's current rights bits 0–5 retain their meanings. Proposed new rights are
 OCCUPY bit 6, VACATE bit 7 and RESHAPE bit 8. BLOCK alone never grants read,
 write, TRANSFER, VACATE or RESHAPE. These bits are **not enabled** in current
-`FlatRights` and current Limits decoders continue rejecting them.
+`FlatRights` and current Limits decoders continue rejecting them. Mapping-only
+FAULT bit 12 is likewise proposed for route configuration, not enabled in v10
+`NestRights`; it conveys no data or publication rights.
 
 Source descriptors need explicit Flat, Share and Memo variants. Every variant
 must retain original authority, fixed range, data ceiling and revocation lineage.
@@ -249,8 +252,10 @@ Ordinary faults and Publish must report nonresidency without implicitly zeroing
 Fresh or Missing. The fault protocol must be implemented together with that
 change: registration authority, stable Mapping/Flat identity and coordinate,
 Memo generation, Slot version, event sequence, notification coalescing, service
-death and bounded waiting/failure behavior. Existing boot `Trap::PageFault`
-delivery does not by itself establish this recovery contract. Do not disable
+death and bounded waiting/failure behavior. The [fault route and wait encoding](memory-wire.md#mapping-fault-routes-and-bounded-recovery)
+now specifies Mapping-owned registration, retained events, coalesced Sign hints,
+finite deadlines and explicit failure reasons. Existing boot `Trap::PageFault`
+delivery does not implement that recovery contract. Do not disable
 materialization in isolation and leave callers waiting indefinitely.
 
 Page Service must first prepare content in authorized private storage, then supply
@@ -282,8 +287,9 @@ dependency; inspect that pin and its fixtures rather than assuming it tracks the
 provider. Do not mix old executable descriptors with a new dispatch prefix.
 Rollback requires the complete old provider/consumer/image set.
 
-Remaining M1 work is explicit: the fault registration/wait protocol and
-backend-specific proof interfaces. Split/Merge now have codecs and checked
+Remaining M1 work is explicit: backend-specific proof interfaces. Fault routing
+and bounded waiting now have value contracts; queues, scheduler/Sign integration
+and terminal fault behavior remain unimplemented. Split/Merge now have codecs and checked
 revision arithmetic; live geometry bookkeeping and allocation conversion still
 require Server/allocator implementation. The tables above constrain that work;
 they do not authorize claiming service integration. Subsequent changes should

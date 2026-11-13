@@ -106,6 +106,7 @@ fn mutations() -> Vec<Action> {
     }
     actions.extend(super::objects::mutations());
     actions.extend(super::reshape::mutations());
+    actions.extend(super::fault::mutations());
     actions
 }
 
@@ -124,6 +125,7 @@ fn settled_operations_have_distinct_domain_and_slot_contracts() {
         (Opcode::Release, 13, 20),
         (Opcode::Split, 12, 25),
         (Opcode::Merge, 12, 26),
+        (Opcode::FaultRoute, 13, 26),
         (Opcode::Inspect(Domain::Flat), 12, 18),
         (Opcode::Inspect(Domain::Nest), 13, 18),
         (Opcode::Occupy, 12, 19),
@@ -148,7 +150,7 @@ fn settled_operations_have_distinct_domain_and_slot_contracts() {
         (2, 0),
         (12, 0),
         (12, 27),
-        (13, 26),
+        (13, 28),
         (13, 27),
         (14, 21),
         (12, u64::MAX),

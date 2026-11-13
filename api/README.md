@@ -88,7 +88,8 @@ remain unimplemented. This does not change the current contracts below.
 The inactive `abi::memory` module provides [bounded request/result codecs](memory-wire.md)
 for next-version transitions (including Split/Merge) and object lifecycles,
 including exact status codes,
-result inspection and scoped Flat/Slot/Block/Nest/Memo/Mapping observations.
+result inspection, scoped Flat/Slot/Block/Nest/Memo/Mapping observations, and
+Mapping fault route/event descriptors with checked finite deadlines.
 It is not accepted by current `EnvCall` and has no invocation traits.
 
 This is a breaking provider redesign of Cell, View, Pend, Sign, Unit and Room.

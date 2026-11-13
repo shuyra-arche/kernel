@@ -7,7 +7,10 @@ use crate::model::{
     cell::{CellLevel, MappingId},
     flat::{BlockRef, FlatId, FlatVersion, Reshape, SlotPosition, SlotVersion},
     identity::PendId,
-    nest::{MappingVersion, MemoGeneration, MemoPosition, NestId, NestVersion, ReserveRequest},
+    nest::{
+        FaultEpoch, FaultRoute, MappingVersion, MemoGeneration, MemoPosition, NestId, NestVersion,
+        ReserveRequest,
+    },
     view::ViewId,
 };
 
@@ -123,6 +126,16 @@ impl Source {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
+    /// Atomically install/replace or disable a Mapping-owned fault route. The
+    /// provider binds the actual caller, never a caller-supplied handler Task.
+    FaultRoute {
+        token: PendId,
+        nest: NestId,
+        mapping: MappingId,
+        expected: MappingVersion,
+        epoch: FaultEpoch,
+        route: Option<FaultRoute>,
+    },
     CreateFlat {
         license: PendId,
         count: usize,
@@ -235,6 +248,7 @@ pub enum Action {
 impl Action {
     pub const fn opcode(self) -> Opcode {
         match self {
+            Self::FaultRoute { .. } => Opcode::FaultRoute,
             Self::CreateFlat { .. } => Opcode::Create(Domain::Flat),
             Self::DeleteFlat { .. } => Opcode::Delete(Domain::Flat),
             Self::CreateNest { .. } => Opcode::Create(Domain::Nest),
@@ -261,6 +275,16 @@ impl Action {
 
     fn valid(self) -> bool {
         match self {
+            Self::FaultRoute {
+                token,
+                mapping,
+                route,
+                ..
+            } => {
+                valid_token(token.get())
+                    && valid_token(mapping.get())
+                    && route.is_none_or(FaultRoute::valid)
+            }
             Self::CreateFlat {
                 license,
                 count,
@@ -346,6 +370,30 @@ impl Action {
 
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
         match self {
+            Self::FaultRoute {
+                token,
+                nest,
+                mapping,
+                expected,
+                epoch,
+                route,
+            } => {
+                for word in [
+                    token.get() as u64,
+                    nest.get() as u64,
+                    mapping.get() as u64,
+                    expected.get(),
+                    epoch.get(),
+                    u64::from(route.is_some()),
+                ] {
+                    out.word(word)?;
+                }
+                if let Some(route) = route {
+                    out.word(route.sign.get() as u64)?;
+                    out.word(route.timeout_ns)?;
+                }
+                Some(())
+            }
             Self::CreateFlat {
                 license,
                 count,
@@ -491,6 +539,21 @@ impl Action {
 
     fn read(opcode: Opcode, input: &mut Reader<'_>) -> Option<Self> {
         Some(match opcode {
+            Opcode::FaultRoute => Self::FaultRoute {
+                token: input.token()?,
+                nest: NestId::new(input.size()?)?,
+                mapping: input.mapping()?,
+                expected: MappingVersion::new(input.word()?)?,
+                epoch: FaultEpoch::new(input.word()?)?,
+                route: match input.word()? {
+                    0 => None,
+                    1 => Some(FaultRoute {
+                        sign: input.token()?,
+                        timeout_ns: input.word()?,
+                    }),
+                    _ => return None,
+                },
+            },
             Opcode::Create(Domain::Flat) => Self::CreateFlat {
                 license: input.token()?,
                 count: input.size()?,

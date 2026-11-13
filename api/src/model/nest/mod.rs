@@ -1,7 +1,12 @@
 //! Stable nest identity. A numeric identity is descriptive and never grants access.
+mod fault;
 mod position;
 mod reserve;
 mod status;
+pub use fault::{
+    FAULT_CAPACITY, FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase, FaultRoute,
+    FaultSequence, FaultStatus, MAX_FAULT_NS, fault_read_deadline,
+};
 pub use position::{MemoGeneration, MemoPosition};
 pub use reserve::ReserveRequest;
 pub use status::{
