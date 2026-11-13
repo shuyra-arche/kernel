@@ -150,3 +150,40 @@ fn wired_notifications_do_not_substitute_for_tagged_cq_completion() {
 }
 
 const CONTROLLER: usize = 0x3010000;
+
+#[test]
+fn partial_command_submission_never_releases_or_reuses_queue_storage() {
+    use registers::Submission;
+    for stage in [
+        Submission::QueueWritten,
+        Submission::TailWritten,
+        Submission::TailLost,
+    ] {
+        let (mut engine, device, pools) = engine();
+        start(&mut engine);
+        device.interrupt_submission(stage);
+        let batch = engine.invalidate().unwrap();
+        assert_eq!(engine.phase(), Phase::Waiting(batch));
+        if matches!(stage, Submission::TailLost) {
+            // The software owns the exact batch even when MMIO made no progress.
+            for _ in 0..4 {
+                assert_eq!(engine.observe(batch), Ok(false));
+            }
+            assert_eq!(engine.phase(), Phase::Waiting(batch));
+        } else {
+            device.complete(true, true); // Even a late write cannot override CQ fault.
+            assert_eq!(engine.observe(batch), Err(EngineError::Hardware));
+            assert_eq!(engine.phase(), Phase::Failed);
+            device.set32(CQCSR, ENABLE | ON);
+            assert_eq!(engine.observe(batch), Err(EngineError::State));
+        }
+        assert_eq!(engine.invalidate(), Err(EngineError::State));
+        assert_eq!(engine.stop(), Err(EngineError::State));
+        drop(engine);
+        assert!(
+            pools
+                .iter()
+                .all(|pool| pool.gives() == 0 && pool.page().is_err())
+        );
+    }
+}
