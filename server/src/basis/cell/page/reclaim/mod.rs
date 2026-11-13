@@ -1,6 +1,7 @@
 //! 物理归还的纯判定与原子提交；引用消失不自动清偿硬件访问责任。
 
 pub(in super::super) mod change;
+pub(super) mod group;
 mod retention;
 pub(crate) mod statistics;
 
@@ -45,6 +46,7 @@ enum Event {
         kind: Kind,
         access: Modifiable,
         admission: Admission,
+        qualified: bool,
     },
     Begin,
     End,
@@ -118,14 +120,15 @@ impl State {
                 kind,
                 access,
                 admission,
+                qualified,
             } => {
                 let writable = access == Modifiable::Yes;
                 let permitted_freezes = usize::from(!matches!(admission, Admission::Ordinary));
                 if writable && self.freezes > permitted_freezes {
                     return Err(RetainError::Busy);
                 }
-                // CPU mappings share coherent RAM. Preserve the exclusion of
-                // writable external access and of CPU writes during external use.
+                // Unknown/legacy participants keep conservative exclusion. Only
+                // the Page membership gate may supply a whole-group qualification.
                 let conflicts = match (kind, writable) {
                     (Kind::Cpu, false) => self.external_writers != 0,
                     (Kind::Cpu, true) => self.external_readers != 0 || self.external_writers != 0,
@@ -137,7 +140,7 @@ impl State {
                             || self.cpu_writers != 0
                     }
                 };
-                if conflicts {
+                if conflicts && !qualified {
                     return Err(RetainError::Borrowed);
                 }
                 let mut next = self;
@@ -238,11 +241,17 @@ impl Reclaim {
         }
     }
 
-    pub(super) fn register(&self, kind: Kind, modifiable: bool) -> Result<(), RetainError> {
+    pub(super) fn register(
+        &self,
+        kind: Kind,
+        modifiable: bool,
+        qualified: bool,
+    ) -> Result<(), RetainError> {
         self.apply(Event::Register {
             kind,
             access: mode(modifiable),
             admission: Admission::Ordinary,
+            qualified,
         })
     }
     pub(super) fn register_during(
@@ -250,10 +259,12 @@ impl Reclaim {
         kind: Kind,
         modifiable: bool,
         maintenance: bool,
+        qualified: bool,
     ) -> Result<(), RetainError> {
         self.apply(Event::Register {
             kind,
             access: mode(modifiable),
+            qualified,
             admission: if maintenance {
                 Admission::Maintenance
             } else {

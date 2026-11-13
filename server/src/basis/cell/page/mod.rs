@@ -52,13 +52,13 @@ pub(crate) enum Exposure {
 /// owner 是唯一资源归属；Flat 槽、映射和借用仅持有同一 Page。
 /// External 从已登记的设备访问责任推导，不证明独占借用。
 /// 尚未登记的裸物理访问不在本账目保护范围内。
-#[derive(Debug)]
 pub(crate) struct Page {
     id: PageId,
     owner: Owner,
     page: Option<Region>,
     level: CellLevel,
     reclaim: reclaim::Reclaim,
+    membership: crate::metal::sync::SpinLock<reclaim::group::Membership>,
 }
 
 impl Page {
@@ -92,6 +92,7 @@ impl Page {
             page: Some(region),
             level,
             reclaim: reclaim::Reclaim::new(),
+            membership: crate::metal::sync::SpinLock::new(reclaim::group::Membership::new()),
         })
     }
 
@@ -185,6 +186,18 @@ impl Page {
         Retention::prepare(self, reclaim::Kind::External, modifiable)
     }
 
+    /// Advisory preflight for precise staged errors. Actual registration repeats
+    /// the group check under the same membership gate as Retention admission.
+    pub(crate) fn compatible(
+        &self,
+        topology: &crate::metal::generic::memory::topology::Topology,
+        endpoint: crate::metal::generic::memory::Endpoint,
+        access: crate::metal::generic::memory::Access,
+    ) -> Result<(), crate::metal::generic::memory::Error> {
+        self.membership
+            .lock()
+            .check(self, topology, endpoint, access)
+    }
     pub(crate) fn frozen(&self) -> bool {
         self.reclaim.frozen()
     }
@@ -234,3 +247,13 @@ unsafe impl Send for Page {}
 unsafe impl Sync for Page {}
 
 pub(crate) use reclaim::statistics;
+
+impl core::fmt::Debug for Page {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Page")
+            .field("id", &self.id)
+            .field("level", &self.level)
+            .field("reclaim", &self.reclaim)
+            .finish_non_exhaustive()
+    }
+}

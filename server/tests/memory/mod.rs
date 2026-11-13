@@ -22,6 +22,7 @@ mod scope;
 mod translation;
 
 mod evidence;
+mod fabric;
 #[path = "../../src/metal/generic/memory/mod.rs"]
 pub mod proof;
 
@@ -75,7 +76,14 @@ use external_error::Error;
 mod host_lock;
 mod metal {
     pub(crate) use crate::host_lock as sync;
+    pub(crate) mod memory {
+        pub(crate) fn topology() -> Option<&'static crate::proof::topology::Topology> {
+            None
+        }
+        pub(crate) fn data_visible() {}
+    }
     pub(crate) mod generic {
         pub(crate) use crate::contract as iommu;
+        pub(crate) use crate::proof as memory;
     }
 }

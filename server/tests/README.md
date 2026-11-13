@@ -120,3 +120,13 @@ data/distribution/disposal limits, and live Narrow/recovery. Stage/Provenance
 graph metadata in storage/Memo tests and Task lifetimes remain
 fixtures at their documented boundaries; these tests do not establish native
 trap-to-ledger-to-MMU execution or trusted device compatibility.
+
+
+The [M5 evidence matrix](../../api/memory-m5.md#verification-and-limits) adds
+production whole-group admission, competing requester races, unknown-alias
+refusal and membership allocation/capacity rollback. The IOMMU guest adds
+`dma-coherent`: actual DT-resolved EDU DMA while a qualified CPU writer remains,
+then device retirement without releasing the CPU receipt and denied DMA after
+reuse. Run it with the existing `iommu_on_real_qemu_registers` ignored test; that
+entry runs all 11 backend scenarios. This is one-Hart QEMU evidence, not a native
+v11 service, SMP or physical-hardware result.

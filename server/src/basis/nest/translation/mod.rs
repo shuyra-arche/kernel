@@ -270,6 +270,7 @@ impl NestState {
     pub(super) fn publish_page(
         &mut self,
         geometry: Geometry,
+        endpoint: crate::metal::generic::memory::Endpoint,
         mapping: &Arc<Span>,
         address: VirtAddr,
         page: &Arc<Page>,
@@ -301,11 +302,14 @@ impl NestState {
         } else {
             range.current
         };
-        let mut memo = Publication::prepare_access(
+        let mut memo = Publication::prepare_cpu(
             page,
             retained.contains(Access::WRITE),
-            Some(change),
+            change,
             maintenance,
+            endpoint,
+            crate::metal::generic::memory::Access::new((retained.bits() << 1) as u8)
+                .ok_or(NestError::Busy)?,
         )?;
         self.memos.reserve(1)?;
         self.retirement

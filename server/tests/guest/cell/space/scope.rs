@@ -207,7 +207,10 @@ pub(super) fn run() {
     let limits = crate::pend::inspect(root).limits;
     assert_eq!(limits.modifiable, Modifiable::No);
     assert_eq!(limits.distributable, Distributable::No);
-    assert_eq!(limits.operations, Operations::Nest(NestRights::reservation()));
+    assert_eq!(
+        limits.operations,
+        Operations::Nest(NestRights::reservation())
+    );
     let request = NarrowRequest {
         token: limited,
         limits: Limits {

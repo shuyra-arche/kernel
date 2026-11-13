@@ -40,6 +40,22 @@ impl Nest {
         })
         .map_err(|_| NestError::OutOfMemory)
     }
+    pub(crate) fn memory_endpoint(&self) -> Option<crate::metal::generic::memory::Endpoint> {
+        if self.cpu.is_some() {
+            let id = core::num::NonZeroU64::new(self.id.get() as u64)?;
+            // Nest instance never reuses an identity; one CPU domain/ASID lease
+            // spans exactly this instance, even when the numeric ASID is reused.
+            return Some(crate::metal::generic::memory::Endpoint::Cpu {
+                nest: id,
+                leases: id,
+            });
+        }
+        let state = self.state.lock();
+        match &state.root {
+            Storage::External(e) => e.endpoint(),
+            _ => None,
+        }
+    }
     pub(crate) fn is_external(&self) -> bool {
         self.cpu.is_none()
     }

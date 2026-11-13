@@ -51,6 +51,7 @@ impl Page {
                     level,
                     page: None,
                     reclaim: reclaim::Reclaim::new(),
+                    membership: crate::metal::sync::SpinLock::new(reclaim::group::Membership::new()),
                 })
                 .map_err(|_| PageError::OutOfMemory)?,
             );

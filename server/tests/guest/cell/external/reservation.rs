@@ -79,8 +79,14 @@ pub(super) fn run(root: PendId) {
     let endpoint = sign::create(crate::license::get()).unwrap();
     for (token, mapping) in [(root, mapping), (vacant, other_id), (no_inspect, mapping)] {
         for source in [
-            SignSource::ReservationPublished { token, mapping },
-            SignSource::ReservationRetired { token, mapping },
+            SignSource::ReservationPublished {
+                token,
+                reservation: mapping,
+            },
+            SignSource::ReservationRetired {
+                token,
+                reservation: mapping,
+            },
         ] {
             assert_eq!(
                 sign::attach(endpoint, source, 0).unwrap_err().source,

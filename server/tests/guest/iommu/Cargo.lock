@@ -88,8 +88,10 @@ dependencies = [
 name = "kernel-iommu-guest"
 version = "0.0.0"
 dependencies = [
+ "fdt",
  "kernel-api",
  "kernel-hardware-fixture",
+ "platform-riscv",
 ]
 
 [[package]]

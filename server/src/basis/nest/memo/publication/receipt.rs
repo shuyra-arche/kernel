@@ -52,6 +52,32 @@ impl Publication {
             external: None,
         })
     }
+    pub(crate) fn prepare_cpu(
+        page: &Arc<Page>,
+        writable: bool,
+        change: &Change,
+        maintenance: Option<&crate::basis::cell::page::Maintenance>,
+        endpoint: crate::metal::generic::memory::Endpoint,
+        access: crate::metal::generic::memory::Access,
+    ) -> Result<Self, RetainError> {
+        let Some(topology) = crate::metal::memory::topology() else {
+            return Self::prepare_access(page, writable, Some(change), maintenance);
+        };
+        if !matches!(
+            endpoint,
+            crate::metal::generic::memory::Endpoint::Cpu { .. }
+        ) || !Arc::ptr_eq(change.page(), page)
+            || access.writable() != writable
+        {
+            return Err(RetainError::Busy);
+        }
+        let retention = change.qualified(topology, endpoint, access, maintenance)?;
+        Ok(Self {
+            retention: Some(retention),
+            phase: Phase::Prepared,
+            external: None,
+        })
+    }
     pub(crate) fn prepare_external<H: Hardware<PageId>>(
         hardware: &H,
         page: &Arc<Page>,
@@ -83,16 +109,36 @@ impl Publication {
             return Err(Error::InvalidRange);
         }
         hardware.validate(projection)?;
-        let retention = match maintenance {
-            Some(permit) if Arc::ptr_eq(permit.change().page(), page) => {
-                permit.external(writable)?
+        let retention = if let (Some(topology), Some(change)) =
+            (crate::metal::memory::topology(), change)
+        {
+            if !Arc::ptr_eq(change.page(), page) {
+                return Err(Error::InvalidRange);
             }
-            Some(_) => return Err(Error::InvalidRange),
-            None => match change {
-                Some(change) if Arc::ptr_eq(change.page(), page) => change.external(writable)?,
+            let endpoint = hardware.endpoint().ok_or(Error::UnknownDomain)?;
+            if !matches!(
+                endpoint,
+                crate::metal::generic::memory::Endpoint::External { .. }
+            ) {
+                return Err(Error::UnknownDomain);
+            }
+            let access =
+                crate::metal::generic::memory::Access::new(if writable { 6 } else { 2 }).unwrap();
+            change.qualified(topology, endpoint, access, maintenance)?
+        } else {
+            match maintenance {
+                Some(permit) if Arc::ptr_eq(permit.change().page(), page) => {
+                    permit.external(writable)?
+                }
                 Some(_) => return Err(Error::InvalidRange),
-                None => page.prepare_external(writable)?,
-            },
+                None => match change {
+                    Some(change) if Arc::ptr_eq(change.page(), page) => {
+                        change.external(writable)?
+                    }
+                    Some(_) => return Err(Error::InvalidRange),
+                    None => page.prepare_external(writable)?,
+                },
+            }
         };
         Ok(Self {
             retention: Some(retention),
@@ -110,6 +156,7 @@ impl Publication {
             .as_mut()
             .expect("prepared retention")
             .publish();
+        crate::metal::memory::data_visible();
         self.phase = Phase::Publishing;
     }
     pub(crate) fn complete(&mut self) {

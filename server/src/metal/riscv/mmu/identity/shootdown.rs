@@ -70,6 +70,7 @@ pub fn shootdown(asid: Asid) -> Result<(), Deaf> {
                 .map_err(|_| Deaf { asid })?;
         }
     }
+    crate::metal::memory::cpu_drained().map_err(|_| Deaf { asid })?;
     Ok(())
 }
 

@@ -48,8 +48,19 @@ mod retirement;
 mod support;
 mod metal {
     pub(crate) use crate::host_lock as sync;
+    pub(crate) mod memory {
+        pub(crate) fn topology() -> Option<&'static crate::proof::topology::Topology> {
+            None
+        }
+        pub(crate) fn data_visible() {}
+    }
     pub(crate) mod generic {
         pub(crate) use crate::iommu::contract as iommu;
+        pub(crate) use crate::proof as memory;
     }
     pub(crate) use crate::iommu;
 }
+
+#[allow(dead_code)]
+#[path = "../../src/metal/generic/memory/mod.rs"]
+pub mod proof;

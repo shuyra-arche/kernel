@@ -22,6 +22,7 @@ pub(crate) struct Retention {
     kind: Kind,
     modifiable: bool,
     maintenance: bool,
+    member: Option<core::num::NonZeroU64>,
 }
 
 impl Retention {
@@ -30,7 +31,12 @@ impl Retention {
         kind: Kind,
         modifiable: bool,
     ) -> Result<Self, RetainError> {
-        cell.reclaim.register(kind, modifiable)?;
+        let mut group = cell.membership.lock();
+        let member = group.prepare(cell, None)?;
+        if let Err(error) = cell.reclaim.register(kind, modifiable, false) {
+            group.remove(member);
+            return Err(error);
+        }
         super::statistics::register(kind, cell.pages() * 4096);
         Ok(Self {
             cell: Some(cell.clone()),
@@ -38,6 +44,7 @@ impl Retention {
             kind,
             modifiable,
             maintenance: false,
+            member,
         })
     }
 
@@ -47,10 +54,30 @@ impl Retention {
         modifiable: bool,
         maintenance: bool,
     ) -> Result<Self, RetainError> {
-        change
-            .page()
-            .reclaim
-            .register_during(kind, modifiable, maintenance)?;
+        Self::during_qualified(change, kind, modifiable, maintenance, None)
+    }
+    pub(in super::super) fn during_qualified(
+        change: &super::Change,
+        kind: Kind,
+        modifiable: bool,
+        maintenance: bool,
+        qualified: Option<(
+            &crate::metal::generic::memory::topology::Topology,
+            crate::metal::generic::memory::Endpoint,
+            crate::metal::generic::memory::Access,
+        )>,
+    ) -> Result<Self, RetainError> {
+        let mut group = change.page().membership.lock();
+        let member = group.prepare(change.page(), qualified)?;
+        if let Err(error) = change.page().reclaim.register_during(
+            kind,
+            modifiable,
+            maintenance,
+            qualified.is_some(),
+        ) {
+            group.remove(member);
+            return Err(error);
+        }
         super::statistics::register(kind, change.page().pages() * 4096);
         Ok(Self {
             cell: Some(change.page().clone()),
@@ -58,6 +85,7 @@ impl Retention {
             kind,
             modifiable,
             maintenance,
+            member,
         })
     }
 
@@ -88,9 +116,12 @@ impl Retention {
     /// Unit 退出、通知、请求已提交或用户态 Ack 都不构成这个证明。
     pub(crate) unsafe fn settle(mut self) {
         assert_eq!(self.phase, Phase::Retiring);
+        let mut group = self.cell().membership.lock();
         self.cell()
             .reclaim
             .discharge(self.kind, self.modifiable, self.maintenance);
+        group.remove(self.member);
+        drop(group);
         super::statistics::discharge(self.kind, self.cell().pages() * 4096, true);
         self.phase = Phase::Settled;
     }
@@ -107,9 +138,11 @@ impl Drop for Retention {
     fn drop(&mut self) {
         match self.phase {
             Phase::Prepared => {
+                let mut group = self.cell().membership.lock();
                 self.cell()
                     .reclaim
                     .discharge(self.kind, self.modifiable, self.maintenance);
+                group.remove(self.member);
                 super::statistics::discharge(self.kind, self.cell().pages() * 4096, false);
             }
             Phase::Settled => {}

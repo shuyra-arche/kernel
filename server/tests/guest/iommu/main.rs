@@ -84,13 +84,25 @@ extern "C" fn guest(dtb: usize) -> ! {
         environment.scenario,
         "dma"
             | "dma-change"
+            | "dma-coherent"
             | "readonly"
             | "dma-abandon"
             | "owner-exit"
             | "activation-exit"
             | "route-reject"
     ) {
-        dma::run(base, environment.scenario, environment.requester);
+        let requester = if environment.scenario == "dma-coherent" {
+            // The pinned older fixture does not recognize this new scenario.
+            // Resolve its actual DT route instead of treating a PCI BDF as a DID.
+            let tree = unsafe { fdt::Fdt::from_ptr(dtb as *const u8) }.unwrap();
+            let topology = platform_riscv::topology::Topology::discover(&tree).unwrap();
+            let route = topology.resolve(0x30000000, 8).unwrap();
+            assert_eq!(route.controller(), base);
+            route.device()
+        } else {
+            environment.requester
+        };
+        dma::run(base, environment.scenario, requester);
     }
     let _ = writeln!(Uart, "BEGIN iommu-command-engine base={base:#x}");
     let cells = [
@@ -156,8 +168,38 @@ fn progress(engine: &mut Engine<mmio::Mmio>, target: Phase) {
 
 mod metal {
     pub(crate) use crate::lock as sync;
+    pub(crate) mod memory {
+        use crate::proof::topology::Topology;
+        use core::sync::atomic::{AtomicPtr, Ordering};
+        static TOPOLOGY: AtomicPtr<Topology> = AtomicPtr::new(core::ptr::null_mut());
+        pub(crate) fn install(topology: Topology) {
+            let value = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(topology));
+            assert!(
+                TOPOLOGY
+                    .compare_exchange(
+                        core::ptr::null_mut(),
+                        value,
+                        Ordering::AcqRel,
+                        Ordering::Acquire
+                    )
+                    .is_ok()
+            );
+        }
+        pub(crate) fn topology() -> Option<&'static Topology> {
+            // Boot-only fixture, never removed or mutated after publication.
+            unsafe { TOPOLOGY.load(Ordering::Acquire).as_ref() }
+        }
+        pub(crate) fn data_visible() {
+            unsafe { core::arch::asm!("fence rw, rw", options(nostack)) };
+        }
+    }
     pub(crate) mod generic {
         pub(crate) use crate::iommu::contract as iommu;
+        pub(crate) use crate::proof as memory;
     }
     pub(crate) use crate::iommu;
 }
+
+#[allow(dead_code)]
+#[path = "../../../src/metal/generic/memory/mod.rs"]
+pub mod proof;

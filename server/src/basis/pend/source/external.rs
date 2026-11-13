@@ -1,5 +1,6 @@
-//! Kernel-retained device reborrow. A private allocation reserves the whole source;
-//! a View uses the same Pend borrow tree as CPU access. Neither returns on timeout.
+//! Kernel-retained device source use. Qualified fabrics retain the live branch
+//! without lending its data permission; legacy private/View uses keep exclusive
+//! borrowing. Neither responsibility returns on timeout.
 use super::SourceAuthorization;
 use super::hold::Hold;
 use crate::basis::cell::page::Exposure;
@@ -24,6 +25,7 @@ pub(crate) struct ExternalBorrow {
     loan: Option<Arc<Pend>>,
     parent: Option<Arc<Pend>>,
     published: bool,
+    shared: bool,
     observer: Option<(
         kernel_api::model::identity::TaskId,
         kernel_api::model::identity::PendId,
@@ -99,6 +101,8 @@ impl ExternalBorrow {
         {
             return Err(PendFail::Denied);
         }
+        let shared =
+            crate::metal::memory::topology().is_some() && change.is_some() && root.is_some();
         let (loan, parent, observer) = if let Some((meta, root, authority)) = root {
             let (token, authority) = hold.branch().unwrap_or((root, &authority));
             let _operation = SharingOperation::acquire(&meta).ok_or(PendFail::Busy)?;
@@ -106,24 +110,32 @@ impl ExternalBorrow {
                 && (meta.pending_maps(token) || source.pending_cpu());
             let withdrawal = source.begin_withdraw()?;
             withdrawal.check_publish(offset, count, maintenance)?;
-            if pending_cpu {
+            if pending_cpu && !shared {
                 return Err(PendFail::Busy);
             }
-            let loan = Pend::try_new_scope(
-                access,
-                PendScope::Pages(PendRange::Pages {
-                    offset: offset.get(),
-                    count: count.get(),
-                }),
-                Operations::None(CreationRights::empty()),
-                Distributable::No,
-            )?;
-            authority.borrow_external(&loan)?;
-            (
-                Some(loan),
-                Some(authority.clone()),
-                Some((task.ident.id, token)),
-            )
+            if shared {
+                // The actual Page group must still pass qualified physical
+                // admission before any backend write. This is only a retained
+                // source route; it grants neither data nor hardware compatibility.
+                authority.retain_retirement()?;
+                (None, Some(authority.clone()), Some((task.ident.id, token)))
+            } else {
+                let loan = Pend::try_new_scope(
+                    access,
+                    PendScope::Pages(PendRange::Pages {
+                        offset: offset.get(),
+                        count: count.get(),
+                    }),
+                    Operations::None(CreationRights::empty()),
+                    Distributable::No,
+                )?;
+                authority.borrow_external(&loan)?;
+                (
+                    Some(loan),
+                    Some(authority.clone()),
+                    Some((task.ident.id, token)),
+                )
+            }
         } else {
             if cell.owner() != PageOwner::Team(task.ident.team.id)
                 || !source
@@ -142,6 +154,7 @@ impl ExternalBorrow {
             loan,
             parent,
             published: false,
+            shared,
             observer,
         })
     }
@@ -157,7 +170,13 @@ impl ExternalBorrow {
         kernel_api::model::identity::TaskId,
         kernel_api::model::identity::PendId,
     )> {
-        if self.loan.is_none() {
+        if self.shared {
+            // SAFETY: this exact publication has settled; other qualified users
+            // retain their own routes and Page responsibilities.
+            unsafe { self.parent.take().unwrap().release_retirement() };
+            self.source = None;
+            self.shared = false;
+        } else if self.loan.is_none() {
             assert_eq!(self.cell.exposure(), Exposure::Internal);
         }
         if let Some(loan) = self.loan.take() {
@@ -186,6 +205,10 @@ impl Drop for ExternalBorrow {
             core::mem::forget(self.source.take());
             core::mem::forget(self.loan.take());
             core::mem::forget(self.parent.take());
+        } else if self.shared {
+            // SAFETY: published failures take the retain-forever branch above.
+            unsafe { self.parent.take().unwrap().release_retirement() };
+            self.source = None;
         } else if let Some(loan) = self.loan.take() {
             // SAFETY: a published borrow takes the fail-closed branch above;
             // trusted settlement already consumed its loan in settle().
