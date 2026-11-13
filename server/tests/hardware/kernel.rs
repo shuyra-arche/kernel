@@ -297,15 +297,13 @@ fn run(mode: &str) {
                 format!("{command:?}\n"),
             )
             .unwrap();
-            // Instrumented latency, realtime and context modes run their
-            // scenarios before the shared Cell/retirement suite. Slow hosts
-            // can reach the assertions and still spend time on shutdown output.
-            // Keep the composed run bounded and require the full evidence.
-            let watchdog = std::time::Duration::from_secs(if realtime || context || latency {
-                120
-            } else {
-                60
-            });
+            // exec,nochain disables TCG block chaining for the whole image,
+            // even when dfilter records only one checkpoint. Include traced
+            // IRQ/IOMMU and clock runs in the same host budget as the other
+            // instrumented suites, including final cleanup and process exit.
+            // Guest deadlines and all behavioral assertions stay unchanged.
+            let instrumented = !symbols.is_empty() || realtime || context || latency;
+            let watchdog = std::time::Duration::from_secs(if instrumented { 120 } else { 60 });
             let output = super::run(command, &evidence, &name, watchdog);
             let log = String::from_utf8_lossy(&output.stdout);
             assert!(output.status.success(), "{name}: {log}");
