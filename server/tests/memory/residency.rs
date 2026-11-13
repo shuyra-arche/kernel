@@ -27,6 +27,140 @@ pub(crate) fn resident(state: &FlatState) -> Arc<Page> {
     page.clone()
 }
 
+fn maintenance(state: &FlatState) -> Vec<crate::cell::Block> {
+    let page = resident(state);
+    vec![crate::cell::Block::new(crate::changes::acquire(&page).unwrap()).unwrap()]
+}
+
+#[test]
+fn vacate_consumes_only_its_settled_maintenance_reference_without_allocation() {
+    let mut state = fresh();
+    let pool = Pool::new(0);
+    let (stamp, _) = state
+        .occupy(PageIndex::ZERO, SlotVersion::INITIAL, page(pool))
+        .unwrap();
+    let mut held = maintenance(&state);
+    assert!(resident(&state).changing());
+    let (next, returned) =
+        crate::allocation::fail_after(0, || state.vacate(PageIndex::ZERO, stamp, Some(&mut held)))
+            .unwrap();
+    assert!(held.is_empty());
+    assert_eq!(next.get(), stamp.get() + 1);
+    assert_eq!(pool.gives(), 0);
+    drop(returned);
+    assert_eq!(pool.gives(), 1);
+}
+
+#[test]
+fn failed_vacate_keeps_the_same_gate_and_holding_for_weak_and_strong_observers() {
+    for weak_only in [false, true] {
+        let mut state = fresh();
+        let pool = Pool::new(0);
+        let (stamp, id) = state
+            .occupy(PageIndex::ZERO, SlotVersion::INITIAL, page(pool))
+            .unwrap();
+        let observed = resident(&state);
+        let weak = Arc::downgrade(&observed);
+        let strong = if weak_only {
+            drop(observed);
+            None
+        } else {
+            Some(observed)
+        };
+        let mut held = maintenance(&state);
+        let gate = Arc::as_ptr(held[0].change());
+        assert_eq!(
+            state.vacate(PageIndex::ZERO, stamp, Some(&mut held)).err(),
+            Some(Error::Busy)
+        );
+        assert_eq!(state.revision.at(PageIndex::ZERO), stamp);
+        assert_eq!(Arc::as_ptr(held[0].change()), gate);
+        let current = weak.upgrade().unwrap();
+        assert_eq!(current.id(), id);
+        assert!(current.changing());
+        assert_eq!(
+            current.prepare_hardware(true).err(),
+            Some(crate::cell::RetainError::Busy)
+        );
+        drop(current);
+        drop(strong);
+        drop(weak);
+        drop(
+            state
+                .vacate(PageIndex::ZERO, stamp, Some(&mut held))
+                .unwrap()
+                .1,
+        );
+        assert_eq!(pool.gives(), 1);
+    }
+}
+
+#[test]
+fn overlapping_block_and_inflight_change_prevent_maintenance_consumption() {
+    let mut state = fresh();
+    let pool = Pool::new(0);
+    let (stamp, _) = state
+        .occupy(PageIndex::ZERO, SlotVersion::INITIAL, page(pool))
+        .unwrap();
+    let mut held = maintenance(&state);
+    let inflight = held[0].change().clone();
+    let sibling = crate::cell::Block::new(inflight.clone()).unwrap();
+    assert_eq!(
+        state.vacate(PageIndex::ZERO, stamp, Some(&mut held)).err(),
+        Some(Error::Busy)
+    );
+    drop(sibling);
+    assert_eq!(
+        state.vacate(PageIndex::ZERO, stamp, Some(&mut held)).err(),
+        Some(Error::Busy)
+    );
+    drop(inflight);
+    drop(
+        state
+            .vacate(PageIndex::ZERO, stamp, Some(&mut held))
+            .unwrap()
+            .1,
+    );
+    assert_eq!(pool.gives(), 1);
+}
+
+#[test]
+fn hardware_retirement_and_stale_version_cannot_be_bypassed_by_a_held_block() {
+    let mut state = fresh();
+    let pool = Pool::new(0);
+    let (stamp, _) = state
+        .occupy(PageIndex::ZERO, SlotVersion::INITIAL, page(pool))
+        .unwrap();
+    let data = resident(&state);
+    let mut receipt = data.prepare_hardware(false).unwrap();
+    receipt.publish();
+    drop(data);
+    let mut held = maintenance(&state);
+    assert_eq!(held[0].page().obligations(), 1);
+    assert_eq!(
+        state.vacate(PageIndex::ZERO, stamp, Some(&mut held)).err(),
+        Some(Error::Busy)
+    );
+    // Bookkeeping completion only: no host test installs a physical translation.
+    unsafe {
+        receipt.retire().settle();
+    }
+    assert_eq!(
+        state
+            .vacate(PageIndex::ZERO, SlotVersion::INITIAL, Some(&mut held))
+            .err(),
+        Some(Error::Stale)
+    );
+    assert_eq!(held.len(), 1);
+    drop(
+        state
+            .vacate(PageIndex::ZERO, stamp, Some(&mut held))
+            .unwrap()
+            .1,
+    );
+    assert_eq!(pool.gives(), 1);
+}
+
 #[test]
 fn occupy_and_vacate_advance_stamps_and_never_rezero_missing() {
     let mut state = fresh();
@@ -39,10 +173,12 @@ fn occupy_and_vacate_advance_stamps_and_never_rezero_missing() {
     assert_eq!(state.revision.at(PageIndex::new(1)), SlotVersion::INITIAL);
     assert_eq!(resident(&state).id(), id);
     assert_eq!(
-        state.vacate(PageIndex::ZERO, SlotVersion::INITIAL).err(),
+        state
+            .vacate(PageIndex::ZERO, SlotVersion::INITIAL, None)
+            .err(),
         Some(Error::Stale)
     );
-    let (missing, allocation) = state.vacate(PageIndex::ZERO, stamp).unwrap();
+    let (missing, allocation) = state.vacate(PageIndex::ZERO, stamp, None).unwrap();
     assert_eq!(missing.get(), 3);
     assert_eq!(pool.gives(), 0, "release is outside the source lock");
     drop(allocation);
@@ -96,7 +232,7 @@ fn vacate_waits_for_software_holders_weak_discovery_and_exact_retirement() {
     let observer = resident(&state);
     assert!(observer.allows_return());
     assert_eq!(
-        state.vacate(PageIndex::ZERO, stamp).err(),
+        state.vacate(PageIndex::ZERO, stamp, None).err(),
         Some(Error::Busy)
     );
     let weak = Arc::downgrade(&observer);
@@ -104,12 +240,12 @@ fn vacate_waits_for_software_holders_weak_discovery_and_exact_retirement() {
     receipt.publish();
     drop(observer);
     assert_eq!(
-        state.vacate(PageIndex::ZERO, stamp).err(),
+        state.vacate(PageIndex::ZERO, stamp, None).err(),
         Some(Error::Busy)
     );
     let receipt = receipt.retire();
     assert_eq!(
-        state.vacate(PageIndex::ZERO, stamp).err(),
+        state.vacate(PageIndex::ZERO, stamp, None).err(),
         Some(Error::Busy)
     );
     // SAFETY: host fixture explicitly models the completion point; it does not
@@ -118,11 +254,11 @@ fn vacate_waits_for_software_holders_weak_discovery_and_exact_retirement() {
         receipt.settle();
     }
     assert_eq!(
-        state.vacate(PageIndex::ZERO, stamp).err(),
+        state.vacate(PageIndex::ZERO, stamp, None).err(),
         Some(Error::Busy)
     );
     drop(weak);
-    let (_, allocation) = state.vacate(PageIndex::ZERO, stamp).unwrap();
+    let (_, allocation) = state.vacate(PageIndex::ZERO, stamp, None).unwrap();
     drop(allocation);
     assert_eq!(pool.gives(), 1);
 }
@@ -141,13 +277,13 @@ fn explicit_sources_reject_legacy_transfers_and_unsettled_vacate_keeps_version()
     let held = resident(&state);
     let change = held.begin().unwrap();
     assert_eq!(
-        state.vacate(PageIndex::ZERO, stamp).err(),
+        state.vacate(PageIndex::ZERO, stamp, None).err(),
         Some(Error::Busy)
     );
     assert_eq!(state.revision.at(PageIndex::ZERO), stamp);
     drop(change);
     drop(held);
-    let (_, allocation) = state.vacate(PageIndex::ZERO, stamp).unwrap();
+    let (_, allocation) = state.vacate(PageIndex::ZERO, stamp, None).unwrap();
     drop(allocation);
     let mut legacy = FlatState::new(FlatSource::Managed(Vec::new()), true);
     let attempt = Pool::new(0);
@@ -216,12 +352,15 @@ fn versioned_transfer_preserves_identity_and_owner_without_moving_unsettled_publ
         "a snapshot is not a second holding or a new authority"
     );
     assert_eq!(
-        source.vacate(PageIndex::ZERO, from).err(),
+        source.vacate(PageIndex::ZERO, from, None).err(),
         Some(Error::Empty)
     );
-    assert_eq!(target.vacate(PageIndex::ZERO, to).err(), Some(Error::Busy));
+    assert_eq!(
+        target.vacate(PageIndex::ZERO, to, None).err(),
+        Some(Error::Busy)
+    );
     drop(observed);
-    let (_, allocation) = target.vacate(PageIndex::ZERO, to).unwrap();
+    let (_, allocation) = target.vacate(PageIndex::ZERO, to, None).unwrap();
     drop(allocation);
     assert_eq!(pool.gives(), 1);
 }
@@ -254,7 +393,7 @@ fn same_flat_move_uses_one_revision_and_can_restore_missing_without_zeroing() {
         state.move_within(PageIndex::ZERO, first, PageIndex::new(1), to),
         Err(Error::Stale)
     );
-    let (_, allocation) = state.vacate(PageIndex::ZERO, to).unwrap();
+    let (_, allocation) = state.vacate(PageIndex::ZERO, to, None).unwrap();
     drop(allocation);
     assert_eq!(pool.gives(), 1);
 }

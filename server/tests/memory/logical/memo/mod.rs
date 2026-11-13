@@ -13,6 +13,9 @@ pub(crate) mod source {
     #[derive(Clone)]
     pub(crate) struct Source(pub Arc<Registry>);
     impl Source {
+        pub(crate) fn position(&self) -> (kernel_api::model::flat::FlatId, usize) {
+            (kernel_api::model::flat::FlatId::new(1).unwrap(), 0)
+        }
         pub(crate) fn source(&self) -> &Arc<Registry> {
             &self.0
         }

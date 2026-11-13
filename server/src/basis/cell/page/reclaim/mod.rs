@@ -278,6 +278,10 @@ impl Reclaim {
             && state.cpu_writers == 0
             && state.external == 0
     }
+    pub(super) fn obligations(&self) -> u64 {
+        let state = State::decode(self.0.load(Ordering::Acquire));
+        (state.cpu_readers + state.cpu_writers + state.external) as u64
+    }
     pub(super) fn allows_return(&self) -> bool {
         self.0.load(Ordering::Acquire) == 0
     }

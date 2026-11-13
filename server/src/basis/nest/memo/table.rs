@@ -124,8 +124,9 @@ impl Memos {
     ) {
         for ((id, page), memo) in &mut self.entries {
             if *id == span.identity() && *page >= first && *page <= last {
-                if let Some(publication) = memo.publication.take() {
-                    retired.push(publication.retire());
+                if let Some(publication) = memo.withdraw() {
+                    retired.push(publication);
+                    span.changed();
                 }
             }
         }

@@ -57,6 +57,7 @@ pub(in crate::basis::nest) struct Settled {
     publisher: Option<Publisher>,
     borrow: Option<ExternalBorrow>,
     freeze: Option<Freeze>,
+    page: Option<Arc<Page>>,
 }
 
 impl Settled {
@@ -70,6 +71,7 @@ impl Settled {
                 .publisher
                 .map(|publisher| unsafe { publisher.settle() });
             drop(self.freeze);
+            drop(self.page);
             (source_notice, publisher_notice)
         };
         for (task, token) in source_notice.into_iter().chain(publisher_notice) {
@@ -100,6 +102,11 @@ pub(crate) struct Memo {
     /// keeps this freeze; logical associations release it after exact retirement.
     pub(super) freeze: Option<Freeze>,
     flight: Option<MemoFlight>,
+    /// Last accepted physical access survives removal of the address policy.
+    publication_access: u64,
+    /// Bulk withdrawal moves the receipt into Nest's fence batch. Keep its
+    /// exact physical identity here until that batch has completed.
+    retiring_page: Option<Arc<Page>>,
     pub(super) publication: Option<Publication>,
     publisher: Option<Publisher>,
     borrow: Option<ExternalBorrow>,
@@ -112,6 +119,8 @@ impl Memo {
             page: None,
             freeze: None,
             flight: None,
+            publication_access: 0,
+            retiring_page: None,
             publication: None,
             publisher: None,
             borrow: None,
@@ -237,11 +246,18 @@ impl Memo {
         &mut self,
         expected: u64,
         change: Arc<Change>,
+        access: u64,
     ) -> Result<(), NestError> {
         if self.busy() {
             return Err(NestError::Busy);
         }
-        self.begin(expected, change, MemoFlight::Publishing, false)
+        self.begin(expected, change, MemoFlight::Publishing, false)?;
+        self.record_access(access);
+        Ok(())
+    }
+
+    pub(in crate::basis::nest) fn record_access(&mut self, access: u64) {
+        self.publication_access = access;
     }
 
     pub(in crate::basis::nest) fn retain(
@@ -357,6 +373,16 @@ impl Memo {
         self.publication = Some(publication);
     }
 
+    pub(in crate::basis::nest) fn withdraw(&mut self) -> Option<Publication> {
+        let publication = self.publication.take()?;
+        self.retiring_page = Some(publication.cell().clone());
+        if !self.retracting() {
+            self.generation = self.generation.next().unwrap_or(self.generation);
+            self.flight = Some(MemoFlight::Retracting);
+        }
+        Some(publication.retire())
+    }
+
     pub(in crate::basis::nest) fn settle_external(&mut self) -> Settled {
         assert!(
             self.publication()
@@ -387,6 +413,7 @@ impl Memo {
                     publisher: self.publisher.take(),
                     borrow: self.borrow.take(),
                     freeze,
+                    page: self.retiring_page.take(),
                 }
             }
             _ => Settled::default(),
@@ -403,6 +430,7 @@ impl Memo {
                     .map(|publication| publication.cell().clone())
             })
             .or_else(|| self.freeze.as_ref().map(|freeze| freeze.page().clone()))
+            .or_else(|| self.retiring_page.clone())
     }
 
     pub(in crate::basis::nest) fn inspect(&self, address: VirtAddr) -> CellInfo {
@@ -441,6 +469,50 @@ impl Memo {
             address,
             fault_cause: 0,
             fault_address: 0,
+        }
+    }
+
+    /// Observe the retained physical Page, never re-resolve the logical source.
+    pub(in crate::basis::nest) fn snapshot(
+        &self,
+        nest: kernel_api::model::nest::NestId,
+        reservation: kernel_api::model::nest::ReservationId,
+        coordinate: usize,
+        level: kernel_api::model::cell::CellLevel,
+        failed_fence: bool,
+    ) -> kernel_api::model::nest::MemoStatus {
+        use kernel_api::model::nest::{MemoGeneration, MemoPhase, MemoStatus};
+        let observed = self.inspect(VirtAddr::new(0));
+        let source = match &self.page {
+            Some(MemoPage::Associated(association)) => Some(association.source.position()),
+            _ => None,
+        };
+        let phase = if failed_fence && self.in_flight() {
+            MemoPhase::Failed
+        } else {
+            match observed.state {
+                CellState::Publishing => MemoPhase::Publishing,
+                CellState::Published => MemoPhase::Published,
+                CellState::Retracting => MemoPhase::Retiring,
+                CellState::Failed => MemoPhase::Failed,
+                _ if source.is_some() => MemoPhase::Associated,
+                _ => MemoPhase::Empty,
+            }
+        };
+        MemoStatus {
+            nest,
+            reservation,
+            coordinate,
+            level,
+            generation: MemoGeneration::new(self.generation()).expect("Memo generation"),
+            phase,
+            source,
+            page: if self.busy() { observed.page } else { 0 },
+            access: if self.busy() {
+                self.publication_access
+            } else {
+                0
+            },
         }
     }
 }

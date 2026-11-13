@@ -5,7 +5,7 @@ mod fault;
 mod target;
 use target::Storage;
 mod invalidation;
-mod phase;
+pub(super) mod phase;
 mod retirement;
 mod tickets;
 pub(super) use invalidation::Invalidation;
@@ -385,6 +385,7 @@ impl NestState {
         window: (usize, usize),
         request: Protection,
         replacement: Option<(usize, Publication)>,
+        accepted: &mut impl FnMut(),
     ) -> Result<(), NestError> {
         if !self.retirement.invalidation().is_clean() {
             return Err(NestError::Busy);
@@ -427,6 +428,7 @@ impl NestState {
                 .map_err(|_| NestError::OutOfMemory)?;
         }
         // 从此处开始提交不再分配：即使 shootdown 失败，保留映射与 Dirty/Failed 状态。
+        accepted();
         self.retirement.mappings.push(mapping.clone());
         if let Some((page, mut publication)) = replacement {
             let old = self
@@ -438,6 +440,12 @@ impl NestState {
             self.retirement.cells.push(old.retire());
         }
         for update in transition.updates {
+            if let Some(memo) = self
+                .memos
+                .existing_mut(mapping, mapping.page_index(update.address))
+            {
+                memo.record_access(update.access.bits() << 1);
+            }
             self.root.cpu_mut()?.set_permissions_prepared_geometry(
                 update.address,
                 mapping.leaf_attributes(update.access),

@@ -22,7 +22,7 @@ fn page(pool: &'static Pool) -> Arc<Page> {
 }
 fn publish(memo: &mut Memo, page: &Arc<Page>) {
     let change = page.begin().unwrap();
-    memo.begin_publish(memo.generation(), change.clone())
+    memo.begin_publish(memo.generation(), change.clone(), 6)
         .unwrap();
     let mut publication = Publication::prepare(page, true, Some(&change)).unwrap();
     publication.publish();
@@ -41,6 +41,101 @@ fn retract(memo: &mut Memo, page: &Arc<Page>) {
         publication.settle();
     }
     memo.finish().release();
+}
+
+#[test]
+fn next_observation_keeps_physical_identity_through_failed_fence_and_retirement() {
+    use kernel_api::model::nest::{MemoPhase, NestId, ReservationId};
+    let observe = |memo: &Memo, failed| {
+        memo.snapshot(
+            NestId::new(1).unwrap(),
+            ReservationId::from_bytes(&2u64.to_le_bytes()).unwrap(),
+            0,
+            kernel_api::model::cell::CellLevel::BASE,
+            failed,
+        )
+    };
+    let (mut memo, _, _) = logical();
+    let associated = observe(&memo, false);
+    assert!(associated.valid());
+    assert_eq!(associated.phase, MemoPhase::Associated);
+    assert_eq!((associated.page, associated.access), (0, 0));
+    let pool = Pool::new(0);
+    let data = page(pool);
+    let id = data.id().get() as u64;
+    let change = data.begin().unwrap();
+    memo.begin_publish(memo.generation(), change.clone(), 6)
+        .unwrap();
+    let pending = observe(&memo, false);
+    assert!(pending.valid());
+    assert_eq!((pending.phase, pending.page), (MemoPhase::Publishing, id));
+    assert_eq!(pending.access, 6);
+    assert_eq!(observe(&memo, true).phase, MemoPhase::Failed);
+    let mut publication = Publication::prepare(&data, true, Some(&change)).unwrap();
+    publication.publish();
+    publication.complete();
+    memo.install(publication);
+    memo.finish().release();
+    assert_eq!(observe(&memo, false).phase, MemoPhase::Published);
+    memo.record_access(2);
+    assert_eq!(observe(&memo, false).access, 2);
+    memo.begin_retract(memo.generation(), change.clone(), false)
+        .unwrap();
+    let retired = memo.publication.take().unwrap().retire();
+    let pending = observe(&memo, false);
+    assert!(pending.valid());
+    assert_eq!((pending.phase, pending.page), (MemoPhase::Retiring, id));
+    assert_eq!(pending.access, 2);
+    drop(data);
+    assert_eq!(pool.gives(), 0);
+    unsafe {
+        retired.settle();
+    } // No physical publication in the host fixture.
+    memo.finish().release();
+    assert_eq!(observe(&memo, false).phase, MemoPhase::Associated);
+    assert_eq!(observe(&memo, false).source, associated.source);
+    assert_eq!(observe(&memo, false).page, 0);
+    drop(change);
+    assert_eq!(pool.gives(), 1);
+    memo.remove(memo.generation()).unwrap().release();
+    assert_eq!(observe(&memo, false).phase, MemoPhase::Empty);
+}
+
+#[test]
+fn whole_namespace_withdrawal_retains_memo_page_until_its_batch_settles() {
+    use kernel_api::model::nest::{MemoPhase, NestId, ReservationId};
+    let (mut memo, registry, binding) = logical();
+    let pool = Pool::new(0);
+    let data = page(pool);
+    let id = data.id().get() as u64;
+    publish(&mut memo, &data);
+    let before = memo.generation();
+    let retired = memo.withdraw().unwrap();
+    drop(data);
+    assert_eq!(memo.generation(), before + 1);
+    assert!(memo.matches(&binding));
+    assert!(memo.clear().is_err());
+    let status = memo.snapshot(
+        NestId::new(1).unwrap(),
+        ReservationId::from_bytes(&2u64.to_le_bytes()).unwrap(),
+        0,
+        kernel_api::model::cell::CellLevel::BASE,
+        false,
+    );
+    assert!(status.valid());
+    assert_eq!(
+        (status.phase, status.page, status.access),
+        (MemoPhase::Retiring, id, 6)
+    );
+    assert_eq!(pool.gives(), 0);
+    // SAFETY: the host models the exact batch receipt completion, not a CPU fence.
+    unsafe { retired.settle() };
+    assert_eq!(pool.gives(), 0); // Memo's descriptive retention still exists.
+    memo.finish().release();
+    assert_eq!(pool.gives(), 1);
+    assert!(memo.page().is_none());
+    memo.clear().unwrap().release();
+    assert_eq!(registry.0.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -213,7 +308,7 @@ fn holding_move_and_restore_preserve_logical_binding_and_page_identity() {
     publish(&mut memo, &observer);
     retract(&mut memo, &observer);
     drop(observer);
-    drop(source.vacate(PageIndex::ZERO, restored).unwrap().1);
+    drop(source.vacate(PageIndex::ZERO, restored, None).unwrap().1);
     assert_eq!(pool.gives(), 1);
     assert!(memo.matches(&binding));
     memo.clear().unwrap().release();
@@ -226,7 +321,7 @@ fn unfinished_publication_retains_exact_page_and_prevents_replacement() {
     let pool = Pool::new(0);
     let page = page(pool);
     let change = page.begin().unwrap();
-    memo.begin_publish(memo.generation(), change.clone())
+    memo.begin_publish(memo.generation(), change.clone(), 6)
         .unwrap();
     let mut publication = Publication::prepare(&page, true, Some(&change)).unwrap();
     publication.publish();

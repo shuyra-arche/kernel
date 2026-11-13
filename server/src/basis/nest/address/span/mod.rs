@@ -31,8 +31,10 @@ pub struct Span {
     pub(crate) reservation: Reservation,
     pub(crate) attrs: Attributes,
     level: CellLevel,
+    initial_access: Access,
     pub(crate) state: SpinLock<SpanState>,
     operation: core::sync::atomic::AtomicBool,
+    revision: core::sync::atomic::AtomicU64,
     /// Weak discovery of sources exported through this reservation. Live
     /// permission remains in each Source's original Pend lineage.
     pub(crate) exports:
@@ -56,6 +58,30 @@ impl Drop for Span {
 }
 
 impl Span {
+    pub(crate) fn initial_access(&self) -> Access {
+        self.initial_access
+    }
+    pub(crate) fn version(&self) -> kernel_api::model::nest::ReservationVersion {
+        kernel_api::model::nest::ReservationVersion::new(
+            self.revision.load(core::sync::atomic::Ordering::Acquire),
+        )
+        .expect("reservation revision")
+    }
+    pub(in crate::basis::nest) fn prepare_revision(&self) -> Result<(), NestError> {
+        self.version()
+            .next()
+            .ok_or(NestError::OutOfMemory)
+            .map(|_| ())
+    }
+    /// Forced cleanup may exhaust a revision but never wrap or reopen admission.
+    pub(in crate::basis::nest) fn changed(&self) {
+        let _ = self.revision.try_update(
+            core::sync::atomic::Ordering::AcqRel,
+            core::sync::atomic::Ordering::Acquire,
+            |v| v.checked_add(1),
+        );
+    }
+
     /// 建立一段关系；活动区间必须落在初始范围内，来源跨度必须等长。
     ///
     /// 构造失败即退回占用：调用方交出的凭证不会随失败一起丢掉。
@@ -109,9 +135,13 @@ impl Span {
         match Arc::try_new(Self {
             reservation,
             operation: core::sync::atomic::AtomicBool::new(false),
+            revision: core::sync::atomic::AtomicU64::new(1),
             exports: SpinLock::new(crate::basis::pend::Tracking::new()),
             attrs,
             level,
+            initial_access: active
+                .iter()
+                .fold(Access::all(), |access, range| access & range.ceiling),
             state: SpinLock::new_level(Level::Reservation, SpanState::new(active, source)),
         }) {
             Ok(mapping) => Ok(mapping),
@@ -248,6 +278,7 @@ impl Span {
         let mut inner = self.state.lock();
         if inner.phase == ReservationPhase::Open {
             inner.phase = ReservationPhase::Closing;
+            self.changed();
         }
     }
 

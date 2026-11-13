@@ -81,6 +81,8 @@ pub struct ReservationStatus {
     /// Original reservation base, not the narrowed window's first address.
     pub address: VirtAddr,
     pub level: CellLevel,
+    /// Creation access ceiling, intersected with this Pend's write ceiling.
+    /// Per-position current publication access is reported by MemoStatus.
     pub access: u64,
     pub phase: ReservationPhase,
 }
