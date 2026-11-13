@@ -45,7 +45,8 @@ or exact Git revision. Review the
 [API and ABI compatibility notes](api/README.md#source-migration-and-abi-compatibility)
 before updating a pin. GitHub releases identify source revisions. The
 [Shuyra release standard](https://github.com/shuyra-arche/.github/blob/main/docs/engineering/release.md)
-defines the date-based tags. See [Contributing](CONTRIBUTING.md) for review
+defines the date-based tags. The [Preview Alpha record](docs/releases/README.md)
+describes the selected contract, validation and publication gate. See [Contributing](CONTRIBUTING.md) for review
 and verification requirements.
 
 Kernel and API derive from [anreonyr/sqware](https://github.com/anreonyr/sqware)

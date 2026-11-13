@@ -77,7 +77,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          args=(--verify-tag --generate-notes --title "$RELEASE_TAG")
+          notes=(--generate-notes)
+          if [[ "$RELEASE_TAG" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]{2}-preview-Alpha$ ]]; then
+            sed -e "s/{{RELEASE_TAG}}/$RELEASE_TAG/g" \
+                -e "s/{{RELEASE_COMMIT}}/$GITHUB_SHA/g" \
+                docs/releases/preview-alpha.md > "$RUNNER_TEMP/release-notes.md"
+            notes=(--notes-file "$RUNNER_TEMP/release-notes.md")
+          fi
+          args=(--verify-tag "${notes[@]}" --title "$RELEASE_TAG")
           if [[ "$RELEASE_TAG" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]{2}-(explore|develop|preview)- ]]; then
             args+=(--prerelease)
           fi
