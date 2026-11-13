@@ -25,3 +25,11 @@ path = "tests/abi/mod.rs"
 [[test]]
 name = "boot"
 path = "tests/boot/mod.rs"
+
+[features]
+memory-v11 = []
+
+[[test]]
+name = "native"
+path = "tests/native/mod.rs"
+required-features = ["memory-v11"]

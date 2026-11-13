@@ -22,6 +22,7 @@ fn one_failed_target_does_not_discharge_or_block_another() {
         targets.push(target);
         traces.push(trace);
     }
+    assert!(crate::cell::statistics::snapshot().external >= 8192);
     traces[0].lock().unwrap().fail_revoke = Some(HardwareError::Timeout);
     assert_eq!(
         targets[0].advance_close(),

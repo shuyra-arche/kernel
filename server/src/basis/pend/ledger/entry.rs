@@ -125,7 +125,7 @@ impl PendEntry {
             };
             let mut permitted = ShareRights::empty();
             if rights.contains(FlatRights::ASSOCIATE) {
-                permitted |= ShareRights::OPEN | ShareRights::SHUT | ShareRights::ASSOCIATE;
+                permitted |= ShareRights::association();
             }
             if rights.contains(FlatRights::DELETE) {
                 permitted |= ShareRights::DELETE;

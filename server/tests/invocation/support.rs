@@ -36,6 +36,7 @@ pub(crate) struct Task {
     pub memory_results: Lock<Option<Box<Journal>>>,
     pub effects: AtomicUsize,
     pub mode: AtomicUsize,
+    pub completion: Lock<Option<crate::memory_result::Completion>>,
 }
 impl Task {
     pub fn new() -> Arc<Self> {
@@ -54,6 +55,7 @@ impl Task {
             memory_results: Lock(Mutex::new(None)),
             effects: AtomicUsize::new(0),
             mode: AtomicUsize::new(0),
+            completion: Lock(Mutex::new(None)),
         })
     }
     pub fn realtime(&self) -> bool {

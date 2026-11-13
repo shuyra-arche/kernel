@@ -116,7 +116,7 @@ impl Entry {
             )
     }
 }
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = crate::abi::VERSION as u32;
 #[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub version: u32,

@@ -3,6 +3,8 @@ extern crate alloc;
 // Production descriptor-copy, dispatch and result transaction. Resource/Task
 // scheduling and user buffers are fixtures; this is not a trap/MMU guest test.
 mod entry;
+#[path = "../../src/basis/unit/task/memory_result.rs"]
+pub(crate) mod memory_result;
 mod support;
 use kernel_api::{
     abi::memory::{
@@ -14,12 +16,17 @@ use kernel_api::{
         nest::{MemoGeneration, MemoPosition, NestId, ReservationId},
     },
 };
+use memory_result::Transition;
 use std::sync::atomic::Ordering;
 use support::*;
 pub(crate) mod basis {
     pub(crate) mod room {
         pub(crate) enum Handoff<T> {
             Resume(T),
+            #[expect(
+                dead_code,
+                reason = "this descriptor fixture rejects fault waits; real switches run in the native guest"
+            )]
             Switch(usize),
         }
     }
@@ -45,6 +52,7 @@ pub(crate) mod basis {
     pub(crate) use crate::support::commit;
     pub(crate) mod unit {
         pub(crate) mod task {
+            pub(crate) use crate::memory_result;
             pub(crate) use crate::support::{Task, TaskIdent};
         }
     }
@@ -108,6 +116,64 @@ fn invoke(task: &Task, request: Request, output: usize) -> (Delivery, Option<Rep
         None
     };
     (delivery, reply)
+}
+
+#[test]
+fn deferred_completion_preserves_pending_replay_and_releases_journal_capacity() {
+    let task = Task::new();
+    task.mode.store(3, Ordering::SeqCst);
+    for id in 1..=(kernel_api::abi::memory::RESULT_CAPACITY * 2) as u64 {
+        let req = request(id, true);
+        let first = invoke(&task, req, 0x1100).1.unwrap();
+        assert!(matches!(first.outcome(), Outcome::Pending(_)));
+        assert_eq!(invoke(&task, req, 0x1100).1, Some(first));
+        assert_eq!(task.effects.load(Ordering::SeqCst), id as usize);
+        task.completion
+            .lock()
+            .take()
+            .unwrap()
+            .finish(Transition::Published);
+        let done = invoke(&task, req, 0x1100).1.unwrap();
+        assert!(matches!(done.outcome(), Outcome::Committed(_)));
+        assert_eq!(task.effects.load(Ordering::SeqCst), id as usize);
+    }
+}
+
+#[test]
+fn deferred_cancel_and_hardware_failure_are_terminal_without_reexecution() {
+    for hardware in [false, true] {
+        let task = Task::new();
+        task.mode.store(3, Ordering::SeqCst);
+        let req = request(1, true);
+        invoke(&task, req, 0x1100);
+        let completion = task.completion.lock().take().unwrap();
+        if hardware {
+            completion.finish(Transition::Failed(Failure::Hardware));
+        } else {
+            completion.finish(Transition::Retired);
+        }
+        let result = invoke(&task, req, 0x1100).1.unwrap();
+        assert!(matches!(
+            result.outcome(),
+            Outcome::Failed {
+                retained: Some(_),
+                ..
+            }
+        ));
+        assert_eq!(task.effects.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[test]
+fn deferred_result_does_not_keep_dead_task_alive() {
+    let task = Task::new();
+    task.mode.store(3, Ordering::SeqCst);
+    invoke(&task, request(1, true), 0x1100);
+    let weak = std::sync::Arc::downgrade(&task);
+    let completion = task.completion.lock().take().unwrap();
+    drop(task);
+    assert!(weak.upgrade().is_none());
+    completion.finish(Transition::Published);
 }
 
 #[test]

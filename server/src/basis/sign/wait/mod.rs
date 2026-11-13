@@ -55,7 +55,7 @@ fn rise(tasks: impl IntoIterator<Item = Arc<Task>>, place: impl Fn(Arc<Task>)) -
         let t = task;
         if let Some(join) = t.take_wait() {
             let resumed = join.resume(&t);
-            if resumed == Resumption::Waiting {
+            if resumed != Resumption::Complete {
                 continue;
             }
         }

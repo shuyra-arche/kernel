@@ -17,3 +17,6 @@ erra = { workspace = true }
 [[test]]
 name = "call"
 path = "tests/call/mod.rs"
+
+[features]
+memory-v11 = ["kernel-api/memory-v11"]

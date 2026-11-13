@@ -19,10 +19,15 @@ pub struct Fabric {
     pub ram: Vec<Ram>,
     pub routes: Vec<Route>,
 }
+enum Instructions {
+    Unsupported,
+    LocalHart,
+}
 /// Kept immutable for the boot lifetime. Runtime endpoint epochs still belong
 /// to the actual CPU domain and exclusive IOMMU binding, not these descriptions.
 pub struct Topology {
     fabrics: Vec<Fabric>,
+    instructions: Instructions,
 }
 impl Topology {
     /// # Safety
@@ -66,7 +71,25 @@ impl Topology {
                 }
             }
         }
-        Ok(Self { fabrics })
+        Ok(Self {
+            fabrics,
+            instructions: Instructions::Unsupported,
+        })
+    }
+    /// Qualify instruction fetch on the single admitted CPU Hart.
+    ///
+    /// # Safety
+    /// All instruction fetches for these RAM intervals occur on that Hart,
+    /// whose FENCE.I synchronizes prior visible writes before execution. No
+    /// device fetch, bypass or executable alias exists outside this model.
+    /// The installed backend must reject SMP and execute FENCE.I before
+    /// completing executable Publish/Protect. This does not relax group W/X.
+    pub unsafe fn with_local_instructions(mut self) -> Self {
+        self.instructions = Instructions::LocalHart;
+        self
+    }
+    pub fn allows_local_instructions(&self) -> bool {
+        matches!(self.instructions, Instructions::LocalHart)
     }
     pub(crate) fn regions(&self) -> impl Iterator<Item = Ram> + '_ {
         self.fabrics.iter().flat_map(|f| f.ram.iter().copied())
@@ -75,10 +98,15 @@ impl Topology {
     /// group and the entire interval. Never union two partial fabric guarantees.
     pub fn compatible(&self, group: Group<'_>) -> Result<Evidence<Compatibility>, Error> {
         let request = group.request();
-        // This provider qualifies data fabrics, not instruction visibility.
-        // No data fence can stand in for every executing Hart's FENCE.I.
-        if request.member.access.executable()
-            || group.existing().iter().any(|m| m.access.executable())
+        let executable = request.member.access.executable()
+            || group.existing().iter().any(|m| m.access.executable());
+        if executable
+            && (!self.allows_local_instructions()
+                || group
+                    .existing()
+                    .iter()
+                    .chain(core::iter::once(&request.member))
+                    .any(|m| matches!(m.endpoint, Endpoint::External { .. })))
         {
             return Err(Error::Unsupported);
         }

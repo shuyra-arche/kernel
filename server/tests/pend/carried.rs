@@ -1,6 +1,6 @@
 //! Production transfer ceilings and real Pend ancestry. These tests neither
 //! manufacture hardware settlement nor replace provenance checks with booleans.
-use crate::authority::{Carried, Pend};
+use crate::authority::{Pend, carried::Carried};
 use kernel_api::{
     abi::{call::pend::PendFail, memory::rights::VACATE},
     address::{PageCount, PageOffset},

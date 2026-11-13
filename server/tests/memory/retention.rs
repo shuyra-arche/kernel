@@ -41,6 +41,8 @@ fn retirement_outlives_the_source_slot_until_explicit_settlement() {
     let identity = cell.id();
     retained.publish();
     let retired = retained.retire();
+    let telemetry = crate::cell::statistics::snapshot();
+    assert!(telemetry.cpu >= 4096 && telemetry.retiring >= 4096);
     drop(slots);
     assert_eq!(retired.id(), identity);
     assert_eq!(pool.gives(), 0);

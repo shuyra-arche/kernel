@@ -5,6 +5,7 @@ use crate::basis::cell::page::{Change, Freeze, Page};
 use crate::basis::nest::NestError;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::{ExternalBorrow, Pend};
+use crate::basis::unit::task::memory_result::Transition;
 use alloc::sync::Arc;
 use kernel_api::address::VirtAddr;
 use kernel_api::model::cell::{CellInfo, CellState};
@@ -54,6 +55,10 @@ impl Detached {
 /// Completion resources leave the Nest lock before inverse owners are touched.
 #[derive(Default)]
 pub(in crate::basis::nest) struct Settled {
+    completion: Option<(
+        crate::basis::unit::task::memory_result::Completion,
+        Transition,
+    )>,
     publisher: Option<Publisher>,
     borrow: Option<ExternalBorrow>,
     freeze: Option<Freeze>,
@@ -64,6 +69,9 @@ pub(in crate::basis::nest) struct Settled {
 
 impl Settled {
     pub(in crate::basis::nest) fn release(self) {
+        if let Some((completion, transition)) = self.completion {
+            completion.finish(transition);
+        }
         let (source_notice, publisher_notice) = {
             let _commit = crate::basis::commit();
             // SAFETY: only exact hardware completion or an unpublished cancellation
@@ -100,6 +108,8 @@ impl MemoFlight {
 }
 
 pub(crate) struct Memo {
+    pub(in crate::basis::nest) completion:
+        Option<crate::basis::unit::task::memory_result::Completion>,
     pub(in crate::basis::nest) provenance: Option<Arc<crate::basis::pend::Provenance>>,
     pub(in crate::basis::nest) maintenance: Option<Arc<crate::basis::pend::MaintenanceUse>>,
     generation: crate::basis::name::Generation,
@@ -121,6 +131,7 @@ pub(crate) struct Memo {
 impl Memo {
     pub(crate) const fn vacant() -> Self {
         Self {
+            completion: None,
             maintenance: None,
             provenance: None,
             generation: crate::basis::name::Generation::first(),
@@ -406,6 +417,7 @@ impl Memo {
             Some(Phase::Mapped) => {
                 self.flight = None;
                 Settled {
+                    completion: self.completion.take().map(|c| (c, Transition::Published)),
                     freeze: self.freeze.take(),
                     ..Settled::default()
                 }
@@ -418,6 +430,7 @@ impl Memo {
                     None
                 };
                 Settled {
+                    completion: self.completion.take().map(|c| (c, Transition::Retired)),
                     publisher: self.publisher.take(),
                     borrow: self.borrow.take(),
                     freeze,

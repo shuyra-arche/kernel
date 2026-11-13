@@ -2,7 +2,7 @@
 //! and Memo discovery edges avoid ownership cycles; only live Pends authorize.
 use super::*;
 use crate::basis::{
-    pend::{Target, authority::Carried},
+    pend::{Target, authority::carried::Carried},
     unit::task::Task,
 };
 use kernel_api::model::pend::FlatRights;

@@ -36,7 +36,7 @@ fn takeover_requires_dead_owner_actual_ancestor_and_whole_original_window() {
     sibling.inherit(&parent).unwrap();
     let worker = Task::new(1);
     let manager = Task::new(2);
-    let mut epoch = Epoch::new(reference(), &worker, token(1), &child, 0);
+    let mut epoch = Epoch::new(reference(), &worker, token(1), &child, 4096);
     let window = (PageOffset::new(2), PageCount::new(4).unwrap());
     assert_eq!(
         epoch.takeover(reference(), &manager, token(2), &parent, window),
@@ -57,6 +57,10 @@ fn takeover_requires_dead_owner_actual_ancestor_and_whole_original_window() {
         .takeover(reference(), &manager, token(2), &parent, window)
         .unwrap();
     assert_eq!(epoch.reference.generation().get(), 2);
+    assert_eq!(
+        epoch.base, 4096,
+        "takeover must retain the original fixed coordinates"
+    );
     assert_eq!(epoch.phase, BlockPhase::Draining);
     assert_eq!(epoch.data, Modifiable::No); // takeover cannot wash the old ceiling
     assert!(epoch.live(window));

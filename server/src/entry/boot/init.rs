@@ -88,6 +88,26 @@ pub unsafe fn grant_mmio(region: kernel_api::boot::platform::Region) -> Result<(
     })
 }
 
+/// Place a static RW (never executable) device aperture in the initial Team.
+/// This is explicit boot layout, not a v11 RAM publication or a revocable Pend.
+/// No mapping is inherited by subsequently created Teams.
+///
+/// # Safety
+/// Call during single-Hart boot before `start`. The paired initial image knows
+/// this fixed virtual address. The platform validates device memory attributes
+/// and ordering, owns the independently assignable aperture for the entire Team
+/// lifetime, and must not reassign the device while the Team can access it.
+/// Configuration, routing, IOMMU and other protected controls must remain private.
+pub unsafe fn map_entry_mmio(
+    region: kernel_api::boot::platform::Region,
+    address: kernel_api::address::VirtAddr,
+) -> Result<(), BootError> {
+    super::devices::entry_mmio::stage(region, address).map_err(|source| BootError::Resources {
+        operation: ResourceOperation::Devices,
+        source,
+    })
+}
+
 /// Grant one independently owned, level-high PLIC source to the initial Unit.
 /// # Safety
 /// The external platform validated the complete DT route, exclusive ownership,

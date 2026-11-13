@@ -244,8 +244,10 @@ pub(crate) fn resume(task: &Arc<Task>, wait: Cpu) -> Resumption {
     if let Err(error) = result {
         wait.event.finish(Err(error));
         crate::basis::unit::lifecycle::fault(task, error as i64 as usize);
+        return Resumption::Terminated;
     } else if matches!(result, Ok(false)) {
         crate::basis::unit::lifecycle::fault(task, Failure::OutOfMemory as i64 as usize);
+        return Resumption::Terminated;
     }
     Resumption::Complete
 }

@@ -89,7 +89,10 @@ mod nest {
             );
             drop(window);
             actor.effects.fetch_add(1, Ordering::SeqCst);
-            if actor.mode.load(Ordering::SeqCst) == 2 {
+            if actor.mode.load(Ordering::SeqCst) == 3 {
+                *actor.completion.lock() = Some(receipt.defer());
+                Ok(value)
+            } else if actor.mode.load(Ordering::SeqCst) == 2 {
                 Err(Failure::Busy)
             } else {
                 let _commit = commit();

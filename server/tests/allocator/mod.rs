@@ -77,6 +77,10 @@ fn frame_split_and_merge_never_publish_reserved_pages_or_bank_holes() {
         .count();
     let mut allocator = frame::FrameInner::new();
     allocator.init().unwrap();
+    assert_eq!(
+        allocator.allocated, 0,
+        "initialization must not charge client frames"
+    );
     let mut indices = Vec::new();
     while let Some(index) = unsafe { allocator.split_block(0) } {
         assert!(usable(allocator.frame_addr(index)));
