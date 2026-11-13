@@ -17,17 +17,27 @@ enum Phase {
     Held,
 }
 
+struct Blocks {
+    count: usize,
+    next: usize,
+    admitted: usize,
+}
+
 pub(crate) struct Change {
     page: Option<Arc<Page>>,
     phase: Phase,
-    blocks: crate::metal::sync::SpinLock<usize>,
+    blocks: crate::metal::sync::SpinLock<Blocks>,
 }
 impl Change {
     pub(in super::super) fn begin(page: &Arc<Page>) -> Result<Arc<Self>, RetainError> {
         let mut change = Arc::try_new(Self {
             page: Some(page.clone()),
             phase: Phase::Prepared,
-            blocks: crate::metal::sync::SpinLock::new(0),
+            blocks: crate::metal::sync::SpinLock::new(Blocks {
+                count: 0,
+                next: 0,
+                admitted: 0,
+            }),
         })
         .map_err(|_| RetainError::Exhausted)?;
         page.reclaim.begin()?;
@@ -40,19 +50,19 @@ impl Change {
     pub(crate) fn hardware(&self, modifiable: bool) -> Result<Retention, RetainError> {
         // CPU Memo publication holds its own freeze before preparing a PTE.
         let blocks = self.blocks.lock();
-        if *blocks != 0 {
+        if blocks.count != 0 {
             return Err(RetainError::Busy);
         }
-        Retention::during(self, Kind::Cpu, modifiable)
+        Retention::during(self, Kind::Cpu, modifiable, false)
     }
     pub(crate) fn external(&self, modifiable: bool) -> Result<Retention, RetainError> {
         // A device handoff can use the sole freeze left by CPU withdrawal.
         // External writers also require all CPU and other device use to settle.
         let blocks = self.blocks.lock();
-        if *blocks != 0 {
+        if blocks.count != 0 {
             return Err(RetainError::Busy);
         }
-        Retention::during(self, Kind::External, modifiable)
+        Retention::during(self, Kind::External, modifiable, false)
     }
 }
 impl Drop for Change {
@@ -90,8 +100,20 @@ impl Drop for Freeze {
 /// Existing receipts must still discharge through their normal completion path.
 pub(crate) struct Block {
     change: Arc<Change>,
+    id: usize,
 }
 impl Block {
+    pub(crate) fn permit(&self) -> Result<Maintenance, RetainError> {
+        let mut blocks = self.change.blocks.lock();
+        if blocks.count != 1 {
+            return Err(RetainError::Busy);
+        }
+        blocks.admitted = self.id;
+        Ok(Maintenance {
+            change: self.change.clone(),
+            id: self.id,
+        })
+    }
     pub(crate) fn change(&self) -> &Arc<Change> {
         &self.change
     }
@@ -106,7 +128,7 @@ impl Block {
         let Some(change) = Arc::get_mut(&mut self.change) else {
             return false;
         };
-        if *change.blocks.lock() != 1 {
+        if change.blocks.lock().count != 1 {
             return false;
         }
         drop(change.page.take());
@@ -121,11 +143,16 @@ impl Block {
         }
     }
     pub(crate) fn new(change: Arc<Change>) -> Result<Self, RetainError> {
-        {
-            let mut count = change.blocks.lock();
-            *count = count.checked_add(1).ok_or(RetainError::Exhausted)?;
-        }
-        Ok(Self { change })
+        let id = {
+            let mut blocks = change.blocks.lock();
+            let id = blocks.next.checked_add(1).ok_or(RetainError::Exhausted)?;
+            let count = blocks.count.checked_add(1).ok_or(RetainError::Exhausted)?;
+            blocks.next = id;
+            blocks.count = count;
+            blocks.admitted = id;
+            id
+        };
+        Ok(Self { change, id })
     }
     pub(crate) fn page(&self) -> &Arc<Page> {
         self.change.page()
@@ -134,11 +161,38 @@ impl Block {
         self.change.page().reclaim.hardware_idle()
     }
 }
+
+/// A physical admission path derived from one retained Block. Logical ownership,
+/// epoch and authority are rechecked by the range record under COMMIT. Every
+/// physical registration still excludes additional overlapping Page blocks.
+pub(crate) struct Maintenance {
+    change: Arc<Change>,
+    id: usize,
+}
+impl Maintenance {
+    pub(crate) fn change(&self) -> &Arc<Change> {
+        &self.change
+    }
+    pub(crate) fn hardware(&self, writable: bool) -> Result<Retention, RetainError> {
+        let blocks = self.change.blocks.lock();
+        if blocks.count != 1 || blocks.admitted != self.id {
+            return Err(RetainError::Busy);
+        }
+        Retention::during(&self.change, Kind::Cpu, writable, true)
+    }
+    pub(crate) fn external(&self, writable: bool) -> Result<Retention, RetainError> {
+        let blocks = self.change.blocks.lock();
+        if blocks.count != 1 || blocks.admitted != self.id {
+            return Err(RetainError::Busy);
+        }
+        Retention::during(&self.change, Kind::External, writable, true)
+    }
+}
 impl Drop for Block {
     fn drop(&mut self) {
         let mut count = self.change.blocks.lock();
-        assert!(*count > 0);
-        *count -= 1;
+        assert!(count.count > 0);
+        count.count -= 1;
     }
 }
 

@@ -28,13 +28,13 @@ pub(in crate::entry::call) fn effect(
         Action::Publish {
             memo,
             expected,
-            maintenance: None,
+            maintenance: _,
         } => (memo, expected, NestRights::PUBLISH),
         Action::Retract { memo, expected } => (memo, expected, NestRights::RETRACT),
         Action::Protect { memo, expected, .. } => (memo, expected, NestRights::PROTECT),
         _ => return Err(Failure::Unsupported),
     };
-    let (route, span, index, data, publisher) = {
+    let (route, span, index, data, publisher, maintenance) = {
         let _serial = actor.pend.lock();
         let _commit = basis::commit();
         let route = Reservation::acquire(actor, position.token(), rights).map_err(pend_error)?;
@@ -81,13 +81,43 @@ pub(in crate::entry::call) fn effect(
         } else {
             None
         };
-        (route, span, index, data, publisher)
+        let maintenance = if let Action::Publish {
+            maintenance: Some(credential),
+            ..
+        } = action
+        {
+            let (_, _, block) =
+                super::super::flat::next::maintenance::resolve(actor, credential, true)?;
+            let source = route
+                .nest()
+                .logical_source(&span, index, expected.get())
+                .map_err(nest_error)?
+                .ok_or(Failure::SourceEmpty)?;
+            Some(
+                pend::MaintenanceUse::prepare(
+                    block,
+                    actor,
+                    &source,
+                    data.as_ref().expect("publish Page"),
+                    route.nest(),
+                    &span,
+                    index,
+                    expected.next().expect("checked generation").get(),
+                    span.access(index).map_err(nest_error)?.1,
+                )
+                .map_err(cell_error)?,
+            )
+        } else {
+            None
+        };
+        (route, span, index, data, publisher, maintenance)
     };
     let mut accepted = |generation| {
         receipt.start(Value::Memo {
             generation: MemoGeneration::new(generation).expect("Memo generation"),
         })
     };
+    let maintenance_check = maintenance.clone();
     let result = match action {
         Action::Publish { .. } => {
             let change = basis::cell::change::acquire(data.as_ref().expect("selected Page"))
@@ -98,6 +128,7 @@ pub(in crate::entry::call) fn effect(
                 expected.get(),
                 change,
                 publisher.expect("publish route"),
+                maintenance,
                 &mut accepted,
             )
         }
@@ -132,6 +163,7 @@ pub(in crate::entry::call) fn effect(
                 expected.get(),
                 access,
                 route.entry().authority(),
+                Some(actor),
                 &mut accepted,
             )
         }
@@ -173,9 +205,23 @@ pub(in crate::entry::call) fn effect(
             .logical_source(&span, index, status.generation.get())
             .map_err(nest_error)?
             .ok_or(Failure::SourceEmpty)?;
-        source
-            .check(span.access(index).map_err(nest_error)?.1)
-            .map_err(cell_error)?;
+        if let Some(usage) = &maintenance_check {
+            usage
+                .check_retained(&source, span.access(index).map_err(nest_error)?.1)
+                .map_err(cell_error)?;
+        }
+        if maintenance_check.is_none() {
+            source.admit_provenance(None).map_err(cell_error)?;
+        }
+        if route.nest().is_external() {
+            if source.retiring() {
+                return Err(Failure::Denied);
+            }
+        } else {
+            source
+                .check(span.access(index).map_err(nest_error)?.1)
+                .map_err(cell_error)?;
+        }
     }
     receipt.committed(value);
     Ok(value)

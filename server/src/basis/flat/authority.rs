@@ -167,7 +167,24 @@ pub(crate) fn slot(
     position: kernel_api::model::flat::SlotPosition,
     rights: FlatRights,
 ) -> Result<super::FlatRange, PendFail> {
-    let entry = authorized(task, position.token(), rights)?;
+    // BLOCK/INSPECT govern maintenance, not data access. An outstanding
+    // External loan can suspend reads while its owner still closes the phase.
+    let entry = if rights == FlatRights::BLOCK || rights == FlatRights::INSPECT {
+        let entry = pend::locate(task, position.token()).ok_or(PendFail::Denied)?;
+        if !pend::live(task)
+            || !entry.alive()
+            || !entry
+                .authority()
+                .limits()
+                .operations
+                .contains(Operations::Flat(rights))
+        {
+            return Err(PendFail::Denied);
+        }
+        entry
+    } else {
+        authorized(task, position.token(), rights)?
+    };
     let pend::Target::Flat(meta) = entry.target() else {
         return Err(PendFail::Denied);
     };
@@ -180,12 +197,12 @@ pub(crate) fn slot(
         .checked_sub(source.index().get())
         .ok_or(PendFail::Denied)?;
     let count = source.grain();
-    if !entry.authority().selects(
-        Operations::Flat(rights),
-        kernel_api::model::pend::PendScope::Pages(kernel_api::model::pend::PendRange::Pages {
-            offset,
-            count,
-        }),
+    if !matches!(
+        entry.scope(),
+        kernel_api::model::pend::PendScope::Pages(kernel_api::model::pend::PendRange::Pages { .. })
+    ) || !entry.authority().contains(
+        PageOffset::new(offset),
+        kernel_api::address::PageCount::new(count).ok_or(PendFail::NotAligned)?,
     ) {
         return Err(PendFail::Denied);
     }
@@ -285,6 +302,9 @@ pub(crate) fn retire_block(
         return Ok(());
     };
     if let Some(block) = source.blocking(authority) {
+        if block.native() {
+            block.retire_uses(None)?;
+        }
         settle_block(meta, &source, &block)?;
         if !block.native() {
             source.allow(authority);
@@ -300,6 +320,7 @@ pub(crate) fn settle_block(
     if source.moving() {
         return Err(PendFail::Busy);
     }
+    source.retain_staged(block)?;
     let (offset, count) = block.window();
     let selected = meta
         .source()

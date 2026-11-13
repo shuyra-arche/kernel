@@ -42,6 +42,7 @@ impl ExternalBorrow {
         count: PageCount,
         modifiable: bool,
         change: Option<&crate::basis::cell::page::Change>,
+        maintenance: Option<&Pend>,
     ) -> Result<Self, PendFail> {
         let access = if modifiable {
             Modifiable::Yes
@@ -104,7 +105,7 @@ impl ExternalBorrow {
             let pending_cpu = authority.configured() == Modifiable::Yes
                 && (meta.pending_maps(token) || source.pending_cpu());
             let withdrawal = source.begin_withdraw()?;
-            withdrawal.check_publish(offset, count)?;
+            withdrawal.check_publish(offset, count, maintenance)?;
             if pending_cpu {
                 return Err(PendFail::Busy);
             }

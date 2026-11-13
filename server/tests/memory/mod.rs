@@ -38,6 +38,7 @@ mod admission;
 #[path = "../name/allocation.rs"]
 mod allocation;
 mod levels;
+mod maintenance;
 mod ownership;
 mod retention;
 mod support;

@@ -171,3 +171,52 @@ fn mixed_cpu_device_concurrency_never_clears_the_remaining_external_use() {
     drop(cell);
     assert_eq!(pool.gives(), 1);
 }
+
+#[test]
+fn maintenance_uses_unified_publication_and_exact_external_completion() {
+    let pool = Pool::new(0);
+    let page = Arc::new(Page::from_internal(PageOwner::Kernel, pool.page().unwrap()).unwrap());
+    let change = page.begin().unwrap();
+    let block = crate::cell::Block::new(change.clone()).unwrap();
+    let permit = block.permit().unwrap();
+    let (mut a, ta) = Scripted::new();
+    let (mut b, tb) = Scripted::new();
+    let mut cpu = Publication::prepare_access(&page, false, Some(&change), Some(&permit)).unwrap();
+    cpu.publish();
+    cpu.complete();
+    let mut first =
+        Publication::prepare_external_access(&a, &page, 4096, false, Some(&change), Some(&permit))
+            .unwrap();
+    let mut second =
+        Publication::prepare_external_access(&b, &page, 8192, false, Some(&change), Some(&permit))
+            .unwrap();
+    first.submit(&mut a).unwrap();
+    tb.lock().unwrap().fail_publish = Some(HardwareError::Fault);
+    assert_eq!(
+        second.submit(&mut b),
+        Err(Error::Hardware(HardwareError::Fault))
+    );
+    assert_eq!(second.phase(), Phase::Failed);
+    let one = first.revoke(&mut a).unwrap().unwrap();
+    let two = second.revoke(&mut b).unwrap().unwrap();
+    assert_ne!(one, two);
+    assert_eq!(page.maintenance_obligations(), 3);
+    // A completion for another publication never discharges this obligation.
+    ta.lock().unwrap().completion.push_back(Ok(Some(two)));
+    assert_eq!(first.poll(&mut a), Err(Error::WrongBatch));
+    assert_eq!(page.maintenance_obligations(), 3);
+    ta.lock().unwrap().completion.push_back(Ok(Some(one)));
+    assert!(first.poll(&mut a).unwrap());
+    assert_eq!(page.maintenance_obligations(), 2);
+    assert!(!block.settled());
+    tb.lock().unwrap().completion.push_back(Ok(Some(two)));
+    assert!(second.poll(&mut b).unwrap());
+    assert_eq!(page.maintenance_obligations(), 1);
+    unsafe { cpu.retire().settle() }; // modeled host receipt, no actual PTE
+    assert!(block.settled());
+    assert_eq!(page.maintenance_obligations(), 0);
+    assert!(matches!(
+        Publication::prepare(&page, false, Some(&change)),
+        Err(RetainError::Busy)
+    ));
+}

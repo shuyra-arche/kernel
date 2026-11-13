@@ -30,10 +30,14 @@ use kernel_api::model::identity::TaskId;
 use kernel_api::model::modifiable::Modifiable;
 
 mod admission;
+mod epoch;
+mod provenance;
 pub(crate) use admission::RangeBlock;
+pub(crate) use provenance::Provenance;
 mod external;
 mod geometry;
 mod hold;
+pub(crate) mod maintenance;
 mod tracking;
 pub(crate) use tracking::Tracking;
 
@@ -117,6 +121,7 @@ pub(crate) struct SourceAuthorization {
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
     bindings: SpinLock<Vec<Arc<RangeBinding>>>,
     blocks: SpinLock<Vec<Arc<RangeBlock>>>,
+    origins: SpinLock<Vec<Weak<Provenance>>>,
     phase: SpinLock<Phase>,
 }
 
@@ -147,6 +152,7 @@ impl SourceAuthorization {
             revoked: SpinLock::new(false),
             bindings: SpinLock::new(Vec::new()),
             blocks: SpinLock::new(Vec::new()),
+            origins: SpinLock::new(Vec::new()),
             phase: SpinLock::new(Phase::Private(range)),
         })
         .map_err(|_| PendFail::OutOfMemory)
@@ -294,12 +300,13 @@ impl SourceAuthorization {
         access: Access,
         offset: PageOffset,
         count: PageCount,
+        maintenance: Option<&Pend>,
     ) -> Result<(), PendFail> {
         let gate = self.revoked.lock();
         if *gate || !self.branch_permits(branch, access) {
             return Err(PendFail::Denied);
         }
-        self.check_blocks(offset, count, None)?;
+        self.check_blocks(offset, count, maintenance)?;
         let mut inflight = self.inflight.lock();
         inflight.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
         inflight.push((id, None));
@@ -552,11 +559,13 @@ impl Withdrawal<'_> {
         &self,
         offset: PageOffset,
         count: PageCount,
+        maintenance: Option<&Pend>,
     ) -> Result<(), PendFail> {
         if *self.gate {
             return Err(PendFail::Denied);
         }
-        self.source.check_window(offset, count)
+        self.source.check_blocks(offset, count, maintenance)?;
+        self.source.check_unblocked_window(offset, count)
     }
 
     pub(crate) fn adopt(

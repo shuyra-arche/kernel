@@ -254,3 +254,55 @@ fn rejected_attempt_is_retained_but_inspections_and_expired_results_are_not_muta
     ));
     assert_eq!(journal.high_water(), 1);
 }
+
+#[test]
+fn takeover_updates_retained_epoch_before_a_later_failure() {
+    use kernel_api::model::flat::{BlockPhase, BlockRef};
+    let old = super::request::maintenance().block;
+    let next = BlockRef::new(old.flat(), old.record(), old.generation().next().unwrap()).unwrap();
+    let req = Request::new(
+        request(1).id(),
+        Action::Block {
+            start: slot(0),
+            count: 1,
+            recover: Some(old),
+        },
+    )
+    .unwrap();
+    let mut journal = Journal::new(actor()).unwrap();
+    let accepted = execute(&mut journal, req);
+    for block in [old, next] {
+        journal
+            .record(
+                &accepted,
+                Reply::new(
+                    req.id().unwrap(),
+                    Opcode::Block,
+                    Outcome::Pending(Value::Maintenance {
+                        block,
+                        phase: BlockPhase::Draining,
+                    }),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    let failed = Reply::new(
+        req.id().unwrap(),
+        Opcode::Block,
+        Outcome::Failed {
+            failure: Failure::Busy,
+            retained: Some(Value::Maintenance {
+                block: next,
+                phase: BlockPhase::Draining,
+            }),
+        },
+    )
+    .unwrap();
+    journal.record(&accepted, failed).unwrap();
+    assert_eq!(
+        journal.inspect(actor(), Domain::Flat, req.id().unwrap()),
+        Ok(Some(failed))
+    );
+    assert!(matches!(journal.begin(actor(), req), Ok(Admission::Replay(reply)) if reply == failed));
+}

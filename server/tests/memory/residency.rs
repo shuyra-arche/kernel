@@ -313,7 +313,8 @@ fn versioned_transfer_preserves_identity_and_owner_without_moving_unsettled_publ
             version,
             &mut target,
             PageIndex::ZERO,
-            SlotVersion::INITIAL
+            SlotVersion::INITIAL,
+            None
         ),
         Err(Error::Busy)
     );
@@ -329,7 +330,8 @@ fn versioned_transfer_preserves_identity_and_owner_without_moving_unsettled_publ
             version,
             &mut target,
             PageIndex::ZERO,
-            SlotVersion::new(7).unwrap()
+            SlotVersion::new(7).unwrap(),
+            None
         ),
         Err(Error::Stale)
     );
@@ -340,6 +342,7 @@ fn versioned_transfer_preserves_identity_and_owner_without_moving_unsettled_publ
             &mut target,
             PageIndex::ZERO,
             SlotVersion::INITIAL,
+            None,
         )
         .unwrap();
     assert_eq!(moved, id);
@@ -378,19 +381,20 @@ fn same_flat_move_uses_one_revision_and_can_restore_missing_without_zeroing() {
             first,
             PageIndex::new(1),
             SlotVersion::INITIAL,
+            None,
         )
         .unwrap();
     assert_eq!(from, to);
     assert_eq!(from.get(), 3);
     assert_eq!(moved, id);
     let (from, to, restored) = state
-        .move_within(PageIndex::new(1), to, PageIndex::ZERO, from)
+        .move_within(PageIndex::new(1), to, PageIndex::ZERO, from, None)
         .unwrap();
     assert_eq!(from, to);
     assert_eq!(from.get(), 4);
     assert_eq!(restored, id);
     assert_eq!(
-        state.move_within(PageIndex::ZERO, first, PageIndex::new(1), to),
+        state.move_within(PageIndex::ZERO, first, PageIndex::new(1), to, None),
         Err(Error::Stale)
     );
     let (_, allocation) = state.vacate(PageIndex::ZERO, to, None).unwrap();

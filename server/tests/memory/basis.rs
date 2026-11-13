@@ -17,6 +17,11 @@ pub(crate) mod nest;
 pub(crate) mod pend {
     use kernel_api::model::identity::{PendId, TaskId};
     pub(crate) struct Pend;
+    // Opaque native owner references. These fixtures never authorize a transfer
+    // or publication; the physical/storage tests exercise the production gate.
+    pub(crate) struct Stage;
+    pub(crate) struct Provenance;
+    pub(crate) struct MaintenanceUse;
     pub(crate) struct ExternalBorrow;
     impl ExternalBorrow {
         pub(crate) unsafe fn settle(self) -> Option<(TaskId, PendId)> {

@@ -1,22 +1,119 @@
 //! Persistent, branch-owned Flat window blocks. Source publication and transfer
 //! admission consult this same record; Page gates cover aliases after movement.
+use super::epoch::Epoch as NativeBlock;
+use super::maintenance::{MaintenanceUse, Stage};
 use super::*;
 use crate::basis::cell::page::{Block, Page};
+use crate::basis::unit::task::Task;
 
 pub(crate) struct RangeBlock {
     authority: Arc<Pend>,
     geometry: Arc<Geometry>,
     pages: SpinLock<Vec<Block>>,
     native: SpinLock<Option<NativeBlock>>,
-}
-
-struct NativeBlock {
-    reference: kernel_api::model::flat::BlockRef,
-    actor: TaskId,
-    phase: kernel_api::model::flat::BlockPhase,
+    pub(super) uses: SpinLock<Vec<Weak<MaintenanceUse>>>,
+    pub(super) stages: SpinLock<Vec<Weak<Stage>>>,
 }
 
 impl RangeBlock {
+    /// Immutable upper bound of the originating branch. Takeover changes the
+    /// live owner, never the data rights carried by staged Pages.
+    pub(crate) fn staged_access(&self, access: Access) -> bool {
+        self.native.lock().as_ref().is_some_and(|r| {
+            r.associate && (!access.contains(Access::WRITE) || r.data == Modifiable::Yes)
+        })
+    }
+    pub(crate) fn recover(
+        &self,
+        expected: kernel_api::model::flat::BlockRef,
+        actor: &Arc<Task>,
+        token: PendId,
+        authority: &Arc<Pend>,
+    ) -> Result<(), PendFail> {
+        if !self.settled() || self.has_uses() {
+            return Err(PendFail::Busy);
+        }
+        self.native
+            .lock()
+            .as_mut()
+            .ok_or(PendFail::Denied)?
+            .takeover(expected, actor, token, authority, self.window())
+    }
+    pub(crate) fn retained(&self, page: &Arc<Page>) -> bool {
+        self.pages
+            .lock()
+            .iter()
+            .any(|b| Arc::ptr_eq(b.page(), page))
+    }
+    /// Rollback only a new gate prepared by an atomic holding transfer under COMMIT.
+    pub(crate) fn cancel_page(&self, page: &Arc<Page>) {
+        self.pages.lock().retain(|b| !Arc::ptr_eq(b.page(), page));
+    }
+    pub(crate) fn owner(&self) -> Arc<Pend> {
+        self.native
+            .lock()
+            .as_ref()
+            .map_or_else(|| self.authority.clone(), |record| record.authority.clone())
+    }
+    pub(crate) fn owns(&self, authority: &Pend) -> bool {
+        core::ptr::eq(self.owner().as_ref(), authority)
+    }
+    pub(crate) fn owner_live(&self) -> bool {
+        self.native
+            .lock()
+            .as_ref()
+            .map_or_else(|| self.authority.alive(), |r| r.live(self.window()))
+    }
+    pub(crate) fn owner_entry(
+        &self,
+    ) -> Result<(Arc<Task>, Arc<crate::basis::pend::PendEntry>), PendFail> {
+        let record = self.native.lock();
+        let r = record.as_ref().ok_or(PendFail::Denied)?;
+        let task = r
+            .task
+            .upgrade()
+            .filter(|task| crate::basis::pend::live(task))
+            .ok_or(PendFail::Dead)?;
+        let entry = crate::basis::pend::locate(&task, r.token).ok_or(PendFail::Denied)?;
+        if !r.live(self.window())
+            || !Arc::ptr_eq(entry.authority(), &r.authority)
+            || !(entry.alive()
+                && entry.authority().limits().operations.contains(
+                    kernel_api::model::pend::Operations::Flat(
+                        kernel_api::model::pend::FlatRights::BLOCK,
+                    ),
+                ))
+        {
+            return Err(PendFail::Denied);
+        }
+        Ok((task, entry))
+    }
+    pub(crate) fn covers(&self, range: &FlatRange) -> bool {
+        let native = self.native.lock();
+        let Some(r) = native.as_ref() else {
+            return false;
+        };
+        let (offset, count) = self.window();
+        range.source_id() == r.reference.flat()
+            && range.index().get() >= r.base + offset.get()
+            && range
+                .index()
+                .get()
+                .checked_add(range.page_count().get())
+                .is_some_and(|end| end <= r.base + offset.get() + count.get())
+    }
+    pub(crate) fn permit(
+        &self,
+        page: &Arc<Page>,
+    ) -> Result<crate::basis::cell::page::Maintenance, PendFail> {
+        self.pages
+            .lock()
+            .iter()
+            .find(|b| Arc::ptr_eq(b.page(), page))
+            .ok_or(PendFail::Denied)?
+            .permit()
+            .map_err(|_| PendFail::Busy)
+    }
     pub(crate) fn reference(&self) -> kernel_api::model::flat::BlockRef {
         self.native
             .lock()
@@ -31,7 +128,7 @@ impl RangeBlock {
 
     pub(crate) fn phase(&self) -> kernel_api::model::flat::BlockPhase {
         use kernel_api::model::flat::BlockPhase;
-        if !self.authority.alive() {
+        if !self.owner_live() {
             return BlockPhase::Orphaned;
         }
         self.native
@@ -48,13 +145,20 @@ impl RangeBlock {
             .phase = phase;
     }
     pub(crate) fn inspect(&self) -> kernel_api::model::flat::BlockStatus {
+        let maintenance = self
+            .pages
+            .lock()
+            .iter()
+            .map(|b| b.page().maintenance_obligations())
+            .sum::<u64>();
+        let failed = self.pages.lock().iter().any(|b| b.page().quarantined()) || self.failed_uses();
         let record = self.native.lock();
         let record = record.as_ref().expect("native maintenance");
         let (offset, count) = self.window();
         kernel_api::model::flat::BlockStatus {
             block: record.reference,
             actor: record.actor,
-            phase: if self.authority.alive() {
+            phase: if record.live(self.window()) {
                 record.phase
             } else {
                 kernel_api::model::flat::BlockPhase::Orphaned
@@ -66,9 +170,10 @@ impl RangeBlock {
                 .lock()
                 .iter()
                 .map(|block| block.page().obligations())
-                .sum(),
-            maintenance: 0,
-            failed: false,
+                .sum::<u64>()
+                .saturating_sub(maintenance),
+            maintenance,
+            failed,
         }
     }
 
@@ -78,12 +183,11 @@ impl RangeBlock {
         actor: TaskId,
         authority: &Arc<Pend>,
     ) -> bool {
-        Arc::ptr_eq(&self.authority, authority)
-            && self
-                .native
-                .lock()
-                .as_ref()
-                .is_some_and(|record| record.reference == reference && record.actor == actor)
+        self.native.lock().as_ref().is_some_and(|record| {
+            record.reference == reference
+                && record.actor == actor
+                && Arc::ptr_eq(&record.authority, authority)
+        })
     }
 
     pub(crate) fn vacate(
@@ -111,6 +215,80 @@ impl RangeBlock {
     }
 }
 impl SourceAuthorization {
+    pub(crate) fn inspect_block(
+        &self,
+        block: &RangeBlock,
+    ) -> Result<kernel_api::model::flat::BlockStatus, PendFail> {
+        let mut status = block.inspect();
+        status.failed |= self.failed_origins(block)?;
+        for binding in self.bindings()? {
+            let Some(nest) = binding.nest().upgrade() else {
+                continue;
+            };
+            let Some(source) = nest.binding_source(&binding) else {
+                continue;
+            };
+            let (offset, count) = source.window();
+            if core::ptr::eq(source.source().as_ref(), self)
+                && block.geometry.overlaps(offset, count)
+                && nest.binding_failed(&binding)
+            {
+                status.failed = true;
+                break;
+            }
+        }
+        Ok(status)
+    }
+    pub(crate) fn block_ref(
+        &self,
+        reference: kernel_api::model::flat::BlockRef,
+    ) -> Option<Arc<RangeBlock>> {
+        self.blocks
+            .lock()
+            .iter()
+            .find(|b| b.native() && b.reference() == reference)
+            .cloned()
+    }
+    /// Discover staged historical Pages through existing records; never infer a
+    /// physical identity from the now-Missing original Slot.
+    pub(crate) fn retain_staged(&self, target: &Arc<RangeBlock>) -> Result<(), PendFail> {
+        let blocks = {
+            let known = self.blocks.lock();
+            let mut blocks = Vec::new();
+            blocks
+                .try_reserve(known.len())
+                .map_err(|_| PendFail::OutOfMemory)?;
+            blocks.extend(known.iter().filter(|b| !Arc::ptr_eq(b, target)).cloned());
+            blocks
+        };
+        let base = self.full_range().ok_or(PendFail::Dead)?.index().get();
+        let (offset, count) = target.window();
+        for block in blocks {
+            let pages = {
+                let stages = block.stages.lock();
+                let held = block.pages.lock();
+                let mut pages = Vec::new();
+                pages
+                    .try_reserve(stages.len())
+                    .map_err(|_| PendFail::OutOfMemory)?;
+                for stage in stages.iter().filter_map(Weak::upgrade) {
+                    if stage.origin >= base + offset.get()
+                        && stage.origin < base + offset.get() + count.get()
+                    {
+                        if let Some(page) = held.iter().find(|b| b.page().id() == stage.page) {
+                            pages.push(page.page().clone());
+                        }
+                    }
+                }
+                pages
+            };
+            for page in pages {
+                target.retain(page.clone())?;
+                block.retire_uses(Some(page.id()))?;
+            }
+        }
+        Ok(())
+    }
     /// All fallible identity preparation precedes closing source admission.
     /// Caller holds COMMIT until the accepted result is recorded.
     pub(crate) fn native_block(
@@ -119,13 +297,15 @@ impl SourceAuthorization {
         offset: PageOffset,
         count: PageCount,
         flat: kernel_api::model::flat::FlatId,
-        actor: TaskId,
+        actor: &Arc<Task>,
+        token: PendId,
     ) -> Result<Arc<RangeBlock>, PendFail> {
         use kernel_api::model::flat::{BlockGeneration, BlockPhase, BlockRef};
         if let Some(block) = self.blocking(authority) {
             if block.window() != (offset, count)
                 || !block.native()
-                || !block.matches(block.reference(), actor, authority)
+                || !block.matches(block.reference(), actor.ident.id, authority)
+                || !matches!(block.phase(), BlockPhase::Draining | BlockPhase::Held)
             {
                 return Err(PendFail::Denied);
             }
@@ -140,11 +320,13 @@ impl SourceAuthorization {
         )
         .expect("block identity");
         let block = self.block(authority, offset, count)?;
-        *block.native.lock() = Some(NativeBlock {
+        *block.native.lock() = Some(NativeBlock::new(
             reference,
             actor,
-            phase: BlockPhase::Draining,
-        });
+            token,
+            authority,
+            self.full_range().expect("validated source").index().get(),
+        ));
         Ok(block)
     }
     pub(crate) fn block(
@@ -162,7 +344,7 @@ impl SourceAuthorization {
             .and_then(|range| range.range(offset, count).ok())
             .ok_or(PendFail::NotAligned)?;
         let mut blocks = self.blocks.lock();
-        if let Some(block) = blocks.iter().find(|b| Arc::ptr_eq(&b.authority, authority)) {
+        if let Some(block) = blocks.iter().find(|b| b.owns(authority)) {
             return Ok(block.clone());
         }
         if blocks.len() >= 1024 {
@@ -174,6 +356,8 @@ impl SourceAuthorization {
             geometry: Geometry::new(offset, count)?,
             pages: SpinLock::new(Vec::new()),
             native: SpinLock::new(None),
+            uses: SpinLock::new(Vec::new()),
+            stages: SpinLock::new(Vec::new()),
         })
         .map_err(|_| PendFail::OutOfMemory)?;
         blocks.push(block.clone());
@@ -204,14 +388,11 @@ impl SourceAuthorization {
         self.blocks
             .lock()
             .iter()
-            .find(|b| Arc::ptr_eq(&b.authority, authority))
+            .find(|b| b.owns(authority))
             .cloned()
     }
     pub(crate) fn blocked_by(&self, authority: &Arc<Pend>) -> bool {
-        self.blocks
-            .lock()
-            .iter()
-            .any(|b| Arc::ptr_eq(&b.authority, authority))
+        self.blocks.lock().iter().any(|b| b.owns(authority))
     }
     pub(crate) fn allow(&self, authority: &Arc<Pend>) {
         // Drop Page gates after releasing the source registry lock.
@@ -219,7 +400,7 @@ impl SourceAuthorization {
             let mut blocks = self.blocks.lock();
             blocks
                 .iter()
-                .position(|b| Arc::ptr_eq(&b.authority, authority))
+                .position(|b| b.owns(authority))
                 .map(|at| blocks.remove(at))
         };
         drop(removed);
@@ -230,10 +411,12 @@ impl SourceAuthorization {
         count: PageCount,
         owner: Option<&Pend>,
     ) -> Result<(), PendFail> {
-        if self.blocks.lock().iter().any(|b| {
-            b.geometry.overlaps(offset, count)
-                && owner.is_none_or(|owner| !core::ptr::eq(owner, b.authority.as_ref()))
-        }) {
+        if self
+            .blocks
+            .lock()
+            .iter()
+            .any(|b| b.geometry.overlaps(offset, count) && owner.is_none_or(|owner| !b.owns(owner)))
+        {
             return Err(PendFail::Busy);
         }
         Ok(())

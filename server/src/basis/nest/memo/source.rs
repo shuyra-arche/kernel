@@ -165,7 +165,44 @@ impl Source {
         Ok(selected)
     }
 
+    /// Resolve only descriptive holding metadata. Cleanup must not depend on
+    /// the data grant that has just been revoked or lent to an External user.
+    pub(crate) fn provenance(&self) -> Option<Arc<pend::Provenance>> {
+        self.source()
+            .full_range()?
+            .range(self.offset, self.count)
+            .ok()?
+            .provenance()
+    }
+    pub(crate) fn hold_provenance(
+        &self,
+    ) -> Result<alloc::vec::Vec<crate::basis::flat::sharing::SharingOperation>, CellFail> {
+        self.provenance().map_or_else(
+            || Ok(alloc::vec::Vec::new()),
+            |p| p.operations(self.source()).map_err(failure),
+        )
+    }
+    pub(crate) fn admit_provenance(&self, owner: Option<&Pend>) -> Result<(), CellFail> {
+        if let Some(origin) = self.provenance() {
+            origin.admit(owner).map_err(failure)?;
+        }
+        Ok(())
+    }
+    fn check_provenance(&self, need: Access, export: bool) -> Result<(), CellFail> {
+        if let Some(origin) = self.provenance() {
+            origin
+                .check(
+                    self.task,
+                    Some(need),
+                    kernel_api::model::pend::FlatRights::ASSOCIATE,
+                    export || self.lineage.is_some(),
+                )
+                .map_err(failure)?;
+        }
+        Ok(())
+    }
     pub(crate) fn range(&self) -> Result<FlatRange, CellFail> {
+        self.check_provenance(Access::READ, false)?;
         if let Some(lineage) = &self.lineage {
             lineage.check(Modifiable::No)?;
         }
@@ -178,6 +215,7 @@ impl Source {
     }
 
     pub(crate) fn check(&self, need: Access) -> Result<FlatRange, CellFail> {
+        self.check_provenance(need, false)?;
         if let Some(lineage) = &self.lineage {
             lineage.check(if need.contains(Access::WRITE) {
                 Modifiable::Yes
@@ -203,6 +241,7 @@ impl Source {
         &self,
         id: usize,
         need: Access,
+        maintenance: Option<&Pend>,
     ) -> Result<PublicationFlight, CellFail> {
         let root = self.source().root();
         let operation = root
@@ -213,12 +252,20 @@ impl Source {
             .transpose()?;
         let actor = self.actor().ok_or(CellFail::Denied)?;
         self.check(need)?;
+        self.admit_provenance(maintenance)?;
         let authority = self.authority(&actor)?;
         self.source()
-            .check_publish(self.offset, self.count)
+            .check_move(self.offset, self.count, maintenance)
             .map_err(failure)?;
         self.source()
-            .enter_publish(id, authority.as_deref(), need, self.offset, self.count)
+            .enter_publish(
+                id,
+                authority.as_deref(),
+                need,
+                self.offset,
+                self.count,
+                maintenance,
+            )
             .map_err(failure)?;
         Ok(PublicationFlight {
             source: self.source().clone(),
@@ -246,7 +293,10 @@ impl Source {
         use kernel_api::model::pend::{
             FlatRights, NestRights, NestScope, Operations, PendRange, PendScope, ShareRights,
         };
-        self.range()?;
+        self.check_provenance(Access::READ, true)?;
+        if self.range()?.staged() {
+            return Err(CellFail::Denied);
+        }
         let span = route.span().map_err(failure)?;
         if span.grain() != self.count.get() {
             return Err(CellFail::NotAligned);
@@ -376,9 +426,10 @@ impl Source {
     }
 
     /// Logical source loss, independent of a legitimate external borrow's suspension.
-    pub(in crate::basis::nest) fn retiring(&self) -> bool {
+    pub(crate) fn retiring(&self) -> bool {
         let root = self.source().root();
-        self.actor().is_none()
+        self.provenance().is_some_and(|origin| origin.retiring())
+            || self.actor().is_none()
             || self
                 .lineage
                 .as_ref()
@@ -416,6 +467,7 @@ impl Source {
         page: &Arc<Page>,
         modifiable: bool,
         change: &Change,
+        maintenance: Option<&Pend>,
     ) -> Result<ExternalBorrow, CellFail> {
         let actor = self.actor().ok_or(CellFail::Denied)?;
         let _serial = if Arc::ptr_eq(&actor, publisher) {
@@ -433,6 +485,7 @@ impl Source {
         };
         self.check(need)?;
         self.same_page(page)?;
+        self.admit_provenance(maintenance)?;
         ExternalBorrow::prepare(
             &self.hold,
             &actor,
@@ -440,6 +493,7 @@ impl Source {
             self.count,
             modifiable,
             Some(change),
+            maintenance,
         )
         .map_err(failure)
     }

@@ -61,6 +61,8 @@ impl Nest {
         writable: bool,
         publisher: &mut Option<Publisher>,
         borrow: &mut Option<ExternalBorrow>,
+        maintenance: &mut Option<Arc<crate::basis::pend::MaintenanceUse>>,
+        provenance: Option<Arc<crate::basis::pend::Provenance>>,
     ) -> Result<(), Error> {
         let mut state = self.state.lock();
         if !state.is_open() || !span.is_open() {
@@ -75,13 +77,24 @@ impl Nest {
             return Err(Error::InvalidState);
         };
         let memo = memos.get_mut(span, 0).map_err(|_| Error::OutOfMemory)?;
-        let publication = external.prepare(
-            memo.publication().is_some(),
-            page,
-            span.initial_start().get(),
-            writable,
-            Some(&change),
-        )?;
+        let publication = if let Some(usage) = maintenance {
+            external.prepare_access(
+                memo.publication().is_some(),
+                page,
+                span.initial_start().get(),
+                writable,
+                Some(&change),
+                Some(usage.permit()),
+            )?
+        } else {
+            external.prepare(
+                memo.publication().is_some(),
+                page,
+                span.initial_start().get(),
+                writable,
+                Some(&change),
+            )?
+        };
         span.prepare_revision().map_err(|_| Error::OutOfMemory)?;
         memo.begin_publish(expected, change, if writable { 6 } else { 2 })
             .map_err(|error| match error {
@@ -89,6 +102,8 @@ impl Nest {
                 _ => Error::InvalidState,
             })?;
         span.changed();
+        memo.maintenance = maintenance.take();
+        memo.provenance = provenance;
         memo.retain(
             publisher.take().expect("prepared publishing route"),
             borrow.take(),

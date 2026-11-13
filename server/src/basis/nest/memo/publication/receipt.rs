@@ -27,10 +27,24 @@ impl Publication {
         writable: bool,
         change: Option<&Change>,
     ) -> Result<Self, RetainError> {
-        let retention = match change {
-            Some(change) if Arc::ptr_eq(change.page(), page) => change.hardware(writable)?,
+        Self::prepare_access(page, writable, change, None)
+    }
+    pub(crate) fn prepare_access(
+        page: &Arc<Page>,
+        writable: bool,
+        change: Option<&Change>,
+        maintenance: Option<&crate::basis::cell::page::Maintenance>,
+    ) -> Result<Self, RetainError> {
+        let retention = match maintenance {
+            Some(permit) if Arc::ptr_eq(permit.change().page(), page) => {
+                permit.hardware(writable)?
+            }
             Some(_) => return Err(RetainError::Busy),
-            None => page.prepare_hardware(writable)?,
+            None => match change {
+                Some(change) if Arc::ptr_eq(change.page(), page) => change.hardware(writable)?,
+                Some(_) => return Err(RetainError::Busy),
+                None => page.prepare_hardware(writable)?,
+            },
         };
         Ok(Self {
             retention: Some(retention),
@@ -44,6 +58,16 @@ impl Publication {
         address: usize,
         writable: bool,
         change: Option<&Change>,
+    ) -> Result<Self, Error> {
+        Self::prepare_external_access(hardware, page, address, writable, change, None)
+    }
+    pub(crate) fn prepare_external_access<H: Hardware<PageId>>(
+        hardware: &H,
+        page: &Arc<Page>,
+        address: usize,
+        writable: bool,
+        change: Option<&Change>,
+        maintenance: Option<&crate::basis::cell::page::Maintenance>,
     ) -> Result<Self, Error> {
         let projection = Projection {
             id: BindingId::allocate()?,
@@ -59,10 +83,16 @@ impl Publication {
             return Err(Error::InvalidRange);
         }
         hardware.validate(projection)?;
-        let retention = match change {
-            Some(change) if Arc::ptr_eq(change.page(), page) => change.external(writable)?,
+        let retention = match maintenance {
+            Some(permit) if Arc::ptr_eq(permit.change().page(), page) => {
+                permit.external(writable)?
+            }
             Some(_) => return Err(Error::InvalidRange),
-            None => page.prepare_external(writable)?,
+            None => match change {
+                Some(change) if Arc::ptr_eq(change.page(), page) => change.external(writable)?,
+                Some(_) => return Err(Error::InvalidRange),
+                None => page.prepare_external(writable)?,
+            },
         };
         Ok(Self {
             retention: Some(retention),

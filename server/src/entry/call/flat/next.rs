@@ -1,5 +1,5 @@
 //! Explicit Flat residency operations for the staged next provider.
-mod maintenance;
+pub(in crate::entry::call) mod maintenance;
 use crate::basis::{self, flat, pend, unit::task::Task};
 use alloc::sync::Arc;
 use kernel_api::{
@@ -40,11 +40,10 @@ pub(in crate::entry::call) fn inspect(
         }
         Query::Flat { token, flat: id } => {
             let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
-            if !entry
-                .authority()
-                .permits(kernel_api::model::pend::Operations::Flat(
-                    FlatRights::INSPECT,
-                ))
+            if !entry.alive()
+                || !entry.authority().limits().operations.contains(
+                    kernel_api::model::pend::Operations::Flat(FlatRights::INSPECT),
+                )
             {
                 return Err(Failure::Denied);
             }
@@ -68,8 +67,29 @@ pub(in crate::entry::call) fn inspect(
             })
         }
         Query::Block(maintenance) => {
-            let (_, _, block) = maintenance::resolve(actor, maintenance, false)?;
-            Snapshot::Block(block.inspect())
+            let entry = pend::locate(actor, maintenance.token).ok_or(Failure::Denied)?;
+            if !entry.alive()
+                || !entry.authority().limits().operations.contains(
+                    kernel_api::model::pend::Operations::Flat(FlatRights::INSPECT),
+                )
+            {
+                return Err(Failure::Denied);
+            }
+            let pend::Target::Flat(meta) = entry.target() else {
+                return Err(Failure::Denied);
+            };
+            if meta.source().source_id() != maintenance.block.flat() {
+                return Err(Failure::Denied);
+            }
+            let source = meta.authorization().ok_or(Failure::Denied)?;
+            let block = source.block_ref(maintenance.block).ok_or(Failure::Stale)?;
+            let (offset, count) = block.window();
+            if !block.owner().descends_from(entry.authority())
+                || !entry.authority().contains(offset, count)
+            {
+                return Err(Failure::Denied);
+            }
+            Snapshot::Block(source.inspect_block(&block).map_err(pend_error)?)
         }
         _ => return Err(Failure::Unsupported),
     };
@@ -150,17 +170,79 @@ pub(in crate::entry::call) fn mutate(
             maintenance,
         } => {
             if let Some(maintenance) = maintenance {
-                require_maintenance(actor, maintenance)?;
+                let (local, remote, page) = if matches!(action, Action::Push { .. }) {
+                    maintenance::transfer(
+                        actor,
+                        local,
+                        local_version,
+                        remote,
+                        remote_version,
+                        maintenance,
+                    )?
+                } else {
+                    let (remote, local, page) = maintenance::transfer(
+                        actor,
+                        remote,
+                        remote_version,
+                        local,
+                        local_version,
+                        maintenance,
+                    )?;
+                    (local, remote, page)
+                };
+                return Ok(Value::Transfer {
+                    local,
+                    remote,
+                    page: page.get() as u64,
+                });
             }
             let local_range = resolve(actor, local, FlatRights::TRANSFER)?;
             let remote_range = resolve(actor, remote, FlatRights::TRANSFER)?;
+            let donor = if matches!(action, Action::Push { .. }) {
+                &local_range
+            } else {
+                &remote_range
+            };
+            if let Some(origin) = donor.provenance() {
+                origin.admit(None).map_err(pend_error)?;
+            }
             let (local, remote, page) = if matches!(action, Action::Push { .. }) {
                 local_range
-                    .transfer_to(local_version, &remote_range, remote_version)
+                    .transfer_to(
+                        local_version,
+                        &remote_range,
+                        remote_version,
+                        pend::Provenance::prepare(
+                            actor,
+                            local.token(),
+                            &local_range,
+                            remote.token(),
+                            &remote_range,
+                            None,
+                            false,
+                        )
+                        .map_err(pend_error)?
+                        .0,
+                    )
                     .map_err(residency_error)?
             } else {
                 let (remote, local, page) = remote_range
-                    .transfer_to(remote_version, &local_range, local_version)
+                    .transfer_to(
+                        remote_version,
+                        &local_range,
+                        local_version,
+                        pend::Provenance::prepare(
+                            actor,
+                            remote.token(),
+                            &remote_range,
+                            local.token(),
+                            &local_range,
+                            None,
+                            false,
+                        )
+                        .map_err(pend_error)?
+                        .0,
+                    )
                     .map_err(residency_error)?;
                 (local, remote, page)
             };
@@ -201,12 +283,6 @@ pub(in crate::entry::call) fn mutate(
         } => maintenance::vacate(actor, slot, expected, maintenance),
         _ => Err(Failure::Unsupported),
     }
-}
-
-/// M4 owns the live BlockRef record and consumption of its retained Page gates.
-/// No descriptor, numeric Page identity or caller-supplied flag can stand in for it.
-fn require_maintenance(_: &Arc<Task>, _: memory::Maintenance) -> Result<(), Failure> {
-    Err(Failure::Unsupported)
 }
 
 pub(in crate::entry::call) fn pend_error(error: kernel_api::abi::call::pend::PendFail) -> Failure {
