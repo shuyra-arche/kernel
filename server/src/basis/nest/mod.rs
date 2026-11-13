@@ -2671,6 +2671,8 @@ impl Nest {
         let target = state.retirement.begin(self.id.get(), self.asid())?;
         drop(state);
 
+        #[cfg(debug_assertions)]
+        crate::basis::assert_unlocked();
         let result = fence::invalidate(&cpu.domain, target);
         let fenced = {
             let mut state = self.state.lock();

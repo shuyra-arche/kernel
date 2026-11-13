@@ -26,6 +26,13 @@ turn and rechecks open admission; `close` similarly refuses a newly dirty batch
 and never reopens admission. A later operation owns its own continuation, rather
 than inheriting another operation's result.
 
+Kernel buffer copies validate and walk the current software PTEs while retaining
+Nest/Span locks, then use the permanent physical mapping. They do not depend on
+the Task's cached translations and do not initiate or wait for a fence. This
+keeps COMMIT-protected buffer access pure and avoids treating unrelated Fencing
+as a denied user buffer; removed entries and current permission limits still
+refuse access. Failed or closing address spaces refuse the copy.
+
 Page-fault and envcall entries already preserve the original instruction and
 yield on Busy through the existing deadline retry mechanism. Explicit
 `retry_invalidation` retains the same Nest, settles at most four address tickets

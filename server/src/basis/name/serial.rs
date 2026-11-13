@@ -16,17 +16,7 @@ impl Serial {
     }
 
     pub(crate) fn allocate(&self) -> Option<usize> {
-        self.next
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
-                if next == 0 {
-                    None
-                } else if next == self.last {
-                    Some(0)
-                } else {
-                    Some(next + 1)
-                }
-            })
-            .ok()
+        self.reserve(1).map(|batch| *batch.start())
     }
 
     /// Reserve a nonempty batch atomically. Exhaustion consumes no identities;
