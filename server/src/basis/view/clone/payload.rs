@@ -72,11 +72,12 @@ impl Payload {
         let source = SourceAuthorization::new(self.source.clone(), Access::READ, receiver)?;
         let view = Sharing::from_source(self.source.clone(), size, receiver)?;
         let pend = PendEntry::try_new(View::Share(view.clone()), Mark::NONE, Modifiable::No, None)?;
+        let claim = source.claim()?;
         view.attach_source(&source);
         source
             .begin_withdraw()?
             .adopt(&view, pend.token(), pend.authority().clone())?;
-        source.consume();
+        claim.commit();
         Ok(pend)
     }
 }

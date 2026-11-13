@@ -87,11 +87,12 @@ fn create_kind(
         return Err(PendFail::Dead);
     }
     pend::access::license(task, license, CreationRights::FLAT)?;
+    let claim = source.claim()?;
     meta.attach_source(&source);
     source
         .begin_withdraw()?
         .adopt(&meta, entry.token(), entry.authority().clone())?;
-    source.consume();
+    claim.commit();
     registration.publish();
 
     Ok(entry.token())

@@ -5,6 +5,7 @@ mod ancestry;
 #[path = "../../src/basis/pend/authority/mod.rs"]
 mod authority;
 mod carried;
+mod creation;
 mod exports;
 mod metal {
     pub(crate) mod sync {
