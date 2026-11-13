@@ -64,11 +64,16 @@ fn placement(nest: &Nest, request: ReserveRequest) -> Result<Placement, NestFail
         kernel_api::model::cell::PlacementAt::Lowest => PlacementAt::Lowest,
         kernel_api::model::cell::PlacementAt::Highest => PlacementAt::Highest,
         kernel_api::model::cell::PlacementAt::Exact(address) => {
-            if !nest.is_external() && !Nest::user_range(address, size) {
-                return Err(NestFail::NotAligned);
-            }
-            if !nest.window_contains(RegionKind::Normal, address, size) {
-                return Err(NestFail::NoRegion);
+            // CPU reservations belong to the Team's Normal window. External
+            // exact addresses use the backend geometry checked by reserve_mapping;
+            // their Layout only records occupancy and has no dynamic windows.
+            if !nest.is_external() {
+                if !Nest::user_range(address, size) {
+                    return Err(NestFail::NotAligned);
+                }
+                if !nest.window_contains(RegionKind::Normal, address, size) {
+                    return Err(NestFail::NoRegion);
+                }
             }
             PlacementAt::Exact(address)
         }

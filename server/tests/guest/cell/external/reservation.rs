@@ -7,6 +7,19 @@ pub(super) fn run(root: PendId) {
     let placement = Placement::exact(VirtAddr::new(ADDRESS), 4096).unwrap();
     for (placement, count, level, access) in [
         (Placement::lowest(4096).unwrap(), 1, CellLevel::BASE, 2),
+        (Placement::highest(), 1, CellLevel::BASE, 2),
+        (
+            Placement::exact(VirtAddr::new(0), 4096).unwrap(),
+            1,
+            CellLevel::BASE,
+            2,
+        ),
+        (
+            Placement::exact(VirtAddr::new(1 << 38), 4096).unwrap(),
+            1,
+            CellLevel::BASE,
+            2,
+        ),
         (placement, 2, CellLevel::BASE, 2),
         (
             Placement::exact(VirtAddr::new(1 << 30), 1 << 30).unwrap(),
