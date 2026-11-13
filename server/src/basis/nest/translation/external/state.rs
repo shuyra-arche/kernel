@@ -71,6 +71,17 @@ impl<H: Hardware<PageId>> External<H> {
         writable: bool,
         change: Option<&Change>,
     ) -> Result<Publication, Error> {
+        self.prepare_access(occupied, page, address, writable, change, None)
+    }
+    pub(crate) fn prepare_access(
+        &self,
+        occupied: bool,
+        page: &Arc<Page>,
+        address: usize,
+        writable: bool,
+        change: Option<&Change>,
+        maintenance: Option<&crate::basis::cell::page::Maintenance>,
+    ) -> Result<Publication, Error> {
         if !self.open() {
             return Err(Error::Closed);
         }
@@ -81,7 +92,17 @@ impl<H: Hardware<PageId>> External<H> {
         if hardware.capacity() == 0 {
             return Err(Error::Capacity);
         }
-        Publication::prepare_external(hardware, page, address, writable, change)
+        match maintenance {
+            Some(permit) => Publication::prepare_external_access(
+                hardware,
+                page,
+                address,
+                writable,
+                change,
+                Some(permit),
+            ),
+            None => Publication::prepare_external(hardware, page, address, writable, change),
+        }
     }
     pub(crate) fn submit(&mut self, publication: Option<&mut Publication>) -> Result<(), Error> {
         if !self.open() {

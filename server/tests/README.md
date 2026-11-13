@@ -109,3 +109,11 @@ versions or unfinished hardware obligations. Memo observation tests retain the
 exact Page and access across failed fences and whole-namespace withdrawal.
 Receipt completion is explicitly scripted. See the [M3 evidence matrix](../../api/memory-m3.md#verification-and-limits)
 for the boundary between these tests, ledger/lineage tests and RV64 compilation.
+
+
+The [M4 evidence matrix](../../api/memory-m4.md#verification-and-limits) adds
+physical maintenance admission/overlap races, checked count exhaustion, exact
+CPU/External publication settlement, staging storage rollback and actual Pend
+ancestry/epoch tests. Staging permission metadata and Task lifetimes remain
+fixtures at their documented boundaries; these tests do not establish native
+trap-to-ledger-to-MMU execution or trusted device compatibility.

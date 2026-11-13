@@ -19,12 +19,85 @@ impl Flat {
 }
 
 impl FlatRange {
+    pub(crate) fn staged(&self) -> bool {
+        self.flat()
+            .state
+            .lock()
+            .staged
+            .iter()
+            .any(|(at, _)| *at == self.index())
+    }
+    pub(crate) fn staged_by(
+        &self,
+        block: &alloc::sync::Arc<crate::basis::pend::RangeBlock>,
+        page: PageId,
+    ) -> bool {
+        self.flat().state.lock().staged.iter().any(|(at, stage)| {
+            *at == self.index()
+                && stage.page == page
+                && alloc::sync::Arc::ptr_eq(&stage.block, block)
+        })
+    }
+    pub(crate) fn stage_origin(
+        &self,
+        block: &alloc::sync::Arc<crate::basis::pend::RangeBlock>,
+        page: PageId,
+    ) -> Option<usize> {
+        self.flat()
+            .state
+            .lock()
+            .staged
+            .iter()
+            .find(|(at, stage)| {
+                *at == self.index()
+                    && stage.page == page
+                    && alloc::sync::Arc::ptr_eq(&stage.block, block)
+            })
+            .map(|(_, stage)| stage.origin)
+    }
     pub(crate) fn slot_version(&self) -> Result<SlotVersion, Error> {
         let state = self.flat().state.lock();
         if !state.explicit || self.page_count().get() != self.grain() {
             return Err(Error::Unsupported);
         }
         Ok(state.revision.at(self.index()))
+    }
+    pub(crate) fn transfer_held(
+        &self,
+        expected: SlotVersion,
+        target: &Self,
+        target_version: SlotVersion,
+        change: &alloc::sync::Arc<crate::basis::cell::page::Change>,
+        stage: Option<alloc::sync::Arc<crate::basis::pend::Stage>>,
+    ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
+        if self.page_count().get() != self.grain()
+            || target.page_count().get() != target.grain()
+            || self.level() != target.level()
+        {
+            return Err(Error::Unsupported);
+        }
+        if alloc::sync::Arc::ptr_eq(self.flat(), target.flat()) {
+            self.flat().state.lock().move_within_during(
+                self.index(),
+                expected,
+                target.index(),
+                target_version,
+                Some(change),
+                stage,
+            )
+        } else {
+            crate::metal::sync::with_pair(&self.flat().state, &target.flat().state, |from, to| {
+                from.move_to_during(
+                    self.index(),
+                    expected,
+                    to,
+                    target.index(),
+                    target_version,
+                    Some(change),
+                    stage,
+                )
+            })
+        }
     }
     pub(crate) fn transfer_to(
         &self,

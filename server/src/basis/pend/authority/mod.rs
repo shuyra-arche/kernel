@@ -42,6 +42,18 @@ pub(crate) struct Pend {
 }
 
 impl Pend {
+    /// Immutable real ancestry, including this node. Identities and matching
+    /// limits alone never establish branch-management authority.
+    pub(crate) fn descends_from(&self, ancestor: &Self) -> bool {
+        let mut current = Some(self);
+        while let Some(node) = current {
+            if core::ptr::eq(node, ancestor) {
+                return true;
+            }
+            current = node.ancestor.get().map(Arc::as_ref);
+        }
+        false
+    }
     pub(crate) fn try_new_scope(
         access: Modifiable,
         scope: PendScope,

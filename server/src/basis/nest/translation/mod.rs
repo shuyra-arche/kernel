@@ -274,6 +274,7 @@ impl NestState {
         address: VirtAddr,
         page: &Arc<Page>,
         change: &Change,
+        maintenance: Option<&crate::basis::cell::page::Maintenance>,
     ) -> Result<(), NestError> {
         if !self.retirement.invalidation().is_clean() {
             return Err(NestError::Busy);
@@ -300,7 +301,12 @@ impl NestState {
         } else {
             range.current
         };
-        let mut memo = Publication::prepare(page, retained.contains(Access::WRITE), Some(change))?;
+        let mut memo = Publication::prepare_access(
+            page,
+            retained.contains(Access::WRITE),
+            Some(change),
+            maintenance,
+        )?;
         self.memos.reserve(1)?;
         self.retirement
             .mappings

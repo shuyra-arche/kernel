@@ -58,6 +58,7 @@ pub(in crate::basis::nest) struct Settled {
     borrow: Option<ExternalBorrow>,
     freeze: Option<Freeze>,
     page: Option<Arc<Page>>,
+    maintenance: Option<Arc<crate::basis::pend::MaintenanceUse>>,
 }
 
 impl Settled {
@@ -72,6 +73,7 @@ impl Settled {
                 .map(|publisher| unsafe { publisher.settle() });
             drop(self.freeze);
             drop(self.page);
+            drop(self.maintenance);
             (source_notice, publisher_notice)
         };
         for (task, token) in source_notice.into_iter().chain(publisher_notice) {
@@ -96,6 +98,7 @@ impl MemoFlight {
 }
 
 pub(crate) struct Memo {
+    pub(in crate::basis::nest) maintenance: Option<Arc<crate::basis::pend::MaintenanceUse>>,
     generation: crate::basis::name::Generation,
     pub(super) page: Option<MemoPage>,
     /// Retraction closes admission before removing PTEs. The v10 Ready state
@@ -115,6 +118,7 @@ pub(crate) struct Memo {
 impl Memo {
     pub(crate) const fn vacant() -> Self {
         Self {
+            maintenance: None,
             generation: crate::basis::name::Generation::first(),
             page: None,
             freeze: None,
@@ -414,6 +418,7 @@ impl Memo {
                     borrow: self.borrow.take(),
                     freeze,
                     page: self.retiring_page.take(),
+                    maintenance: self.maintenance.take(),
                 }
             }
             _ => Settled::default(),

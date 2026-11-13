@@ -180,11 +180,17 @@ impl FlatState {
             unreachable!()
         };
         let page = Arc::try_unwrap(page).ok().expect("exclusive holding");
+        self.staged.retain(|(at, _)| *at != index);
         let version = self.revision.commit(index);
         Ok((version, page))
     }
 
-    fn move_source(&mut self, index: PageIndex, expected: SlotVersion) -> Result<Block, Error> {
+    fn move_source(
+        &mut self,
+        index: PageIndex,
+        expected: SlotVersion,
+        maintenance: Option<&Arc<crate::basis::cell::page::Change>>,
+    ) -> Result<Block, Error> {
         self.explicit()?;
         self.revision.prepare(index, expected)?;
         let FlatSource::Managed(slots) = &self.source else {
@@ -208,7 +214,11 @@ impl FlatState {
         // Close new hardware admission before inspecting old obligations. A
         // retained Arc may observe the old Page but cannot publish through this
         // gate. The first next-provider version does not move published Pages.
-        let change = page.begin()?;
+        let change = match maintenance {
+            Some(change) if Arc::ptr_eq(change.page(), page) => change.clone(),
+            Some(_) => return Err(Error::Busy),
+            None => page.begin()?,
+        };
         let block = Block::new(change)?;
         if !block.settled() {
             return Err(Error::Busy);
@@ -272,11 +282,33 @@ impl FlatState {
         to: PageIndex,
         target_version: SlotVersion,
     ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
-        let block = self.move_source(from, expected)?;
+        self.move_to_during(from, expected, target, to, target_version, None, None)
+    }
+    pub fn move_to_during(
+        &mut self,
+        from: PageIndex,
+        expected: SlotVersion,
+        target: &mut Self,
+        to: PageIndex,
+        target_version: SlotVersion,
+        maintenance: Option<&Arc<crate::basis::cell::page::Change>>,
+        stage: Option<Arc<crate::basis::pend::Stage>>,
+    ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
+        let block = self.move_source(from, expected, maintenance)?;
         target.move_target(to, target_version, block.page().pages())?;
+        if stage.is_some() {
+            target
+                .staged
+                .try_reserve(1)
+                .map_err(|_| Error::OutOfMemory)?;
+        }
         let id = block.page().id();
         let page = self.take_holding(from);
         target.put_holding(to, page);
+        self.staged.retain(|(at, _)| *at != from);
+        if let Some(stage) = stage {
+            target.staged.push((to, stage));
+        }
         let source_version = self.revision.commit(from);
         let target_version = target.revision.commit(to);
         Ok((source_version, target_version, id))
@@ -289,10 +321,24 @@ impl FlatState {
         to: PageIndex,
         target_version: SlotVersion,
     ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
+        self.move_within_during(from, expected, to, target_version, None, None)
+    }
+    pub fn move_within_during(
+        &mut self,
+        from: PageIndex,
+        expected: SlotVersion,
+        to: PageIndex,
+        target_version: SlotVersion,
+        maintenance: Option<&Arc<crate::basis::cell::page::Change>>,
+        stage: Option<Arc<crate::basis::pend::Stage>>,
+    ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
         if from == to {
             return Err(Error::Occupied);
         }
-        let block = self.move_source(from, expected)?;
+        let block = self.move_source(from, expected, maintenance)?;
+        if stage.is_some() {
+            self.staged.try_reserve(1).map_err(|_| Error::OutOfMemory)?;
+        }
         self.move_target(to, target_version, block.page().pages())?;
         self.revision
             .slots
@@ -301,6 +347,10 @@ impl FlatState {
         let id = block.page().id();
         let page = self.take_holding(from);
         self.put_holding(to, page);
+        self.staged.retain(|(at, _)| *at != from);
+        if let Some(stage) = stage {
+            self.staged.push((to, stage));
+        }
         let stamp = self.revision.commit(from);
         self.revision.write(to, stamp);
         Ok((stamp, stamp, id))

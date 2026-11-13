@@ -203,6 +203,7 @@ impl Source {
         &self,
         id: usize,
         need: Access,
+        maintenance: Option<&Pend>,
     ) -> Result<PublicationFlight, CellFail> {
         let root = self.source().root();
         let operation = root
@@ -215,10 +216,17 @@ impl Source {
         self.check(need)?;
         let authority = self.authority(&actor)?;
         self.source()
-            .check_publish(self.offset, self.count)
+            .check_move(self.offset, self.count, maintenance)
             .map_err(failure)?;
         self.source()
-            .enter_publish(id, authority.as_deref(), need, self.offset, self.count)
+            .enter_publish(
+                id,
+                authority.as_deref(),
+                need,
+                self.offset,
+                self.count,
+                maintenance,
+            )
             .map_err(failure)?;
         Ok(PublicationFlight {
             source: self.source().clone(),
@@ -246,7 +254,9 @@ impl Source {
         use kernel_api::model::pend::{
             FlatRights, NestRights, NestScope, Operations, PendRange, PendScope, ShareRights,
         };
-        self.range()?;
+        if self.range()?.staged() {
+            return Err(CellFail::Denied);
+        }
         let span = route.span().map_err(failure)?;
         if span.grain() != self.count.get() {
             return Err(CellFail::NotAligned);
@@ -376,7 +386,7 @@ impl Source {
     }
 
     /// Logical source loss, independent of a legitimate external borrow's suspension.
-    pub(in crate::basis::nest) fn retiring(&self) -> bool {
+    pub(crate) fn retiring(&self) -> bool {
         let root = self.source().root();
         self.actor().is_none()
             || self
@@ -416,6 +426,7 @@ impl Source {
         page: &Arc<Page>,
         modifiable: bool,
         change: &Change,
+        maintenance: Option<&Pend>,
     ) -> Result<ExternalBorrow, CellFail> {
         let actor = self.actor().ok_or(CellFail::Denied)?;
         let _serial = if Arc::ptr_eq(&actor, publisher) {
@@ -440,6 +451,7 @@ impl Source {
             self.count,
             modifiable,
             Some(change),
+            maintenance,
         )
         .map_err(failure)
     }

@@ -122,8 +122,9 @@ Scripted receipt completion is not a hardware fence. No QEMU or physical run is
 claimed; the 14 hardware tests remain ignored by the host suite and their guest
 currently consumes ABI v10.
 
-M4 must complete maintenance publication, credential-bearing transfers, takeover
-and the complete per-obligation recovery protocol. Remaining staged Flat
+The [M4 follow-up](memory-m4.md) implements maintenance publication,
+credential-bearing transfers, takeover and per-obligation retirement; its
+verification boundaries and restricted donor-import limit are recorded there. Remaining staged Flat
 Delete/Split/Merge and FaultRoute paths still reject; trusted External lifecycle
 and fault/service integration belong to the corresponding M4–M6/activation gates.
 The [M1 migration gates](memory-m1.md#migration-order-and-acceptance-gates) still

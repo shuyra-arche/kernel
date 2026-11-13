@@ -30,10 +30,12 @@ use kernel_api::model::identity::TaskId;
 use kernel_api::model::modifiable::Modifiable;
 
 mod admission;
+mod epoch;
 pub(crate) use admission::RangeBlock;
 mod external;
 mod geometry;
 mod hold;
+pub(crate) mod maintenance;
 mod tracking;
 pub(crate) use tracking::Tracking;
 
@@ -294,12 +296,13 @@ impl SourceAuthorization {
         access: Access,
         offset: PageOffset,
         count: PageCount,
+        maintenance: Option<&Pend>,
     ) -> Result<(), PendFail> {
         let gate = self.revoked.lock();
         if *gate || !self.branch_permits(branch, access) {
             return Err(PendFail::Denied);
         }
-        self.check_blocks(offset, count, None)?;
+        self.check_blocks(offset, count, maintenance)?;
         let mut inflight = self.inflight.lock();
         inflight.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
         inflight.push((id, None));
@@ -552,11 +555,13 @@ impl Withdrawal<'_> {
         &self,
         offset: PageOffset,
         count: PageCount,
+        maintenance: Option<&Pend>,
     ) -> Result<(), PendFail> {
         if *self.gate {
             return Err(PendFail::Denied);
         }
-        self.source.check_window(offset, count)
+        self.source.check_blocks(offset, count, maintenance)?;
+        self.source.check_unblocked_window(offset, count)
     }
 
     pub(crate) fn adopt(

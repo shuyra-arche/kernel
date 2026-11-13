@@ -4,7 +4,7 @@ pub(in super::super) mod change;
 mod retention;
 pub(crate) mod statistics;
 
-pub(crate) use change::{Block, Change, Freeze};
+pub(crate) use change::{Block, Change, Freeze, Maintenance};
 pub(crate) use retention::Retention;
 
 use super::Exposure;
@@ -12,9 +12,8 @@ use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
 const QUARANTINED: usize = 1 << (usize::BITS - 1);
-const EXTERNAL_WRITER: usize = 1 << (usize::BITS - 2);
-const CHANGING: usize = 1 << (usize::BITS - 3);
-const COUNTER_BITS: u32 = (usize::BITS - 3) / 4;
+const CHANGING: usize = 1 << (usize::BITS - 2);
+const COUNTER_BITS: u32 = (usize::BITS - 2) / 6;
 const MAX_USES: usize = (1 << COUNTER_BITS) - 1;
 
 #[derive(Debug, Clone, Copy)]
@@ -36,6 +35,7 @@ pub(crate) enum RetainError {
 enum Admission {
     Ordinary,
     Changing,
+    Maintenance,
 }
 use kernel_api::model::modifiable::Modifiable;
 
@@ -55,6 +55,7 @@ enum Event {
     Discharge {
         kind: Kind,
         access: Modifiable,
+        maintenance: bool,
     },
     Abandon,
 }
@@ -63,10 +64,11 @@ enum Event {
 struct State {
     cpu_readers: usize,
     cpu_writers: usize,
-    external: usize,
+    external_readers: usize,
+    external_writers: usize,
     freezes: usize,
+    maintenance: usize,
     quarantined: bool,
-    external_writer: bool,
     changing: bool,
 }
 
@@ -90,7 +92,7 @@ impl State {
                 ..
             } if self.changing => Err(RetainError::Busy),
             Event::Register {
-                admission: Admission::Changing,
+                admission: Admission::Changing | Admission::Maintenance,
                 ..
             } if !self.changing => Err(RetainError::Unbalanced),
             Event::Freeze { retracts } => {
@@ -118,45 +120,55 @@ impl State {
                 admission,
             } => {
                 let writable = access == Modifiable::Yes;
-                let permitted_freezes = usize::from(matches!(admission, Admission::Changing));
+                let permitted_freezes = usize::from(!matches!(admission, Admission::Ordinary));
                 if writable && self.freezes > permitted_freezes {
                     return Err(RetainError::Busy);
                 }
                 // CPU mappings share coherent RAM. Preserve the exclusion of
                 // writable external access and of CPU writes during external use.
                 let conflicts = match (kind, writable) {
-                    (Kind::Cpu, false) => self.external_writer,
-                    (Kind::Cpu, true) => self.external != 0,
+                    (Kind::Cpu, false) => self.external_writers != 0,
+                    (Kind::Cpu, true) => self.external_readers != 0 || self.external_writers != 0,
                     (Kind::External, false) => self.writers() != 0,
                     (Kind::External, true) => {
-                        self.external != 0 || self.cpu_readers != 0 || self.cpu_writers != 0
+                        self.external_readers != 0
+                            || self.external_writers != 0
+                            || self.cpu_readers != 0
+                            || self.cpu_writers != 0
                     }
                 };
                 if conflicts {
                     return Err(RetainError::Borrowed);
                 }
                 let mut next = self;
+                if matches!(admission, Admission::Maintenance) {
+                    if next.maintenance == MAX_USES {
+                        return Err(RetainError::Exhausted);
+                    }
+                    next.maintenance += 1;
+                }
                 let uses = next.uses(kind, writable);
                 if *uses == MAX_USES {
                     return Err(RetainError::Exhausted);
                 }
                 *uses += 1;
-                if matches!(kind, Kind::External) {
-                    next.external_writer = writable;
-                }
                 Ok(next)
             }
-            Event::Discharge { kind, access } => {
+            Event::Discharge {
+                kind,
+                access,
+                maintenance,
+            } => {
                 let writable = access == Modifiable::Yes;
                 let mut next = self;
-                if matches!(kind, Kind::External) {
-                    if writable != self.external_writer {
-                        return Err(RetainError::Unbalanced);
-                    }
-                    next.external_writer = false;
-                }
                 let uses = next.uses(kind, writable);
                 *uses = uses.checked_sub(1).ok_or(RetainError::Unbalanced)?;
+                if maintenance {
+                    next.maintenance = next
+                        .maintenance
+                        .checked_sub(1)
+                        .ok_or(RetainError::Unbalanced)?;
+                }
                 Ok(next)
             }
             Event::Abandon => Ok(Self {
@@ -167,14 +179,15 @@ impl State {
     }
 
     fn writers(self) -> usize {
-        self.cpu_writers + usize::from(self.external_writer)
+        self.cpu_writers + self.external_writers
     }
 
     fn uses(&mut self, kind: Kind, writable: bool) -> &mut usize {
         match (kind, writable) {
             (Kind::Cpu, false) => &mut self.cpu_readers,
             (Kind::Cpu, true) => &mut self.cpu_writers,
-            (Kind::External, _) => &mut self.external,
+            (Kind::External, false) => &mut self.external_readers,
+            (Kind::External, true) => &mut self.external_writers,
         }
     }
 
@@ -182,10 +195,11 @@ impl State {
         Self {
             cpu_readers: raw & MAX_USES,
             cpu_writers: (raw >> COUNTER_BITS) & MAX_USES,
-            external: (raw >> (2 * COUNTER_BITS)) & MAX_USES,
-            freezes: (raw >> (3 * COUNTER_BITS)) & MAX_USES,
+            external_readers: (raw >> (2 * COUNTER_BITS)) & MAX_USES,
+            external_writers: (raw >> (3 * COUNTER_BITS)) & MAX_USES,
+            freezes: (raw >> (4 * COUNTER_BITS)) & MAX_USES,
+            maintenance: (raw >> (5 * COUNTER_BITS)) & MAX_USES,
             quarantined: raw & QUARANTINED != 0,
-            external_writer: raw & EXTERNAL_WRITER != 0,
             changing: raw & CHANGING != 0,
         }
     }
@@ -193,14 +207,11 @@ impl State {
     fn encode(self) -> usize {
         self.cpu_readers
             | (self.cpu_writers << COUNTER_BITS)
-            | (self.external << (2 * COUNTER_BITS))
-            | (self.freezes << (3 * COUNTER_BITS))
+            | (self.external_readers << (2 * COUNTER_BITS))
+            | (self.external_writers << (3 * COUNTER_BITS))
+            | (self.freezes << (4 * COUNTER_BITS))
+            | (self.maintenance << (5 * COUNTER_BITS))
             | if self.quarantined { QUARANTINED } else { 0 }
-            | if self.external_writer {
-                EXTERNAL_WRITER
-            } else {
-                0
-            }
             | if self.changing { CHANGING } else { 0 }
     }
 }
@@ -234,11 +245,20 @@ impl Reclaim {
             admission: Admission::Ordinary,
         })
     }
-    pub(super) fn register_during(&self, kind: Kind, modifiable: bool) -> Result<(), RetainError> {
+    pub(super) fn register_during(
+        &self,
+        kind: Kind,
+        modifiable: bool,
+        maintenance: bool,
+    ) -> Result<(), RetainError> {
         self.apply(Event::Register {
             kind,
             access: mode(modifiable),
-            admission: Admission::Changing,
+            admission: if maintenance {
+                Admission::Maintenance
+            } else {
+                Admission::Changing
+            },
         })
     }
     pub(super) fn begin(&self) -> Result<(), RetainError> {
@@ -260,9 +280,10 @@ impl Reclaim {
     pub(super) fn is_changing(&self) -> bool {
         State::decode(self.0.load(Ordering::Acquire)).changing
     }
-    pub(super) fn discharge(&self, kind: Kind, modifiable: bool) {
+    pub(super) fn discharge(&self, kind: Kind, modifiable: bool, maintenance: bool) {
         self.apply(Event::Discharge {
             kind,
+            maintenance,
             access: mode(modifiable),
         })
         .expect("a retention discharges exactly one registered use");
@@ -276,18 +297,29 @@ impl Reclaim {
         !state.quarantined
             && state.cpu_readers == 0
             && state.cpu_writers == 0
-            && state.external == 0
+            && state.external_readers == 0
+            && state.external_writers == 0
+    }
+    pub(super) fn maintenance(&self) -> u64 {
+        State::decode(self.0.load(Ordering::Acquire)).maintenance as u64
+    }
+    pub(super) fn quarantined(&self) -> bool {
+        State::decode(self.0.load(Ordering::Acquire)).quarantined
     }
     pub(super) fn obligations(&self) -> u64 {
         let state = State::decode(self.0.load(Ordering::Acquire));
-        (state.cpu_readers + state.cpu_writers + state.external) as u64
+        (state.cpu_readers + state.cpu_writers + state.external_readers + state.external_writers)
+            as u64
     }
     pub(super) fn allows_return(&self) -> bool {
         self.0.load(Ordering::Acquire) == 0
     }
 
     pub(super) fn exposure(&self) -> Exposure {
-        if State::decode(self.0.load(Ordering::Acquire)).external == 0 {
+        if {
+            let state = State::decode(self.0.load(Ordering::Acquire));
+            state.external_readers == 0 && state.external_writers == 0
+        } {
             Exposure::Internal
         } else {
             Exposure::External

@@ -21,6 +21,7 @@ pub(crate) struct Retention {
     phase: Phase,
     kind: Kind,
     modifiable: bool,
+    maintenance: bool,
 }
 
 impl Retention {
@@ -36,6 +37,7 @@ impl Retention {
             phase: Phase::Prepared,
             kind,
             modifiable,
+            maintenance: false,
         })
     }
 
@@ -43,14 +45,19 @@ impl Retention {
         change: &super::Change,
         kind: Kind,
         modifiable: bool,
+        maintenance: bool,
     ) -> Result<Self, RetainError> {
-        change.page().reclaim.register_during(kind, modifiable)?;
+        change
+            .page()
+            .reclaim
+            .register_during(kind, modifiable, maintenance)?;
         super::statistics::register(kind, change.page().pages() * 4096);
         Ok(Self {
             cell: Some(change.page().clone()),
             phase: Phase::Prepared,
             kind,
             modifiable,
+            maintenance,
         })
     }
 
@@ -81,7 +88,9 @@ impl Retention {
     /// Unit 退出、通知、请求已提交或用户态 Ack 都不构成这个证明。
     pub(crate) unsafe fn settle(mut self) {
         assert_eq!(self.phase, Phase::Retiring);
-        self.cell().reclaim.discharge(self.kind, self.modifiable);
+        self.cell()
+            .reclaim
+            .discharge(self.kind, self.modifiable, self.maintenance);
         super::statistics::discharge(self.kind, self.cell().pages() * 4096, true);
         self.phase = Phase::Settled;
     }
@@ -98,7 +107,9 @@ impl Drop for Retention {
     fn drop(&mut self) {
         match self.phase {
             Phase::Prepared => {
-                self.cell().reclaim.discharge(self.kind, self.modifiable);
+                self.cell()
+                    .reclaim
+                    .discharge(self.kind, self.modifiable, self.maintenance);
                 super::statistics::discharge(self.kind, self.cell().pages() * 4096, false);
             }
             Phase::Settled => {}

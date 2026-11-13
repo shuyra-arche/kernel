@@ -7,6 +7,7 @@ mod ledger;
 mod source;
 pub(crate) use authority::{Export, Pend, PreparedLimit};
 pub(crate) use source::Tracking;
+pub(crate) use source::maintenance::{MaintenanceUse, Stage};
 mod target;
 mod window;
 pub(crate) use target::Target;

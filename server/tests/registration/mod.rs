@@ -13,10 +13,13 @@ mod branch;
 #[allow(dead_code)]
 #[path = "../../src/basis/unit/control/mod.rs"]
 pub(crate) mod control;
+#[path = "../../src/basis/pend/source/epoch.rs"]
+mod epoch;
 mod exports;
 #[allow(dead_code, unused_imports)]
 #[path = "../../src/basis/pend/ledger/mod.rs"]
 mod ledger;
+mod maintenance;
 #[allow(dead_code, unused_imports)]
 #[path = "../../src/basis/name/mod.rs"]
 mod name;

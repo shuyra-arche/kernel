@@ -23,7 +23,7 @@ use kernel_api::model::cell::PAGE_SIZE;
 use kernel_api::model::cell::PageOwner;
 
 pub(crate) use identity::PageId;
-pub(crate) use reclaim::{Block, Change, Freeze, RetainError, Retention};
+pub(crate) use reclaim::{Block, Change, Freeze, Maintenance, RetainError, Retention};
 
 /// 分配器交出的唯一承载。构造 Page 后只有 Page 保留这份回收凭证。
 pub(crate) type InternalPage = Box<UnsafeCell<[u8; PAGE_SIZE]>, &'static (dyn Allocator + Sync)>;
@@ -203,6 +203,12 @@ impl Page {
     }
     pub(crate) fn obligations(&self) -> u64 {
         self.reclaim.obligations()
+    }
+    pub(crate) fn maintenance_obligations(&self) -> u64 {
+        self.reclaim.maintenance()
+    }
+    pub(crate) fn quarantined(&self) -> bool {
+        self.reclaim.quarantined()
     }
 }
 

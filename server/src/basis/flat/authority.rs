@@ -285,6 +285,9 @@ pub(crate) fn retire_block(
         return Ok(());
     };
     if let Some(block) = source.blocking(authority) {
+        if block.native() {
+            block.retire_uses(None)?;
+        }
         settle_block(meta, &source, &block)?;
         if !block.native() {
             source.allow(authority);
@@ -300,6 +303,7 @@ pub(crate) fn settle_block(
     if source.moving() {
         return Err(PendFail::Busy);
     }
+    source.retain_staged(block)?;
     let (offset, count) = block.window();
     let selected = meta
         .source()

@@ -37,6 +37,9 @@ pub(super) struct FlatState {
     pub source: FlatSource,
     pub residencies: Vec<ResidencyEntry>,
     pub next_residency: usize,
+    /// A staged holding retains its original maintenance record, even if the
+    /// originating source loses its last public owner. This is no new authority.
+    pub staged: Vec<(PageIndex, Arc<crate::basis::pend::Stage>)>,
     /// 这份来源是否还允许迁移。普通 `acquire` 建立时为真；导入/借用，
     /// 以及任何一次内核或全局发布都把它永久置假。
     pub transferable: bool,
@@ -50,6 +53,7 @@ impl FlatState {
             source,
             residencies: Vec::new(),
             next_residency: 1,
+            staged: Vec::new(),
             transferable,
         }
     }
