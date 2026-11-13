@@ -15,8 +15,8 @@ ABI version or additional top-level authority object:
 | --- | --- |
 | Recipient ledger | 1,024 total registrations, including unpublished preparation. |
 | Incoming delegation | At most 256 registrations whose actual sender is another Task. The other 768 slots remain available to local operations even under incoming saturation. Local operations may use all 1,024 when incoming usage is lower. |
-| One sending Task → one recipient | At most 8 outstanding incoming registrations, across all source Pends. |
-| One sending Team → one recipient | At most 32 outstanding incoming registrations, across all its Tasks. |
+| One sending Task → one recipient | At most 32 outstanding incoming registrations, across all source Pends. |
+| One sending Team → one recipient | At most 128 outstanding incoming registrations, across all its Tasks. |
 | Sender's outgoing/derived edges | Existing Heirs limit of 1,024, including prepared edges. It bounds unsettled delegation obligations across recipients and parents. |
 
 The receiving Table's Admission owns registration charges. Preparation reserves

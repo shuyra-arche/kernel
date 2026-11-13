@@ -74,7 +74,7 @@ fn sender_budget_counts_all_parents_until_return_or_exit_and_failed_grants_leave
     let receiver = Task::in_team(2, 2);
     let first = root(&sender);
     let second = root(&sender);
-    let mut tokens: Vec<_> = (0..8)
+    let mut tokens: Vec<_> = (0..32)
         .map(|at| {
             grant(
                 &sender,
@@ -88,14 +88,14 @@ fn sender_budget_counts_all_parents_until_return_or_exit_and_failed_grants_leave
         grant(&sender, &receiver, &second),
         Err(PendFail::OutOfMemory)
     );
-    assert_eq!(sender.pend.heirs.lock().len(), 8);
-    assert_eq!(receiver.pend.entries.lock().len(), 8);
+    assert_eq!(sender.pend.heirs.lock().len(), 32);
+    assert_eq!(receiver.pend.entries.lock().len(), 32);
     ledger::return_(&receiver, tokens.pop().unwrap()).unwrap();
     tokens.push(grant(&sender, &receiver, &second).unwrap());
     receiver.dead.store(true, Ordering::Release);
     ledger::doom(&receiver);
     assert_eq!(grant(&sender, &receiver, &first), Err(PendFail::Dead));
-    for _ in 0..16 {
+    for _ in 0..64 {
         if ledger::retire(&receiver).is_ok() {
             break;
         }
@@ -111,7 +111,7 @@ fn team_budget_survives_sender_exit_and_another_team_retains_admission() {
     for id in 1..=4 {
         let sender = Task::in_team(id, 1);
         let source = root(&sender);
-        tokens.extend((0..8).map(|_| grant(&sender, &receiver, &source).unwrap()));
+        tokens.extend((0..32).map(|_| grant(&sender, &receiver, &source).unwrap()));
         // Immutable billing identity survives the Weak<Task> becoming stale.
         drop(source);
         drop(sender);
@@ -138,13 +138,13 @@ fn incoming_saturation_preserves_recipient_capacity_and_every_preparation_rolls_
     let receiver = Task::in_team(1000, 1000);
     let mut senders = Vec::new();
     let mut tokens = Vec::new();
-    for id in 1..=32 {
+    for id in 1..=8 {
         let sender = Task::in_team(id, id);
         let source = root(&sender);
-        tokens.extend((0..8).map(|_| grant(&sender, &receiver, &source).unwrap()));
+        tokens.extend((0..32).map(|_| grant(&sender, &receiver, &source).unwrap()));
         senders.push((sender, source));
     }
-    let extra = Task::in_team(33, 33);
+    let extra = Task::in_team(9, 9);
     let source = root(&extra);
     assert_eq!(
         grant(&extra, &receiver, &source),

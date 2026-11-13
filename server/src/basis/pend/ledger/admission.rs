@@ -9,8 +9,8 @@ use kernel_api::{
 
 pub(super) const CAPACITY: usize = 1024;
 pub(super) const INCOMING: usize = 256;
-pub(super) const PER_TASK: usize = 8;
-pub(super) const PER_TEAM: usize = 32;
+pub(super) const PER_TASK: usize = 32;
+pub(super) const PER_TEAM: usize = 128;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct Sender {

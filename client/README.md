@@ -121,8 +121,8 @@ Pend derive/same/release and ReleaseMode interfaces do not exist.
 Task delegation accepts unrelated Teams, including a live Dormant recipient.
 The caller must hold the live, distributable source with every requested right
 and range; delegation grants no Task management authority. Registration has
-fixed budgets: 1,024 total slots, at most 256 incoming slots, 8 per sending Task
-and 32 per sending Team at one recipient. Source Heirs retain their existing
+fixed budgets: 1,024 total slots, at most 256 incoming slots, 32 per sending Task
+and 128 per sending Team at one recipient. Source Heirs retain their existing
 1,024-edge limit. Prepared and unsettled grants count; preparation failure rolls
 back, and Return/Revoke/exit release settled registrations. Exhaustion returns
 `PendFail::OutOfMemory`; contention returns Busy. Multiple Teams can fill the
