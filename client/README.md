@@ -176,6 +176,11 @@ positions have all retired and been removed.
 
 ### Team creation and boot discovery
 
+Public `UnitCreate::Team` creates only User Teams and requires Build authority.
+There is no `kind` field or public `ProgramKind`; descriptor word 1 is reserved
+zero. Retired Supervisor and unknown values reject even for S-mode callers.
+See [construction and version migration](../api/memory-acceptance.md).
+
 Unit Create success uses `[a0, a1, a2] = [kind, id, nest_pend]`.
 `CreatedUnit::Task(task)` decodes `[0, task_id, 0]`.
 `CreatedUnit::Team { team, nest }` decodes `[1, team_id, nest_pend]`.

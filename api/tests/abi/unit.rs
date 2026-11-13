@@ -4,8 +4,8 @@ use kernel_api::{
     model::{
         identity::{TaskId, TeamId},
         unit::{
-            ControlId, CreatedUnit, ExitCause, ProgramKind, UnitCreate, UnitInfo, UnitQuery,
-            UnitState, UnitTarget,
+            ControlId, CreatedUnit, ExitCause, UnitCreate, UnitInfo, UnitQuery, UnitState,
+            UnitTarget,
         },
     },
 };
@@ -14,7 +14,6 @@ fn creation_variants_use_checked_fixed_width_snapshots() {
     for request in [
         UnitCreate::Team {
             nest: None,
-            kind: ProgramKind::User,
             guard: ControlId::NONE,
             member_exit: false,
         },
@@ -27,7 +26,6 @@ fn creation_variants_use_checked_fixed_width_snapshots() {
         },
         UnitCreate::Team {
             nest: Some(kernel_api::model::identity::PendId::mint(9)),
-            kind: ProgramKind::User,
             guard: ControlId::NONE,
             member_exit: true,
         },
@@ -38,7 +36,6 @@ fn creation_variants_use_checked_fixed_width_snapshots() {
     }
     let mut team = UnitCreate::Team {
         nest: None,
-        kind: ProgramKind::User,
         guard: ControlId::NONE,
         member_exit: false,
     }
@@ -46,8 +43,12 @@ fn creation_variants_use_checked_fixed_width_snapshots() {
     team[32] = 2;
     assert!(UnitCreate::from_bytes(&team).is_none());
     team[32] = 0;
-    team[8] = 2;
-    assert!(UnitCreate::from_bytes(&team).is_none());
+    // Both ABI selections retain the width and canonical User encoding. The
+    // old Supervisor selector and every nonzero reserved word fail decoding.
+    for retired in [1u64, 2, 255, u64::MAX] {
+        team[8..16].copy_from_slice(&retired.to_le_bytes());
+        assert!(UnitCreate::from_bytes(&team).is_none());
+    }
 }
 #[test]
 fn query_and_result_encoding_preserve_identity_and_independent_cleanup() {

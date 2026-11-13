@@ -37,8 +37,11 @@ impl EnvCall {
         // Native memory has only bounded Flat/Nest descriptors. Old operation
         // slots cannot fall through into the v10 register adapter.
         if cfg!(feature = "memory-v11")
-            && (matches!(class, 2 | 12 | 13) || (class == 10 && slot as u32 != 1))
+            && (matches!(class, 2 | 12 | 13) || (class == 10 && !matches!(slot as u32, 1 | 4)))
         {
+            return Err(crate::abi::register::Decode::BadSlot);
+        }
+        if !cfg!(feature = "memory-v11") && class == 10 && slot as u32 == 4 {
             return Err(crate::abi::register::Decode::BadSlot);
         }
         match class {

@@ -7,6 +7,8 @@ use kernel_api::{
 };
 
 typed_calls! {
+    fallible fn derive(license: PendId, request: VirtAddr) -> Result<PendId, erra::Error<ShareFail>> =
+        op::Derive { license, request };
     fallible fn create(license: PendId, reference: SlotId, modifiable: Modifiable) -> Result<PendId, erra::Error<ShareFail>> =
         op::Create { license, reference, modifiable };
     fallible fn delete(token: PendId) -> Result<(), erra::Error<ShareFail>> =

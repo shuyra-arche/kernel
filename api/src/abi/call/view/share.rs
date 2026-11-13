@@ -39,6 +39,15 @@ pub mod operations {
     pub struct Shut {
         pub token: super::PendId,
     }
+    /// Native v11 source derivation. `request` points to one AccordRequest;
+    /// its source must be a live Flat/Share and its limits must select Share rights.
+    /// The creation license and source authority are checked in one commit.
+    #[operation(slot = 4, output = super::PendId, error = ShareFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Derive {
+        pub license: super::PendId,
+        pub request: super::VirtAddr,
+    }
 }
 pub use operations::ShareCall;
 pub use operations::ShareFail;

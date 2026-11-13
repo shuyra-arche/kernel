@@ -21,7 +21,7 @@ use kernel_api::{
             ShareRights,
         },
         sign::SignRights,
-        unit::{ControlId, CreatedUnit, ExitCause, ProgramKind, UnitCreate, UnitQuery, UnitTarget},
+        unit::{ControlId, CreatedUnit, ExitCause, UnitCreate, UnitQuery, UnitTarget},
         wait::Wait,
     },
 };
@@ -160,7 +160,6 @@ fn reader_team() -> (TeamId, SlotId, [PendId; 3], VirtAddr) {
         &UnitCreate::Team {
             member_exit: false,
             nest: None,
-            kind: ProgramKind::User,
             guard: ControlId::NONE,
         }
         .to_bytes(),

@@ -6,6 +6,11 @@ use kernel_api::{
     model::{flat::BlockPhase, pend::Operations},
 };
 
+enum Progress {
+    Drain,
+    Takeover(kernel_api::model::flat::BlockRef),
+}
+
 pub(in crate::entry::call) fn effect(
     actor: &Arc<Task>,
     action: Action,
@@ -17,7 +22,7 @@ pub(in crate::entry::call) fn effect(
             count,
             recover,
         } => {
-            let (entry, meta, source, block, _operation) = {
+            let (entry, meta, source, block, progress, _operation) = {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
                 let range =
@@ -44,38 +49,50 @@ pub(in crate::entry::call) fn effect(
                 let source = meta.authorization().ok_or(Failure::Denied)?;
                 let operation =
                     flat::sharing::SharingOperation::acquire(&meta).ok_or(Failure::Busy)?;
-                let block = if let Some(reference) = recover {
+                let (block, progress) = if let Some(reference) = recover {
                     let block = source.block_ref(reference).ok_or(Failure::Stale)?;
-                    if block.owner_live()
-                        || !block.owner().descends_from(entry.authority())
-                        || block.window() != (PageOffset::new(offset), count)
-                    {
+                    if block.window() != (PageOffset::new(offset), count) {
                         return Err(Failure::Denied);
                     }
-                    reference
-                        .generation()
-                        .next()
-                        .ok_or(Failure::VersionExhausted)?;
-                    block
+                    let progress = if !block.owner_live() {
+                        if !block.owner().descends_from(entry.authority()) {
+                            return Err(Failure::Denied);
+                        }
+                        reference
+                            .generation()
+                            .next()
+                            .ok_or(Failure::VersionExhausted)?;
+                        Progress::Takeover(reference)
+                    } else if !block.matches(reference, actor.ident.id, entry.authority())
+                        || !matches!(block.phase(), BlockPhase::Draining | BlockPhase::Held)
+                    {
+                        return Err(Failure::Denied);
+                    } else {
+                        Progress::Drain
+                    };
+                    (block, progress)
                 } else {
-                    source
-                        .native_block(
-                            entry.authority(),
-                            PageOffset::new(offset),
-                            count,
-                            start.flat(),
-                            actor,
-                            start.token(),
-                        )
-                        .map_err(pend_error)?
+                    (
+                        source
+                            .native_block(
+                                entry.authority(),
+                                PageOffset::new(offset),
+                                count,
+                                start.flat(),
+                                actor,
+                                start.token(),
+                            )
+                            .map_err(pend_error)?,
+                        Progress::Drain,
+                    )
                 };
                 receipt.start(Value::Maintenance {
                     block: block.reference(),
                     phase: BlockPhase::Draining,
                 });
-                (entry, meta, source, block, operation)
+                (entry, meta, source, block, progress, operation)
             };
-            if let Some(reference) = recover {
+            if let Progress::Takeover(reference) = progress {
                 block.retire_uses(None).map_err(pend_error)?;
                 flat::authority::settle_block(&meta, &source, &block).map_err(pend_error)?;
                 let _serial = actor.pend.lock();

@@ -1,5 +1,7 @@
 # Reservation migration and section 14 acceptance
 
+Later activation and additional acceptance are recorded in [the coordinated follow-up](memory-acceptance.md). Historical delivery status below is not the current remaining-work list.
+
 This is the same-round follow-up required by [#142 section 14](https://github.com/shuyra-arche/kernel/issues/142#issue-14),
 revised on 2026-11-13. It follows M1/M2 and the M3 baseline
 `bdb3b74d71f8b6b7b53bfb23378701d8ff87a52e`. The original M1/M2 delivery does not

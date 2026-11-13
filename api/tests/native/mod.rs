@@ -10,6 +10,8 @@ use kernel_api::{
     },
     model::pend::*,
 };
+#[path = "../abi/unit.rs"]
+mod unit;
 
 #[test]
 fn native_calls_reject_v10_and_removed_adapters() {
@@ -25,9 +27,20 @@ fn native_calls_reject_v10_and_removed_adapters() {
             assert!(EnvCall::from_wire(abi::PREFIX | (class << 32) | op, &[0; 6]).is_err());
         }
     }
-    for op in [0, 2, 3, 4] {
+    for op in [0, 2, 3, 5] {
         assert!(EnvCall::from_wire(abi::PREFIX | (10 << 32) | op, &[0; 6]).is_err());
     }
+    let derive = kernel_api::abi::call::share_view::operations::Derive {
+        license: kernel_api::model::identity::PendId::mint(1),
+        request: kernel_api::address::VirtAddr::new(4096),
+    };
+    assert!(
+        EnvCall::from_wire(
+            <kernel_api::abi::call::share_view::operations::Derive as RegisterCall>::SLOT,
+            &derive.pack()
+        )
+        .is_ok()
+    );
 }
 
 #[test]

@@ -71,24 +71,36 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         {
             return Err(PendFail::Dead);
         }
-        let operation = match kind {
-            ViewKind::Clone => Operations::Clone(CloneRights::DELETE),
-            ViewKind::Share => Operations::Share(ShareRights::DELETE),
-        };
-        // Closing may be retried through a still-live DELETE branch after the
-        // target is sealed. An invalidated branch cannot regain authority here.
-        let cleanup = !pend.target().alive()
-            && pend.authority().alive()
-            && pend.authority().limits().operations.contains(operation);
-        if !cleanup && !pend.permits(operation) {
-            return Err(PendFail::Denied);
-        }
         let operation = if let Some(p) = &share_view {
             Some(SharingOperation::acquire(p).ok_or(PendFail::Busy)?)
         } else {
             None
         };
         let _commit = crate::basis::commit();
+        let required = match kind {
+            ViewKind::Clone => Operations::Clone(CloneRights::DELETE),
+            ViewKind::Share => Operations::Share(ShareRights::DELETE),
+        };
+        // Validate live ancestry and scope in the same commit as sealing.
+        // Cleanup may continue only through a still-live DELETE branch.
+        let cleanup = !pend.target().alive()
+            && pend.authority().alive()
+            && pend.authority().limits().operations.contains(required);
+        if !cleanup && !pend.permits(required) {
+            return Err(PendFail::Denied);
+        }
+        // DELETE seals the entire Share target. A child window cannot turn a
+        // branch exit into destruction of its siblings or the original source.
+        // Keep this check on retries too; pending cleanup does not widen scope.
+        if let Some(meta) = &share_view
+            && pend.authority().window()
+                != Some((
+                    kernel_api::address::PageOffset::ZERO,
+                    meta.source().page_count(),
+                ))
+        {
+            return Err(PendFail::Denied);
+        }
         pend.target().seal()?;
         (share_view, operation)
     };

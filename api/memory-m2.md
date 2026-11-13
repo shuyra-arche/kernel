@@ -1,5 +1,7 @@
 # M2 organization and authority acceptance
 
+Later activation and additional acceptance are recorded in [the coordinated follow-up](memory-acceptance.md). Historical delivery status below is not the current remaining-work list.
+
 M2's next-interface organization and shared Server authority mechanisms are
 implemented in [PR #146](https://github.com/shuyra-arche/kernel/pull/146), pending
 review and merge after M1 (#145). This milestone does not activate ABI 11.

@@ -7,7 +7,7 @@ use kernel_api::{
         identity::PendId,
         modifiable::Modifiable,
         pend::{AccordTarget, NestRights, Operations},
-        unit::{ControlId, CreatedUnit, ProgramKind, UnitCreate, UnitTarget},
+        unit::{ControlId, CreatedUnit, UnitCreate, UnitTarget},
     },
 };
 use kernel_client::call::{nest, share_view, unit};
@@ -26,7 +26,6 @@ pub(super) fn run(target: PendId) {
     let descriptor = UnitCreate::Team {
         member_exit: false,
         nest: Some(nest),
-        kind: ProgramKind::User,
         guard: ControlId::NONE,
     }
     .to_bytes();

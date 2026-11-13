@@ -11,7 +11,7 @@ use kernel_api::{
             PendScope,
         },
         unit::{
-            ControlId, CreatedUnit, ExitCause, ExitScope, ProgramKind, UnitCreate, UnitQuery,
+            ControlId, CreatedUnit, ExitCause, ExitScope, UnitCreate, UnitQuery,
             UnitState, UnitTarget,
         },
     },
@@ -38,7 +38,6 @@ fn request(token: PendId, member_exit: bool) -> [u8; UnitCreate::WIDTH] {
     UnitCreate::Team {
         member_exit,
         nest: Some(token),
-        kind: ProgramKind::User,
         guard: ControlId::NONE,
     }
     .to_bytes()

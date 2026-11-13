@@ -198,7 +198,8 @@ pub enum Action {
         expected: SlotVersion,
         maintenance: Maintenance,
     },
-    /// A fixed range; recovery names an existing orphaned record in this Flat.
+    /// A fixed range. `recover` resumes this Task/branch's Draining record, or
+    /// takes over an orphaned record under a real ancestor with a new epoch.
     Block {
         start: SlotPosition,
         count: usize,

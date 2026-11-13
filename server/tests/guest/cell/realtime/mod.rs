@@ -22,7 +22,7 @@ use kernel_api::{
         },
         sign::SignRights,
         unit::{
-            ControlId, CreatedUnit, ProgramKind, Schedule, ScheduleInfo, UnitCreate, UnitQuery,
+            ControlId, CreatedUnit, Schedule, ScheduleInfo, UnitCreate, UnitQuery,
             UnitState, UnitTarget,
         },
         wait::Wait,
@@ -163,7 +163,6 @@ impl Fixture {
         let bytes = UnitCreate::Team {
             member_exit: false,
             nest: None,
-            kind: ProgramKind::User,
             guard: ControlId::NONE,
         }
         .to_bytes();
