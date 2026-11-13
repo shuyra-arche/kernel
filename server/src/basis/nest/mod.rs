@@ -2363,7 +2363,18 @@ impl Nest {
             self.finish_invalidation()?;
         }
         for (start, len) in self.owed_spans(&selection)? {
-            self.withdraw(&mapping, start, len)?;
+            if let Err(error) = self.withdraw(&mapping, start, len) {
+                // A peer retry may claim/reclaim the exact settled ticket after
+                // owed_spans took its snapshot. Whole-owner cleanup is already
+                // complete in that case; strict Pages still rejects a hole.
+                if error == NestError::NoRegion
+                    && matches!(selection, NestRange::Whole(_))
+                    && self.settled(mapping.identity())
+                {
+                    return Ok(());
+                }
+                return Err(error);
+            }
         }
         Ok(())
     }
