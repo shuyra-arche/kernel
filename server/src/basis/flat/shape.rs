@@ -9,7 +9,12 @@ impl Flat {
             return Err(FlatError::OutOfRange);
         }
         crate::metal::sync::with_pair(&self.state, &target.state, |from, to| {
-            if !from.transferable || !from.residencies.is_empty() || !to.residencies.is_empty() {
+            if from.explicit
+                || to.explicit
+                || !from.transferable
+                || !from.residencies.is_empty()
+                || !to.residencies.is_empty()
+            {
                 return Err(FlatError::Busy);
             }
             let (FlatSource::Managed(slots), FlatSource::Managed(output)) =

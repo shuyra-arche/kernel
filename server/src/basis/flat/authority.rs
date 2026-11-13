@@ -25,10 +25,54 @@ pub(crate) fn create(
     level: usize,
 ) -> Result<PendId, PendFail> {
     let _serial = task.pend.lock();
+    create_kind(task, license, size, align, level, false)
+}
+
+/// Caller holds its ledger serial and COMMIT through result recording.
+pub(crate) fn create_explicit(
+    task: &Arc<Task>,
+    license: PendId,
+    count: usize,
+    level: kernel_api::model::cell::CellLevel,
+) -> Result<
+    (
+        PendId,
+        kernel_api::model::flat::FlatId,
+        kernel_api::model::flat::FlatVersion,
+    ),
+    PendFail,
+> {
+    let size = count.checked_mul(PAGE_SIZE).ok_or(PendFail::NotAligned)?;
+    let token = create_kind(
+        task,
+        license,
+        size,
+        level.bytes().ok_or(PendFail::NotAligned)?,
+        level.get(),
+        true,
+    )?;
+    let entry = pend::locate(task, token).expect("just published Flat");
+    let range = entry
+        .target()
+        .memory()
+        .expect("Flat target")
+        .source()
+        .clone();
+    Ok((token, range.source_id(), range.flat().revision()))
+}
+
+fn create_kind(
+    task: &Arc<Task>,
+    license: PendId,
+    size: usize,
+    align: usize,
+    level: usize,
+    explicit: bool,
+) -> Result<PendId, PendFail> {
     let level = kernel_api::model::cell::CellLevel::new(level).ok_or(PendFail::NotAligned)?;
     let allocation = kernel_api::model::cell::Allocation { size, align, level };
     let size = allocation.bytes().ok_or(PendFail::NotAligned)?;
-    let (range, source) = allocate(task, license, allocation)?;
+    let (range, source) = allocate_kind(task, license, allocation, explicit)?;
     let meta = Sharing::from_source(range, size, task.ident.id)?;
     let entry = Arc::try_new(pend::PendEntry::try_new(
         pend::Target::Flat(meta.clone()),
@@ -61,6 +105,15 @@ pub(crate) fn allocate(
     license: PendId,
     allocation: kernel_api::model::cell::Allocation,
 ) -> Result<(super::FlatRange, Arc<SourceAuthorization>), PendFail> {
+    allocate_kind(task, license, allocation, false)
+}
+
+fn allocate_kind(
+    task: &Arc<Task>,
+    license: PendId,
+    allocation: kernel_api::model::cell::Allocation,
+    explicit: bool,
+) -> Result<(super::FlatRange, Arc<SourceAuthorization>), PendFail> {
     pend::access::license(task, license, CreationRights::FLAT)?;
     if allocation.level.get() >= crate::metal::mmu::mode::levels()
         || allocation.align != allocation.level.bytes().ok_or(PendFail::NotAligned)?
@@ -70,9 +123,12 @@ pub(crate) fn allocate(
     let pages = allocation.bytes().ok_or(PendFail::NotAligned)? / PAGE_SIZE;
     let allocation =
         super::Allocation::at_level(pages, allocation.level).map_err(|_| PendFail::NotAligned)?;
-    let range = super::Flat::acquire(task.ident.team.cells.clone(), allocation)
-        .map_err(|_| PendFail::OutOfMemory)?
-        .whole();
+    let mut flat = super::Flat::acquire(task.ident.team.cells.clone(), allocation)
+        .map_err(|_| PendFail::OutOfMemory)?;
+    if explicit {
+        Arc::get_mut(&mut flat).expect("private Flat").explicit();
+    }
+    let range = flat.whole();
     let source = SourceAuthorization::new(range.clone(), Access::all(), task.ident.id)?;
     Ok((range, source))
 }

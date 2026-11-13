@@ -95,6 +95,9 @@ and trusted backend proof interface. The [M2 acceptance record](memory-m2.md)
 adds scoped Flat/Nest calls, a checked register Frame and Client invocation.
 These are not accepted by current `EnvCall`; live v11 integration remains an
 activation gate, and the existing v10 invocation traits stay unchanged.
+The [M3 progress record](memory-m3.md) tracks the initial explicit-residency
+provider and Task journal integration; logical Memo/publication migration and
+maintenance-backed Vacate remain unfinished.
 
 This is a breaking provider redesign of Cell, View, Pend, Sign, Unit and Room.
 There are no compatibility aliases for retired operations.

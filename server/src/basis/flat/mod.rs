@@ -6,6 +6,7 @@
 pub(crate) mod authority;
 mod error;
 mod range;
+pub(crate) mod residency;
 mod shape;
 use kernel_api::model::cell::CellLevel;
 pub(crate) mod sharing;
@@ -240,6 +241,7 @@ impl Flat {
             return Err(FlatError::OutOfRange);
         }
         let mut guard = self.state.lock();
+        let explicit = guard.explicit;
         let FlatSource::Managed(slots) = &mut guard.source else {
             return Ok(());
         };
@@ -257,6 +259,9 @@ impl Flat {
                 page += self.grain();
                 at += 1;
                 continue;
+            }
+            if explicit {
+                return Err(FlatError::Missing);
             }
             slots.try_reserve(1).map_err(|_| FlatError::OutOfMemory)?;
             let cell = Arc::try_new(crate::basis::cell::allocate_level(
@@ -320,7 +325,7 @@ impl Flat {
                 let (at, present) = slot::spot(slots, page);
                 if !present {
                     // 缺席就是 Fresh：它本就有一份可以分配的承载。
-                    return Ok(true);
+                    return Ok(!guard.explicit);
                 }
                 Ok(matches!(&slots[at].1, Slot::Resident(page) if !page.changing()))
             }

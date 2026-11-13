@@ -68,7 +68,7 @@ pub(crate) fn withdraw_source_window(
                 .registered(binding.id())
                 .ok_or(PendFail::Busy)?;
             let span = entry.mapping().ok_or(PendFail::Busy)?;
-            let Some((data, _)) = nest.association(span, page).map_err(|_| PendFail::Busy)? else {
+            let Some(data) = nest.memo_page(span, page).map_err(|_| PendFail::Busy)? else {
                 continue;
             };
             block.retain(data)?;

@@ -583,9 +583,10 @@ impl Nest {
             if !memo.matches(binding) {
                 return Ok(());
             }
-            let Some((page, source, _)) = memo.association() else {
+            let Some((_, source, _)) = memo.association() else {
                 return Ok(());
             };
+            let page = memo.page();
             drop(state);
             if !selected(&source) {
                 return Ok(());
@@ -603,6 +604,7 @@ impl Nest {
             .get(mapping, index)
             .is_some_and(memo::Memo::busy);
         if pending {
+            let page = page.ok_or(PendFail::Busy)?;
             let change = crate::basis::cell::change::acquire(&page).map_err(|_| PendFail::Busy)?;
             self.retract_position(mapping, index, None, change, true)
                 .map_err(|_| PendFail::Busy)?;
@@ -1079,6 +1081,30 @@ impl Nest {
         page: Arc<Page>,
         source: memo::source::Source,
     ) -> Result<(), NestError> {
+        self.associate_kind(mapping, index, expected, Some(page), source)
+    }
+
+    pub(crate) fn associate_logical(
+        &self,
+        mapping: &Arc<Span>,
+        index: usize,
+        expected: u64,
+        source: memo::source::Source,
+    ) -> Result<(), NestError> {
+        if mapping.source().is_some() {
+            return Err(NestError::Pinned);
+        }
+        self.associate_kind(mapping, index, expected, None, source)
+    }
+
+    fn associate_kind(
+        &self,
+        mapping: &Arc<Span>,
+        index: usize,
+        expected: u64,
+        page: Option<Arc<Page>>,
+        source: memo::source::Source,
+    ) -> Result<(), NestError> {
         let _operation = mapping.operation().ok_or(NestError::Busy)?;
         let _commit = crate::basis::commit();
         self.ensure_mapping(mapping)?;
@@ -1086,8 +1112,14 @@ impl Nest {
         if !self.is_open() || !mapping.is_open() {
             return Err(NestError::NoRegion);
         }
-        let range = source.same_page(&page).map_err(memo::source_error)?;
-        if page.level() != mapping.level() || range.level() != mapping.level() {
+        let range = match &page {
+            Some(page) => source.same_page(page),
+            None => source.range(),
+        }
+        .map_err(memo::source_error)?;
+        if page.as_ref().is_some_and(|p| p.level() != mapping.level())
+            || range.level() != mapping.level()
+        {
             return Err(NestError::NotAligned);
         }
         let (offset, count) = source.window();
@@ -1095,6 +1127,12 @@ impl Nest {
             .source()
             .check_move(offset, count, source.hold().authority().map(Arc::as_ref))
             .map_err(memo::namespace_error)?;
+        if page.is_none() {
+            source
+                .source()
+                .check_publish(offset, count)
+                .map_err(memo::namespace_error)?;
+        }
         let owner = mapping.reservation.nest().ok_or(NestError::NoRegion)?;
         let binding = authority::RangeBinding::new_position(mapping.identity(), &owner, index)
             .map_err(memo::namespace_error)?;
@@ -1107,19 +1145,24 @@ impl Nest {
             if !state.retirement.invalidation().is_clean() {
                 return Err(NestError::Busy);
             }
-            state
-                .memos
-                .get_mut(mapping, index)?
-                .can_associate(expected)?;
+            let memo = state.memos.get_mut(mapping, index)?;
+            if page.is_none() && !memo.accepts_logical() {
+                return Err(NestError::Pinned);
+            }
+            memo.can_associate(expected)?;
         }
         if !self.is_external() {
             index::source::register(&range, mapping, Some(&binding))?;
         }
-        source
-            .source()
-            .retain_blocked(offset, count, &page)
-            .map_err(memo::namespace_error)?;
-        source.same_page(&page).map_err(memo::source_error)?;
+        if let Some(page) = &page {
+            source
+                .source()
+                .retain_blocked(offset, count, page)
+                .map_err(memo::namespace_error)?;
+            source.same_page(page).map_err(memo::source_error)?;
+        } else {
+            source.range().map_err(memo::source_error)?;
+        }
         let authorization = source.source().clone();
         let replaced = {
             let mut state = self.state.lock();
@@ -1144,13 +1187,126 @@ impl Nest {
     ) -> Result<Option<(Arc<Page>, memo::source::Source)>, NestError> {
         self.check_owner(&mapping.reservation)?;
         mapping.position(index)?;
-        Ok(self
+        let selected = self
             .state
             .lock()
             .memos
             .get(mapping, index)
+            .and_then(memo::Memo::association);
+        let Some((page, source, _)) = selected else {
+            return Ok(None);
+        };
+        let page = match page {
+            Some(page) => page,
+            None => source
+                .range()
+                .map_err(memo::source_error)?
+                .page(PageOffset::ZERO)?
+                .ok_or(NestError::Missing)?,
+        };
+        Ok(Some((page, source)))
+    }
+
+    /// Persistent source lookup never materializes or retains a physical Page.
+    pub(crate) fn logical_source(
+        &self,
+        mapping: &Arc<Span>,
+        index: usize,
+        expected: u64,
+    ) -> Result<Option<memo::source::Source>, NestError> {
+        self.check_owner(&mapping.reservation)?;
+        mapping.position(index)?;
+        if mapping.source().is_some() {
+            return Err(NestError::Pinned);
+        }
+        let state = self.state.lock();
+        let Some(memo) = state.memos.get(mapping, index) else {
+            return if expected == 1 {
+                Ok(None)
+            } else {
+                Err(NestError::Busy)
+            };
+        };
+        if memo.generation() != expected {
+            return Err(NestError::Busy);
+        }
+        if !memo.accepts_logical() {
+            return Err(NestError::Pinned);
+        }
+        Ok(memo.association().map(|(_, source, _)| source))
+    }
+
+    pub(crate) fn inspect_logical(
+        &self,
+        mapping: &Arc<Span>,
+        index: usize,
+    ) -> Result<kernel_api::model::nest::MemoStatus, NestError> {
+        use kernel_api::model::{
+            cell::MappingId,
+            nest::{MemoGeneration, MemoPhase, MemoStatus},
+        };
+        self.check_owner(&mapping.reservation)?;
+        mapping.position(index)?;
+        if mapping.source().is_some() {
+            return Err(NestError::Pinned);
+        }
+        let state = self.state.lock();
+        let memo = state.memos.get(mapping, index);
+        if memo.is_some_and(|memo| !memo.accepts_logical()) {
+            return Err(NestError::Pinned);
+        }
+        if memo.is_some_and(memo::Memo::busy) {
+            return Err(NestError::Busy);
+        }
+        let source = memo
             .and_then(memo::Memo::association)
-            .map(|(page, source, _)| (page, source)))
+            .map(|(_, source, _)| source.position());
+        Ok(MemoStatus {
+            nest: self.id(),
+            mapping: MappingId::from_bytes(&(mapping.identity() as u64).to_le_bytes())
+                .expect("Mapping identity"),
+            coordinate: index,
+            generation: MemoGeneration::new(memo.map_or(1, memo::Memo::generation))
+                .expect("nonzero generation"),
+            phase: if source.is_some() {
+                MemoPhase::Associated
+            } else {
+                MemoPhase::Empty
+            },
+            source,
+            page: 0,
+            access: 0,
+            level: mapping.level(),
+        })
+    }
+
+    /// Next Remove never starts unrelated hardware work under its atomic commit.
+    pub(crate) fn remove_logical(
+        &self,
+        mapping: &Arc<Span>,
+        index: usize,
+        expected: u64,
+    ) -> Result<(), NestError> {
+        let _operation = mapping.operation().ok_or(NestError::Busy)?;
+        self.ensure_mapping(mapping)?;
+        mapping.position(index)?;
+        if mapping.source().is_some() {
+            return Err(NestError::Pinned);
+        }
+        let _commit = crate::basis::commit();
+        let removed = {
+            let mut state = self.state.lock();
+            if !state.retirement.invalidation().is_clean() {
+                return Err(NestError::Busy);
+            }
+            let memo = state.memos.get_mut(mapping, index)?;
+            if !memo.accepts_logical() {
+                return Err(NestError::Pinned);
+            }
+            memo.remove(expected)?
+        };
+        removed.release();
+        Ok(())
     }
 
     pub(crate) fn remove_memo(
@@ -1241,6 +1397,13 @@ impl Nest {
             }
             memo.can_advance(expected)?;
             memo.association().ok_or(CellFail::SourceEmpty)?
+        };
+        let page = match page {
+            Some(page) => page,
+            None => source
+                .range()?
+                .page(PageOffset::ZERO)?
+                .ok_or(CellFail::SourceEmpty)?,
         };
         if !Arc::ptr_eq(&page, change.page()) || page.level() != mapping.level() {
             return Err(CellFail::Busy);
@@ -1470,7 +1633,10 @@ impl Nest {
             }
             memo.can_advance(expected)?;
             (
-                memo.association().ok_or(CellFail::SourceEmpty)?,
+                {
+                    let (_, source, binding) = memo.association().ok_or(CellFail::SourceEmpty)?;
+                    (memo.page().ok_or(CellFail::SourceEmpty)?, source, binding)
+                },
                 memo.publication().map(|publication| publication.writable()),
             )
         };

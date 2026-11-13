@@ -17,6 +17,16 @@ fn flat() -> memory::flat::Call {
     )
     .unwrap()
 }
+
+#[test]
+fn next_residency_rights_do_not_widen_the_v10_decoder() {
+    use kernel_api::model::pend::{FlatRights, Operations};
+    let rights = memory::rights::OCCUPY | memory::rights::VACATE | memory::rights::RESHAPE;
+    assert_eq!(rights.bits(), (1 << 6) | (1 << 7) | (1 << 8));
+    assert!(FlatRights::from_bits(rights.bits()).is_none());
+    assert!(!FlatRights::all().intersects(rights));
+    assert!(Operations::Flat(rights).contains(Operations::Flat(memory::rights::OCCUPY)));
+}
 #[test]
 fn next_surface_has_only_flat_and_nest_and_no_duplicate_create_domain() {
     let flat = flat();
