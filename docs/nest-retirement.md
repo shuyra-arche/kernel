@@ -33,6 +33,13 @@ keeps COMMIT-protected buffer access pure and avoids treating unrelated Fencing
 as a denied user buffer; removed entries and current permission limits still
 refuse access. Failed or closing address spaces refuse the copy.
 
+Creating a standalone CPU Nest or a Team with a fresh Nest installs trampoline
+translations during preparation. Those paths prepare and clean up outside
+COMMIT, then recheck live creation/management authority under COMMIT before
+publishing. Private strong references outlive that final guard so registration
+failure cannot trigger last-owner hardware cleanup inside COMMIT. Debug builds
+assert the fence boundary is outside COMMIT.
+
 Page-fault and envcall entries already preserve the original instruction and
 yield on Busy through the existing deadline retry mechanism. Explicit
 `retry_invalidation` retains the same Nest, settles at most four address tickets

@@ -197,11 +197,16 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: NestCall, ident: &Arc<Task
                 binding::delete(&actor, token)?;
                 return Ok(0);
             }
-            let _commit = crate::basis::commit();
             match call {
                 NestCall::Create { license } => {
-                    pend::access::license(&actor, license, CreationRights::NEST)
-                        .map_err(pend_fail)?;
+                    {
+                        let _commit = crate::basis::commit();
+                        pend::access::license(&actor, license, CreationRights::NEST)
+                            .map_err(pend_fail)?;
+                    }
+                    // Trampoline installation can fence. Keep preparation and
+                    // its failed cleanup outside COMMIT, then recheck live
+                    // creation authority immediately before registration.
                     let nest = crate::basis::unit::team::TeamBuilder::prepare_nest(SpaceKind::User)
                         .map_err(nest_fail)?;
                     let root = Arc::try_new(
@@ -218,10 +223,21 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: NestCall, ident: &Arc<Task
                     )
                     .map_err(|_| NestFail::OutOfMemory)?;
                     let token = root.token();
-                    actor.pend.prepare(root).map_err(pend_fail)?.publish();
+                    let _commit = crate::basis::commit();
+                    if !pend::live(&actor) {
+                        return Err(NestFail::Dead);
+                    }
+                    pend::access::license(&actor, license, CreationRights::NEST)
+                        .map_err(pend_fail)?;
+                    actor
+                        .pend
+                        .prepare(root.clone())
+                        .map_err(pend_fail)?
+                        .publish();
                     Ok(token.get())
                 }
                 NestCall::Inspect { token, out } => {
+                    let _commit = crate::basis::commit();
                     let info = binding::inspect(&actor, token)?;
                     if !ident.team.nest.copy_out(&info.to_bytes(), out) {
                         return Err(NestFail::Denied);
