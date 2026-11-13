@@ -1193,9 +1193,13 @@ impl Nest {
         }
         state.index.insert(node);
         state.retirement.mark_dirty(mapping.is_global());
+        // Installation still owns its unpublished Span. Reserve the sole fence
+        // initiator before unlocking, so an observer cannot steal progress and
+        // make the installer discard a successfully committed mapping on Busy.
+        let target = state.retirement.begin(self.id.get(), self.asid())?;
         drop(state);
         drop(lease);
-        self.finish_invalidation()
+        self.invalidate(target)
     }
 
     /// 把该窗口里已经物化/借用的页发布到本关系：不动 Flat 的物化。
@@ -2678,10 +2682,18 @@ impl Nest {
         // Retirement admits exactly one fence initiator. A peer gets Busy;
         // its caller retains the operation and retries across a scheduling
         // boundary, while this initiator retains the exact pending request.
-        let cpu = self.cpu.as_ref().ok_or(NestError::NoRegion)?;
+        if self.cpu.is_none() {
+            return Err(NestError::NoRegion);
+        }
         let target = state.retirement.begin(self.id.get(), self.asid())?;
         drop(state);
+        self.invalidate(target)
+    }
 
+    /// The request's initiator owns this one hardware invocation through its
+    /// checked completion. Observers cannot replace or abandon this request.
+    fn invalidate(&self, target: fence::Request<Asid>) -> Result<(), NestError> {
+        let cpu = self.cpu.as_ref().expect("CPU invalidation initiator");
         #[cfg(debug_assertions)]
         crate::basis::assert_unlocked();
         let result = fence::invalidate(&cpu.domain, target);
