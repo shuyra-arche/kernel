@@ -141,3 +141,45 @@ fn aliases_overlapping_gates_and_pending_hardware_refuse_before_conversion() {
         assert_eq!(pool.used(), 0);
     }
 }
+
+#[test]
+fn partial_reshape_keeps_unrelated_maintenance_hardware_and_holding() {
+    let (pool, mut state, mut held, range) = fixture();
+    let other_pool = Pool::new();
+    let other = other_pool.page();
+    let id = other.id();
+    state
+        .occupy(
+            PageIndex::ZERO,
+            SlotVersion::INITIAL,
+            Arc::try_unwrap(other).unwrap(),
+        )
+        .unwrap();
+    let FlatSource::Managed(slots) = &state.source else {
+        unreachable!()
+    };
+    let crate::slot::Slot::Resident(other) = &slots[0].1 else {
+        unreachable!()
+    };
+    let other = other.clone();
+    let block = Block::new(crate::changes::acquire(&other).unwrap()).unwrap();
+    let mut hardware = block.permit().unwrap().hardware(false).unwrap();
+    hardware.publish();
+    held.push(block);
+    let version = state.revision.current();
+    state
+        .reshape(range.parent(), range, true, version, &mut held)
+        .unwrap();
+    assert_eq!(held.len(), 513);
+    assert_eq!(heads(&state)[0], (0, id.get()));
+    assert_eq!(other.obligations(), 1);
+    assert_eq!(other_pool.used(), 512);
+    unsafe {
+        hardware.retire().settle();
+    }
+    drop(other);
+    drop(held);
+    drop(state);
+    assert_eq!(pool.used(), 0);
+    assert_eq!(other_pool.used(), 0);
+}

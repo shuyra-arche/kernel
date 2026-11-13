@@ -36,7 +36,7 @@ pub(super) fn run(
     if !entry.permits(Operations::Flat(memory::rights::RESHAPE)) || !block.covers(&selected) {
         return Err(Failure::Denied);
     }
-    if block.phase() != BlockPhase::Held || block.has_uses() || block.staged() {
+    if block.phase() != BlockPhase::Held {
         return Err(Failure::Busy);
     }
     let actual = meta.authorization().ok_or(Failure::Denied)?;

@@ -18,8 +18,9 @@ Split/Merge retains fixed Flat coordinates through sparse geometry overrides.
 Every new head receives the same newly advanced FlatVersion as its SlotVersion;
 retired child stamps are never reused. Allocation preparation failure restores
 the complete old holding and gate set. A merge cannot discard distinct original
-provenance chains. Staged holdings must first return to their original range;
-active maintenance publications and foreign or overlapping gates remain Busy.
+provenance chains. Selected staged holdings must first return to their original
+range; publications and foreign or overlapping gates on selected Pages remain
+Busy. Unrelated Pages and uses in a broader maintenance record are preserved.
 Existing logical Memo selections must still describe a complete physical unit
 after reshaping, so incompatible selections require an ordinary authorized
 replacement before publication.
