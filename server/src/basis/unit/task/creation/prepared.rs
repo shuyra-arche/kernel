@@ -102,7 +102,7 @@ impl PreparedTask {
         {
             return Err(NestError::OutOfMemory);
         }
-        let pend = Table::new().map_err(|_| NestError::OutOfMemory)?;
+        let pend = Table::new(self.ident.id).map_err(|_| NestError::OutOfMemory)?;
         let (task, ()) = crate::basis::unit::task::registry::insert(|| {
             commit();
             assert!(team.ready(), "publish: constructing team");

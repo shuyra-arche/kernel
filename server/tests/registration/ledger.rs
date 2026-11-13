@@ -4,7 +4,7 @@ use std::sync::Weak;
 
 #[test]
 fn heir_admission_counts_pending_reservations_and_drop_returns_capacity() {
-    let table = Table::new().unwrap();
+    let table = Table::new(kernel_api::model::identity::TaskId::new(0)).unwrap();
     let parent = PendId::mint(1);
     let mut pending: Vec<_> = (2..1026)
         .map(|raw| {
@@ -41,7 +41,7 @@ fn heir_admission_counts_pending_reservations_and_drop_returns_capacity() {
 
 #[test]
 fn closed_ledger_rejects_fresh_heir_preparation() {
-    let table = Table::new().unwrap();
+    let table = Table::new(kernel_api::model::identity::TaskId::new(0)).unwrap();
     table.close();
     assert_eq!(
         table

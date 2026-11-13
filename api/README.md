@@ -178,6 +178,16 @@ PendInfo is 16 words (128 bytes): `[token, target_kind, target_id, owner, lender
 mark, status, Limits...]`. Decoding checks both target family and full scope
 validity. A descriptive identity or observation never mints authority.
 
+Accord delegation is independent of Team/creator adjacency and accepts a live
+Dormant Task. It preserves the caller's live source/ancestor, distribution,
+operation, data and scope ceilings; it confers no execution-management rights.
+Registration uses fixed recipient budgets (1,024 total, 256 incoming, 8 per
+sending Task, 32 per sending Team) and the existing sender Heirs limit of 1,024.
+Prepared and unsettled registrations count. Exhaustion returns OutOfMemory;
+Busy retains continuation and hardware responsibility. Incoming saturation
+preserves 768 slots for local work. Return/Revoke/exit reclaim settled charges.
+See the [owner, failure and receive contract](../docs/pend-delegation.md).
+
 | Nest right | Bit | Scope |
 | --- | --- | --- |
 | INSPECT | 1 | Whole or Reservation |

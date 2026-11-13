@@ -118,6 +118,18 @@ derivation or Task for delegation. `pend::narrow(request)` similarly reads an
 retirement. Busy retains cleanup; no call implies safe physical reuse. The old
 Pend derive/same/release and ReleaseMode interfaces do not exist.
 
+Task delegation accepts unrelated Teams, including a live Dormant recipient.
+The caller must hold the live, distributable source with every requested right
+and range; delegation grants no Task management authority. Registration has
+fixed budgets: 1,024 total slots, at most 256 incoming slots, 8 per sending Task
+and 32 per sending Team at one recipient. Source Heirs retain their existing
+1,024-edge limit. Prepared and unsettled grants count; preparation failure rolls
+back, and Return/Revoke/exit release settled registrations. Exhaustion returns
+`PendFail::OutOfMemory`; contention returns Busy. Multiple Teams can fill the
+incoming partition, while 768 slots remain available for local work. No receiver
+call or prior message is required before an initial grant. See the
+[registration and effect contract](../docs/pend-delegation.md).
+
 ### Next-memory Flat/Nest interface
 
 `kernel_client::memory::{flat,nest}` is the next ABI interface. Construct the

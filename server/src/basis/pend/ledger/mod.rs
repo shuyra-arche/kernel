@@ -1,5 +1,6 @@
 //! Task-local authority records and the ordered locking used across ledgers.
 
+mod admission;
 mod cleanup;
 mod entry;
 mod table;
