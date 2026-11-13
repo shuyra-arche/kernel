@@ -33,15 +33,20 @@ fn yield_block_and_delayed_wakeup_preserve_one_window_of_credit() {
     let mut account = Account::new(20, 100);
     account.enter(10);
     account.leave(17);
-    assert_eq!(account.remaining(70), 13);
+    account.advance(70);
+    assert_eq!(account.remaining(), 13);
     account.enter(70);
     account.leave(80);
-    assert_eq!(account.remaining(109), 3);
-    assert_eq!(account.remaining(110), 20);
-    assert_eq!(account.remaining(1010), 20);
+    account.advance(109);
+    assert_eq!(account.remaining(), 3);
+    account.advance(110);
+    assert_eq!(account.remaining(), 20);
+    account.advance(1010);
+    assert_eq!(account.remaining(), 20);
     account.enter(1010);
     account.leave(1030);
-    assert_eq!(account.remaining(1050), 0);
+    account.advance(1050);
+    assert_eq!(account.remaining(), 0);
     assert_eq!(account.deadline(1050), 1110);
     assert_eq!(account.consumed, 37);
 }
@@ -53,12 +58,14 @@ fn late_interrupts_are_charged_across_windows_in_constant_work() {
     account.charge(235);
     assert_eq!(account.consumed, 235);
     assert_eq!(account.overruns, 175);
-    assert_eq!(account.remaining(235), 0);
+    account.advance(235);
+    assert_eq!(account.remaining(), 0);
     assert_eq!(account.deadline(235), 300);
     account.leave(239);
     assert_eq!(account.consumed, 239);
     assert_eq!(account.overruns, 179);
-    assert_eq!(account.remaining(300), 20);
+    account.advance(300);
+    assert_eq!(account.remaining(), 20);
 }
 
 #[test]
@@ -68,7 +75,8 @@ fn every_execution_segment_is_counted_once() {
     let mut now = 0;
     for i in 0..200 {
         now += 101;
-        assert_eq!(account.remaining(now), 37);
+        account.advance(now);
+        assert_eq!(account.remaining(), 37);
         account.enter(now);
         for _ in 0..i % 17 {
             now += 1;
@@ -187,4 +195,52 @@ fn schedule_wire_values_reject_unknown_extensions_and_invalid_ranges() {
         response: 6,
     };
     assert_eq!(ScheduleInfo::from_bytes(&info.to_bytes()), Some(info));
+}
+
+#[test]
+fn budget_observation_is_pure_and_explicit_advance_charges_only_once() {
+    let mut account = Account::new(20, 100);
+    account.enter(0);
+    account.advance(7);
+    let before = format!("{account:?}");
+    for _ in 0..10 {
+        assert_eq!(account.remaining(), 13);
+        assert_eq!(account.deadline(7), 20);
+        assert_eq!(account.replenishment(), 100);
+    }
+    assert_eq!(format!("{account:?}"), before);
+    account.advance(7);
+    assert_eq!(account.consumed, 7);
+    account.advance(10);
+    assert_eq!(account.remaining(), 10);
+    assert_eq!(account.consumed, 10);
+}
+
+#[test]
+fn failed_admission_rolls_back_only_preparation_and_never_an_admitted_contract() {
+    use super::task_schedule::{Schedule as Owned, account::Contract as OwnedContract};
+    let value = contract(4, 8, 20, 100);
+    let admitted = OwnedContract {
+        spec: value.spec,
+        budget: value.budget,
+        period: value.period,
+        latency: value.latency,
+        response: value.response,
+    };
+    let mut state = Owned::new();
+    assert!(!state.admit(admitted));
+    assert!(state.prepare());
+    assert!(!state.prepare());
+    assert!(!state.available());
+    state.cancel();
+    assert!(state.ordinary());
+    assert!(state.prepare());
+    assert!(state.admit(admitted));
+    state.cancel(); // Preparation guard after successful publication.
+    assert_eq!(state.contract(), Some(admitted));
+    assert!(!state.prepare());
+    state.donate(8, super::task_schedule::Dependency::Clear);
+    assert_eq!(state.priority(), 8);
+    assert_eq!(state.release(), Some(admitted));
+    assert!(state.ordinary());
 }

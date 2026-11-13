@@ -30,7 +30,8 @@ impl Ready {
         let mut peer = priority == 0 && !self.ordinary.is_empty();
         self.fixed.visit(MAX_TASKS, |task| {
             let mut schedule = task.schedule.lock();
-            if schedule.available(now) {
+            schedule.advance(now);
+            if schedule.available() {
                 peer |= schedule.priority() >= priority;
             } else {
                 at = at.min(schedule.deadline(now));
@@ -47,7 +48,8 @@ impl Ready {
         let mut best = 0;
         self.fixed.visit(MAX_TASKS, |task| {
             let mut schedule = task.schedule.lock();
-            if schedule.available(now) {
+            schedule.advance(now);
+            if schedule.available() {
                 best = best.max(schedule.priority());
             }
         });
@@ -76,7 +78,8 @@ impl Ready {
                 return;
             }
             let mut schedule = task.schedule.lock();
-            if schedule.available(now) && schedule.priority() > priority {
+            schedule.advance(now);
+            if schedule.available() && schedule.priority() > priority {
                 priority = schedule.priority();
                 best = Some(task.clone());
             }

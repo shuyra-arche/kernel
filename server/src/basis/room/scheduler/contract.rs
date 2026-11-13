@@ -4,8 +4,8 @@
 use crate::basis::unit::task::{
     Task,
     schedule::{
-        Schedule,
-        account::{Account, Contract, MAX_TASKS, analyze, priorities},
+        Dependency,
+        account::{Contract, MAX_TASKS, analyze, priorities},
     },
 };
 use crate::metal::{
@@ -70,7 +70,7 @@ pub(crate) fn admit(
     let _commit = crate::basis::commit();
     if !authorized(actor, task)
         || !(task.held() || task.stopped() && task.ready() && task.on_hart().is_none())
-        || !matches!(*task.schedule.lock(), Schedule::Ordinary { .. })
+        || !task.schedule.lock().ordinary()
         || task.dead()
         || !task.heir.lock().is_empty()
         || task.ident.team.nest.kind().is_supervisor()
@@ -86,7 +86,7 @@ pub(crate) fn admit(
         }
         admission.preparing = Some(Arc::downgrade(task));
     }
-    *task.schedule.lock() = Schedule::Preparing;
+    assert!(task.schedule.lock().prepare());
     let preparation = Preparation {
         task: task.clone(),
         destination,
@@ -95,10 +95,7 @@ pub(crate) fn admit(
     task.prepare_extensions(destination, spec.extensions)?;
     task.ident.prepare_resident().map_err(|_| UnitFail::Busy)?;
     let _commit = crate::basis::commit();
-    if !authorized(actor, task)
-        || task.dead()
-        || !matches!(*task.schedule.lock(), Schedule::Preparing)
-    {
+    if !authorized(actor, task) || task.dead() || !task.schedule.lock().preparing() {
         return Err(UnitFail::Denied);
     }
     let members = slot.admission.lock().members();
@@ -133,31 +130,14 @@ pub(crate) fn admit(
         return Err(UnitFail::Busy);
     }
     let _commit = crate::basis::commit();
-    if !authorized(actor, task)
-        || task.dead()
-        || !matches!(*task.schedule.lock(), Schedule::Preparing)
-    {
+    if !authorized(actor, task) || task.dead() || !task.schedule.lock().preparing() {
         return Err(UnitFail::Denied);
     }
     let mut admission = slot.admission.lock();
     for (task, contract) in members.iter().flatten().zip(&contracts[..count]) {
-        if let Schedule::Fixed {
-            contract: current, ..
-        } = &mut *task.schedule.lock()
-            && current.spec == contract.spec
-        {
-            // A removed Task may already have been admitted on another Hart.
-            // Never overwrite that distinct contract with this analysis.
-            *current = *contract;
-        }
+        task.schedule.lock().response(*contract);
     }
-    let contract = contracts[count];
-    *task.schedule.lock() = Schedule::Fixed {
-        contract,
-        account: Account::new(contract.budget, contract.period),
-        effective: spec.priority as u8,
-        dependency: None,
-    };
+    assert!(task.schedule.lock().admit(contracts[count]));
     admission.tasks[at] = Some(Arc::downgrade(task));
     slot.isolated.store(true, Ordering::Release);
     drop(admission);
@@ -189,10 +169,7 @@ impl Drop for Preparation {
                 .take()
                 .is_some_and(|task| task.ptr_eq(&Arc::downgrade(&self.task)))
         );
-        let mut state = self.task.schedule.lock();
-        if matches!(*state, Schedule::Preparing) {
-            *state = Schedule::new();
-        }
+        self.task.schedule.lock().cancel();
     }
 }
 pub(crate) fn evict(actor: &Task, task: &Arc<Task>) -> Result<(), UnitFail> {
@@ -206,7 +183,7 @@ pub(crate) fn evict(actor: &Task, task: &Arc<Task>) -> Result<(), UnitFail> {
 pub(crate) fn activated(task: &Task) -> bool {
     let contract = {
         let state = task.schedule.lock();
-        if matches!(*state, Schedule::Preparing) {
+        if state.preparing() {
             return false;
         }
         state.contract()
@@ -219,10 +196,9 @@ pub(crate) fn activated(task: &Task) -> bool {
 }
 pub(crate) fn release(task: &Task) {
     let _commit = crate::basis::commit();
-    let Some(contract) = task.schedule.lock().contract() else {
+    let Some(contract) = task.schedule.lock().release() else {
         return;
     };
-    *task.schedule.lock() = Schedule::new();
     let slot = &super::schedulers()[contract.spec.hart as usize];
     let mut admission = slot.admission.lock();
     let members = admission.members();
@@ -230,13 +206,11 @@ pub(crate) fn release(task: &Task) {
         .store(members.iter().any(Option::is_some), Ordering::Release);
     drop(admission);
     if let Some(actor) = members.iter().flatten().next() {
-        let server = match &*actor.schedule.lock() {
-            Schedule::Fixed { dependency, .. } => dependency
-                .as_ref()
-                .and_then(Weak::upgrade)
-                .filter(|task| !task.dead()),
-            Schedule::Ordinary { .. } | Schedule::Preparing => None,
-        };
+        let server = actor
+            .schedule
+            .lock()
+            .dependency()
+            .filter(|task| !task.dead());
         let _ = depend(actor, server.as_ref());
     }
     // A server exit also invalidates callers' retained service binding.
@@ -253,19 +227,12 @@ pub(crate) fn profile(actor: &Task, task: &Task) -> Result<ScheduleInfo, UnitFai
     }
     let now = clock::now().as_ticks();
     let mut state = task.schedule.lock();
-    let Schedule::Fixed {
-        contract,
-        account,
-        effective,
-        ..
-    } = &mut *state
-    else {
-        return Err(UnitFail::Denied);
-    };
-    let remaining = nanos(account.remaining(now));
+    state.advance(now);
+    let (contract, account, effective) = state.observation().ok_or(UnitFail::Denied)?;
+    let remaining = nanos(account.remaining());
     Ok(ScheduleInfo {
         schedule: contract.spec,
-        effective: *effective as u64,
+        effective: effective as u64,
         remaining,
         replenishment: clock::uptime_at(account.replenishment()),
         consumed: nanos(account.consumed),
@@ -295,20 +262,13 @@ pub(crate) fn depend(actor: &Arc<Task>, server: Option<&Arc<Task>>) -> Result<()
     for (at, task) in members.iter().enumerate() {
         let Some(task) = task else { continue };
         let state = task.schedule.lock();
-        let Schedule::Fixed {
-            contract,
-            dependency,
-            ..
-        } = &*state
-        else {
-            unreachable!()
-        };
+        let contract = state.contract().expect("admitted Task");
         base[at] = contract.spec.priority as u8;
         ceiling[at] = contract.spec.ceiling as u8;
         let target = if task.ident.id == actor.ident.id {
             server.cloned()
         } else {
-            dependency.as_ref().and_then(Weak::upgrade)
+            state.dependency()
         };
         if let Some(target) = target {
             edges[at] = members.iter().position(|other| {
@@ -323,18 +283,18 @@ pub(crate) fn depend(actor: &Arc<Task>, server: Option<&Arc<Task>>) -> Result<()
     }
     for (at, task) in members.iter().enumerate() {
         let Some(task) = task else { continue };
-        if let Schedule::Fixed {
-            effective: current,
-            dependency,
-            ..
-        } = &mut *task.schedule.lock()
-        {
-            *current = effective[at];
+        task.schedule.lock().donate(
+            effective[at],
             if task.ident.id == actor.ident.id {
-                *dependency = server.map(Arc::downgrade);
-            }
-        }
+                server.map_or(Dependency::Clear, |server| {
+                    Dependency::Await(Arc::downgrade(server))
+                })
+            } else {
+                Dependency::Keep
+            },
+        );
     }
+
     drop(admission);
     super::idle::nudge(HartId::new(own.spec.hart as usize));
     Ok(())

@@ -189,7 +189,8 @@ impl Slot {
         let ceiling = self.ceiling(&inner, now);
         let (priority, budget) = if reserved {
             let mut schedule = cur.schedule.lock();
-            (schedule.priority(), schedule.available(now))
+            schedule.advance(now);
+            (schedule.priority(), schedule.available())
         } else {
             (0, true)
         };
@@ -248,7 +249,9 @@ impl Slot {
             .map_or(0, |task| task.schedule.lock().priority());
         let mut at = inner.ready.deadline(now, priority);
         if let Some(task) = &inner.running {
-            at = at.min(task.schedule.lock().deadline(now));
+            let mut schedule = task.schedule.lock();
+            schedule.advance(now);
+            at = at.min(schedule.deadline(now));
         }
         inner.pending.visit(
             crate::basis::unit::task::schedule::account::MAX_TASKS,

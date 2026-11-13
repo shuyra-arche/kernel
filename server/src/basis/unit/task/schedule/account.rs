@@ -48,7 +48,7 @@ impl Account {
                 remaining: self.budget,
             };
         }
-        assert!(self.remaining(now) != 0, "dispatch without budget");
+        assert!(self.remaining() != 0, "dispatch without budget");
         self.running = Some(now);
     }
     pub(crate) fn leave(&mut self, now: u64) {
@@ -103,18 +103,14 @@ impl Account {
             };
         }
     }
-    pub(crate) fn remaining(&mut self, now: u64) -> u64 {
-        self.charge_if_running(now);
+    /// Explicitly commit elapsed time; observers never advance accounting.
+    pub(crate) fn advance(&mut self, now: u64) {
+        self.charge(now);
+    }
+    pub(crate) fn remaining(&self) -> u64 {
         match self.window {
             Window::Dormant => self.budget,
             Window::Open { remaining, .. } => remaining,
-        }
-    }
-    fn charge_if_running(&mut self, now: u64) {
-        if self.running.is_some() {
-            self.charge(now);
-        } else {
-            self.refresh(now);
         }
     }
     pub(crate) fn replenishment(&self) -> u64 {
@@ -123,8 +119,8 @@ impl Account {
             Window::Open { next, .. } => next,
         }
     }
-    pub(crate) fn deadline(&mut self, now: u64) -> u64 {
-        let remaining = self.remaining(now);
+    pub(crate) fn deadline(&self, now: u64) -> u64 {
+        let remaining = self.remaining();
         if remaining == 0 {
             self.replenishment()
         } else {
