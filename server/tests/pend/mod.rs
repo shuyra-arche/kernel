@@ -22,8 +22,11 @@ mod metal {
 mod ranges;
 mod scopes;
 mod selection;
+mod sources;
 #[path = "../../src/basis/pend/authority/state.rs"]
 mod state;
+#[path = "../../src/basis/pend/source/tracking.rs"]
+mod tracking;
 #[path = "../../src/basis/pend/window.rs"]
 mod window;
 use kernel_api::model::modifiable::Modifiable::No;

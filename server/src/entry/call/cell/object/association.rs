@@ -53,26 +53,9 @@ fn with_source<T>(
                         .get()
                         .checked_add(pos.page)
                         .ok_or(CellFail::NotAligned)?;
-                    let temporary = resolve_source(
-                        actor,
-                        SourceSpec::Source {
-                            token,
-                            offset,
-                            count: count.get(),
-                        },
-                    )?;
-                    let result = (|| {
-                        let hold = actor
-                            .pend
-                            .references
-                            .get(temporary)
-                            .ok_or(CellFail::Denied)?;
-                        let source = Source::new(actor, hold, PageOffset::ZERO, count)?;
-                        let (page, source) = materialize(source)?;
-                        run(page, source)
-                    })();
-                    actor.pend.references.remove(temporary);
-                    result
+                    let source = Source::from_pend(actor, token, PageOffset::new(offset), count)?;
+                    let (page, source) = materialize(source)?;
+                    run(page, source)
                 }
                 PendScope::Nest(NestScope::Mapping { .. }) => {
                     let mapping =

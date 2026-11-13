@@ -312,6 +312,22 @@ rechecks its creation license under COMMIT. Movement validates both complete
 source and target windows, TRANSFER and data access before registering either
 flight. Hold resolution uses the same live range/operation predicate.
 
+Flat/Share-backed association now builds its retained source directly from the
+actual caller's Pend. It no longer allocates, looks up or deletes a temporary
+SlotId. The Hold retains its immutable source window, original authority branch
+and data ceiling; public Slot identity belongs only to the legacy handle table.
+The original actor and branch are still revalidated on subsequent source use.
+
+Cleanup discovery is independent of those handles. Before association can expose
+a source, its caller records a weak discovery entry; repeated selections deduplicate
+by source identity. Each Task can track at most 1024 distinct live sources, including
+ones still referenced after a public Slot is removed. Capacity exhaustion rejects
+new preparation before materialization/association. Known sources remain usable
+at capacity; live entries are not evicted to admit another source. Failed cleanup
+retains its entry, while dead sources release capacity without retaining payloads.
+This bound also applies to legacy Slot registration, which can now fail at the
+discovery limit even when fewer than 1024 public handles remain.
+
 This is an incremental M2 implementation, not M2 completion or v11 activation.
 The public v10 Cell calls, SlotId table and compatibility coordinate semantics
 remain. Removing those public calls, exposing direct cross-Team Flat endpoints,
@@ -334,6 +350,13 @@ state owner: fixed coordinates after Narrow, Mapping/Whole separation, full
 window bounds, operation removal, ancestor revocation, holder death and suspended
 data access. These host checks do not execute the Task ledger, trap adapters,
 Flat/Mapping object lookup or a complete cross-Team transfer.
+
+`server/tests/pend/sources.rs` exercises the production bounded weak registry:
+retained discovery without a public handle, retry after incomplete cleanup,
+capacity rejection without eviction, deduplication, dead-source collection,
+exact identity and separate Task registries. Its payloads are inert host values;
+it does not execute Source construction, Task exit, Nest withdrawal or hardware
+retirement, and it does not establish that those obligations have settled.
 
 The value-codec tests do not prove live Pend validation, races, atomic commits, orphan recovery,
 request replay, retirement, data visibility, QEMU or hardware behavior. Those

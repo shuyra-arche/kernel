@@ -88,13 +88,7 @@ pub(super) fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, C
             let actor = caller(ident).ok_or(CellFail::Denied)?;
             let _serial = actor.pend.lock();
             let _commit = crate::basis::commit();
-            resolve_source(
-                &actor,
-                SourceSpec::Allocation {
-                    license,
-                    allocation,
-                },
-            )
+            create(&actor, license, allocation)
         }
         CellCall::Delete { slot } => release(slot, ident),
         CellCall::Split { slot } => reshape(slot, false, ident),

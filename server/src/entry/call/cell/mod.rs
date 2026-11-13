@@ -44,97 +44,25 @@ fn source_fail(error: kernel_api::abi::call::pend::PendFail) -> CellFail {
     }
 }
 
-enum SourceSpec {
-    Allocation {
-        license: PendId,
-        allocation: kernel_api::model::cell::Allocation,
-    },
-    Source {
-        token: PendId,
-        offset: usize,
-        count: usize,
-    },
-}
-
+/// Legacy v10 creation returns a SlotId; Pend-backed association does not.
 /// Caller holds the Task ledger serial and COMMIT until the reference is stored.
-fn resolve_source(task: &Arc<Task>, source: SourceSpec) -> Result<usize, CellFail> {
-    let (authorization, offset, count, ceiling, branch) = match source {
-        SourceSpec::Allocation {
-            license,
-            allocation,
-        } => {
-            let (range, authorization) =
-                crate::basis::flat::authority::allocate(task, license, allocation)
-                    .map_err(source_fail)?;
-            let count = range.page_count();
-            let ceiling = authorization.ceiling();
-            (authorization, PageOffset::ZERO, count, ceiling, None)
-        }
-        SourceSpec::Source {
-            token,
-            offset,
-            count,
-        } => {
-            let entry = pend::locate(task, token).ok_or(CellFail::Denied)?;
-            if !entry.associates() {
-                return Err(CellFail::Denied);
-            }
-            let meta = entry.target().memory().ok_or(CellFail::Denied)?;
-            let authorization = meta.authorization().ok_or(CellFail::Denied)?;
-            let count = PageCount::new(count).ok_or(CellFail::NotAligned)?;
-            let offset = PageOffset::new(offset);
-            use kernel_api::model::pend::{
-                FlatRights, Operations, PendRange, PendScope, ShareRights,
-            };
-            let scope = PendScope::Pages(PendRange::Pages {
-                offset: offset.get(),
-                count: count.get(),
-            });
-            if matches!(entry.target(), pend::Target::Flat(_)) {
-                let page = meta
-                    .source()
-                    .index()
-                    .get()
-                    .checked_add(offset.get())
-                    .ok_or(CellFail::NotAligned)?;
-                let position = kernel_api::model::flat::SlotPosition::new(
-                    token,
-                    meta.source().source_id(),
-                    page,
-                )
-                .ok_or(CellFail::NotAligned)?;
-                let selected =
-                    crate::basis::flat::authority::slot(task, position, FlatRights::ASSOCIATE)
-                        .map_err(source_fail)?;
-                if selected.page_count() != count {
-                    return Err(CellFail::NotAligned);
-                }
-            } else if !entry
-                .authority()
-                .selects(Operations::Share(ShareRights::ASSOCIATE), scope)
-            {
-                return Err(CellFail::Denied);
-            }
-            if authorization
-                .full_range()
-                .is_none_or(|range| range.range(offset, count).is_err())
-            {
-                return Err(CellFail::NoRegion);
-            }
-            authorization.ensure_internal().map_err(source_fail)?;
-            let ceiling = authorization.ceiling();
-            (
-                authorization,
-                offset,
-                count,
-                ceiling,
-                Some((token, entry.authority().clone())),
-            )
-        }
-    };
+fn create(
+    task: &Arc<Task>,
+    license: PendId,
+    allocation: kernel_api::model::cell::Allocation,
+) -> Result<usize, CellFail> {
+    let (range, authorization) =
+        crate::basis::flat::authority::allocate(task, license, allocation).map_err(source_fail)?;
+    let ceiling = authorization.ceiling();
     task.pend
         .references
-        .insert(authorization, offset, count, ceiling, branch)
+        .insert(
+            authorization,
+            PageOffset::ZERO,
+            range.page_count(),
+            ceiling,
+            None,
+        )
         .map_err(source_fail)
 }
 
