@@ -43,7 +43,9 @@ pub(crate) fn block_with_call<E: WaitFail>(
     if take_beacon(key) {
         return Ok(Blocked::Resume);
     }
-    let ticket = prepare_wait(&me, key, &life, dur, wait.as_ref()).map_err(|()| E::oom())?;
+    let registration =
+        prepare_wait(&_commit, &me, key, &life, dur, wait.as_ref()).map_err(|()| E::oom())?;
+    let ticket = registration.ticket();
     drop(me);
     let (task, next_pa) = current().handoff(
         crate::basis::room::scheduler::slot::Departure::Wait {
@@ -53,28 +55,11 @@ pub(crate) fn block_with_call<E: WaitFail>(
         },
         &_commit,
     );
-    let queued = {
-        let mut sites = sites(key).lock();
-        let queued = match sites.get_mut(&key) {
-            None => false,
-            Some(site) if Anchor::dead(&site.life) => false,
-            Some(site) if site.pend => {
-                site.pend = false;
-                false
-            }
-            Some(site) => {
-                site.enqueue(task.clone());
-                true
-            }
-        };
-        prune(&mut sites, key);
-        queued
-    };
+    let queued = registration.enroll(&task);
 
     if queued {
         drop(task);
     } else {
-        void(ticket);
         rise(core::iter::once(task), insert);
     }
     #[cfg(debug_assertions)]
