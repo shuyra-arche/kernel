@@ -141,11 +141,11 @@ pub(in super::super) fn run(at: usize, count: usize) {
     // Fencing does not promise a fault; an explicit access after retirement must.
     let late_faults = context(root).fault_sequence;
     transfer(bar, ADDRESS + 4096, true);
-    transfer(bar, ADDRESS, true);
+    transfer(bar, ADDRESS, false);
     let until = room::clock() + 2_000_000_000;
     while context(root).fault_sequence == late_faults {
         assert!(room::clock() < until);
-        room::yield_();
+        room::sleep_until((room::clock() + 1_000_000).min(until)).unwrap();
     }
     assert_eq!(context(root).fault_address, ADDRESS as u64);
     let faults = sign::create(crate::license::get()).unwrap();

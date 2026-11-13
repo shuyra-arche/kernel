@@ -22,21 +22,27 @@ use kernel_api::{
 };
 use kernel_client::call::{pend, room, share_view, sign, unit};
 static LOAD_STOP: AtomicBool = AtomicBool::new(false);
-static LOAD_ENTERED: AtomicUsize = AtomicUsize::new(0);
+static LOAD_ENTERED: AtomicU32 = AtomicU32::new(0);
 struct Load([TaskId; 4]);
 impl Load {
     fn start() -> Self {
         LOAD_STOP.store(false, Ordering::Release);
         LOAD_ENTERED.store(0, Ordering::Release);
-        let tasks = core::array::from_fn(|_| {
-            let task = super::lifecycle::spawn(load_worker as *const () as usize);
+        // Construct every stack/mapping before starting the synthetic syscall
+        // load. Construction is setup, not part of IRQ delivery under load.
+        let tasks =
+            core::array::from_fn(|_| super::lifecycle::spawn(load_worker as *const () as usize));
+        for task in tasks {
             unit::resume(UnitTarget::Task(task)).unwrap();
-            task
-        });
+        }
         let deadline = room::clock() + 3_000_000_000;
-        while LOAD_ENTERED.load(Ordering::Acquire) != tasks.len() {
+        loop {
+            let entered = LOAD_ENTERED.load(Ordering::Acquire);
+            if entered == tasks.len() as u32 {
+                break;
+            }
             assert!(room::clock() < deadline, "load workers did not start");
-            room::yield_();
+            crate::room::wait(&LOAD_ENTERED, entered, Wait::At(deadline));
         }
         Self(tasks)
     }
@@ -51,6 +57,7 @@ impl Load {
 }
 extern "C" fn load_worker() -> ! {
     LOAD_ENTERED.fetch_add(1, Ordering::Release);
+    room::wake_value(VirtAddr::new(LOAD_ENTERED.as_ptr() as usize), true).unwrap();
     while !LOAD_STOP.load(Ordering::Acquire) {
         room::yield_();
     }
@@ -73,14 +80,16 @@ extern "C" fn observer() -> ! {
     unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 static ENTERED: AtomicU32 = AtomicU32::new(0);
-static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
+static REVOKE_FINISHED: AtomicU32 = AtomicU32::new(0);
 static WATCH_TOKEN: AtomicUsize = AtomicUsize::new(0);
 static WATCH_ENTERED: AtomicU32 = AtomicU32::new(0);
 static WATCH_OBSERVED: AtomicU32 = AtomicU32::new(0);
 static WATCH_RELEASE: AtomicU32 = AtomicU32::new(0);
+static WATCH_PHASE: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
 extern "C" fn watch() -> ! {
     let token = PendId::mint(WATCH_TOKEN.load(Ordering::Acquire));
-    WATCH_ENTERED.fetch_add(1, Ordering::Release);
+    let index = WATCH_ENTERED.fetch_add(1, Ordering::Release) as usize;
+    WATCH_PHASE[index].store(1, Ordering::Release);
     room::wake_value(VirtAddr::new(WATCH_ENTERED.as_ptr() as usize), true).unwrap();
     // The controller first confirms every observer is blocked here, then starts
     // contention and the IRQ. Its shared delivery deadline bounds all observers;
@@ -89,12 +98,15 @@ extern "C" fn watch() -> ! {
         sign::listen(token, Wait::Infinite).unwrap(),
         SignReply::Triggered { .. }
     ));
+    WATCH_PHASE[index].store(2, Ordering::Release);
     assert!(sign::consume(token, 1).is_err());
+    WATCH_PHASE[index].store(3, Ordering::Release);
     WATCH_OBSERVED.fetch_add(1, Ordering::Release);
     room::wake_value(VirtAddr::new(WATCH_OBSERVED.as_ptr() as usize), true).unwrap();
     // Keep Task retirement outside the delivery measurement. The first woken
     // observers must not start cross-Hart mapping cleanup before the rest run.
     while WATCH_RELEASE.load(Ordering::Acquire) == 0 {
+        WATCH_PHASE[index].store(4, Ordering::Release);
         crate::room::wait(&WATCH_RELEASE, 0, Wait::Infinite);
     }
     unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
@@ -244,8 +256,8 @@ extern "C" fn revoked_driver() -> ! {
     ));
     // Keep this ledger alive until the controller finishes exact-identity
     // retries; Task exit would otherwise race the same physical retirement.
-    while !REVOKE_FINISHED.load(Ordering::Acquire) {
-        room::yield_();
+    while REVOKE_FINISHED.load(Ordering::Acquire) == 0 {
+        crate::room::wait(&REVOKE_FINISHED, 0, Wait::Infinite);
     }
     unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
@@ -270,6 +282,7 @@ pub(super) fn run(at: usize, count: usize) {
     open(page);
     assert_ne!(read(5) & 0x20, 0);
     assert!(sign::listen(root, Wait::Poll).is_err());
+    writeln!(super::Console, "START interrupt load-setup").unwrap();
     let load = Load::start();
     let token = sign_branch(root, AccordTarget::Caller);
     assert!(
@@ -290,6 +303,7 @@ pub(super) fn run(at: usize, count: usize) {
     write(1, 0);
     sign::consume(token, pending).unwrap();
     load.finish();
+    writeln!(super::Console, "START interrupt observer-setup").unwrap();
     // Prepare observers without the synthetic Yield load. Both the initial
     // pending IRQ above and actual notification delivery below retain that load.
     // More listeners than a notification batch must all progress. Observation
@@ -329,6 +343,7 @@ pub(super) fn run(at: usize, count: usize) {
     sign::attach(routed, source, 0).unwrap();
     assert_eq!(WATCH_OBSERVED.load(Ordering::Acquire), 0);
     let load = Load::start();
+    writeln!(super::Console, "START interrupt observers=6").unwrap();
     // This batch checks delivery to all observers under contention. Latency
     // is measured separately, so allow host scheduling headroom for the batch.
     let until = room::clock().saturating_add(5_000_000_000);
@@ -347,7 +362,12 @@ pub(super) fn run(at: usize, count: usize) {
             LOAD_STOP.store(true, Ordering::Release);
             let states = watchers
                 .map(|task| super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task))));
-            panic!("UART notification batch stalled: observed {seen}/6; tasks={states:?}");
+            let phases = WATCH_PHASE
+                .each_ref()
+                .map(|phase| phase.load(Ordering::Acquire));
+            panic!(
+                "UART notification batch stalled: observed {seen}/6; phases={phases:?}; tasks={states:?}"
+            );
         }
         crate::room::wait(&WATCH_OBSERVED, seen, Wait::At(until));
     }
@@ -445,7 +465,7 @@ pub(super) fn run(at: usize, count: usize) {
     // Independently revoking either half closes the binding and wakes its waiter.
     for revoke_view in [false, true] {
         ENTERED.store(0, Ordering::Release);
-        REVOKE_FINISHED.store(false, Ordering::Release);
+        REVOKE_FINISHED.store(0, Ordering::Release);
         let task = super::lifecycle::spawn(revoked_driver as *const () as usize);
         let (view, branch) = pair(page, root, task);
         VIEW.store(view.get(), Ordering::Release);
@@ -475,7 +495,8 @@ pub(super) fn run(at: usize, count: usize) {
                 }
             }
         }
-        REVOKE_FINISHED.store(true, Ordering::Release);
+        REVOKE_FINISHED.store(1, Ordering::Release);
+        room::wake_value(VirtAddr::new(REVOKE_FINISHED.as_ptr() as usize), true).unwrap();
         assert!(super::lifecycle::wait_task(task));
         assert_eq!(super::lifecycle::result(task), (1, 0));
         super::lifecycle::delete(task);

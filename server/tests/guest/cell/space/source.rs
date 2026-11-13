@@ -2,7 +2,7 @@
 use super::*;
 use core::{
     fmt::Write,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
 use kernel_api::{
     abi::call::nest::NestFail,
@@ -11,6 +11,7 @@ use kernel_api::{
         modifiable::Modifiable,
         pend::{NarrowRequest, PendStatus},
         unit::{ExitCause, ExitScope, UnitQuery, UnitState, UnitTarget},
+        wait::Wait,
     },
 };
 use kernel_client::call::{cell, room, unit};
@@ -24,16 +25,26 @@ static COPIED: AtomicUsize = AtomicUsize::new(0);
 static DELETED: AtomicUsize = AtomicUsize::new(0);
 static EXIT: AtomicUsize = AtomicUsize::new(0);
 static CLEANUP: AtomicUsize = AtomicUsize::new(0);
+static CHANGED: AtomicU32 = AtomicU32::new(0);
+
+fn announce(flag: &AtomicUsize, value: usize) {
+    flag.store(value, Ordering::Release);
+    CHANGED.fetch_add(1, Ordering::Release);
+    room::wake_value(VirtAddr::new(CHANGED.as_ptr() as usize), true).unwrap();
+}
 
 fn until(flag: &AtomicUsize) -> usize {
     let deadline = room::clock() + 5_000_000_000;
     loop {
+        let changed = CHANGED.load(Ordering::Acquire);
         let value = flag.load(Ordering::Acquire);
         if value != 0 {
             return value;
         }
         assert!(room::clock() < deadline, "source fixture handshake stalled");
-        room::yield_();
+        // Park setup peers instead of making their repeated syscalls contend
+        // with the source transaction whose completion they are observing.
+        crate::room::wait(&CHANGED, changed, Wait::At(deadline));
     }
 }
 
@@ -62,7 +73,7 @@ extern "C" fn owner() -> ! {
             scope: mapping(source, PendRange::Inherit),
         },
     );
-    ALIAS.store(alias.get(), Ordering::Release);
+    announce(&ALIAS, alias.get());
     until(&COPIED);
     let request = NarrowRequest {
         token: source,
@@ -84,7 +95,7 @@ extern "C" fn owner() -> ! {
         )
         .is_err()
     );
-    DELETED.store(1, Ordering::Release);
+    announce(&DELETED, 1);
     until(&EXIT);
     unit::exit(77, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
@@ -117,11 +128,11 @@ extern "C" fn publisher() -> ! {
     );
     let old = crate::memo(root, 0);
     ADDRESS.store(address.get(), Ordering::Release);
-    OBSERVER.store(observer.get(), Ordering::Release);
+    announce(&OBSERVER, observer.get());
     crate::lifecycle::return_pend(alias);
     assert_eq!(crate::info(old).state, CellState::Published);
     assert_eq!(crate::read(address, 0), 0x13579bdf);
-    COPIED.store(1, Ordering::Release);
+    announce(&COPIED, 1);
     until(&CLEANUP);
     assert_eq!(
         crate::info(crate::raw_memo(root, 0)).state,
@@ -175,7 +186,7 @@ pub(super) fn run() {
     assert_eq!(sibling.state, CellState::Published);
     assert_eq!(crate::read(address, 0), 0x13579bdf);
     assert_eq!(crate::read(address, 4096), 0x2468ace0);
-    EXIT.store(1, Ordering::Release);
+    announce(&EXIT, 1);
     let deadline = room::clock() + 5_000_000_000;
     loop {
         let source = crate::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(a)));
@@ -197,7 +208,7 @@ pub(super) fn run() {
             room::clock() < deadline,
             "foreign source cleanup stalled: {source:?}"
         );
-        room::yield_();
+        room::sleep_until((room::clock() + 1_000_000).min(deadline)).unwrap();
     }
     assert_eq!(id(observer), identity);
     assert_eq!(crate::pend::inspect(observer).status, PendStatus::Active);
@@ -232,7 +243,7 @@ pub(super) fn run() {
             room::clock() < deadline,
             "stale read did not fault: {result:?}"
         );
-        room::yield_();
+        room::sleep_until((room::clock() + 1_000_000).min(deadline)).unwrap();
     }
     assert_eq!(crate::info(crate::raw_memo(observer, 1)), sibling);
     assert_eq!(crate::read(address, 4096), 0x2468ace0);
@@ -240,7 +251,7 @@ pub(super) fn run() {
     assert_eq!(crate::lifecycle::result(a), (1, 77));
     crate::lifecycle::delete(a);
     crate::lifecycle::return_pend(observer);
-    CLEANUP.store(1, Ordering::Release);
+    announce(&CLEANUP, 1);
     assert!(crate::lifecycle::wait_task(probe));
     let result = crate::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(probe)));
     assert!(

@@ -82,7 +82,7 @@ fn returned(token: PendId) {
             Err(error) => {
                 assert_eq!(error.source, kernel_api::abi::call::pend::PendFail::Busy);
                 assert!(room::clock() < until, "Pend return stalled");
-                room::yield_();
+                room::sleep_until((room::clock() + 1_000_000).min(until)).unwrap();
             }
         }
     }
@@ -138,7 +138,7 @@ fn wait(pos: CellPosition, state: CellState) {
     let until = room::clock() + 2_000_000_000;
     while super::info(pos).state != state {
         assert!(room::clock() < until, "Memo deadline {state:?}");
-        room::yield_();
+        room::sleep_until((room::clock() + 1_000_000).min(until)).unwrap();
     }
 }
 fn publish(pos: CellPosition) {
@@ -187,7 +187,7 @@ fn closed(token: PendId) {
             "Nest close deadline {:?}",
             context(token)
         );
-        room::yield_();
+        room::sleep_until((room::clock() + 1_000_000).min(until)).unwrap();
     }
 }
 fn read(base: VirtAddr, offset: usize) -> u32 {
