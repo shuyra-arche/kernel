@@ -3,16 +3,16 @@ use kernel_api::{
     abi::call::pend::PendFail,
     address::{PageCount, PageOffset},
     model::{
-        cell::MappingId,
         modifiable::Modifiable::{No, Yes},
+        nest::ReservationId,
         pend::{Distributable, Limits, NestRights, NestScope, Operations, PendRange, PendScope},
     },
 };
 use std::sync::{Arc, Barrier};
 
 fn mapping(id: usize, offset: usize, count: usize) -> PendScope {
-    PendScope::Nest(NestScope::Mapping {
-        id: MappingId::from_bytes(&(id as u64).to_le_bytes()).unwrap(),
+    PendScope::Nest(NestScope::Reservation {
+        id: ReservationId::from_bytes(&(id as u64).to_le_bytes()).unwrap(),
         range: PendRange::Pages { offset, count },
     })
 }
@@ -21,7 +21,7 @@ fn authority() -> Arc<Pend> {
     Pend::try_new_scope(
         Yes,
         mapping(1, 10, 8),
-        Operations::Nest(NestRights::mapping()),
+        Operations::Nest(NestRights::reservation()),
         Distributable::Yes,
     )
     .unwrap()
@@ -50,8 +50,8 @@ fn limits_keep_scope_identity_and_reject_absolute_window_widening() {
         mapping(2, 12, 2),
         mapping(1, 9, 2),
         mapping(1, 17, 2),
-        PendScope::Nest(NestScope::Mapping {
-            id: MappingId::from_bytes(&1u64.to_le_bytes()).unwrap(),
+        PendScope::Nest(NestScope::Reservation {
+            id: ReservationId::from_bytes(&1u64.to_le_bytes()).unwrap(),
             range: PendRange::Inherit,
         }),
     ] {

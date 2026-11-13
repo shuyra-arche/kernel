@@ -57,9 +57,9 @@ fn with_source<T>(
                     let (page, source) = materialize(source)?;
                     run(page, source)
                 }
-                PendScope::Nest(NestScope::Mapping { .. }) => {
-                    let mapping =
-                        Mapping::acquire(actor, token, NestRights::INSERT).map_err(source_fail)?;
+                PendScope::Nest(NestScope::Reservation { .. }) => {
+                    let mapping = Reservation::acquire(actor, token, NestRights::INSERT)
+                        .map_err(source_fail)?;
                     let page = mapping.page(pos.page).map_err(source_fail)?;
                     let span = mapping.span().map_err(source_fail)?;
                     let (data, source) = {
@@ -99,7 +99,7 @@ pub(in crate::entry::call) fn associate(
     let CellObject::Pend(token) = spec.target.object else {
         return Err(CellFail::Denied);
     };
-    let mapping = Mapping::acquire(&actor, token, NestRights::INSERT).map_err(source_fail)?;
+    let mapping = Reservation::acquire(&actor, token, NestRights::INSERT).map_err(source_fail)?;
     let page = mapping.page(spec.target.page).map_err(source_fail)?;
     let span = mapping.span().map_err(source_fail)?;
     let info = span.inspect_memo(page)?;

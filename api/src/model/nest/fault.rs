@@ -1,15 +1,15 @@
-//! Next-memory-ABI fault routing values. A route is a Mapping-owned record,
+//! Next-memory-ABI fault routing values. A route is a Reservation-owned record,
 //! never an authorization root. Events describe identities, not data grants.
 
 use super::{MemoGeneration, NestId};
 use crate::model::{
-    cell::MappingId,
     flat::{FlatId, SlotVersion},
     identity::{PendId, TaskId},
+    nest::ReservationId,
 };
 use core::num::NonZeroU64;
 
-/// Maximum retained events per Mapping. Pending events cannot be evicted.
+/// Maximum retained events per Reservation. Pending events cannot be evicted.
 pub const FAULT_CAPACITY: usize = 16;
 /// Finite recovery budget in Room.Clock nanoseconds, capped at sixty seconds.
 pub const MAX_FAULT_NS: u64 = 60_000_000_000;
@@ -34,7 +34,7 @@ impl FaultEpoch {
     }
 }
 
-/// Mapping-wide event identity, distinct from route epochs and Memo generations.
+/// Reservation-wide event identity, distinct from route epochs and Memo generations.
 /// Never reset on route replacement; zero is reserved for an initial read cursor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FaultSequence(NonZeroU64);
@@ -108,7 +108,7 @@ impl FaultPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaultStatus {
     pub nest: NestId,
-    pub mapping: MappingId,
+    pub reservation: ReservationId,
     pub epoch: FaultEpoch,
     pub phase: FaultPhase,
     pub handler: Option<TaskId>,
@@ -117,8 +117,8 @@ pub struct FaultStatus {
 }
 impl FaultStatus {
     pub fn valid(self) -> bool {
-        self.mapping.get() > 0
-            && self.mapping.get() <= isize::MAX as usize
+        self.reservation.get() > 0
+            && self.reservation.get() <= isize::MAX as usize
             && match self.phase {
                 FaultPhase::Disabled => {
                     self.handler.is_none()
@@ -175,7 +175,7 @@ impl FaultAccess {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaultEvent {
     pub nest: NestId,
-    pub mapping: MappingId,
+    pub reservation: ReservationId,
     pub epoch: FaultEpoch,
     pub sequence: FaultSequence,
     pub memo_page: usize,
@@ -188,8 +188,8 @@ pub struct FaultEvent {
 }
 impl FaultEvent {
     pub fn valid(self) -> bool {
-        self.mapping.get() > 0
-            && self.mapping.get() <= isize::MAX as usize
+        self.reservation.get() > 0
+            && self.reservation.get() <= isize::MAX as usize
             && self.epoch.get() > 1
             && crate::model::cell::pages(self.memo_page, 1).is_some()
             && crate::model::cell::pages(self.slot_page, 1).is_some()

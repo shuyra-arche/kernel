@@ -12,7 +12,7 @@ The reviewed source baseline is Kernel
 `f61164b594226978d15040fbd9e5847e7974b738`
 (the merge of [#144](https://github.com/shuyra-arche/kernel/pull/144)),
 after the issue's original `ac381c7` / ABI v9 baseline. #144 already implements
-Nest Whole/Mapping authorization from #141. Preserve that work; do not recreate
+Nest Whole/Reservation authorization from #141. Preserve that work; do not recreate
 Memo authorization roots. Engineering guidance was read at
 `.github@11d25fcfeb1ceeda05a9e137bace040cc7f5517d`.
 
@@ -36,14 +36,14 @@ reject; u64 revisions and record identities preserve their complete width.
 | --- | ---: | --- | --- |
 | `flat::SlotPosition` | 24 | `[flat_pend, flat_id, page]` | Fixed Flat-origin position; no Task-local SlotId |
 | `flat::SlotVersion` | 8 | `[version]` | Nonzero residency/geometry revision |
-| `nest::MemoPosition` | 32 | `[nest_pend, nest_id, mapping_id, page]` | Fixed Mapping-origin position; requires Mapping scope |
+| `nest::MemoPosition` | 32 | `[nest_pend, nest_id, reservation_id, page]` | Fixed Reservation-origin position; requires Reservation scope |
 | `nest::MemoGeneration` | 8 | `[generation]` | Nonzero logical association/publication generation |
 | `flat::BlockRef` | 24 | `[flat_id, record_id, generation]` | Maintenance record locator; contains no live grant |
 | `flat::BlockGeneration` | embedded | BlockRef word 2 | Nonzero maintenance generation, distinct from Slot/Memo revisions |
 
 Position identity and expected revision are separate. Inspect accepts a position
 without knowing its current revision. A mutation must additionally carry the
-expected revision. FlatId, NestId, MappingId and PageId remain descriptive;
+expected revision. FlatId, NestId, ReservationId and PageId remain descriptive;
 numeric equality does not confer authorization.
 
 `SlotPosition::new` / `MemoPosition::new` validate the same representation as
@@ -66,7 +66,7 @@ not reused within one Flat; takeover advances the distinct maintenance generatio
 
 Both position types provide `fits(offset, count, level)`. This is a pure checked
 geometry predicate, not a saved permission proof. `offset` and `page` use the
-same **original** Flat/Mapping origin. For a level-1 physical Page, `page=512`
+same **original** Flat/Reservation origin. For a level-1 physical Page, `page=512`
 covers `[512, 1024)` in 4 KiB ABI units. It fits a window `[512, 1024)` but not
 `[513, 1025)` or `[512, 1023)`. Coordinate zero does not become 512 after Narrow.
 The window may be broader or unaligned; the selected complete Page must fit.
@@ -108,22 +108,22 @@ slots under the new global version prefix.
 | ---: | --- | --- |
 | 16 | Create | None NEST; Internal only |
 | 17 | Delete | Whole DELETE; close the space, retain incomplete hardware work |
-| 18 | Inspect | Explicit Object / Memo / Mapping / Request query |
-| 19 | Reserve | Whole RESERVE; vacant address reservation; returns Mapping Pend and address |
-| 20 | Release | Mapping RELEASE; entire original reservation; no premature address reuse |
-| 21 | Insert | Mapping INSERT; MemoPosition + generation + authorized logical source; replacement also REMOVE |
-| 22 | Remove | Mapping REMOVE; MemoPosition + generation; old publication settled |
-| 23 | Publish | Mapping PUBLISH; MemoPosition + generation; optional live Flat Pend + BlockRef |
-| 24 | Retract | Mapping RETRACT; exact Memo publication generation |
-| 25 | Protect | Mapping PROTECT; generation and requested access within all ceilings |
-| 26 | FaultRoute | Full Mapping FAULT; expected MappingVersion/route epoch; register actual caller or disable |
+| 18 | Inspect | Explicit Object / Memo / Reservation / Request query |
+| 19 | Reserve | Whole RESERVE; vacant address reservation; returns Reservation Pend and address |
+| 20 | Release | Reservation RELEASE; entire original reservation; no premature address reuse |
+| 21 | Insert | Reservation INSERT; MemoPosition + generation + authorized logical source; replacement also REMOVE |
+| 22 | Remove | Reservation REMOVE; MemoPosition + generation; old publication settled |
+| 23 | Publish | Reservation PUBLISH; MemoPosition + generation; optional live Flat Pend + BlockRef |
+| 24 | Retract | Reservation RETRACT; exact Memo publication generation |
+| 25 | Protect | Reservation PROTECT; generation and requested access within all ceilings |
+| 26 | FaultRoute | Full Reservation FAULT; expected ReservationVersion/route epoch; register actual caller or disable |
 
-Retain current Nest Whole/Mapping rights separation and Pend target kind 4.
+Retain current Nest Whole/Reservation rights separation and Pend target kind 4.
 Do not reintroduce target kind 7, a Slot root or a maintenance Pend target.
 Flat's current rights bits 0–5 retain their meanings. Proposed new rights are
 OCCUPY bit 6, VACATE bit 7 and RESHAPE bit 8. BLOCK alone never grants read,
 write, TRANSFER, VACATE or RESHAPE. These bits are **not enabled** in current
-`FlatRights` and current Limits decoders continue rejecting them. Mapping-only
+`FlatRights` and current Limits decoders continue rejecting them. Reservation-only
 FAULT bit 12 is likewise proposed for route configuration, not enabled in v10
 `NestRights`; it conveys no data or publication rights.
 
@@ -257,10 +257,10 @@ independent record; the current `external_writer: bool` cannot represent this.
 
 Ordinary faults and Publish must report nonresidency without implicitly zeroing
 Fresh or Missing. The fault protocol must be implemented together with that
-change: registration authority, stable Mapping/Flat identity and coordinate,
+change: registration authority, stable Reservation/Flat identity and coordinate,
 Memo generation, Slot version, event sequence, notification coalescing, service
-death and bounded waiting/failure behavior. The [fault route and wait encoding](memory-wire.md#mapping-fault-routes-and-bounded-recovery)
-now specifies Mapping-owned registration, retained events, coalesced Sign hints,
+death and bounded waiting/failure behavior. The [fault route and wait encoding](memory-wire.md#reservation-fault-routes-and-bounded-recovery)
+now specifies Reservation-owned registration, retained events, coalesced Sign hints,
 finite deadlines and explicit failure reasons. Existing boot `Trap::PageFault`
 delivery does not implement that recovery contract. Do not disable
 materialization in isolation and leave callers waiting indefinitely.
@@ -304,9 +304,9 @@ those owners against the fixed contract and records any deliberate contract chan
 See the [M2 acceptance record](memory-m2.md) for the complete requirement map,
 implementation evidence and explicit v10 compatibility/activation boundary.
 
-The Server now normalizes v10 Flat source and Mapping coordinates before using
+The Server now normalizes v10 Flat source and Reservation coordinates before using
 fixed-origin `SlotPosition` / `MemoPosition` resolvers. They check the actual
-Flat or Nest/Mapping identity and require the complete geometry unit to fit the
+Flat or Nest/Reservation identity and require the complete geometry unit to fit the
 live grant. `Pend::selects` checks scope identity, range and operation bits from
 one authoritative state, including live ancestry. A returned range is not a
 cached permission; callers still serialize and recheck at admission/commit.
@@ -357,10 +357,10 @@ The backend evidence tests compile the production Rust proof interface with
 explicitly synthetic attestations; they do not claim a physical implementation.
 
 `server/tests/pend/selection.rs` exercises the production live authority and
-state owner: fixed coordinates after Narrow, Mapping/Whole separation, full
+state owner: fixed coordinates after Narrow, Reservation/Whole separation, full
 window bounds, operation removal, ancestor revocation, holder death and suspended
 data access. These host checks do not execute the Task ledger, trap adapters,
-Flat/Mapping object lookup or a complete cross-Team transfer.
+Flat/Reservation object lookup or a complete cross-Team transfer.
 
 `server/tests/pend/sources.rs` exercises the production bounded weak registry:
 retained discovery without a public handle, retry after incomplete cleanup,

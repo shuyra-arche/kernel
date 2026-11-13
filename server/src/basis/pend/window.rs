@@ -34,8 +34,8 @@ impl Window {
             }
             (PendScope::Pages(range), PendScope::Pages(_)) => range,
             (
-                PendScope::Nest(NestScope::Mapping { id, range }),
-                PendScope::Nest(NestScope::Mapping { id: next, .. }),
+                PendScope::Nest(NestScope::Reservation { id, range }),
+                PendScope::Nest(NestScope::Reservation { id: next, .. }),
             ) if id == next => range,
             _ => return Err(PendFail::Denied),
         };
@@ -52,8 +52,8 @@ impl Window {
         };
         Ok(match requested {
             PendScope::Pages(_) => PendScope::Pages(range),
-            PendScope::Nest(NestScope::Mapping { id, .. }) => {
-                PendScope::Nest(NestScope::Mapping { id, range })
+            PendScope::Nest(NestScope::Reservation { id, .. }) => {
+                PendScope::Nest(NestScope::Reservation { id, range })
             }
             _ => return Err(PendFail::Denied),
         })

@@ -392,9 +392,9 @@ fn scoped_pend_descriptors_remain_caller_snapshots() {
         abi::call::pend::operations::{Accord, Narrow},
         address::VirtAddr,
         model::{
-            cell::MappingId,
             identity::Mark,
             modifiable::Modifiable,
+            nest::ReservationId,
             pend::{
                 AccordRequest, AccordTarget, Distributable, Limits, NarrowRequest, NestRights,
                 NestScope, Operations, PendRange, PendScope,
@@ -405,8 +405,8 @@ fn scoped_pend_descriptors_remain_caller_snapshots() {
         operations: Operations::Nest(NestRights::INSPECT | NestRights::PUBLISH),
         modifiable: Modifiable::No,
         distributable: Distributable::No,
-        scope: PendScope::Nest(NestScope::Mapping {
-            id: MappingId::from_bytes(&23u64.to_le_bytes()).unwrap(),
+        scope: PendScope::Nest(NestScope::Reservation {
+            id: ReservationId::from_bytes(&23u64.to_le_bytes()).unwrap(),
             range: PendRange::pages(2, 3).unwrap(),
         }),
     };

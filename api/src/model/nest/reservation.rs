@@ -1,5 +1,5 @@
-//! Descriptive mapping identity used by completion observations. Ordinary Cell
-//! operations require a live mapping-scoped Nest Pend, never this numeric ID alone.
+//! Stable address-reservation identity. Access requires a live reservation-scoped
+//! Nest Pend; this descriptive identity never grants authority.
 
 use crate::abi::register::{Decode, Wire};
 use crate::abi::reply::FromPair;
@@ -7,14 +7,13 @@ use crate::address::VirtAddr;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
-pub struct MappingId(pub(crate) usize);
+pub struct ReservationId(pub(crate) usize);
 
-impl MappingId {
+impl ReservationId {
     /// 无效哨兵（0）：没有这一段关系。
     pub const NONE: Self = Self(0);
 
-    /// 号在**线上**的宽度（8 字节 LE）——与 [`SlotId`](super::SlotId)
-    /// 同形：一个号在账上占多宽是该号自己的事实。
+    /// Identity width on the wire, unchanged by the v10 naming migration.
     pub const WIDTH: usize = 8;
 
     /// 由裸值造一枚（线上解码面）。
@@ -31,7 +30,7 @@ impl MappingId {
         (raw <= isize::MAX as usize).then(|| Self::new(raw))
     }
 
-    /// **交出**：号变回线上的那 8 字节（与 [`MappingId::from_bytes`] 成对）。
+    /// **交出**：号变回线上的那 8 字节（与 [`ReservationId::from_bytes`] 成对）。
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         (self.0 as u64).to_le_bytes()
     }
@@ -41,13 +40,13 @@ impl MappingId {
     }
 }
 
-impl From<MappingId> for usize {
-    fn from(mapping: MappingId) -> Self {
-        mapping.0
+impl From<ReservationId> for usize {
+    fn from(reservation: ReservationId) -> Self {
+        reservation.0
     }
 }
 
-impl Wire for MappingId {
+impl Wire for ReservationId {
     const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.0;
@@ -63,8 +62,8 @@ impl Wire for MappingId {
     }
 }
 
-impl FromPair for (MappingId, VirtAddr) {
+impl FromPair for (ReservationId, VirtAddr) {
     fn from_pair(v0: usize, v1: usize) -> Self {
-        (MappingId::new(v0), VirtAddr(v1))
+        (ReservationId::new(v0), VirtAddr(v1))
     }
 }

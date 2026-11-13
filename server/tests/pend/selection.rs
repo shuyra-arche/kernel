@@ -2,8 +2,8 @@
 //! checks do not execute trap dispatch, allocate Pages or prove a transfer.
 use crate::authority::Pend;
 use kernel_api::model::{
-    cell::MappingId,
     modifiable::Modifiable::{No, Yes},
+    nest::ReservationId,
     pend::{
         Distributable, FlatRights, Limits, NestRights, NestScope, Operations, PendRange, PendScope,
         ShareRights,
@@ -45,8 +45,8 @@ fn next_residency_selection_requires_an_explicit_live_grant() {
     assert!(!root.selects(Operations::Flat(rights::OCCUPY), pages(10, 1)));
 }
 fn mapping(id: usize, offset: usize, count: usize) -> PendScope {
-    PendScope::Nest(NestScope::Mapping {
-        id: MappingId::from_bytes(&(id as u64).to_le_bytes()).unwrap(),
+    PendScope::Nest(NestScope::Reservation {
+        id: ReservationId::from_bytes(&(id as u64).to_le_bytes()).unwrap(),
         range: PendRange::Pages { offset, count },
     })
 }

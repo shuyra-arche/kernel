@@ -166,7 +166,7 @@ impl NestState {
     #[cfg(debug_assertions)]
     pub(super) fn audit(&self, owner: &Nest, geometry: Geometry) {
         self.index.audit();
-        self.index.audit_mappings(
+        self.index.audit_reservations(
             owner,
             self.root.cpu().expect("CPU audit"),
             geometry,
@@ -282,7 +282,7 @@ impl NestState {
             return Err(NestError::NoRegion);
         }
         let inner = mapping.state.lock();
-        if inner.phase != super::address::span::MappingPhase::Open {
+        if inner.phase != super::address::span::ReservationPhase::Open {
             return Err(NestError::NoRegion);
         }
         let index = mapping.page_index(address);
@@ -393,7 +393,7 @@ impl NestState {
             return Err(NestError::NoRegion);
         }
         let mut inner = mapping.state.lock();
-        if inner.phase != super::address::span::MappingPhase::Open {
+        if inner.phase != super::address::span::ReservationPhase::Open {
             return Err(NestError::NoRegion);
         }
         let transition =

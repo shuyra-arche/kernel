@@ -189,7 +189,7 @@ pub(crate) fn typed_cell(
 ) -> Result<Route, SignFail> {
     let memo = matches!(
         source,
-        SignSource::MappingRetired { .. } | SignSource::MappingPublished { .. }
+        SignSource::ReservationRetired { .. } | SignSource::ReservationPublished { .. }
     );
     if memo == (generation == 0) {
         return Err(SignFail::Denied);
@@ -197,14 +197,23 @@ pub(crate) fn typed_cell(
     let mut keys = Vec::new();
     keys.try_reserve(4).map_err(|_| SignFail::OutOfMemory)?;
     let watch = match source {
-        SignSource::MappingRetired { token, mapping }
-        | SignSource::MappingPublished { token, mapping } => {
-            let published = matches!(source, SignSource::MappingPublished { .. });
+        SignSource::ReservationRetired { token, reservation }
+        | SignSource::ReservationPublished { token, reservation } => {
+            let published = matches!(source, SignSource::ReservationPublished { .. });
             let (life, _) = crate::basis::nest::authority::external::event(
-                actor, token, mapping, published, generation,
+                actor,
+                token,
+                reservation,
+                published,
+                generation,
             )
             .map_err(|_| SignFail::Denied)?;
-            keys.push((WakeKey::ExternalMapping { id: mapping.get() }, life));
+            keys.push((
+                WakeKey::ExternalReservation {
+                    id: reservation.get(),
+                },
+                life,
+            ));
             keys.push((
                 WakeKey::Inspect {
                     task: actor.ident.id,
@@ -212,9 +221,9 @@ pub(crate) fn typed_cell(
                 },
                 actor.life(),
             ));
-            Watch::ExternalMapping {
+            Watch::ExternalReservation {
                 token,
-                mapping,
+                reservation,
                 published,
                 generation,
             }

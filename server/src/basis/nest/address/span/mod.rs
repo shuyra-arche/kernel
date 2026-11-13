@@ -25,7 +25,7 @@ use kernel_api::model::cell::CellLevel;
 ///
 /// It has no per-position Page, generation, publication or retirement state.
 /// Nest owns those Memos. Keeping a historical span cannot keep a deleted
-/// position's Page or freeze alive. The ABI MappingId denotes this reservation.
+/// position's Page or freeze alive. The ABI ReservationId denotes this reservation.
 /// Architectural U/G/A/D policy is fixed for the span; logical permissions may narrow.
 pub struct Span {
     pub(crate) reservation: Reservation,
@@ -107,7 +107,7 @@ impl Span {
             operation: core::sync::atomic::AtomicBool::new(false),
             attrs,
             level,
-            state: SpinLock::new_level(Level::Mapping, SpanState::new(active, source)),
+            state: SpinLock::new_level(Level::Reservation, SpanState::new(active, source)),
         }) {
             Ok(mapping) => Ok(mapping),
             Err(_) => {
@@ -144,7 +144,7 @@ impl Span {
         (self.initial_start(), self.initial_size())
     }
 
-    /// 这段映射在占用表里的身份（generation）；现有 ABI 的 `MappingId` 就是它。
+    /// 这段映射在占用表里的身份（generation）；现有 ABI 的 `ReservationId` 就是它。
     pub(crate) fn identity(&self) -> usize {
         self.reservation.id()
     }
@@ -236,13 +236,13 @@ impl Span {
     }
 
     pub(in crate::basis::nest) fn is_open(&self) -> bool {
-        self.state.lock().phase == MappingPhase::Open
+        self.state.lock().phase == ReservationPhase::Open
     }
 
     pub(in crate::basis::nest) fn close(&self) {
         let mut inner = self.state.lock();
-        if inner.phase == MappingPhase::Open {
-            inner.phase = MappingPhase::Closing;
+        if inner.phase == ReservationPhase::Open {
+            inner.phase = ReservationPhase::Closing;
         }
     }
 
@@ -338,7 +338,7 @@ pub(crate) struct ProtectionTransition {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::basis::nest) enum MappingPhase {
+pub(in crate::basis::nest) enum ReservationPhase {
     Open,
     Closing,
     Gone,
@@ -351,7 +351,7 @@ pub(crate) struct SpanState {
     pub(in crate::basis::nest) cleanup: Option<Box<CleanupNode>>,
     pub(crate) active: Vec<ActiveRange>,
     pub(crate) source: Option<FlatRange>,
-    pub(in crate::basis::nest) phase: MappingPhase,
+    pub(in crate::basis::nest) phase: ReservationPhase,
 }
 
 impl SpanState {
@@ -360,7 +360,7 @@ impl SpanState {
             cleanup: None,
             active,
             source,
-            phase: MappingPhase::Open,
+            phase: ReservationPhase::Open,
         }
     }
 

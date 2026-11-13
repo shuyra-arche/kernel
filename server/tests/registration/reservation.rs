@@ -7,9 +7,9 @@ use kernel_api::{
     abi::call::pend::PendFail,
     address::PageCount,
     model::{
-        cell::MappingId,
         identity::{Mark, TaskId},
         modifiable::Modifiable,
+        nest::ReservationId,
         pend::{
             Distributable, Limits, NestRights, NestScope, Operations, PendRange, PendScope,
             PendStatus,
@@ -18,11 +18,11 @@ use kernel_api::{
 };
 use std::sync::{Arc, atomic::Ordering};
 
-pub(super) fn id(raw: usize) -> MappingId {
-    MappingId::from_bytes(&(raw as u64).to_le_bytes()).unwrap()
+pub(super) fn id(raw: usize) -> ReservationId {
+    ReservationId::from_bytes(&(raw as u64).to_le_bytes()).unwrap()
 }
 pub(super) fn map(raw: usize, offset: usize, count: usize) -> PendScope {
-    PendScope::Nest(NestScope::Mapping {
+    PendScope::Nest(NestScope::Reservation {
         id: id(raw),
         range: PendRange::Pages { offset, count },
     })
@@ -59,17 +59,17 @@ pub(super) fn setup(
 }
 
 #[test]
-fn licensed_mapping_root_retains_parent_limits_and_actual_creation_edge() {
+fn licensed_reservation_root_retains_parent_limits_and_actual_creation_edge() {
     let (task, nest, parent) = setup(Modifiable::No, Distributable::No);
     let serial = task.pend.lock();
     let prepared =
-        ledger::prepare_mapping(&task, &parent, id(1), PageCount::new(8).unwrap()).unwrap();
+        ledger::prepare_reservation(&task, &parent, id(1), PageCount::new(8).unwrap()).unwrap();
     let entry = prepared.entry().clone();
     assert_eq!(entry.scope(), map(1, 0, 8));
     assert_eq!(
         entry.authority().limits(),
         Limits {
-            operations: Operations::Nest(NestRights::mapping()),
+            operations: Operations::Nest(NestRights::reservation()),
             modifiable: Modifiable::No,
             distributable: Distributable::No,
             scope: map(1, 0, 8),
@@ -80,10 +80,10 @@ fn licensed_mapping_root_retains_parent_limits_and_actual_creation_edge() {
     assert!(entry.target().same(parent.target()));
     assert_eq!(entry.target().owner(), parent.target().owner());
     assert!(entry.authority().alive());
-    assert!(!entry.alive()); // The fresh Mapping has not been committed by Namespace yet.
+    assert!(!entry.alive()); // The fresh Reservation has not been committed by Namespace yet.
     assert!(task.pend.entries.lock().get(entry.token()).is_none());
     assert!(task.pend.heirs.lock().is_empty());
-    nest.mappings
+    nest.reservations
         .lock()
         .unwrap()
         .push((id(1), PendStatus::Active));
@@ -118,7 +118,7 @@ fn mapping_preparation_rejects_foreign_dead_and_reserve_less_whole_grants() {
     {
         let _serial = foreign.pend.lock();
         assert_eq!(
-            ledger::prepare_mapping(&foreign, &parent, id(1), PageCount::new(1).unwrap()).err(),
+            ledger::prepare_reservation(&foreign, &parent, id(1), PageCount::new(1).unwrap()).err(),
             Some(PendFail::Denied)
         );
     }
@@ -130,12 +130,12 @@ fn mapping_preparation_rejects_foreign_dead_and_reserve_less_whole_grants() {
         })
         .unwrap();
     assert_eq!(
-        ledger::prepare_mapping(&task, &parent, id(1), PageCount::new(1).unwrap()).err(),
+        ledger::prepare_reservation(&task, &parent, id(1), PageCount::new(1).unwrap()).err(),
         Some(PendFail::Denied)
     );
     parent.invalidate();
     assert_eq!(
-        ledger::prepare_mapping(&task, &parent, id(1), PageCount::new(1).unwrap()).err(),
+        ledger::prepare_reservation(&task, &parent, id(1), PageCount::new(1).unwrap()).err(),
         Some(PendFail::Dead)
     );
     assert!(task.pend.heirs.lock().is_empty());
@@ -147,7 +147,7 @@ fn unpublished_mapping_drop_cancels_the_real_ledger_and_heir_reservations() {
     let (task, _, parent) = setup(Modifiable::Yes, Distributable::Yes);
     let _serial = task.pend.lock();
     let prepared =
-        ledger::prepare_mapping(&task, &parent, id(1), PageCount::new(8).unwrap()).unwrap();
+        ledger::prepare_reservation(&task, &parent, id(1), PageCount::new(8).unwrap()).unwrap();
     let token = prepared.entry().token();
     let weak = Arc::downgrade(prepared.entry());
     drop(prepared);
@@ -155,7 +155,8 @@ fn unpublished_mapping_drop_cancels_the_real_ledger_and_heir_reservations() {
     assert!(task.pend.entries.lock().get(token).is_none());
     assert_eq!(task.pend.entries.lock().len(), 1);
     assert!(task.pend.heirs.lock().is_empty());
-    let retry = ledger::prepare_mapping(&task, &parent, id(1), PageCount::new(8).unwrap()).unwrap();
+    let retry =
+        ledger::prepare_reservation(&task, &parent, id(1), PageCount::new(8).unwrap()).unwrap();
     assert_ne!(retry.entry().token(), token);
     drop(retry);
     assert!(parent.alive());
@@ -169,7 +170,7 @@ fn mapping_preparation_allocation_failures_leave_no_hidden_heir_or_registration(
         let (task, _, parent) = setup(Modifiable::Yes, Distributable::Yes);
         let _serial = task.pend.lock();
         let result = allocation::fail_after(remaining, || {
-            ledger::prepare_mapping(&task, &parent, id(1), PageCount::new(8).unwrap())
+            ledger::prepare_reservation(&task, &parent, id(1), PageCount::new(8).unwrap())
         });
         match result {
             Err(PendFail::OutOfMemory) => failed += 1,
@@ -183,7 +184,7 @@ fn mapping_preparation_allocation_failures_leave_no_hidden_heir_or_registration(
         assert_eq!(task.pend.entries.lock().len(), 1);
         assert!(parent.alive());
         let retry =
-            ledger::prepare_mapping(&task, &parent, id(1), PageCount::new(8).unwrap()).unwrap();
+            ledger::prepare_reservation(&task, &parent, id(1), PageCount::new(8).unwrap()).unwrap();
         drop(retry);
     }
     assert!(failed != 0 && prepared != 0);
@@ -195,12 +196,13 @@ fn simultaneous_mapping_preparations_reserve_every_heir_publication() {
     let _serial = task.pend.lock();
     let pending: Vec<_> = (1..=8)
         .map(|raw| {
-            ledger::prepare_mapping(&task, &parent, id(raw), PageCount::new(1).unwrap()).unwrap()
+            ledger::prepare_reservation(&task, &parent, id(raw), PageCount::new(1).unwrap())
+                .unwrap()
         })
         .collect();
     assert!(task.pend.heirs.lock().is_empty());
     for raw in 1..=8 {
-        nest.mappings
+        nest.reservations
             .lock()
             .unwrap()
             .push((id(raw), PendStatus::Active));
@@ -220,9 +222,9 @@ fn ordinary_derivation_preserves_mapping_identity_and_cannot_use_creation_except
     let (task, nest, whole) = setup(Modifiable::Yes, Distributable::Yes);
     let _serial = task.pend.lock();
     let prepared =
-        ledger::prepare_mapping(&task, &whole, id(1), PageCount::new(8).unwrap()).unwrap();
+        ledger::prepare_reservation(&task, &whole, id(1), PageCount::new(8).unwrap()).unwrap();
     let root = prepared.entry().clone();
-    nest.mappings
+    nest.reservations
         .lock()
         .unwrap()
         .push((id(1), PendStatus::Active));
@@ -265,25 +267,25 @@ fn namespace_and_mapping_closure_reject_authority_without_losing_observation_ide
     let (task, nest, whole) = setup(Modifiable::Yes, Distributable::Yes);
     let serial = task.pend.lock();
     let pending =
-        ledger::prepare_mapping(&task, &whole, id(1), PageCount::new(8).unwrap()).unwrap();
+        ledger::prepare_reservation(&task, &whole, id(1), PageCount::new(8).unwrap()).unwrap();
     let entry = pending.entry().clone();
-    nest.mappings
+    nest.reservations
         .lock()
         .unwrap()
         .push((id(1), PendStatus::Active));
     pending.publish();
     let identity = entry.target().identity();
-    nest.mappings.lock().unwrap()[0].1 = PendStatus::Retiring;
+    nest.reservations.lock().unwrap()[0].1 = PendStatus::Retiring;
     assert!(!entry.alive());
     assert_eq!(entry.status(), PendStatus::Retiring);
     assert_eq!(entry.target().identity(), identity);
-    nest.mappings.lock().unwrap()[0].1 = PendStatus::Dead;
+    nest.reservations.lock().unwrap()[0].1 = PendStatus::Dead;
     assert_eq!(entry.status(), PendStatus::Dead);
     nest.open.store(false, Ordering::Release);
     assert!(!whole.alive());
     assert_eq!(whole.status(), PendStatus::Retiring);
     assert_eq!(
-        ledger::prepare_mapping(&task, &whole, id(2), PageCount::new(1).unwrap())
+        ledger::prepare_reservation(&task, &whole, id(2), PageCount::new(1).unwrap())
             .err()
             .map(|e| e),
         Some(PendFail::Dead)

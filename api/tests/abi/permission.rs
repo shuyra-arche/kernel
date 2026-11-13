@@ -1,9 +1,9 @@
 use kernel_api::model::{
-    cell::MappingId,
     flat::FlatId,
     identity::{Mark, PendId, TaskId},
     modifiable::Modifiable,
     nest::NestId,
+    nest::ReservationId,
     pend::{
         CloneRights, CreationRights, Distributable, FlatRights, Limits, NestRights, NestScope,
         Operations, PendInfo, PendRange, PendScope, PendStatus, ShareRights, Target, ViewTarget,
@@ -13,8 +13,8 @@ use kernel_api::model::{
 };
 
 fn mapping(id: u64, range: PendRange) -> PendScope {
-    PendScope::Nest(NestScope::Mapping {
-        id: MappingId::from_bytes(&id.to_le_bytes()).unwrap(),
+    PendScope::Nest(NestScope::Reservation {
+        id: ReservationId::from_bytes(&id.to_le_bytes()).unwrap(),
         range,
     })
 }
@@ -29,6 +29,74 @@ fn grant(operations: Operations) -> Limits {
             Operations::Nest(_) => PendScope::Nest(NestScope::Whole),
             _ => PendScope::Object,
         },
+    }
+}
+
+#[test]
+fn reservation_migration_preserves_the_joint_target_scope_operation_contract() {
+    let targets = [
+        Target::None,
+        Target::View(ViewTarget::Clone(ViewId::new(7))),
+        Target::View(ViewTarget::Share(ViewId::new(7))),
+        Target::Flat(FlatId::new(7).unwrap()),
+        Target::Nest(NestId::new(7).unwrap()),
+        Target::Sign(SignId::new(7)),
+    ];
+    let scopes = [
+        PendScope::Object,
+        PendScope::Pages(PendRange::Pages {
+            offset: 8,
+            count: 4,
+        }),
+        PendScope::Nest(NestScope::Whole),
+        mapping(
+            19,
+            PendRange::Pages {
+                offset: 8,
+                count: 4,
+            },
+        ),
+    ];
+    // Explicit legal pairs from #142 §14. No single independently valid field
+    // may make an invalid Target/Scope/Operations combination decode.
+    let families = [
+        (0, 0, Operations::None(CreationRights::all())),
+        (1, 0, Operations::Clone(CloneRights::all())),
+        (2, 1, Operations::Share(ShareRights::all())),
+        (3, 1, Operations::Flat(FlatRights::all())),
+        (4, 2, Operations::Nest(NestRights::whole())),
+        (4, 3, Operations::Nest(NestRights::reservation())),
+        (5, 0, Operations::Sign(SignRights::all())),
+    ];
+    for (family, allowed_scope, operations) in families {
+        for (target_index, target) in targets.into_iter().enumerate() {
+            for (scope_index, scope) in scopes.into_iter().enumerate() {
+                let info = PendInfo {
+                    token: PendId::mint(3),
+                    target,
+                    limits: Limits {
+                        operations,
+                        modifiable: Modifiable::No,
+                        distributable: Distributable::Yes,
+                        scope,
+                    },
+                    owner: TaskId::new(5),
+                    lender: TaskId::new(6),
+                    mark: Mark::NONE,
+                    status: PendStatus::Active,
+                };
+                assert_eq!(
+                    PendInfo::from_bytes(&info.to_bytes()),
+                    (target_index == family && scope_index == allowed_scope).then_some(info),
+                    "target {target_index}, scope {scope_index}, operations {operations:?}",
+                );
+            }
+        }
+    }
+    // Reservation is a scope, not a new top-level Target. Former target tags
+    // stay invalid, including a nonzero value that is a valid ReservationId.
+    for tag in [5, 7, 8] {
+        assert!(Target::of([tag, 19]).is_none());
     }
 }
 
@@ -212,7 +280,7 @@ fn scope_codec_is_five_canonical_words_with_a_checked_mapping_identity() {
         assert_eq!(
             scope.range(),
             match scope {
-                PendScope::Pages(range) | PendScope::Nest(NestScope::Mapping { range, .. }) =>
+                PendScope::Pages(range) | PendScope::Nest(NestScope::Reservation { range, .. }) =>
                     Some(range),
                 _ => None,
             }
@@ -247,8 +315,8 @@ fn scope_codec_is_five_canonical_words_with_a_checked_mapping_identity() {
         assert_eq!(PendScope::of(invalid), None, "{invalid:?}");
     }
     let invalid = Limits {
-        scope: PendScope::Nest(NestScope::Mapping {
-            id: MappingId::NONE,
+        scope: PendScope::Nest(NestScope::Reservation {
+            id: ReservationId::NONE,
             range: PendRange::Inherit,
         }),
         ..grant(Operations::Nest(NestRights::INSPECT))
@@ -260,16 +328,16 @@ fn scope_codec_is_five_canonical_words_with_a_checked_mapping_identity() {
 fn whole_and_mapping_rights_have_distinct_masks_and_retired_bits_stay_invalid() {
     assert_eq!(NestRights::whole().bits(), 1 | 2 | 8 | 512);
     assert_eq!(
-        NestRights::mapping().bits(),
+        NestRights::reservation().bits(),
         1 | 4 | 64 | 128 | 256 | 1024 | 2048
     );
     assert_eq!(
         NestRights::all(),
-        NestRights::whole() | NestRights::mapping()
+        NestRights::whole() | NestRights::reservation()
     );
     for (scope, mask) in [
         (PendScope::Nest(NestScope::Whole), NestRights::whole()),
-        (mapping(7, PendRange::Inherit), NestRights::mapping()),
+        (mapping(7, PendRange::Inherit), NestRights::reservation()),
     ] {
         for bit in 0..12 {
             let bits = 1u32 << bit;

@@ -1,7 +1,9 @@
 //! Stable nest identity. A numeric identity is descriptive and never grants access.
 mod fault;
 mod position;
+mod reservation;
 mod reserve;
+pub use reservation::ReservationId;
 mod status;
 pub use fault::{
     FAULT_CAPACITY, FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase, FaultRoute,
@@ -10,7 +12,8 @@ pub use fault::{
 pub use position::{MemoGeneration, MemoPosition};
 pub use reserve::ReserveRequest;
 pub use status::{
-    MappingPhase, MappingStatus, MappingVersion, MemoPhase, MemoStatus, NestStatus, NestVersion,
+    MemoPhase, MemoStatus, NestStatus, NestVersion, ReservationPhase, ReservationStatus,
+    ReservationVersion,
 };
 
 use crate::abi::register::{Decode, Wire};

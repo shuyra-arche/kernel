@@ -7,6 +7,10 @@ atomic Insert/Remove and the staged Task result path. Publication entry/result
 integration and maintenance prerequisites remain unfinished. Running ABI,
 Capsule and Ledger remain v10.
 
+The same-round [Reservation migration](memory-reservation.md) updates the public
+names and scope selectors used below. Its additional authorization acceptance
+is tracked separately from the existing M3 residency evidence.
+
 ## Delivered core
 
 - A next-provider Flat is created without allocating payload pages. Its private
@@ -42,7 +46,7 @@ Next Insert stores a fixed logical Source and reverse binding, without retaining
 a current Page. It accepts missing residency, retains the original actor/branch
 and sticky access ceiling, and rechecks live authority on use. A descriptive
 source coordinate survives revocation but supplies no authority. Selection from
-another Memo requires Mapping PUBLISH and keeps that Memo's original lineage.
+another Memo requires Reservation PUBLISH and keeps that Memo's original lineage.
 
 Insert checks the target generation and requires INSERT plus REMOVE when
 replacing an association. It prepares binding/index capacity before the atomic

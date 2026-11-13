@@ -42,7 +42,7 @@ impl Principal {
                 .target()
                 .nest()
                 .is_none_or(|owner| !core::ptr::eq(Arc::as_ptr(&owner), nest))
-            || !matches!(self.authority.scope(), PendScope::Nest(NestScope::Mapping { id, .. })
+            || !matches!(self.authority.scope(), PendScope::Nest(NestScope::Reservation { id, .. })
                 if id.get() == span.identity())
             || !self.authority.contains(PageOffset::new(page), count)
             || access.contains(Access::WRITE) && entry.modifiable() != Modifiable::Yes
@@ -66,7 +66,7 @@ impl Publisher {
             || !entry.permits(Operations::Nest(NestRights::PUBLISH))
             || !matches!(
                 entry.authority().scope(),
-                PendScope::Nest(NestScope::Mapping { .. })
+                PendScope::Nest(NestScope::Reservation { .. })
             )
             || entry.target().nest().is_none()
             || pend::locate(actor, entry.token()).is_none_or(|held| !Arc::ptr_eq(&held, entry))

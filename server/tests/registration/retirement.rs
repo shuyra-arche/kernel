@@ -1,7 +1,7 @@
 //! Real Pend transactions; Namespace spans and hardware completions are scripted.
 use super::{
     Window, basis, branch, ledger,
-    mapping::{id, map, setup},
+    reservation::{id, map, setup},
     support::{Nest, Task},
 };
 use kernel_api::{
@@ -28,7 +28,7 @@ fn reserve(
 ) -> Arc<ledger::PendEntry> {
     let _serial = task.pend.lock();
     let count = PageCount::new(count).unwrap();
-    let prepared = ledger::prepare_mapping(task, whole, id(1), count).unwrap();
+    let prepared = ledger::prepare_reservation(task, whole, id(1), count).unwrap();
     let root = prepared.entry().clone();
     let _commit = basis::commit();
     nest.install(id(1), count, level, root.authority());
@@ -47,7 +47,7 @@ fn child(
         parent.token(),
         &Arc::downgrade(target),
         Limits {
-            scope: PendScope::Nest(NestScope::Mapping { id: id(1), range }),
+            scope: PendScope::Nest(NestScope::Reservation { id: id(1), range }),
             ..parent.authority().limits()
         },
         Mark::NONE,
@@ -59,26 +59,26 @@ fn child(
 }
 
 #[test]
-fn returned_mapping_roots_reap_scripted_metadata_after_real_authority_settlement() {
+fn returned_reservation_roots_reap_scripted_metadata_after_real_authority_settlement() {
     let (task, nest, whole) = setup(Yes, Distributable::Yes);
     for raw in 1..=64 {
         let root = {
             let _serial = task.pend.lock();
             let count = PageCount::new(1).unwrap();
-            let prepared = ledger::prepare_mapping(&task, &whole, id(raw), count).unwrap();
+            let prepared = ledger::prepare_reservation(&task, &whole, id(raw), count).unwrap();
             let root = prepared.entry().clone();
             let _commit = basis::commit();
             nest.install(id(raw), count, CellLevel::BASE, root.authority());
             prepared.publish();
             root
         };
-        nest.retire_mapping(raw);
-        assert!(nest.mapping(id(raw)).is_some());
+        nest.retire_reservation(raw);
+        assert!(nest.reservation(id(raw)).is_some());
         ledger::return_(&task, root.token()).unwrap();
         assert_eq!(root.authority().status(), PendStatus::Dead);
         assert!(ledger::locate(&task, root.token()).is_none());
-        assert!(nest.mapping(id(raw)).is_none());
-        assert!(nest.mappings.lock().unwrap().is_empty());
+        assert!(nest.reservation(id(raw)).is_none());
+        assert!(nest.reservations.lock().unwrap().is_empty());
         assert!(task.pend.heirs.lock().is_empty());
         assert!(whole.alive());
     }
@@ -157,7 +157,7 @@ fn creating_whole_cannot_narrow_until_its_mapping_heir_is_removed() {
 }
 
 #[test]
-fn narrowed_mapping_root_return_retires_the_original_span_despite_its_sire() {
+fn narrowed_reservation_root_return_retires_the_original_span_despite_its_sire() {
     let (task, nest, whole) = setup(Yes, Distributable::Yes);
     let root = reserve(&task, &nest, &whole, 8, CellLevel::BASE);
     assert_eq!(root.sire(), Some(whole.token()));
@@ -245,7 +245,7 @@ fn narrow_withdraws_publication_before_committing_and_busy_preserves_limits() {
 fn gone_mapping_metadata_remains_reachable_for_busy_return_retry() {
     let (task, nest, whole) = setup(Yes, Distributable::Yes);
     let root = reserve(&task, &nest, &whole, 8, CellLevel::BASE);
-    nest.mappings.lock().unwrap()[0].1 = PendStatus::Dead;
+    nest.reservations.lock().unwrap()[0].1 = PendStatus::Dead;
     assert_eq!(root.status(), PendStatus::Dead);
     assert!(!root.alive());
     nest.busy.store(true, Ordering::Release);

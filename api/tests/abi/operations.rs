@@ -167,7 +167,7 @@ fn compound_field_widths_match_their_actual_register_consumption() {
 fn mapping_observation_requires_a_pend_and_retired_device_abi_is_rejected() {
     use kernel_api::{
         abi::call::{EnvCall, cell::operations::Create},
-        model::{cell::MappingId, identity::PendId, sign::SignSource},
+        model::{identity::PendId, nest::ReservationId, sign::SignSource},
     };
     assert_eq!(Create::SLOT, kernel_api::abi::PREFIX | (2usize << 32));
     for slot in [2, 3, 7, 8, 9] {
@@ -186,10 +186,10 @@ fn mapping_observation_requires_a_pend_and_retired_device_abi_is_rejected() {
         );
     }
     let token = PendId::mint(17);
-    let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
+    let reservation = ReservationId::from_bytes(&23u64.to_le_bytes()).unwrap();
     for source in [
-        SignSource::MappingRetired { token, mapping },
-        SignSource::MappingPublished { token, mapping },
+        SignSource::ReservationRetired { token, reservation },
+        SignSource::ReservationPublished { token, reservation },
     ] {
         assert_eq!(SignSource::of(source.words()), Some(source));
         let mut words = source.words();

@@ -36,8 +36,8 @@ use kernel_api::address::VirtAddr;
 use translation::Invalidation;
 
 use crate::metal::generic::trap::FaultKind;
+pub(crate) use address::PreparedReservation;
 pub use address::Reservation;
-pub(crate) use address::ReservedMapping;
 pub use address::span::{Access, ActiveRange, Span};
 pub use error::NestError;
 pub use identity::Asid;
@@ -94,7 +94,7 @@ pub struct Nest {
     id: NestId,
     cpu: Option<CpuContext>,
     life: Arc<Anchor>,
-    pub(crate) mappings: authority::RangeRegistry,
+    pub(crate) reservations: authority::ReservationRegistry,
     layout: SpinLock<Layout>,
     pending_cleanup: SpinLock<Option<Box<CleanupNode>>>,
     state: ManuallyDrop<SpinLock<NestState>>,
@@ -140,7 +140,7 @@ impl Nest {
             id,
             cpu: Some(CpuContext { domain, kind }),
             life,
-            mappings: authority::RangeRegistry::new(),
+            reservations: authority::ReservationRegistry::new(),
             layout: SpinLock::new_level(Level::Address, layout),
             pending_cleanup: SpinLock::new_level(Level::Address, None),
             state: ManuallyDrop::new(SpinLock::new_level(Level::Nest, NestState::new(root))),
@@ -203,7 +203,7 @@ impl Nest {
         if !state.is_open()
             || state.team.is_some()
             || !state.retirement.invalidation().is_clean()
-            || !self.mappings.empty()
+            || !self.reservations.empty()
         {
             return Err(NestError::Busy);
         }
@@ -211,33 +211,42 @@ impl Nest {
         Ok(())
     }
 
-    pub(crate) fn mapping(&self, id: kernel_api::model::cell::MappingId) -> Option<Arc<Span>> {
-        self.mappings.registered(id.get())?.mapping
-    }
-
-    pub(crate) fn mapping_open(&self, id: kernel_api::model::cell::MappingId) -> bool {
-        self.is_open() && self.mapping(id).is_some_and(|mapping| mapping.is_open())
-    }
-
-    pub(crate) fn mapping_status(
+    pub(crate) fn reservation(
         &self,
-        id: kernel_api::model::cell::MappingId,
+        id: kernel_api::model::nest::ReservationId,
+    ) -> Option<Arc<Span>> {
+        self.reservations.registered(id.get())?.reservation
+    }
+
+    pub(crate) fn reservation_open(&self, id: kernel_api::model::nest::ReservationId) -> bool {
+        self.is_open()
+            && self
+                .reservation(id)
+                .is_some_and(|mapping| mapping.is_open())
+    }
+
+    pub(crate) fn reservation_status(
+        &self,
+        id: kernel_api::model::nest::ReservationId,
     ) -> kernel_api::model::pend::PendStatus {
-        use address::span::MappingPhase;
+        use address::span::ReservationPhase;
         use kernel_api::model::pend::PendStatus;
-        match self.mapping(id).map(|mapping| mapping.state.lock().phase) {
-            Some(MappingPhase::Open) if self.is_open() => PendStatus::Active,
-            Some(MappingPhase::Open | MappingPhase::Closing) => PendStatus::Retiring,
-            Some(MappingPhase::Gone) | None => PendStatus::Dead,
+        match self
+            .reservation(id)
+            .map(|mapping| mapping.state.lock().phase)
+        {
+            Some(ReservationPhase::Open) if self.is_open() => PendStatus::Active,
+            Some(ReservationPhase::Open | ReservationPhase::Closing) => PendStatus::Retiring,
+            Some(ReservationPhase::Gone) | None => PendStatus::Dead,
         }
     }
 
-    pub(crate) fn mapping_root(
+    pub(crate) fn reservation_root(
         &self,
-        id: kernel_api::model::cell::MappingId,
+        id: kernel_api::model::nest::ReservationId,
         root: &Arc<crate::basis::pend::Pend>,
     ) -> bool {
-        self.mappings.registered(id.get()).is_some_and(|entry| {
+        self.reservations.registered(id.get()).is_some_and(|entry| {
             entry
                 .root
                 .as_ref()
@@ -245,18 +254,18 @@ impl Nest {
         })
     }
 
-    pub(crate) fn mapping_count(
+    pub(crate) fn reservation_count(
         &self,
-        id: kernel_api::model::cell::MappingId,
+        id: kernel_api::model::nest::ReservationId,
     ) -> Option<PageCount> {
-        PageCount::new(self.mapping(id)?.initial_size() / PAGE_SIZE)
+        PageCount::new(self.reservation(id)?.initial_size() / PAGE_SIZE)
     }
 
-    pub(crate) fn mapping_level(
+    pub(crate) fn reservation_level(
         &self,
-        id: kernel_api::model::cell::MappingId,
+        id: kernel_api::model::nest::ReservationId,
     ) -> Option<kernel_api::model::cell::CellLevel> {
-        Some(self.mapping(id)?.level())
+        Some(self.reservation(id)?.level())
     }
 
     pub(crate) fn asid(&self) -> Asid {
@@ -319,7 +328,7 @@ impl Nest {
         binding: &Arc<authority::RangeBinding>,
     ) -> Option<memo::source::Source> {
         let index = binding.page()?;
-        let mapping = self.mappings.registered(binding.id())?.mapping?;
+        let mapping = self.reservations.registered(binding.id())?.reservation?;
         let state = self.state.lock();
         let memo = state.memos.get(&mapping, index)?;
         if !memo.matches(binding) {
@@ -329,10 +338,10 @@ impl Nest {
     }
 
     pub(crate) fn binding_pending(&self, binding: &Arc<authority::RangeBinding>) -> bool {
-        let Some(entry) = self.mappings.registered(binding.id()) else {
+        let Some(entry) = self.reservations.registered(binding.id()) else {
             return false;
         };
-        let Some(mapping) = entry.mapping() else {
+        let Some(mapping) = entry.reservation() else {
             return binding.page().is_none() && Arc::ptr_eq(&entry.binding, binding);
         };
         let state = self.state.lock();
@@ -358,13 +367,13 @@ impl Nest {
     }
 
     /// Close reservation admission before contending for its operation gate.
-    pub(crate) fn release_mapping(
+    pub(crate) fn release_reservation(
         &self,
-        id: kernel_api::model::cell::MappingId,
+        id: kernel_api::model::nest::ReservationId,
     ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
-        use address::span::MappingPhase;
+        use address::span::ReservationPhase;
         use kernel_api::abi::call::cell::CellFail;
-        let Some(mapping) = self.mapping(id) else {
+        let Some(mapping) = self.reservation(id) else {
             return Ok(());
         };
         {
@@ -372,7 +381,7 @@ impl Nest {
             mapping.close();
         }
         let _operation = mapping.operation().ok_or(CellFail::Busy)?;
-        if mapping.state.lock().phase == MappingPhase::Gone {
+        if mapping.state.lock().phase == ReservationPhase::Gone {
             return Ok(());
         }
         if mapping.source().is_some() {
@@ -442,31 +451,31 @@ impl Nest {
             layout.occupancy.release_settled(mapping.identity());
             let mut inner = mapping.state.lock();
             inner.active.clear();
-            inner.phase = MappingPhase::Gone;
+            inner.phase = ReservationPhase::Gone;
         }
-        sign::signal(self.mapping_key(&mapping));
+        sign::signal(self.reservation_key(&mapping));
         if self.is_external() {
-            sign::signal(WakeKey::ExternalMapping { id: id.get() });
+            sign::signal(WakeKey::ExternalReservation { id: id.get() });
         }
         Ok(())
     }
 
-    pub(crate) fn withdraw_mapping(
+    pub(crate) fn withdraw_reservation(
         self: &Arc<Self>,
-        id: kernel_api::model::cell::MappingId,
+        id: kernel_api::model::nest::ReservationId,
         window: (PageOffset, PageCount),
         authority: &Arc<crate::basis::pend::Pend>,
     ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
         use kernel_api::abi::call::pend::PendFail;
         use kernel_api::model::pend::{NestScope, PendScope};
-        let Some(mapping) = self.mapping(id) else {
+        let Some(mapping) = self.reservation(id) else {
             return Ok(());
         };
         let _operation = mapping.operation().ok_or(PendFail::Busy)?;
         mapping
             .range(window.0, window.1)
             .map_err(|_| PendFail::NotAligned)?;
-        if !matches!(authority.scope(), PendScope::Nest(NestScope::Mapping { id: known, .. }) if known == id)
+        if !matches!(authority.scope(), PendScope::Nest(NestScope::Reservation { id: known, .. }) if known == id)
         {
             return Err(PendFail::Denied);
         }
@@ -508,9 +517,9 @@ impl Nest {
                 Err(_) => busy = true,
             }
         }
-        sign::signal(self.mapping_key(&mapping));
+        sign::signal(self.reservation_key(&mapping));
         if self.is_external() {
-            sign::signal(WakeKey::ExternalMapping { id: id.get() });
+            sign::signal(WakeKey::ExternalReservation { id: id.get() });
         }
         if busy { Err(PendFail::Busy) } else { Ok(()) }
     }
@@ -524,10 +533,10 @@ impl Nest {
         clear: bool,
     ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
         use kernel_api::abi::call::pend::PendFail;
-        let Some(entry) = self.mappings.registered(binding.id()) else {
+        let Some(entry) = self.reservations.registered(binding.id()) else {
             return Ok(());
         };
-        let Some(mapping) = entry.mapping() else {
+        let Some(mapping) = entry.reservation() else {
             return Err(PendFail::Busy);
         };
         let _operation = mapping.operation().ok_or(PendFail::Busy)?;
@@ -544,7 +553,7 @@ impl Nest {
             }
             if clear {
                 self.dispose(mapping.clone()).map_err(|_| PendFail::Busy)?;
-                self.retire_mapping(binding.id());
+                self.retire_reservation(binding.id());
                 return Ok(());
             }
             if mapping.source().is_some_and(|source| source.is_borrowed()) {
@@ -624,9 +633,9 @@ impl Nest {
             };
             cleared.release();
         }
-        sign::signal(self.mapping_key(mapping));
+        sign::signal(self.reservation_key(mapping));
         if self.is_external() {
-            sign::signal(WakeKey::ExternalMapping {
+            sign::signal(WakeKey::ExternalReservation {
                 id: mapping.identity(),
             });
         }
@@ -634,14 +643,14 @@ impl Nest {
     }
 
     /// Prepare a source-free namespace transaction; only publish makes it visible.
-    pub(crate) fn reserve_mapping(
+    pub(crate) fn reserve_reservation(
         self: &Arc<Self>,
         placement: Placement,
         level: kernel_api::model::cell::CellLevel,
         access: Access,
         creator: kernel_api::model::identity::TaskId,
-    ) -> Result<ReservedMapping, NestError> {
-        self.reap_mappings();
+    ) -> Result<PreparedReservation, NestError> {
+        self.reap_reservations();
         let cell_size = level.bytes().ok_or(NestError::NotAligned)?;
         if !access.is_leaf_set() || !placement.size().is_multiple_of(cell_size) {
             return Err(NestError::NotAligned);
@@ -660,7 +669,7 @@ impl Nest {
             {
                 return Err(NestError::NotAligned);
             }
-            if self.mappings.competing_reservation(creator) {
+            if self.reservations.competing_reservation(creator) {
                 return Err(NestError::Busy);
             }
         } else if level.get() >= crate::metal::mmu::mode::levels() {
@@ -670,7 +679,7 @@ impl Nest {
             return Err(NestError::NoRegion);
         }
         let reservation = self.reserve(placement)?;
-        ReservedMapping::new(self, reservation, level, access, creator)
+        PreparedReservation::new(self, reservation, level, access, creator)
     }
 
     /// 普通挂载的架构属性：用户空间只对 `Normal` 区开 U，A/D 由内核自维护。
@@ -957,7 +966,7 @@ impl Nest {
     ///
     /// 只发布活动形状内的页，不偷分配未物化的页。
     fn publish(self: &Arc<Self>, selection: NestRange) -> Result<(), NestError> {
-        let mapping = selection.mapping().clone();
+        let mapping = selection.reservation().clone();
         for (start, size) in self.active_spans(&selection)? {
             self.publish_span(&mapping, start, size)?;
         }
@@ -1107,7 +1116,7 @@ impl Nest {
     ) -> Result<(), NestError> {
         let _operation = mapping.operation().ok_or(NestError::Busy)?;
         let _commit = crate::basis::commit();
-        self.ensure_mapping(mapping)?;
+        self.ensure_reservation(mapping)?;
         mapping.access(index)?;
         if !self.is_open() || !mapping.is_open() {
             return Err(NestError::NoRegion);
@@ -1242,7 +1251,7 @@ impl Nest {
         index: usize,
     ) -> Result<kernel_api::model::nest::MemoStatus, NestError> {
         use kernel_api::model::{
-            cell::MappingId,
+            nest::ReservationId,
             nest::{MemoGeneration, MemoPhase, MemoStatus},
         };
         self.check_owner(&mapping.reservation)?;
@@ -1263,8 +1272,8 @@ impl Nest {
             .map(|(_, source, _)| source.position());
         Ok(MemoStatus {
             nest: self.id(),
-            mapping: MappingId::from_bytes(&(mapping.identity() as u64).to_le_bytes())
-                .expect("Mapping identity"),
+            reservation: ReservationId::from_bytes(&(mapping.identity() as u64).to_le_bytes())
+                .expect("Reservation identity"),
             coordinate: index,
             generation: MemoGeneration::new(memo.map_or(1, memo::Memo::generation))
                 .expect("nonzero generation"),
@@ -1288,7 +1297,7 @@ impl Nest {
         expected: u64,
     ) -> Result<(), NestError> {
         let _operation = mapping.operation().ok_or(NestError::Busy)?;
-        self.ensure_mapping(mapping)?;
+        self.ensure_reservation(mapping)?;
         mapping.position(index)?;
         if mapping.source().is_some() {
             return Err(NestError::Pinned);
@@ -1316,7 +1325,7 @@ impl Nest {
         expected: u64,
     ) -> Result<(), NestError> {
         let _operation = mapping.operation().ok_or(NestError::Busy)?;
-        self.ensure_mapping(mapping)?;
+        self.ensure_reservation(mapping)?;
         mapping.position(index)?;
         if !self.is_external() {
             self.finish_invalidation()?;
@@ -1325,7 +1334,7 @@ impl Nest {
         let _commit = crate::basis::commit();
         let removed = {
             let mut state = self.state.lock();
-            if mapping.state.lock().phase == address::span::MappingPhase::Gone {
+            if mapping.state.lock().phase == address::span::ReservationPhase::Gone {
                 return Err(NestError::NoRegion);
             }
             state.memos.get_mut(mapping, index)?.remove(expected)?
@@ -1373,7 +1382,7 @@ impl Nest {
     ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
         use kernel_api::abi::call::cell::CellFail;
         let _operation = mapping.operation().ok_or(CellFail::Busy)?;
-        self.ensure_mapping(mapping)?;
+        self.ensure_reservation(mapping)?;
         if !self.is_external() {
             self.finish_invalidation()?;
         }
@@ -1437,7 +1446,7 @@ impl Nest {
                 .submit_external(mapping)
                 .map_err(memo::publication_failure);
             drop(commit);
-            sign::signal(WakeKey::ExternalMapping {
+            sign::signal(WakeKey::ExternalReservation {
                 id: mapping.identity(),
             });
             return result;
@@ -1499,7 +1508,7 @@ impl Nest {
         self.finish_memo(mapping, index);
         drop(lease);
         drop(flight);
-        sign::signal(self.mapping_key(mapping));
+        sign::signal(self.reservation_key(mapping));
         result
     }
 
@@ -1512,12 +1521,12 @@ impl Nest {
     ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
         use kernel_api::abi::call::cell::CellFail;
         let _operation = mapping.operation().ok_or(CellFail::Busy)?;
-        self.ensure_mapping(mapping)?;
+        self.ensure_reservation(mapping)?;
         mapping.position(index)?;
         let result = self.retract_position(mapping, index, Some(expected), change, false);
-        sign::signal(self.mapping_key(mapping));
+        sign::signal(self.reservation_key(mapping));
         if self.is_external() {
-            sign::signal(WakeKey::ExternalMapping {
+            sign::signal(WakeKey::ExternalReservation {
                 id: mapping.identity(),
             });
         }
@@ -1600,7 +1609,7 @@ impl Nest {
         use kernel_api::model::modifiable::Modifiable;
         use kernel_api::model::pend::{NestRights, NestScope, Operations, PendScope};
         let _operation = mapping.operation().ok_or(CellFail::Busy)?;
-        self.ensure_mapping(mapping)?;
+        self.ensure_reservation(mapping)?;
         if self.is_external() || !access.is_leaf_set() {
             return Err(CellFail::Denied);
         }
@@ -1612,7 +1621,7 @@ impl Nest {
             self.is_open()
                 && mapping.is_open()
                 && authority.permits(Operations::Nest(NestRights::PROTECT))
-                && matches!(authority.scope(), PendScope::Nest(NestScope::Mapping { id, .. })
+                && matches!(authority.scope(), PendScope::Nest(NestScope::Reservation { id, .. })
                     if id.get() == mapping.identity())
                 && authority.contains(PageOffset::new(index), count)
                 && (!access.contains(Access::WRITE)
@@ -1721,7 +1730,7 @@ impl Nest {
         }
         drop(lease);
         drop(flight);
-        sign::signal(self.mapping_key(mapping));
+        sign::signal(self.reservation_key(mapping));
         if valid { result } else { Err(CellFail::Denied) }
     }
 
@@ -1731,15 +1740,15 @@ impl Nest {
         index: usize,
     ) -> Result<kernel_api::model::cell::CellInfo, NestError> {
         let state = self.state.lock();
-        if mapping.state.lock().phase == address::span::MappingPhase::Gone {
+        if mapping.state.lock().phase == address::span::ReservationPhase::Gone {
             return Err(NestError::NoRegion);
         }
         let level = if mapping.source().is_none() {
-            let id = kernel_api::model::cell::MappingId::from_bytes(
+            let id = kernel_api::model::nest::ReservationId::from_bytes(
                 &(mapping.identity() as u64).to_le_bytes(),
             )
             .ok_or(NestError::NoRegion)?;
-            self.mapping_level(id).ok_or(NestError::NoRegion)?
+            self.reservation_level(id).ok_or(NestError::NoRegion)?
         } else {
             mapping.level()
         };
@@ -1809,7 +1818,7 @@ impl Nest {
         self: &Arc<Self>,
         selection: NestRange,
     ) -> Result<(), NestError> {
-        let mapping = selection.mapping().clone();
+        let mapping = selection.reservation().clone();
         for (start, size) in self.active_spans(&selection)? {
             let offset = PageOffset::new(mapping.page_index(start));
             let count = PageCount::new(size / PAGE_SIZE).ok_or(NestError::NotAligned)?;
@@ -1822,7 +1831,7 @@ impl Nest {
 
     /// 发布只选择活动页，不把尚未结算的撤销重新安装。
     fn active_spans(&self, selection: &NestRange) -> Result<Vec<(VirtAddr, usize)>, NestError> {
-        let mapping = selection.mapping();
+        let mapping = selection.reservation();
         let (lo, hi) = selection.window();
         let state = self.ready_state()?;
         self.ensure_owned(mapping, &state)?;
@@ -1846,7 +1855,7 @@ impl Nest {
 
     /// 收窄选择窗口的权限上限与当前权限；架构属性不变。
     pub(crate) fn narrow(&self, selection: NestRange, ceiling: Access) -> Result<(), NestError> {
-        let key = self.mapping_key(selection.mapping());
+        let key = self.reservation_key(selection.reservation());
         let result = self.protect(selection, address::span::Protection::Narrow(ceiling));
         sign::signal(key);
         result
@@ -1858,7 +1867,7 @@ impl Nest {
         selection: NestRange,
         request: address::span::Protection,
     ) -> Result<(), NestError> {
-        let mapping = selection.mapping().clone();
+        let mapping = selection.reservation().clone();
         let mut state = self.ready_state()?;
         self.ensure_owned(&mapping, &state)?;
         state.protect(self.geometry(), &mapping, selection.window(), request, None)?;
@@ -1866,15 +1875,15 @@ impl Nest {
         self.finish_invalidation()
     }
 
-    fn mapping_key(&self, mapping: &Span) -> WakeKey {
-        WakeKey::Mapping {
+    fn reservation_key(&self, mapping: &Span) -> WakeKey {
+        WakeKey::Reservation {
             space: self.id,
-            mapping: mapping.identity(),
+            reservation: mapping.identity(),
         }
     }
 
     pub(crate) fn detach(self: &Arc<Self>, selection: NestRange) -> Result<(), NestError> {
-        let key = self.mapping_key(selection.mapping());
+        let key = self.reservation_key(selection.reservation());
         let result = self.detach_range(selection);
         sign::signal(key);
         result
@@ -1885,7 +1894,7 @@ impl Nest {
     /// 失败时退休票、Page、表页、来源与待撤的活动全都保留，VA 禁复用；
     /// 沿用同一身份重试（再次 `detach`，或 `retry_invalidation`）才继续。
     fn detach_range(self: &Arc<Self>, selection: NestRange) -> Result<(), NestError> {
-        let mapping = selection.mapping().clone();
+        let mapping = selection.reservation().clone();
         self.check_owner(&mapping.reservation)?;
         if self.is_closed() {
             return Err(NestError::NoRegion);
@@ -1905,7 +1914,7 @@ impl Nest {
     /// `Pages` 还要求整个窗口都被欠着：选到已经结算完的页就是失败。
     /// 整段只取还欠着的那几段，因此部分撤下之后不会去碰已经没了的洞。
     fn owed_spans(&self, selection: &NestRange) -> Result<Vec<(VirtAddr, usize)>, NestError> {
-        let mapping = selection.mapping();
+        let mapping = selection.reservation();
         let (lo, hi) = selection.window();
         let strict = matches!(selection, NestRange::Pages { .. });
         let mut owned: Vec<(usize, usize)> = Vec::new();
@@ -2078,7 +2087,7 @@ impl Nest {
     /// 失败时责任留在 Nest 自己那里：退休票、退休资源与待撤的活动都还在，
     /// 由 `retry_invalidation` 继续；调用者不再持有这笔关系的凭证。
     pub(crate) fn dispose(self: &Arc<Self>, mapping: Arc<Span>) -> Result<(), NestError> {
-        let key = self.mapping_key(&mapping);
+        let key = self.reservation_key(&mapping);
         let result = (|| {
             self.check_owner(&mapping.reservation)?;
             let cleanup = mapping.take_cleanup();
@@ -2132,7 +2141,7 @@ impl Nest {
     }
 
     /// 交还一笔尚未落地的保留。
-    pub(crate) fn release_reservation(&self, reservation: Reservation) -> Result<(), NestError> {
+    pub(crate) fn cancel_reservation(&self, reservation: Reservation) -> Result<(), NestError> {
         self.release_reserved(&reservation)
     }
 
@@ -2277,19 +2286,19 @@ impl Nest {
     pub(crate) fn retire(&self) -> Result<(), NestError> {
         if !self.cpu.as_ref().is_none_or(|cpu| cpu.domain.released()) {
             self.close()?;
-            self.drain_mapping_resources()?;
+            self.drain_reservation_resources()?;
             if self.pending_cleanup.lock().is_some() {
                 return Err(NestError::Busy);
             }
             if !sign::wipe_space(self.id) {
                 return Err(NestError::Busy);
             }
-            if !self.reap_mappings() {
+            if !self.reap_reservations() {
                 return Err(NestError::Busy);
             }
             self.release_asid()?;
         }
-        self.reap_mappings();
+        self.reap_reservations();
         Ok(())
     }
 
@@ -2347,12 +2356,12 @@ impl Nest {
         Ok(())
     }
 
-    fn ensure_mapping(&self, mapping: &Arc<Span>) -> Result<(), NestError> {
+    fn ensure_reservation(&self, mapping: &Arc<Span>) -> Result<(), NestError> {
         self.check_owner(&mapping.reservation)?;
         if self
-            .mappings
+            .reservations
             .registered(mapping.identity())
-            .and_then(|entry| entry.mapping)
+            .and_then(|entry| entry.reservation)
             .is_none_or(|held| !Arc::ptr_eq(&held, mapping))
         {
             return Err(NestError::NoRegion);

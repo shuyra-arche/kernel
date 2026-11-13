@@ -44,7 +44,10 @@ pub(super) fn wake(affected: Vec<Weak<Span>>) {
         let key = mapping.wake_key();
         drop(mapping);
         if let Some((space, mapping)) = key {
-            sign::signal(WakeKey::Mapping { space, mapping });
+            sign::signal(WakeKey::Reservation {
+                space,
+                reservation: mapping,
+            });
         }
     }
 }

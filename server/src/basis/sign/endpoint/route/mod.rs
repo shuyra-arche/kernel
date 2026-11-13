@@ -50,15 +50,15 @@ impl Route {
                     Err(_) => Some(Some(SignEventFail::Denied)),
                 }
             }
-            Watch::ExternalMapping {
+            Watch::ExternalReservation {
                 token,
-                mapping,
+                reservation,
                 published,
                 generation,
             } => match crate::basis::nest::authority::external::event(
                 actor,
                 *token,
-                *mapping,
+                *reservation,
                 *published,
                 *generation,
             ) {

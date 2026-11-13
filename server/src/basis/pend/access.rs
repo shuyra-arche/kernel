@@ -99,12 +99,12 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
 }
 
 /// Retains an authority route while the caller holds its ledger serial.
-pub(crate) struct Mapping {
+pub(crate) struct Reservation {
     entry: alloc::sync::Arc<PendEntry>,
     rights: kernel_api::model::pend::NestRights,
 }
 
-impl Mapping {
+impl Reservation {
     pub(crate) fn acquire(
         actor: &alloc::sync::Arc<crate::basis::unit::task::Task>,
         token: PendId,
@@ -116,18 +116,18 @@ impl Mapping {
             return Err(PendFail::Dead);
         }
         let entry = pend::locate(actor, token).ok_or(PendFail::Denied)?;
-        let PendScope::Nest(NestScope::Mapping { id, .. }) = entry.scope() else {
+        let PendScope::Nest(NestScope::Reservation { id, .. }) = entry.scope() else {
             return Err(PendFail::Denied);
         };
         if !entry.authority().permits(Operations::Nest(rights)) {
             return Err(PendFail::Denied);
         }
         let nest = entry.target().nest().ok_or(PendFail::Denied)?;
-        let span = nest.mapping(id).ok_or(PendFail::Dead)?;
+        let span = nest.reservation(id).ok_or(PendFail::Dead)?;
         let cleanup = rights == NestRights::INSPECT
             || rights == NestRights::RETRACT
             || rights == NestRights::REMOVE;
-        if !cleanup && (!nest.is_open() || !nest.mapping_open(id)) {
+        if !cleanup && (!nest.is_open() || !nest.reservation_open(id)) {
             return Err(PendFail::Dead);
         }
         let (offset, count) = entry.authority().window().ok_or(PendFail::Denied)?;
@@ -148,24 +148,23 @@ impl Mapping {
 
     pub(crate) fn nest(&self) -> &alloc::sync::Arc<crate::basis::nest::Nest> {
         let pend::Target::Nest { nest, .. } = self.entry.target() else {
-            unreachable!("a Mapping retains its immutable Nest target")
+            unreachable!("a Reservation retains its immutable Nest target")
         };
         nest
     }
 
-    pub(crate) fn id(&self) -> kernel_api::model::cell::MappingId {
-        let kernel_api::model::pend::PendScope::Nest(kernel_api::model::pend::NestScope::Mapping {
-            id,
-            ..
-        }) = self.entry.scope()
+    pub(crate) fn id(&self) -> kernel_api::model::nest::ReservationId {
+        let kernel_api::model::pend::PendScope::Nest(
+            kernel_api::model::pend::NestScope::Reservation { id, .. },
+        ) = self.entry.scope()
         else {
-            unreachable!("scope attenuation preserves Mapping identity")
+            unreachable!("scope attenuation preserves Reservation identity")
         };
         id
     }
 
     pub(crate) fn span(&self) -> Result<alloc::sync::Arc<crate::basis::nest::Span>, PendFail> {
-        self.nest().mapping(self.id()).ok_or(PendFail::Dead)
+        self.nest().reservation(self.id()).ok_or(PendFail::Dead)
     }
 
     pub(crate) fn page(&self, relative: usize) -> Result<usize, PendFail> {
@@ -193,7 +192,7 @@ impl Mapping {
     }
 
     /// The v10 adapter above normalizes once. The common resolver never adds
-    /// the current Pend window to a fixed Mapping-origin coordinate.
+    /// the current Pend window to a fixed Reservation-origin coordinate.
     pub(crate) fn position(
         &self,
         position: kernel_api::model::nest::MemoPosition,
@@ -201,7 +200,7 @@ impl Mapping {
         use kernel_api::model::pend::{NestScope, PendRange, PendScope};
         if position.token() != self.entry.token()
             || position.nest() != self.nest().id()
-            || position.mapping() != self.id()
+            || position.reservation() != self.id()
         {
             return Err(PendFail::Denied);
         }
@@ -210,8 +209,8 @@ impl Mapping {
         let grain = span.grain();
         if !self.entry.authority().selects(
             Operations::Nest(self.rights),
-            PendScope::Nest(NestScope::Mapping {
-                id: position.mapping(),
+            PendScope::Nest(NestScope::Reservation {
+                id: position.reservation(),
                 range: PendRange::Pages {
                     offset: page,
                     count: grain,
@@ -229,7 +228,7 @@ impl Mapping {
     }
 }
 
-impl Drop for Mapping {
+impl Drop for Reservation {
     fn drop(&mut self) {
         // No operation keeps this transient route after its ledger guard ends.
         unsafe { self.entry.authority().release_route() };

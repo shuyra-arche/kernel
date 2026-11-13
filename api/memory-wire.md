@@ -55,7 +55,7 @@ The following symbols expand inline, without a pointer or Rust padding:
 | Symbol | Words |
 | --- | --- |
 | S | SlotPosition `[flat_pend, flat_id, fixed_page]` |
-| M | MemoPosition `[nest_pend, nest_id, mapping_id, fixed_page]` |
+| M | MemoPosition `[nest_pend, nest_id, reservation_id, fixed_page]` |
 | V | Nonzero SlotVersion |
 | G | Nonzero MemoGeneration |
 | B | BlockRef `[flat_id, record_id, block_generation]` |
@@ -78,7 +78,7 @@ a different Flat's maintenance record is not admitted by this first contract.
 | Nest 13 / 16 | CreateNest | `[license]` |
 | Nest 13 / 17 | DeleteNest | `[nest_pend, nest_id, expected_nest_version]` |
 | Nest 13 / 19 | Reserve | `[nest_pend, nest_id, expected_nest_version, reservation...]` |
-| Nest 13 / 20 | Release | `[mapping_pend, nest_id, mapping_id, expected_mapping_version]` |
+| Nest 13 / 20 | Release | `[reservation_pend, nest_id, reservation_id, expected_reservation_version]` |
 | Flat 12 / 19 | Occupy | `[S..., V]` |
 | Flat 12 / 20 | Vacate | `[S..., V, H...]` |
 | Flat 12 / 21 | Block | `[S..., count, Optional B...]` |
@@ -92,7 +92,7 @@ a different Flat's maintenance record is not admitted by this first contract.
 | Nest 13 / 23 | Publish | `[M..., G, Optional H...]` |
 | Nest 13 / 24 | Retract | `[M..., G]` |
 | Nest 13 / 25 | Protect | `[M..., G, access]` |
-| Nest 13 / 26 | FaultRoute | `[mapping_pend, nest_id, mapping_id, expected_mapping_version, expected_fault_epoch, enabled, sign_pend?, timeout_ns?]` |
+| Nest 13 / 26 | FaultRoute | `[reservation_pend, nest_id, reservation_id, expected_reservation_version, expected_fault_epoch, enabled, sign_pend?, timeout_ns?]` |
 | Flat 12 or Nest 13 / 18 | InspectResult | `[query_tag = 3, requested_id]`; header RequestId is zero |
 
 The largest implemented request is maintenance Push/Pull:
@@ -122,7 +122,7 @@ Reserve embeds `model::nest::ReserveRequest`'s six little-endian words:
 `[placement_tag, address, align, count, level, access]`, with its existing
 Exact/Anywhere placement rules. Exact placement also checks address plus the
 entire byte length for overflow. Reserve atomically creates source-free Empty
-Memo positions and a fresh Mapping-scoped Nest Pend under Whole RESERVE. No
+Memo positions and a fresh Reservation-scoped Nest Pend under Whole RESERVE. No
 Page, logical source or publication is implied. Failed Create/Reserve exposes no
 partial grant; a committed grant remains recoverable by the original RequestId
 if copying its result fails.
@@ -135,10 +135,10 @@ Failed phase. Rejected has no effects; failure after acceptance cannot reopen
 admission or hide unfinished cleanup. Live rights, branch scope and hardware
 settlement remain Server checks, not facts proved by these encodings.
 
-`FlatVersion`, `NestVersion` and `MappingVersion` are distinct nonzero u64 values
+`FlatVersion`, `NestVersion` and `ReservationVersion` are distinct nonzero u64 values
 with checked, non-wrapping successors. FlatVersion covers structural/lifecycle
 changes including holding and geometry changes. NestVersion covers reservation
-topology and space lifecycle. MappingVersion covers changes anywhere in the
+topology and space lifecycle. ReservationVersion covers changes anywhere in the
 reservation, including logical association and publication transitions; Release
 must not rely on one Memo's generation. These are separate from SlotVersion,
 MemoGeneration, request sequences and ordinary memory content.
@@ -270,12 +270,12 @@ Value tags and payloads are:
 | 4 | `[B..., block_phase]` | Block/Allow |
 | 5 | `[flat_pend, flat_id, flat_version]` | CreateFlat |
 | 6 | `[nest_pend, nest_id, nest_version]` | CreateNest |
-| 7 | `[mapping_pend, nest_id, nest_version, mapping_id, mapping_version, address]` | Reserve |
+| 7 | `[reservation_pend, nest_id, nest_version, reservation_id, reservation_version, address]` | Reserve |
 | 8 | `[flat_id, flat_version, flat_phase]` | DeleteFlat |
 | 9 | `[nest_id, nest_version, nest_phase]` | DeleteNest |
-| 10 | `[nest_id, mapping_id, mapping_version, mapping_phase]` | Release |
+| 10 | `[nest_id, reservation_id, reservation_version, reservation_phase]` | Release |
 | 11 | `[flat_id, flat_version, slot_version, offset, parent_level]` | Split/Merge |
-| 12 | `[nest_id, mapping_id, mapping_version, fault_epoch, fault_phase]` | FaultRoute |
+| 12 | `[nest_id, reservation_id, reservation_version, fault_epoch, fault_phase]` | FaultRoute |
 
 Page IDs are descriptive positive identities at most `isize::MAX`; they confer
 no rights. Slot/Memo versions are nonzero u64. A result's Value must match its
@@ -372,7 +372,7 @@ record. Query tag 3 remains the separate retained-result query described below.
 | Flat | 2 | `[H...]` | BlockStatus |
 | Nest | 0 | `[nest_pend, nest_id]` | NestStatus |
 | Nest | 1 | `[M...]` | MemoStatus |
-| Nest | 2 | `[mapping_pend, nest_id, mapping_id]` | MappingStatus |
+| Nest | 2 | `[reservation_pend, nest_id, reservation_id]` | ReservationStatus |
 
 An `Observation` is exactly 128 bytes. Its six-word header is
 `[11, domain, 18, 0, query_tag, 0]`; the payload below is followed by zero padding.
@@ -386,8 +386,8 @@ permission. Inspection failure uses Delivery with no valid output snapshot.
 | Slot | `[flat_id, coordinate, slot_version, level, slot_phase, page_id, obligations, blocked]` |
 | Block | `[B..., block_phase, offset, count, actor_task, ordinary, maintenance, failed]` |
 | Nest | `[nest_id, nest_version, kind, nest_phase, fault_sequence, fault_cause, fault_address, fault_requester]` |
-| Memo | `[nest_id, mapping_id, coordinate, memo_generation, memo_phase, source_flat, source_coordinate, page_id, access, level]` |
-| Mapping | `[nest_id, mapping_id, mapping_version, offset, count, original_address, level, access, mapping_phase]` |
+| Memo | `[nest_id, reservation_id, coordinate, memo_generation, memo_phase, source_flat, source_coordinate, page_id, access, level]` |
+| Reservation | `[nest_id, reservation_id, reservation_version, offset, count, original_address, level, access, reservation_phase]` |
 
 Booleans accept only 0/1. Phases and kind accept only known tags:
 
@@ -399,10 +399,10 @@ Booleans accept only 0/1. Phases and kind accept only known tags:
 | NestPhase | Unbound=0, Bound=1, Closing=2, Closed=3, Failed=4 |
 | NestKind | Internal=0, External=1 |
 | MemoPhase | Empty=0, Associated=1, Publishing=2, Published=3, Retiring=4, Failed=5 |
-| MappingPhase | Open=0, Releasing=1, Released=2, Failed=3 |
+| ReservationPhase | Open=0, Releasing=1, Released=2, Failed=3 |
 
-Flat/Mapping ranges use original-origin coordinates and checked nonempty spans.
-A Mapping's address is its original reservation base, even for a narrowed
+Flat/Reservation ranges use original-origin coordinates and checked nonempty spans.
+A Reservation's address is its original reservation base, even for a narrowed
 window; adding the full window extent must not overflow. Its range covers whole
 physical grains. Slot and Memo positions must be physical-grain heads.
 
@@ -425,14 +425,14 @@ source is not an implicit Page allocation.
 
 Nest's four fault fields preserve all 64 bits, including on narrower hosts.
 The NestStatus observation alone does not register a handler or wait for a new
-fault; the separate Mapping fault protocol below defines those requests. Every
+fault; the separate Reservation fault protocol below defines those requests. Every
 snapshot can become stale immediately; neither a revision, count, source identity
 nor a Page ID proves content immutability, permission or hardware completion.
 
-## Mapping fault routes and bounded recovery
+## Reservation fault routes and bounded recovery
 
 This is an inactive service-facing protocol, using Nest operations and existing
-Sign endpoints. A route is stored in its Mapping; there is no Fault/Mapping Pend
+Sign endpoints. A route is stored in its Reservation; there is no Fault/Reservation Pend
 target or new data authority. Enabling these codecs alone cannot change v10 fault
 behavior. Scheduler, trap, Sign and Server integration remain unimplemented.
 
@@ -441,35 +441,35 @@ behavior. Scheduler, trap, Sign and Server integration remain unimplemented.
 FaultRoute (Nest slot 26) installs/replaces a route when `enabled=1`, followed by
 `[sign_pend, timeout_ns]`; `enabled=0` disables it and has no remaining payload.
 Other tags and nonzero unused fields reject. The request has a normal nonzero
-RequestId, expected MappingVersion and expected FaultEpoch. Preparation failure
+RequestId, expected ReservationVersion and expected FaultEpoch. Preparation failure
 leaves the old route intact; commit advances both versions once and records a
 Value tag 12 result. Only Active or Disabled is a committed configuration result,
 with both new versions greater than 1. There is no Pending/partial installation.
 The reply correlates both exact successors and the requested phase/identity.
 
-The proposed **Mapping-only FAULT right is bit 12 (4096)**. It is not enabled in
+The proposed **Reservation-only FAULT right is bit 12 (4096)**. It is not enabled in
 v10 NestRights or Limits. Configuration requires this right over the entire
-original reservation, a live Mapping branch and an open Mapping. A Whole grant
-cannot configure an existing Mapping's route. Narrowed subranges cannot replace
-a handler for peers outside their scope. Managers delegate a full Mapping-scoped
+original reservation, a live Reservation branch and an open Reservation. A Whole grant
+cannot configure an existing Reservation's route. Narrowed subranges cannot replace
+a handler for peers outside their scope. Managers delegate a full Reservation-scoped
 FAULT grant to the chosen service; it must register itself. The request cannot
 nominate a Task by numeric identity.
 
 The actual calling Task becomes the handler. Its Sign grant must carry LISTEN,
-ROUTE and TRIGGER; the route retains the exact live Mapping and Sign branch
+ROUTE and TRIGGER; the route retains the exact live Reservation and Sign branch
 lineages, not table indices that could later be reused. Registration conveys no
 Flat access, Occupy/Vacate, transfer, Insert or Publish permission. Those grants
 must be delegated separately. Event reads require the actual handler plus its
-live full-Mapping INSPECT/FAULT authority and original route binding. Route-status
-reads require full-Mapping INSPECT. Recheck permissions when delivering a read
+live full-Reservation INSPECT/FAULT authority and original route binding. Route-status
+reads require full-Reservation INSPECT. Recheck permissions when delivering a read
 that slept, and fail if the handler, branch or route changed meanwhile.
 
 Initial route state is Disabled at FaultEpoch 1. FaultEpoch is nonzero u64;
 replacing/disabling advances it without wrapping. Task death, branch revocation,
-Sign destruction or Mapping close marks an active route Lost immediately and
+Sign destruction or Reservation close marks an active route Lost immediately and
 ends its waiters with HandlerGone. Lost retains its old actor/budget for diagnosis
 and accepts no new recovery waits. This forced invalidation does not need a new
-epoch at exhaustion; replacement always requires a fresh epoch and MappingVersion.
+epoch at exhaustion; replacement always requires a fresh epoch and ReservationVersion.
 Old events/wake callbacks cannot target the replacement generation. Changing or
 disabling a route also ends old waits; it does not transfer them to a new service.
 
@@ -480,8 +480,8 @@ header RequestId zero. Query tags 4 and 5 are invalid in the Flat domain.
 
 | Query tag | Payload after tag | Result |
 | ---: | --- | --- |
-| 4 | `[mapping_pend, nest_id, mapping_id]` | FaultStatus |
-| 5 | `[mapping_pend, nest_id, mapping_id, fault_epoch, after_sequence, wait_tag, deadline_ns]` | FaultEvent |
+| 4 | `[reservation_pend, nest_id, reservation_id]` | FaultStatus |
+| 5 | `[reservation_pend, nest_id, reservation_id, fault_epoch, after_sequence, wait_tag, deadline_ns]` | FaultEvent |
 
 Event reads are non-consuming. `wait_tag=0, deadline_ns=0` polls; `wait_tag=1`
 uses an absolute Room.Clock nanosecond deadline. Infinite and other wait tags
@@ -493,18 +493,18 @@ The 128-byte Observation header remains `[11, 13, 18, 0, query_tag, 0]`:
 
 | Query tag | Payload after the six-word header |
 | ---: | --- |
-| 4 | `[nest_id, mapping_id, fault_epoch, phase, handler_task_or_zero, timeout_ns, last_sequence]`, then zero tail |
-| 5 | `[nest_id, mapping_id, fault_epoch, sequence, memo_page, memo_generation, flat_id, slot_page, slot_version, cause_and_access]` |
+| 4 | `[nest_id, reservation_id, fault_epoch, phase, handler_task_or_zero, timeout_ns, last_sequence]`, then zero tail |
+| 5 | `[nest_id, reservation_id, fault_epoch, sequence, memo_page, memo_generation, flat_id, slot_page, slot_version, cause_and_access]` |
 
 FaultPhase is Disabled=0, Active=1, Lost=2. Disabled has zero handler and timeout;
 Active/Lost retain a positive handler identity and a timeout in 1..=MAX_FAULT_NS.
 Active routes and events require epoch greater than 1. FaultSequence is a
-separate nonzero u64, monotonic for the Mapping's entire lifetime and never reset
+separate nonzero u64, monotonic for the Reservation's entire lifetime and never reset
 on route replacement. `last_sequence` is zero before any event. Counters preserve
 all 64 bits and reject exhaustion with VersionExhausted without reuse. A new
-route cannot reset an exhausted Mapping event sequence.
+route cannot reset an exhausted Reservation event sequence.
 
-Event coordinates use original Mapping and Flat origins, not the current grant
+Event coordinates use original Reservation and Flat origins, not the current grant
 window or raw fault VA. The event identifies the Memo unit and resolved logical
 source seen at fault admission; the provider checks complete physical geometry
 when resolving that source. A Share/Memo source resolves to its original Flat
@@ -521,7 +521,7 @@ transparent replay or resumption of a device request.
 
 ### Queue, notification and timeout rules
 
-Each Mapping retains at most `FAULT_CAPACITY = 16` events. The key for coalescing
+Each Reservation retains at most `FAULT_CAPACITY = 16` events. The key for coalescing
 is route epoch, Memo coordinate/generation, source Flat/coordinate/version, cause
 and attempted access. Identical pending faults share one event and its original
 deadline. Waiter storage is bounded to one embedded wait per Task; it is not an
@@ -539,7 +539,7 @@ NoHandler and Lost returns HandlerGone. Read failures use Delivery and have no
 valid Observation payload. Lost reply copies do not consume events.
 
 Kernel uses the existing Sign direct-trigger slot only as a coalesced wake hint.
-If the slot already has a trigger, the event remains in the Mapping queue and no
+If the slot already has a trigger, the event remains in the Reservation queue and no
 second trigger is necessary. The Sign sequence is independent of FaultSequence.
 Consuming a Sign trigger does not acknowledge, discard or resolve a fault. The
 service consumes an observed direct trigger **before** draining events, reads
@@ -551,7 +551,7 @@ Spurious triggers are harmless because reads recheck authority and retained
 state. A notification error caused by revoked/dead delivery authority loses the
 route; it cannot silently strand waiting Tasks.
 
-For a recoverable CPU nonresident fault, admission first checks the live mapping,
+For a recoverable CPU nonresident fault, admission first checks the live reservation,
 logical source and access ceilings. With no handler, return NoHandler immediately.
 With a live route, establish the event and its fixed deadline before parking the
 Task. `FaultRoute::deadline(accepted_at)` performs checked addition; overflow
@@ -570,7 +570,7 @@ completion checks that exact lineage, current authority and actual visibility
 before satisfying the original wait. A Sign notification, supplied Page alone,
 user Ack or timeout is never completion proof.
 
-Insert replacement, Remove or Mapping release invalidates the old logical event;
+Insert replacement, Remove or Reservation release invalidates the old logical event;
 it cannot retarget the event to the new source. Supply changes SlotVersion as
 expected, but never authorizes reuse of the old event as a new supply request.
 Service mutations still check their ordinary expected versions and grants. A

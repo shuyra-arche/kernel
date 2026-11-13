@@ -59,7 +59,7 @@ impl RangeBinding {
 }
 
 #[derive(Clone)]
-pub(in crate::basis::nest) struct MappingRoot {
+pub(in crate::basis::nest) struct ReservationRoot {
     pub(in crate::basis::nest) creator: TaskId,
     pub(in crate::basis::nest) authority: Weak<Pend>,
 }
@@ -67,14 +67,14 @@ pub(in crate::basis::nest) struct MappingRoot {
 #[derive(Clone)]
 pub(crate) struct RangeEntry {
     pub(crate) binding: Arc<RangeBinding>,
-    pub(crate) mapping: Option<Arc<Span>>,
+    pub(crate) reservation: Option<Arc<Span>>,
     source: Option<Arc<SourceAuthorization>>,
-    pub(in crate::basis::nest) root: Option<MappingRoot>,
+    pub(in crate::basis::nest) root: Option<ReservationRoot>,
 }
 
 impl RangeEntry {
-    pub(crate) fn mapping(&self) -> Option<&Arc<Span>> {
-        self.mapping.as_ref()
+    pub(crate) fn reservation(&self) -> Option<&Arc<Span>> {
+        self.reservation.as_ref()
     }
 
     pub(crate) fn source(&self) -> Option<&Arc<SourceAuthorization>> {
@@ -84,8 +84,8 @@ impl RangeEntry {
     fn reapable(&self, nest: &Nest) -> bool {
         nest.settled(self.binding.id())
             && self.root.as_ref().is_none_or(|root| {
-                self.mapping().is_some_and(|span| {
-                    span.state.lock().phase == super::address::span::MappingPhase::Gone
+                self.reservation().is_some_and(|span| {
+                    span.state.lock().phase == super::address::span::ReservationPhase::Gone
                 }) && root
                     .authority
                     .upgrade()
@@ -96,16 +96,16 @@ impl RangeEntry {
 
 struct Ranges {
     entries: Vec<RangeEntry>,
-    /// Private staging owns capacity, not a visible mapping or root.
+    /// Private staging owns capacity, not a visible reservation or root.
     prepared: usize,
     cursor: usize,
 }
 
-pub(crate) struct RangeRegistry {
+pub(crate) struct ReservationRegistry {
     ranges: SpinLock<Ranges>,
 }
 
-impl RangeRegistry {
+impl ReservationRegistry {
     pub(crate) fn new() -> Self {
         Self {
             ranges: SpinLock::new(Ranges {
@@ -116,7 +116,7 @@ impl RangeRegistry {
         }
     }
 
-    pub(crate) fn claim_mapping(
+    pub(crate) fn claim_reservation(
         &self,
         id: usize,
         nest: &Arc<Nest>,
@@ -142,22 +142,22 @@ impl RangeRegistry {
         source.register_binding(binding.clone());
         self.ranges.lock().entries.push(RangeEntry {
             binding,
-            mapping: None,
+            reservation: None,
             source: Some(source),
             root: None,
         });
         Ok(())
     }
 
-    pub(crate) fn commit(&self, id: usize, mapping: Arc<Span>) {
+    pub(crate) fn commit(&self, id: usize, reservation: Arc<Span>) {
         let mut ranges = self.ranges.lock();
         let entry = ranges
             .entries
             .iter_mut()
             .find(|entry| entry.binding.id() == id)
-            .expect("prepared implicit mapping registration");
+            .expect("prepared implicit reservation registration");
         assert!(entry.root.is_none());
-        entry.mapping = Some(mapping);
+        entry.reservation = Some(reservation);
     }
 
     pub(in crate::basis::nest) fn prepare(&self) -> Result<(), PendFail> {
@@ -182,7 +182,7 @@ impl RangeRegistry {
     pub(in crate::basis::nest) fn publish(
         &self,
         binding: Arc<RangeBinding>,
-        mapping: Arc<Span>,
+        reservation: Arc<Span>,
         creator: TaskId,
         root: &Arc<Pend>,
     ) {
@@ -197,9 +197,9 @@ impl RangeRegistry {
         ranges.prepared -= 1;
         ranges.entries.push(RangeEntry {
             binding,
-            mapping: Some(mapping),
+            reservation: Some(reservation),
             source: None,
-            root: Some(MappingRoot {
+            root: Some(ReservationRoot {
                 creator,
                 authority: Arc::downgrade(root),
             }),
@@ -257,8 +257,8 @@ impl RangeRegistry {
                 .root
                 .as_ref()
                 .is_some_and(|root| root.creator != creator)
-                && entry.mapping().is_some_and(|span| {
-                    span.state.lock().phase != super::address::span::MappingPhase::Gone
+                && entry.reservation().is_some_and(|span| {
+                    span.state.lock().phase != super::address::span::ReservationPhase::Gone
                 })
             {
                 return true;
@@ -290,8 +290,8 @@ impl RangeRegistry {
 }
 
 // PendId is observation metadata in SourceAuthorization, never a transferable handle here.
-unsafe impl Send for RangeRegistry {}
-unsafe impl Sync for RangeRegistry {}
+unsafe impl Send for ReservationRegistry {}
+unsafe impl Sync for ReservationRegistry {}
 
 impl Nest {
     fn settle(&self, entry: RangeEntry) {
@@ -299,10 +299,10 @@ impl Nest {
             source.release_binding(&entry.binding);
         }
         if entry.root.is_some()
-            && let Some(mapping) = entry.mapping()
+            && let Some(reservation) = entry.reservation()
         {
             loop {
-                let memo = self.state.lock().memos.take_metadata(mapping);
+                let memo = self.state.lock().memos.take_metadata(reservation);
                 if memo.is_none() {
                     break;
                 }
@@ -311,49 +311,51 @@ impl Nest {
         }
     }
 
-    pub(crate) fn retire_mapping(&self, id: usize) {
+    pub(crate) fn retire_reservation(&self, id: usize) {
         let _commit = crate::basis::commit();
-        let Some(entry) = self.mappings.registered(id) else {
+        let Some(entry) = self.reservations.registered(id) else {
             return;
         };
         if entry.reapable(self)
-            && let Some(entry) = self.mappings.retire(id)
+            && let Some(entry) = self.reservations.retire(id)
         {
             self.settle(entry);
         }
     }
 
     /// The whole-Nest keeper advances a bounded number of the real namespace records.
-    pub(crate) fn progress_mappings(self: &Arc<Self>) {
-        use kernel_api::model::cell::MappingId;
+    pub(crate) fn progress_reservations(self: &Arc<Self>) {
+        use kernel_api::model::nest::ReservationId;
         if !self.is_external() {
             return;
         }
         for _ in 0..4 {
             let _commit = crate::basis::commit();
-            let Some(entry) = self.mappings.progress_entry() else {
+            let Some(entry) = self.reservations.progress_entry() else {
                 break;
             };
-            let Some(mapping) = entry.mapping() else {
+            let Some(reservation) = entry.reservation() else {
                 continue;
             };
             let Some(root) = entry.root.as_ref() else {
                 continue;
             };
-            let Some(id) = MappingId::from_bytes(&(mapping.identity() as u64).to_le_bytes()) else {
+            let Some(id) =
+                ReservationId::from_bytes(&(reservation.identity() as u64).to_le_bytes())
+            else {
                 continue;
             };
             let lost = root.authority.upgrade().is_none_or(|root| !root.alive());
-            if lost || !self.is_open() || !mapping.is_open() {
-                let _ = self.release_mapping(id);
-                self.retire_mapping(id.get());
+            if lost || !self.is_open() || !reservation.is_open() {
+                let _ = self.release_reservation(id);
+                self.retire_reservation(id.get());
                 continue;
             }
             let snapshot = {
                 let state = self.state.lock();
                 state
                     .memos
-                    .get(mapping, 0)
+                    .get(reservation, 0)
                     .map(|memo| (memo.association(), memo.principal()))
             };
             let Some((association, principal)) = snapshot else {
@@ -366,22 +368,22 @@ impl Nest {
                 }
             }
             if let Some(principal) = principal
-                && mapping.access(0).map_or(true, |(_, access)| {
-                    principal.check(self, mapping, 0, access).is_err()
+                && reservation.access(0).map_or(true, |(_, access)| {
+                    principal.check(self, reservation, 0, access).is_err()
                 })
             {
-                if let Some(count) = kernel_api::address::PageCount::new(mapping.grain()) {
-                    let _ = self.withdraw_mapping(
+                if let Some(count) = kernel_api::address::PageCount::new(reservation.grain()) {
+                    let _ = self.withdraw_reservation(
                         id,
                         (kernel_api::address::PageOffset::ZERO, count),
                         principal.authority(),
                     );
                 }
-            } else if let Some(_operation) = mapping.operation() {
-                let before = self.inspect_memo(mapping, 0).ok();
-                let _ = self.progress_external(mapping);
-                if before != self.inspect_memo(mapping, 0).ok() {
-                    crate::basis::sign::signal(crate::basis::sign::WakeKey::ExternalMapping {
+            } else if let Some(_operation) = reservation.operation() {
+                let before = self.inspect_memo(reservation, 0).ok();
+                let _ = self.progress_external(reservation);
+                if before != self.inspect_memo(reservation, 0).ok() {
+                    crate::basis::sign::signal(crate::basis::sign::WakeKey::ExternalReservation {
                         id: id.get(),
                     });
                 }
@@ -390,41 +392,43 @@ impl Nest {
     }
 
     /// CPU shutdown already proved every PTE absent; finish bounded namespace resources.
-    pub(in crate::basis::nest) fn drain_mapping_resources(&self) -> Result<(), super::NestError> {
+    pub(in crate::basis::nest) fn drain_reservation_resources(
+        &self,
+    ) -> Result<(), super::NestError> {
         if !self.is_closed() {
             return Err(super::NestError::Busy);
         }
         for _ in 0..4 {
-            let Some(entry) = self.mappings.progress_entry() else {
+            let Some(entry) = self.reservations.progress_entry() else {
                 break;
             };
-            let Some(mapping) = entry.mapping() else {
+            let Some(reservation) = entry.reservation() else {
                 continue;
             };
-            if mapping.state.lock().phase == super::address::span::MappingPhase::Gone {
+            if reservation.state.lock().phase == super::address::span::ReservationPhase::Gone {
                 continue;
             }
-            let id = kernel_api::model::cell::MappingId::from_bytes(
-                &(mapping.identity() as u64).to_le_bytes(),
+            let id = kernel_api::model::nest::ReservationId::from_bytes(
+                &(reservation.identity() as u64).to_le_bytes(),
             )
             .ok_or(super::NestError::NoRegion)?;
-            self.release_mapping(id)
+            self.release_reservation(id)
                 .map_err(super::memo::source_error)?;
         }
-        if self.mappings_gone() {
+        if self.reservations_gone() {
             Ok(())
         } else {
             Err(super::NestError::Busy)
         }
     }
 
-    pub(in crate::basis::nest) fn mappings_gone(&self) -> bool {
+    pub(in crate::basis::nest) fn reservations_gone(&self) -> bool {
         let mut cursor = 0;
-        while let Some(entry) = self.mappings.next(cursor) {
+        while let Some(entry) = self.reservations.next(cursor) {
             cursor = entry.binding.id();
             if entry.root.is_some()
-                && entry.mapping().is_some_and(|mapping| {
-                    mapping.state.lock().phase != super::address::span::MappingPhase::Gone
+                && entry.reservation().is_some_and(|reservation| {
+                    reservation.state.lock().phase != super::address::span::ReservationPhase::Gone
                 })
             {
                 return false;
@@ -433,16 +437,16 @@ impl Nest {
         true
     }
 
-    pub(crate) fn reap_mappings(&self) -> bool {
+    pub(crate) fn reap_reservations(&self) -> bool {
         for _ in 0..4 {
             let _commit = crate::basis::commit();
-            let Some(entry) = self.mappings.take_settled(self) else {
+            let Some(entry) = self.reservations.take_settled(self) else {
                 break;
             };
             self.settle(entry);
         }
         let mut cursor = 0;
-        while let Some(entry) = self.mappings.next(cursor) {
+        while let Some(entry) = self.reservations.next(cursor) {
             cursor = entry.binding.id();
             if !self.settled(cursor) {
                 return false;

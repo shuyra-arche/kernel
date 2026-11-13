@@ -1,12 +1,9 @@
 //! Next-memory-ABI space, reservation and Memo observations. Descriptive
-//! snapshots do not replace a live Whole/Mapping Pend or retirement evidence.
+//! snapshots do not replace a live Whole/Reservation Pend or retirement evidence.
 
 use super::{MemoGeneration, NestId, NestInfo};
 use crate::address::{BASE_PAGE_SIZE, VirtAddr};
-use crate::model::{
-    cell::{CellLevel, MappingId},
-    flat::FlatId,
-};
+use crate::model::{cell::CellLevel, flat::FlatId, nest::ReservationId};
 use core::num::NonZeroU64;
 
 /// Address-space topology/lifecycle epoch, not a Memo publication generation.
@@ -28,11 +25,11 @@ impl NestVersion {
     }
 }
 
-/// Aggregate Mapping revision used by Release, distinct from one Memo's
+/// Aggregate Reservation revision used by Release, distinct from one Memo's
 /// generation. Changes anywhere in the reservation invalidate an old revision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MappingVersion(NonZeroU64);
-impl MappingVersion {
+pub struct ReservationVersion(NonZeroU64);
+impl ReservationVersion {
     pub const INITIAL: Self = Self(NonZeroU64::MIN);
     pub const fn new(value: u64) -> Option<Self> {
         match NonZeroU64::new(value) {
@@ -56,13 +53,13 @@ pub struct NestStatus {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u64)]
-pub enum MappingPhase {
+pub enum ReservationPhase {
     Open = 0,
     Releasing = 1,
     Released = 2,
     Failed = 3,
 }
-impl MappingPhase {
+impl ReservationPhase {
     pub const fn from_tag(tag: u64) -> Option<Self> {
         match tag {
             0 => Some(Self::Open),
@@ -75,25 +72,25 @@ impl MappingPhase {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MappingStatus {
+pub struct ReservationStatus {
     pub nest: NestId,
-    pub mapping: MappingId,
-    pub version: MappingVersion,
+    pub reservation: ReservationId,
+    pub version: ReservationVersion,
     pub offset: usize,
     pub count: usize,
     /// Original reservation base, not the narrowed window's first address.
     pub address: VirtAddr,
     pub level: CellLevel,
     pub access: u64,
-    pub phase: MappingPhase,
+    pub phase: ReservationPhase,
 }
-impl MappingStatus {
+impl ReservationStatus {
     pub fn valid(self) -> bool {
         let Some(grain) = self.level.pages() else {
             return false;
         };
-        self.mapping.get() > 0
-            && self.mapping.get() <= isize::MAX as usize
+        self.reservation.get() > 0
+            && self.reservation.get() <= isize::MAX as usize
             && crate::model::cell::pages(self.offset, self.count).is_some()
             && self.offset.is_multiple_of(grain)
             && self.count.is_multiple_of(grain)
@@ -137,7 +134,7 @@ impl MemoPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoStatus {
     pub nest: NestId,
-    pub mapping: MappingId,
+    pub reservation: ReservationId,
     pub coordinate: usize,
     pub generation: MemoGeneration,
     pub phase: MemoPhase,
@@ -152,8 +149,8 @@ impl MemoStatus {
         let Some(grain) = self.level.pages() else {
             return false;
         };
-        if self.mapping.get() == 0
-            || self.mapping.get() > isize::MAX as usize
+        if self.reservation.get() == 0
+            || self.reservation.get() > isize::MAX as usize
             || !self.level.fits_at(self.coordinate, self.coordinate, grain)
             || self.page > isize::MAX as u64
             || self

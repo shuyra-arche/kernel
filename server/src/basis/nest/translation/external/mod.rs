@@ -32,7 +32,7 @@ impl Nest {
             id: super::super::next_id()?,
             cpu: None,
             life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
-            mappings: super::super::authority::RangeRegistry::new(),
+            reservations: super::super::authority::ReservationRegistry::new(),
             layout: SpinLock::new_level(Level::Address, Layout::new()),
             pending_cleanup: SpinLock::new(None),
             state: ManuallyDrop::new(SpinLock::new_level(Level::Nest, NestState::external())),

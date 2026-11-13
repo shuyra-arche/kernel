@@ -64,10 +64,10 @@ pub(crate) fn withdraw_source_window(
                 continue;
             }
             let entry = nest
-                .mappings
+                .reservations
                 .registered(binding.id())
                 .ok_or(PendFail::Busy)?;
-            let span = entry.mapping().ok_or(PendFail::Busy)?;
+            let span = entry.reservation().ok_or(PendFail::Busy)?;
             let Some(data) = nest.memo_page(span, page).map_err(|_| PendFail::Busy)? else {
                 continue;
             };

@@ -4,12 +4,13 @@
 
 use super::{Domain, Opcode, Query, Reader, RequestId, VERSION, Writer, valid_token};
 use crate::model::{
-    cell::{CellLevel, MappingId},
+    cell::CellLevel,
     flat::{BlockRef, FlatId, FlatVersion, Reshape, SlotPosition, SlotVersion},
     identity::PendId,
+    nest::ReservationId,
     nest::{
-        FaultEpoch, FaultRoute, MappingVersion, MemoGeneration, MemoPosition, NestId, NestVersion,
-        ReserveRequest,
+        FaultEpoch, FaultRoute, MemoGeneration, MemoPosition, NestId, NestVersion,
+        ReservationVersion, ReserveRequest,
     },
     view::ViewId,
 };
@@ -126,13 +127,13 @@ impl Source {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// Atomically install/replace or disable a Mapping-owned fault route. The
+    /// Atomically install/replace or disable a Reservation-owned fault route. The
     /// provider binds the actual caller, never a caller-supplied handler Task.
     FaultRoute {
         token: PendId,
         nest: NestId,
-        mapping: MappingId,
-        expected: MappingVersion,
+        reservation: ReservationId,
+        expected: ReservationVersion,
         epoch: FaultEpoch,
         route: Option<FaultRoute>,
     },
@@ -163,8 +164,8 @@ pub enum Action {
     Release {
         token: PendId,
         nest: NestId,
-        mapping: MappingId,
-        expected: MappingVersion,
+        reservation: ReservationId,
+        expected: ReservationVersion,
     },
     /// One parent to its 512 immediate children. The expected Flat revision
     /// covers every affected coordinate, not merely the first Slot's stamp.
@@ -277,12 +278,12 @@ impl Action {
         match self {
             Self::FaultRoute {
                 token,
-                mapping,
+                reservation,
                 route,
                 ..
             } => {
                 valid_token(token.get())
-                    && valid_token(mapping.get())
+                    && valid_token(reservation.get())
                     && route.is_none_or(FaultRoute::valid)
             }
             Self::CreateFlat {
@@ -314,9 +315,9 @@ impl Action {
                         _ => true,
                     }
             }
-            Self::Release { token, mapping, .. } => {
-                valid_token(token.get()) && valid_token(mapping.get())
-            }
+            Self::Release {
+                token, reservation, ..
+            } => valid_token(token.get()) && valid_token(reservation.get()),
             Self::Split {
                 start,
                 parent,
@@ -373,7 +374,7 @@ impl Action {
             Self::FaultRoute {
                 token,
                 nest,
-                mapping,
+                reservation,
                 expected,
                 epoch,
                 route,
@@ -381,7 +382,7 @@ impl Action {
                 for word in [
                     token.get() as u64,
                     nest.get() as u64,
-                    mapping.get() as u64,
+                    reservation.get() as u64,
                     expected.get(),
                     epoch.get(),
                     u64::from(route.is_some()),
@@ -436,12 +437,12 @@ impl Action {
             Self::Release {
                 token,
                 nest,
-                mapping,
+                reservation,
                 expected,
             } => {
                 out.word(token.get() as u64)?;
                 out.word(nest.get() as u64)?;
-                out.word(mapping.get() as u64)?;
+                out.word(reservation.get() as u64)?;
                 out.word(expected.get())
             }
             Self::Split {
@@ -542,8 +543,8 @@ impl Action {
             Opcode::FaultRoute => Self::FaultRoute {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
-                mapping: input.mapping()?,
-                expected: MappingVersion::new(input.word()?)?,
+                reservation: input.reservation()?,
+                expected: ReservationVersion::new(input.word()?)?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 route: match input.word()? {
                     0 => None,
@@ -581,8 +582,8 @@ impl Action {
             Opcode::Release => Self::Release {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
-                mapping: input.mapping()?,
-                expected: MappingVersion::new(input.word()?)?,
+                reservation: input.reservation()?,
+                expected: ReservationVersion::new(input.word()?)?,
             },
             Opcode::Split | Opcode::Merge => {
                 let start = SlotPosition::from_bytes(input.bytes::<24>()?)?;

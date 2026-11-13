@@ -12,7 +12,7 @@ use crate::basis::pend::Target;
 use crate::basis::unit::task::Task;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
-use kernel_api::model::cell::MappingId;
+use kernel_api::model::nest::ReservationId;
 use kernel_api::model::pend::{
     Limits, NestRights, NestScope, Operations, PendRange, PendScope, PendStatus,
 };
@@ -63,9 +63,10 @@ impl PendEntry {
         self.meta.alive()
             && self.authority.alive()
             && match self.scope() {
-                PendScope::Nest(NestScope::Mapping { id, .. }) => {
-                    self.meta.nest().is_some_and(|nest| nest.mapping_open(id))
-                }
+                PendScope::Nest(NestScope::Reservation { id, .. }) => self
+                    .meta
+                    .nest()
+                    .is_some_and(|nest| nest.reservation_open(id)),
                 _ => true,
             }
     }
@@ -73,8 +74,8 @@ impl PendEntry {
     pub(crate) fn status(&self) -> PendStatus {
         let status = self.authority.status();
         if let Target::Nest { nest, .. } = &self.meta {
-            if let PendScope::Nest(NestScope::Mapping { id, .. }) = self.scope() {
-                match nest.mapping_status(id) {
+            if let PendScope::Nest(NestScope::Reservation { id, .. }) = self.scope() {
+                match nest.reservation_status(id) {
                     PendStatus::Dead => return PendStatus::Dead,
                     PendStatus::Retiring if status != PendStatus::Dead => {
                         return PendStatus::Retiring;
@@ -256,12 +257,12 @@ impl PendEntry {
 }
 
 /// Caller holds the Task's Pend serial through preparation and final COMMIT.
-pub(crate) fn prepare_mapping<'a>(
+pub(crate) fn prepare_reservation<'a>(
     task: &'a Arc<Task>,
     parent: &Arc<PendEntry>,
-    id: MappingId,
+    id: ReservationId,
     count: PageCount,
-) -> Result<PreparedMapping<'a>, PendFail> {
+) -> Result<PreparedReservationGrant<'a>, PendFail> {
     if !super::live(task) || !parent.alive() {
         return Err(PendFail::Dead);
     }
@@ -273,7 +274,7 @@ pub(crate) fn prepare_mapping<'a>(
         return Err(PendFail::Denied);
     }
     let ceiling = parent.authority().limits();
-    let scope = PendScope::Nest(NestScope::Mapping {
+    let scope = PendScope::Nest(NestScope::Reservation {
         id,
         range: PendRange::Pages {
             offset: 0,
@@ -281,7 +282,7 @@ pub(crate) fn prepare_mapping<'a>(
         },
     });
     let limits = Limits {
-        operations: Operations::Nest(NestRights::mapping()),
+        operations: Operations::Nest(NestRights::reservation()),
         modifiable: ceiling.modifiable,
         distributable: ceiling.distributable,
         scope,
@@ -301,7 +302,7 @@ pub(crate) fn prepare_mapping<'a>(
         .pend
         .prepare_heir(parent.token(), Arc::downgrade(task), entry.token())?;
     let registration = task.pend.prepare(entry.clone())?;
-    Ok(PreparedMapping {
+    Ok(PreparedReservationGrant {
         entry,
         _parent: parent.clone(),
         heir,
@@ -309,15 +310,15 @@ pub(crate) fn prepare_mapping<'a>(
     })
 }
 
-#[must_use = "an unpublished Mapping rolls back its ledger and heir reservations"]
-pub(crate) struct PreparedMapping<'a> {
+#[must_use = "an unpublished Reservation rolls back its ledger and heir reservations"]
+pub(crate) struct PreparedReservationGrant<'a> {
     entry: Arc<PendEntry>,
     _parent: Arc<PendEntry>,
     heir: HeirRegistration<'a>,
     registration: Registration<'a>,
 }
 
-impl PreparedMapping<'_> {
+impl PreparedReservationGrant<'_> {
     pub(crate) fn entry(&self) -> &Arc<PendEntry> {
         &self.entry
     }

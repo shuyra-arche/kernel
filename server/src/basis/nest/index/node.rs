@@ -9,7 +9,7 @@ use super::super::Span;
 
 /// 关系索引节点：以关系最小区间起点为键的 AVL 节点，缓存高度与最大终点。
 pub(crate) struct IndexNode {
-    pub(super) mapping: Arc<Span>,
+    pub(super) reservation: Arc<Span>,
     pub(super) left: Option<Box<IndexNode>>,
     pub(super) right: Option<Box<IndexNode>>,
     pub(super) start: VirtAddr,
@@ -19,18 +19,18 @@ pub(crate) struct IndexNode {
 
 impl IndexNode {
     /// 以关系当前区间建节点。
-    pub(crate) fn new(mapping: Arc<Span>) -> Result<Self, NestError> {
-        let (start, max_end) = Self::span(&mapping.state.lock().active)?;
-        Ok(Self::cached(mapping, start, max_end))
+    pub(crate) fn new(reservation: Arc<Span>) -> Result<Self, NestError> {
+        let (start, max_end) = Self::span(&reservation.state.lock().active)?;
+        Ok(Self::cached(reservation, start, max_end))
     }
 
     /// 以给定区间建节点。
     pub(crate) fn with_ranges(
-        mapping: Arc<Span>,
+        reservation: Arc<Span>,
         active: &[ActiveRange],
     ) -> Result<Self, NestError> {
         let (start, max_end) = Self::span(active)?;
-        Ok(Self::cached(mapping, start, max_end))
+        Ok(Self::cached(reservation, start, max_end))
     }
 
     /// 键取最小区间起点，缓存终点取最大区间终点；空集合没有键。
@@ -48,9 +48,9 @@ impl IndexNode {
         Ok((start, max_end))
     }
 
-    fn cached(mapping: Arc<Span>, start: VirtAddr, max_end: usize) -> Self {
+    fn cached(reservation: Arc<Span>, start: VirtAddr, max_end: usize) -> Self {
         Self {
-            mapping,
+            reservation,
             left: None,
             right: None,
             start,
@@ -68,7 +68,7 @@ impl IndexNode {
     pub(super) fn update(&mut self) {
         self.height = 1 + Self::height(&self.left).max(Self::height(&self.right));
         {
-            let state = self.mapping.state.lock();
+            let state = self.reservation.state.lock();
             if let Some(start) = state.active.iter().map(|range| range.start).min() {
                 self.start = start;
             }
