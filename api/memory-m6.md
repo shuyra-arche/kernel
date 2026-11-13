@@ -13,6 +13,7 @@ API、Client、Server 的 `memory-v11` feature 必须由同一个 composition �
 这不是所有 Vanllia 产品组件已经完成 ABI 切换的声明。
 
 三项 native host 检查验证调用版本、权限位以及 Ledger/Capsule 混用拒绝。
+默认与 native host 检查均以 `-Dwarnings` 运行；生产 RV64 与组合镜像也保留该门禁。
 QEMU 另以正常 v11 guest 执行旧版本调用，并将相同 ELF 包成 v10 Capsule，
 确认在初始 Task 执行前启动失败。
 
@@ -34,6 +35,9 @@ QEMU 另以正常 v11 guest 执行旧版本调用，并将相同 ELF 包成 v10 
 ## 本轮修复与可信条件
 
 - Fault continuation 已终结 Task 时不再第二次执行 `Task::rise`。
+- 受理结果显式区分 Ready、Started、Committed、Deferred；完成事件用 Published、
+  Retired、Failed 表达，纯函数归约结果，再由边界写入 journal。启动 MMIO 布局也
+  区分 Open/Sealed，指令资格区分 Unsupported/LocalHart，不以布尔组合隐含状态。
 - External 发布/退休保留 Pending；由原 Memo 的精确完成回调更新该 Task 的 journal。
   回调仅持有弱 Task 引用和原 Accepted，不拥有 Page、不授予权限、不代替硬件退休。
   取消或硬件失败记录终态失败，仍保留实际资源责任。
@@ -53,7 +57,7 @@ QEMU 另以正常 v11 guest 执行旧版本调用，并将相同 ELF 包成 v10 
 
 | 层次 | 本轮证据 |
 | --- | --- |
-| Host | 默认 workspace 437 项通过；另有 native ABI 3 项；没有 CPU/IOMMU 硬件结论 |
+| Host | 默认 workspace 438 项通过；另有 native ABI 3 项；没有 CPU/IOMMU 硬件结论 |
 | RV64 编译 | 默认 v10 与原生 v11 provider/client/image，debug/release 分开验证 |
 | QEMU v11 | 上述全部场景；保存串口、stderr、输入哈希、QEMU 命令与版本、耗时、退出状态；debug/release 分开记录 |
 | QEMU v10 | 保留既有 14 项环境测试，作为兼容回归 |

@@ -98,9 +98,26 @@ fn unknown_legacy_aliases_and_unknown_routes_refuse_without_losing_receipts() {
     let legacy = page.prepare_hardware(false).unwrap();
     let change = page.begin().unwrap();
     let read = Access::new(2).unwrap();
+    assert_eq!(
+        topology.regions().collect::<Vec<_>>(),
+        vec![Ram {
+            base: page.physical_address() as u64,
+            bytes: page.size() as u64
+        }]
+    );
+    assert_eq!(
+        page.compatible(&topology, device(0), read),
+        Err(Error::Unsupported)
+    );
     assert!(change.qualified(&topology, device(0), read, None).is_err());
     assert_eq!(page.obligations(), 1);
     drop(legacy);
+    assert!(page.compatible(&topology, cpu(), read).is_ok());
+    assert_eq!(
+        page.obligations(),
+        0,
+        "preflight must not register a publication"
+    );
     let qualified = change.qualified(&topology, cpu(), read, None).unwrap();
     assert!(change.external(false).is_err());
     assert!(change.hardware(false).is_err());

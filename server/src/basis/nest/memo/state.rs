@@ -5,6 +5,7 @@ use crate::basis::cell::page::{Change, Freeze, Page};
 use crate::basis::nest::NestError;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::{ExternalBorrow, Pend};
+use crate::basis::unit::task::memory_result::Transition;
 use alloc::sync::Arc;
 use kernel_api::address::VirtAddr;
 use kernel_api::model::cell::{CellInfo, CellState};
@@ -54,7 +55,10 @@ impl Detached {
 /// Completion resources leave the Nest lock before inverse owners are touched.
 #[derive(Default)]
 pub(in crate::basis::nest) struct Settled {
-    completion: Option<(crate::basis::unit::task::memory_result::Completion, bool)>,
+    completion: Option<(
+        crate::basis::unit::task::memory_result::Completion,
+        Transition,
+    )>,
     publisher: Option<Publisher>,
     borrow: Option<ExternalBorrow>,
     freeze: Option<Freeze>,
@@ -65,8 +69,8 @@ pub(in crate::basis::nest) struct Settled {
 
 impl Settled {
     pub(in crate::basis::nest) fn release(self) {
-        if let Some((completion, published)) = self.completion {
-            completion.finish(published);
+        if let Some((completion, transition)) = self.completion {
+            completion.finish(transition);
         }
         let (source_notice, publisher_notice) = {
             let _commit = crate::basis::commit();
@@ -413,7 +417,7 @@ impl Memo {
             Some(Phase::Mapped) => {
                 self.flight = None;
                 Settled {
-                    completion: self.completion.take().map(|c| (c, true)),
+                    completion: self.completion.take().map(|c| (c, Transition::Published)),
                     freeze: self.freeze.take(),
                     ..Settled::default()
                 }
@@ -426,7 +430,7 @@ impl Memo {
                     None
                 };
                 Settled {
-                    completion: self.completion.take().map(|c| (c, false)),
+                    completion: self.completion.take().map(|c| (c, Transition::Retired)),
                     publisher: self.publisher.take(),
                     borrow: self.borrow.take(),
                     freeze,

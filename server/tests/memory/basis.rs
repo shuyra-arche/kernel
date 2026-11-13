@@ -5,9 +5,13 @@ pub(crate) fn commit() {}
 pub(crate) mod unit {
     pub(crate) mod task {
         pub(crate) mod memory_result {
+            pub(crate) enum Transition {
+                Published,
+                Retired,
+            }
             pub(crate) struct Completion;
             impl Completion {
-                pub(crate) fn finish(self, _: bool) {
+                pub(crate) fn finish(self, _: Transition) {
                     panic!("Task journal outside Memo fixture; covered by invocation tests")
                 }
             }

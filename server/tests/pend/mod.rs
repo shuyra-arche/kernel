@@ -4,6 +4,7 @@ mod ancestry;
 #[allow(dead_code)]
 #[path = "../../src/basis/pend/authority/mod.rs"]
 mod authority;
+mod carried;
 mod exports;
 mod metal {
     pub(crate) mod sync {
@@ -148,4 +149,26 @@ fn live_permission_restricts_operations_without_changing_borrow_rules() {
     let back = lent.transition(Return(No)).unwrap();
     assert!(back.permits(open));
     assert!(!back.transition(Retire).unwrap().permits(open));
+}
+
+#[test]
+fn selection_of_pure_authority_state_requires_active_exact_scope() {
+    use kernel_api::model::pend::{Distributable, FlatRights, Operations, PendRange, PendScope};
+    let scope = PendScope::Pages(PendRange::Pages {
+        offset: 4,
+        count: 2,
+    });
+    let op = Operations::Flat(FlatRights::TRANSFER);
+    let state = State::authorized(Yes, scope, op, Distributable::No);
+    assert!(state.selects(op, scope));
+    assert!(!state.selects(
+        op,
+        PendScope::Pages(PendRange::Pages {
+            offset: 0,
+            count: 2
+        })
+    ));
+    assert!(!state.selects(Operations::Flat(FlatRights::ASSOCIATE), scope));
+    assert!(!state.transition(Retire).unwrap().selects(op, scope));
+    assert!(!state.transition(Borrow(No)).unwrap().selects(op, scope));
 }

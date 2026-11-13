@@ -12,7 +12,15 @@ use kernel_api::{
     boot::platform::Region,
 };
 
-static STAGED: SpinLock<(bool, Vec<(Region, VirtAddr)>)> = SpinLock::new((false, Vec::new()));
+enum Layout {
+    Open(Vec<Mapping>),
+    Sealed,
+}
+struct Mapping {
+    physical: Region,
+    address: VirtAddr,
+}
+static STAGED: SpinLock<Layout> = SpinLock::new(Layout::Open(Vec::new()));
 
 pub(in crate::entry::boot) fn stage(region: Region, address: VirtAddr) -> Result<(), PendFail> {
     super::admission::description()?.admits(region)?;
@@ -22,26 +30,37 @@ pub(in crate::entry::boot) fn stage(region: Region, address: VirtAddr) -> Result
         .ok_or(PendFail::Denied)?;
     Placement::exact(RegionKind::Normal, address, region.size).map_err(|_| PendFail::Denied)?;
     let mut staged = STAGED.lock();
-    if staged.0
-        || staged.1.iter().any(|(old, at)| {
-            old.base < region.base + region.size && region.base < old.base + old.size
-                || at.get() < end && address.get() < at.get() + old.size
-        })
-    {
+    let Layout::Open(mappings) = &mut *staged else {
+        return Err(PendFail::Denied);
+    };
+    if mappings.iter().any(|old| {
+        old.physical.base < region.base + region.size
+            && region.base < old.physical.base + old.physical.size
+            || old.address.get() < end && address.get() < old.address.get() + old.physical.size
+    }) {
         return Err(PendFail::Denied);
     }
-    staged.1.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
-    staged.1.push((region, address));
+    mappings.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+    mappings.push(Mapping {
+        physical: region,
+        address,
+    });
     Ok(())
 }
 
 pub(in crate::entry::boot) fn install(nest: &Arc<Nest>) -> Result<(), NestError> {
     let mappings = {
         let mut staged = STAGED.lock();
-        staged.0 = true;
-        core::mem::take(&mut staged.1)
+        match core::mem::replace(&mut *staged, Layout::Sealed) {
+            Layout::Open(mappings) => mappings,
+            Layout::Sealed => return Err(NestError::Busy),
+        }
     };
-    for (region, address) in mappings {
+    for Mapping {
+        physical: region,
+        address,
+    } in mappings
+    {
         // SAFETY: the trusted boot caller retains exclusive MMIO ownership for
         // this Team's lifetime. Admission excludes RAM and protected controls.
         let source = Flat::from_region(unsafe {

@@ -1,7 +1,10 @@
 //! Result delivery only. The Memo retains all physical cleanup authority.
 use super::Task;
+#[path = "memory_result/transition.rs"]
+mod transition;
 use alloc::sync::{Arc, Weak};
-use kernel_api::abi::memory::{Failure, Outcome, Reply, Request, Value, journal::Accepted};
+use kernel_api::abi::memory::{Outcome, Reply, Request, Value, journal::Accepted};
+pub(crate) use transition::Transition;
 
 pub(crate) struct Completion {
     actor: Weak<Task>,
@@ -29,26 +32,8 @@ impl Completion {
     }
     /// Called only after the owning Memo's exact hardware transition, outside
     /// the Nest lock. No grant is minted or resource retired by this callback.
-    pub(crate) fn finish(self, published: bool) {
-        let was_publish = matches!(
-            self.request.action(),
-            kernel_api::abi::memory::Action::Publish { .. }
-        );
-        let outcome = if was_publish == published {
-            Outcome::Committed(self.value)
-        } else {
-            Outcome::Failed {
-                failure: Failure::Denied,
-                retained: Some(self.value),
-            }
-        };
-        self.record(outcome);
-    }
-    pub(crate) fn fail(self) {
-        let outcome = Outcome::Failed {
-            failure: Failure::Hardware,
-            retained: Some(self.value),
-        };
+    pub(crate) fn finish(self, transition: Transition) {
+        let outcome = transition.outcome(self.request.action(), self.value);
         self.record(outcome);
     }
     fn record(self, outcome: Outcome) {

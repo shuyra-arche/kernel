@@ -58,8 +58,12 @@ jobs:
           restore-keys: |
             rust-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.hash }}-
       - name: Test workspace on host
+        env:
+          RUSTFLAGS: "-Dwarnings"
         run: cargo test --locked --workspace --target x86_64-unknown-linux-gnu
       - name: Test native ABI selection
+        env:
+          RUSTFLAGS: "-Dwarnings"
         run: cargo test --locked -p kernel-api --features memory-v11 --test native --target x86_64-unknown-linux-gnu
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --target riscv64gc-unknown-none-elf

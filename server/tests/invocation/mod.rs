@@ -16,12 +16,17 @@ use kernel_api::{
         nest::{MemoGeneration, MemoPosition, NestId, ReservationId},
     },
 };
+use memory_result::Transition;
 use std::sync::atomic::Ordering;
 use support::*;
 pub(crate) mod basis {
     pub(crate) mod room {
         pub(crate) enum Handoff<T> {
             Resume(T),
+            #[expect(
+                dead_code,
+                reason = "this descriptor fixture rejects fault waits; real switches run in the native guest"
+            )]
             Switch(usize),
         }
     }
@@ -123,7 +128,11 @@ fn deferred_completion_preserves_pending_replay_and_releases_journal_capacity() 
         assert!(matches!(first.outcome(), Outcome::Pending(_)));
         assert_eq!(invoke(&task, req, 0x1100).1, Some(first));
         assert_eq!(task.effects.load(Ordering::SeqCst), id as usize);
-        task.completion.lock().take().unwrap().finish(true);
+        task.completion
+            .lock()
+            .take()
+            .unwrap()
+            .finish(Transition::Published);
         let done = invoke(&task, req, 0x1100).1.unwrap();
         assert!(matches!(done.outcome(), Outcome::Committed(_)));
         assert_eq!(task.effects.load(Ordering::SeqCst), id as usize);
@@ -139,9 +148,9 @@ fn deferred_cancel_and_hardware_failure_are_terminal_without_reexecution() {
         invoke(&task, req, 0x1100);
         let completion = task.completion.lock().take().unwrap();
         if hardware {
-            completion.fail();
+            completion.finish(Transition::Failed(Failure::Hardware));
         } else {
-            completion.finish(false);
+            completion.finish(Transition::Retired);
         }
         let result = invoke(&task, req, 0x1100).1.unwrap();
         assert!(matches!(
@@ -164,7 +173,7 @@ fn deferred_result_does_not_keep_dead_task_alive() {
     let completion = task.completion.lock().take().unwrap();
     drop(task);
     assert!(weak.upgrade().is_none());
-    completion.finish(true);
+    completion.finish(Transition::Published);
 }
 
 #[test]

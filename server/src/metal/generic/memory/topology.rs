@@ -19,11 +19,15 @@ pub struct Fabric {
     pub ram: Vec<Ram>,
     pub routes: Vec<Route>,
 }
+enum Instructions {
+    Unsupported,
+    LocalHart,
+}
 /// Kept immutable for the boot lifetime. Runtime endpoint epochs still belong
 /// to the actual CPU domain and exclusive IOMMU binding, not these descriptions.
 pub struct Topology {
     fabrics: Vec<Fabric>,
-    local_instructions: bool,
+    instructions: Instructions,
 }
 impl Topology {
     /// # Safety
@@ -69,7 +73,7 @@ impl Topology {
         }
         Ok(Self {
             fabrics,
-            local_instructions: false,
+            instructions: Instructions::Unsupported,
         })
     }
     /// Qualify instruction fetch on the single admitted CPU Hart.
@@ -81,11 +85,11 @@ impl Topology {
     /// The installed backend must reject SMP and execute FENCE.I before
     /// completing executable Publish/Protect. This does not relax group W/X.
     pub unsafe fn with_local_instructions(mut self) -> Self {
-        self.local_instructions = true;
+        self.instructions = Instructions::LocalHart;
         self
     }
     pub fn allows_local_instructions(&self) -> bool {
-        self.local_instructions
+        matches!(self.instructions, Instructions::LocalHart)
     }
     pub(crate) fn regions(&self) -> impl Iterator<Item = Ram> + '_ {
         self.fabrics.iter().flat_map(|f| f.ram.iter().copied())
@@ -97,7 +101,7 @@ impl Topology {
         let executable = request.member.access.executable()
             || group.existing().iter().any(|m| m.access.executable());
         if executable
-            && (!self.local_instructions
+            && (!self.allows_local_instructions()
                 || group
                     .existing()
                     .iter()

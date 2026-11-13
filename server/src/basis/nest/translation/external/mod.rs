@@ -193,7 +193,9 @@ impl Nest {
             let completion = memo.completion.take();
             drop(state);
             if let Some(completion) = completion {
-                completion.fail();
+                completion.finish(crate::basis::unit::task::memory_result::Transition::Failed(
+                    kernel_api::abi::memory::Failure::Hardware,
+                ));
             }
             return Err(error);
         }
