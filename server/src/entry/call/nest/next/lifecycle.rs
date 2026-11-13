@@ -82,9 +82,10 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
                 )
                 .map_err(nest_error)?;
             let span = prepared.span();
+            span.faults.lock().native = true;
             let id = ReservationId::from_bytes(&(span.identity() as u64).to_le_bytes())
                 .expect("reservation identity");
-            let grant = pend::prepare_reservation(actor, &parent, id, reservation.count)
+            let grant = pend::prepare_native_reservation(actor, &parent, id, reservation.count)
                 .map_err(pend_error)?;
             let token = grant.entry().token();
             let span = prepared
@@ -223,13 +224,13 @@ pub(super) fn effect(
                 if nest.id() != id {
                     return Err(Failure::Denied);
                 }
-                if nest.is_external() {
-                    return Err(Failure::Unsupported);
-                }
+                binding::check_delete_root(&nest, &entry).map_err(error)?;
                 if nest.version() != expected {
                     return Err(Failure::Stale);
                 }
-                expected.next().ok_or(Failure::VersionExhausted)?;
+                if nest.is_open() {
+                    expected.next().ok_or(Failure::VersionExhausted)?;
+                }
                 nest.begin_delete().map_err(nest_error)?;
                 receipt.start(Value::NestLifecycle {
                     nest: id,
@@ -238,7 +239,11 @@ pub(super) fn effect(
                 });
                 nest
             };
-            nest.retire().map_err(nest_error)?;
+            if nest.is_external() {
+                binding::delete(actor, token).map_err(error)?;
+            } else {
+                nest.retire().map_err(nest_error)?;
+            }
             let _commit = basis::commit();
             let value = Value::NestLifecycle {
                 nest: id,

@@ -1,12 +1,24 @@
 //! Explicit Flat residency operations for the staged next provider.
+mod lifecycle;
 pub(in crate::entry::call) mod maintenance;
+mod reshape;
 use crate::basis::{self, flat, pend, unit::task::Task};
 use alloc::sync::Arc;
 use kernel_api::{
     abi::memory::{self, Action, Failure, Observation, Query, Snapshot, Value},
     model::pend::FlatRights,
 };
-pub(in crate::entry::call) use maintenance::effect;
+pub(in crate::entry::call) fn effect(
+    actor: &Arc<Task>,
+    action: Action,
+    receipt: &mut crate::entry::call::next_memory::Receipt<'_>,
+) -> Result<Value, Failure> {
+    if matches!(action, Action::DeleteFlat { .. }) {
+        lifecycle::delete(actor, action, receipt)
+    } else {
+        maintenance::effect(actor, action, receipt)
+    }
+}
 
 pub(in crate::entry::call) fn inspect(
     actor: &Arc<Task>,
@@ -40,10 +52,11 @@ pub(in crate::entry::call) fn inspect(
         }
         Query::Flat { token, flat: id } => {
             let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
-            if !entry.alive()
-                || !entry.authority().limits().operations.contains(
-                    kernel_api::model::pend::Operations::Flat(FlatRights::INSPECT),
-                )
+            if !entry
+                .authority()
+                .permits(kernel_api::model::pend::Operations::Flat(
+                    FlatRights::INSPECT,
+                ))
             {
                 return Err(Failure::Denied);
             }
@@ -59,7 +72,9 @@ pub(in crate::entry::call) fn inspect(
                 version: meta.source().flat().revision(),
                 offset: offset.get(),
                 count: count.get(),
-                phase: if meta.alive() {
+                phase: if meta.source().flat().is_explicit() {
+                    meta.source().flat().phase()
+                } else if meta.alive() {
                     kernel_api::model::flat::FlatPhase::Open
                 } else {
                     kernel_api::model::flat::FlatPhase::Closing
@@ -155,6 +170,25 @@ pub(in crate::entry::call) fn mutate(
         return Err(Failure::Dead);
     }
     match action {
+        Action::Split {
+            start,
+            expected,
+            parent,
+            maintenance,
+        }
+        | Action::Merge {
+            start,
+            expected,
+            parent,
+            maintenance,
+        } => reshape::run(
+            actor,
+            start,
+            expected,
+            parent,
+            maintenance,
+            matches!(action, Action::Split { .. }),
+        ),
         Action::Push {
             local,
             local_version,

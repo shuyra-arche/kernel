@@ -134,6 +134,38 @@ pub(crate) struct Block {
     id: usize,
 }
 impl Block {
+    /// Allocate an unpublished gate before an irreversible receipt conversion.
+    pub(crate) fn prepare() -> Result<Self, RetainError> {
+        Ok(Self {
+            change: Arc::try_new(Change {
+                page: None,
+                phase: Phase::Prepared,
+                blocks: crate::metal::sync::SpinLock::new(Blocks {
+                    count: 1,
+                    next: 1,
+                    admitted: 1,
+                }),
+            })
+            .map_err(|_| RetainError::Exhausted)?,
+            id: 1,
+        })
+    }
+    pub(crate) fn bind(&mut self, page: &Arc<Page>) {
+        let change = Arc::get_mut(&mut self.change).expect("unpublished gate");
+        assert!(change.page.is_none() && change.phase == Phase::Prepared);
+        page.reclaim.begin().expect("fresh reshaped Page");
+        change.page = Some(page.clone());
+        change.phase = Phase::Held;
+    }
+    pub(crate) fn exclusive(&self, page: &Arc<Page>, registry_weak: usize) -> bool {
+        Arc::ptr_eq(page, self.page())
+            && self.settled()
+            && Arc::strong_count(&self.change) == 1
+            && Arc::weak_count(&self.change) == registry_weak
+            && self.change.blocks.lock().count == 1
+            && Arc::strong_count(page) == 2
+            && Arc::weak_count(page) == 0
+    }
     pub(crate) fn permit(&self) -> Result<Maintenance, RetainError> {
         let mut blocks = self.change.blocks.lock();
         if blocks.count != 1 {

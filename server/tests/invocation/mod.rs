@@ -17,6 +17,31 @@ use kernel_api::{
 use std::sync::atomic::Ordering;
 use support::*;
 pub(crate) mod basis {
+    pub(crate) mod room {
+        pub(crate) enum Handoff<T> {
+            Resume(T),
+            Switch(usize),
+        }
+    }
+    pub(crate) mod nest {
+        pub(crate) mod fault {
+            pub(crate) mod read {
+                pub(crate) struct Read;
+                impl Read {
+                    pub(crate) fn new(
+                        _: &std::sync::Arc<crate::support::Task>,
+                        _: kernel_api::abi::memory::Query,
+                        _: kernel_api::address::VirtAddr,
+                    ) -> Result<Self, kernel_api::abi::memory::Failure> {
+                        Err(kernel_api::abi::memory::Failure::Unsupported)
+                    }
+                }
+                pub(crate) fn park(_: Read) -> crate::basis::room::Handoff<()> {
+                    panic!("scheduler outside invocation fixture")
+                }
+            }
+        }
+    }
     pub(crate) use crate::support::commit;
     pub(crate) mod unit {
         pub(crate) mod task {

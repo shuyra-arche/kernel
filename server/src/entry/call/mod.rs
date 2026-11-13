@@ -42,8 +42,7 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
     if kernel_api::abi::VERSION as u64 == kernel_api::abi::memory::VERSION
         && kernel_api::abi::memory::Opcode::from_call_number(number as u64).is_some()
     {
-        next_memory::dispatch(frame, &ident, number as u64, regs);
-        return Some(frame as *mut TrapContext);
+        return Some(next_memory::dispatch(frame, ident, number as u64, regs));
     }
     let envcall = match EnvCall::from_wire(number, &regs) {
         Ok(c) => c,

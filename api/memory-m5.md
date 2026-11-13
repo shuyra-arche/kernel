@@ -142,3 +142,7 @@ pointed at this checkout. Its evidence is under
 No PR merge, issue checkbox update or ABI activation is part of this delivery.
 M6 retains native v11 service integration, activation gates, performance and
 additional platform/SMP/executable-path qualification.
+
+The [path follow-up](memory-paths.md) connects staged Flat Delete, partial
+Split/Merge, Reservation fault routes and bounded continuations, and versioned
+External Delete. It records the remaining native service verification boundary.

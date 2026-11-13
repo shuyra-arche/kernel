@@ -1,6 +1,6 @@
 //! Staged next-version provider. Dispatch remains disabled by the active ABI.
-//! Implemented residency commits use the actual Task's bounded result journal;
-//! unsupported lifecycle/maintenance operations fail before resource effects.
+//! Mutations use the actual Task's bounded result journal; finite event reads
+//! retain a scheduler continuation and revalidate the exact live route on delivery.
 #[path = "next_memory/receipt.rs"]
 mod receipt;
 use crate::{
@@ -22,21 +22,30 @@ pub(super) use receipt::Receipt;
 
 pub(super) fn dispatch(
     frame: &mut TrapContext,
-    ident: &Arc<TaskIdent>,
+    ident: Arc<TaskIdent>,
     number: u64,
     registers: [usize; 6],
-) {
-    let delivery =
-        run(ident, number, registers).map_or_else(Delivery::Failed, |()| Delivery::Written);
+) -> *mut TrapContext {
+    let delivery = match run(ident, number, registers) {
+        Ok(crate::basis::room::Handoff::Switch(pa)) => return pa as *mut TrapContext,
+        Ok(crate::basis::room::Handoff::Resume(true)) => return frame as *mut TrapContext,
+        Ok(crate::basis::room::Handoff::Resume(false)) => Delivery::Written,
+        Err(error) => Delivery::Failed(error),
+    };
     for (register, word) in [Gprs::A0, Gprs::A1, Gprs::A2]
         .into_iter()
         .zip(delivery.registers())
     {
         frame.gpr.set_x(register, word as usize);
     }
+    frame as *mut TrapContext
 }
 
-fn run(ident: &Arc<TaskIdent>, number: u64, registers: [usize; 6]) -> Result<(), Failure> {
+fn run(
+    ident: Arc<TaskIdent>,
+    number: u64,
+    registers: [usize; 6],
+) -> Result<crate::basis::room::Handoff<bool>, Failure> {
     let frame = Frame::decode(number, registers).ok_or(Failure::Invalid)?;
     let mut bytes = [0; Request::WIDTH];
     if !ident
@@ -47,9 +56,19 @@ fn run(ident: &Arc<TaskIdent>, number: u64, registers: [usize; 6]) -> Result<(),
         return Err(Failure::Invalid);
     }
     let request = frame.snapshot(&bytes).ok_or(Failure::Invalid)?.request();
-    let actor = super::memory::caller(ident).ok_or(Failure::Dead)?;
+    let actor = super::memory::caller(&ident).ok_or(Failure::Dead)?;
     if actor.realtime() {
         return Err(Failure::Denied);
+    }
+    if let Action::Inspect(query @ memory::Query::FaultEvent { .. }) = request.action() {
+        let wait =
+            basis::nest::fault::read::Read::new(&actor, query, VirtAddr::new(frame.output()))?;
+        drop(actor);
+        drop(ident);
+        return Ok(match basis::nest::fault::read::park(wait) {
+            basis::room::Handoff::Resume(()) => basis::room::Handoff::Resume(true),
+            basis::room::Handoff::Switch(pa) => basis::room::Handoff::Switch(pa),
+        });
     }
     let output = execute(&actor, request)?;
     // A completed holding change reopens its Page gate. Wake source observers
@@ -62,7 +81,7 @@ fn run(ident: &Arc<TaskIdent>, number: u64, registers: [usize; 6]) -> Result<(),
     {
         return Err(Failure::ReplyFault);
     }
-    Ok(())
+    Ok(basis::room::Handoff::Resume(false))
 }
 
 fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Failure> {
@@ -110,7 +129,7 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
     let mut receipt = Receipt::new(actor, request, accepted);
     if matches!(
         request.action(),
-        Action::Block { .. } | Action::Allow { .. }
+        Action::Block { .. } | Action::Allow { .. } | Action::DeleteFlat { .. }
     ) {
         let result = super::flat::next::effect(actor, request.action(), &mut receipt);
         return Ok(receipt.finish(result));

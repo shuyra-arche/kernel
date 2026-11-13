@@ -96,6 +96,12 @@ The report labels frame-chain evidence separately.
 
 ## Staged memory v11 host evidence
 
+The [path integration record](../../api/memory-paths.md) describes Flat closure,
+partial geometry and bounded Reservation recovery. The `fault` host target
+executes the production queue; the `memory` target tests receipt conversion and
+closure, including allocation rollback. Native trap, Sign authority and timeout
+integration still require v11 service/image tests before activation.
+
 The `invocation` target imports the production next-memory descriptor dispatcher
 and result receipt code. Task/user buffers and resource effects are fixtures;
 it checks complete input copying, lost replies, replay, result inspection,

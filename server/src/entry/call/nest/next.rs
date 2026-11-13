@@ -262,6 +262,9 @@ pub(in crate::entry::call) fn inspect(
     actor: &Arc<Task>,
     query: Query,
 ) -> Result<Observation, Failure> {
+    if matches!(query, Query::FaultRoute { .. }) {
+        return basis::nest::fault::inspect(actor, query);
+    }
     if !matches!(query, Query::Memo(_)) {
         return lifecycle::inspect(actor, query);
     }
@@ -288,6 +291,7 @@ pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Resul
         return Err(Failure::Dead);
     }
     match action {
+        Action::FaultRoute { .. } => basis::nest::fault::configure(actor, action),
         Action::CreateNest { .. } | Action::Reserve { .. } => lifecycle::mutate(actor, action),
         Action::Insert {
             target,

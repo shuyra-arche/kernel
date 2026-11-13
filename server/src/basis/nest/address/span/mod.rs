@@ -28,6 +28,7 @@ use kernel_api::model::cell::CellLevel;
 /// position's Page or freeze alive. The ABI ReservationId denotes this reservation.
 /// Architectural U/G/A/D policy is fixed for the span; logical permissions may narrow.
 pub struct Span {
+    pub(crate) faults: SpinLock<super::super::fault::State>,
     pub(crate) reservation: Reservation,
     pub(crate) attrs: Attributes,
     level: CellLevel,
@@ -133,6 +134,7 @@ impl Span {
         let nest = reservation.nest();
         let identity = reservation.id();
         match Arc::try_new(Self {
+            faults: SpinLock::new(super::super::fault::State::new()),
             reservation,
             operation: core::sync::atomic::AtomicBool::new(false),
             revision: core::sync::atomic::AtomicU64::new(1),
@@ -279,6 +281,7 @@ impl Span {
         if inner.phase == ReservationPhase::Open {
             inner.phase = ReservationPhase::Closing;
             self.changed();
+            self.faults.lock().close();
         }
     }
 

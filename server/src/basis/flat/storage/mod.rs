@@ -1,6 +1,9 @@
 //! Backing and residency state for a linear source.
 
+mod geometry;
+mod lifecycle;
 mod region;
+mod reshape;
 pub(super) mod residency;
 pub(super) mod slot;
 
@@ -32,6 +35,8 @@ pub(super) struct ResidencyEntry {
 }
 
 pub(super) struct FlatState {
+    pub geometry: geometry::Geometry,
+    pub phase: kernel_api::model::flat::FlatPhase,
     pub explicit: bool,
     pub revision: residency::Revision,
     pub source: FlatSource,
@@ -50,6 +55,8 @@ pub(super) struct FlatState {
 impl FlatState {
     pub fn new(source: FlatSource, transferable: bool) -> Self {
         Self {
+            geometry: geometry::Geometry::new(),
+            phase: kernel_api::model::flat::FlatPhase::Open,
             explicit: false,
             revision: residency::Revision::new(),
             source,

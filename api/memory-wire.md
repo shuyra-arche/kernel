@@ -434,7 +434,9 @@ nor a Page ID proves content immutability, permission or hardware completion.
 This is an inactive service-facing protocol, using Nest operations and existing
 Sign endpoints. A route is stored in its Reservation; there is no Fault/Reservation Pend
 target or new data authority. Enabling these codecs alone cannot change v10 fault
-behavior. Scheduler, trap, Sign and Server integration remain unimplemented.
+behavior. The [staged Server integration](memory-paths.md) connects scheduler,
+trap, Sign and route/queue paths; native v11 service/image verification remains
+an activation gate.
 
 ### Registration and authority
 
@@ -636,12 +638,10 @@ reply correlation, exact lengths and canonical encodings after byte mutations.
 Delivery and stored outcome are separately tested. Existing tests keep active
 v10 dispatch rejecting next-ABI calls.
 
-The [M1 acceptance record](memory-m1.md) links the completed contract deliverables
-and [backend interfaces](memory-backend.md). Fault route/event codecs and deadline
-arithmetic do not implement fault queues, wait registration, notification races,
-terminal Task behavior or recovery scheduling. Live geometry/revision bookkeeping and atomic
-allocation-receipt conversion still require Server/allocator integration. The
-journal attachment, permission checks, atomic state changes and hardware effects
-described above require Server work;
-the codecs alone do not implement them. M1 is complete as a contract deliverable
-pending merge; M2–M6 remain open.
+The [M1 acceptance record](memory-m1.md) links the contract deliverables and
+[backend interfaces](memory-backend.md). [M2](memory-m2.md), [M3](memory-m3.md),
+[M4](memory-m4.md), [M5](memory-m5.md) and the [path follow-up](memory-paths.md)
+record Server integration and its verification boundaries. Geometry conversion,
+fault queues, finite continuations and closure are implemented in the inactive
+provider. M6 native service/image execution, coordinated delegation and ABI
+migration, and additional platform qualification remain activation gates.

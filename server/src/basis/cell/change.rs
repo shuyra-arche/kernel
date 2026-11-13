@@ -8,6 +8,65 @@ use alloc::vec::Vec;
 use kernel_api::abi::call::cell::CellFail;
 static LIVE: SpinLock<Vec<Weak<Change>>> = SpinLock::new_level(Level::L3, Vec::new());
 
+/// All old and new physical gates commit with one exclusive receipt conversion.
+/// Caller holds COMMIT, the maintenance record and the Flat holdings lock.
+pub(crate) fn reshape(
+    pages: &mut Vec<Arc<Page>>,
+    blocks: &mut Vec<super::page::Block>,
+    level: kernel_api::model::cell::CellLevel,
+) -> Result<Vec<Arc<Page>>, super::page::PageError> {
+    use super::page::{Block, PageError};
+    let mut live = LIVE.lock();
+    for page in pages.iter() {
+        let block = blocks
+            .iter()
+            .find(|b| Arc::ptr_eq(b.page(), page))
+            .ok_or(PageError::Busy)?;
+        let weak = live
+            .iter()
+            .filter(|w| w.as_ptr() == Arc::as_ptr(block.change()))
+            .count();
+        if !block.exclusive(page, weak) {
+            return Err(PageError::Busy);
+        }
+    }
+    let total = pages
+        .iter()
+        .try_fold(0usize, |n, p| n.checked_add(p.pages()))
+        .ok_or(PageError::InvalidRange)?;
+    let count = total / level.pages().ok_or(PageError::InvalidRange)?;
+    let mut prepared = Vec::new();
+    prepared
+        .try_reserve(count)
+        .map_err(|_| PageError::OutOfMemory)?;
+    blocks
+        .try_reserve(count)
+        .map_err(|_| PageError::OutOfMemory)?;
+    live.try_reserve(count)
+        .map_err(|_| PageError::OutOfMemory)?;
+    for _ in 0..count {
+        prepared.push(Block::prepare().map_err(|_| PageError::OutOfMemory)?);
+    }
+    let result = Page::reshape_with(pages, level, |pages| {
+        for page in pages {
+            let at = blocks
+                .iter()
+                .position(|b| Arc::ptr_eq(b.page(), page))
+                .unwrap();
+            let mut block = blocks.remove(at);
+            live.retain(|w| w.as_ptr() != Arc::as_ptr(block.change()));
+            assert!(block.release_unique(page), "prevalidated exclusive gate");
+        }
+        Ok(())
+    })?;
+    for (page, mut block) in result.iter().zip(prepared) {
+        block.bind(page);
+        live.push(Arc::downgrade(block.change()));
+        blocks.push(block);
+    }
+    Ok(result)
+}
+
 /// Caller holds COMMIT and the holding's Flat lock. Detach the registry's weak
 /// upgrade path while proving exclusive ownership; restore it without allocation
 /// on refusal. No hardware receipt is discharged by this operation.

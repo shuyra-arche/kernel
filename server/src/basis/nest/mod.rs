@@ -42,6 +42,7 @@ pub use address::span::{Access, ActiveRange, Span};
 pub use error::NestError;
 pub use identity::Asid;
 pub use translation::FaultOutcome;
+pub(crate) mod fault;
 
 use address::Layout;
 pub(crate) use address::NestRange;
@@ -143,15 +144,21 @@ impl Nest {
     }
     /// Called under COMMIT after live whole-resource authority/version checks.
     pub(crate) fn begin_delete(&self) -> Result<(), NestError> {
-        if self.is_external() || self.is_adopted() || self.asid().is_kernel() {
+        if !self.is_external() && (self.is_adopted() || self.asid().is_kernel()) {
             return Err(NestError::Pinned);
         }
         let mut state = self.state.lock();
         if state.phase.is_open() {
             self.version().next().ok_or(NestError::OutOfMemory)?;
+            if let translation::Storage::External(external) = &mut state.root {
+                external.close();
+            }
             state.phase = translation::phase::ClosePhase::Draining;
+            state.index.close_faults();
             self.changed();
         }
+        drop(state);
+        fault::wake_nest(self);
         Ok(())
     }
 
@@ -172,6 +179,8 @@ impl Nest {
             span.close();
             self.changed();
         }
+        drop(_state);
+        fault::wake_span(span);
         Ok(())
     }
     pub(crate) fn version(&self) -> kernel_api::model::nest::NestVersion {
@@ -587,6 +596,7 @@ impl Nest {
             }
             mapping.close();
         }
+        fault::wake_span(&mapping);
         let _operation = mapping.operation().ok_or(CellFail::Busy)?;
         if mapping.state.lock().phase == ReservationPhase::Gone {
             return Ok(());
@@ -1410,6 +1420,11 @@ impl Nest {
         mapping.changed();
         authorization.register_binding(binding);
         replaced.release();
+        mapping
+            .faults
+            .lock()
+            .invalidate(Some(index), kernel_api::abi::memory::Failure::Stale);
+        sign::signal(self.reservation_key(mapping));
         Ok(())
     }
 
@@ -1526,6 +1541,11 @@ impl Nest {
             removed
         };
         removed.release();
+        mapping
+            .faults
+            .lock()
+            .invalidate(Some(index), kernel_api::abi::memory::Failure::Stale);
+        sign::signal(self.reservation_key(mapping));
         Ok(())
     }
 
@@ -1736,6 +1756,10 @@ impl Nest {
             memo.maintenance = maintenance.clone();
             memo.provenance = source.provenance();
             accepted(memo.generation());
+            mapping
+                .faults
+                .lock()
+                .publishing(index, expected, memo.generation());
             state.publish_page(
                 self.geometry(),
                 crate::metal::generic::memory::Endpoint::Cpu {
@@ -2710,8 +2734,9 @@ impl Nest {
         if phase != state.phase {
             self.changed();
         }
-        result?;
         drop(state);
+        fault::wake_nest(self);
+        result?;
         self.finish_invalidation()?;
         self.drain_closed();
         if self.is_closed() {

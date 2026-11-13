@@ -128,10 +128,10 @@ impl Source {
             .ok_or(CellFail::NotAligned)?;
         end.checked_mul(PAGE_SIZE).ok_or(CellFail::NotAligned)?;
         let full = hold.source().full_range().ok_or(CellFail::Denied)?;
-        if count.get() != full.grain()
-            || !page.get().is_multiple_of(full.grain())
-            || !offset.is_multiple_of(full.grain())
-        {
+        let selected = full
+            .range(PageOffset::new(offset), count)
+            .map_err(|_| CellFail::NotAligned)?;
+        if count.get() != selected.grain() {
             return Err(CellFail::NotAligned);
         }
         let ceiling = hold.ceiling() & hold.source().ceiling();
@@ -209,9 +209,14 @@ impl Source {
         let actor = self.actor().ok_or(CellFail::Denied)?;
         self.source().ensure_internal().map_err(failure)?;
         let _authority = self.authority(&actor)?;
-        self.hold
+        let range = self
+            .hold
             .resolve_window(self.offset, self.count)
-            .ok_or(CellFail::Denied)
+            .ok_or(CellFail::Denied)?;
+        if range.page_count().get() != range.grain() {
+            return Err(CellFail::NotAligned);
+        }
+        Ok(range)
     }
 
     pub(crate) fn check(&self, need: Access) -> Result<FlatRange, CellFail> {
@@ -232,9 +237,14 @@ impl Source {
         if !self.source().branch_check(authority.as_deref(), need) {
             return Err(CellFail::Denied);
         }
-        self.hold
+        let range = self
+            .hold
             .resolve_window(self.offset, self.count)
-            .ok_or(CellFail::Denied)
+            .ok_or(CellFail::Denied)?;
+        if range.page_count().get() != range.grain() {
+            return Err(CellFail::NotAligned);
+        }
+        Ok(range)
     }
 
     pub(in crate::basis::nest) fn begin_cpu(

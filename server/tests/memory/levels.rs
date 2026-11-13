@@ -6,12 +6,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 const SIZE: usize = 1 << 21;
-struct Pool {
+pub(super) struct Pool {
     base: usize,
     used: Mutex<Vec<bool>>,
 }
 impl Pool {
-    fn new() -> &'static Self {
+    pub(super) fn new() -> &'static Self {
         let base = unsafe { std::alloc::alloc(Layout::from_size_align(SIZE, SIZE).unwrap()) };
         assert!(!base.is_null());
         Box::leak(Box::new(Self {
@@ -19,10 +19,10 @@ impl Pool {
             used: Mutex::new(vec![false; 512]),
         }))
     }
-    fn used(&self) -> usize {
+    pub(super) fn used(&self) -> usize {
         self.used.lock().unwrap().iter().filter(|x| **x).count()
     }
-    fn page(&'static self) -> Arc<Page> {
+    pub(super) fn page(&'static self) -> Arc<Page> {
         Arc::new(
             unsafe { Page::allocate(Owner::Kernel, CellLevel::new(1).unwrap(), self, repartition) }
                 .unwrap(),

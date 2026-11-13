@@ -25,6 +25,18 @@ pub(super) struct Index {
 }
 
 impl Index {
+    /// Close native recovery admission without running continuations under the
+    /// Nest lock. Sign delivery queues the already allocated wake endpoint.
+    pub(super) fn close_faults(&self) {
+        fn visit(node: Option<&IndexNode>) {
+            if let Some(node) = node {
+                node.reservation.faults.lock().close();
+                visit(node.left.as_deref());
+                visit(node.right.as_deref());
+            }
+        }
+        visit(self.root.as_deref());
+    }
     pub(super) const fn new() -> Self {
         Self { root: None, len: 0 }
     }

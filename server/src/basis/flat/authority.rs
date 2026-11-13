@@ -196,7 +196,11 @@ pub(crate) fn slot(
         .page()
         .checked_sub(source.index().get())
         .ok_or(PendFail::Denied)?;
-    let count = source.grain();
+    let count = source
+        .flat()
+        .level_at(kernel_api::address::PageIndex::new(position.page()))
+        .pages()
+        .ok_or(PendFail::NotAligned)?;
     if !matches!(
         entry.scope(),
         kernel_api::model::pend::PendScope::Pages(kernel_api::model::pend::PendRange::Pages { .. })
@@ -351,7 +355,9 @@ pub(crate) fn settle_block(
         let low = selected.index().get().max(base);
         let high = (selected.index().get() + selected.page_count().get())
             .min(base + affine.page_count().get());
-        for index in (low..high).step_by(selected.grain()) {
+        // Affine legacy Memos keep the Reservation's original physical unit.
+        // Native mixed Flat geometry is represented by per-position bindings.
+        for index in (low..high).step_by(span.grain()) {
             let page = index - base;
             if let Some(data) = nest.memo_page(span, page).map_err(|_| PendFail::Busy)? {
                 block.retain(data.clone())?;
