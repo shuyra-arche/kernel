@@ -23,8 +23,64 @@ enum Withdrawal {
 }
 struct Leaf {
     projection: Projection,
+    state: LeafState,
+}
+
+/// Publication and withdrawal are independent dimensions: a failed/incomplete
+/// publication must still be withdrawable. Effects hold the exclusive Adapter
+/// borrow, then publish only the event justified by that exact hardware result.
+#[derive(Clone, Copy)]
+struct LeafState {
     publication: Publication,
     withdrawal: Option<(BatchId, Withdrawal)>,
+}
+enum LeafEvent {
+    Published(BatchId),
+    Ready,
+    Withdraw(BatchId),
+    Flush { attempt: BatchId, fence: BatchId },
+    Fenced(BatchId),
+}
+impl LeafState {
+    fn transition(self, event: LeafEvent) -> Result<Self, HardwareError> {
+        let mut next = self;
+        match event {
+            LeafEvent::Published(batch)
+                if matches!(self.publication, Publication::Unconfirmed)
+                    && self.withdrawal.is_none() =>
+            {
+                next.publication = Publication::Flushing(batch);
+            }
+            LeafEvent::Ready if !matches!(self.publication, Publication::Unconfirmed) => {
+                next.publication = Publication::Ready;
+            }
+            LeafEvent::Withdraw(batch) => {
+                // A new platform attempt preserves the exact completed/queued
+                // hardware fence, including when the previous proof failed.
+                next.withdrawal = Some((
+                    batch,
+                    self.withdrawal
+                        .map_or(Withdrawal::Requested, |(_, phase)| phase),
+                ));
+            }
+            LeafEvent::Flush { attempt, fence } if matches!(self.withdrawal, Some((held, Withdrawal::Requested)) if held == attempt) =>
+            {
+                next.withdrawal = Some((attempt, Withdrawal::Flushing(fence)));
+            }
+            LeafEvent::Fenced(attempt) if matches!(self.withdrawal, Some((held, Withdrawal::Flushing(_))) if held == attempt) =>
+            {
+                next.withdrawal = Some((attempt, Withdrawal::Proof));
+            }
+            _ => return Err(HardwareError::Fault),
+        }
+        Ok(next)
+    }
+}
+impl Leaf {
+    fn apply(&mut self, event: LeafEvent) -> Result<(), HardwareError> {
+        self.state = self.state.transition(event)?;
+        Ok(())
+    }
 }
 
 enum Context<R: Registers> {
@@ -101,7 +157,7 @@ impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
         }
     }
     fn publication(&mut self, at: usize) -> Result<bool, HardwareError> {
-        let phase = self.leaves[at].publication;
+        let phase = self.leaves[at].state.publication;
         let domain = self.domain()?;
         let ready = match phase {
             Publication::Starting => domain.step().map_err(failure)? == DomainPhase::Active,
@@ -110,7 +166,7 @@ impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
             Publication::Ready => true,
         };
         if ready {
-            self.leaves[at].publication = Publication::Ready;
+            self.leaves[at].apply(LeafEvent::Ready)?;
         }
         Ok(ready)
     }
@@ -150,7 +206,7 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
                     && !self
                         .leaves
                         .iter()
-                        .any(|leaf| matches!(leaf.publication, Publication::Unconfirmed)) =>
+                        .any(|leaf| matches!(leaf.state.publication, Publication::Unconfirmed)) =>
             {
                 512 - self.leaves.len()
             }
@@ -188,12 +244,14 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
         // It cannot inherit readiness from the already-active context.
         self.leaves.push(Leaf {
             projection: p,
-            publication: if first {
-                Publication::Starting
-            } else {
-                Publication::Unconfirmed
+            state: LeafState {
+                publication: if first {
+                    Publication::Starting
+                } else {
+                    Publication::Unconfirmed
+                },
+                withdrawal: None,
             },
-            withdrawal: None,
         });
         if first {
             let Binding::Open(Context::Setup(engine, tables)) =
@@ -208,13 +266,16 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
             self.domain()?.start().map_err(failure)
         } else {
             let batch = self.domain()?.publish_leaf(p).map_err(failure)?;
-            self.leaves.last_mut().unwrap().publication = Publication::Flushing(batch);
+            self.leaves
+                .last_mut()
+                .unwrap()
+                .apply(LeafEvent::Published(batch))?;
             Ok(())
         }
     }
     fn ready(&mut self, p: Projection) -> Result<bool, HardwareError> {
         let at = self.index(p)?;
-        if self.leaves[at].withdrawal.is_some() {
+        if self.leaves[at].state.withdrawal.is_some() {
             return Err(HardwareError::Unavailable);
         }
         self.publication(at)
@@ -227,28 +288,25 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
         let at = self.index(p)?;
         // Retrying a platform error keeps the completed hardware fence but must
         // obtain fresh evidence for the new token; never resubmit over a live CQ.
-        let phase = self.leaves[at]
-            .withdrawal
-            .map_or(Withdrawal::Requested, |(_, phase)| phase);
-        self.leaves[at].withdrawal = Some((batch, phase));
+        self.leaves[at].apply(LeafEvent::Withdraw(batch))?;
         Ok(())
     }
     fn observe(&mut self, batch: BatchId) -> Result<Option<BatchId>, HardwareError> {
         let at = self
             .leaves
             .iter()
-            .position(|leaf| leaf.withdrawal.is_some_and(|(b, _)| b == batch))
+            .position(|leaf| leaf.state.withdrawal.is_some_and(|(b, _)| b == batch))
             .ok_or(HardwareError::Fault)?;
         // Withdrawing a leaf with no submitted publication fence can still
         // succeed: clear its PTE, then prove withdrawal with a fresh fence.
         // This path never certifies that the failed publication was ready.
-        if !matches!(self.leaves[at].publication, Publication::Unconfirmed)
+        if !matches!(self.leaves[at].state.publication, Publication::Unconfirmed)
             && !self.publication(at)?
         {
             return Ok(None);
         }
         let p = self.leaves[at].projection;
-        match self.leaves[at].withdrawal.unwrap().1 {
+        match self.leaves[at].state.withdrawal.unwrap().1 {
             Withdrawal::Requested => {
                 let domain = self.domain()?;
                 if domain.phase() == DomainPhase::Failed {
@@ -258,11 +316,14 @@ unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
                     return Ok(None);
                 }
                 let fence = domain.withdraw_leaf(p).map_err(failure)?;
-                self.leaves[at].withdrawal = Some((batch, Withdrawal::Flushing(fence)));
+                self.leaves[at].apply(LeafEvent::Flush {
+                    attempt: batch,
+                    fence,
+                })?;
             }
             Withdrawal::Flushing(fence) => {
                 if self.domain()?.observe_leaf(fence).map_err(failure)? {
-                    self.leaves[at].withdrawal = Some((batch, Withdrawal::Proof));
+                    self.leaves[at].apply(LeafEvent::Fenced(batch))?;
                 }
             }
             Withdrawal::Proof => {
