@@ -207,10 +207,10 @@ pub(super) fn run() {
     let cursor = crate::allocate(1);
     let producer = share_view::create(crate::license::get(), data, Modifiable::Yes).unwrap();
     let consumer = share_view::create(crate::license::get(), cursor, Modifiable::Yes).unwrap();
-    let (address, _) = share_view::open(producer).unwrap();
+    let (address, _) = crate::open_share(producer).unwrap();
     let rights = Operations::Share(ShareRights::OPEN | ShareRights::SHUT);
     let read_cursor = grant(consumer, AccordTarget::Caller, rights, Modifiable::No);
-    let (consumed, _) = share_view::open(read_cursor).unwrap();
+    let (consumed, _) = crate::open_share(read_cursor).unwrap();
     let send = sign::create(crate::license::get()).unwrap();
     let ack = sign::create(crate::license::get()).unwrap();
 

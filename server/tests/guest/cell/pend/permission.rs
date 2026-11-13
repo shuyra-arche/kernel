@@ -21,7 +21,7 @@ pub(super) fn run() {
     .to_bytes();
     let child = pend::accord(super::super::ptr(&bytes)).unwrap();
     assert_eq!(inspect(child).limits.distributable, Distributable::No);
-    share_view::open(child).unwrap();
+    crate::open_share(child).unwrap();
     share_view::shut(child).unwrap();
     assert_eq!(
         accord(
@@ -68,7 +68,7 @@ pub(super) fn run() {
     }
     .to_bytes();
     pend::narrow(super::super::ptr(&bytes)).unwrap();
-    assert!(share_view::open(child).is_err());
+    assert!(crate::open_share(child).is_err());
     pend::return_(child).unwrap();
     // The old owning Slot must not bypass a later restriction on its root.
     let bytes = NarrowRequest {
@@ -99,7 +99,7 @@ pub(super) fn run() {
         CellState::Vacant
     );
     crate::delete(crate::raw_memo(mapping, 0).object);
-    share_view::open(root).unwrap();
+    crate::open_share(root).unwrap();
     share_view::shut(root).unwrap();
     pend::return_(root).unwrap();
     super::super::delete(kernel_api::model::cell::CellObject::Slot(reference));
@@ -133,7 +133,7 @@ pub(super) fn run() {
         kernel_api::abi::call::clone_view::CloneFail::Denied
     );
     let delivery = clone_view::pull(root, 4096).unwrap();
-    let (address, _) = share_view::open(delivery.token).unwrap();
+    let (address, _) = crate::open_share(delivery.token).unwrap();
     assert_eq!(super::super::read(address, 0), message as usize);
     pend::return_(delivery.token).unwrap();
     pend::return_(peek).unwrap();

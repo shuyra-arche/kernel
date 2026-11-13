@@ -4,6 +4,9 @@ extern crate alloc;
 #[path = "../../src/basis/name/mod.rs"]
 mod name;
 
+#[path = "../name/allocation.rs"]
+mod allocation;
+
 mod basis {
     pub(crate) use crate::name;
     pub(crate) mod nest {
@@ -24,11 +27,11 @@ fn address_reuse_requires_exact_generation_and_completed_retirement() {
     let mut layout = Layout::new();
     let placement = Placement::fixed(VirtAddr::new(0x1000), 8192).unwrap();
     let (address, generation) = layout.reserve(placement).unwrap();
-    layout.occupancy.reserve_cuts(2).unwrap();
-    let ticket = layout
+    let prepared = layout
         .occupancy
-        .retire(address, address + 4095, generation)
+        .prepare_retirement(address, address + 4095, generation)
         .unwrap();
+    let ticket = layout.occupancy.retire(prepared)[0].2;
     assert_eq!(
         layout.reserve(placement),
         Err(address::AddressError::Occupied)
@@ -59,6 +62,69 @@ fn address_reuse_requires_exact_generation_and_completed_retirement() {
             .release(address + 4096, address + 8191, generation)
     );
     assert!(!layout.occupancy.has_id(generation));
+}
+
+#[test]
+fn segmented_retirement_prepares_all_tickets_before_changing_occupancy() {
+    let mut layout = Layout::new();
+    let placement = Placement::fixed(VirtAddr::new(0x1000), 5 * 4096).unwrap();
+    let (start, generation) = layout.reserve(placement).unwrap();
+    let prepared = layout
+        .occupancy
+        .prepare_retirement(0x3000, 0x3fff, generation)
+        .unwrap();
+    let middle = layout.occupancy.retire(prepared)[0].2;
+    let before = layout.occupancy.pieces(start, 0x5fff, generation).unwrap();
+    assert_eq!(
+        before,
+        [
+            (0x1000, 0x2fff, 0),
+            (0x3000, 0x3fff, middle),
+            (0x4000, 0x5fff, 0)
+        ]
+    );
+
+    // Failure after allocating the pieces snapshot must leave every span and
+    // old ticket unchanged. No occupancy or PTE commit has taken place.
+    assert!(
+        allocation::fail_after(1, || layout
+            .occupancy
+            .prepare_retirement(start, 0x5fff, generation))
+        .is_err()
+    );
+    assert_eq!(
+        layout.occupancy.pieces(start, 0x5fff, generation).unwrap(),
+        before
+    );
+    let prepared = layout
+        .occupancy
+        .prepare_retirement(start, 0x5fff, generation)
+        .unwrap();
+    drop(prepared); // Later PTE preparation may fail: abandoning is harmless.
+    assert_eq!(
+        layout.occupancy.pieces(start, 0x5fff, generation).unwrap(),
+        before
+    );
+
+    let prepared = layout
+        .occupancy
+        .prepare_retirement(start, 0x5fff, generation)
+        .unwrap();
+    let committed = allocation::fail_after(0, || layout.occupancy.retire(prepared));
+    assert_eq!(committed[1].2, middle);
+    assert!(committed[0].2 != 0 && committed[2].2 != 0 && committed[0].2 != committed[2].2);
+    assert_eq!(
+        layout.reserve(placement),
+        Err(address::AddressError::Occupied)
+    );
+    layout.occupancy.reclaim(middle);
+    assert_eq!(
+        layout.reserve(placement),
+        Err(address::AddressError::Occupied)
+    );
+    layout.occupancy.reclaim(committed[0].2);
+    layout.occupancy.reclaim(committed[2].2);
+    assert!(layout.reserve(placement).is_ok());
 }
 
 #[test]

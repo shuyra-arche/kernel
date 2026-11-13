@@ -15,8 +15,8 @@ use kernel_client::call::{share_view, unit};
 pub(in super::super) fn run(at: usize, count: usize) {
     let (bar_token, root) = roots(at, count);
     let identity = context(root).id;
-    let (bar, _) = share_view::open(bar_token).unwrap();
-    assert!(share_view::open(root).is_err());
+    let (bar, _) = crate::open_share(bar_token).unwrap();
+    assert!(crate::open_share(root).is_err());
     let mut out = [0; NestInfo::WIDTH];
     for invalid in [
         bar_token,

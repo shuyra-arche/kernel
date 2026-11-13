@@ -176,6 +176,14 @@ fn accord(
     operations: Operations,
     modifiable: Modifiable,
 ) -> Option<PendId> {
+    accord_result(root, target, operations, modifiable).ok()
+}
+fn accord_result(
+    root: PendId,
+    target: AccordTarget,
+    operations: Operations,
+    modifiable: Modifiable,
+) -> kernel_api::abi::call::pend::PendResult<PendId> {
     let bytes = AccordRequest {
         src: root,
         target,
@@ -188,7 +196,28 @@ fn accord(
         },
     }
     .to_bytes();
-    pend::accord(super::ptr(&bytes)).ok()
+    pend::accord(super::ptr(&bytes))
+}
+fn required_accord(
+    root: PendId,
+    target: AccordTarget,
+    operations: Operations,
+    modifiable: Modifiable,
+) -> PendId {
+    let until = room::clock().saturating_add(5_000_000_000);
+    loop {
+        match accord_result(root, target, operations, modifiable) {
+            Ok(token) => return token,
+            Err(error) if error.source == kernel_api::abi::call::pend::PendFail::Busy => {
+                assert!(
+                    room::clock() < until,
+                    "register grant continuation timed out"
+                );
+                room::yield_();
+            }
+            Err(error) => panic!("register grant: {error:?}"),
+        }
+    }
 }
 fn sign_branch(root: PendId, target: AccordTarget) -> PendId {
     accord(
@@ -200,15 +229,14 @@ fn sign_branch(root: PendId, target: AccordTarget) -> PendId {
     .unwrap()
 }
 fn pair(view: PendId, sign: PendId, task: TaskId) -> (PendId, PendId) {
-    let view = accord(
+    let view = required_accord(
         view,
         AccordTarget::Task(task),
         Operations::Share(
             kernel_api::model::pend::ShareRights::OPEN | kernel_api::model::pend::ShareRights::SHUT,
         ),
         Modifiable::Yes,
-    )
-    .unwrap();
+    );
     let Some(sign) = accord(
         sign,
         AccordTarget::Task(task),
@@ -221,7 +249,7 @@ fn pair(view: PendId, sign: PendId, task: TaskId) -> (PendId, PendId) {
     (view, sign)
 }
 fn open(view: PendId) {
-    let (address, _) = share_view::open(view).unwrap();
+    let (address, _) = crate::open_share(view).unwrap();
     UART.store(address.get(), Ordering::Release);
     write(1, 0);
 }

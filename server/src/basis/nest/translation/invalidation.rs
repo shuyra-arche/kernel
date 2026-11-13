@@ -1,6 +1,7 @@
 /// 失效状态机。
 ///
-/// `Fencing` 期间等待者只等结果，不得看到旧失败。
+/// `Fencing` has one synchronous initiator. Observers return Busy and retain
+/// their continuation; they neither spin nor initiate a second attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Invalidation {
     /// 无待失效的 PTE 修改。

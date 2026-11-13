@@ -22,8 +22,8 @@ use kernel_api::{
         },
         sign::SignRights,
         unit::{
-            ControlId, CreatedUnit, Schedule, ScheduleInfo, UnitCreate, UnitQuery,
-            UnitState, UnitTarget,
+            ControlId, CreatedUnit, Schedule, ScheduleInfo, UnitCreate, UnitQuery, UnitState,
+            UnitTarget,
         },
         wait::Wait,
     },
