@@ -56,7 +56,15 @@ fn partial_reshape_preserves_origin_and_stamps_all_new_heads_once() {
     let parent = range.parent();
     let before = heads(&state);
     let old = state.revision.current();
-    let (version, stamp) = state.reshape(parent, range, true, old, &mut held).unwrap();
+    let (version, stamp) = state
+        .reshape(
+            parent,
+            range,
+            crate::state::reshape::Direction::Split,
+            old,
+            &mut held,
+        )
+        .unwrap();
     assert_eq!(version.get(), old.get() + 1);
     assert_eq!(held.len(), 512);
     assert_eq!(state.geometry.head(0, parent), (0, parent));
@@ -65,11 +73,23 @@ fn partial_reshape_preserves_origin_and_stamps_all_new_heads_once() {
         assert_eq!(state.revision.at(PageIndex::new(n)), stamp);
     }
     assert_eq!(
-        state.reshape(parent, range, false, old, &mut held),
+        state.reshape(
+            parent,
+            range,
+            crate::state::reshape::Direction::Combine,
+            old,
+            &mut held
+        ),
         Err(Error::Stale)
     );
     let merged = state
-        .reshape(parent, range, false, version, &mut held)
+        .reshape(
+            parent,
+            range,
+            crate::state::reshape::Direction::Combine,
+            version,
+            &mut held,
+        )
         .unwrap()
         .0;
     assert_eq!(heads(&state).len(), 1);
@@ -77,7 +97,13 @@ fn partial_reshape_preserves_origin_and_stamps_all_new_heads_once() {
     assert_eq!(held.len(), 1);
     assert!(!state.geometry.covers(513, 1, parent));
     let (_, second) = state
-        .reshape(parent, range, true, merged, &mut held)
+        .reshape(
+            parent,
+            range,
+            crate::state::reshape::Direction::Split,
+            merged,
+            &mut held,
+        )
         .unwrap();
     assert!(second.get() > stamp.get());
     assert_eq!(state.revision.at(PageIndex::new(513)), second);
@@ -93,7 +119,13 @@ fn every_preparation_failure_preserves_holding_geometry_version_and_gate() {
     let mut failures = 0;
     loop {
         let result = crate::allocation::fail_after(failures, || {
-            state.reshape(range.parent(), range, true, version, &mut held)
+            state.reshape(
+                range.parent(),
+                range,
+                crate::state::reshape::Direction::Split,
+                version,
+                &mut held,
+            )
         });
         if result.is_ok() {
             break;
@@ -125,7 +157,13 @@ fn aliases_overlapping_gates_and_pending_hardware_refuse_before_conversion() {
         let overlap = (mode == 1).then(|| Block::new(held[0].change().clone()).unwrap());
         let hardware = (mode == 2).then(|| held[0].permit().unwrap().hardware(true).unwrap());
         assert_eq!(
-            state.reshape(range.parent(), range, true, version, &mut held),
+            state.reshape(
+                range.parent(),
+                range,
+                crate::state::reshape::Direction::Split,
+                version,
+                &mut held
+            ),
             Err(Error::Busy)
         );
         assert_eq!(heads(&state), before);
@@ -134,7 +172,13 @@ fn aliases_overlapping_gates_and_pending_hardware_refuse_before_conversion() {
         drop(overlap);
         drop(hardware);
         state
-            .reshape(range.parent(), range, true, version, &mut held)
+            .reshape(
+                range.parent(),
+                range,
+                crate::state::reshape::Direction::Split,
+                version,
+                &mut held,
+            )
             .unwrap();
         drop(held);
         drop(state);
@@ -168,7 +212,13 @@ fn partial_reshape_keeps_unrelated_maintenance_hardware_and_holding() {
     held.push(block);
     let version = state.revision.current();
     state
-        .reshape(range.parent(), range, true, version, &mut held)
+        .reshape(
+            range.parent(),
+            range,
+            crate::state::reshape::Direction::Split,
+            version,
+            &mut held,
+        )
         .unwrap();
     assert_eq!(held.len(), 513);
     assert_eq!(heads(&state)[0], (0, id.get()));

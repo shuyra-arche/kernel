@@ -98,7 +98,7 @@ impl Read {
             return Err(Failure::Denied);
         }
         let state = self.span.faults.lock();
-        if state.lost {
+        if state.lost() {
             return Err(Failure::HandlerGone);
         }
         state.queue.expire(clock::uptime().as_nanos() as u64);

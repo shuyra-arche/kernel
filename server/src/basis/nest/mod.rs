@@ -111,8 +111,7 @@ impl Nest {
     ) -> bool {
         let state = self.state.lock();
         state.memos.get(span, index).is_some_and(|memo| {
-            memo.maintenance
-                .as_ref()
+            memo.maintenance()
                 .is_some_and(|known| Arc::ptr_eq(known, usage))
                 && memo.failed(state.retirement.invalidation() == Invalidation::Failed)
         })
@@ -132,8 +131,7 @@ impl Nest {
             if state.memos.get(span, index).is_none_or(|memo| {
                 memo.generation() < generation
                     || memo
-                        .maintenance
-                        .as_ref()
+                        .maintenance()
                         .is_none_or(|known| !Arc::ptr_eq(known, usage))
             }) {
                 return Ok(());
@@ -484,7 +482,7 @@ impl Nest {
             if !memo.matches(binding) {
                 return Ok(());
             }
-            if memo.provenance.as_ref().is_none_or(|p| !p.contains(origin)) {
+            if memo.provenance().is_none_or(|p| !p.contains(origin)) {
                 return Ok(());
             }
             let Some(page) = memo.page() else {
@@ -546,7 +544,7 @@ impl Nest {
         let state = self.state.lock();
         state.memos.get(span, index).is_some_and(|memo| {
             memo.matches(binding)
-                && memo.provenance.as_ref().is_some_and(|p| p.contains(origin))
+                && memo.provenance().is_some_and(|p| p.contains(origin))
                 && memo.failed(state.retirement.invalidation() == Invalidation::Failed)
         })
     }
@@ -1752,9 +1750,12 @@ impl Nest {
             mapping.prepare_revision()?;
             memo.begin_publish(expected, change.clone(), access.bits() << 1)?;
             mapping.changed();
-            memo.retain(publisher.take().expect("prepared publishing route"), None);
-            memo.maintenance = maintenance.clone();
-            memo.provenance = source.provenance();
+            memo.retain(
+                publisher.take().expect("prepared publishing route"),
+                None,
+                maintenance.clone(),
+                source.provenance(),
+            );
             accepted(memo.generation());
             mapping
                 .faults
@@ -2020,7 +2021,7 @@ impl Nest {
                     (memo.page(), source, binding)
                 },
                 memo.publication().map(|publication| publication.writable()),
-                memo.maintenance.clone(),
+                memo.maintenance().cloned(),
             )
         };
         if !ceiling.contains(access) || !source.ceiling().contains(access) {

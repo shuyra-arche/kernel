@@ -236,7 +236,7 @@ impl FlatRange {
     pub(crate) fn reshape_held(
         &self,
         range: kernel_api::model::flat::Reshape,
-        split: bool,
+        direction: crate::basis::flat::Direction,
         expected: FlatVersion,
         blocks: &mut alloc::vec::Vec<crate::basis::cell::page::Block>,
     ) -> Result<(FlatVersion, SlotVersion), Error> {
@@ -246,6 +246,6 @@ impl FlatRange {
         self.flat()
             .state
             .lock()
-            .reshape(self.flat().level, range, split, expected, blocks)
+            .reshape(self.flat().level, range, direction, expected, blocks)
     }
 }

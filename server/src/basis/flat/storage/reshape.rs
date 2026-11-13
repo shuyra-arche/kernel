@@ -14,20 +14,43 @@ use kernel_api::{
     },
 };
 
+#[derive(Clone, Copy)]
+pub(crate) enum Direction {
+    Split,
+    Combine,
+}
+impl Direction {
+    pub(crate) fn levels(self, range: Reshape) -> (CellLevel, CellLevel) {
+        match self {
+            Self::Split => (range.parent(), range.child()),
+            Self::Combine => (range.child(), range.parent()),
+        }
+    }
+}
+/// Indices are valid only while the same Flat lock is held. Planning performs no
+/// allocation or holding movement; preparation reserves all commit capacity.
+struct Plan {
+    start: usize,
+    end: usize,
+    old_grain: usize,
+    new: CellLevel,
+    new_grain: usize,
+    count: usize,
+    first: usize,
+    last: usize,
+    origin: Option<usize>,
+}
 impl FlatState {
-    pub fn reshape(
-        &mut self,
+    fn plan(
+        &self,
         initial: CellLevel,
         range: Reshape,
-        split: bool,
-        expected: FlatVersion,
-        blocks: &mut Vec<Block>,
-    ) -> Result<(FlatVersion, SlotVersion), Error> {
+        direction: Direction,
+    ) -> Result<Plan, Error> {
         self.explicit()?;
         let start = range.offset();
         let end = start + range.count();
-        let old = if split { range.parent() } else { range.child() };
-        let new = if split { range.child() } else { range.parent() };
+        let (old, new) = direction.levels(range);
         let old_grain = old.pages().unwrap();
         let new_grain = new.pages().unwrap();
         let count = range.count() / new_grain;
@@ -46,22 +69,16 @@ impl FlatState {
                 return Err(Error::Unsupported);
             }
         }
-        self.revision.prepare_geometry(expected, count)?;
-        self.geometry.prepare(count)?;
         // One parent cannot discard distinct original branch restrictions.
         // Splitting carries the same restriction to every resulting child.
-        let origin = self
-            .provenance
-            .iter()
-            .find(|(at, _)| at.get() == start)
-            .map(|(_, p)| p.clone());
+        let origin = self.provenance.iter().position(|(at, _)| at.get() == start);
         for head in (start..end).step_by(old_grain) {
             let other = self
                 .provenance
                 .iter()
                 .find(|(at, _)| at.get() == head)
                 .map(|(_, p)| p);
-            if match (&origin, other) {
+            if match (origin.map(|at| &self.provenance[at].1), other) {
                 (None, None) => false,
                 (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
                 _ => true,
@@ -69,10 +86,7 @@ impl FlatState {
                 return Err(Error::Busy);
             }
         }
-        self.provenance
-            .try_reserve(count)
-            .map_err(|_| Error::OutOfMemory)?;
-        let FlatSource::Managed(slots) = &mut self.source else {
+        let FlatSource::Managed(slots) = &self.source else {
             unreachable!()
         };
         let first = slots.partition_point(|(at, _)| at.get() < start);
@@ -90,6 +104,51 @@ impl FlatState {
                 _ => return Err(Error::Busy),
             }
         }
+        Ok(Plan {
+            start,
+            end,
+            old_grain,
+            new,
+            new_grain,
+            count,
+            first,
+            last,
+            origin,
+        })
+    }
+    pub fn reshape(
+        &mut self,
+        initial: CellLevel,
+        range: Reshape,
+        direction: Direction,
+        expected: FlatVersion,
+        blocks: &mut Vec<Block>,
+    ) -> Result<(FlatVersion, SlotVersion), Error> {
+        // No lock is released between the immutable plan and its application.
+        // Check the version first so a stale retry never acts on new geometry.
+        if self.revision.current() != expected {
+            return Err(Error::Stale);
+        }
+        let Plan {
+            start,
+            end,
+            old_grain,
+            new,
+            new_grain,
+            count,
+            first,
+            last,
+            origin,
+        } = self.plan(initial, range, direction)?;
+        self.revision.prepare_geometry(expected, count)?;
+        self.geometry.prepare(count)?;
+        self.provenance
+            .try_reserve(count)
+            .map_err(|_| Error::OutOfMemory)?;
+        let origin = origin.map(|at| self.provenance[at].1.clone());
+        let FlatSource::Managed(slots) = &mut self.source else {
+            unreachable!()
+        };
         slots.try_reserve(count).map_err(|_| Error::OutOfMemory)?;
         let mut pages = Vec::new();
         pages

@@ -57,7 +57,7 @@ pub(super) fn wait(
     if let Some(span) =
         kernel_api::model::nest::ReservationId::from_bytes(&(mapping as u64).to_le_bytes())
             .and_then(|id| nest.reservation(id))
-        && span.faults.lock().native
+        && span.faults.lock().native()
     {
         let result = crate::basis::room::scheduler::slot::current()
             .running_task()

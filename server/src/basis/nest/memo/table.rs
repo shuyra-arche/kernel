@@ -113,7 +113,7 @@ impl Memos {
     ) -> Option<Publication> {
         let key = Self::key(span, page);
         let at = self.entries.binary_search_by_key(&key, |(k, _)| *k).ok()?;
-        self.entries[at].1.publication.take()
+        self.entries[at].1.take_publication()
     }
     pub(in crate::basis::nest) fn withdraw(
         &mut self,
@@ -141,15 +141,16 @@ impl Memos {
         }
     }
     pub(in crate::basis::nest) fn has_resources(&self, span: &Span) -> bool {
-        self.entries.iter().any(|((id, _), memo)| {
-            *id == span.identity() && (memo.page.is_some() || memo.freeze.is_some() || memo.busy())
-        })
+        self.entries
+            .iter()
+            .any(|((id, _), memo)| *id == span.identity() && memo.has_resources())
     }
 
     pub(in crate::basis::nest) fn take_metadata(&mut self, span: &Span) -> Option<Memo> {
-        let at = self.entries.iter().position(|((id, _), memo)| {
-            *id == span.identity() && memo.page.is_none() && memo.freeze.is_none() && !memo.busy()
-        })?;
+        let at = self
+            .entries
+            .iter()
+            .position(|((id, _), memo)| *id == span.identity() && !memo.has_resources())?;
         Some(self.entries.remove(at).1)
     }
 

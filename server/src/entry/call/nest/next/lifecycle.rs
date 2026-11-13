@@ -82,7 +82,7 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
                 )
                 .map_err(nest_error)?;
             let span = prepared.span();
-            span.faults.lock().native = true;
+            span.faults.lock().enable_native();
             let id = ReservationId::from_bytes(&(span.identity() as u64).to_le_bytes())
                 .expect("reservation identity");
             let grant = pend::prepare_native_reservation(actor, &parent, id, reservation.count)
