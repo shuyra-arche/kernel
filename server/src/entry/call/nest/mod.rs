@@ -1,3 +1,4 @@
+pub(super) mod memo;
 use crate::{
     basis::{
         nest::{

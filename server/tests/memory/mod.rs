@@ -37,6 +37,8 @@ mod basis {
     }
     pub(crate) mod cell {
         pub(crate) use crate::cell as page;
+    }
+    pub(crate) mod flat {
         pub(crate) mod transfer {
             pub(crate) use crate::transfer_error::TransferError;
         }
@@ -62,7 +64,7 @@ mod state;
 
 mod transaction;
 #[allow(dead_code)]
-#[path = "../../src/basis/cell/transfer/error.rs"]
+#[path = "../../src/basis/flat/transfer/error.rs"]
 mod transfer_error;
 
 #[allow(dead_code)]

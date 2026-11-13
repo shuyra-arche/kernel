@@ -1,3 +1,4 @@
+pub(super) mod legacy;
 use crate::{
     basis::{flat::authority, room::scheduler::slot::current, unit::task::TaskIdent},
     metal::switcher::context::TrapContext,

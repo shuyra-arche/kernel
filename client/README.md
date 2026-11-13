@@ -113,7 +113,20 @@ derivation or Task for delegation. `pend::narrow(request)` similarly reads an
 retirement. Busy retains cleanup; no call implies safe physical reuse. The old
 Pend derive/same/release and ReleaseMode interfaces do not exist.
 
-### Cell endpoints and mapping lifetime
+### Next-memory Flat/Nest interface
+
+`kernel_client::memory::{flat,nest}` is the next ABI interface. Construct the
+corresponding `Call` from a validated Action and explicit RequestId, then use
+`flat::invoke` or `nest::invoke`. `memory::invoke_with` provides an explicit host
+transport. Calls snapshot fixed-size buffers, perform one invocation and check
+result/observation correlation; they never retry automatically or fall back to
+Cell. A Delivery error does not imply rollback. InspectResult recovers the
+original request, including its original mutation opcode.
+
+This interface requires the coordinated v11 provider. The running v10 Kernel
+rejects it; activation remains gated by M3–M6. See the [M2 acceptance record](../api/memory-m2.md).
+
+### ABI v10 Cell compatibility and mapping lifetime
 
 | Descriptor | Layout | Size |
 | --- | --- | --- |

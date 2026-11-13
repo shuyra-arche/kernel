@@ -4,7 +4,8 @@ Status: **M1 contract deliverables complete in [PR #145](https://github.com/shuy
 See the [M1 acceptance matrix and activation plan](memory-m1.md) for each section 9
 requirement and its evidence. Value codecs, bounded journal transitions and the
 trusted backend proof interface are implemented and tested. The next syscall ABI
-is not activated; Task/resource integration and physical backends remain M2–M6.
+is not activated; see the [M2 organization/authority acceptance](memory-m2.md).
+Task/resource integration and physical backends remain activation gates in M3–M6.
 Current executable contracts remain [ABI v10 / Ledger v10](README.md#source-migration-and-abi-compatibility).
 
 The reviewed source baseline is Kernel
@@ -295,10 +296,13 @@ Rollback requires the complete old provider/consumer/image set.
 
 The [M1 acceptance record](memory-m1.md) closes the contract/encoding decisions.
 Fault queues, scheduler/Sign integration, actual geometry bookkeeping, allocation
-conversion and physical proof implementations remain M2–M6. New work implements
+conversion and physical proof implementations remain M3–M6. New work implements
 those owners against the fixed contract and records any deliberate contract change.
 
-### M2 implementation progress
+### M2 organization and authority implementation
+
+See the [M2 acceptance record](memory-m2.md) for the complete requirement map,
+implementation evidence and explicit v10 compatibility/activation boundary.
 
 The Server now normalizes v10 Flat source and Mapping coordinates before using
 fixed-origin `SlotPosition` / `MemoPosition` resolvers. They check the actual
@@ -328,11 +332,13 @@ retains its entry, while dead sources release capacity without retaining payload
 This bound also applies to legacy Slot registration, which can now fail at the
 discovery limit even when fewer than 1024 public handles remain.
 
-This is an incremental M2 implementation, not M2 completion or v11 activation.
-The public v10 Cell calls, SlotId table and compatibility coordinate semantics
-remain. Removing those public calls, exposing direct cross-Team Flat endpoints,
-and connecting v11 bounded copies, result journals and new permission bits still
-requires the coordinated provider implementation. M3–M6 gates remain unchanged.
+The shared movement engine now receives fixed Flat endpoints and resolves both
+grants in the actual caller's ledger, without a peer Task or local Slot table.
+Flat owns holding movement; Nest owns association/publication. The next API and
+Client expose only Flat/Nest calls and validate correlated replies. Cell remains
+an explicit v10 compatibility adapter, removed at the coordinated activation.
+Resource-version, journal and maintenance integration remains in M3–M4; M5–M6
+gates are unchanged. M2 does not activate the next syscall version.
 
 ## Verification boundary
 

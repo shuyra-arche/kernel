@@ -1,7 +1,7 @@
 use super::*;
 use crate::basis::nest::memo::Publisher;
 
-pub(super) fn publication(
+pub(in crate::entry::call) fn publication(
     pos: CellPosition,
     publishing: bool,
     ident: &Arc<TaskIdent>,

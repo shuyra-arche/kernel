@@ -16,7 +16,7 @@
 
 use alloc::sync::Arc;
 
-use crate::basis::cell::transfer::TransferError;
+use crate::basis::flat::transfer::TransferError;
 use crate::metal::sync::with_pair;
 use kernel_api::address::PageIndex;
 

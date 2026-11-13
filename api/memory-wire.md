@@ -1,6 +1,7 @@
 # Next memory request, result and observation encoding
 
-Status: implemented **value codecs**, awaiting Server/Client integration and ABI
+Status: implemented **value codecs, domain calls and Client transport**, awaiting
+resource-handler integration and ABI
 activation. These are the M1 request/result contracts for the settled transitions
 in [#142](https://github.com/shuyra-arche/kernel/issues/142), extending the
 [fixed-reference and migration contract](memory.md). They do not activate ABI 11
@@ -12,6 +13,9 @@ request deduplication, live authorization or hardware settlement.
 own the semantic status, phase and revision types. No new Pend
 target, general transaction syscall or second resource-state authority is added.
 There are no `RegisterCall`/`KernelCall` implementations for these drafts.
+The domain-scoped `flat::Call` / `nest::Call`, checked `Frame`, and Client
+`memory::{flat,nest}` own the dynamic operation number and bounded-buffer transport;
+they do not reuse the v10 static register-call adapter. See [M2](memory-m2.md).
 
 ## Invocation and snapshot
 

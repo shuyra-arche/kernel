@@ -1,7 +1,7 @@
 use super::*;
 
 /// Prepare the replacement authority before consuming any physical receipt.
-pub(super) fn reshape(
+pub(in crate::entry::call) fn reshape(
     slot: SlotId,
     merging: bool,
     ident: &Arc<TaskIdent>,

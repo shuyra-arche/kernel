@@ -89,7 +89,10 @@ fn with_source<T>(
     }
 }
 
-pub(super) fn associate(spec: CellAssociation, ident: &Arc<TaskIdent>) -> Result<usize, CellFail> {
+pub(in crate::entry::call) fn associate(
+    spec: CellAssociation,
+    ident: &Arc<TaskIdent>,
+) -> Result<usize, CellFail> {
     let actor = caller(ident).ok_or(CellFail::Denied)?;
     let _serial = actor.pend.lock();
     let _commit = crate::basis::commit();

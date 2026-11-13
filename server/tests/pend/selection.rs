@@ -36,6 +36,28 @@ const INSPECT: Operations = Operations::Flat(FlatRights::INSPECT);
 const TRANSFER: Operations = Operations::Flat(FlatRights::TRANSFER);
 
 #[test]
+fn delegated_transfer_grants_do_not_need_association_or_a_whole_nest() {
+    let roots = [flat(), flat()];
+    let grants: Vec<_> = roots
+        .iter()
+        .map(|root| {
+            let child =
+                Pend::try_new_scope(Yes, pages(12, 2), TRANSFER, Distributable::No).unwrap();
+            child.inherit(root).unwrap();
+            child
+        })
+        .collect();
+    for grant in &grants {
+        assert!(grant.selects(TRANSFER, pages(12, 1)));
+        assert!(!grant.selects(Operations::Flat(FlatRights::ASSOCIATE), pages(12, 1)));
+        assert!(!grant.selects(TRANSFER, pages(10, 1)));
+    }
+    roots[1].invalidate();
+    assert!(grants[0].selects(TRANSFER, pages(12, 1)));
+    assert!(!grants[1].selects(TRANSFER, pages(12, 1)));
+}
+
+#[test]
 fn fixed_flat_pages_survive_narrow_without_rebasing() {
     let grant = flat();
     for page in [10, 12, 17] {

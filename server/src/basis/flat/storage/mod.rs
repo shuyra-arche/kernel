@@ -10,7 +10,8 @@ pub use region::BorrowedRegion;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
 
-use crate::basis::cell::{page::Page, transfer::TransferError};
+use crate::basis::cell::page::Page;
+use crate::basis::flat::transfer::TransferError;
 
 use self::slot::Slot;
 

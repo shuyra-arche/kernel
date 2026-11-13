@@ -1,4 +1,4 @@
-//! Cell creation, transfer and publication.
+//! ABI v10 compatibility only. The next provider uses `memory::{flat,nest}`.
 
 use kernel_api::abi::call::cell::operations as op;
 use kernel_api::{

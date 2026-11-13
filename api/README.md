@@ -91,8 +91,10 @@ including exact status codes,
 result inspection, scoped Flat/Slot/Block/Nest/Memo/Mapping observations, and
 Mapping fault route/event descriptors with checked finite deadlines.
 The [M1 acceptance record](memory-m1.md) also covers the bounded request journal
-and trusted backend proof interface. These are not accepted by current `EnvCall`
-and have no invocation traits; live integration remains unimplemented.
+and trusted backend proof interface. The [M2 acceptance record](memory-m2.md)
+adds scoped Flat/Nest calls, a checked register Frame and Client invocation.
+These are not accepted by current `EnvCall`; live v11 integration remains an
+activation gate, and the existing v10 invocation traits stay unchanged.
 
 This is a breaking provider redesign of Cell, View, Pend, Sign, Unit and Room.
 There are no compatibility aliases for retired operations.

@@ -11,6 +11,7 @@ use kernel_api::model::cell::CellLevel;
 pub(crate) mod sharing;
 mod storage;
 pub(crate) mod transaction;
+pub(crate) mod transfer;
 
 use crate::basis::cell::page::Owner;
 use alloc::sync::Arc;
