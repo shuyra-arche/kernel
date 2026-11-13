@@ -54,13 +54,19 @@ fn state(id: TaskId) -> UnitState {
 }
 fn wait_state(id: TaskId, expected: UnitState) {
     let end = limit();
-    while state(id) != expected {
+    loop {
+        let observed = state(id);
+        if observed == expected {
+            return;
+        }
         assert!(
             room::clock() < end,
-            "state {id:?}: {:?} != {expected:?}",
-            state(id)
+            "state {id:?}: {observed:?} != {expected:?}"
         );
-        room::yield_();
+        // This controller observes an admitted Task on another Hart. Repeated
+        // Inspect/Yield syscalls contend for COMMIT and consume the worker's
+        // response budget; sleep between observations without extending its bound.
+        room::sleep_until((room::clock() + 1_000_000).min(end)).unwrap();
     }
 }
 fn resume(id: TaskId) {

@@ -394,6 +394,12 @@ mapping's freeze. Failed publication may advance the generation and leave Ready
 with its freeze, so retry from Inspect. Historical observation references do not
 prolong deleted freezes after fencing.
 
+External Retract may return Busy after starting an asynchronous withdrawal.
+Inspect distinguishes a rejected request from a retained Retracting flight with
+an advanced generation. Wait for that exact generation's MappingRetired event
+or inspect settled Ready state before treating this mapping's withdrawal as
+complete; Busy alone proves neither acceptance nor completion.
+
 Retract completion settles only this mapping. `external` and other retained
 CPU/device obligations may still forbid moving or reclaiming the Page. Physical
 reuse requires all such obligations to settle, independently of business results,

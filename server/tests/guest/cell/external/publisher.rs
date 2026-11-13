@@ -2,7 +2,7 @@
 use super::*;
 use core::{
     fmt::Write,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
 use kernel_api::{
     abi::call::nest::NestFail,
@@ -14,29 +14,47 @@ use kernel_api::{
 use kernel_client::call::unit;
 
 static TOKEN: AtomicUsize = AtomicUsize::new(0);
-static PHASE: AtomicUsize = AtomicUsize::new(0);
+static PHASE: AtomicU32 = AtomicU32::new(0);
+
+fn advance(phase: u32) {
+    PHASE.store(phase, Ordering::Release);
+    room::wake_value(VirtAddr::new(PHASE.as_ptr() as usize), true).unwrap();
+}
+
+fn await_phase(phase: u32, wait: Wait) {
+    loop {
+        let observed = PHASE.load(Ordering::Acquire);
+        if observed >= phase {
+            return;
+        }
+        if let Wait::At(deadline) = wait {
+            assert!(
+                room::clock() < deadline,
+                "publisher phase {observed} < {phase}"
+            );
+        }
+        crate::room::wait(&PHASE, observed, wait);
+    }
+}
 
 extern "C" fn publish_delegated() -> ! {
     let token = PendId::mint(TOKEN.load(Ordering::Acquire));
     let position = crate::memo(token, 0);
     let published = sign::create(crate::license::get()).unwrap();
     sign::attach(published, source(position, true), position.generation + 1).unwrap();
+    // Task setup is ordinary work, outside the hardware completion deadline.
+    // The process watchdog still bounds a setup that cannot make progress.
+    advance(1);
+    await_phase(2, Wait::Infinite);
     cell::publish(crate::ptr(&position.to_bytes())).unwrap();
     event(published, source(position, true));
     assert_eq!(crate::info(position).state, CellState::Published);
-    PHASE.store(1, Ordering::Release);
-    let deadline = room::clock() + 2_000_000_000;
-    while PHASE.load(Ordering::Acquire) < 2 {
-        assert!(
-            room::clock() < deadline,
-            "delegated publisher did not receive queued DMA"
-        );
-        room::yield_();
-    }
+    advance(3);
+    await_phase(4, Wait::Infinite);
     let position = current(position);
     let retired = sign::create(crate::license::get()).unwrap();
     sign::attach(retired, source(position, false), position.generation + 1).unwrap();
-    cell::retract(crate::ptr(&position.to_bytes())).unwrap();
+    begin_retract(position);
     event(retired, source(position, false));
     let observed = crate::info(position);
     assert_eq!(observed.state, CellState::Ready);
@@ -46,7 +64,7 @@ extern "C" fn publish_delegated() -> ! {
         returned(endpoint);
     }
     returned(token);
-    PHASE.store(3, Ordering::Release);
+    advance(5);
     unit::exit(79, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 
@@ -79,14 +97,10 @@ pub(super) fn run(bar: VirtAddr, root: PendId) {
     );
     TOKEN.store(child.get(), Ordering::Release);
     unit::resume(UnitTarget::Task(task)).unwrap();
+    await_phase(1, Wait::Infinite);
     let deadline = room::clock() + 2_000_000_000;
-    while PHASE.load(Ordering::Acquire) < 1 {
-        assert!(
-            room::clock() < deadline,
-            "publication holder did not receive completion"
-        );
-        room::sleep_until((room::clock() + 1_000_000).min(deadline)).unwrap();
-    }
+    advance(2);
+    await_phase(3, Wait::At(deadline));
     assert_eq!(crate::info(position).state, CellState::Published);
     transfer(bar, ADDRESS, false);
     start(bar, ADDRESS, false);
@@ -95,11 +109,11 @@ pub(super) fn run(bar: VirtAddr, root: PendId) {
         0,
         "DMA must still be queued at Retract"
     );
-    PHASE.store(2, Ordering::Release);
+    advance(4);
     assert!(crate::lifecycle::wait_task(task));
     assert_eq!(crate::lifecycle::result(task), (1, 79));
     crate::lifecycle::delete(task);
-    assert_eq!(PHASE.load(Ordering::Acquire), 3);
+    assert_eq!(PHASE.load(Ordering::Acquire), 5);
     assert_eq!(read(bar, 0x98) & 1, 0);
     assert_eq!(context(root).id, identity);
     assert_eq!(context(root).phase, NestPhase::Bound);

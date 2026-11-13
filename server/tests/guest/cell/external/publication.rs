@@ -129,7 +129,7 @@ pub(in super::super) fn run(at: usize, count: usize) {
     assert_eq!(context(root).fault_sequence, 0);
     // A delayed device request must finish before this one address is reusable.
     start(bar, ADDRESS, false);
-    cell::retract(super::super::ptr(&current(first).to_bytes())).unwrap();
+    begin_retract(first);
     let retired = sign::create(crate::license::get()).unwrap();
     sign::attach(retired, source(first, false), current(first).generation).unwrap();
     event(retired, source(first, false));

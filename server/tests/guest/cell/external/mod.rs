@@ -146,8 +146,25 @@ fn publish(pos: CellPosition) {
     wait(pos, CellState::Published);
 }
 fn retract(pos: CellPosition) {
-    cell::retract(super::ptr(&current(pos).to_bytes())).unwrap();
+    begin_retract(pos);
     wait(pos, CellState::Ready);
+}
+fn begin_retract(pos: CellPosition) {
+    let pos = current(pos);
+    let before = super::info(pos);
+    assert_eq!(before.state, CellState::Published);
+    if let Err(error) = cell::retract(super::ptr(&pos.to_bytes())) {
+        // Busy can retain an accepted asynchronous withdrawal. It must have
+        // advanced this exact publication, rather than rejected the request.
+        assert_eq!(error.source, kernel_api::abi::call::cell::CellFail::Busy);
+    }
+    let after = super::info(pos);
+    assert_eq!(after.generation, before.generation + 1);
+    assert_eq!(after.page, before.page);
+    assert!(matches!(
+        after.state,
+        CellState::Retracting | CellState::Ready
+    ));
 }
 fn closed(token: PendId) {
     let until = room::clock() + 2_000_000_000;
