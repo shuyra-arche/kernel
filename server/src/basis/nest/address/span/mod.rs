@@ -33,6 +33,10 @@ pub struct Span {
     level: CellLevel,
     pub(crate) state: SpinLock<SpanState>,
     operation: core::sync::atomic::AtomicBool,
+    /// Weak discovery of sources exported through this reservation. Live
+    /// permission remains in each Source's original Pend lineage.
+    pub(crate) exports:
+        SpinLock<crate::basis::pend::Tracking<crate::basis::pend::SourceAuthorization>>,
 }
 
 impl core::fmt::Debug for Span {
@@ -105,6 +109,7 @@ impl Span {
         match Arc::try_new(Self {
             reservation,
             operation: core::sync::atomic::AtomicBool::new(false),
+            exports: SpinLock::new(crate::basis::pend::Tracking::new()),
             attrs,
             level,
             state: SpinLock::new_level(Level::Reservation, SpanState::new(active, source)),

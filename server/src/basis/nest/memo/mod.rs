@@ -42,7 +42,7 @@ pub(super) fn publication_failure(error: super::PublicationError) -> CellFail {
     }
 }
 
-fn pend_failure(error: PendFail) -> CellFail {
+pub(super) fn pend_failure(error: PendFail) -> CellFail {
     match error {
         PendFail::OutOfMemory => CellFail::OutOfMemory,
         PendFail::Busy => CellFail::Busy,

@@ -10,7 +10,9 @@ use kernel_api::{
         pend::{Distributable, Limits, Operations, PendRange, PendScope},
     },
 };
+mod export;
 mod state;
+pub(crate) use export::Export;
 use state::{Event, Failure, Phase, State};
 /// A Pend is the live access authority for one View range. Its parent obligation
 /// survives handle removal until CPU withdrawal and any external use are settled.
@@ -36,6 +38,7 @@ pub(crate) struct Pend {
     // A retirement hold alone grants no operation and does not block narrowing.
     external: AtomicUsize,
     routing: AtomicUsize,
+    exports: AtomicUsize,
 }
 
 impl Pend {
@@ -52,6 +55,7 @@ impl Pend {
             holder: OnceLock::new(),
             external: AtomicUsize::new(0),
             routing: AtomicUsize::new(0),
+            exports: AtomicUsize::new(0),
         })
         .map_err(|_| PendFail::OutOfMemory)
     }
@@ -199,6 +203,9 @@ impl Pend {
         self.alive() && self.state.lock().selects(operations, scope)
     }
     pub(crate) fn can_narrow(&self, limits: Limits) -> Result<(), PendFail> {
+        if self.exports.load(Ordering::Acquire) != 0 {
+            return Err(PendFail::Busy);
+        }
         if !limits.valid() {
             return Err(PendFail::Denied);
         }
@@ -227,7 +234,7 @@ impl Pend {
             return Err(PendFail::Dead);
         }
         let state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) != 0 {
+        if self.routing.load(Ordering::Acquire) != 0 || self.exports.load(Ordering::Acquire) != 0 {
             return Err(PendFail::Busy);
         }
         let next = state
@@ -241,7 +248,9 @@ impl Pend {
         Ok(PreparedLimit { state, next })
     }
     pub(crate) fn external_pending(&self) -> bool {
-        self.external.load(Ordering::Acquire) != 0 || self.routing.load(Ordering::Acquire) != 0
+        self.external.load(Ordering::Acquire) != 0
+            || self.routing.load(Ordering::Acquire) != 0
+            || self.exports.load(Ordering::Acquire) != 0
     }
     /// Retain the object's retirement responsibility, not permission to keep
     /// performing an operation. Caller serializes admission with revocation.

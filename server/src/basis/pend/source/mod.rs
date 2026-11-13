@@ -35,6 +35,7 @@ mod external;
 mod geometry;
 mod hold;
 mod tracking;
+pub(crate) use tracking::Tracking;
 
 pub(crate) use external::ExternalBorrow;
 pub(crate) use geometry::Geometry;

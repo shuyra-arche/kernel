@@ -146,6 +146,10 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
             crate::basis::flat::authority::retire_block(&meta, entry.authority())?;
         }
         if let crate::basis::pend::Target::Nest { nest, .. } = entry.target() {
+            holder
+                .pend
+                .references
+                .withdraw_exports(holder.ident.id, entry.token())?;
             match entry.scope() {
                 PendScope::Nest(NestScope::Reservation { id, .. }) => {
                     if nest.reservation_root(id, entry.authority()) {

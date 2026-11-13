@@ -9,6 +9,9 @@ use kernel_api::abi::call::{cell::CellFail, pend::PendFail};
 use kernel_api::address::{PAGE_SIZE, PageCount, PageOffset};
 use kernel_api::model::identity::{PendId, TaskId};
 use kernel_api::model::modifiable::Modifiable;
+mod lineage;
+use lineage::Lineage;
+pub(crate) mod exports;
 
 #[derive(Clone)]
 pub(crate) struct Source {
@@ -21,6 +24,7 @@ pub(crate) struct Source {
     ceiling: Access,
     /// Descriptive fixed origin survives revocation; never used as authority.
     position: (kernel_api::model::flat::FlatId, usize),
+    lineage: Option<Arc<Lineage>>,
 }
 
 impl Source {
@@ -146,6 +150,7 @@ impl Source {
             task: actor.ident.id,
             ceiling,
             position,
+            lineage: None,
         };
         selected.range()?;
         let authority = selected.authority(actor)?;
@@ -161,6 +166,9 @@ impl Source {
     }
 
     pub(crate) fn range(&self) -> Result<FlatRange, CellFail> {
+        if let Some(lineage) = &self.lineage {
+            lineage.check(Modifiable::No)?;
+        }
         let actor = self.actor().ok_or(CellFail::Denied)?;
         self.source().ensure_internal().map_err(failure)?;
         let _authority = self.authority(&actor)?;
@@ -170,6 +178,13 @@ impl Source {
     }
 
     pub(crate) fn check(&self, need: Access) -> Result<FlatRange, CellFail> {
+        if let Some(lineage) = &self.lineage {
+            lineage.check(if need.contains(Access::WRITE) {
+                Modifiable::Yes
+            } else {
+                Modifiable::No
+            })?;
+        }
         if !self.ceiling.contains(need) {
             return Err(CellFail::Denied);
         }
@@ -219,6 +234,87 @@ impl Source {
         }
     }
 
+    /// Export only through the actual caller's live Reservation PUBLISH grant.
+    /// Source, original and intermediate distribution qualifications remain
+    /// live dependencies through the destination Memo's hardware retirement.
+    pub(crate) fn export(
+        &self,
+        actor: &Arc<Task>,
+        route: &pend::access::Reservation,
+        index: usize,
+    ) -> Result<Self, CellFail> {
+        use kernel_api::model::pend::{
+            FlatRights, NestRights, NestScope, Operations, PendRange, PendScope, ShareRights,
+        };
+        self.range()?;
+        let span = route.span().map_err(failure)?;
+        if span.grain() != self.count.get() {
+            return Err(CellFail::NotAligned);
+        }
+        let (mut ceiling, _) = span.access(index)?;
+        if route.entry().modifiable() != Modifiable::Yes {
+            ceiling.remove(Access::WRITE);
+        }
+        let previous = if let Some(lineage) = &self.lineage {
+            lineage.clone()
+        } else {
+            let original = self.actor().ok_or(CellFail::Denied)?;
+            let authority = self.authority(&original)?.ok_or(CellFail::Denied)?;
+            let (_, root, _) = self.source().root().ok_or(CellFail::Denied)?;
+            let token = self.hold.branch().map_or(root, |(token, _)| token);
+            let entry = pend::locate(&original, token).ok_or(CellFail::Denied)?;
+            if !Arc::ptr_eq(entry.authority(), &authority) {
+                return Err(CellFail::Denied);
+            }
+            let operations = match entry.target() {
+                pend::Target::Flat(_) => Operations::Flat(FlatRights::ASSOCIATE),
+                pend::Target::View(crate::basis::view::View::Share(_)) => {
+                    Operations::Share(ShareRights::ASSOCIATE)
+                }
+                _ => return Err(CellFail::Denied),
+            };
+            Lineage::extend(
+                None,
+                &original,
+                &entry,
+                operations,
+                PendScope::Pages(PendRange::Pages {
+                    offset: self.offset.get(),
+                    count: self.count.get(),
+                }),
+                None,
+            )?
+        };
+        let lineage = Lineage::extend(
+            Some(previous),
+            actor,
+            route.entry(),
+            Operations::Nest(NestRights::PUBLISH),
+            PendScope::Nest(NestScope::Reservation {
+                id: route.id(),
+                range: PendRange::Pages {
+                    offset: index,
+                    count: self.count.get(),
+                },
+            }),
+            Some(&span),
+        )?;
+        actor
+            .pend
+            .references
+            .track(self.source())
+            .map_err(failure)?;
+        span.exports
+            .lock()
+            .remember(self.source())
+            .map_err(failure)?;
+        Ok(Self {
+            ceiling: self.ceiling & ceiling,
+            lineage: Some(lineage),
+            ..self.clone()
+        })
+    }
+
     pub(crate) fn ceiling(&self) -> Access {
         self.ceiling
     }
@@ -243,6 +339,13 @@ impl Source {
     }
 
     pub(crate) fn matches_branch(&self, token: PendId) -> bool {
+        if self
+            .lineage
+            .as_ref()
+            .is_some_and(|route| route.any(|route| route.branch(token)))
+        {
+            return true;
+        }
         match self.hold.branch() {
             Some((branch, _)) => branch == token,
             None => self
@@ -254,12 +357,32 @@ impl Source {
 
     pub(crate) fn belongs_to(&self, task: TaskId) -> bool {
         self.task == task
+            || self
+                .lineage
+                .as_ref()
+                .is_some_and(|route| route.any(|route| route.actor(task)))
+    }
+
+    pub(crate) fn uses_reservation(&self, span: &crate::basis::nest::Span) -> bool {
+        self.lineage
+            .as_ref()
+            .is_some_and(|route| route.any(|route| route.reservation(span)))
+    }
+
+    pub(crate) fn exported_by(&self, task: TaskId, token: PendId) -> bool {
+        self.lineage
+            .as_ref()
+            .is_some_and(|lineage| lineage.any(|route| route.actor(task) && route.branch(token)))
     }
 
     /// Logical source loss, independent of a legitimate external borrow's suspension.
     pub(in crate::basis::nest) fn retiring(&self) -> bool {
         let root = self.source().root();
         self.actor().is_none()
+            || self
+                .lineage
+                .as_ref()
+                .is_some_and(|route| route.any(Lineage::retiring))
             || self.source().revoked()
             || self
                 .hold

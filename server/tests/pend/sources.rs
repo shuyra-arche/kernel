@@ -75,3 +75,29 @@ fn equal_payloads_and_foreign_tracking_do_not_share_cleanup_identity() {
     assert!(local.next().is_none());
     assert!(Arc::ptr_eq(&foreign.next().unwrap(), &first));
 }
+
+#[test]
+fn cursor_traversal_skips_dead_entries_without_acknowledging_live_cleanup() {
+    let mut sources = Tracking::new();
+    let live: Vec<_> = (0..8).map(Arc::new).collect();
+    let dead = Arc::new(99);
+    sources.remember(&dead).unwrap();
+    for source in live.iter().rev() {
+        sources.remember(source).unwrap();
+        sources.remember(source).unwrap();
+    }
+    drop(dead);
+    let mut cursor = 0;
+    let mut seen = Vec::new();
+    while let Some(source) = sources.after(cursor) {
+        let next = Arc::as_ptr(&source) as usize;
+        assert!(next > cursor);
+        cursor = next;
+        seen.push(*source);
+    }
+    seen.sort();
+    assert_eq!(seen, (0..8).collect::<Vec<_>>());
+    assert!(sources.after(0).is_some());
+    drop(live);
+    assert!(sources.after(0).is_none());
+}

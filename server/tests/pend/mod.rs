@@ -4,6 +4,7 @@ mod ancestry;
 #[allow(dead_code)]
 #[path = "../../src/basis/pend/authority/mod.rs"]
 mod authority;
+mod exports;
 mod metal {
     pub(crate) mod sync {
         pub(crate) use std::sync::OnceLock;
