@@ -3,13 +3,32 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 #[derive(Clone)]
-pub struct Device(pub Arc<Mutex<[u64; 512]>>, pub usize);
+pub struct Device(
+    pub Arc<Mutex<[u64; 512]>>,
+    pub usize,
+    Arc<Mutex<Option<Submission>>>,
+);
+
+#[derive(Clone, Copy)]
+pub enum Submission {
+    QueueWritten,
+    TailWritten,
+    TailLost,
+}
 
 impl Device {
     pub fn new() -> Self {
         let mut words = [0; 512];
         words[CAP / 8] = 0x10 | (56u64 << 32) | (1 << 9) | (1 << 22);
-        Self(Arc::new(Mutex::new(words)), 0x3010000)
+        Self(
+            Arc::new(Mutex::new(words)),
+            0x3010000,
+            Arc::new(Mutex::new(None)),
+        )
+    }
+
+    pub fn interrupt_submission(&self, at: Submission) {
+        *self.2.lock().unwrap() = Some(at);
     }
 
     pub fn set32(&self, offset: usize, value: u32) {
@@ -62,6 +81,20 @@ unsafe impl Registers for Device {
                 },
             );
         } else {
+            if offset == CQT {
+                let mut injection = self.2.lock().unwrap();
+                match *injection {
+                    Some(Submission::TailLost) => {
+                        *injection = None;
+                        return;
+                    }
+                    Some(Submission::TailWritten) => {
+                        *injection = None;
+                        self.set32(CQCSR, ENABLE | ON | (1 << 9));
+                    }
+                    _ => {}
+                }
+            }
             self.set32(offset, value);
         }
     }
@@ -70,5 +103,10 @@ unsafe impl Registers for Device {
     }
     fn sync(&self) {
         std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+        let mut injection = self.2.lock().unwrap();
+        if matches!(*injection, Some(Submission::QueueWritten)) {
+            *injection = None;
+            self.set32(CQCSR, ENABLE | ON | (1 << 9));
+        }
     }
 }
