@@ -101,6 +101,7 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
 /// Retains an authority route while the caller holds its ledger serial.
 pub(crate) struct Mapping {
     entry: alloc::sync::Arc<PendEntry>,
+    rights: kernel_api::model::pend::NestRights,
 }
 
 impl Mapping {
@@ -138,7 +139,7 @@ impl Mapping {
             return Err(PendFail::NotAligned);
         }
         entry.authority().retain_route()?;
-        Ok(Self { entry })
+        Ok(Self { entry, rights })
     }
 
     pub(crate) fn entry(&self) -> &alloc::sync::Arc<PendEntry> {
@@ -168,9 +169,8 @@ impl Mapping {
     }
 
     pub(crate) fn page(&self, relative: usize) -> Result<usize, PendFail> {
-        let span = self.span()?;
+        let grain = self.span()?.grain();
         let (offset, count) = self.entry.authority().window().ok_or(PendFail::Denied)?;
-        let grain = span.grain();
         if !relative.is_multiple_of(grain)
             || relative
                 .checked_add(grain)
@@ -182,6 +182,44 @@ impl Mapping {
             .get()
             .checked_add(relative)
             .ok_or(PendFail::NotAligned)?;
+        let position = kernel_api::model::nest::MemoPosition::new(
+            self.entry.token(),
+            self.nest().id(),
+            self.id(),
+            page,
+        )
+        .ok_or(PendFail::NotAligned)?;
+        self.position(position)
+    }
+
+    /// The v10 adapter above normalizes once. The common resolver never adds
+    /// the current Pend window to a fixed Mapping-origin coordinate.
+    pub(crate) fn position(
+        &self,
+        position: kernel_api::model::nest::MemoPosition,
+    ) -> Result<usize, PendFail> {
+        use kernel_api::model::pend::{NestScope, PendRange, PendScope};
+        if position.token() != self.entry.token()
+            || position.nest() != self.nest().id()
+            || position.mapping() != self.id()
+        {
+            return Err(PendFail::Denied);
+        }
+        let span = self.span()?;
+        let page = position.page();
+        let grain = span.grain();
+        if !self.entry.authority().selects(
+            Operations::Nest(self.rights),
+            PendScope::Nest(NestScope::Mapping {
+                id: position.mapping(),
+                range: PendRange::Pages {
+                    offset: page,
+                    count: grain,
+                },
+            }),
+        ) {
+            return Err(PendFail::Denied);
+        }
         span.range(
             kernel_api::address::PageOffset::new(page),
             kernel_api::address::PageCount::new(grain).ok_or(PendFail::NotAligned)?,

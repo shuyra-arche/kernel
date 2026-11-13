@@ -25,21 +25,10 @@ pub(crate) fn create(
     level: usize,
 ) -> Result<PendId, PendFail> {
     let _serial = task.pend.lock();
-    pend::access::license(task, license, CreationRights::FLAT)?;
     let level = kernel_api::model::cell::CellLevel::new(level).ok_or(PendFail::NotAligned)?;
-    if level.get() >= crate::metal::mmu::mode::levels()
-        || align != level.bytes().ok_or(PendFail::NotAligned)?
-    {
-        return Err(PendFail::NotAligned);
-    }
     let allocation = kernel_api::model::cell::Allocation { size, align, level };
     let size = allocation.bytes().ok_or(PendFail::NotAligned)?;
-    let allocation =
-        super::Allocation::at_level(size / PAGE_SIZE, level).map_err(|_| PendFail::NotAligned)?;
-    let range = super::Flat::acquire(task.ident.team.cells.clone(), allocation)
-        .map_err(|_| PendFail::OutOfMemory)?
-        .whole();
-    let source = SourceAuthorization::new(range.clone(), Access::all(), task.ident.id)?;
+    let (range, source) = allocate(task, license, allocation)?;
     let meta = Sharing::from_source(range, size, task.ident.id)?;
     let entry = Arc::try_new(pend::PendEntry::try_new(
         pend::Target::Flat(meta.clone()),
@@ -53,6 +42,7 @@ pub(crate) fn create(
     if !pend::live(task) {
         return Err(PendFail::Dead);
     }
+    pend::access::license(task, license, CreationRights::FLAT)?;
     meta.attach_source(&source);
     source
         .begin_withdraw()?
@@ -61,6 +51,30 @@ pub(crate) fn create(
     registration.publish();
 
     Ok(entry.token())
+}
+
+/// One preparation path for Flat creation and the v10 Cell compatibility entry.
+/// Both callers hold the Task ledger serial; the caller that publishes later
+/// rechecks the license under COMMIT. Preparation exposes no Pend or Slot.
+pub(crate) fn allocate(
+    task: &Arc<Task>,
+    license: PendId,
+    allocation: kernel_api::model::cell::Allocation,
+) -> Result<(super::FlatRange, Arc<SourceAuthorization>), PendFail> {
+    pend::access::license(task, license, CreationRights::FLAT)?;
+    if allocation.level.get() >= crate::metal::mmu::mode::levels()
+        || allocation.align != allocation.level.bytes().ok_or(PendFail::NotAligned)?
+    {
+        return Err(PendFail::NotAligned);
+    }
+    let pages = allocation.bytes().ok_or(PendFail::NotAligned)? / PAGE_SIZE;
+    let allocation =
+        super::Allocation::at_level(pages, allocation.level).map_err(|_| PendFail::NotAligned)?;
+    let range = super::Flat::acquire(task.ident.team.cells.clone(), allocation)
+        .map_err(|_| PendFail::OutOfMemory)?
+        .whole();
+    let source = SourceAuthorization::new(range.clone(), Access::all(), task.ident.id)?;
+    Ok((range, source))
 }
 pub(crate) fn inspect(task: &Arc<Task>, token: PendId) -> Result<FlatInfo, PendFail> {
     let entry = authorized(task, token, FlatRights::INSPECT)?;
@@ -87,6 +101,44 @@ fn authorized(
     }
     pend::available(&entry)?;
     Ok(entry)
+}
+
+/// Resolve one complete unit from the Flat's original origin. The descriptor
+/// supplies identity, never authority. Keep the caller's ledger serial and
+/// COMMIT through use; retaining the returned range is not a permit.
+pub(crate) fn slot(
+    task: &Arc<Task>,
+    position: kernel_api::model::flat::SlotPosition,
+    rights: FlatRights,
+) -> Result<super::FlatRange, PendFail> {
+    let entry = authorized(task, position.token(), rights)?;
+    let pend::Target::Flat(meta) = entry.target() else {
+        return Err(PendFail::Denied);
+    };
+    let source = meta.source();
+    if position.flat() != source.source_id() {
+        return Err(PendFail::Denied);
+    }
+    let offset = position
+        .page()
+        .checked_sub(source.index().get())
+        .ok_or(PendFail::Denied)?;
+    let count = source.grain();
+    if !entry.authority().selects(
+        Operations::Flat(rights),
+        kernel_api::model::pend::PendScope::Pages(kernel_api::model::pend::PendRange::Pages {
+            offset,
+            count,
+        }),
+    ) {
+        return Err(PendFail::Denied);
+    }
+    source
+        .range(
+            PageOffset::new(offset),
+            kernel_api::address::PageCount::new(count).ok_or(PendFail::NotAligned)?,
+        )
+        .map_err(|_| PendFail::NotAligned)
 }
 pub(crate) fn slice(
     task: &Arc<Task>,

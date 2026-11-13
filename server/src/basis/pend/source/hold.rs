@@ -93,7 +93,16 @@ impl Hold {
             return None;
         }
         if let Some((_, authority)) = &self.branch {
-            if !authority.associates() || !authority.contains(offset, count) {
+            use kernel_api::model::pend::{
+                FlatRights, Operations, PendRange, PendScope, ShareRights,
+            };
+            let scope = PendScope::Pages(PendRange::Pages {
+                offset: offset.get(),
+                count: count.get(),
+            });
+            if !authority.selects(Operations::Flat(FlatRights::ASSOCIATE), scope)
+                && !authority.selects(Operations::Share(ShareRights::ASSOCIATE), scope)
+            {
                 return None;
             }
             let (meta, _, _) = self.source.root()?;

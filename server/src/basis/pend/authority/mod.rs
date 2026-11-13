@@ -192,6 +192,12 @@ impl Pend {
     pub(crate) fn permits(&self, operations: Operations) -> bool {
         self.alive() && self.state.lock().permits(operations)
     }
+    /// Check an already-normalized fixed-origin window against live ancestry
+    /// and one authoritative scope/rights snapshot. This is not a retained
+    /// permission: callers serialize and repeat it at their commit boundary.
+    pub(crate) fn selects(&self, operations: Operations, scope: PendScope) -> bool {
+        self.alive() && self.state.lock().selects(operations, scope)
+    }
     pub(crate) fn can_narrow(&self, limits: Limits) -> Result<(), PendFail> {
         if !limits.valid() {
             return Err(PendFail::Denied);

@@ -21,6 +21,7 @@ mod metal {
 }
 mod ranges;
 mod scopes;
+mod selection;
 #[path = "../../src/basis/pend/authority/state.rs"]
 mod state;
 #[path = "../../src/basis/pend/window.rs"]

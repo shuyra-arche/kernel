@@ -298,6 +298,26 @@ Fault queues, scheduler/Sign integration, actual geometry bookkeeping, allocatio
 conversion and physical proof implementations remain M2–M6. New work implements
 those owners against the fixed contract and records any deliberate contract change.
 
+### M2 implementation progress
+
+The Server now normalizes v10 Flat source and Mapping coordinates before using
+fixed-origin `SlotPosition` / `MemoPosition` resolvers. They check the actual
+Flat or Nest/Mapping identity and require the complete geometry unit to fit the
+live grant. `Pend::selects` checks scope identity, range and operation bits from
+one authoritative state, including live ancestry. A returned range is not a
+cached permission; callers still serialize and recheck at admission/commit.
+
+Flat and legacy Cell creation share one Flat preparation path; Flat publication
+rechecks its creation license under COMMIT. Movement validates both complete
+source and target windows, TRANSFER and data access before registering either
+flight. Hold resolution uses the same live range/operation predicate.
+
+This is an incremental M2 implementation, not M2 completion or v11 activation.
+The public v10 Cell calls, SlotId table and compatibility coordinate semantics
+remain. Removing those public calls, exposing direct cross-Team Flat endpoints,
+and connecting v11 bounded copies, result journals and new permission bits still
+requires the coordinated provider implementation. M3–M6 gates remain unchanged.
+
 ## Verification boundary
 
 `api/tests/abi/memory_contract/` verifies exact byte layouts, identity/sentinel
@@ -309,7 +329,13 @@ They use the production public codecs and the actual bounded journal.
 The backend evidence tests compile the production Rust proof interface with
 explicitly synthetic attestations; they do not claim a physical implementation.
 
-It does not prove live Pend validation, races, atomic commits, orphan recovery,
+`server/tests/pend/selection.rs` exercises the production live authority and
+state owner: fixed coordinates after Narrow, Mapping/Whole separation, full
+window bounds, operation removal, ancestor revocation, holder death and suspended
+data access. These host checks do not execute the Task ledger, trap adapters,
+Flat/Mapping object lookup or a complete cross-Team transfer.
+
+The value-codec tests do not prove live Pend validation, races, atomic commits, orphan recovery,
 request replay, retirement, data visibility, QEMU or hardware behavior. Those
 tests belong with the owners implementing the relevant transitions. In
 particular, keep the #142 acceptance cases for two independent writable Memo

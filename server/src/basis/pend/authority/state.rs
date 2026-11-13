@@ -95,6 +95,18 @@ impl State {
     pub(crate) fn permits(self, operations: Operations) -> bool {
         self.usable() && self.operations.contains(operations)
     }
+    /// An absolute page selection checks scope identity, bounds and operation
+    /// rights from one state. Inherit is a derivation request, never a selection.
+    pub(crate) fn selects(self, operations: Operations, scope: PendScope) -> bool {
+        matches!(scope.range(), Some(PendRange::Pages { .. }))
+            && self.permits(operations)
+            && self.limits().permits_narrowing(Limits {
+                operations,
+                scope,
+                ..self.limits()
+            })
+            && self.contains_scope(scope)
+    }
     pub(crate) fn usable(self) -> bool {
         self.phase == Phase::Active
             && !self.writer

@@ -1,11 +1,11 @@
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use kernel_api::abi::call::cell::{CellCall, CellFail};
-use kernel_api::address::{PAGE_SIZE, PageCount, PageOffset, VirtAddr as KVirt};
+use kernel_api::address::{PageCount, PageOffset, VirtAddr as KVirt};
 use kernel_api::model::{identity::PendId, modifiable::Modifiable};
 
 use crate::basis::cell::transfer::{Transfer, TransferError};
-use crate::basis::flat::{Allocation, Flat, FlatError, FlatRange};
+use crate::basis::flat::{Flat, FlatError, FlatRange};
 use crate::basis::nest::{Access, Nest, NestError, Span};
 use crate::basis::pend::{self, Geometry, Hold, SourceAuthorization};
 use crate::basis::sign::{self, WakeKey};
@@ -63,22 +63,10 @@ fn resolve_source(task: &Arc<Task>, source: SourceSpec) -> Result<usize, CellFai
             license,
             allocation,
         } => {
-            pend::access::license(task, license, kernel_api::model::pend::CreationRights::FLAT)
-                .map_err(source_fail)?;
-            if allocation.level.get() >= crate::metal::mmu::mode::levels()
-                || allocation.align != allocation.level.bytes().ok_or(CellFail::NotAligned)?
-            {
-                return Err(CellFail::NotAligned);
-            }
-            let pages = allocation.bytes().ok_or(CellFail::NotAligned)? / PAGE_SIZE;
-            let count = PageCount::new(pages).ok_or(CellFail::NotAligned)?;
-            let range = Flat::acquire(
-                task.ident.team.cells.clone(),
-                Allocation::at_level(pages, allocation.level)?,
-            )?
-            .whole();
-            let authorization = SourceAuthorization::new(range, Access::all(), task.ident.id)
-                .map_err(source_fail)?;
+            let (range, authorization) =
+                crate::basis::flat::authority::allocate(task, license, allocation)
+                    .map_err(source_fail)?;
+            let count = range.page_count();
             let ceiling = authorization.ceiling();
             (authorization, PageOffset::ZERO, count, ceiling, None)
         }
@@ -95,7 +83,36 @@ fn resolve_source(task: &Arc<Task>, source: SourceSpec) -> Result<usize, CellFai
             let authorization = meta.authorization().ok_or(CellFail::Denied)?;
             let count = PageCount::new(count).ok_or(CellFail::NotAligned)?;
             let offset = PageOffset::new(offset);
-            if !entry.authority().contains(offset, count) {
+            use kernel_api::model::pend::{
+                FlatRights, Operations, PendRange, PendScope, ShareRights,
+            };
+            let scope = PendScope::Pages(PendRange::Pages {
+                offset: offset.get(),
+                count: count.get(),
+            });
+            if matches!(entry.target(), pend::Target::Flat(_)) {
+                let page = meta
+                    .source()
+                    .index()
+                    .get()
+                    .checked_add(offset.get())
+                    .ok_or(CellFail::NotAligned)?;
+                let position = kernel_api::model::flat::SlotPosition::new(
+                    token,
+                    meta.source().source_id(),
+                    page,
+                )
+                .ok_or(CellFail::NotAligned)?;
+                let selected =
+                    crate::basis::flat::authority::slot(task, position, FlatRights::ASSOCIATE)
+                        .map_err(source_fail)?;
+                if selected.page_count() != count {
+                    return Err(CellFail::NotAligned);
+                }
+            } else if !entry
+                .authority()
+                .selects(Operations::Share(ShareRights::ASSOCIATE), scope)
+            {
                 return Err(CellFail::Denied);
             }
             if authorization
@@ -183,26 +200,6 @@ fn transfer(
             .references
             .get(reference.get())
             .ok_or(CellFail::Denied)?;
-        if !hold.source().branch_check(
-            hold.authority().map(Arc::as_ref),
-            Access::READ | Access::WRITE,
-        ) {
-            return Err(CellFail::Denied);
-        }
-        if let Some((token, authority)) = hold.branch() {
-            use kernel_api::model::pend::{FlatRights, Operations};
-            let owns = match authority.limits().operations {
-                Operations::Flat(_) => authority.permits(Operations::Flat(FlatRights::TRANSFER)),
-                Operations::Share(_) => hold
-                    .source()
-                    .root()
-                    .is_some_and(|(_, root, _)| token == root),
-                _ => false,
-            };
-            if !owns {
-                return Err(CellFail::Denied);
-            }
-        }
         let offset = PageOffset::new(
             hold.window()
                 .0
@@ -218,6 +215,34 @@ fn transfer(
         let _commit = crate::basis::commit();
         for (hold, window) in &ends {
             let (offset, count) = window.window();
+            if !hold.source().branch_check(
+                hold.authority().map(Arc::as_ref),
+                Access::READ | Access::WRITE,
+            ) {
+                return Err(CellFail::Denied);
+            }
+            // Recheck both complete endpoints at the admission commit, including
+            // TRANSFER after preparation; ASSOCIATE alone is not movement authority.
+            if let Some((token, authority)) = hold.branch() {
+                use kernel_api::model::pend::{FlatRights, Operations, PendRange, PendScope};
+                let owns = match authority.limits().operations {
+                    Operations::Flat(_) => authority.selects(
+                        Operations::Flat(FlatRights::TRANSFER),
+                        PendScope::Pages(PendRange::Pages {
+                            offset: offset.get(),
+                            count: count.get(),
+                        }),
+                    ),
+                    Operations::Share(_) => hold
+                        .source()
+                        .root()
+                        .is_some_and(|(_, root, _)| token == root),
+                    _ => false,
+                };
+                if !owns {
+                    return Err(CellFail::Denied);
+                }
+            }
             if !hold
                 .resolve_window(offset, count)
                 .is_some_and(|range| range.level() == source_page.level())
