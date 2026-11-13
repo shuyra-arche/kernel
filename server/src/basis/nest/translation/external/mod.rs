@@ -40,8 +40,7 @@ impl Nest {
             .existing_mut(span, index)
             .expect("accepted Memo");
         assert_eq!(memo.generation(), generation);
-        assert!(memo.in_flight() && memo.completion.is_none());
-        memo.completion = Some(completion);
+        memo.retain_completion(completion);
     }
     /// Empty external address organization, before any requester is admitted.
     pub(crate) fn external_empty() -> Result<Arc<Self>, NestError> {
@@ -135,11 +134,11 @@ impl Nest {
                 _ => Error::InvalidState,
             })?;
         span.changed();
-        memo.maintenance = maintenance.take();
-        memo.provenance = provenance;
         memo.retain(
             publisher.take().expect("prepared publishing route"),
             borrow.take(),
+            maintenance.take(),
+            provenance,
         );
         memo.install(publication);
         Ok(())
@@ -190,7 +189,7 @@ impl Nest {
             span.changed();
         }
         if let Err(error) = progress {
-            let completion = memo.completion.take();
+            let completion = memo.take_completion();
             drop(state);
             if let Some(completion) = completion {
                 completion.finish(crate::basis::unit::task::memory_result::Transition::Failed(

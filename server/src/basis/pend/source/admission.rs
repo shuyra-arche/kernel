@@ -134,15 +134,41 @@ impl RangeBlock {
         self.native
             .lock()
             .as_ref()
-            .map_or(BlockPhase::Draining, |record| record.phase)
+            .map_or(BlockPhase::Draining, |record| record.phase())
     }
 
-    pub(crate) fn set_phase(&self, phase: kernel_api::model::flat::BlockPhase) {
+    pub(crate) fn hold(&self, source: &SourceAuthorization) -> Result<(), PendFail> {
+        if !self.owner_live() {
+            return Err(PendFail::Denied);
+        }
+        if (self.phase() != kernel_api::model::flat::BlockPhase::Held && !self.settled())
+            || source.moving()
+        {
+            return Err(PendFail::Busy);
+        }
+        self.apply(super::epoch::Event::Hold)
+    }
+    pub(crate) fn release(&self) -> Result<(), PendFail> {
+        if !self.owner_live() {
+            return Err(PendFail::Denied);
+        }
+        self.apply(super::epoch::Event::Release)
+    }
+    /// Closing never discharges live physical or staged obligations.
+    pub(crate) fn close(&self) -> Result<(), PendFail> {
+        if !self.settled() || self.has_uses() || self.staged() {
+            return Err(PendFail::Busy);
+        }
+        self.apply(super::epoch::Event::Close)
+    }
+    fn apply(&self, event: super::epoch::Event) -> Result<(), PendFail> {
+        #[cfg(debug_assertions)]
+        crate::basis::assert_held();
         self.native
             .lock()
             .as_mut()
-            .expect("native maintenance")
-            .phase = phase;
+            .ok_or(PendFail::Denied)?
+            .apply(event)
     }
     pub(crate) fn inspect(&self) -> kernel_api::model::flat::BlockStatus {
         let maintenance = self
@@ -159,7 +185,7 @@ impl RangeBlock {
             block: record.reference,
             actor: record.actor,
             phase: if record.live(self.window()) {
-                record.phase
+                record.phase()
             } else {
                 kernel_api::model::flat::BlockPhase::Orphaned
             },
@@ -201,7 +227,7 @@ impl RangeBlock {
         &self,
         selected: &FlatRange,
         range: kernel_api::model::flat::Reshape,
-        split: bool,
+        direction: crate::basis::flat::Direction,
         expected: kernel_api::model::flat::FlatVersion,
     ) -> Result<
         (
@@ -210,7 +236,7 @@ impl RangeBlock {
         ),
         crate::basis::flat::residency::Error,
     > {
-        selected.reshape_held(range, split, expected, &mut self.pages.lock())
+        selected.reshape_held(range, direction, expected, &mut self.pages.lock())
     }
     pub(crate) fn window(&self) -> (PageOffset, PageCount) {
         self.geometry.window()
@@ -254,7 +280,7 @@ impl SourceAuthorization {
         }
         for block in &blocks {
             if block.native() {
-                block.set_phase(kernel_api::model::flat::BlockPhase::Closed);
+                block.close()?;
             }
             block.pages.lock().clear();
         }

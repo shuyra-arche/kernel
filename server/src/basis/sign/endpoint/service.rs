@@ -53,25 +53,26 @@ pub(crate) fn assign(
         authority: Arc::downgrade(&authority),
     })
     .map_err(|_| SignFail::OutOfMemory)?;
-    let mut current = endpoint.service.lock();
-    if current.is_some() {
-        return Err(SignFail::Busy);
-    }
-    *current = Some(binding);
-    Ok(())
+    endpoint.routing.lock().bind(binding)
 }
+
 pub(crate) fn resign(endpoint: &Endpoint) {
-    endpoint.service.lock().take();
+    endpoint.routing.lock().resign();
     super::authority_changed(endpoint);
 }
 pub(crate) fn binding(endpoint: &Endpoint) -> Result<Arc<Binding>, SignFail> {
-    endpoint.service.lock().clone().ok_or(SignFail::Denied)
+    endpoint
+        .routing
+        .lock()
+        .binding()
+        .cloned()
+        .ok_or(SignFail::Denied)
 }
 pub(crate) fn valid(endpoint: &Endpoint, binding: &Arc<Binding>) -> Result<Arc<Task>, SignFail> {
     if !endpoint
-        .service
+        .routing
         .lock()
-        .as_ref()
+        .binding()
         .is_some_and(|current| Arc::ptr_eq(current, binding))
     {
         return Err(SignFail::Denied);

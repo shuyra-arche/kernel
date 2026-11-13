@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
-use crate::basis::unit::task::chain::Chain;
+use crate::basis::unit::task::chain::{Chain, Drain};
 use crate::metal::sync::Level;
 use crate::metal::sync::OnceLock;
 use crate::metal::sync::SpinLock;
@@ -15,9 +15,9 @@ use crate::metal::sync::SpinLock;
 use super::key::WakeKey;
 
 pub(in super::super) struct Site {
-    pub(super) pend: bool,
-    pub(in super::super) chain: Chain,
-    pub(super) life: Weak<Anchor>,
+    pend: bool,
+    chain: Chain,
+    life: Weak<Anchor>,
     pub(super) fwd: Fwd,
 }
 
@@ -55,7 +55,48 @@ impl Site {
         }
     }
 
-    pub(super) fn enqueue(&mut self, task: Arc<Task>) {
+    pub(super) fn take_beacon(&mut self) -> bool {
+        core::mem::take(&mut self.pend)
+    }
+    /// Retention is only for notifications without a current recipient.
+    pub(super) fn notify(&mut self, all: bool) -> Option<Drain> {
+        let chain = self.take(all);
+        if chain.is_none() {
+            self.pend = true;
+        }
+        chain
+    }
+    pub(super) fn take(&mut self, all: bool) -> Option<Drain> {
+        if all {
+            self.chain.take()
+        } else {
+            self.chain.dequeue().map(Drain::single)
+        }
+    }
+    pub(super) fn dequeue(&mut self) -> Option<Arc<Task>> {
+        self.chain.dequeue()
+    }
+    pub(super) fn remove(&mut self, task: &Arc<Task>) -> Option<Arc<Task>> {
+        self.chain.remove(task)
+    }
+    pub(super) fn has_waiters(&self) -> bool {
+        !self.chain.is_empty()
+    }
+    /// Initial enrollment consumes a retained notification instead of sleeping.
+    pub(super) fn register(&mut self, task: Arc<Task>) -> bool {
+        if Anchor::dead(&self.life) || self.take_beacon() {
+            return false;
+        }
+        self.enqueue(task);
+        true
+    }
+    /// A continuation already rechecked its condition and must not spin on the
+    /// notification that caused that check.
+    pub(super) fn requeue(&mut self, task: Arc<Task>) {
+        self.pend = false;
+        self.enqueue(task);
+    }
+    fn enqueue(&mut self, task: Arc<Task>) {
         debug_assert!(
             task.waiting(),
             "站点只收 Blocked 任务，且入链前不得挂在链上"
@@ -100,13 +141,7 @@ pub(super) fn sites(key: WakeKey) -> &'static Shard {
 
 pub(super) fn take_beacon(key: WakeKey) -> bool {
     let mut sites = sites(key).lock();
-    let taken = match sites.get_mut(&key) {
-        Some(site) if site.pend => {
-            site.pend = false;
-            true
-        }
-        _ => false,
-    };
+    let taken = sites.get_mut(&key).is_some_and(Site::take_beacon);
     if taken {
         prune(&mut sites, key);
     }

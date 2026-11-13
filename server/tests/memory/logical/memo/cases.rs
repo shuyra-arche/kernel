@@ -34,7 +34,7 @@ fn retract(memo: &mut Memo, page: &Arc<Page>) {
     let change = page.begin().unwrap();
     memo.begin_retract(memo.generation(), change, false)
         .unwrap();
-    let publication = memo.publication.take().unwrap().retire();
+    let publication = memo.withdraw().unwrap();
     // SAFETY: the host fixture explicitly supplies the exact completion point;
     // no real MMU/IOMMU or CPU fence is claimed by this state-machine test.
     unsafe {
@@ -81,7 +81,7 @@ fn next_observation_keeps_physical_identity_through_failed_fence_and_retirement(
     assert_eq!(observe(&memo, false).access, 2);
     memo.begin_retract(memo.generation(), change.clone(), false)
         .unwrap();
-    let retired = memo.publication.take().unwrap().retire();
+    let retired = memo.withdraw().unwrap();
     let pending = observe(&memo, false);
     assert!(pending.valid());
     assert_eq!((pending.phase, pending.page), (MemoPhase::Retiring, id));
@@ -343,7 +343,7 @@ fn unfinished_publication_retains_exact_page_and_prevents_replacement() {
     // that permit instead of attempting to open a competing Page change.
     memo.begin_retract(memo.generation(), change, false)
         .unwrap();
-    let publication = memo.publication.take().unwrap().retire();
+    let publication = memo.withdraw().unwrap();
     // SAFETY: exact host-model retirement point, not physical fence evidence.
     unsafe { publication.settle() };
     memo.finish().release();
@@ -360,16 +360,60 @@ fn exact_publication_retains_provenance_through_withdrawal_until_settlement() {
     let page = page(pool);
     let origin = Arc::new(crate::basis::pend::Provenance);
     let weak = Arc::downgrade(&origin);
-    publish(&mut memo, &page);
-    memo.provenance = Some(origin);
+    let change = page.begin().unwrap();
+    memo.begin_publish(memo.generation(), change.clone(), 6)
+        .unwrap();
+    let settlements = Arc::new(AtomicUsize::new(0));
+    memo.retain(
+        Publisher {
+            settled: settlements.clone(),
+        },
+        None,
+        None,
+        Some(origin),
+    );
+    let mut receipt = Publication::prepare(&page, true, Some(&change)).unwrap();
+    receipt.publish();
+    receipt.complete();
+    memo.install(receipt);
+    memo.finish().release();
     let publication = memo.withdraw().unwrap();
     // A failed/unfinished fence must not lose the original authorization route.
-    assert!(memo.provenance.is_some());
+    assert!(memo.provenance().is_some());
     assert!(weak.upgrade().is_some());
     unsafe { publication.settle() }; // host model only, not hardware evidence
     let settled = memo.finish();
-    assert!(memo.provenance.is_none());
+    assert!(memo.provenance().is_none());
     assert!(weak.upgrade().is_some());
+    assert_eq!(settlements.load(Ordering::SeqCst), 0);
     settled.release();
+    assert_eq!(settlements.load(Ordering::SeqCst), 1);
     assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn failed_publication_keeps_its_exact_completion_through_retirement() {
+    use crate::basis::unit::task::memory_result::{Completion, Transition};
+    let (mut memo, _, _) = logical();
+    let pool = Pool::new(0);
+    let page = page(pool);
+    let change = page.begin().unwrap();
+    memo.begin_publish(memo.generation(), change.clone(), 6)
+        .unwrap();
+    let results = Arc::new(std::sync::Mutex::new(Vec::new()));
+    memo.retain_completion(Completion(results.clone()));
+    let mut receipt = Publication::prepare(&page, true, Some(&change)).unwrap();
+    receipt.publish(); // Hardware publication has not completed.
+    memo.install(receipt);
+    memo.finish().release();
+    assert!(results.lock().unwrap().is_empty());
+    memo.begin_retract(memo.generation(), change, true).unwrap();
+    let receipt = memo.withdraw().unwrap();
+    assert!(results.lock().unwrap().is_empty());
+    // SAFETY: exact host-model completion; no claim about physical CPU fences.
+    unsafe { receipt.settle() };
+    memo.finish().release();
+    memo.finish().release();
+    assert_eq!(*results.lock().unwrap(), vec![Transition::Retired]);
+    assert!(!memo.in_flight());
 }

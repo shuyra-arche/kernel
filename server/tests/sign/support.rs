@@ -58,7 +58,7 @@ pub(crate) mod basis {
         pub(crate) mod task {
             pub(crate) use crate::Task;
             pub(crate) mod chain {
-                pub(crate) use crate::chain::Chain;
+                pub(crate) use crate::chain::{Chain, Drain};
             }
         }
     }

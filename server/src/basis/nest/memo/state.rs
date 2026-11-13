@@ -107,45 +107,121 @@ impl MemoFlight {
     }
 }
 
-pub(crate) struct Memo {
-    pub(in crate::basis::nest) completion:
-        Option<crate::basis::unit::task::memory_result::Completion>,
-    pub(in crate::basis::nest) provenance: Option<Arc<crate::basis::pend::Provenance>>,
-    pub(in crate::basis::nest) maintenance: Option<Arc<crate::basis::pend::MaintenanceUse>>,
-    generation: crate::basis::name::Generation,
-    pub(super) page: Option<MemoPage>,
-    /// Retraction closes admission before removing PTEs. The v10 Ready state
-    /// keeps this freeze; logical associations release it after exact retirement.
-    pub(super) freeze: Option<Freeze>,
-    flight: Option<MemoFlight>,
-    /// Last accepted physical access survives removal of the address policy.
-    publication_access: u64,
-    /// Bulk withdrawal moves the receipt into Nest's fence batch. Keep its
-    /// exact physical identity here until that batch has completed.
-    retiring_page: Option<Arc<Page>>,
-    pub(super) publication: Option<Publication>,
-    publisher: Option<Publisher>,
-    borrow: Option<ExternalBorrow>,
+/// Physical publication and a detached batch receipt cannot coexist. A retired
+/// Page remains pinned here even when the publication moved to Nest's batch.
+enum Hardware {
+    Empty,
+    Installed(Publication),
+    Retiring(Arc<Page>),
 }
-
+/// A completion belongs to one in-flight operation. A legacy Ready position may
+/// retain a freeze without an active operation; logical positions release it.
+enum Activity {
+    Idle(Option<Freeze>),
+    Publishing {
+        freeze: Freeze,
+        completion: Option<crate::basis::unit::task::memory_result::Completion>,
+    },
+    Retracting {
+        freeze: Option<Freeze>,
+        completion: Option<crate::basis::unit::task::memory_result::Completion>,
+    },
+}
+impl Activity {
+    fn flight(&self) -> Option<MemoFlight> {
+        match self {
+            Self::Idle(_) => None,
+            Self::Publishing { .. } => Some(MemoFlight::Publishing),
+            Self::Retracting { .. } => Some(MemoFlight::Retracting),
+        }
+    }
+    fn freeze(&self) -> Option<&Freeze> {
+        match self {
+            Self::Idle(freeze) | Self::Retracting { freeze, .. } => freeze.as_ref(),
+            Self::Publishing { freeze, .. } => Some(freeze),
+        }
+    }
+    fn completion(
+        &mut self,
+    ) -> Option<&mut Option<crate::basis::unit::task::memory_result::Completion>> {
+        match self {
+            Self::Idle(_) => None,
+            Self::Publishing { completion, .. } | Self::Retracting { completion, .. } => {
+                Some(completion)
+            }
+        }
+    }
+    fn take(
+        &mut self,
+    ) -> (
+        Option<Freeze>,
+        Option<crate::basis::unit::task::memory_result::Completion>,
+    ) {
+        match core::mem::replace(self, Self::Idle(None)) {
+            Self::Idle(freeze) => (freeze, None),
+            Self::Publishing { freeze, completion } => (Some(freeze), completion),
+            Self::Retracting { freeze, completion } => (freeze, completion),
+        }
+    }
+}
+struct Attribution {
+    publisher: Publisher,
+    borrow: Option<ExternalBorrow>,
+    maintenance: Option<Arc<crate::basis::pend::MaintenanceUse>>,
+    provenance: Option<Arc<crate::basis::pend::Provenance>>,
+}
+pub(crate) struct Memo {
+    generation: crate::basis::name::Generation,
+    page: Option<MemoPage>,
+    activity: Activity,
+    publication_access: u64,
+    hardware: Hardware,
+    attribution: Option<Attribution>,
+}
 impl Memo {
     pub(crate) const fn vacant() -> Self {
         Self {
-            completion: None,
-            maintenance: None,
-            provenance: None,
             generation: crate::basis::name::Generation::first(),
             page: None,
-            freeze: None,
-            flight: None,
+            activity: Activity::Idle(None),
             publication_access: 0,
-            retiring_page: None,
-            publication: None,
-            publisher: None,
-            borrow: None,
+            hardware: Hardware::Empty,
+            attribution: None,
         }
     }
-
+    pub(in crate::basis::nest) fn retain_completion(
+        &mut self,
+        completion: crate::basis::unit::task::memory_result::Completion,
+    ) {
+        let slot = self
+            .activity
+            .completion()
+            .expect("completion requires an in-flight operation");
+        assert!(slot.is_none());
+        *slot = Some(completion);
+    }
+    pub(in crate::basis::nest) fn take_completion(
+        &mut self,
+    ) -> Option<crate::basis::unit::task::memory_result::Completion> {
+        self.activity.completion().and_then(Option::take)
+    }
+    pub(in crate::basis::nest) fn maintenance(
+        &self,
+    ) -> Option<&Arc<crate::basis::pend::MaintenanceUse>> {
+        self.attribution
+            .as_ref()
+            .and_then(|a| a.maintenance.as_ref())
+    }
+    pub(in crate::basis::nest) fn provenance(
+        &self,
+    ) -> Option<&Arc<crate::basis::pend::Provenance>> {
+        self.attribution
+            .as_ref()
+            .and_then(|a| a.provenance.as_ref())
+    }
+    pub(in crate::basis::nest) fn has_resources(&self) -> bool {
+        self.page.is_some() || self.frozen() || self.busy()
+    }
     pub(in crate::basis::nest) fn generation(&self) -> u64 {
         self.generation.get()
     }
@@ -169,13 +245,13 @@ impl Memo {
     }
 
     pub(in crate::basis::nest) fn published_by(&self, authority: &Arc<Pend>) -> bool {
-        self.publisher
+        self.attribution
             .as_ref()
-            .is_some_and(|publisher| Arc::ptr_eq(publisher.authority(), authority))
+            .is_some_and(|a| Arc::ptr_eq(a.publisher.authority(), authority))
     }
 
     pub(in crate::basis::nest) fn principal(&self) -> Option<publisher::Principal> {
-        self.publisher.as_ref().map(Publisher::observe)
+        self.attribution.as_ref().map(|a| a.publisher.observe())
     }
 
     pub(in crate::basis::nest) fn can_associate(&self, expected: u64) -> Result<(), NestError> {
@@ -201,7 +277,7 @@ impl Memo {
                 source,
                 binding,
             })),
-            freeze: self.freeze.take(),
+            freeze: self.activity.take().0,
         };
         self.generation = next;
         old
@@ -225,20 +301,20 @@ impl Memo {
         self.generation = self.generation.next().unwrap_or(self.generation);
         Ok(Detached {
             page: self.page.take(),
-            freeze: self.freeze.take(),
+            freeze: self.activity.take().0,
         })
     }
 
     pub(in crate::basis::nest) fn in_flight(&self) -> bool {
-        self.flight.is_some()
+        self.activity.flight().is_some()
     }
 
     pub(in crate::basis::nest) fn frozen(&self) -> bool {
-        self.freeze.is_some()
+        self.activity.freeze().is_some()
     }
 
     pub(in crate::basis::nest) fn can_advance(&self, expected: u64) -> Result<(), NestError> {
-        if self.generation.get() != expected || self.flight.is_some() {
+        if self.generation.get() != expected || self.activity.flight().is_some() {
             return Err(NestError::Busy);
         }
         self.generation.next().ok_or(NestError::OutOfMemory)?;
@@ -255,9 +331,11 @@ impl Memo {
         self.advance(expected)
             .expect("prepared protection generation");
         if let Some(freeze) = freeze {
-            assert!(self.publication.is_some() && self.freeze.is_none());
-            self.freeze = Some(freeze);
-            self.flight = Some(MemoFlight::Publishing);
+            assert!(self.publication().is_some() && self.activity.freeze().is_none());
+            self.activity = Activity::Publishing {
+                freeze,
+                completion: None,
+            };
         }
     }
 
@@ -283,11 +361,17 @@ impl Memo {
         &mut self,
         publisher: Publisher,
         borrow: Option<ExternalBorrow>,
+        maintenance: Option<Arc<crate::basis::pend::MaintenanceUse>>,
+        provenance: Option<Arc<crate::basis::pend::Provenance>>,
     ) {
-        assert!(matches!(self.flight, Some(MemoFlight::Publishing)));
-        assert!(self.publisher.is_none() && self.borrow.is_none());
-        self.publisher = Some(publisher);
-        self.borrow = borrow;
+        assert!(matches!(self.activity, Activity::Publishing { .. }));
+        assert!(self.attribution.is_none());
+        self.attribution = Some(Attribution {
+            publisher,
+            borrow,
+            maintenance,
+            provenance,
+        });
     }
 
     pub(in crate::basis::nest) fn begin_retract(
@@ -296,7 +380,7 @@ impl Memo {
         change: Arc<Change>,
         forced: bool,
     ) -> Result<(), NestError> {
-        if self.publication.is_none() || self.retracting() {
+        if self.publication().is_none() || self.retracting() {
             return Err(NestError::Busy);
         }
         self.begin(expected, change, MemoFlight::Retracting, forced)?;
@@ -331,38 +415,39 @@ impl Memo {
         let retracts = match flight {
             MemoFlight::Publishing => None,
             MemoFlight::Retracting if forced || self.logical() => None,
-            MemoFlight::Retracting => {
-                Some(self.publication.as_ref().ok_or(NestError::Busy)?.writable())
-            }
+            MemoFlight::Retracting => Some(self.publication().ok_or(NestError::Busy)?.writable()),
         };
         let freeze = Freeze::new(change, retracts)?;
         self.generation = generation;
         if self.page.is_none() {
             self.page = Some(MemoPage::Implicit(page));
         }
-        self.freeze = Some(freeze);
-        self.flight = Some(flight);
+        let (_, completion) = self.activity.take();
+        self.activity = match flight {
+            MemoFlight::Publishing => Activity::Publishing { freeze, completion },
+            MemoFlight::Retracting => Activity::Retracting {
+                freeze: Some(freeze),
+                completion,
+            },
+        };
         Ok(())
     }
 
     pub(in crate::basis::nest) fn attempted(&mut self) {
-        if let Some(publisher) = &mut self.publisher {
-            publisher.publish();
-        }
-        if let Some(borrow) = &mut self.borrow {
-            borrow.publish();
+        if let Some(attribution) = &mut self.attribution {
+            attribution.publisher.publish();
+            if let Some(borrow) = &mut attribution.borrow {
+                borrow.publish();
+            }
         }
     }
 
     pub(in crate::basis::nest) fn retracting(&self) -> bool {
-        matches!(self.flight, Some(MemoFlight::Retracting))
+        matches!(self.activity, Activity::Retracting { .. })
     }
 
     pub(in crate::basis::nest) fn busy(&self) -> bool {
-        self.flight.is_some()
-            || self.publication.is_some()
-            || self.publisher.is_some()
-            || self.borrow.is_some()
+        self.in_flight() || !matches!(self.hardware, Hardware::Empty) || self.attribution.is_some()
     }
 
     pub(in crate::basis::nest) fn logical(&self) -> bool {
@@ -377,90 +462,112 @@ impl Memo {
     }
 
     pub(in crate::basis::nest) fn publication(&self) -> Option<&Publication> {
-        self.publication.as_ref()
+        match &self.hardware {
+            Hardware::Installed(publication) => Some(publication),
+            _ => None,
+        }
     }
-
     pub(in crate::basis::nest) fn publication_mut(&mut self) -> Option<&mut Publication> {
-        self.publication.as_mut()
+        match &mut self.hardware {
+            Hardware::Installed(publication) => Some(publication),
+            _ => None,
+        }
     }
-
     pub(in crate::basis::nest) fn install(&mut self, publication: Publication) {
-        assert!(self.publication.is_none());
+        assert!(matches!(self.hardware, Hardware::Empty));
         if let Some(page) = self.page() {
             assert!(Arc::ptr_eq(&page, publication.cell()));
         }
-        self.publication = Some(publication);
+        self.hardware = Hardware::Installed(publication);
     }
-
+    /// CPU withdrawal/replacement under the Nest lock moves the old receipt
+    /// straight into Nest's retirement batch before releasing that lock.
+    pub(in crate::basis::nest) fn take_publication(&mut self) -> Option<Publication> {
+        if !matches!(self.hardware, Hardware::Installed(_)) {
+            return None;
+        }
+        let Hardware::Installed(publication) =
+            core::mem::replace(&mut self.hardware, Hardware::Empty)
+        else {
+            unreachable!()
+        };
+        Some(publication)
+    }
     pub(in crate::basis::nest) fn withdraw(&mut self) -> Option<Publication> {
-        let publication = self.publication.take()?;
-        self.retiring_page = Some(publication.cell().clone());
+        let publication = self.take_publication()?;
+        self.hardware = Hardware::Retiring(publication.cell().clone());
         if !self.retracting() {
             self.generation = self.generation.next().unwrap_or(self.generation);
-            self.flight = Some(MemoFlight::Retracting);
+            let (freeze, completion) = self.activity.take();
+            self.activity = Activity::Retracting { freeze, completion };
         }
         Some(publication.retire())
     }
-
     pub(in crate::basis::nest) fn settle_external(&mut self) -> Settled {
         assert!(
             self.publication()
                 .is_some_and(|p| p.phase() == Phase::Settled)
         );
-        self.publication = None;
+        self.hardware = Hardware::Empty;
         self.finish()
     }
-
     /// Caller has the matching CPU fence or external publication/withdrawal proof.
     pub(in crate::basis::nest) fn finish(&mut self) -> Settled {
-        match self.publication.as_ref().map(Publication::phase) {
+        match self.publication().map(Publication::phase) {
             Some(Phase::Mapped) => {
-                self.flight = None;
+                let (freeze, completion) = self.activity.take();
                 Settled {
-                    completion: self.completion.take().map(|c| (c, Transition::Published)),
-                    freeze: self.freeze.take(),
+                    completion: completion.map(|c| (c, Transition::Published)),
+                    freeze,
                     ..Settled::default()
                 }
             }
             None => {
-                self.flight = None;
+                let (freeze, completion) = self.activity.take();
                 let freeze = if self.logical() {
-                    self.freeze.take()
+                    freeze
                 } else {
+                    self.activity = Activity::Idle(freeze);
                     None
                 };
+                let page = match core::mem::replace(&mut self.hardware, Hardware::Empty) {
+                    Hardware::Retiring(page) => Some(page),
+                    Hardware::Empty => None,
+                    Hardware::Installed(_) => unreachable!(),
+                };
+                let (publisher, borrow, maintenance, provenance) = match self.attribution.take() {
+                    Some(a) => (Some(a.publisher), a.borrow, a.maintenance, a.provenance),
+                    None => (None, None, None, None),
+                };
                 Settled {
-                    completion: self.completion.take().map(|c| (c, Transition::Retired)),
-                    publisher: self.publisher.take(),
-                    borrow: self.borrow.take(),
+                    completion: completion.map(|c| (c, Transition::Retired)),
+                    publisher,
+                    borrow,
                     freeze,
-                    page: self.retiring_page.take(),
-                    maintenance: self.maintenance.take(),
-                    provenance: self.provenance.take(),
+                    page,
+                    maintenance,
+                    provenance,
                 }
             }
             _ => Settled::default(),
         }
     }
-
     pub(in crate::basis::nest) fn page(&self) -> Option<Arc<Page>> {
         self.page
             .as_ref()
             .and_then(|page| page.page().cloned())
-            .or_else(|| {
-                self.publication
-                    .as_ref()
-                    .map(|publication| publication.cell().clone())
+            .or_else(|| match &self.hardware {
+                Hardware::Empty => None,
+                Hardware::Installed(publication) => Some(publication.cell().clone()),
+                Hardware::Retiring(page) => Some(page.clone()),
             })
-            .or_else(|| self.freeze.as_ref().map(|freeze| freeze.page().clone()))
-            .or_else(|| self.retiring_page.clone())
+            .or_else(|| self.activity.freeze().map(|freeze| freeze.page().clone()))
     }
 
     pub(in crate::basis::nest) fn inspect(&self, address: VirtAddr) -> CellInfo {
         let page = self.page();
         let state = self
-            .publication
-            .as_ref()
+            .publication()
             .and_then(|publication| match publication.phase() {
                 Phase::Failed => Some(CellState::Failed),
                 Phase::Waiting(_) | Phase::Withdrawing | Phase::Settled => {
@@ -468,8 +575,8 @@ impl Memo {
                 }
                 _ => None,
             })
-            .or_else(|| self.flight.map(MemoFlight::observation))
-            .unwrap_or(if self.publication.is_some() {
+            .or_else(|| self.activity.flight().map(MemoFlight::observation))
+            .unwrap_or(if self.publication().is_some() {
                 CellState::Published
             } else if page.is_some() || self.page.is_some() {
                 CellState::Ready

@@ -12,7 +12,6 @@ use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
-use core::sync::atomic::AtomicU8;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
@@ -30,6 +29,8 @@ use kernel_api::model::identity::TaskId;
 use kernel_api::model::modifiable::Modifiable;
 
 mod admission;
+mod creation;
+use creation::Creation;
 mod epoch;
 mod provenance;
 pub(crate) use admission::RangeBlock;
@@ -59,43 +60,6 @@ enum Phase {
         token: PendId,
         authority: Arc<Pend>,
     },
-}
-
-const AVAILABLE: u8 = 0;
-const CLAIMED: u8 = 1;
-const CONSUMED: u8 = 2;
-
-struct Creation {
-    state: AtomicU8,
-}
-
-impl Creation {
-    fn new() -> Self {
-        Self {
-            state: AtomicU8::new(AVAILABLE),
-        }
-    }
-
-    fn claim(&self) -> Result<(), kernel_api::abi::call::pend::PendFail> {
-        match self
-            .state
-            .compare_exchange(AVAILABLE, CLAIMED, Ordering::AcqRel, Ordering::Acquire)
-        {
-            Ok(_) => Ok(()),
-            Err(CLAIMED) => Err(kernel_api::abi::call::pend::PendFail::Busy),
-            Err(_) => Err(kernel_api::abi::call::pend::PendFail::Denied),
-        }
-    }
-
-    fn consume(&self) {
-        self.state.store(CONSUMED, Ordering::Release);
-    }
-
-    fn release(&self) {
-        let _ =
-            self.state
-                .compare_exchange(CLAIMED, AVAILABLE, Ordering::AcqRel, Ordering::Acquire);
-    }
 }
 
 pub(crate) struct SourceAuthorization {
@@ -379,9 +343,7 @@ impl SourceAuthorization {
 
     /// External access blocks private CPU publication until trusted settlement.
     pub(crate) fn ensure_internal(&self) -> Result<(), PendFail> {
-        if self.external.load(Ordering::Acquire)
-            || self.qualification.state.load(Ordering::Acquire) == CLAIMED
-        {
+        if self.external.load(Ordering::Acquire) || self.qualification.claimed() {
             Err(PendFail::Busy)
         } else {
             Ok(())
@@ -528,22 +490,13 @@ impl SourceAuthorization {
     /// 这份记录，资格该结束还是结束。
     pub(crate) fn release_hold(&self) {
         if self.holds.fetch_sub(1, Ordering::AcqRel) == 1 {
-            self.qualification.consume();
+            self.qualification.expire();
         }
     }
 
-    /// 一次性创建资格：单次 `claim` / `consume`，协议与既有 `Creation` 同一套。
-    pub(crate) fn claim(&self) -> Result<(), PendFail> {
+    /// The returned claim owns rollback until Share adoption commits it.
+    pub(crate) fn claim(&self) -> Result<creation::Claim<'_>, PendFail> {
         self.qualification.claim()
-    }
-
-    pub(crate) fn release_claim(&self) {
-        self.qualification.release();
-    }
-
-    /// 一次性资格用掉了（Share 已接手）。
-    pub(crate) fn consume(&self) {
-        self.qualification.consume();
     }
 }
 

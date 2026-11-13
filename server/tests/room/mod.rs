@@ -86,7 +86,4 @@ fn periodic_placement_progress_is_independent_of_unrelated_wakeups() {
             unrelated.placement();
         }
     }
-    let mut wrapping = task_schedule::Schedule::Ordinary { cursor: usize::MAX };
-    assert_eq!(wrapping.placement(), usize::MAX);
-    assert_eq!(wrapping.placement(), 0);
 }

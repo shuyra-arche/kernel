@@ -96,8 +96,8 @@ pub(crate) fn create_share(
         return Err(PendFail::Denied);
     }
     // 一次性创建资格：单次 claim，竞争方 Busy、已消费 Denied。
-    authorization.claim()?;
-    let result = (|| {
+    let claim = authorization.claim()?;
+    {
         let size = source
             .page_count()
             .checked_bytes()
@@ -122,14 +122,10 @@ pub(crate) fn create_share(
         }
         meta.attach_source(&authorization);
         withdrawal.adopt(&meta, token, pend.authority().clone())?;
-        authorization.consume();
+        claim.commit();
         registration.publish();
         Ok(token)
-    })();
-    if result.is_err() {
-        authorization.release_claim();
     }
-    result
 }
 
 pub(crate) fn open_resource(

@@ -187,7 +187,11 @@ pub(in crate::entry::call) fn mutate(
             expected,
             parent,
             maintenance,
-            matches!(action, Action::Split { .. }),
+            if matches!(action, Action::Split { .. }) {
+                flat::Direction::Split
+            } else {
+                flat::Direction::Combine
+            },
         ),
         Action::Push {
             local,

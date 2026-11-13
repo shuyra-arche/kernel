@@ -30,7 +30,9 @@ pub(crate) mod source {
 pub(crate) mod publisher {
     use super::*;
     pub(crate) struct Principal;
-    pub(crate) struct Publisher;
+    pub(crate) struct Publisher {
+        pub settled: Arc<AtomicUsize>,
+    }
     impl Publisher {
         pub(crate) fn authority(&self) -> &Arc<Pend> {
             panic!("authority outside Memo fixture")
@@ -42,7 +44,8 @@ pub(crate) mod publisher {
             panic!("authority outside Memo fixture")
         }
         pub(crate) unsafe fn settle(self) -> (TaskId, PendId) {
-            panic!("authority outside Memo fixture")
+            self.settled.fetch_add(1, Ordering::SeqCst);
+            (TaskId::new(1), PendId::mint(1))
         }
     }
 }

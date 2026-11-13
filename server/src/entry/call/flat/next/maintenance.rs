@@ -116,10 +116,7 @@ pub(in crate::entry::call) fn effect(
             {
                 return Err(Failure::Denied);
             }
-            if (block.phase() != BlockPhase::Held && !block.settled()) || source.moving() {
-                return Err(Failure::Busy);
-            }
-            block.set_phase(BlockPhase::Held);
+            block.hold(&source).map_err(pend_error)?;
             let value = Value::Maintenance {
                 block: block.reference(),
                 phase: BlockPhase::Held,
@@ -135,7 +132,7 @@ pub(in crate::entry::call) fn effect(
                 let meta = selected.0.target().memory().ok_or(Failure::Denied)?;
                 let operation =
                     flat::sharing::SharingOperation::acquire(&meta).ok_or(Failure::Busy)?;
-                selected.2.set_phase(BlockPhase::Releasing);
+                selected.2.release().map_err(pend_error)?;
                 receipt.start(Value::Maintenance {
                     block: maintenance.block,
                     phase: BlockPhase::Releasing,
@@ -153,8 +150,8 @@ pub(in crate::entry::call) fn effect(
             if !block.matches(maintenance.block, actor.ident.id, entry.authority()) {
                 return Err(Failure::Denied);
             }
+            block.close().map_err(pend_error)?;
             source.allow(entry.authority());
-            block.set_phase(BlockPhase::Closed);
             drop(block);
             let value = Value::Maintenance {
                 block: maintenance.block,

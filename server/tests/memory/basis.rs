@@ -5,14 +5,17 @@ pub(crate) fn commit() {}
 pub(crate) mod unit {
     pub(crate) mod task {
         pub(crate) mod memory_result {
+            #[derive(Debug, PartialEq, Eq)]
             pub(crate) enum Transition {
                 Published,
                 Retired,
             }
-            pub(crate) struct Completion;
+            pub(crate) struct Completion(pub std::sync::Arc<std::sync::Mutex<Vec<Transition>>>);
             impl Completion {
-                pub(crate) fn finish(self, _: Transition) {
-                    panic!("Task journal outside Memo fixture; covered by invocation tests")
+                pub(crate) fn finish(self, transition: Transition) {
+                    // Observe the Memo ownership transfer; Task journal policy is
+                    // covered by the invocation tests, not manufactured here.
+                    self.0.lock().unwrap().push(transition);
                 }
             }
         }
@@ -47,7 +50,8 @@ pub(crate) mod pend {
             panic!("external authority outside Memo fixture")
         }
     }
-    pub(crate) fn notify(_: TaskId, _: PendId) {
-        panic!("Task notification outside Memo fixture")
+    pub(crate) fn notify(task: TaskId, token: PendId) {
+        // The inert Publisher fixture reports settlement, not live authority.
+        assert_eq!((task.get(), token.get()), (1, 1));
     }
 }

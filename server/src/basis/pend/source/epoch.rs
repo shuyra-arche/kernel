@@ -25,13 +25,40 @@ pub(super) struct Epoch {
     pub(super) base: usize,
     pub(super) data: Modifiable,
     pub(super) associate: bool,
-    pub(super) phase: BlockPhase,
+    phase: BlockPhase,
 }
 // SAFETY: token is a lookup identity paired with its original Task, never a
 // handle interpreted in another Task's ledger. RangeBlock locks this record;
 // authorization transitions additionally hold COMMIT.
 unsafe impl Send for Epoch {}
+#[derive(Clone, Copy)]
+pub(super) enum Event {
+    Hold,
+    Release,
+    Close,
+}
 impl Epoch {
+    pub(super) fn phase(&self) -> BlockPhase {
+        self.phase
+    }
+    pub(super) fn apply(&mut self, event: Event) -> Result<(), PendFail> {
+        self.phase = match (self.phase, event) {
+            (BlockPhase::Draining | BlockPhase::Held, Event::Hold) => BlockPhase::Held,
+            (BlockPhase::Draining | BlockPhase::Held | BlockPhase::Releasing, Event::Release) => {
+                BlockPhase::Releasing
+            }
+            (
+                BlockPhase::Draining
+                | BlockPhase::Held
+                | BlockPhase::Releasing
+                | BlockPhase::Closed,
+                Event::Close,
+            ) => BlockPhase::Closed,
+            _ => return Err(PendFail::Busy),
+        };
+        Ok(())
+    }
+
     pub(super) fn new(
         reference: BlockRef,
         actor: &Arc<Task>,

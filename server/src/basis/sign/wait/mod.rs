@@ -135,7 +135,7 @@ pub(crate) fn wipe(key: WakeKey) -> usize {
     let chain = match chain {
         Some(mut site) => {
             fan_out(&site.fwd);
-            site.chain.take()
+            site.take(true)
         }
         None => None,
     };
@@ -151,17 +151,13 @@ pub(crate) fn knock(key: WakeKey, life: &Weak<Anchor>) -> usize {
         let chain = match sites.get_mut(&key) {
             Some(site) => {
                 fwd = site.fwd.clone();
-                let chain = site.chain.take();
-                if chain.is_none() {
-                    site.pend = true;
-                }
-                chain
+                site.notify(true)
             }
             None => {
                 if !Anchor::dead(life)
                     && let Ok(site) = Site::ensure(&mut sites, key, life)
                 {
-                    site.pend = true;
+                    site.notify(true);
                 }
                 None
             }
@@ -206,7 +202,7 @@ pub(crate) fn signal(key: WakeKey) -> usize {
         let chain = match sites.get_mut(&key) {
             Some(site) => {
                 fwd = site.fwd.clone();
-                site.chain.take()
+                site.take(true)
             }
             None => None,
         };
@@ -243,12 +239,12 @@ fn listeners_batch(key: WakeKey) -> bool {
         let mut sites = shard.lock();
         let more = if let Some(site) = sites.get_mut(&key) {
             for _ in 0..4 {
-                let Some(task) = site.chain.dequeue() else {
+                let Some(task) = site.dequeue() else {
                     break;
                 };
                 batch.enqueue(task);
             }
-            !site.chain.is_empty()
+            site.has_waiters()
         } else {
             false
         };
@@ -279,7 +275,7 @@ pub(crate) fn wipe_space(space: NestId) -> bool {
                 key.and_then(|key| sites.remove(&key))
             };
             let Some(mut site) = taken else { break };
-            rise(unchain(site.chain.take()), insert);
+            rise(unchain(site.take(true)), insert);
             removed += 1;
             if removed == 4 {
                 return false;
@@ -295,13 +291,7 @@ pub(crate) fn wake_counted(key: WakeKey, all: bool) -> usize {
     let _commit = crate::basis::commit();
     let chain = {
         let mut table = sites(key).lock();
-        let chain = table.get_mut(&key).and_then(|site| {
-            if all {
-                site.chain.take()
-            } else {
-                site.chain.dequeue().map(Drain::single)
-            }
-        });
+        let chain = table.get_mut(&key).and_then(|site| site.take(all));
         prune(&mut table, key);
         chain
     };
@@ -322,27 +312,21 @@ pub fn wake(key: WakeKey, life: &Weak<Anchor>) -> bool {
     let (popped, fwd) = {
         let mut sites = sites(key).lock();
         if Anchor::dead(life) {
-            let chain = sites.remove(&key).and_then(|mut site| site.chain.take());
+            let chain = sites.remove(&key).and_then(|mut site| site.take(true));
             drop(sites);
             rise(unchain(chain), insert);
             return false;
         } else {
             let mut beacon_only = false;
             let popped = match sites.get_mut(&key) {
-                Some(site) => match site.chain.dequeue() {
-                    Some(task) => Some(task),
-                    None => {
-                        site.pend = true;
-                        None
-                    }
-                },
+                Some(site) => site.notify(false).and_then(|mut drain| drain.next()),
                 None => {
                     beacon_only = true;
                     None
                 }
             };
             if beacon_only && let Ok(site) = Site::ensure(&mut sites, key, life) {
-                site.pend = true;
+                site.notify(false);
             }
             let fwd = sites.get(&key).map_or_else(Fwd::empty, |s| s.fwd.clone());
             prune(&mut sites, key);
@@ -376,9 +360,7 @@ pub fn redeem() -> bool {
         };
         let popped = {
             let mut sites = sites(key).lock();
-            let w = sites
-                .get_mut(&key)
-                .and_then(|site| site.chain.remove(&holder));
+            let w = sites.get_mut(&key).and_then(|site| site.remove(&holder));
             prune(&mut sites, key);
             w
         };
@@ -394,13 +376,14 @@ pub fn redeem() -> bool {
 }
 
 /// Reserve the Site and exact timeout ticket before changing Task ownership.
-fn prepare_wait(
+fn prepare_wait<'a>(
+    commit: &'a crate::basis::CommitGuard,
     task: &Arc<Task>,
     key: WakeKey,
     life: &Weak<Anchor>,
     dur: Duration,
     call: Option<&WaitCall>,
-) -> Result<Ticket, ()> {
+) -> Result<PreparedWait<'a>, ()> {
     #[cfg(debug_assertions)]
     crate::basis::assert_held();
     let result = (|| {
@@ -409,23 +392,70 @@ fn prepare_wait(
             Site::ensure(&mut table, key, life)?.admit()?;
         }
         let ticket = Ticket::next_id().ok_or(())?;
+        let registration = PreparedWait {
+            key,
+            ticket: Some(ticket),
+            _commit: commit,
+        };
         let at = call.map_or_else(
             || (dur != Duration::MAX).then(|| clock::now().add(dur).as_ticks()),
             |call| call.deadline(dur),
         );
         if let Some(at) = at {
             hold(ticket, key, task)?;
-            if deadline::insert(ticket.raw(), at).is_err() {
-                void(ticket);
-                return Err(());
-            }
+            deadline::insert(ticket.raw(), at)?;
         }
-        Ok(ticket)
+        Ok(registration)
     })();
     if result.is_err() {
         prune_empty(key);
     }
     result
+}
+
+/// Before enrollment this object owns timeout/Holder rollback. Successful
+/// enrollment transfers that exact responsibility to Task's waiting state.
+#[must_use]
+struct PreparedWait<'a> {
+    key: WakeKey,
+    ticket: Option<Ticket>,
+    _commit: &'a crate::basis::CommitGuard,
+}
+impl PreparedWait<'_> {
+    fn ticket(&self) -> Ticket {
+        self.ticket.expect("uncommitted wait")
+    }
+    fn enroll(mut self, task: &Arc<Task>) -> bool {
+        let queued = {
+            let mut table = sites(self.key).lock();
+            let queued = table
+                .get_mut(&self.key)
+                .is_some_and(|site| site.register(task.clone()));
+            prune(&mut table, self.key);
+            queued
+        };
+        if queued {
+            self.ticket = None;
+        }
+        queued
+    }
+    fn requeue(mut self, task: &Arc<Task>, call: WaitCall) {
+        task.block(self.key, self.ticket(), Some(call));
+        sites(self.key)
+            .lock()
+            .get_mut(&self.key)
+            .expect("prepared site")
+            .requeue(task.clone());
+        self.ticket = None;
+    }
+}
+impl Drop for PreparedWait<'_> {
+    fn drop(&mut self) {
+        if let Some(ticket) = self.ticket.take() {
+            void(ticket);
+            prune_empty(self.key);
+        }
+    }
 }
 
 pub(crate) fn requeue<E: Copy>(
@@ -436,12 +466,10 @@ pub(crate) fn requeue<E: Copy>(
     call: WaitCall,
     oom: E,
 ) -> Result<(), E> {
-    let ticket = prepare_wait(task, key, &life, dur, Some(&call)).map_err(|()| oom)?;
-    task.block(key, ticket, Some(call));
-    let mut table = sites(key).lock();
-    let site = table.get_mut(&key).expect("requeued site");
-    site.pend = false;
-    site.enqueue(task.clone());
+    let commit = crate::basis::commit();
+    let registration =
+        prepare_wait(&commit, task, key, &life, dur, Some(&call)).map_err(|()| oom)?;
+    registration.requeue(task, call);
     Ok(())
 }
 
@@ -460,7 +488,7 @@ pub(crate) fn detach(task: &Arc<Task>) -> bool {
     };
     let removed = {
         let mut sites = shard.lock();
-        let removed = sites.get_mut(&key).and_then(|site| site.chain.remove(task));
+        let removed = sites.get_mut(&key).and_then(|site| site.remove(task));
         prune(&mut sites, key);
         removed.is_some()
     };

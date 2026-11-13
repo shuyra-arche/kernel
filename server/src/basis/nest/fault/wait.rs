@@ -83,7 +83,7 @@ impl Cpu {
         let binding = active(&span)?;
         let (binding, event) = {
             let mut state = span.faults.lock();
-            if state.lost {
+            if state.lost() {
                 return Err(Failure::HandlerGone);
             }
             if binding.handler == actor.ident.id {
@@ -108,8 +108,7 @@ impl Cpu {
             };
             let event = state.queue.accept(wire, deadline, now)?;
             if binding.notify().is_err() {
-                state.lost = true;
-                state.queue.invalidate(None, Failure::HandlerGone);
+                state.lose();
                 binding.wake_later();
                 return Err(Failure::HandlerGone);
             }

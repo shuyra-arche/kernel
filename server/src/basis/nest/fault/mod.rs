@@ -15,30 +15,72 @@ use kernel_api::{
 use queue::Queue;
 
 pub(crate) struct State {
-    pub native: bool,
+    native: bool,
     epoch: FaultEpoch,
-    binding: Option<Arc<Binding>>,
-    lost: bool,
+    route: Route,
     queue: Queue,
+}
+enum Route {
+    Disabled,
+    Active(Arc<Binding>),
+    Lost(Arc<Binding>),
+}
+impl Route {
+    fn binding(&self) -> Option<&Arc<Binding>> {
+        match self {
+            Self::Disabled => None,
+            Self::Active(binding) | Self::Lost(binding) => Some(binding),
+        }
+    }
 }
 impl State {
     pub fn new() -> Self {
         Self {
             native: false,
             epoch: FaultEpoch::INITIAL,
-            binding: None,
-            lost: false,
+            route: Route::Disabled,
             queue: Queue::new(),
+        }
+    }
+    pub(crate) fn native(&self) -> bool {
+        self.native
+    }
+    pub(crate) fn enable_native(&mut self) {
+        self.native = true;
+    }
+    fn binding(&self) -> Option<Arc<Binding>> {
+        self.route.binding().cloned()
+    }
+    fn lost(&self) -> bool {
+        matches!(self.route, Route::Lost(_))
+    }
+    fn lose(&mut self) {
+        if let Route::Active(binding) = &self.route {
+            self.route = Route::Lost(binding.clone());
+        }
+        self.queue.invalidate(None, Failure::HandlerGone);
+    }
+    fn configure(
+        &mut self,
+        epoch: FaultEpoch,
+        binding: Option<Arc<Binding>>,
+    ) -> Option<Arc<Binding>> {
+        self.queue.invalidate(None, Failure::HandlerGone);
+        self.epoch = epoch;
+        let old = core::mem::replace(
+            &mut self.route,
+            binding.map_or(Route::Disabled, Route::Active),
+        );
+        match old {
+            Route::Disabled => None,
+            Route::Active(binding) | Route::Lost(binding) => Some(binding),
         }
     }
     pub(in crate::basis::nest) fn invalidate(&self, page: Option<usize>, error: Failure) {
         self.queue.invalidate(page, error);
     }
     pub(in crate::basis::nest) fn close(&mut self) {
-        if self.binding.is_some() {
-            self.lost = true;
-            self.queue.invalidate(None, Failure::HandlerGone);
-        }
+        self.lose();
     }
     pub(in crate::basis::nest) fn publishing(&self, page: usize, before: u64, after: u64) {
         self.queue.publishing(
@@ -50,23 +92,17 @@ impl State {
 }
 // Caller owns COMMIT. No route lock crosses a Nest, Span or authority lookup.
 fn active(span: &Span) -> Result<Arc<Binding>, Failure> {
-    let binding = span
-        .faults
-        .lock()
-        .binding
-        .clone()
-        .ok_or(Failure::NoHandler)?;
+    let binding = span.faults.lock().binding().ok_or(Failure::NoHandler)?;
     let live = binding.live(span);
     let mut state = span.faults.lock();
-    if state.lost || !live {
-        state.lost = true;
-        state.queue.invalidate(None, Failure::HandlerGone);
+    if state.lost() || !live {
+        state.lose();
         return Err(Failure::HandlerGone);
     }
     Ok(binding)
 }
 pub(in crate::basis::nest) fn wake_span(span: &Span) {
-    let binding = span.faults.lock().binding.clone();
+    let binding = span.faults.lock().binding();
     if let Some(binding) = binding {
         binding.wake_later();
     }
@@ -149,11 +185,8 @@ pub(crate) fn configure(
             return Err(Failure::Stale);
         }
         let mut state = span.faults.lock();
-        state.queue.invalidate(None, Failure::HandlerGone);
-        state.epoch = epoch;
-        state.lost = false;
         span.changed();
-        core::mem::replace(&mut state.binding, binding)
+        state.configure(epoch, binding)
     };
     if let Some(old) = old {
         sign::signal(old.key());
@@ -194,14 +227,14 @@ pub(crate) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
         reservation,
         epoch: state.epoch,
         phase: match active {
-            Ok(_) if !state.lost => FaultPhase::Active,
+            Ok(_) if !state.lost() => FaultPhase::Active,
             Err(Failure::NoHandler) => FaultPhase::Disabled,
             _ => FaultPhase::Lost,
         },
-        handler: state.binding.as_ref().map(|binding| binding.handler),
+        handler: state.route.binding().map(|binding| binding.handler),
         timeout_ns: state
-            .binding
-            .as_ref()
+            .route
+            .binding()
             .map_or(0, |binding| binding.config.timeout_ns),
         last_sequence: state.queue.last(),
     };

@@ -14,7 +14,7 @@ pub(super) fn run(
     expected: FlatVersion,
     parent: CellLevel,
     maintenance: memory::Maintenance,
-    split: bool,
+    direction: crate::basis::flat::Direction,
 ) -> Result<Value, Failure> {
     let geometry = Reshape::new(start.page(), parent).ok_or(Failure::NotAligned)?;
     let slot = flat::authority::slot(actor, start, memory::rights::RESHAPE).map_err(pend_error)?;
@@ -47,7 +47,7 @@ pub(super) fn run(
         .check_move(PageOffset::new(offset), count, Some(entry.authority()))
         .map_err(pend_error)?;
     let _operation = flat::sharing::SharingOperation::acquire(&meta).ok_or(Failure::Busy)?;
-    let old = if split { parent } else { geometry.child() };
+    let (old, _) = direction.levels(geometry);
     for head in (0..geometry.count()).step_by(old.pages().unwrap()) {
         let cell = selected
             .cell(PageOffset::new(head))
@@ -63,7 +63,7 @@ pub(super) fn run(
         }
     }
     let (version, slots) = block
-        .reshape(&selected, geometry, split, expected)
+        .reshape(&selected, geometry, direction, expected)
         .map_err(residency_error)?;
     Ok(Value::Geometry {
         flat: start.flat(),

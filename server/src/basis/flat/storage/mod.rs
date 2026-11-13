@@ -3,7 +3,7 @@
 mod geometry;
 mod lifecycle;
 mod region;
-mod reshape;
+pub(super) mod reshape;
 pub(super) mod residency;
 pub(super) mod slot;
 

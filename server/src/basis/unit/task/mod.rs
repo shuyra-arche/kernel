@@ -90,7 +90,7 @@ impl Task {
     }
 
     pub(crate) fn preparing(&self) -> bool {
-        matches!(*self.schedule.lock(), schedule::Schedule::Preparing)
+        self.schedule.lock().preparing()
     }
 
     pub(crate) fn prepare_extensions(&self, hart: HartId, flags: u64) -> Result<(), UnitFail> {

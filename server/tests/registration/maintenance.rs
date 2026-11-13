@@ -61,7 +61,7 @@ fn takeover_requires_dead_owner_actual_ancestor_and_whole_original_window() {
         epoch.base, 4096,
         "takeover must retain the original fixed coordinates"
     );
-    assert_eq!(epoch.phase, BlockPhase::Draining);
+    assert_eq!(epoch.phase(), BlockPhase::Draining);
     assert_eq!(epoch.data, Modifiable::No); // takeover cannot wash the old ceiling
     assert!(epoch.live(window));
     assert_eq!(
@@ -156,4 +156,22 @@ fn external_data_loan_does_not_orphan_maintenance_management() {
     borrower.invalidate();
     borrower.settle().unwrap();
     assert!(epoch.live((PageOffset::ZERO, PageCount::new(8).unwrap())));
+}
+
+#[test]
+fn releasing_and_closed_epochs_cannot_be_reopened_by_phase_assignment() {
+    use crate::epoch::Event;
+    let owner = Task::new(16);
+    let branch = grant(Modifiable::Yes, 0, 8);
+    let mut epoch = Epoch::new(reference(), &owner, token(16), &branch, 0);
+    epoch.apply(Event::Hold).unwrap();
+    epoch.apply(Event::Hold).unwrap(); // Idempotent Block retry.
+    epoch.apply(Event::Release).unwrap();
+    assert_eq!(epoch.apply(Event::Hold), Err(PendFail::Busy));
+    assert_eq!(epoch.phase(), BlockPhase::Releasing);
+    epoch.apply(Event::Release).unwrap(); // Retry after a delayed use retires.
+    epoch.apply(Event::Close).unwrap();
+    assert_eq!(epoch.apply(Event::Release), Err(PendFail::Busy));
+    assert_eq!(epoch.apply(Event::Hold), Err(PendFail::Busy));
+    assert_eq!(epoch.phase(), BlockPhase::Closed);
 }

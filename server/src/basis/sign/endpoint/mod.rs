@@ -30,11 +30,51 @@ pub struct Endpoint {
     state: SpinLock<State>,
     pub(crate) id: usize,
     life: Arc<Anchor>,
-    routes: SpinLock<Vec<Route>>,
+    routing: SpinLock<Routing>,
     owner: TaskId,
     cursor: AtomicUsize,
-    service: SpinLock<Option<Arc<service::Binding>>>,
     delivery: SpinLock<delivery::Delivery>,
+}
+/// Ordinary sources and a service binding are mutually exclusive modes.
+/// COMMIT spans forwarding effects; this lock owns the mode itself.
+enum Routing {
+    Sources(Vec<Route>),
+    Service(Arc<service::Binding>),
+}
+impl Routing {
+    fn routes(&self) -> &[Route] {
+        match self {
+            Self::Sources(routes) => routes,
+            Self::Service(_) => &[],
+        }
+    }
+    fn sources(&mut self) -> Result<&mut Vec<Route>, SignFail> {
+        match self {
+            Self::Sources(routes) => Ok(routes),
+            Self::Service(_) => Err(SignFail::Denied),
+        }
+    }
+    fn bind(&mut self, binding: Arc<service::Binding>) -> Result<(), SignFail> {
+        match self {
+            Self::Service(_) => Err(SignFail::Busy),
+            Self::Sources(routes) if !routes.is_empty() => Err(SignFail::Denied),
+            Self::Sources(_) => {
+                *self = Self::Service(binding);
+                Ok(())
+            }
+        }
+    }
+    fn resign(&mut self) {
+        if matches!(self, Self::Service(_)) {
+            *self = Self::Sources(Vec::new());
+        }
+    }
+    fn binding(&self) -> Option<&Arc<service::Binding>> {
+        match self {
+            Self::Service(binding) => Some(binding),
+            _ => None,
+        }
+    }
 }
 fn key(meta: &Endpoint) -> WakeKey {
     WakeKey::Sign { id: meta.id }
@@ -57,10 +97,9 @@ impl Endpoint {
                     .ok_or(crate::basis::nest::NestError::OutOfMemory)?
             },
             life: Anchor::try_new()?,
-            routes: SpinLock::new_level(Level::L3, Vec::new()),
+            routing: SpinLock::new_level(Level::L3, Routing::Sources(Vec::new())),
             owner,
             cursor: AtomicUsize::new(0),
-            service: SpinLock::new(None),
             delivery: SpinLock::new(delivery::Delivery::Idle),
         })
         .map_err(|_| crate::basis::nest::NestError::OutOfMemory)
@@ -79,7 +118,7 @@ impl Endpoint {
         self.state.lock().ready()
     }
     pub(crate) fn direct(&self) -> bool {
-        self.routes.lock().is_empty()
+        self.routing.lock().routes().is_empty()
     }
     pub(crate) fn poll(&self, task: &Arc<Task>) -> Result<SignReply, SignFail> {
         if !self.alive() {
@@ -88,14 +127,14 @@ impl Endpoint {
         if let Some(sequence) = self.state.lock().sequence() {
             return Ok(SignReply::Triggered { sequence });
         }
-        let count = self.routes.lock().len();
+        let count = self.routing.lock().routes().len();
         if count == 0 {
             return Ok(SignReply::Pending);
         }
         let start = self.cursor.load(Ordering::Relaxed) % count;
         for offset in 0..count {
             let at = (start + offset) % count;
-            let route = { self.routes.lock().get(at).cloned() };
+            let route = { self.routing.lock().routes().get(at).cloned() };
             let Some(route) = route else { continue };
             if route.actor != task.ident.id {
                 continue;
@@ -117,12 +156,10 @@ pub(crate) fn attach(meta: &Endpoint, route: Route) -> Result<(), SignFail> {
     if !meta.alive() {
         return Err(SignFail::Dead);
     }
-    if meta.service.lock().is_some() {
-        return Err(SignFail::Denied);
-    }
     let mut shared = [false; 4];
     {
-        let mut routes = meta.routes.lock();
+        let mut routing = meta.routing.lock();
+        let routes = routing.sources()?;
         if routes
             .iter()
             .any(|old| old.watches(route.permit, route.watch.source()))
@@ -147,7 +184,7 @@ pub(crate) fn attach(meta: &Endpoint, route: Route) -> Result<(), SignFail> {
             return Err(SignFail::OutOfMemory);
         }
     }
-    meta.routes.lock().push(route);
+    meta.routing.lock().sources()?.push(route);
     sign::knock(key(meta), &meta.life());
     Ok(())
 }
@@ -165,15 +202,18 @@ fn detach_where(
         return Err(SignFail::Dead);
     }
     let route = {
-        let mut routes = meta.routes.lock();
-        routes
-            .iter()
-            .position(|c| c.permit == permit && matches(c.watch.source()))
-            .map(|at| routes.remove(at))
+        let mut routing = meta.routing.lock();
+        match &mut *routing {
+            Routing::Sources(routes) => routes
+                .iter()
+                .position(|c| c.permit == permit && matches(c.watch.source()))
+                .map(|at| routes.remove(at)),
+            Routing::Service(_) => None,
+        }
     };
     if let Some(route) = route {
         for (key, _) in route.keys.iter() {
-            let shared = meta.routes.lock().iter().any(|c| c.covers(*key));
+            let shared = meta.routing.lock().routes().iter().any(|c| c.covers(*key));
             if !shared {
                 sign::unforward(*key, meta.id);
             }
@@ -187,12 +227,15 @@ pub(crate) fn seal(meta: &Endpoint) {
     clear(meta);
 }
 fn clear(meta: &Endpoint) {
-    meta.service.lock().take();
     let mut state = meta.state.lock();
     *state = state.transition(Event::Close).expect("close is idempotent");
     drop(state);
     sign::wipe(trigger_key(meta));
-    let routes = core::mem::take(&mut *meta.routes.lock());
+    let routing = core::mem::replace(&mut *meta.routing.lock(), Routing::Sources(Vec::new()));
+    let routes = match routing {
+        Routing::Sources(routes) => routes,
+        Routing::Service(_) => Vec::new(),
+    };
     for route in routes {
         for (key, _) in route.keys.iter() {
             sign::unforward(*key, meta.id);
@@ -258,8 +301,9 @@ fn apply(meta: &Endpoint, event: Event) -> Result<(), SignFail> {
 pub(crate) fn release_authority(meta: &Endpoint, permit: PendId) {
     let _commit = crate::basis::commit();
     while meta
-        .routes
+        .routing
         .lock()
+        .routes()
         .iter()
         .any(|route| route.permit == permit)
     {
