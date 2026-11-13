@@ -20,6 +20,20 @@ pub(crate) struct Occupancy {
     spans: Vec<Span>,
 }
 
+/// Prepared while the owning Layout lock remains held through commit. This is
+/// unpublished capacity and identity reservation, not a second occupancy ledger.
+pub(crate) struct PreparedRetirement {
+    pieces: Vec<(usize, usize, usize)>,
+    identities: Option<core::ops::RangeInclusive<usize>>,
+    reservation: usize,
+}
+
+impl PreparedRetirement {
+    pub(crate) fn len(&self) -> usize {
+        self.pieces.len()
+    }
+}
+
 impl Occupancy {
     pub(super) const fn new() -> Self {
         Self { spans: Vec::new() }
@@ -204,22 +218,53 @@ impl Occupancy {
         Ok(retired)
     }
 
-    pub(crate) fn reserve_cuts(&mut self, count: usize) -> Result<(), AddressError> {
-        self.spans
-            .try_reserve(count)
-            .map_err(|_| AddressError::OutOfMemory)
-    }
-
-    /// 把 `[start, last]` 内的占用切成带退休票的段：占位仍留着，但在票结算前不可复用。
-    pub(crate) fn retire(
+    /// Reserve every cut and ticket identity before changing occupancy or PTEs.
+    pub(crate) fn prepare_retirement(
         &mut self,
         start: usize,
         last: usize,
-        reservation_id: usize,
-    ) -> Result<usize, AddressError> {
+        reservation: usize,
+    ) -> Result<PreparedRetirement, AddressError> {
+        let pieces = self.pieces(start, last, reservation)?;
+        let fresh = pieces.iter().filter(|(_, _, ticket)| *ticket == 0).count();
+        self.spans
+            .try_reserve(fresh.checked_mul(2).ok_or(AddressError::OutOfMemory)?)
+            .map_err(|_| AddressError::OutOfMemory)?;
         static NEXT: crate::basis::name::Serial =
             crate::basis::name::Serial::new(1, isize::MAX as usize);
-        let ticket = NEXT.allocate().ok_or(AddressError::OutOfMemory)?;
+        let identities = if fresh == 0 {
+            None
+        } else {
+            Some(NEXT.reserve(fresh).ok_or(AddressError::OutOfMemory)?)
+        };
+        Ok(PreparedRetirement {
+            pieces,
+            identities,
+            reservation,
+        })
+    }
+
+    /// Commit under the same Layout lock, after all other owners are prepared.
+    /// No allocation or fallible ticket preparation remains here.
+    pub(crate) fn retire(
+        &mut self,
+        mut prepared: PreparedRetirement,
+    ) -> Vec<(usize, usize, usize)> {
+        for (start, last, ticket) in &mut prepared.pieces {
+            if *ticket == 0 {
+                *ticket = prepared
+                    .identities
+                    .as_mut()
+                    .and_then(Iterator::next)
+                    .expect("prepared retirement identity");
+                self.retire_piece(*start, *last, prepared.reservation, *ticket);
+            }
+        }
+        prepared.pieces
+    }
+
+    /// Occupancy remains reserved until the exact ticket settles.
+    fn retire_piece(&mut self, start: usize, last: usize, reservation_id: usize, ticket: usize) {
         let mut i = 0;
         while i < self.spans.len() {
             let slot = self.spans[i];
@@ -269,7 +314,6 @@ impl Occupancy {
                 i += 1;
             }
         }
-        Ok(ticket)
     }
 
     /// Caller proved every hardware obligation of this reservation settled.

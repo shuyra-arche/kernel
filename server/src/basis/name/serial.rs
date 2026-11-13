@@ -16,16 +16,23 @@ impl Serial {
     }
 
     pub(crate) fn allocate(&self) -> Option<usize> {
-        self.next
+        self.reserve(1).map(|batch| *batch.start())
+    }
+
+    /// Reserve a nonempty batch atomically. Exhaustion consumes no identities;
+    /// successful reservations are never reused, even if preparation is abandoned.
+    pub(crate) fn reserve(&self, count: usize) -> Option<core::ops::RangeInclusive<usize>> {
+        let extra = count.checked_sub(1)?;
+        let first = self
+            .next
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
                 if next == 0 {
-                    None
-                } else if next == self.last {
-                    Some(0)
-                } else {
-                    Some(next + 1)
+                    return None;
                 }
+                let last = next.checked_add(extra).filter(|last| *last <= self.last)?;
+                Some(if last == self.last { 0 } else { last + 1 })
             })
-            .ok()
+            .ok()?;
+        Some(first..=first + extra)
     }
 }

@@ -251,7 +251,9 @@ impl Nest {
 
     /// 尚未发布的事务只在这些阶段可见：Clean 且未关闭。
     fn ready_state(&self) -> Result<SpinLockGuard<'_, NestState>, NestError> {
-        loop {
+        // One covering fence per turn. A peer may dirty a new batch before the
+        // final lock acquisition; admission then returns Busy for continuation.
+        for turn in 0..2 {
             let state = self.state.lock();
             if !state.phase.is_open() {
                 return Err(NestError::NoRegion);
@@ -261,9 +263,13 @@ impl Nest {
                 Invalidation::Failed => return Err(NestError::Shootdown),
                 Invalidation::Dirty | Invalidation::Fencing => {}
             }
+            if turn == 1 {
+                return Err(NestError::Busy);
+            }
             drop(state);
             self.finish_invalidation()?;
         }
+        unreachable!("bounded admission")
     }
 
     pub fn kind(&self) -> SpaceKind {
@@ -1187,9 +1193,13 @@ impl Nest {
         }
         state.index.insert(node);
         state.retirement.mark_dirty(mapping.is_global());
+        // Installation still owns its unpublished Span. Reserve the sole fence
+        // initiator before unlocking, so an observer cannot steal progress and
+        // make the installer discard a successfully committed mapping on Busy.
+        let target = state.retirement.begin(self.id.get(), self.asid())?;
         drop(state);
         drop(lease);
-        self.finish_invalidation()
+        self.invalidate(target)
     }
 
     /// 把该窗口里已经物化/借用的页发布到本关系：不动 Flat 的物化。
@@ -2357,7 +2367,18 @@ impl Nest {
             self.finish_invalidation()?;
         }
         for (start, len) in self.owed_spans(&selection)? {
-            self.withdraw(&mapping, start, len)?;
+            if let Err(error) = self.withdraw(&mapping, start, len) {
+                // A peer retry may claim/reclaim the exact settled ticket after
+                // owed_spans took its snapshot. Whole-owner cleanup is already
+                // complete in that case; strict Pages still rejects a hole.
+                if error == NestError::NoRegion
+                    && matches!(selection, NestRange::Whole(_))
+                    && self.settled(mapping.identity())
+                {
+                    return Ok(());
+                }
+                return Err(error);
+            }
         }
         Ok(())
     }
@@ -2440,17 +2461,11 @@ impl Nest {
 
         // 地址 → Nest → Span：准备与提交共享临界区，不暴露无人接管的退休票。
         let mut layout = self.layout.lock();
-        let pieces = layout
-            .occupancy
-            .pieces(start.as_usize(), last, mapping.reservation.id())?;
-        let fresh_count = pieces.iter().filter(|(_, _, ticket)| *ticket == 0).count();
-        layout
-            .occupancy
-            .reserve_cuts(fresh_count.checked_mul(2).ok_or(NestError::OutOfMemory)?)?;
-        let mut tickets: Vec<usize> = Vec::new();
-        tickets
-            .try_reserve(pieces.len())
-            .map_err(|_| NestError::OutOfMemory)?;
+        let prepared = layout.occupancy.prepare_retirement(
+            start.as_usize(),
+            last,
+            mapping.reservation.id(),
+        )?;
         let mut state = self.state.lock();
         if state.phase.is_closed() {
             return Err(NestError::NoRegion);
@@ -2489,18 +2504,12 @@ impl Nest {
         state
             .retirement
             .tickets
-            .reserve(pieces.len())
+            .reserve(prepared.len())
             .map_err(|_| NestError::OutOfMemory)?;
         state.prepare_withdrawal(start, len, self.geometry())?;
 
         // 开票之后没有可失败准备：票、PTE 与关系在同一提交内转入退休责任。
-        for (lo, hi, ticket) in pieces {
-            tickets.push(if ticket == 0 {
-                layout.occupancy.retire(lo, hi, mapping.reservation.id())?
-            } else {
-                ticket
-            });
-        }
+        let tickets = layout.occupancy.retire(prepared);
         state.withdraw_prepared(start, len, self.geometry());
         state.retirement.mappings.push(mapping.clone());
         {
@@ -2515,7 +2524,7 @@ impl Nest {
         if let Some(node) = next_node {
             state.index.insert(node);
         }
-        for &ticket in &tickets {
+        for &(_, _, ticket) in &tickets {
             state.retirement.tickets.retire(ticket);
         }
         state.retirement.mark_dirty(mapping.is_global());
@@ -2526,7 +2535,7 @@ impl Nest {
         if !tickets.is_empty() {
             let mut layout = self.layout.lock();
             let mut state = self.state.lock();
-            for ticket in tickets {
+            for (_, _, ticket) in tickets {
                 if state.retirement.tickets.claim(ticket) {
                     layout.occupancy.reclaim(ticket);
                 }
@@ -2666,47 +2675,49 @@ impl Nest {
     }
 
     fn finish_invalidation(&self) -> Result<(), NestError> {
-        loop {
-            let mut state = self.state.lock();
-            if state.retirement.invalidation().is_clean() {
-                return Ok(());
-            }
-            if state.retirement.invalidation().is_fencing() {
-                drop(state);
-                // Keep synchronous callers' access result stable while a peer
-                // fences. Reception uses the stack-free interrupt window.
-                crate::metal::interrupt::window::poll();
-                continue;
-            }
-            let target = state.retirement.begin(self.id.get(), self.asid())?;
-            drop(state);
-
-            let result = fence::invalidate(
-                &self.cpu.as_ref().ok_or(NestError::NoRegion)?.domain,
-                target,
-            );
-            let fenced = {
-                let mut state = self.state.lock();
-                match result {
-                    Ok(proof) => {
-                        let phase = state.phase;
-                        let fenced = state.settle(proof)?;
-                        if phase != state.phase {
-                            self.changed();
-                        }
-                        fenced
-                    }
-                    Err(_) => {
-                        state.retirement.fail();
-                        return Err(NestError::Shootdown);
-                    }
-                }
-            };
-            // Retired Page and table resources can leave the lock. Address
-            // tickets are reclaimed by detach or explicit retry_invalidation.
-            fenced.release(self);
+        let mut state = self.state.lock();
+        if state.retirement.invalidation().is_clean() {
             return Ok(());
         }
+        // Retirement admits exactly one fence initiator. A peer gets Busy;
+        // its caller retains the operation and retries across a scheduling
+        // boundary, while this initiator retains the exact pending request.
+        if self.cpu.is_none() {
+            return Err(NestError::NoRegion);
+        }
+        let target = state.retirement.begin(self.id.get(), self.asid())?;
+        drop(state);
+        self.invalidate(target)
+    }
+
+    /// The request's initiator owns this one hardware invocation through its
+    /// checked completion. Observers cannot replace or abandon this request.
+    fn invalidate(&self, target: fence::Request<Asid>) -> Result<(), NestError> {
+        let cpu = self.cpu.as_ref().expect("CPU invalidation initiator");
+        #[cfg(debug_assertions)]
+        crate::basis::assert_unlocked();
+        let result = fence::invalidate(&cpu.domain, target);
+        let fenced = {
+            let mut state = self.state.lock();
+            match result {
+                Ok(proof) => {
+                    let phase = state.phase;
+                    let fenced = state.settle(proof)?;
+                    if phase != state.phase {
+                        self.changed();
+                    }
+                    fenced
+                }
+                Err(_) => {
+                    state.retirement.fail();
+                    return Err(NestError::Shootdown);
+                }
+            }
+        };
+        // Retired Page and table resources can leave the lock. Address
+        // tickets are reclaimed by detach or explicit retry_invalidation.
+        fenced.release(self);
+        Ok(())
     }
 
     /// 撤下全部关系并等算 shootdown；内核地址空间为进程期，不在此列。
@@ -2717,18 +2728,18 @@ impl Nest {
         if self.asid().is_kernel() {
             return Err(NestError::Pinned);
         }
-        let mut state = loop {
+        self.finish_invalidation()?;
+        let mut state = {
             let state = self.state.lock();
             if state.phase.is_closed() {
                 drop(state);
                 self.drain_closed();
                 return Ok(());
             }
-            if state.retirement.invalidation().is_clean() {
-                break state;
+            if !state.retirement.invalidation().is_clean() {
+                return Err(NestError::Busy);
             }
-            drop(state);
-            self.finish_invalidation()?;
+            state
         };
         let phase = state.phase;
         let result = state.close_mappings(self.geometry());

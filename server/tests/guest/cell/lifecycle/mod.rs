@@ -20,11 +20,21 @@ pub(super) fn spawn(entry: usize) -> TaskId {
         stack: VirtAddr::new(0),
     }
     .to_bytes();
-    let CreatedUnit::Task(id) = unit::create(VirtAddr::new(bytes.as_ptr() as usize)).unwrap()
-    else {
-        panic!("created wrong kind")
-    };
-    id
+    let deadline = room::clock().saturating_add(5_000_000_000);
+    loop {
+        match unit::create(VirtAddr::new(bytes.as_ptr() as usize)) {
+            Ok(CreatedUnit::Task(id)) => return id,
+            Ok(_) => panic!("created wrong kind"),
+            Err(error) if error.source == kernel_api::abi::call::unit::UnitFail::Busy => {
+                assert!(
+                    room::clock() < deadline,
+                    "Task preparation continuation timed out"
+                );
+                room::yield_();
+            }
+            Err(error) => panic!("Task preparation: {error:?}"),
+        }
+    }
 }
 pub(super) fn inspect(query: UnitQuery) -> UnitInfo {
     let mut bytes = [0; UnitInfo::WIDTH];

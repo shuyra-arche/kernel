@@ -279,7 +279,7 @@ fn covers_source(source: &FlatRange, entry: &HeldMap) -> bool {
 fn pend_map_error(error: NestError) -> PendFail {
     match error {
         NestError::OutOfMemory => PendFail::OutOfMemory,
-        NestError::Shootdown => PendFail::Busy,
+        NestError::Shootdown | NestError::Busy => PendFail::Busy,
         _ => PendFail::Denied,
     }
 }
