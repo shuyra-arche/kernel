@@ -15,6 +15,8 @@ bench = false
 
 [dependencies]
 kernel-api = { path = "../../../../api" }
+fdt = { version = "0.1.5", default-features = false }
+platform-riscv = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "8127d85230176b2483669d2242d62ef33bd36f6c", default-features = false }
 kernel-hardware-fixture = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "8127d85230176b2483669d2242d62ef33bd36f6c" }
 
 [profile.dev]

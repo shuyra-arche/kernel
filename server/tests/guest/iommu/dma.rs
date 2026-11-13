@@ -91,7 +91,49 @@ pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
     }
     let adapter = unsafe { controllers.bind(base, requester, tables, platform) }.unwrap();
     let mut target = Target::new(adapter);
-    let change = (scenario == "dma-change").then(|| payload.begin().unwrap());
+    let coherent = scenario == "dma-coherent";
+    if coherent {
+        use crate::proof::topology::{Fabric, Ram, Route, Topology};
+        // SAFETY: this exact single-Hart QEMU virt/EDU fixture owns all MMIO,
+        // maps ordinary payload RAM with default attributes and has no ATS/bypass.
+        // This is an emulated-platform qualification, not a physical-board claim.
+        let topology = unsafe {
+            Topology::new(alloc::vec![Fabric {
+                ram: alloc::vec![Ram {
+                    base: pa as u64,
+                    bytes: 4096
+                }],
+                routes: alloc::vec![Route {
+                    controller: base as u64,
+                    requester
+                }],
+            }])
+            .unwrap()
+        };
+        crate::metal::memory::install(topology);
+    }
+    let change = (scenario == "dma-change" || coherent).then(|| payload.begin().unwrap());
+    let mut cpu = if coherent {
+        use crate::proof::{Access, Endpoint};
+        let id = core::num::NonZeroU64::MIN;
+        let mut receipt = change
+            .as_ref()
+            .unwrap()
+            .qualified(
+                crate::metal::memory::topology().unwrap(),
+                Endpoint::Cpu {
+                    nest: id,
+                    leases: id,
+                },
+                Access::new(6).unwrap(),
+                None,
+            )
+            .unwrap();
+        receipt.publish();
+        Some(receipt)
+    } else {
+        None
+    };
     let freeze = change
         .as_ref()
         .map(|change| crate::cell::Freeze::new(change.clone(), None).unwrap());
@@ -106,7 +148,7 @@ pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
     target.publish().unwrap();
     drop(freeze);
     drop(change);
-    assert_eq!(Arc::strong_count(&payload), 2); // exactly one data obligation
+    assert_eq!(Arc::strong_count(&payload), 2 + usize::from(coherent)); // exactly one data obligation
     drop(payload);
     if scenario != "activation-exit" {
         let mut active = false;
@@ -180,6 +222,20 @@ pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
         }
     }
     assert!(target.settled());
+    if let Some(receipt) = cpu.take() {
+        assert_eq!(RETURNS.load(Ordering::SeqCst), 4); // device settled, CPU still owns payload
+        assert_eq!(receipt.cell().obligations(), 1);
+        unsafe { bytes.write_bytes(0x91, 64) };
+        edu.transfer(IOVA, true);
+        edu.drain();
+        check(bytes, 0x91); // retired device cannot overwrite the surviving CPU view
+        // SAFETY: M-mode bare CPU fixture, no CPU translation aliases or other
+        // Harts; ordered completion of all synchronous accesses before release.
+        unsafe {
+            core::arch::asm!("fence rw, rw", options(nostack));
+            receipt.retire().settle();
+        }
+    }
     assert_eq!(RETURNS.load(Ordering::SeqCst), 5); // payload + tables; controller still owns queues
     let reused = POOL.cell().unwrap();
     assert_eq!(reused.physical_address(), pa);
@@ -200,6 +256,10 @@ pub fn run(base: usize, scenario: &str, requester: u32) -> ! {
     check(new_bytes, 0xc3);
     drop(reused);
     let _ = match scenario {
+        "dma-coherent" => writeln!(
+            Uart,
+            "PASS iommu-dma coherent-cpu-writer=1 exact-device-retirement=1 reused=1"
+        ),
         "dma-change" => writeln!(Uart, "PASS iommu-dma change=1 revoked=1 reused=1"),
         "readonly" => writeln!(Uart, "PASS iommu-dma readonly=1 denied=5"),
         "owner-exit" => writeln!(Uart, "PASS iommu-dma owner-exit=1 delayed-dma=1 reused=1"),

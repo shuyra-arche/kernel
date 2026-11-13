@@ -106,3 +106,14 @@ pub unsafe fn grant_interrupt(
         }
     })
 }
+
+/// Install already-qualified complete-fabric facts, after boot RAM admission and
+/// before publishing Units. Unknown hardware keeps staged External Publish closed.
+pub fn qualify_memory(
+    topology: super::memory::topology::Topology,
+) -> Result<(), super::memory::Error> {
+    if kernel_api::abi::VERSION as u64 != kernel_api::abi::memory::VERSION {
+        return Err(super::memory::Error::Unsupported);
+    }
+    crate::metal::memory::install(topology)
+}

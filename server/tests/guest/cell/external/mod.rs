@@ -227,13 +227,20 @@ fn source(pos: CellPosition, published: bool) -> SignSource {
     let mut bytes = [0; kernel_api::model::pend::PendInfo::SIZE];
     pend::inspect(token, VirtAddr::new(bytes.as_mut_ptr() as usize)).unwrap();
     let observation = kernel_api::model::pend::PendInfo::from_bytes(&bytes).unwrap();
-    let PendScope::Nest(NestScope::Reservation { id: mapping, .. }) = observation.limits.scope else {
+    let PendScope::Nest(NestScope::Reservation { id: mapping, .. }) = observation.limits.scope
+    else {
         panic!("mapping-scoped Nest grant expected")
     };
     if published {
-        SignSource::ReservationPublished { token, mapping }
+        SignSource::ReservationPublished {
+            token,
+            reservation: mapping,
+        }
     } else {
-        SignSource::ReservationRetired { token, mapping }
+        SignSource::ReservationRetired {
+            token,
+            reservation: mapping,
+        }
     }
 }
 fn event(token: PendId, source: SignSource) {

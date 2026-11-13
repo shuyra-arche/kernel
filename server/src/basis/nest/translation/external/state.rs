@@ -32,6 +32,9 @@ impl<H: Hardware<PageId>> External<H> {
             error: None,
         }
     }
+    pub(crate) fn endpoint(&self) -> Option<crate::metal::generic::memory::Endpoint> {
+        self.hardware.as_ref().and_then(Hardware::endpoint)
+    }
     pub(crate) fn open(&self) -> bool {
         self.admission == Admission::Open
     }

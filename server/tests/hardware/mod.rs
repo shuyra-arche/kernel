@@ -84,6 +84,13 @@ fn iommu_on_real_qemu_registers() {
             true,
         ),
         (
+            "dma-coherent",
+            "virt,iommu-sys=on",
+            "dma-coherent",
+            "PASS iommu-dma coherent-cpu-writer=1 exact-device-retirement=1 reused=1",
+            true,
+        ),
+        (
             "readonly",
             "virt,iommu-sys=on",
             "readonly",
@@ -132,6 +139,7 @@ fn iommu_on_real_qemu_registers() {
             name,
             "dma"
                 | "dma-change"
+                | "dma-coherent"
                 | "readonly"
                 | "dma-abandon"
                 | "owner-exit"

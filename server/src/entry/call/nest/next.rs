@@ -49,6 +49,19 @@ pub(in crate::entry::call) fn effect(
         }
         expected.next().ok_or(Failure::VersionExhausted)?;
         span.version().next().ok_or(Failure::VersionExhausted)?;
+        if rights == NestRights::PUBLISH || rights == NestRights::PROTECT {
+            if crate::metal::memory::topology().is_none() {
+                return Err(Failure::Unsupported);
+            }
+            let access = if let Action::Protect { access, .. } = action {
+                Access::from_wire(access).ok_or(Failure::Invalid)?
+            } else {
+                span.access(index).map_err(nest_error)?.1
+            };
+            if access.contains(Access::EXECUTE) {
+                return Err(Failure::Unsupported);
+            }
+        }
         let data = if rights == NestRights::PUBLISH {
             let source = route
                 .nest()
@@ -76,6 +89,24 @@ pub(in crate::entry::call) fn effect(
             }
             page
         };
+        if let Some(page) = &data {
+            if rights == NestRights::PUBLISH || rights == NestRights::PROTECT {
+                let topology = crate::metal::memory::topology().ok_or(Failure::Unsupported)?;
+                let endpoint = route.nest().memory_endpoint().ok_or(Failure::Unsupported)?;
+                let access = if let Action::Protect { access, .. } = action {
+                    access
+                } else {
+                    span.access(index).map_err(nest_error)?.1.bits() << 1
+                };
+                let access = crate::metal::generic::memory::Access::new(access as u8)
+                    .ok_or(Failure::Unsupported)?;
+                page.compatible(topology, endpoint, access)
+                    .map_err(|e| match e {
+                        crate::metal::generic::memory::Error::Capacity => Failure::Busy,
+                        _ => Failure::Unsupported,
+                    })?;
+            }
+        }
         let publisher = if rights == NestRights::PUBLISH {
             Some(Publisher::new(actor, route.entry()).map_err(cell_error)?)
         } else {

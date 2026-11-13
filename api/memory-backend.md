@@ -1,6 +1,6 @@
 # Next-memory backend proof contract
 
-M1 contract, not an enabled hardware path. The compiled trusted Rust interface
+M1 proof contract, with the staged concrete [M5 provider](memory-m5.md). The compiled trusted Rust interface
 is [metal::generic::memory](../server/src/metal/generic/memory/mod.rs), exposed to
 platform code as `kernel::entry::boot::memory`. Exporting it installs no provider.
 The default `Unsupported` backend refuses every operation. There are no userspace
@@ -95,9 +95,11 @@ A coarser fence is not permission to remove unrelated mappings. Fault/TimedOut/
 Unsupported/None never become success through retry limits, driver death, Task
 exit, an Ack, a timer or a reference count.
 
-The new interfaces do not replace existing v10 backends. M5 must implement and
-validate the required proofs for each enabled path. Until then, new hardware
-sharing remains disabled rather than silently adapting an incomplete old proof.
+The new interfaces do not replace existing v10 backends. The [M5 delivery](memory-m5.md)
+qualifies one-Hart normal-RAM data fabrics, integrates complete Page membership,
+and preserves exact CPU/IOMMU retirement. Boot installation still refuses while
+v10 is active. SMP, executable qualified access and unknown platforms remain
+Unsupported rather than adapting an incomplete proof.
 
 ## Admission, retirement and safe reuse
 

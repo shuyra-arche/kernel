@@ -1738,6 +1738,10 @@ impl Nest {
             accepted(memo.generation());
             state.publish_page(
                 self.geometry(),
+                crate::metal::generic::memory::Endpoint::Cpu {
+                    nest: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                    leases: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                },
                 mapping,
                 VirtAddr::new(mapping.position(index)?),
                 &page,
@@ -2064,11 +2068,17 @@ impl Nest {
             let replacement = if retained.is_some_and(|old| old != writable) {
                 Some((
                     index,
-                    Publication::prepare_access(
+                    Publication::prepare_cpu(
                         &page,
                         writable,
-                        Some(&change),
+                        &change,
                         maintenance.as_ref().map(|u| u.permit()),
+                        crate::metal::generic::memory::Endpoint::Cpu {
+                            nest: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                            leases: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                        },
+                        crate::metal::generic::memory::Access::new((access.bits() << 1) as u8)
+                            .ok_or(CellFail::Denied)?,
                     )
                     .map_err(NestError::from)?,
                 ))
@@ -2078,10 +2088,18 @@ impl Nest {
             // Admission and PTE edits share the checked retirement batch.
             admission = if retained.is_some() && replacement.is_none() {
                 Some(
-                    match &maintenance {
-                        Some(usage) => usage.permit().hardware(writable),
-                        None => change.hardware(writable),
-                    }
+                    Publication::prepare_cpu(
+                        &page,
+                        writable,
+                        &change,
+                        maintenance.as_ref().map(|u| u.permit()),
+                        crate::metal::generic::memory::Endpoint::Cpu {
+                            nest: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                            leases: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                        },
+                        crate::metal::generic::memory::Access::new((access.bits() << 1) as u8)
+                            .ok_or(CellFail::Denied)?,
+                    )
                     .map_err(NestError::from)?,
                 )
             } else {

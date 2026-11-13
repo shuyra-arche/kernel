@@ -64,6 +64,37 @@ impl Change {
         }
         Retention::during(self, Kind::External, modifiable, false)
     }
+    /// Group verification and physical registration share the membership gate.
+    pub(crate) fn qualified(
+        &self,
+        topology: &crate::metal::generic::memory::topology::Topology,
+        endpoint: crate::metal::generic::memory::Endpoint,
+        access: crate::metal::generic::memory::Access,
+        maintenance: Option<&Maintenance>,
+    ) -> Result<Retention, RetainError> {
+        let blocks = self.blocks.lock();
+        if let Some(permit) = maintenance {
+            if !core::ptr::eq(self, permit.change.as_ref())
+                || blocks.count != 1
+                || blocks.admitted != permit.id
+            {
+                return Err(RetainError::Busy);
+            }
+        } else if blocks.count != 0 {
+            return Err(RetainError::Busy);
+        }
+        let kind = match endpoint {
+            crate::metal::generic::memory::Endpoint::Cpu { .. } => Kind::Cpu,
+            crate::metal::generic::memory::Endpoint::External { .. } => Kind::External,
+        };
+        Retention::during_qualified(
+            self,
+            kind,
+            access.writable(),
+            maintenance.is_some(),
+            Some((topology, endpoint, access)),
+        )
+    }
 }
 impl Drop for Change {
     fn drop(&mut self) {

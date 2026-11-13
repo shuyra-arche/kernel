@@ -43,7 +43,8 @@ pub(crate) fn accord(src: PendId, target: AccordTarget, limits: Limits) -> PendI
 }
 
 pub(crate) fn id(token: PendId) -> kernel_api::model::nest::ReservationId {
-    let PendScope::Nest(NestScope::Reservation { id, .. }) = crate::pend::inspect(token).limits.scope
+    let PendScope::Nest(NestScope::Reservation { id, .. }) =
+        crate::pend::inspect(token).limits.scope
     else {
         panic!("mapping scope expected")
     };
@@ -146,6 +147,9 @@ pub(crate) fn range(scope: PendScope, range: PendRange) -> PendScope {
 
 pub(crate) fn mapping(token: PendId, range: PendRange) -> PendScope {
     let scope = crate::pend::inspect(token).limits.scope;
-    assert!(matches!(scope, PendScope::Nest(NestScope::Reservation { .. })));
+    assert!(matches!(
+        scope,
+        PendScope::Nest(NestScope::Reservation { .. })
+    ));
     self::range(scope, range)
 }

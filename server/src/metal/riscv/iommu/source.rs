@@ -13,6 +13,9 @@ struct Bound {
 // SAFETY: forwarding retains the exclusive adapter. The controller is returned
 // only after shutdown settles payloads and the independent Binding proof.
 unsafe impl Hardware<PageId> for Bound {
+    fn endpoint(&self) -> Option<crate::metal::generic::memory::Endpoint> {
+        self.adapter.endpoint()
+    }
     fn capacity(&self) -> usize {
         self.adapter.capacity()
     }

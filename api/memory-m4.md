@@ -157,3 +157,8 @@ Flat Delete/Split/Merge, FaultRoute and the remaining External lifecycle gates
 are still not activated by this change. The [M1 activation requirements](memory-m1.md#migration-order-and-acceptance-gates)
 require coordinated provider, consumer and image verification; this delivery
 does not change issue checkboxes, merge the stack or activate ABI v11.
+
+The [M5 follow-up](memory-m5.md) adds qualified whole-group admission and durable
+Retentions' membership, with a one-Hart QEMU CPU/EDU hardware scenario. Its
+explicit unsupported paths and activation gates supersede M4's conservative
+conflict matrix only when the new provider is qualified.

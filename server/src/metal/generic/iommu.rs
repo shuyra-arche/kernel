@@ -8,6 +8,9 @@ use core::num::{NonZeroU32, NonZeroUsize};
 pub(crate) struct BindingId(NonZeroUsize);
 
 impl BindingId {
+    pub(crate) fn epoch(self) -> core::num::NonZeroU64 {
+        core::num::NonZeroU64::new(self.0.get() as u64).unwrap()
+    }
     /// # Safety
     /// The value was issued by the boot-wide allocator and has never been used.
     pub(crate) unsafe fn from_unique(value: NonZeroUsize) -> Self {
@@ -167,6 +170,10 @@ pub(crate) struct Fault {
 /// 完成存储与队列不可由外部 Unit 写入，迟到写回不能污染复用后的存储。
 /// 实现者的 Drop 须安全处理自己的目录、页表和队列等硬件可访问内存。
 pub(crate) unsafe trait Hardware<P: Copy> {
+    /// Exact immutable boot binding; never supplied by a Unit.
+    fn endpoint(&self) -> Option<crate::metal::generic::memory::Endpoint> {
+        None
+    }
     fn capacity(&self) -> usize {
         usize::MAX
     }
@@ -194,6 +201,9 @@ pub(crate) unsafe trait Hardware<P: Copy> {
 
 // SAFETY: exclusive forwarding preserves the installed implementation's contract.
 unsafe impl<P: Copy, H: Hardware<P> + ?Sized> Hardware<P> for Box<H> {
+    fn endpoint(&self) -> Option<crate::metal::generic::memory::Endpoint> {
+        (**self).endpoint()
+    }
     fn capacity(&self) -> usize {
         (**self).capacity()
     }

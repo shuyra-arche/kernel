@@ -44,6 +44,7 @@ enum Binding<R: Registers> {
 pub(crate) struct Adapter<R: Registers, Q: Quiescence> {
     binding: Binding<R>,
     device: u32,
+    epoch: BindingId,
     controller: usize,
     proof: Q,
     leaves: Vec<Leaf>,
@@ -62,6 +63,10 @@ impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
         if let Err(error) = Domain::supports_device(&engine, device) {
             return Err((error, engine));
         }
+        let epoch = match BindingId::allocate() {
+            Ok(id) => id,
+            Err(_) => return Err((EngineError::Memory, engine)),
+        };
         let mut leaves = Vec::new();
         if leaves.try_reserve_exact(512).is_err() {
             return Err((EngineError::Memory, engine));
@@ -74,6 +79,7 @@ impl<R: Registers, Q: Quiescence> Adapter<R, Q> {
             controller: engine.physical_base(),
             binding: Binding::Open(Context::Setup(engine, tables)),
             device,
+            epoch,
             proof,
             leaves,
         })
@@ -128,6 +134,14 @@ fn failure(error: EngineError) -> HardwareError {
 // leaf + exact PR/PW fence + matching platform proof discharges that payload.
 // Closing a context requires every leaf settled and a separate Binding proof.
 unsafe impl<R: Registers, Q: Quiescence> Hardware<PageId> for Adapter<R, Q> {
+    fn endpoint(&self) -> Option<crate::metal::generic::memory::Endpoint> {
+        Some(crate::metal::generic::memory::Endpoint::External {
+            controller: self.controller as u64,
+            requester: self.device,
+            binding: self.epoch.epoch(),
+        })
+    }
+
     fn capacity(&self) -> usize {
         match &self.binding {
             Binding::Open(Context::Setup(..)) => 512,

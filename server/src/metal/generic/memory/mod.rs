@@ -1,8 +1,11 @@
-//! Inactive next-memory trusted-platform contract. No provider is installed by
-//! this module. Numeric request fields are not evidence; only an unsafe trusted
-//! implementation may attest them. Existing v10 MMU/IOMMU behavior is unchanged.
+//! Next-memory proof contract and immutable complete-fabric qualification.
+//! This module installs no provider. Numeric request fields are not evidence;
+//! only trusted integration may establish physical facts. Runtime activation
+//! remains coordinated separately from these Rust interfaces.
 
 use core::{marker::PhantomData, num::NonZeroU64};
+
+pub mod topology;
 
 pub const MAX_MEMBERS: usize = 64;
 
