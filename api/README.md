@@ -80,6 +80,12 @@ Cells. ABI coordinates remain 4 KiB units, so a level-1 Cell spans 512 coordinat
 
 ## Source migration and ABI compatibility
 
+The [next Flat/Nest memory contract](memory.md) tracks #142 against the current
+ABI v10 baseline. Its fixed-origin position and revision codecs are available in
+`model::{flat,nest}` for migration preparation; current calls do not accept these
+new descriptors. Runtime Occupy/Vacate, maintenance BlockRef and the next ABI
+remain unimplemented. This does not change the current contracts below.
+
 This is a breaking provider redesign of Cell, View, Pend, Sign, Unit and Room.
 There are no compatibility aliases for retired operations.
 

@@ -15,6 +15,7 @@ mod permission;
 mod organization;
 
 mod memory;
+mod memory_contract;
 
 fn fetch_words<const N: usize>(bytes: &[u8]) -> Option<[usize; N]> {
     if bytes.len() != N * 8 {

@@ -1,4 +1,10 @@
 //! Stable flat identity. A numeric identity is descriptive and never grants access.
+mod maintenance;
+mod position;
+
+pub use maintenance::{BlockGeneration, BlockRef};
+pub use position::{SlotPosition, SlotVersion};
+
 use crate::abi::register::{Decode, Wire};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
