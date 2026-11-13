@@ -87,6 +87,17 @@ extern "C" fn successor() -> ! {
     transfer(bar, ADDRESS, false);
     retract(fresh);
     super::super::delete(fresh.object);
+    // Verify the successor's DMA in both directions. A fault-count snapshot
+    // cannot prove successful access while older FQ records are still draining.
+    // Release the legacy exclusive source loan before restoring CPU access.
+    super::super::publish(cpu, 0);
+    super::super::write(address, 0, 0);
+    super::super::retract(cpu, 0);
+    let fresh = create(token, slot, ADDRESS, true);
+    publish(fresh);
+    transfer(bar, ADDRESS, true);
+    retract(fresh);
+    super::super::delete(fresh.object);
     super::super::publish(cpu, 0);
     assert_eq!(super::super::read(address, 0), 0xc3c3c3c3);
     super::super::retract(cpu, 0);
@@ -156,9 +167,9 @@ pub(in super::super) fn death(at: usize, count: usize) {
         assert!(room::clock() < deadline, "retired address accepted DMA");
         room::sleep_until((room::clock() + 1_000_000).min(deadline)).unwrap();
     }
-    let faults = context(root).fault_sequence;
-    assert!(faults > previous_faults);
-    assert_eq!(context(root).fault_address, ADDRESS as u64);
+    let faults = context(root);
+    assert!(faults.fault_sequence > previous_faults);
+    assert_eq!(faults.fault_address, ADDRESS as u64);
     // Losing the old mapping does not authorize the new Task to use its ID.
     assert!(observed(pos).is_none());
     share_view::shut(bar).unwrap();
@@ -170,7 +181,13 @@ pub(in super::super) fn death(at: usize, count: usize) {
     super::super::lifecycle::delete(next);
     assert_eq!(context(root).id, identity);
     assert_eq!(context(root).phase, NestPhase::Bound);
-    assert_eq!(context(root).fault_sequence, faults);
+    // The keeper consumes at most four FQ records per pass. The denied probe
+    // can leave more records after its first observable fault; handover must
+    // preserve the oldest fault and monotonic sequence, not freeze the count.
+    let after = context(root);
+    assert!(after.fault_sequence >= faults.fault_sequence);
+    assert_eq!(after.fault_address, faults.fault_address);
+    assert_eq!(after.fault_cause, faults.fault_cause);
     assert_eq!(
         sign::listen(closed_event, Wait::Poll).unwrap(),
         SignReply::Pending
