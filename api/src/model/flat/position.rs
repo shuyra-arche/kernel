@@ -59,6 +59,8 @@ impl SlotPosition {
 
 /// Residency/geometry revision, not a content version or permission. The next
 /// memory ABI starts at one and refuses mutations when this sequence exhausts.
+/// Live stamps are issued from the Flat's high-water mark via
+/// `FlatVersion::next_slots`, including newly created heads after Split/Merge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SlotVersion(NonZeroU64);
 
@@ -77,6 +79,8 @@ impl SlotVersion {
         self.0.get()
     }
 
+    /// Checked arithmetic only. A provider must not use a local successor to
+    /// issue live stamps: a retired child may already have used that value.
     pub fn next(self) -> Option<Self> {
         Self::new(self.get().checked_add(1)?)
     }

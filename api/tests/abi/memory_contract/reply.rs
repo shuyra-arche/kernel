@@ -119,6 +119,7 @@ fn results() -> Vec<Reply> {
         .map(|(opcode, outcome)| Reply::new(id(), opcode, outcome).unwrap())
         .collect();
     replies.extend(super::objects::results());
+    replies.extend(super::reshape::results());
     replies
 }
 
@@ -332,7 +333,7 @@ fn malformed_reply_tags_statuses_and_tail_words_reject() {
         (5, 1),
         (5, (-17i64) as u64),
         (6, 0),
-        (6, 11),
+        (6, 12),
         (7, 0),
         (8, 0),
         (9, 1),

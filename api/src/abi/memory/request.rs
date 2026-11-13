@@ -5,7 +5,7 @@
 use super::{Domain, Opcode, Query, Reader, RequestId, VERSION, Writer, valid_token};
 use crate::model::{
     cell::{CellLevel, MappingId},
-    flat::{BlockRef, FlatId, FlatVersion, SlotPosition, SlotVersion},
+    flat::{BlockRef, FlatId, FlatVersion, Reshape, SlotPosition, SlotVersion},
     identity::PendId,
     nest::{MappingVersion, MemoGeneration, MemoPosition, NestId, NestVersion, ReserveRequest},
     view::ViewId,
@@ -153,6 +153,21 @@ pub enum Action {
         mapping: MappingId,
         expected: MappingVersion,
     },
+    /// One parent to its 512 immediate children. The expected Flat revision
+    /// covers every affected coordinate, not merely the first Slot's stamp.
+    Split {
+        start: SlotPosition,
+        expected: FlatVersion,
+        parent: CellLevel,
+        maintenance: Maintenance,
+    },
+    /// The same parent-sized range, from 512 immediate children to one parent.
+    Merge {
+        start: SlotPosition,
+        expected: FlatVersion,
+        parent: CellLevel,
+        maintenance: Maintenance,
+    },
     Inspect(Query),
     /// Query tag 3; resolves only the actual caller's retained result. No live
     /// resource token is necessary after an accepted deletion or revocation.
@@ -226,6 +241,8 @@ impl Action {
             Self::DeleteNest { .. } => Opcode::Delete(Domain::Nest),
             Self::Reserve { .. } => Opcode::Reserve,
             Self::Release { .. } => Opcode::Release,
+            Self::Split { .. } => Opcode::Split,
+            Self::Merge { .. } => Opcode::Merge,
             Self::Inspect(query) => Opcode::Inspect(query.domain()),
             Self::InspectResult { domain, .. } => Opcode::Inspect(domain),
             Self::Occupy { .. } => Opcode::Occupy,
@@ -275,6 +292,22 @@ impl Action {
             }
             Self::Release { token, mapping, .. } => {
                 valid_token(token.get()) && valid_token(mapping.get())
+            }
+            Self::Split {
+                start,
+                parent,
+                maintenance,
+                ..
+            }
+            | Self::Merge {
+                start,
+                parent,
+                maintenance,
+                ..
+            } => {
+                Reshape::new(start.page(), parent).is_some()
+                    && maintenance.valid()
+                    && maintenance.block.flat() == start.flat()
             }
             Self::Inspect(query) => query.valid(),
             Self::Vacate { maintenance, .. } | Self::Allow { maintenance } => maintenance.valid(),
@@ -362,6 +395,23 @@ impl Action {
                 out.word(nest.get() as u64)?;
                 out.word(mapping.get() as u64)?;
                 out.word(expected.get())
+            }
+            Self::Split {
+                start,
+                expected,
+                parent,
+                maintenance,
+            }
+            | Self::Merge {
+                start,
+                expected,
+                parent,
+                maintenance,
+            } => {
+                out.bytes(&start.to_bytes())?;
+                out.word(expected.get())?;
+                out.word(parent.get() as u64)?;
+                maintenance.write(out)
             }
             Self::Inspect(query) => query.write(out),
             Self::InspectResult { request, .. } => {
@@ -471,6 +521,27 @@ impl Action {
                 mapping: input.mapping()?,
                 expected: MappingVersion::new(input.word()?)?,
             },
+            Opcode::Split | Opcode::Merge => {
+                let start = SlotPosition::from_bytes(input.bytes::<24>()?)?;
+                let expected = FlatVersion::new(input.word()?)?;
+                let parent = CellLevel::new(input.size()?)?;
+                let maintenance = Maintenance::read(input)?;
+                if opcode == Opcode::Split {
+                    Self::Split {
+                        start,
+                        expected,
+                        parent,
+                        maintenance,
+                    }
+                } else {
+                    Self::Merge {
+                        start,
+                        expected,
+                        parent,
+                        maintenance,
+                    }
+                }
+            }
             Opcode::Inspect(domain) => {
                 let tag = input.word()?;
                 if tag == 3 {

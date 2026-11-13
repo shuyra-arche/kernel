@@ -64,6 +64,8 @@ Only tags 0 and 1 are accepted. Every H still requires the original record's liv
 branch/Task, range, phase and data/operation rights at execution. It is not a new
 authorization root. A staged Slot can belong to a different Flat from B; only
 Server's trace of the exact Page and original authority can validate that case.
+Split/Merge deliberately require B to name S's own Flat; staged reshaping under
+a different Flat's maintenance record is not admitted by this first contract.
 
 | Domain / slot | Action | Payload after the four-word header |
 | --- | --- | --- |
@@ -79,6 +81,8 @@ Server's trace of the exact Page and original authority can validate that case.
 | Flat 12 / 22 | Allow | `[H...]` |
 | Flat 12 / 23 | Push | `[local S..., local V, remote S..., remote V, Optional H...]` |
 | Flat 12 / 24 | Pull | Same encoding as Push, opposite transfer direction |
+| Flat 12 / 25 | Split | `[S..., expected_flat_version, parent_level, H...]` |
+| Flat 12 / 26 | Merge | Same fields as Split; level names the resulting parent |
 | Nest 13 / 21 | Insert | `[target M..., G, Source...]` |
 | Nest 13 / 22 | Remove | `[M..., G]` |
 | Nest 13 / 23 | Publish | `[M..., G, Optional H...]` |
@@ -86,9 +90,7 @@ Server's trace of the exact Page and original authority can validate that case.
 | Nest 13 / 25 | Protect | `[M..., G, access]` |
 | Flat 12 or Nest 13 / 18 | InspectResult | `[query_tag = 3, requested_id]`; header RequestId is zero |
 
-Split/Merge are not encoded by this revision; their proposed slots remain in
-the migration document and these codecs reject them. This does not retire those
-v10 operations. The largest implemented request is maintenance Push/Pull:
+The largest implemented request is maintenance Push/Pull:
 17 total words (136 bytes); all remaining bytes are zero.
 
 Block's range is nonempty and fixed-origin; byte and coordinate overflow reject.
@@ -143,6 +145,80 @@ finish; forced cleanup cannot wrap a counter or reopen a dead identity. A
 revision alone does not prove a phase or settlement. Codec `next()` tests prove
 only checked arithmetic; Server must implement the invalidation rules.
 
+### Split/Merge geometry and non-reusing Slot stamps
+
+Both requests identify one aligned parent-sized range at S's fixed coordinate.
+`parent_level` must have an immediate child level. Split changes one Resident
+parent into exactly 512 Resident children at level `parent_level - 1`; Merge
+changes exactly that complete child group into one Resident parent. A level-1
+range starting at 512 always covers `[512, 1024)`, and its base-page child heads
+are 512 through 1023. No relative origin, partial group, zero level or multi-level
+shortcut is accepted. Each request occupies 13 words (104 bytes), then zero tail.
+
+`model::flat::Reshape` checks this geometry and enumerates fixed-origin child
+heads without allocation. `fits()` requires the full parent range inside a
+scope; the live Flat/Pend must supply that scope and recheck it at commit. The
+model does not certify RAM availability, physical contiguity or supported Sv mode.
+
+The expected version is **FlatVersion**, not only the first SlotVersion. It
+covers all residency/geometry changes throughout the Flat, so a change in any
+sibling invalidates an old Merge request. This conservative contract may return
+Stale for an unrelated change outside the selected range; a range grant still
+confers authority only over its own range. It does not require sending 512
+independently sampled versions or grant whole-Flat mutation rights.
+
+FlatVersion is also the retained high-water mark for live Slot stamps. At
+creation it and every initial Fresh stamp equal 1. Every accepted residency or
+geometry commit advances the Flat revision once and assigns that new value as
+SlotVersion to **every changed coordinate/head**. Unchanged Slots retain their
+old stamps. Occupy/Vacate use this rule too; cross-Flat Push/Pull reserve one new
+revision from each Flat, while same-Flat transfers use one revision for both
+positions. Lifecycle-only changes may advance FlatVersion without changing Slots.
+No live stamp may exceed its owning Flat's high-water mark.
+
+`FlatVersion::next_slots()` computes the checked next Flat revision and common
+Slot stamp; it does not mutate state. Server must apply it under the same commit
+boundary as the holdings and geometry. Never issue a stamp using only
+`old_slot.next()`, a parent's local counter or a newly initialized child record:
+a deleted child may already have used that number. For example, a Flat at 900
+merges to 901 and splits to 902 even if the old parent was stamped 2 and a former
+child 3. Old child references cannot become current after merge/split cycles.
+Counter exhaustion rejects before allocation changes. Forced cleanup at exhaustion
+cannot recreate an ordinary live head or authorize a new reshape.
+
+At the commit boundary the provider must check all of the following:
+
+- Live RESHAPE authority covers the full range, the actual calling Task and branch
+  still own the supplied Held record, and no other blocking record is bypassed.
+- Actual source levels match the operation; every affected holding is Resident.
+  Fresh, Missing, borrowed allocations and a staged Page bound to another Flat's
+  maintenance record reject. No implicit Occupy, transfer or retirement occurs.
+- Ordinary, maintenance and External publications, including historical ones,
+  have exact settlement evidence. Held alone is insufficient because the
+  maintenance actor may have republished. Unresolved hardware failure rejects.
+- Allocation receipts permit exclusive, complete reorganization. Merge children
+  have contiguous, correctly aligned physical layout and compatible ownership,
+  attributes and allocation provenance; adjacent addresses alone are insufficient.
+- Metadata, new Page identities, result capacity and revision capacity are ready
+  before changing any allocation receipt. An unsupported allocator rejects.
+
+The commit atomically replaces the geometry/holdings, advances versions and
+updates the existing maintenance record's exact Page tracking. It preserves the
+record's binding and block, Flat identity/origin, content and PageOwner; it must
+neither keep hidden old owning receipts nor briefly expose unblocked children.
+No fallible allocation or hardware operation may follow an irreversible partial
+receipt conversion. Before commit, rejection/failure leaves the original group
+intact. There is no Pending or partial-success geometry result. Already committed
+changes remain recoverable by RequestId if reply delivery fails.
+
+Memo logical coordinates/spans and generations are not rewritten by this Flat
+operation. A previously associated span may no longer match the complete physical
+units required by Publish; that publication fails explicitly until an authorized
+caller repairs the geometry/association. Reshaping does not grant permission to
+rewrite peer Memo associations, revive old physical Page identities or widen a
+narrowed grant. These are Server/allocator integration obligations, not effects
+implemented by the value codecs.
+
 ### Insert sources
 
 | Source tag | Remaining words | Required interpretation |
@@ -193,6 +269,7 @@ Value tags and payloads are:
 | 8 | `[flat_id, flat_version, flat_phase]` | DeleteFlat |
 | 9 | `[nest_id, nest_version, nest_phase]` | DeleteNest |
 | 10 | `[nest_id, mapping_id, mapping_version, mapping_phase]` | Release |
+| 11 | `[flat_id, flat_version, slot_version, offset, parent_level]` | Split/Merge |
 
 Page IDs are descriptive positive identities at most `isize::MAX`; they confer
 no rights. Slot/Memo versions are nonzero u64. A result's Value must match its
@@ -200,8 +277,9 @@ operation. Constructors and decoders reject these additional impossible claims:
 
 - Occupy Committed with a zero Page; Vacate Committed with a retained Page.
 - Vacate Pending with a zero Page; this would imply release before settlement.
-- Pending CreateFlat/CreateNest, Reserve, Occupy, Push/Pull, Insert or Remove. These logical transitions either
-  commit atomically or return a rejection/failure, with no exposed partial state.
+- Pending CreateFlat/CreateNest, Reserve, Occupy, Push/Pull, Split/Merge, Insert
+  or Remove. These logical transitions commit atomically or return a
+  rejection/failure, with no exposed partial state.
 - Block Pending other than Draining, or Block Committed other than Held.
 - Allow Pending other than Releasing, or Allow Committed other than Closed.
 - Delete Pending other than Closing, or Delete Committed other than Closed.
@@ -212,10 +290,19 @@ operation. Constructors and decoders reject these additional impossible claims:
 BlockPhase tags are Draining=0, Held=1, Releasing=2, Closed=3, Orphaned=4. A Failed
 Block/Allow result must retain its known reference and Draining/Releasing phase
 respectively, or Orphaned. Failed Vacate must retain its still-resident Page.
-Failed Occupy, Push/Pull, Insert and Remove have no result Value: they cannot
-claim a partial atomic commit. Failed Publish/Retract/Protect may retain the
+Failed Occupy, Push/Pull, Split/Merge, Insert and Remove have no result Value:
+they cannot claim a partial atomic commit. Failed Publish/Retract/Protect may retain the
 known Memo generation. Held does not promise immutable content: the authorized maintenance
 actor can still establish controlled writes.
+
+A Geometry result requires a valid `Reshape` range, FlatVersion greater than 1
+and an equal SlotVersion for all resulting heads. The reply opcode determines
+whether those heads are the 512 children or the one parent. `Reply::matches`
+checks a committed reshape against the request's Flat, start, parent level and
+exact next FlatVersion as well as opcode/RequestId. A retained-result query still
+correlates by original RequestId/domain because it may not carry the old request.
+The result does not enumerate new Page IDs or carry allocation authority; inspect
+positions using live grants when those descriptive identities are needed.
 
 Publish/Retract/Protect may report Pending with their recorded Memo generation.
 Committed Retract means the selected publication settled; it does not freeze
@@ -374,7 +461,9 @@ reply correlation, exact lengths and canonical encodings after byte mutations.
 Delivery and stored outcome are separately tested. Existing tests keep active
 v10 dispatch rejecting next-ABI calls.
 
-Remaining M1 work includes Split/Merge call descriptors and revision bookkeeping,
-fault registration and bounded waits, and backend-specific proof interfaces. The bounded journal, permission checks,
-atomic state changes and hardware effects described above require Server work;
+Remaining M1 work includes fault registration and bounded waits, and
+backend-specific proof interfaces. Live geometry/revision bookkeeping and atomic
+allocation-receipt conversion still require Server/allocator integration. The
+bounded journal, permission checks, atomic state changes and hardware effects
+described above require Server work;
 the codecs alone do not implement them. All M1–M6 milestones remain open.

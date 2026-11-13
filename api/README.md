@@ -86,7 +86,8 @@ ABI v10 baseline. Its fixed-origin position and revision codecs are available in
 new descriptors. Runtime Occupy/Vacate, maintenance BlockRef and the next ABI
 remain unimplemented. This does not change the current contracts below.
 The inactive `abi::memory` module provides [bounded request/result codecs](memory-wire.md)
-for next-version transitions and object lifecycles, including exact status codes,
+for next-version transitions (including Split/Merge) and object lifecycles,
+including exact status codes,
 result inspection and scoped Flat/Slot/Block/Nest/Memo/Mapping observations.
 It is not accepted by current `EnvCall` and has no invocation traits.
 

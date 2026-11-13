@@ -4,6 +4,7 @@ mod objects;
 mod observation;
 mod reply;
 mod request;
+mod reshape;
 
 use kernel_api::{
     abi::{self, call::EnvCall},

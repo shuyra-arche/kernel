@@ -6,8 +6,8 @@ use super::{
 };
 use crate::address::{BASE_PAGE_SIZE, VirtAddr};
 use crate::model::{
-    cell::MappingId,
-    flat::{BlockPhase, BlockRef, FlatId, FlatPhase, FlatVersion, SlotVersion},
+    cell::{CellLevel, MappingId},
+    flat::{BlockPhase, BlockRef, FlatId, FlatPhase, FlatVersion, Reshape, SlotVersion},
     identity::PendId,
     nest::{MappingPhase, MappingVersion, MemoGeneration, NestId, NestPhase, NestVersion},
 };
@@ -16,6 +16,14 @@ use crate::model::{
 /// page=0 in a Slot result means Missing, never a newly allocated zero page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Value {
+    /// One atomic reshape. All resulting heads receive `slots`, equal to the
+    /// committed Flat revision. Page IDs must be observed under live authority.
+    Geometry {
+        flat: FlatId,
+        version: FlatVersion,
+        slots: SlotVersion,
+        range: Reshape,
+    },
     CreatedFlat {
         token: PendId,
         flat: FlatId,
@@ -71,6 +79,9 @@ pub enum Value {
 impl Value {
     fn matches(self, opcode: Opcode) -> bool {
         match (self, opcode) {
+            (Self::Geometry { version, slots, .. }, Opcode::Split | Opcode::Merge) => {
+                version.get() > 1 && slots.get() == version.get()
+            }
             (Self::CreatedFlat { token, .. }, Opcode::Create(Domain::Flat))
             | (Self::CreatedNest { token, .. }, Opcode::Create(Domain::Nest)) => {
                 valid_token(token.get())
@@ -111,6 +122,19 @@ impl Value {
 
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
         match self {
+            Self::Geometry {
+                flat,
+                version,
+                slots,
+                range,
+            } => {
+                out.word(11)?;
+                out.word(flat.get() as u64)?;
+                out.word(version.get())?;
+                out.word(slots.get())?;
+                out.word(range.offset() as u64)?;
+                out.word(range.parent().get() as u64)
+            }
             Self::CreatedFlat {
                 token,
                 flat,
@@ -208,6 +232,12 @@ impl Value {
 
     fn read(input: &mut Reader<'_>) -> Option<Option<Self>> {
         Some(match input.word()? {
+            11 => Some(Self::Geometry {
+                flat: FlatId::new(input.size()?)?,
+                version: FlatVersion::new(input.word()?)?,
+                slots: SlotVersion::new(input.word()?)?,
+                range: Reshape::new(input.size()?, CellLevel::new(input.size()?)?)?,
+            }),
             5 => Some(Self::CreatedFlat {
                 token: input.token()?,
                 flat: FlatId::new(input.size()?)?,
@@ -334,6 +364,8 @@ impl Outcome {
                         Opcode::Occupy
                         | Opcode::Push
                         | Opcode::Pull
+                        | Opcode::Split
+                        | Opcode::Merge
                         | Opcode::Insert
                         | Opcode::Remove,
                         None,
@@ -504,7 +536,39 @@ impl Reply {
             Action::InspectResult { domain, request } => {
                 self.request == request && self.opcode.domain() == domain
             }
-            action => Some(self.request) == request.id() && self.opcode == action.opcode(),
+            action => {
+                if Some(self.request) != request.id() || self.opcode != action.opcode() {
+                    return false;
+                }
+                match (action, self.outcome) {
+                    (
+                        Action::Split {
+                            start,
+                            expected,
+                            parent,
+                            ..
+                        }
+                        | Action::Merge {
+                            start,
+                            expected,
+                            parent,
+                            ..
+                        },
+                        Outcome::Committed(Value::Geometry {
+                            flat,
+                            version,
+                            range,
+                            ..
+                        }),
+                    ) => {
+                        flat == start.flat()
+                            && range.offset() == start.page()
+                            && range.parent() == parent
+                            && expected.next() == Some(version)
+                    }
+                    _ => true,
+                }
+            }
         }
     }
 

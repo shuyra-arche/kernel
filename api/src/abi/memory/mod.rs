@@ -73,6 +73,8 @@ pub enum Opcode {
     Allow,
     Push,
     Pull,
+    Split,
+    Merge,
     Insert,
     Remove,
     Publish,
@@ -96,9 +98,14 @@ impl Opcode {
     pub const fn domain(self) -> Domain {
         match self {
             Self::Create(domain) | Self::Delete(domain) | Self::Inspect(domain) => domain,
-            Self::Occupy | Self::Vacate | Self::Block | Self::Allow | Self::Push | Self::Pull => {
-                Domain::Flat
-            }
+            Self::Occupy
+            | Self::Vacate
+            | Self::Block
+            | Self::Allow
+            | Self::Push
+            | Self::Pull
+            | Self::Split
+            | Self::Merge => Domain::Flat,
             Self::Reserve
             | Self::Release
             | Self::Insert
@@ -120,7 +127,8 @@ impl Opcode {
             Self::Allow | Self::Remove => 22,
             Self::Push | Self::Publish => 23,
             Self::Pull | Self::Retract => 24,
-            Self::Protect => 25,
+            Self::Split | Self::Protect => 25,
+            Self::Merge => 26,
         }
     }
 
@@ -135,6 +143,8 @@ impl Opcode {
             (Domain::Flat, 22) => Self::Allow,
             (Domain::Flat, 23) => Self::Push,
             (Domain::Flat, 24) => Self::Pull,
+            (Domain::Flat, 25) => Self::Split,
+            (Domain::Flat, 26) => Self::Merge,
             (Domain::Nest, 19) => Self::Reserve,
             (Domain::Nest, 20) => Self::Release,
             (Domain::Nest, 21) => Self::Insert,

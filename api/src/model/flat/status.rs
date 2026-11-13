@@ -5,8 +5,9 @@ use super::{BlockPhase, BlockRef, FlatId, SlotVersion};
 use crate::model::{cell::CellLevel, identity::TaskId};
 use core::num::NonZeroU64;
 
-/// Flat structural/lifecycle revision. It is independent of an individual
-/// Slot's residency version and never tracks ordinary memory load/store content.
+/// Flat structural/lifecycle revision and high-water mark for Slot stamps.
+/// Each changed Slot receives the next Flat revision; unchanged Slots keep their
+/// stamps. Neither revision tracks ordinary memory load/store content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FlatVersion(NonZeroU64);
 
@@ -23,6 +24,15 @@ impl FlatVersion {
     }
     pub fn next(self) -> Option<Self> {
         Self::new(self.get().checked_add(1)?)
+    }
+
+    /// Proposes one new Flat revision and a common stamp for every changed Slot.
+    /// The live Flat must check this against its current revision and install
+    /// both atomically. Never derive a revived child stamp from its old parent
+    /// or from a deleted child record. This helper performs no state mutation.
+    pub fn next_slots(self) -> Option<(Self, SlotVersion)> {
+        let next = self.next()?;
+        Some((next, SlotVersion::new(next.get())?))
     }
 }
 

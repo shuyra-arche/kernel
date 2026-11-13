@@ -50,8 +50,10 @@ their decoders. Fields are private so invalid values cannot be assembled by
 ordinary safe field assignment. Their getters do not resolve any Kernel state.
 `BlockRef::new` requires a nonzero record ID. Revisions start at one, preserve
 all 64 bits, and `next()` returns `None` at `u64::MAX`. Server code must reject a
-new transition at exhaustion before committing any effects. Forced cleanup may
-retain the terminal generation, but must never resurrect ordinary mutation.
+new transition at exhaustion before committing any effects. Live Slot stamps are
+issued from the Flat-wide high-water mark, not the local arithmetic successor;
+see [Split/Merge issuance rules](memory-wire.md#splitmerge-geometry-and-non-reusing-slot-stamps).
+Forced cleanup may retain the terminal generation, but must never resurrect ordinary mutation.
 
 `BlockRef` does not contain the branch, Task or effective range. Those facts
 belong to the Flat's original maintenance record. Each use will supply a live
@@ -98,14 +100,14 @@ slots under the new global version prefix.
 | 22 | Allow | Same live branch/actor and BlockRef; enters Releasing |
 | 23 | Push | Two independently authorized SlotPositions and expected versions; local → remote |
 | 24 | Pull | Same two endpoints; remote → local |
-| 25 | Split | Flat RESHAPE; full physical unit, expected geometry version and maintenance |
-| 26 | Merge | Flat RESHAPE; full sibling group, expected geometry version and maintenance |
+| 25 | Split | Flat RESHAPE; full parent, expected FlatVersion, parent level and Held maintenance |
+| 26 | Merge | Flat RESHAPE; 512 immediate siblings, expected FlatVersion, parent level and Held maintenance |
 
 | Nest slot | Operation | Required grant / semantic input |
 | ---: | --- | --- |
 | 16 | Create | None NEST; Internal only |
 | 17 | Delete | Whole DELETE; close the space, retain incomplete hardware work |
-| 18 | Inspect | Explicit Object / Memo / Request query |
+| 18 | Inspect | Explicit Object / Memo / Mapping / Request query |
 | 19 | Reserve | Whole RESERVE; vacant address reservation; returns Mapping Pend and address |
 | 20 | Release | Mapping RELEASE; entire original reservation; no premature address reuse |
 | 21 | Insert | Mapping INSERT; MemoPosition + generation + authorized logical source; replacement also REMOVE |
@@ -184,7 +186,10 @@ until both consent, quotas and responsibility settlement have their own contract
 Split/Merge must preserve the Flat identity and fixed coordinate system. Use a
 non-reusing geometry revision covering every affected coordinate, including newly
 created child heads, so an old child reference cannot become valid after a
-merge/split cycle. Reject partial Pages, borrowed allocations, outstanding
+merge/split cycle. The implemented value contract uses one checked FlatVersion
+successor as the common SlotVersion for changed heads; requests check the full
+Flat revision and operate on exactly one level. Live issuance still belongs to
+the Server commit boundary. Reject partial Pages, borrowed allocations, outstanding
 publications and nonexclusive allocation receipts. Prepare metadata and validate
 layout before changing the allocation. Memo logical spans survive; an incompatible
 new geometry makes Publish fail explicitly until repaired. No implicit rewriting
@@ -277,11 +282,12 @@ dependency; inspect that pin and its fixtures rather than assuming it tracks the
 provider. Do not mix old executable descriptors with a new dispatch prefix.
 Rollback requires the complete old provider/consumer/image set.
 
-Remaining M1 work is explicit: Split/Merge descriptors and revision bookkeeping,
-the fault registration/wait protocol and backend-specific proof interfaces. The
-tables above constrain that work; they do not silently freeze untested numeric encodings or authorize claiming
-service integration. Subsequent changes should implement coherent slices of
-M2–M5 and record which M1 contracts they finalize.
+Remaining M1 work is explicit: the fault registration/wait protocol and
+backend-specific proof interfaces. Split/Merge now have codecs and checked
+revision arithmetic; live geometry bookkeeping and allocation conversion still
+require Server/allocator implementation. The tables above constrain that work;
+they do not authorize claiming service integration. Subsequent changes should
+implement coherent slices of M2–M5 and record which M1 contracts they finalize.
 
 ## Verification boundary
 
