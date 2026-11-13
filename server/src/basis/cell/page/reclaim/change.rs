@@ -70,6 +70,9 @@ pub(crate) struct Freeze {
     change: Arc<Change>,
 }
 impl Freeze {
+    pub(crate) fn page(&self) -> &Arc<Page> {
+        self.change.page()
+    }
     pub(crate) fn new(change: Arc<Change>, retracts: Option<bool>) -> Result<Self, RetainError> {
         // Admission and the writer check are one transition. A prepared or
         // retiring writer still counts until its exact obligation discharges.

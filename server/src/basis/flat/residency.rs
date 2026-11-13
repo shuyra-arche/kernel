@@ -22,6 +22,38 @@ impl Flat {
 }
 
 impl FlatRange {
+    pub(crate) fn slot_version(&self) -> Result<SlotVersion, Error> {
+        let state = self.flat().state.lock();
+        if !state.explicit || self.page_count().get() != self.grain() {
+            return Err(Error::Unsupported);
+        }
+        Ok(state.revision.at(self.index()))
+    }
+    pub(crate) fn transfer_to(
+        &self,
+        expected: SlotVersion,
+        target: &Self,
+        target_version: SlotVersion,
+    ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
+        if self.page_count().get() != self.grain()
+            || target.page_count().get() != target.grain()
+            || self.level() != target.level()
+        {
+            return Err(Error::Unsupported);
+        }
+        if alloc::sync::Arc::ptr_eq(self.flat(), target.flat()) {
+            self.flat().state.lock().move_within(
+                self.index(),
+                expected,
+                target.index(),
+                target_version,
+            )
+        } else {
+            crate::metal::sync::with_pair(&self.flat().state, &target.flat().state, |from, to| {
+                from.move_to(self.index(), expected, to, target.index(), target_version)
+            })
+        }
+    }
     pub(crate) fn inspect_slot(&self) -> Result<SlotStatus, Error> {
         if self.page_count().get() != self.grain() {
             return Err(Error::Unsupported);

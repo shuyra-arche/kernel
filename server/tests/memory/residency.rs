@@ -9,15 +9,15 @@ use crate::{
 use kernel_api::model::flat::{FlatVersion, SlotVersion};
 use std::sync::{Arc, Barrier, Mutex};
 
-fn fresh() -> FlatState {
+pub(crate) fn fresh() -> FlatState {
     let mut state = FlatState::new(FlatSource::Managed(Vec::new()), true);
     state.explicit = true;
     state
 }
-fn page(pool: &'static Pool) -> Page {
+pub(crate) fn page(pool: &'static Pool) -> Page {
     Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap()
 }
-fn resident(state: &FlatState) -> Arc<Page> {
+pub(crate) fn resident(state: &FlatState) -> Arc<Page> {
     let FlatSource::Managed(slots) = &state.source else {
         unreachable!()
     };
@@ -157,4 +157,104 @@ fn explicit_sources_reject_legacy_transfers_and_unsettled_vacate_keeps_version()
     );
     assert_eq!(legacy.revision.current(), FlatVersion::INITIAL);
     assert_eq!(attempt.gives(), 1);
+}
+
+#[test]
+fn versioned_transfer_preserves_identity_and_owner_without_moving_unsettled_publications() {
+    let mut source = fresh();
+    let mut target = fresh();
+    let pool = Pool::new(0);
+    let (version, id) = source
+        .occupy(PageIndex::ZERO, SlotVersion::INITIAL, page(pool))
+        .unwrap();
+    let observed = resident(&source);
+    let owner = observed.owner();
+    let mut publication = observed.prepare_hardware(false).unwrap();
+    publication.publish();
+    assert_eq!(
+        source.move_to(
+            PageIndex::ZERO,
+            version,
+            &mut target,
+            PageIndex::ZERO,
+            SlotVersion::INITIAL
+        ),
+        Err(Error::Busy)
+    );
+    assert_eq!(source.revision.at(PageIndex::ZERO), version);
+    assert_eq!(target.revision.current(), FlatVersion::INITIAL);
+    // SAFETY: the host fixture names the completion point, not a physical proof.
+    unsafe {
+        publication.retire().settle();
+    }
+    assert_eq!(
+        source.move_to(
+            PageIndex::ZERO,
+            version,
+            &mut target,
+            PageIndex::ZERO,
+            SlotVersion::new(7).unwrap()
+        ),
+        Err(Error::Stale)
+    );
+    let (from, to, moved) = source
+        .move_to(
+            PageIndex::ZERO,
+            version,
+            &mut target,
+            PageIndex::ZERO,
+            SlotVersion::INITIAL,
+        )
+        .unwrap();
+    assert_eq!(moved, id);
+    assert_eq!(from.get(), 3);
+    assert_eq!(to.get(), 2);
+    assert_eq!(resident(&target).owner(), owner);
+    assert_eq!(
+        observed.id(),
+        id,
+        "a snapshot is not a second holding or a new authority"
+    );
+    assert_eq!(
+        source.vacate(PageIndex::ZERO, from).err(),
+        Some(Error::Empty)
+    );
+    assert_eq!(target.vacate(PageIndex::ZERO, to).err(), Some(Error::Busy));
+    drop(observed);
+    let (_, allocation) = target.vacate(PageIndex::ZERO, to).unwrap();
+    drop(allocation);
+    assert_eq!(pool.gives(), 1);
+}
+
+#[test]
+fn same_flat_move_uses_one_revision_and_can_restore_missing_without_zeroing() {
+    let mut state = fresh();
+    let pool = Pool::new(0);
+    let (first, id) = state
+        .occupy(PageIndex::ZERO, SlotVersion::INITIAL, page(pool))
+        .unwrap();
+    let (from, to, moved) = state
+        .move_within(
+            PageIndex::ZERO,
+            first,
+            PageIndex::new(1),
+            SlotVersion::INITIAL,
+        )
+        .unwrap();
+    assert_eq!(from, to);
+    assert_eq!(from.get(), 3);
+    assert_eq!(moved, id);
+    let (from, to, restored) = state
+        .move_within(PageIndex::new(1), to, PageIndex::ZERO, from)
+        .unwrap();
+    assert_eq!(from, to);
+    assert_eq!(from.get(), 4);
+    assert_eq!(restored, id);
+    assert_eq!(
+        state.move_within(PageIndex::ZERO, first, PageIndex::new(1), to),
+        Err(Error::Stale)
+    );
+    let (_, allocation) = state.vacate(PageIndex::ZERO, to).unwrap();
+    drop(allocation);
+    assert_eq!(pool.gives(), 1);
 }

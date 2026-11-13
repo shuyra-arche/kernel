@@ -49,6 +49,9 @@ fn run(ident: &Arc<TaskIdent>, number: u64, registers: [usize; 6]) -> Result<(),
         return Err(Failure::Denied);
     }
     let output = execute(&actor, request)?;
+    // A completed holding change reopens its Page gate. Wake source observers
+    // only after the ledger, journal and COMMIT guards have been released.
+    crate::basis::cell::change::maintain();
     if !ident
         .team
         .nest
@@ -61,7 +64,11 @@ fn run(ident: &Arc<TaskIdent>, number: u64, registers: [usize; 6]) -> Result<(),
 
 fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Failure> {
     if let Action::Inspect(query) = request.action() {
-        return super::flat::next::inspect(actor, query).map(|value| value.to_bytes());
+        return match query.domain() {
+            memory::Domain::Flat => super::flat::next::inspect(actor, query),
+            memory::Domain::Nest => super::nest::next::inspect(actor, query),
+        }
+        .map(|value| value.to_bytes());
     }
     let _serial = actor.pend.lock();
     let mut window = actor.memory_results.lock();
@@ -97,8 +104,10 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
     // and expected version. A losing preparation remains private and is freed.
     let prepared = super::flat::next::prepare(actor, request.action());
     let _commit = basis::commit();
-    let result =
-        prepared.and_then(|prepared| super::flat::next::mutate(actor, request.action(), prepared));
+    let result = prepared.and_then(|prepared| match request.action().opcode().domain() {
+        memory::Domain::Flat => super::flat::next::mutate(actor, request.action(), prepared),
+        memory::Domain::Nest => super::nest::next::mutate(actor, request.action()),
+    });
     let outcome = match result {
         Ok(value) => Outcome::Committed(value),
         Err(error) => Outcome::Rejected(error),

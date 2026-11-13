@@ -85,6 +85,41 @@ pub(in crate::entry::call) fn mutate(
         return Err(Failure::Dead);
     }
     match action {
+        Action::Push {
+            local,
+            local_version,
+            remote,
+            remote_version,
+            maintenance,
+        }
+        | Action::Pull {
+            local,
+            local_version,
+            remote,
+            remote_version,
+            maintenance,
+        } => {
+            if let Some(maintenance) = maintenance {
+                require_maintenance(actor, maintenance)?;
+            }
+            let local_range = resolve(actor, local, FlatRights::TRANSFER)?;
+            let remote_range = resolve(actor, remote, FlatRights::TRANSFER)?;
+            let (local, remote, page) = if matches!(action, Action::Push { .. }) {
+                local_range
+                    .transfer_to(local_version, &remote_range, remote_version)
+                    .map_err(residency_error)?
+            } else {
+                let (remote, local, page) = remote_range
+                    .transfer_to(remote_version, &local_range, local_version)
+                    .map_err(residency_error)?;
+                (local, remote, page)
+            };
+            Ok(Value::Transfer {
+                local,
+                remote,
+                page: page.get() as u64,
+            })
+        }
         Action::CreateFlat {
             license,
             count,
@@ -130,7 +165,7 @@ fn require_maintenance(_: &Arc<Task>, _: memory::Maintenance) -> Result<(), Fail
     Err(Failure::Unsupported)
 }
 
-fn pend_error(error: kernel_api::abi::call::pend::PendFail) -> Failure {
+pub(in crate::entry::call) fn pend_error(error: kernel_api::abi::call::pend::PendFail) -> Failure {
     use kernel_api::abi::call::pend::PendFail;
     match error {
         PendFail::OutOfMemory => Failure::OutOfMemory,
@@ -140,7 +175,7 @@ fn pend_error(error: kernel_api::abi::call::pend::PendFail) -> Failure {
         _ => Failure::Denied,
     }
 }
-fn residency_error(error: flat::residency::Error) -> Failure {
+pub(in crate::entry::call) fn residency_error(error: flat::residency::Error) -> Failure {
     use flat::residency::Error;
     match error {
         Error::Unsupported => Failure::Unsupported,

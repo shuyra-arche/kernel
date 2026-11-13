@@ -19,6 +19,8 @@ pub(crate) struct Source {
     /// Cleanup identity only; authority always uses the live original actor.
     task: TaskId,
     ceiling: Access,
+    /// Descriptive fixed origin survives revocation; never used as authority.
+    position: (kernel_api::model::flat::FlatId, usize),
 }
 
 impl Source {
@@ -129,6 +131,13 @@ impl Source {
             return Err(CellFail::NotAligned);
         }
         let ceiling = hold.ceiling() & hold.source().ceiling();
+        let position = (
+            full.source_id(),
+            full.index()
+                .get()
+                .checked_add(offset)
+                .ok_or(CellFail::NotAligned)?,
+        );
         let mut selected = Self {
             hold,
             offset: PageOffset::new(offset),
@@ -136,6 +145,7 @@ impl Source {
             actor: Arc::downgrade(actor),
             task: actor.ident.id,
             ceiling,
+            position,
         };
         selected.range()?;
         let authority = selected.authority(actor)?;
@@ -211,6 +221,9 @@ impl Source {
 
     pub(crate) fn ceiling(&self) -> Access {
         self.ceiling
+    }
+    pub(crate) fn position(&self) -> (kernel_api::model::flat::FlatId, usize) {
+        self.position
     }
 
     pub(crate) fn source(&self) -> &Arc<SourceAuthorization> {

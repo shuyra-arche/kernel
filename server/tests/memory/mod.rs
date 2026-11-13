@@ -30,20 +30,8 @@ pub mod proof;
 #[path = "../../src/basis/name/mod.rs"]
 mod name;
 
-mod basis {
-    pub(crate) use crate::name;
-    pub(crate) mod nest {
-        pub(crate) use crate::external_error::Error as PublicationError;
-    }
-    pub(crate) mod cell {
-        pub(crate) use crate::cell as page;
-    }
-    pub(crate) mod flat {
-        pub(crate) mod transfer {
-            pub(crate) use crate::transfer_error::TransferError;
-        }
-    }
-}
+#[allow(dead_code)]
+mod basis;
 
 mod admission;
 #[path = "../name/allocation.rs"]
