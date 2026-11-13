@@ -77,6 +77,7 @@ static REVOKE_FINISHED: AtomicBool = AtomicBool::new(false);
 static WATCH_TOKEN: AtomicUsize = AtomicUsize::new(0);
 static WATCH_ENTERED: AtomicU32 = AtomicU32::new(0);
 static WATCH_OBSERVED: AtomicU32 = AtomicU32::new(0);
+static WATCH_RELEASE: AtomicU32 = AtomicU32::new(0);
 extern "C" fn watch() -> ! {
     let token = PendId::mint(WATCH_TOKEN.load(Ordering::Acquire));
     WATCH_ENTERED.fetch_add(1, Ordering::Release);
@@ -91,6 +92,11 @@ extern "C" fn watch() -> ! {
     assert!(sign::consume(token, 1).is_err());
     WATCH_OBSERVED.fetch_add(1, Ordering::Release);
     room::wake_value(VirtAddr::new(WATCH_OBSERVED.as_ptr() as usize), true).unwrap();
+    // Keep Task retirement outside the delivery measurement. The first woken
+    // observers must not start cross-Hart mapping cleanup before the rest run.
+    while WATCH_RELEASE.load(Ordering::Acquire) == 0 {
+        crate::room::wait(&WATCH_RELEASE, 0, Wait::Infinite);
+    }
     unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 fn write(offset: usize, byte: u8) {
@@ -337,12 +343,16 @@ pub(super) fn run(at: usize, count: usize) {
         if seen == watchers.len() as u32 {
             break;
         }
-        assert!(
-            room::clock() < until,
-            "UART notification batch stalled: observed {seen}/6"
-        );
+        if room::clock() >= until {
+            LOAD_STOP.store(true, Ordering::Release);
+            let states = watchers
+                .map(|task| super::lifecycle::inspect(UnitQuery::Target(UnitTarget::Task(task))));
+            panic!("UART notification batch stalled: observed {seen}/6; tasks={states:?}");
+        }
         crate::room::wait(&WATCH_OBSERVED, seen, Wait::At(until));
     }
+    WATCH_RELEASE.store(1, Ordering::Release);
+    room::wake_value(VirtAddr::new(WATCH_RELEASE.as_ptr() as usize), true).unwrap();
     for task in watchers {
         assert!(super::lifecycle::wait_task(task));
         assert_eq!(super::lifecycle::result(task), (1, 0));

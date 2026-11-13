@@ -147,8 +147,17 @@ pub(in super::super) fn death(at: usize, count: usize) {
     assert!(nest::inspect(nest_child, VirtAddr::new(info.as_mut_ptr() as usize)).is_err());
     let (registers, _) = share_view::open(bar).unwrap();
     assert_eq!(read(registers, 0x98) & 1, 0);
+    // A queued request may have finished before Task retirement began. Probe
+    // the now-retired address explicitly to establish denied late access.
+    let previous_faults = context(root).fault_sequence;
+    transfer(registers, ADDRESS, true);
+    let deadline = room::clock() + 2_000_000_000;
+    while context(root).fault_sequence == previous_faults {
+        assert!(room::clock() < deadline, "retired address accepted DMA");
+        room::sleep_until((room::clock() + 1_000_000).min(deadline)).unwrap();
+    }
     let faults = context(root).fault_sequence;
-    assert!(faults > 0);
+    assert!(faults > previous_faults);
     assert_eq!(context(root).fault_address, ADDRESS as u64);
     // Losing the old mapping does not authorize the new Task to use its ID.
     assert!(observed(pos).is_none());

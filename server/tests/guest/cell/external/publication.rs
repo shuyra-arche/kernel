@@ -137,16 +137,17 @@ pub(in super::super) fn run(at: usize, count: usize) {
     assert!(!super::super::info(first).external);
     assert_eq!(super::super::info(second).state, CellState::Published);
     assert!(super::super::info(second).external);
+    // The queued request may have completed before the kernel admitted Retract.
+    // Fencing does not promise a fault; an explicit access after retirement must.
     let late_faults = context(root).fault_sequence;
-    assert!(late_faults > 0);
     transfer(bar, ADDRESS + 4096, true);
-    assert_eq!(context(root).fault_address, ADDRESS as u64);
     transfer(bar, ADDRESS, true);
     let until = room::clock() + 2_000_000_000;
     while context(root).fault_sequence == late_faults {
         assert!(room::clock() < until);
         room::yield_();
     }
+    assert_eq!(context(root).fault_address, ADDRESS as u64);
     let faults = sign::create(crate::license::get()).unwrap();
     sign::attach(faults, SignSource::NestFault { token: root }, 0).unwrap();
     event(faults, SignSource::NestFault { token: root });

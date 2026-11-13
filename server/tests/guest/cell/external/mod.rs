@@ -153,18 +153,31 @@ fn begin_retract(pos: CellPosition) {
     let pos = current(pos);
     let before = super::info(pos);
     assert_eq!(before.state, CellState::Published);
-    if let Err(error) = cell::retract(super::ptr(&pos.to_bytes())) {
-        // Busy can retain an accepted asynchronous withdrawal. It must have
-        // advanced this exact publication, rather than rejected the request.
-        assert_eq!(error.source, kernel_api::abi::call::cell::CellFail::Busy);
+    let deadline = room::clock() + 2_000_000_000;
+    loop {
+        let result = cell::retract(super::ptr(&pos.to_bytes()));
+        if let Err(error) = &result {
+            assert_eq!(error.source, kernel_api::abi::call::cell::CellFail::Busy);
+        }
+        let after = super::info(pos);
+        assert_eq!(after.page, before.page);
+        if after.generation == before.generation + 1 {
+            // Busy can retain an accepted asynchronous withdrawal. Require
+            // this exact publication's new generation before waiting for it.
+            assert!(matches!(
+                after.state,
+                CellState::Retracting | CellState::Ready
+            ));
+            return;
+        }
+        // Maintenance may own the span before this attempt starts. A rejected
+        // Busy must leave the publication unchanged; retry within the same bound.
+        assert!(result.is_err());
+        assert_eq!(after.generation, before.generation);
+        assert_eq!(after.state, CellState::Published);
+        assert!(room::clock() < deadline, "External Retract did not start");
+        room::sleep_until((room::clock() + 1_000_000).min(deadline)).unwrap();
     }
-    let after = super::info(pos);
-    assert_eq!(after.generation, before.generation + 1);
-    assert_eq!(after.page, before.page);
-    assert!(matches!(
-        after.state,
-        CellState::Retracting | CellState::Ready
-    ));
 }
 fn closed(token: PendId) {
     let until = room::clock() + 2_000_000_000;
