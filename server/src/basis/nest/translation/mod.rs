@@ -3,7 +3,7 @@
 mod external;
 mod fault;
 mod target;
-use target::Storage;
+pub(super) use target::Storage;
 mod invalidation;
 pub(super) mod phase;
 mod retirement;
@@ -108,6 +108,7 @@ impl NestState {
         // One indexed Span per service turn. Its admitted Page/active-range
         // geometry bounds the backend work; no complete-Nest snapshot is made.
         self.phase = ClosePhase::Draining;
+        self.index.close_faults();
         let mappings = self.index.first_overlap(0, usize::MAX);
         let cell_count = mappings
             .iter()

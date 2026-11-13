@@ -141,11 +141,11 @@ impl Flat {
         self.page_count
     }
 
-    pub fn level(&self) -> CellLevel {
-        self.level
-    }
     pub fn grain(&self) -> usize {
         self.level.pages().unwrap()
+    }
+    pub(crate) fn level_at(&self, index: PageIndex) -> CellLevel {
+        self.state.lock().geometry.head(index.get(), self.level).1
     }
 
     /// 整段来源。
@@ -159,7 +159,12 @@ impl Flat {
         index: PageIndex,
         count: PageCount,
     ) -> Result<FlatRange, FlatError> {
-        if !index.get().is_multiple_of(self.grain()) || !count.get().is_multiple_of(self.grain()) {
+        if !self
+            .state
+            .lock()
+            .geometry
+            .covers(index.get(), count.get(), self.level)
+        {
             return Err(FlatError::NotAligned);
         }
         let end = index
@@ -182,13 +187,22 @@ impl Flat {
         change: Option<&crate::basis::cell::page::Change>,
     ) -> Result<Residency, FlatError> {
         let mut state = self.state.lock();
+        if !state
+            .geometry
+            .covers(range.index().get(), range.page_count().get(), self.level)
+        {
+            return Err(FlatError::NotAligned);
+        }
         // 驻留要在在途事务之外取得：Moving/Reserved 的页还没有可用的承载。
         if state.busy(range.index(), range.page_count())
             && !change.is_some_and(|change| {
+                if range.page_count().get() != change.page().pages() {
+                    return false;
+                }
                 let FlatSource::Managed(slots) = &state.source else {
                     return false;
                 };
-                range.page_count().get() == self.grain() && slots.iter().any(|(index, slot)| {
+                slots.iter().any(|(index, slot)| {
                     *index == range.index()
                         && matches!(slot, Slot::Resident(page) if Arc::ptr_eq(page, change.page()))
                 })
@@ -242,12 +256,20 @@ impl Flat {
         }
         let mut guard = self.state.lock();
         let explicit = guard.explicit;
-        let FlatSource::Managed(slots) = &mut guard.source else {
+        let storage::FlatState {
+            source, geometry, ..
+        } = &mut *guard;
+        if !geometry.covers(index.get(), count.get(), self.level) {
+            return Err(FlatError::NotAligned);
+        }
+        let FlatSource::Managed(slots) = source else {
             return Ok(());
         };
         let mut page = index.get();
         let mut at = slots.partition_point(|(slot, _)| slot.get() < page);
         while page < end {
+            let level = geometry.head(page, self.level).1;
+            let grain = level.pages().unwrap();
             if slots.get(at).is_some_and(|(slot, _)| slot.get() == page) {
                 match slots[at].1 {
                     // 承载已移出：不补零、不新分配。
@@ -256,7 +278,7 @@ impl Flat {
                     Slot::Moving { .. } | Slot::Reserved { .. } => return Err(FlatError::Busy),
                     Slot::Resident(_) => {}
                 }
-                page += self.grain();
+                page += grain;
                 at += 1;
                 continue;
             }
@@ -266,11 +288,11 @@ impl Flat {
             slots.try_reserve(1).map_err(|_| FlatError::OutOfMemory)?;
             let cell = Arc::try_new(crate::basis::cell::allocate_level(
                 self.allocation_owner.clone(),
-                self.level,
+                level,
             )?)
             .map_err(|_| FlatError::OutOfMemory)?;
             slots.insert(at, (PageIndex::new(page), Slot::Resident(cell)));
-            page += self.grain();
+            page += grain;
             at += 1;
         }
         Ok(())
@@ -293,6 +315,9 @@ impl Flat {
             return Err(FlatError::OutOfRange);
         }
         let guard = self.state.lock();
+        if !guard.geometry.covers(index.get(), count.get(), self.level) {
+            return Err(FlatError::NotAligned);
+        }
         let FlatSource::Managed(slots) = &guard.source else {
             return Ok(Vec::new());
         };
@@ -317,8 +342,8 @@ impl Flat {
         if page.get() >= self.page_count.get() {
             return Err(FlatError::OutOfRange);
         }
-        let page = PageIndex::new(page.get() / self.grain() * self.grain());
         let guard = self.state.lock();
+        let page = PageIndex::new(guard.geometry.head(page.get(), self.level).0);
         match &guard.source {
             FlatSource::Borrowed(_) => Ok(true),
             FlatSource::Managed(slots) => {
@@ -351,7 +376,7 @@ impl Flat {
                 Ok(PhysAddr::from_raw(address))
             }
             FlatSource::Managed(slots) => {
-                let head = page.get() / self.grain() * self.grain();
+                let head = guard.geometry.head(page.get(), self.level).0;
                 let (at, present) = slot::spot(slots, PageIndex::new(head));
                 if !present {
                     return Err(FlatError::OutOfRange);

@@ -8,6 +8,23 @@ impl Page {
         pages: &mut Vec<Arc<Self>>,
         level: CellLevel,
     ) -> Result<Vec<Arc<Self>>, PageError> {
+        Self::reshape_with(pages, level, |pages| {
+            if pages.iter().any(|page| {
+                Arc::strong_count(page) != 1 || Arc::weak_count(page) != 0 || !page.allows_return()
+            }) {
+                return Err(PageError::Busy);
+            }
+            Ok(())
+        })
+    }
+    /// Prepare identities/layout before the caller consumes its exact settled
+    /// gates. The callback must leave exclusive Pages on success; on failure it
+    /// must preserve the complete original gate set.
+    pub(crate) fn reshape_with(
+        pages: &mut Vec<Arc<Self>>,
+        level: CellLevel,
+        release: impl FnOnce(&mut Vec<Arc<Self>>) -> Result<(), PageError>,
+    ) -> Result<Vec<Arc<Self>>, PageError> {
         let first = pages.first().ok_or(PageError::InvalidRange)?;
         let old = first.level;
         let size = level.bytes().ok_or(PageError::InvalidRange)?;
@@ -26,9 +43,6 @@ impl Page {
         let receipt = first.page.as_ref().unwrap();
         let repartition = receipt.repartition.ok_or(PageError::InvalidRange)?;
         for (index, page) in pages.iter().enumerate() {
-            if Arc::strong_count(page) != 1 || Arc::weak_count(page) != 0 || !page.allows_return() {
-                return Err(PageError::Busy);
-            }
             if page.level != old
                 || page.owner() != first.owner()
                 || page.physical_address() != base + index * first.size()
@@ -57,6 +71,10 @@ impl Page {
             );
         }
         let allocator = receipt.allocator;
+        release(pages)?;
+        assert!(pages.iter().all(|page| Arc::strong_count(page) == 1
+            && Arc::weak_count(page) == 0
+            && page.allows_return()));
         // SAFETY: exclusive, aligned receipts cover exactly the same contiguous union.
         unsafe { repartition(base, old, pages.len(), level, count) };
         for page in pages.iter_mut() {

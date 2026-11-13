@@ -54,6 +54,41 @@ pub(super) fn wait(
     mapping: usize,
     frame: &mut TrapContext,
 ) -> *mut TrapContext {
+    if let Some(span) =
+        kernel_api::model::nest::ReservationId::from_bytes(&(mapping as u64).to_le_bytes())
+            .and_then(|id| nest.reservation(id))
+        && span.faults.lock().native
+    {
+        let result = crate::basis::room::scheduler::slot::current()
+            .running_task()
+            .ok_or(kernel_api::abi::memory::Failure::Dead)
+            .and_then(|actor| {
+                crate::basis::nest::fault::wait::Cpu::admit(
+                    &actor,
+                    nest.clone(),
+                    span,
+                    fault.addr,
+                    fault.kind,
+                )
+            });
+        drop(ident);
+        let result = result.and_then(|wait| match wait {
+            Some(wait) => crate::basis::nest::fault::wait::park(wait),
+            None => Ok(Handoff::Resume(())),
+        });
+        return match result {
+            Ok(Handoff::Resume(())) => resume(frame as *mut TrapContext),
+            Ok(Handoff::Switch(pa)) => pa as *mut TrapContext,
+            Err(error) => {
+                super::doom(
+                    None,
+                    kernel_api::model::unit::ExitCause::Fault,
+                    error.code() as usize,
+                );
+                super::quit(None, error.code() as usize)
+            }
+        };
+    }
     // 登记失败要终止任务时，身份已经交出去了：先把这一 id 标量留下来。
     let tid = ident.as_ref().map_or(0, Identity::task_id);
     let life = nest.life();

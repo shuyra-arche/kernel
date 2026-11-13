@@ -19,7 +19,7 @@ use crate::basis::unit::task::Task;
 pub(crate) use branch::{accord, reduce};
 pub(crate) use ledger::{
     PendEntry, PreparedReservationGrant, Table, accede, available, doom, insert, locate, notify,
-    prepare_reservation, retire, return_, revoke, vestor,
+    prepare_native_reservation, prepare_reservation, retire, return_, revoke, vestor,
 };
 pub(crate) use source::{
     ExternalBorrow, Geometry, Hold, HoldTable, RangeBlock, SourceAuthorization,

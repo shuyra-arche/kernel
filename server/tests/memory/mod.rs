@@ -56,6 +56,7 @@ mod memo;
 #[path = "../../src/basis/flat/storage/mod.rs"]
 mod state;
 
+mod reshape;
 mod residency;
 mod transaction;
 #[allow(dead_code)]

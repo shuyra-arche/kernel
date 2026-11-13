@@ -197,6 +197,21 @@ impl RangeBlock {
     ) -> Result<kernel_api::model::flat::SlotVersion, crate::basis::flat::residency::Error> {
         range.vacate_held(expected, &mut self.pages.lock())
     }
+    pub(crate) fn reshape(
+        &self,
+        selected: &FlatRange,
+        range: kernel_api::model::flat::Reshape,
+        split: bool,
+        expected: kernel_api::model::flat::FlatVersion,
+    ) -> Result<
+        (
+            kernel_api::model::flat::FlatVersion,
+            kernel_api::model::flat::SlotVersion,
+        ),
+        crate::basis::flat::residency::Error,
+    > {
+        selected.reshape_held(range, split, expected, &mut self.pages.lock())
+    }
     pub(crate) fn window(&self) -> (PageOffset, PageCount) {
         self.geometry.window()
     }
@@ -215,6 +230,37 @@ impl RangeBlock {
     }
 }
 impl SourceAuthorization {
+    /// Closing the source retires maintenance uses too. Staged holdings keep
+    /// their original record until returned or explicitly released elsewhere.
+    pub(crate) fn close_blocks(&self) -> Result<(), PendFail> {
+        let blocks = {
+            let held = self.blocks.lock();
+            let mut blocks = Vec::new();
+            blocks
+                .try_reserve(held.len())
+                .map_err(|_| PendFail::OutOfMemory)?;
+            blocks.extend(held.iter().cloned());
+            blocks
+        };
+        for block in &blocks {
+            block.retire_uses(None)?;
+            if !block.settled() || block.has_uses() || block.staged() {
+                return Err(PendFail::Busy);
+            }
+        }
+        let _commit = crate::basis::commit();
+        if !self.revoked() || self.pending_close() {
+            return Err(PendFail::Busy);
+        }
+        for block in &blocks {
+            if block.native() {
+                block.set_phase(kernel_api::model::flat::BlockPhase::Closed);
+            }
+            block.pages.lock().clear();
+        }
+        self.blocks.lock().clear();
+        Ok(())
+    }
     pub(crate) fn inspect_block(
         &self,
         block: &RangeBlock,

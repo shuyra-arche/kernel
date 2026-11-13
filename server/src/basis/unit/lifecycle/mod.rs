@@ -75,6 +75,16 @@ pub(crate) use reap::bury;
 pub(crate) use reap::hook;
 pub(crate) use reap::quit;
 
+/// Only for a detached ordinary wait continuation, after its ticket and wait
+/// have been removed. Reuse the normal exit/retirement owner without re-detach.
+pub(crate) fn fault(task: &alloc::sync::Arc<crate::basis::unit::task::Task>, reason: usize) {
+    reap::reap(
+        task.clone(),
+        kernel_api::model::unit::ExitCause::Fault,
+        reason,
+    );
+}
+
 pub(crate) fn rip() {
     let retired = HUSKS.lock().take();
     drop(retired);

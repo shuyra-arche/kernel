@@ -167,6 +167,23 @@ pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), NestFail> {
     Ok(())
 }
 
+/// Whole scope alone cannot close another branch's trusted hardware lease.
+/// Check the exact registered root before a versioned close commits anything.
+pub(crate) fn check_delete_root(nest: &Arc<Nest>, entry: &PendEntry) -> Result<(), NestFail> {
+    if !nest.is_external() {
+        return Ok(());
+    }
+    let records = ORGANIZATIONS.lock();
+    let record = records
+        .iter()
+        .find(|r| Arc::ptr_eq(&r.nest, nest))
+        .ok_or(NestFail::Denied)?;
+    if !record.root.ptr_eq(&Arc::downgrade(entry.authority())) {
+        return Err(NestFail::Denied);
+    }
+    Ok(())
+}
+
 pub(crate) fn maintain() -> bool {
     use core::sync::atomic::{AtomicUsize, Ordering};
     static CURSOR: AtomicUsize = AtomicUsize::new(0);

@@ -33,6 +33,45 @@ fn maintenance(state: &FlatState) -> Vec<crate::cell::Block> {
 }
 
 #[test]
+fn closure_is_irreversible_and_does_not_return_any_page_until_all_holdings_settle() {
+    use kernel_api::model::flat::FlatPhase;
+    let pool = Pool::new(0);
+    let second = Pool::new(0);
+    let mut state = fresh();
+    state
+        .occupy(PageIndex::ZERO, SlotVersion::INITIAL, page(pool))
+        .unwrap();
+    state
+        .occupy(PageIndex::new(1), SlotVersion::INITIAL, page(second))
+        .unwrap();
+    let before = state.revision.current();
+    let alias = resident(&state);
+    let version = state.begin_close(before).unwrap();
+    assert_eq!(version, before.next().unwrap());
+    assert_eq!(state.phase, FlatPhase::Closing);
+    assert_eq!(state.begin_close(before), Err(Error::Stale));
+    assert_eq!(state.begin_close(version), Ok(version));
+    assert!(matches!(state.finish_close(), Err(Error::Busy)));
+    assert_eq!(pool.gives(), 0);
+    assert_eq!(
+        state.occupy(PageIndex::new(2), SlotVersion::INITIAL, page(Pool::new(0))),
+        Err(Error::Busy)
+    );
+    let weak = Arc::downgrade(&alias);
+    drop(alias);
+    assert!(matches!(state.finish_close(), Err(Error::Busy)));
+    drop(weak);
+    let returned = state.finish_close().unwrap();
+    assert_eq!(pool.gives() + second.gives(), 0);
+    drop(returned);
+    assert_eq!(pool.gives() + second.gives(), 2);
+    assert_eq!(state.phase, FlatPhase::Closed);
+    state.finish_close().unwrap();
+    assert_eq!(pool.gives() + second.gives(), 2);
+    assert_eq!(state.begin_close(version), Ok(version));
+}
+
+#[test]
 fn vacate_consumes_only_its_settled_maintenance_reference_without_allocation() {
     let mut state = fresh();
     let pool = Pool::new(0);

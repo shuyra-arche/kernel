@@ -125,8 +125,8 @@ currently consumes ABI v10.
 The [M4 follow-up](memory-m4.md) implements maintenance publication,
 credential-bearing transfers, takeover and per-obligation retirement; its
 verification boundaries and durable donor provenance are recorded there. Remaining staged Flat
-Delete/Split/Merge and FaultRoute paths still reject; trusted External lifecycle
-and fault/service integration belong to the corresponding M4–M6/activation gates.
+Delete/Split/Merge, FaultRoute and External Delete are connected by the later
+[path follow-up](memory-paths.md); its native service/activation gates still apply.
 The [M1 migration gates](memory-m1.md#migration-order-and-acceptance-gates) still
 require coordinated provider, consumer and image switching. Changing the ABI
 constant alone is insufficient. Issue checkboxes and merge decisions are not

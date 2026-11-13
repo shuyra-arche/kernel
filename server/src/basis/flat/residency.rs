@@ -6,6 +6,17 @@ use crate::basis::cell::page::{Page, PageId};
 use kernel_api::model::flat::{FlatVersion, SlotPhase, SlotStatus, SlotVersion};
 
 impl Flat {
+    pub(crate) fn phase(&self) -> kernel_api::model::flat::FlatPhase {
+        self.state.lock().phase
+    }
+    pub(crate) fn begin_close(&self, expected: FlatVersion) -> Result<FlatVersion, Error> {
+        self.state.lock().begin_close(expected)
+    }
+    pub(crate) fn finish_close(&self) -> Result<(), Error> {
+        let released = self.state.lock().finish_close()?;
+        drop(released);
+        Ok(())
+    }
     pub(crate) fn is_explicit(&self) -> bool {
         self.state.lock().explicit
     }
@@ -65,8 +76,9 @@ impl FlatRange {
             .map(|(_, stage)| stage.origin)
     }
     pub(crate) fn slot_version(&self) -> Result<SlotVersion, Error> {
+        let grain = self.grain();
         let state = self.flat().state.lock();
-        if !state.explicit || self.page_count().get() != self.grain() {
+        if !state.explicit || self.page_count().get() != grain {
             return Err(Error::Unsupported);
         }
         Ok(state.revision.at(self.index()))
@@ -146,6 +158,7 @@ impl FlatRange {
         }
     }
     pub(crate) fn inspect_slot(&self) -> Result<SlotStatus, Error> {
+        let level = self.level();
         if self.page_count().get() != self.grain() {
             return Err(Error::Unsupported);
         }
@@ -175,7 +188,7 @@ impl FlatRange {
             flat: self.source_id(),
             coordinate: self.index().get(),
             version: state.revision.at(self.index()),
-            level: self.level(),
+            level,
             phase,
             page,
             obligations,
@@ -219,5 +232,20 @@ impl FlatRange {
                 .vacate(self.index(), expected, Some(blocks))?;
         drop(page);
         Ok(stamp)
+    }
+    pub(crate) fn reshape_held(
+        &self,
+        range: kernel_api::model::flat::Reshape,
+        split: bool,
+        expected: FlatVersion,
+        blocks: &mut alloc::vec::Vec<crate::basis::cell::page::Block>,
+    ) -> Result<(FlatVersion, SlotVersion), Error> {
+        if range.offset() != self.index().get() || range.count() != self.page_count().get() {
+            return Err(Error::Unsupported);
+        }
+        self.flat()
+            .state
+            .lock()
+            .reshape(self.flat().level, range, split, expected, blocks)
     }
 }

@@ -52,13 +52,17 @@ impl FlatRange {
     }
 
     pub fn level(&self) -> kernel_api::model::cell::CellLevel {
-        self.flat.level()
+        self.flat.level_at(self.index)
     }
     pub fn grain(&self) -> usize {
-        self.flat.grain()
+        self.level().pages().unwrap()
     }
     pub(crate) fn cell(&self, offset: PageOffset) -> Result<Self, FlatError> {
-        self.range(offset, PageCount::new(self.grain()).unwrap())
+        let index = self.page_at(offset)?;
+        self.range(
+            offset,
+            PageCount::new(self.flat.level_at(index).pages().unwrap()).unwrap(),
+        )
     }
     pub(crate) fn page(&self, offset: PageOffset) -> Result<Option<Arc<Page>>, FlatError> {
         Ok(self

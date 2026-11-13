@@ -19,6 +19,10 @@ name = "memory"
 path = "memory/mod.rs"
 
 [[test]]
+name = "fault"
+path = "fault/mod.rs"
+
+[[test]]
 name = "iommu"
 path = "iommu/mod.rs"
 

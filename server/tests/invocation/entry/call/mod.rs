@@ -9,7 +9,7 @@ pub(crate) fn invoke(
     number: u64,
     registers: [usize; 6],
 ) {
-    next_memory::dispatch(frame, ident, number, registers);
+    next_memory::dispatch(frame, ident.clone(), number, registers);
 }
 mod memory {
     use super::*;

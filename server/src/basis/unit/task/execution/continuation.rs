@@ -8,6 +8,8 @@ pub(crate) enum WaitCall {
     Value { deadline: Option<u64> },
     Sleep { deadline: u64 },
     Sign(crate::basis::sign::endpoint::AwaitWait),
+    Fault(crate::basis::nest::fault::wait::Cpu),
+    FaultRead(crate::basis::nest::fault::read::Read),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,7 +39,9 @@ impl WaitCall {
                 wait.write(frame, result);
                 true
             }
-            Self::Value { .. } => unreachable!("value wait is outside admitted calls"),
+            Self::Value { .. } | Self::Fault(_) | Self::FaultRead(_) => {
+                unreachable!("wait is outside admitted calls")
+            }
         }
     }
     pub(crate) fn resume(self, task: &Arc<Task>) -> Resumption {
@@ -78,6 +82,8 @@ impl WaitCall {
                 Resumption::Complete
             }
             Self::Sign(wait) => crate::basis::sign::endpoint::wait::resume(task, wait),
+            Self::Fault(wait) => crate::basis::nest::fault::wait::resume(task, wait),
+            Self::FaultRead(wait) => crate::basis::nest::fault::read::resume(task, wait),
         }
     }
 
@@ -92,6 +98,8 @@ impl WaitCall {
             Self::Value { deadline } => *deadline,
             Self::Sleep { deadline } => Some(*deadline),
             Self::Sign(wait) => wait.deadline,
+            Self::Fault(wait) => Some(wait.deadline()),
+            Self::FaultRead(wait) => Some(wait.deadline()),
         }
     }
 }

@@ -38,6 +38,37 @@ pub(in super::super) struct Revision {
     slots: Vec<(PageIndex, SlotVersion)>,
 }
 impl Revision {
+    pub(super) fn prepare_geometry(
+        &mut self,
+        expected: FlatVersion,
+        count: usize,
+    ) -> Result<(), Error> {
+        if self.current != expected {
+            return Err(Error::Stale);
+        }
+        self.current.next_slots().ok_or(Error::Exhausted)?;
+        self.slots
+            .try_reserve(count)
+            .map_err(|_| Error::OutOfMemory)
+    }
+    pub(super) fn commit_geometry(
+        &mut self,
+        heads: impl Iterator<Item = PageIndex>,
+    ) -> (FlatVersion, SlotVersion) {
+        let (version, stamp) = self
+            .current
+            .next_slots()
+            .expect("prepared geometry revision");
+        self.current = version;
+        for head in heads {
+            self.write(head, stamp);
+        }
+        (version, stamp)
+    }
+    pub(in super::super) fn advance(&mut self) -> Result<FlatVersion, Error> {
+        self.current = self.current.next().ok_or(Error::Exhausted)?;
+        Ok(self.current)
+    }
     pub fn new() -> Self {
         Self {
             current: FlatVersion::INITIAL,
@@ -85,7 +116,10 @@ impl Revision {
 }
 
 impl FlatState {
-    fn explicit(&self) -> Result<(), Error> {
+    pub(super) fn explicit(&self) -> Result<(), Error> {
+        if self.phase != kernel_api::model::flat::FlatPhase::Open {
+            return Err(Error::Busy);
+        }
         if !self.explicit || !self.transferable || !matches!(self.source, FlatSource::Managed(_)) {
             return Err(Error::Unsupported);
         }

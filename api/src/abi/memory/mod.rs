@@ -25,6 +25,9 @@ pub mod rights {
     pub const OCCUPY: FlatRights = FlatRights::from_bits_retain(1 << 6);
     pub const VACATE: FlatRights = FlatRights::from_bits_retain(1 << 7);
     pub const RESHAPE: FlatRights = FlatRights::from_bits_retain(1 << 8);
+    /// Reservation-only native fault control. The v10 rights decoder stays closed.
+    pub const FAULT: crate::model::pend::NestRights =
+        crate::model::pend::NestRights::from_bits_retain(1 << 12);
 
     /// Selection of already-issued next Flat rights, not a v10 decoder or a
     /// delegation API. Normalize only the three frozen additions, then reuse
