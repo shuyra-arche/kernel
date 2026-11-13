@@ -6,5 +6,6 @@
 pub(crate) mod clock;
 pub(crate) mod interrupt;
 pub(crate) mod iommu;
+pub mod memory;
 pub(crate) mod mmu;
 pub(crate) mod trap;

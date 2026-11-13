@@ -6,6 +6,8 @@ pub(crate) mod resources;
 mod space;
 
 pub use crate::metal::generic::iommu::{HardwareError, Quiescence, Retirement, RetirementScope};
+// Inactive next-memory proof interface; exposing its types installs no backend.
+pub use crate::metal::generic::memory;
 pub use devices::{ExternalRoute, MapMmio};
 pub use error::BootError;
 pub use error::MapOperation;

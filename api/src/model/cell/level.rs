@@ -26,4 +26,18 @@ impl CellLevel {
     pub fn parent(self) -> Option<Self> {
         Self::new(self.get() + 1)
     }
+
+    /// One complete physical unit at a fixed-origin coordinate inside a window.
+    /// Pure geometry; callers must separately validate current identity/authority.
+    pub(crate) fn fits_at(self, page: usize, offset: usize, count: usize) -> bool {
+        let Some(grain) = self.pages() else {
+            return false;
+        };
+        super::pages(offset, count).is_some()
+            && page.is_multiple_of(grain)
+            && page >= offset
+            && page
+                .checked_add(grain)
+                .is_some_and(|end| end <= offset + count)
+    }
 }
