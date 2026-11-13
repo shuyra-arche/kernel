@@ -4,7 +4,8 @@ Status: **M1 contract deliverables complete in [PR #145](https://github.com/shuy
 See the [M1 acceptance matrix and activation plan](memory-m1.md) for each section 9
 requirement and its evidence. Value codecs, bounded journal transitions and the
 trusted backend proof interface are implemented and tested. The next syscall ABI
-is not activated; Task/resource integration and physical backends remain M2–M6.
+is not activated; see the [M2 organization/authority acceptance](memory-m2.md).
+Task/resource integration and physical backends remain activation gates in M3–M6.
 Current executable contracts remain [ABI v10 / Ledger v10](README.md#source-migration-and-abi-compatibility).
 
 The reviewed source baseline is Kernel
@@ -295,8 +296,49 @@ Rollback requires the complete old provider/consumer/image set.
 
 The [M1 acceptance record](memory-m1.md) closes the contract/encoding decisions.
 Fault queues, scheduler/Sign integration, actual geometry bookkeeping, allocation
-conversion and physical proof implementations remain M2–M6. New work implements
+conversion and physical proof implementations remain M3–M6. New work implements
 those owners against the fixed contract and records any deliberate contract change.
+
+### M2 organization and authority implementation
+
+See the [M2 acceptance record](memory-m2.md) for the complete requirement map,
+implementation evidence and explicit v10 compatibility/activation boundary.
+
+The Server now normalizes v10 Flat source and Mapping coordinates before using
+fixed-origin `SlotPosition` / `MemoPosition` resolvers. They check the actual
+Flat or Nest/Mapping identity and require the complete geometry unit to fit the
+live grant. `Pend::selects` checks scope identity, range and operation bits from
+one authoritative state, including live ancestry. A returned range is not a
+cached permission; callers still serialize and recheck at admission/commit.
+
+Flat and legacy Cell creation share one Flat preparation path; Flat publication
+rechecks its creation license under COMMIT. Movement validates both complete
+source and target windows, TRANSFER and data access before registering either
+flight. Hold resolution uses the same live range/operation predicate.
+
+Flat/Share-backed association now builds its retained source directly from the
+actual caller's Pend. It no longer allocates, looks up or deletes a temporary
+SlotId. The Hold retains its immutable source window, original authority branch
+and data ceiling; public Slot identity belongs only to the legacy handle table.
+The original actor and branch are still revalidated on subsequent source use.
+
+Cleanup discovery is independent of those handles. Before association can expose
+a source, its caller records a weak discovery entry; repeated selections deduplicate
+by source identity. Each Task can track at most 1024 distinct live sources, including
+ones still referenced after a public Slot is removed. Capacity exhaustion rejects
+new preparation before materialization/association. Known sources remain usable
+at capacity; live entries are not evicted to admit another source. Failed cleanup
+retains its entry, while dead sources release capacity without retaining payloads.
+This bound also applies to legacy Slot registration, which can now fail at the
+discovery limit even when fewer than 1024 public handles remain.
+
+The shared movement engine now receives fixed Flat endpoints and resolves both
+grants in the actual caller's ledger, without a peer Task or local Slot table.
+Flat owns holding movement; Nest owns association/publication. The next API and
+Client expose only Flat/Nest calls and validate correlated replies. Cell remains
+an explicit v10 compatibility adapter, removed at the coordinated activation.
+Resource-version, journal and maintenance integration remains in M3–M4; M5–M6
+gates are unchanged. M2 does not activate the next syscall version.
 
 ## Verification boundary
 
@@ -309,7 +351,20 @@ They use the production public codecs and the actual bounded journal.
 The backend evidence tests compile the production Rust proof interface with
 explicitly synthetic attestations; they do not claim a physical implementation.
 
-It does not prove live Pend validation, races, atomic commits, orphan recovery,
+`server/tests/pend/selection.rs` exercises the production live authority and
+state owner: fixed coordinates after Narrow, Mapping/Whole separation, full
+window bounds, operation removal, ancestor revocation, holder death and suspended
+data access. These host checks do not execute the Task ledger, trap adapters,
+Flat/Mapping object lookup or a complete cross-Team transfer.
+
+`server/tests/pend/sources.rs` exercises the production bounded weak registry:
+retained discovery without a public handle, retry after incomplete cleanup,
+capacity rejection without eviction, deduplication, dead-source collection,
+exact identity and separate Task registries. Its payloads are inert host values;
+it does not execute Source construction, Task exit, Nest withdrawal or hardware
+retirement, and it does not establish that those obligations have settled.
+
+The value-codec tests do not prove live Pend validation, races, atomic commits, orphan recovery,
 request replay, retirement, data visibility, QEMU or hardware behavior. Those
 tests belong with the owners implementing the relevant transitions. In
 particular, keep the #142 acceptance cases for two independent writable Memo

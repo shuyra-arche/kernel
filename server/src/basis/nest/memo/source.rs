@@ -22,6 +22,77 @@ pub(crate) struct Source {
 }
 
 impl Source {
+    /// Select directly from a live Flat/Share Pend, without creating a SlotId.
+    /// Offset is relative to the immutable source range, not the narrowed Pend.
+    /// Caller holds its ledger serial and COMMIT until association is installed.
+    pub(crate) fn from_pend(
+        actor: &Arc<Task>,
+        token: PendId,
+        offset: PageOffset,
+        count: PageCount,
+    ) -> Result<Self, CellFail> {
+        use kernel_api::model::pend::{FlatRights, Operations, PendRange, PendScope, ShareRights};
+        if !pend::live(actor) {
+            return Err(CellFail::Denied);
+        }
+        let entry = pend::locate(actor, token).ok_or(CellFail::Denied)?;
+        if !entry.associates() {
+            return Err(CellFail::Denied);
+        }
+        let meta = entry.target().memory().ok_or(CellFail::Denied)?;
+        let authorization = meta.authorization().ok_or(CellFail::Denied)?;
+        if matches!(entry.target(), pend::Target::Flat(_)) {
+            let page = meta
+                .source()
+                .index()
+                .get()
+                .checked_add(offset.get())
+                .ok_or(CellFail::NotAligned)?;
+            let position =
+                kernel_api::model::flat::SlotPosition::new(token, meta.source().source_id(), page)
+                    .ok_or(CellFail::NotAligned)?;
+            let selected =
+                crate::basis::flat::authority::slot(actor, position, FlatRights::ASSOCIATE)
+                    .map_err(failure)?;
+            if selected.page_count() != count {
+                return Err(CellFail::NotAligned);
+            }
+        } else if !entry.authority().selects(
+            Operations::Share(ShareRights::ASSOCIATE),
+            PendScope::Pages(PendRange::Pages {
+                offset: offset.get(),
+                count: count.get(),
+            }),
+        ) {
+            return Err(CellFail::Denied);
+        }
+        if authorization
+            .full_range()
+            .is_none_or(|range| range.range(offset, count).is_err())
+        {
+            return Err(CellFail::NoRegion);
+        }
+        authorization.ensure_internal().map_err(failure)?;
+        let ceiling = authorization.ceiling();
+        let hold = Hold::from_branch(
+            authorization,
+            offset,
+            count,
+            ceiling,
+            (token, entry.authority().clone()),
+        )
+        .map_err(failure)?;
+        let selected = Self::new(actor, hold, PageOffset::ZERO, count)?;
+        // A source may outlive this call through a foreign Nest. Losing the last
+        // public Slot must not remove the actor's route to its remaining uses.
+        actor
+            .pend
+            .references
+            .track(selected.source())
+            .map_err(failure)?;
+        Ok(selected)
+    }
+
     pub(crate) fn new(
         actor: &Arc<Task>,
         hold: Arc<Hold>,

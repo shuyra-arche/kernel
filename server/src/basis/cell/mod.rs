@@ -1,5 +1,4 @@
 pub(crate) mod page;
-pub(crate) mod transfer;
 
 use self::page::{Owner, Page, PageError};
 use crate::basis::flat::FlatError;

@@ -1,324 +1,85 @@
-use alloc::sync::{Arc, Weak};
-use alloc::vec::Vec;
-use kernel_api::abi::call::cell::{CellCall, CellFail};
-use kernel_api::address::{PAGE_SIZE, PageCount, PageOffset, VirtAddr as KVirt};
-use kernel_api::model::{identity::PendId, modifiable::Modifiable};
-
-use crate::basis::cell::transfer::{Transfer, TransferError};
-use crate::basis::flat::{Allocation, Flat, FlatError, FlatRange};
-use crate::basis::nest::{Access, Nest, NestError, Span};
-use crate::basis::pend::{self, Geometry, Hold, SourceAuthorization};
-use crate::basis::sign::{self, WakeKey};
-use crate::basis::unit::task::{Task, TaskIdent};
-use crate::metal::switcher::context::TrapContext;
-
-mod object;
+//! ABI v10 compatibility only. All resource operations belong to Flat/Nest.
+//! The next memory call surface has no Cell domain or SlotId descriptors.
+use super::{
+    flat::legacy as flat,
+    memory::{caller, read_snapshot},
+    nest::memo as nest,
+};
+use crate::{basis::unit::task::TaskIdent, metal::switcher::context::TrapContext};
+use alloc::sync::Arc;
+use kernel_api::{
+    abi::call::cell::{CellCall, CellFail},
+    address::VirtAddr as KVirt,
+    model::cell::*,
+};
 
 pub(super) fn dispatch(frame: &mut TrapContext, call: CellCall, ident: &Arc<TaskIdent>) {
-    super::outcome::answer(frame, object::execute(call, ident));
+    super::outcome::answer(frame, execute(call, ident));
+}
+fn position(at: KVirt, ident: &Arc<TaskIdent>) -> Result<CellPosition, CellFail> {
+    CellPosition::from_bytes(&read_snapshot::<{ CellPosition::WIDTH }>(
+        &ident.team.nest,
+        at,
+    )?)
+    .ok_or(CellFail::NotAligned)
 }
 
-fn read_snapshot<const N: usize>(space: &Nest, at: KVirt) -> Result<[u8; N], CellFail> {
-    let mut bytes = [0; N];
-    if !space.copy_in(&mut bytes, at) {
-        return Err(CellFail::Denied);
-    }
-    Ok(bytes)
-}
-
-fn caller(ident: &Arc<TaskIdent>) -> Option<Arc<Task>> {
-    use crate::basis::room::scheduler::slot::current;
-    use crate::basis::unit::task::registry::find;
-    current()
-        .running_task()
-        .or_else(|| find(ident.id).and_then(|task| task.upgrade()))
-}
-
-fn source_fail(error: kernel_api::abi::call::pend::PendFail) -> CellFail {
-    use kernel_api::abi::call::pend::PendFail;
-    match error {
-        PendFail::OutOfMemory => CellFail::OutOfMemory,
-        PendFail::Busy => CellFail::Busy,
-        PendFail::NotAligned => CellFail::NotAligned,
-        _ => CellFail::Denied,
-    }
-}
-
-enum SourceSpec {
-    Allocation {
-        license: PendId,
-        allocation: kernel_api::model::cell::Allocation,
-    },
-    Source {
-        token: PendId,
-        offset: usize,
-        count: usize,
-    },
-}
-
-/// Caller holds the Task ledger serial and COMMIT until the reference is stored.
-fn resolve_source(task: &Arc<Task>, source: SourceSpec) -> Result<usize, CellFail> {
-    let (authorization, offset, count, ceiling, branch) = match source {
-        SourceSpec::Allocation {
+fn execute(call: CellCall, ident: &Arc<TaskIdent>) -> Result<usize, CellFail> {
+    match call {
+        CellCall::Create {
             license,
             allocation,
         } => {
-            pend::access::license(task, license, kernel_api::model::pend::CreationRights::FLAT)
-                .map_err(source_fail)?;
-            if allocation.level.get() >= crate::metal::mmu::mode::levels()
-                || allocation.align != allocation.level.bytes().ok_or(CellFail::NotAligned)?
-            {
-                return Err(CellFail::NotAligned);
-            }
-            let pages = allocation.bytes().ok_or(CellFail::NotAligned)? / PAGE_SIZE;
-            let count = PageCount::new(pages).ok_or(CellFail::NotAligned)?;
-            let range = Flat::acquire(
-                task.ident.team.cells.clone(),
-                Allocation::at_level(pages, allocation.level)?,
-            )?
-            .whole();
-            let authorization = SourceAuthorization::new(range, Access::all(), task.ident.id)
-                .map_err(source_fail)?;
-            let ceiling = authorization.ceiling();
-            (authorization, PageOffset::ZERO, count, ceiling, None)
+            let actor = caller(ident).ok_or(CellFail::Denied)?;
+            let _serial = actor.pend.lock();
+            let _commit = crate::basis::commit();
+            flat::create(&actor, license, allocation)
         }
-        SourceSpec::Source {
-            token,
-            offset,
-            count,
-        } => {
-            let entry = pend::locate(task, token).ok_or(CellFail::Denied)?;
-            if !entry.associates() {
-                return Err(CellFail::Denied);
-            }
-            let meta = entry.target().memory().ok_or(CellFail::Denied)?;
-            let authorization = meta.authorization().ok_or(CellFail::Denied)?;
-            let count = PageCount::new(count).ok_or(CellFail::NotAligned)?;
-            let offset = PageOffset::new(offset);
-            if !entry.authority().contains(offset, count) {
-                return Err(CellFail::Denied);
-            }
-            if authorization
-                .full_range()
-                .is_none_or(|range| range.range(offset, count).is_err())
-            {
-                return Err(CellFail::NoRegion);
-            }
-            authorization.ensure_internal().map_err(source_fail)?;
-            let ceiling = authorization.ceiling();
-            (
-                authorization,
-                offset,
-                count,
-                ceiling,
-                Some((token, entry.authority().clone())),
-            )
-        }
-    };
-    task.pend
-        .references
-        .insert(authorization, offset, count, ceiling, branch)
-        .map_err(source_fail)
-}
-
-fn release(
-    reference: kernel_api::model::cell::SlotId,
-    ident: &Arc<TaskIdent>,
-) -> Result<usize, CellFail> {
-    let task = caller(ident).ok_or(CellFail::Denied)?;
-    let _serial = task.pend.lock();
-    if !pend::live(&task) {
-        return Err(CellFail::Denied);
-    }
-    let hold = task
-        .pend
-        .references
-        .remove(reference.get())
-        .ok_or(CellFail::Denied)?;
-    drop(hold);
-    Ok(0)
-}
-
-fn next_flight_key() -> Result<usize, CellFail> {
-    const FLIGHT_DOMAIN: usize = 1 << (usize::BITS - 1);
-    static NEXT: crate::basis::name::Serial =
-        crate::basis::name::Serial::new(1, isize::MAX as usize);
-    NEXT.allocate()
-        .map(|id| FLIGHT_DOMAIN | id)
-        .ok_or(CellFail::OutOfMemory)
-}
-
-fn transfer(
-    from: kernel_api::model::cell::SlotId,
-    from_page: usize,
-    to: kernel_api::model::cell::SlotId,
-    to_page: usize,
-    ident: &Arc<TaskIdent>,
-) -> Result<usize, CellFail> {
-    let caller = caller(ident).ok_or(CellFail::Denied)?;
-    let serial = caller.pend.lock();
-    if !pend::live(&caller) {
-        return Err(CellFail::Denied);
-    }
-    let source = endpoint(&caller, from)?;
-    let target = endpoint(&caller, to)?;
-    let transfer = Transfer::new(
-        source,
-        PageOffset::new(from_page),
-        target,
-        PageOffset::new(to_page),
-    )
-    .map_err(CellFail::from)?;
-    let source_page = endpoint(&caller, from)?
-        .page(PageOffset::new(from_page))?
-        .ok_or(CellFail::SourceEmpty)?;
-    let permit = crate::basis::cell::change::find(&source_page);
-    let flight = next_flight_key()?;
-    let mut ends: Vec<(Arc<Hold>, Arc<Geometry>)> = Vec::new();
-    ends.try_reserve_exact(2)
-        .map_err(|_| CellFail::OutOfMemory)?;
-    for (reference, page) in [(from, from_page), (to, to_page)] {
-        let hold = caller
-            .pend
-            .references
-            .get(reference.get())
-            .ok_or(CellFail::Denied)?;
-        if !hold.source().branch_check(
-            hold.authority().map(Arc::as_ref),
-            Access::READ | Access::WRITE,
-        ) {
-            return Err(CellFail::Denied);
-        }
-        if let Some((token, authority)) = hold.branch() {
-            use kernel_api::model::pend::{FlatRights, Operations};
-            let owns = match authority.limits().operations {
-                Operations::Flat(_) => authority.permits(Operations::Flat(FlatRights::TRANSFER)),
-                Operations::Share(_) => hold
-                    .source()
-                    .root()
-                    .is_some_and(|(_, root, _)| token == root),
-                _ => false,
+        CellCall::Delete { slot } => flat::release(slot, ident),
+        CellCall::Split { slot } => flat::reshape(slot, false, ident),
+        CellCall::Merge { slot } => flat::reshape(slot, true, ident),
+        CellCall::Push { request } | CellCall::Pull { request } => {
+            let spec = CellHandoff::from_bytes(&read_snapshot::<{ CellHandoff::WIDTH }>(
+                &ident.team.nest,
+                request,
+            )?)
+            .ok_or(CellFail::NotAligned)?;
+            let (source, target) = if matches!(call, CellCall::Push { .. }) {
+                (spec.local, spec.remote)
+            } else {
+                (spec.remote, spec.local)
             };
-            if !owns {
+            let (CellObject::Slot(from), CellObject::Slot(to)) = (source.object, target.object)
+            else {
+                return Err(CellFail::Denied);
+            };
+            flat::transfer(from, source.page, to, target.page, ident)
+        }
+        CellCall::Insert { request } => nest::associate(
+            CellAssociation::from_bytes(&read_snapshot::<{ CellAssociation::WIDTH }>(
+                &ident.team.nest,
+                request,
+            )?)
+            .ok_or(CellFail::NotAligned)?,
+            ident,
+        ),
+        CellCall::Publish { position: at } => nest::publication(position(at, ident)?, true, ident),
+        CellCall::Retract { position: at } => nest::publication(position(at, ident)?, false, ident),
+        CellCall::Inspect { position: at, out } => {
+            let pos = position(at, ident)?;
+            let info = match pos.object {
+                CellObject::Slot(_) => flat::inspect(pos, ident)?,
+                CellObject::Pend(_) => nest::inspect(pos, ident)?,
+            };
+            if !ident.team.nest.copy_out(&info.to_bytes(), out) {
                 return Err(CellFail::Denied);
             }
+            Ok(0)
         }
-        let offset = PageOffset::new(
-            hold.window()
-                .0
-                .get()
-                .checked_add(page)
-                .ok_or(CellFail::NotAligned)?,
-        );
-        let count = PageCount::new(source_page.pages()).ok_or(CellFail::NotAligned)?;
-        let window = Geometry::new(offset, count).map_err(source_fail)?;
-        ends.push((hold, window));
-    }
-    {
-        let _commit = crate::basis::commit();
-        for (hold, window) in &ends {
-            let (offset, count) = window.window();
-            if !hold
-                .resolve_window(offset, count)
-                .is_some_and(|range| range.level() == source_page.level())
-            {
-                return Err(CellFail::Denied);
-            }
-            hold.source()
-                .check_move(offset, count, hold.authority().map(Arc::as_ref))
-                .map_err(source_fail)?;
-        }
-        for (hold, window) in &ends {
-            let (offset, count) = window.window();
-            hold.source()
-                .retain_blocked(offset, count, &source_page)
-                .map_err(source_fail)?;
-        }
-        for (at, (hold, window)) in ends.iter().enumerate() {
-            if let Err(error) = hold.source().enter_publish_range(
-                flight,
-                window.clone(),
-                hold.authority().map(Arc::as_ref),
-            ) {
-                for (held, _) in &ends[..at] {
-                    held.source().leave_publish(flight);
-                }
-                return Err(source_fail(error));
-            }
-        }
-    }
-    let outcome = transfer.execute(permit.as_ref());
-    for (hold, _) in &ends {
-        hold.source().leave_publish(flight);
-    }
-    drop(serial);
-    wake(outcome.affected);
-    outcome.result.map(|()| 0).map_err(CellFail::from)
-}
-
-fn endpoint(
-    caller: &Arc<Task>,
-    reference: kernel_api::model::cell::SlotId,
-) -> Result<FlatRange, CellFail> {
-    let hold = caller
-        .pend
-        .references
-        .get(reference.get())
-        .ok_or(CellFail::Denied)?;
-    let flat = hold.authority().is_some_and(|p| {
-        matches!(
-            p.limits().operations,
-            kernel_api::model::pend::Operations::Flat(_)
-        )
-    });
-    if !flat && !hold.source().manages(caller) {
-        return Err(CellFail::Denied);
-    }
-    hold.resolve().ok_or(CellFail::Denied)
-}
-
-fn wake(affected: Vec<Weak<Span>>) {
-    for relation in affected {
-        let Some(mapping) = relation.upgrade() else {
-            continue;
-        };
-        let key = mapping.wake_key();
-        drop(mapping);
-        if let Some((space, mapping)) = key {
-            sign::signal(WakeKey::Mapping { space, mapping });
-        }
-    }
-}
-
-impl From<NestError> for CellFail {
-    fn from(error: NestError) -> Self {
-        match error {
-            NestError::OutOfMemory => CellFail::OutOfMemory,
-            NestError::NotAligned => CellFail::NotAligned,
-            NestError::NoRegion | NestError::Missing => CellFail::NoRegion,
-            NestError::AlreadyMapped => CellFail::AlreadyMapped,
-            NestError::WidenDenied => CellFail::WidenDenied,
-            NestError::Shootdown | NestError::Busy => CellFail::Busy,
-            NestError::Pinned | NestError::NotMapped | NestError::DramOverlap => CellFail::Denied,
-        }
-    }
-}
-
-impl From<FlatError> for CellFail {
-    fn from(error: FlatError) -> Self {
-        NestError::from(error).into()
-    }
-}
-
-impl From<TransferError> for CellFail {
-    fn from(error: TransferError) -> Self {
-        match error {
-            TransferError::OutOfMemory => CellFail::OutOfMemory,
-            TransferError::OutOfRange => CellFail::NoRegion,
-            TransferError::SourceEmpty => CellFail::SourceEmpty,
-            TransferError::DestinationOccupied => CellFail::DestinationOccupied,
-            TransferError::NotTransferable => CellFail::NotTransferable,
-            TransferError::Busy => CellFail::Busy,
-        }
+        CellCall::Remove { position: at } => nest::remove(position(at, ident)?, ident),
+        CellCall::Protect {
+            position: at,
+            access,
+        } => nest::protect(position(at, ident)?, access, ident),
     }
 }

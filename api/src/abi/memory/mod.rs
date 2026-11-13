@@ -1,8 +1,10 @@
-//! Next-memory-ABI value contracts. These codecs do not implement RegisterCall
-//! and do not enable ABI 11 in the running v10 dispatcher. Every decoded token
+//! Next-memory-ABI contracts and domain calls. These do not implement RegisterCall
+//! or enable ABI 11 in the running v10 dispatcher. Every decoded token
 //! still requires caller-local live authorization at the server commit point.
 
+mod call;
 pub mod journal;
+pub use call::{Call, Frame, flat, nest};
 mod observation;
 mod reply;
 mod request;

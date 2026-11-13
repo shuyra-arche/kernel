@@ -1,3 +1,4 @@
+mod memory;
 use alloc::sync::Arc;
 
 use kernel_api::abi::call::EnvCall;

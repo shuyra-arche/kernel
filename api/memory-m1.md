@@ -2,7 +2,9 @@
 
 **M1 deliverables are complete in PR #145, pending merge.** This is completion of
 contracts, migration decisions and their executable checks, not completion of
-runtime integration. ABI/Ledger remain v10; M2–M6 remain open. This document maps
+runtime integration. ABI/Ledger remain v10. At M1 delivery, M2–M6 remained open;
+the later [M2 acceptance record](memory-m2.md) tracks organization and authority
+delivery and its remaining activation gates. This document maps
 [#142](https://github.com/shuyra-arche/kernel/issues/142) sections 9 and 13 to the
 implementation evidence and makes the conditions for activating v11 explicit.
 

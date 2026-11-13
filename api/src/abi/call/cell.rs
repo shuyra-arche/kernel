@@ -1,3 +1,5 @@
+//! ABI v10 compatibility only. New memory operations belong to
+//! `abi::memory::{flat,nest}`; no Cell domain is admitted by that decoder.
 use crate::address::VirtAddr;
 
 #[kernel_api_macros::envcall(class = 2, call = CellCall)]
