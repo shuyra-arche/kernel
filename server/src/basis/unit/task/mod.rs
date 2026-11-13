@@ -20,7 +20,6 @@ use crate::basis::unit::control::Request;
 use execution::Effect;
 
 pub(crate) mod chain;
-mod controls;
 mod creation;
 mod execution;
 mod identity;
@@ -52,7 +51,6 @@ pub struct Task {
     pub(crate) administration: crate::basis::unit::control::Table,
     pub(crate) heir: SpinLock<Vec<Arc<Team>>>,
     extensions: SpinLock<crate::metal::switcher::context::extension::ExtendedContext>,
-    pub(crate) controls: controls::Controls,
     retirement: SpinLock<retirement::Retirement>,
     pub(crate) schedule: SpinLock<schedule::Schedule>,
 }

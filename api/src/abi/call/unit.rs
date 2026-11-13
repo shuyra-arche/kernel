@@ -3,7 +3,7 @@ use crate::{
     address::VirtAddr,
     model::{
         identity::{TaskId, TeamId},
-        unit::{ControlId, ExitScope, UnitQuery, UnitTarget},
+        unit::{ControlId, CreatedUnit, ExitScope, UnitQuery, UnitTarget},
     },
 };
 pub type UnitResult<T> = Result<T, erra::Error<UnitFail>>;
@@ -19,7 +19,7 @@ pub mod operations {
         BadEntry = -5,
     }
     /// Snapshot UnitCreate before allocating. Team/Task are distinct tagged variants.
-    #[operation(slot = 0, output = super::UnitTarget, error = UnitFail)]
+    #[operation(slot = 0, output = super::CreatedUnit, error = UnitFail, reply = 3)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Create {
         pub request: super::VirtAddr,

@@ -1,4 +1,7 @@
 //! Stable nest identity. A numeric identity is descriptive and never grants access.
+mod reserve;
+pub use reserve::ReserveRequest;
+
 use crate::abi::register::{Decode, Wire};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

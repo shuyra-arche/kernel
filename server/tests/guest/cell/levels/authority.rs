@@ -4,12 +4,12 @@ use kernel_api::{
     model::{
         cell::*,
         flat::FlatInfo,
-        identity::{Mark, PendId, TeamId},
+        identity::Mark,
         modifiable::Modifiable,
-        pend::{AccordRequest, AccordTarget, NarrowRequest, PendRange},
+        pend::{AccordRequest, AccordTarget, NarrowRequest, PendRange, PendScope},
     },
 };
-use kernel_client::call::{cell, flat, pend};
+use kernel_client::call::{flat, pend};
 pub(super) fn run() {
     let root = flat::create(crate::license::get(), 1 << 21, 1 << 21, 1).unwrap();
     let mut out = [0; FlatInfo::WIDTH];
@@ -22,7 +22,7 @@ pub(super) fn run() {
     let original = crate::pend::inspect(root).limits;
     for (offset, count) in [(0, 1), (1, 511)] {
         let mut limits = original;
-        limits.range = PendRange::Pages { offset, count };
+        limits.scope = PendScope::Pages(PendRange::Pages { offset, count });
         let request = AccordRequest {
             src: root,
             target: AccordTarget::Caller,
@@ -42,10 +42,10 @@ pub(super) fn run() {
         assert_eq!(crate::pend::inspect(root).limits, original);
     }
     let mut limits = original;
-    limits.range = PendRange::Pages {
+    limits.scope = PendScope::Pages(PendRange::Pages {
         offset: 0,
         count: 512,
-    };
+    });
     limits.modifiable = Modifiable::No;
     let child = pend::accord(ptr(&AccordRequest {
         src: root,
@@ -55,26 +55,14 @@ pub(super) fn run() {
     }
     .to_bytes()))
     .unwrap();
-    let request = CellCreate::Memo {
-        source: CellSource::Pend {
-            token: child,
-            offset: 0,
-            count: 512,
-        },
-        destination: MemoDestination::Internal {
-            team: TeamId::new(0),
-            placement: Placement::lowest(4096).unwrap(),
-            access: 2,
-        },
-    }
-    .to_bytes();
-    let CreatedCell::Memo {
-        token: mapping,
-        address,
-    } = cell::create(PendId::NONE, ptr(&request)).unwrap()
-    else {
-        panic!("Memo expected")
-    };
+    let (mapping, address) = crate::space::reserve(
+        crate::space::get(),
+        Placement::lowest(1 << 21).unwrap(),
+        512,
+        CellLevel::new(1).unwrap(),
+        2,
+    );
+    crate::handoff(raw_memo(child, 0), crate::memo(mapping, 0), false);
     assert_eq!(info(raw_memo(mapping, 0)).state, CellState::Ready);
     assert_eq!(info(raw_memo(mapping, 0)).level.get(), 1);
     publish(mapping, 0);

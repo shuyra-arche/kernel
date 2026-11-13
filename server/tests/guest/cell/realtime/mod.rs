@@ -10,23 +10,27 @@ use kernel_api::{
         operation::RegisterCall,
         reply::SignReply,
     },
-    address::VirtAddr,
+    address::{PageCount, VirtAddr},
     model::{
         cell::*,
         identity::{Mark, PendId, TaskId, TeamId},
         modifiable::Modifiable,
+        nest::ReserveRequest,
         pend::{
-            AccordRequest, AccordTarget, Distributable, Limits, Operations, PendRange, ShareRights,
+            AccordRequest, AccordTarget, Distributable, Limits, NestRights, NestScope, Operations,
+            PendRange, PendScope, ShareRights,
         },
         sign::SignRights,
         unit::{
-            ControlId, ProgramKind, Schedule, ScheduleInfo, UnitCreate, UnitQuery, UnitState,
-            UnitTarget,
+            ControlId, CreatedUnit, ProgramKind, Schedule, ScheduleInfo, UnitCreate, UnitQuery,
+            UnitState, UnitTarget,
         },
         wait::Wait,
     },
 };
-use kernel_client::call::{cell, pend, room, share_view, sign, unit};
+use kernel_client::call::{pend, room, share_view, sign, unit};
+const _: () = assert!(128 + 7 * kernel_api::model::pend::PendInfo::SIZE <= 1024);
+const _: () = assert!(CellPosition::WIDTH == 32 && CellAssociation::WIDTH == 64);
 const fn call(class: usize, slot: usize) -> usize {
     ((kernel_api::abi::VERSION as usize) << 48) | (class << 32) | slot
 }
@@ -34,7 +38,9 @@ core::arch::global_asm!(include_str!("worker.S"),
     collect=const call(7,18), trigger=const call(11,3), consume=const call(11,4),
     listen=const call(11,2), await_=const call(11,12), yield_=const call(0,0),
     clock=const call(0,4), wait_value=const call(0,2), inspect_room=const Inspect::SLOT,
-    sleep=const call(0,1), exit=const call(1,5), create_memo=const call(2,0), publish=const call(2,4));
+    sleep=const call(0,1), exit=const call(1,5), reserve=const call(13,5),
+    insert=const call(2,10), inspect=const call(2,7), publish=const call(2,4),
+    pend_size=const kernel_api::model::pend::PendInfo::SIZE);
 unsafe extern "C" {
     static realtime_worker_start: u8;
     static realtime_worker_end: u8;
@@ -48,13 +54,19 @@ fn state(id: TaskId) -> UnitState {
 }
 fn wait_state(id: TaskId, expected: UnitState) {
     let end = limit();
-    while state(id) != expected {
+    loop {
+        let observed = state(id);
+        if observed == expected {
+            return;
+        }
         assert!(
             room::clock() < end,
-            "state {id:?}: {:?} != {expected:?}",
-            state(id)
+            "state {id:?}: {observed:?} != {expected:?}"
         );
-        room::yield_();
+        // This controller observes an admitted Task on another Hart. Repeated
+        // Inspect/Yield syscalls contend for COMMIT and consume the worker's
+        // response budget; sleep between observations without extending its bound.
+        room::sleep_until((room::clock() + 1_000_000).min(end)).unwrap();
     }
 }
 fn resume(id: TaskId) {
@@ -120,7 +132,7 @@ fn grant(src: PendId, dst: TaskId, mark: u64, rights: SignRights) -> PendId {
             operations: Operations::Sign(rights),
             modifiable: Modifiable::No,
             distributable: Distributable::No,
-            range: PendRange::Inherit,
+            scope: PendScope::Object,
         },
     }
     .to_bytes();
@@ -139,6 +151,8 @@ fn close(token: PendId) {
 }
 struct Fixture {
     team: TeamId,
+    whole: PendId,
+    execution: PendId,
     source: PendId,
     slot: SlotId,
     data: SlotId,
@@ -153,7 +167,8 @@ impl Fixture {
             guard: ControlId::NONE,
         }
         .to_bytes();
-        let UnitTarget::Team(team) = unit::create(crate::ptr(&bytes)).unwrap() else {
+        let CreatedUnit::Team { team, nest: whole } = unit::create(crate::ptr(&bytes)).unwrap()
+        else {
             panic!("Team")
         };
         let slot = crate::allocate(1);
@@ -167,35 +182,21 @@ impl Fixture {
         crate::retract(mapping, 0);
         crate::delete(crate::raw_memo(mapping, 0).object);
         let source = share_view::create(crate::license::get(), slot, Modifiable::No).unwrap();
-        let bytes = CellCreate::Memo {
-            source: CellSource::Pend {
-                token: source,
-                offset: 0,
-                count: 1,
-            },
-            destination: MemoDestination::Internal {
-                team,
-                placement: Placement::exact(VirtAddr::new(ADDRESS), 4096).unwrap(),
-                access: 10,
-            },
-        }
-        .to_bytes();
-        let CreatedCell::Memo { token: mapping, .. } =
-            cell::create(PendId::NONE, crate::ptr(&bytes)).unwrap()
-        else {
-            panic!("Memo")
-        };
-        let bytes = CellPosition {
-            object: CellObject::Memo(mapping),
-            page: 0,
-            generation: 2,
-        }
-        .to_bytes();
-        cell::publish(crate::ptr(&bytes)).unwrap();
+        let (execution, _) = crate::space::reserve(
+            whole,
+            Placement::exact(VirtAddr::new(ADDRESS), 4096).unwrap(),
+            1,
+            CellLevel::BASE,
+            10,
+        );
+        crate::handoff(crate::raw_memo(source, 0), crate::memo(execution, 0), false);
+        crate::publish(execution, 0);
         let data = crate::allocate(1);
         let shared = share_view::create(crate::license::get(), data, Modifiable::Yes).unwrap();
         Self {
             team,
+            whole,
+            execution,
             source,
             slot,
             data,
@@ -210,20 +211,14 @@ impl Fixture {
         dependency: Option<PendId>,
         reply: Option<PendId>,
     ) -> Worker {
-        let descriptor = CellCreate::Memo {
-            source: CellSource::Pend {
-                token: PendId::mint(1),
-                offset: 0,
-                count: 1,
-            },
-            destination: MemoDestination::Internal {
-                team: TeamId::new(0),
-                placement: Placement::exact(VirtAddr::new(ADDRESS + 4096), 4096).unwrap(),
-                access: 6,
-            },
+        let descriptor = ReserveRequest {
+            placement: Placement::exact(VirtAddr::new(ADDRESS + 4096), 4096).unwrap(),
+            count: PageCount::new(1).unwrap(),
+            level: CellLevel::BASE,
+            access: 6,
         }
         .to_bytes();
-        let mut args = [0usize; 14];
+        let mut args = [0usize; 2 + ReserveRequest::WIDTH / 8];
         args[0] = role;
         args[1] = timeout as usize;
         for (word, bytes) in args[2..].iter_mut().zip(descriptor.chunks_exact(8)) {
@@ -237,7 +232,7 @@ impl Fixture {
             stack: VirtAddr::new(0),
         }
         .to_bytes();
-        let UnitTarget::Task(id) = unit::create(crate::ptr(&bytes)).unwrap() else {
+        let CreatedUnit::Task(id) = unit::create(crate::ptr(&bytes)).unwrap() else {
             panic!("Task")
         };
         let prepared = endpoint();
@@ -259,7 +254,20 @@ impl Fixture {
                     operations: Operations::Share(ShareRights::ASSOCIATE),
                     modifiable: Modifiable::Yes,
                     distributable: Distributable::No,
-                    range: PendRange::Inherit,
+                    scope: PendScope::Pages(PendRange::Inherit),
+                },
+            }
+            .to_bytes();
+            pend::accord(crate::ptr(&descriptor)).unwrap();
+            let descriptor = AccordRequest {
+                src: self.whole,
+                target: AccordTarget::Task(id),
+                mark: Mark::new(7),
+                limits: Limits {
+                    operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
+                    modifiable: Modifiable::Yes,
+                    distributable: Distributable::No,
+                    scope: PendScope::Nest(NestScope::Whole),
                 },
             }
             .to_bytes();
@@ -289,6 +297,8 @@ impl Fixture {
                 }
             }
         }
+        crate::lifecycle::return_pend(self.execution);
+        crate::lifecycle::return_pend(self.whole);
         crate::lifecycle::return_pend(self.shared);
         crate::delete(CellObject::Slot(self.data));
         crate::lifecycle::return_pend(self.source);

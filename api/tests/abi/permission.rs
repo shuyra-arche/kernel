@@ -1,32 +1,40 @@
 use kernel_api::model::{
+    cell::MappingId,
     flat::FlatId,
     identity::{Mark, PendId, TaskId},
     modifiable::Modifiable,
     nest::NestId,
     pend::{
-        CloneRights, CreationRights, Distributable, FlatRights, Limits, MemoRights, NestRights,
-        Operations, PendInfo, PendRange, PendStatus, ShareRights, Target, ViewTarget,
+        CloneRights, CreationRights, Distributable, FlatRights, Limits, NestRights, NestScope,
+        Operations, PendInfo, PendRange, PendScope, PendStatus, ShareRights, Target, ViewTarget,
     },
     sign::{SignId, SignRights},
     view::ViewId,
 };
+
+fn mapping(id: u64, range: PendRange) -> PendScope {
+    PendScope::Nest(NestScope::Mapping {
+        id: MappingId::from_bytes(&id.to_le_bytes()).unwrap(),
+        range,
+    })
+}
 
 fn grant(operations: Operations) -> Limits {
     Limits {
         operations,
         modifiable: Modifiable::No,
         distributable: Distributable::Yes,
-        range: PendRange::Inherit,
+        scope: match operations {
+            Operations::Share(_) | Operations::Flat(_) => PendScope::Pages(PendRange::Inherit),
+            Operations::Nest(_) => PendScope::Nest(NestScope::Whole),
+            _ => PendScope::Object,
+        },
     }
 }
 
 #[test]
-fn each_operation_family_requires_its_own_target() {
+fn each_operation_family_requires_its_own_target_and_scope() {
     let kinds = [
-        (
-            Target::Memo(kernel_api::model::cell::MemoId::new(7).unwrap()),
-            Operations::Memo(MemoRights::INSPECT),
-        ),
         (
             Target::Sign(SignId::new(7)),
             Operations::Sign(SignRights::LISTEN),
@@ -51,69 +59,273 @@ fn each_operation_family_requires_its_own_target() {
     ];
     for (i, (target, operations)) in kinds.iter().enumerate() {
         assert_eq!(Target::of(target.words()), Some(*target));
+        assert!(grant(*operations).valid());
         for (j, (_, requested)) in kinds.iter().enumerate() {
             assert_eq!(target.accepts(*requested), i == j);
             assert_eq!(grant(*operations).permits_child(grant(*requested)), i == j);
         }
     }
-    for words in [[0, 1], [1, 0], [3, usize::MAX], [5, 7], [99, 7]] {
+    for words in [[0, 1], [1, 0], [3, usize::MAX], [5, 7], [7, 7], [99, 7]] {
         assert_eq!(Target::of(words), None);
     }
-    assert_eq!(Operations::of([5, 1]), None);
-    assert_eq!(Operations::of([5, 2]), None);
+    for kind in [5, 7, 99] {
+        for bits in [0, 1, u32::MAX as usize] {
+            assert_eq!(Operations::of([kind, bits]), None);
+        }
+    }
 }
 
 #[test]
 fn distribution_is_independent_of_mutability_and_cannot_be_restored() {
+    for read in [
+        grant(Operations::Share(ShareRights::OPEN)),
+        Limits {
+            scope: mapping(7, PendRange::Inherit),
+            ..grant(Operations::Nest(NestRights::PUBLISH))
+        },
+    ] {
+        let final_read = Limits {
+            distributable: Distributable::No,
+            ..read
+        };
+        assert!(read.permits_child(final_read));
+        assert!(!final_read.permits_child(final_read));
+        assert!(read.permits_narrowing(final_read));
+        assert!(!final_read.permits_narrowing(read));
+        let write = Limits {
+            modifiable: Modifiable::Yes,
+            ..final_read
+        };
+        assert!(!write.permits_child(final_read));
+        assert!(!read.permits_child(write));
+        assert!(!read.permits_narrowing(write));
+        assert!(write.permits_narrowing(final_read));
+        assert!(!write.permits_narrowing(Limits {
+            distributable: Distributable::Yes,
+            ..write
+        }));
+    }
     let read = grant(Operations::Share(ShareRights::OPEN));
-    let final_read = Limits {
-        distributable: Distributable::No,
-        ..read
-    };
-    assert!(read.permits_child(final_read));
-    assert!(!final_read.permits_child(final_read));
-    assert!(read.permits_narrowing(final_read));
-    assert!(!final_read.permits_narrowing(read));
-    let write = Limits {
-        modifiable: Modifiable::Yes,
-        ..final_read
-    };
-    assert!(!write.permits_child(final_read));
-    assert!(!read.permits_child(write));
-    assert!(write.permits_narrowing(final_read));
     let expanded = Limits {
         operations: Operations::Share(ShareRights::OPEN | ShareRights::ASSOCIATE),
-        ..final_read
+        ..read
     };
     assert!(!read.permits_child(expanded));
 }
 
 #[test]
-fn object_free_permission_never_admits_a_data_window_or_mutable_access() {
-    let calls = grant(Operations::None(
-        CreationRights::FLAT | CreationRights::NEST,
-    ));
-    assert!(calls.valid());
-    for invalid in [
-        Limits {
-            range: PendRange::Pages {
-                offset: 0,
-                count: 1,
-            },
-            ..calls
+fn scopes_exclude_incompatible_families_and_invalid_page_geometry() {
+    let scopes = [
+        PendScope::Object,
+        PendScope::Pages(PendRange::Inherit),
+        PendScope::Pages(PendRange::pages(2, 3).unwrap()),
+        PendScope::Nest(NestScope::Whole),
+        mapping(7, PendRange::Inherit),
+        mapping(7, PendRange::pages(2, 3).unwrap()),
+    ];
+    for (operations, expected) in [
+        (
+            Operations::None(CreationRights::FLAT),
+            [true, false, false, false, false, false],
+        ),
+        (
+            Operations::Clone(CloneRights::PUSH),
+            [true, false, false, false, false, false],
+        ),
+        (
+            Operations::Sign(SignRights::LISTEN),
+            [true, false, false, false, false, false],
+        ),
+        (
+            Operations::Share(ShareRights::OPEN),
+            [false, true, true, false, false, false],
+        ),
+        (
+            Operations::Flat(FlatRights::INSPECT),
+            [false, true, true, false, false, false],
+        ),
+        (
+            Operations::Nest(NestRights::INSPECT),
+            [false, false, false, true, true, true],
+        ),
+    ] {
+        for (scope, expected) in scopes.into_iter().zip(expected) {
+            let limits = Limits {
+                scope,
+                ..grant(operations)
+            };
+            assert_eq!(limits.valid(), expected, "{operations:?} {scope:?}");
+            assert_eq!(Limits::of(limits.words()), expected.then_some(limits));
+        }
+    }
+    for range in [
+        PendRange::Pages {
+            offset: 0,
+            count: 0,
         },
-        Limits {
-            modifiable: Modifiable::Yes,
-            ..calls
+        PendRange::Pages {
+            offset: usize::MAX,
+            count: 1,
+        },
+        PendRange::Pages {
+            offset: 0,
+            count: usize::MAX,
         },
     ] {
+        for scope in [PendScope::Pages(range), mapping(7, range)] {
+            assert_eq!(PendScope::of(scope.words()), None);
+        }
+    }
+    for operations in [
+        Operations::None(CreationRights::all()),
+        Operations::Sign(SignRights::all()),
+    ] {
+        let invalid = Limits {
+            modifiable: Modifiable::Yes,
+            ..grant(operations)
+        };
         assert!(!invalid.valid());
         assert_eq!(Limits::of(invalid.words()), None);
     }
 }
 
 #[test]
-fn info_rejects_a_valid_permission_for_the_wrong_target() {
+fn scope_codec_is_five_canonical_words_with_a_checked_mapping_identity() {
+    assert_eq!(PendScope::WORDS, 5);
+    assert_eq!(Limits::WORDS, 9);
+    for (scope, words) in [
+        (PendScope::Object, [0, 0, 0, 0, 0]),
+        (PendScope::Pages(PendRange::Inherit), [1, 0, 0, 0, 0]),
+        (
+            PendScope::Pages(PendRange::pages(2, 3).unwrap()),
+            [1, 0, 1, 2, 3],
+        ),
+        (PendScope::Nest(NestScope::Whole), [2, 0, 0, 0, 0]),
+        (mapping(7, PendRange::Inherit), [3, 7, 0, 0, 0]),
+        (
+            mapping(isize::MAX as u64, PendRange::pages(2, 3).unwrap()),
+            [3, isize::MAX as usize, 1, 2, 3],
+        ),
+    ] {
+        assert_eq!(scope.words(), words);
+        assert_eq!(PendScope::of(words), Some(scope));
+        assert_eq!(
+            scope.range(),
+            match scope {
+                PendScope::Pages(range) | PendScope::Nest(NestScope::Mapping { range, .. }) =>
+                    Some(range),
+                _ => None,
+            }
+        );
+    }
+    for invalid in [
+        [0, 1, 0, 0, 0],
+        [0, 0, 1, 0, 1],
+        [0, 0, 0, 1, 0],
+        [0, 0, 0, 0, 1],
+        [1, 1, 0, 0, 0],
+        [1, 0, 0, 1, 0],
+        [1, 0, 0, 0, 1],
+        [1, 0, 2, 0, 1],
+        [1, 0, 1, 0, 0],
+        [1, 0, 1, usize::MAX, 1],
+        [1, 0, 1, 0, usize::MAX],
+        [2, 1, 0, 0, 0],
+        [2, 0, 1, 0, 1],
+        [2, 0, 0, 1, 0],
+        [2, 0, 0, 0, 1],
+        [3, 0, 0, 0, 0],
+        [3, usize::MAX, 0, 0, 0],
+        [3, 7, 0, 1, 0],
+        [3, 7, 0, 0, 1],
+        [3, 7, 2, 0, 1],
+        [3, 7, 1, 0, 0],
+        [3, 7, 1, usize::MAX, 1],
+        [3, 7, 1, 0, usize::MAX],
+        [4, 0, 0, 0, 0],
+    ] {
+        assert_eq!(PendScope::of(invalid), None, "{invalid:?}");
+    }
+    let invalid = Limits {
+        scope: PendScope::Nest(NestScope::Mapping {
+            id: MappingId::NONE,
+            range: PendRange::Inherit,
+        }),
+        ..grant(Operations::Nest(NestRights::INSPECT))
+    };
+    assert!(!invalid.valid());
+}
+
+#[test]
+fn whole_and_mapping_rights_have_distinct_masks_and_retired_bits_stay_invalid() {
+    assert_eq!(NestRights::whole().bits(), 1 | 2 | 8 | 512);
+    assert_eq!(
+        NestRights::mapping().bits(),
+        1 | 4 | 64 | 128 | 256 | 1024 | 2048
+    );
+    assert_eq!(
+        NestRights::all(),
+        NestRights::whole() | NestRights::mapping()
+    );
+    for (scope, mask) in [
+        (PendScope::Nest(NestScope::Whole), NestRights::whole()),
+        (mapping(7, PendRange::Inherit), NestRights::mapping()),
+    ] {
+        for bit in 0..12 {
+            let bits = 1u32 << bit;
+            let rights = NestRights::from_bits_retain(bits);
+            let limits = Limits {
+                scope,
+                ..grant(Operations::Nest(rights))
+            };
+            assert_eq!(limits.valid(), mask.contains(rights), "{scope:?} bit {bit}");
+        }
+        let all = Limits {
+            scope,
+            ..grant(Operations::Nest(NestRights::all()))
+        };
+        assert!(!all.valid());
+        assert_eq!(Limits::of(all.words()), None);
+    }
+    for bits in [16, 32, 4096, u32::MAX] {
+        assert!(NestRights::from_bits(bits).is_none());
+        assert!(Operations::of([4, bits as usize]).is_none());
+    }
+}
+
+#[test]
+fn generic_attenuation_never_changes_scope_category_or_mapping_identity() {
+    let whole = grant(Operations::Nest(NestRights::INSPECT));
+    let first = Limits {
+        scope: mapping(7, PendRange::pages(2, 3).unwrap()),
+        ..whole
+    };
+    let second = Limits {
+        scope: mapping(8, PendRange::Inherit),
+        ..first
+    };
+    for (parent, child) in [
+        (whole, first),
+        (first, whole),
+        (first, second),
+        (second, first),
+    ] {
+        assert!(parent.valid() && child.valid());
+        assert!(!parent.permits_child(child));
+        assert!(!parent.permits_narrowing(child));
+    }
+    for scope in [
+        mapping(7, PendRange::Inherit),
+        mapping(7, PendRange::pages(1, 1).unwrap()),
+    ] {
+        let child = Limits { scope, ..first };
+        assert!(first.permits_child(child));
+        assert!(first.permits_narrowing(child));
+    }
+}
+
+#[test]
+fn info_requires_resolved_scope_and_matching_target_family() {
     let info = PendInfo {
         token: PendId::mint(1),
         target: Target::Nest(NestId::new(3).unwrap()),
@@ -123,88 +335,75 @@ fn info_rejects_a_valid_permission_for_the_wrong_target() {
         mark: Mark::NONE,
         status: PendStatus::Active,
     };
+    assert_eq!(PendInfo::WORDS, 16);
+    assert_eq!(PendInfo::SIZE, 128);
     assert_eq!(PendInfo::from_bytes(&info.to_bytes()), Some(info));
-    let forged = PendInfo {
-        limits: grant(Operations::Flat(FlatRights::INSPECT)),
+    for limits in [
+        grant(Operations::Flat(FlatRights::INSPECT)),
+        Limits {
+            scope: mapping(7, PendRange::Inherit),
+            ..grant(Operations::Nest(NestRights::INSPECT))
+        },
+        Limits {
+            scope: PendScope::Object,
+            ..info.limits
+        },
+        grant(Operations::Nest(NestRights::PUBLISH)),
+    ] {
+        assert_eq!(
+            PendInfo::from_bytes(&PendInfo { limits, ..info }.to_bytes()),
+            None
+        );
+    }
+    let mapped = PendInfo {
+        limits: Limits {
+            scope: mapping(7, PendRange::pages(20, 3).unwrap()),
+            ..grant(Operations::Nest(NestRights::INSPECT))
+        },
         ..info
     };
-    assert_eq!(PendInfo::from_bytes(&forged.to_bytes()), None);
-}
-
-#[test]
-fn sign_permissions_are_control_rights_not_mutable_memory() {
-    let listen = grant(Operations::Sign(SignRights::LISTEN));
-    for invalid in [
-        Limits {
-            modifiable: Modifiable::Yes,
-            ..listen
+    assert_eq!(PendInfo::from_bytes(&mapped.to_bytes()), Some(mapped));
+    let flat = PendInfo {
+        target: Target::Flat(FlatId::new(3).unwrap()),
+        limits: Limits {
+            scope: PendScope::Pages(PendRange::pages(20, 3).unwrap()),
+            ..grant(Operations::Flat(FlatRights::INSPECT))
         },
-        Limits {
-            range: PendRange::Pages {
-                offset: 0,
-                count: 1,
-            },
-            ..listen
-        },
-    ] {
-        assert_eq!(Limits::of(invalid.words()), None);
-    }
-    let all = grant(Operations::Sign(SignRights::all()));
-    assert!(all.permits_child(listen));
-    assert!(!listen.permits_child(grant(Operations::Sign(SignRights::CONSUME))));
-    assert!(!listen.permits_child(grant(Operations::Sign(SignRights::DELETE))));
+        ..info
+    };
+    assert_eq!(PendInfo::from_bytes(&flat.to_bytes()), Some(flat));
+    let inherited = PendInfo {
+        limits: grant(flat.limits.operations),
+        ..flat
+    };
+    assert_eq!(PendInfo::from_bytes(&inherited.to_bytes()), None);
 }
 
 #[test]
-fn nest_delegation_can_withhold_destruction_distribution_and_write_access() {
-    let root = Limits {
-        modifiable: Modifiable::Yes,
-        ..grant(Operations::Nest(NestRights::all()))
-    };
-    let worker = Limits {
-        operations: Operations::Nest(
-            NestRights::INSPECT | NestRights::RESERVE | NestRights::PUBLISH | NestRights::RETRACT,
-        ),
-        distributable: Distributable::No,
-        ..root
-    };
-    assert!(root.permits_child(worker));
-    assert!(!worker.permits_child(worker));
-    assert!(!worker.permits_narrowing(root));
-    assert!(
-        !worker
-            .operations
-            .contains(Operations::Nest(NestRights::DELETE))
-    );
-    let observer = Limits {
-        modifiable: Modifiable::No,
-        ..grant(Operations::Nest(NestRights::INSPECT))
-    };
-    assert!(root.permits_child(observer));
-    assert!(!observer.permits_child(worker));
-    assert!(!observer.permits_child(grant(Operations::None(CreationRights::NEST))));
-    assert!(NestRights::from_bits(16).is_none());
-    assert!(Operations::of([4, 16]).is_none());
-    // ATTACH remains meaningful only for consuming an Internal Nest into Team.
-    assert_eq!(NestRights::from_bits(8), Some(NestRights::ATTACH));
-}
-
-#[test]
-fn observation_and_access_cannot_supply_transfer_or_block_authority() {
+fn observation_and_access_cannot_supply_mutation_authority() {
     assert!(
         !Operations::Share(ShareRights::all()).contains(Operations::Flat(FlatRights::TRANSFER))
     );
     assert!(!Operations::Flat(FlatRights::ASSOCIATE).contains(Operations::Flat(FlatRights::BLOCK)));
-    let inspect = grant(Operations::Memo(MemoRights::INSPECT));
+    let inspect = Limits {
+        scope: mapping(7, PendRange::Inherit),
+        ..grant(Operations::Nest(NestRights::INSPECT))
+    };
     for operation in [
-        MemoRights::INSERT,
-        MemoRights::REMOVE,
-        MemoRights::PUBLISH,
-        MemoRights::RETRACT,
-        MemoRights::PROTECT,
-        MemoRights::DELETE,
+        NestRights::INSERT,
+        NestRights::REMOVE,
+        NestRights::PUBLISH,
+        NestRights::RETRACT,
+        NestRights::PROTECT,
+        NestRights::RELEASE,
     ] {
-        assert!(!inspect.permits_child(grant(Operations::Memo(operation))));
+        assert!(!inspect.permits_child(Limits {
+            operations: Operations::Nest(operation),
+            ..inspect
+        }));
     }
-    assert_eq!(Operations::of([7, 128]), None);
+    let listen = grant(Operations::Sign(SignRights::LISTEN));
+    assert!(grant(Operations::Sign(SignRights::all())).permits_child(listen));
+    assert!(!listen.permits_child(grant(Operations::Sign(SignRights::CONSUME))));
+    assert!(!listen.permits_child(grant(Operations::Sign(SignRights::DELETE))));
 }

@@ -19,7 +19,6 @@ use core::sync::atomic::Ordering;
 use crate::basis::flat::FlatRange;
 use crate::basis::flat::sharing::Sharing;
 use crate::basis::nest::Access;
-use crate::basis::nest::Nest;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::Pend;
 use crate::metal::sync::{SpinLock, SpinLockGuard};
@@ -159,20 +158,11 @@ impl SourceAuthorization {
         if !self.private_owner(task) {
             return Err(PendFail::Denied);
         }
+        if self.pending_cpu() {
+            return Err(PendFail::Busy);
+        }
         let gate = self.revoked.lock();
-        if *gate
-            || self.bindings.lock().iter().any(|binding| {
-                binding.nest().upgrade().is_none_or(|space| {
-                    space.has_pending_invalidation()
-                        || space.mappings.registered(binding.id()).is_none_or(|entry| {
-                            entry
-                                .mapping()
-                                .is_none_or(|mapping| space.has_published(mapping))
-                        })
-                })
-            })
-            || !self.inflight.lock().is_empty()
-        {
+        if *gate || !self.inflight.lock().is_empty() {
             return Err(PendFail::Busy);
         }
         self.external
@@ -360,9 +350,6 @@ impl SourceAuthorization {
     /// 备下一条成员的位置（可失败的准备；调用方在同一提交段里紧接着写入）。
     pub(crate) fn reserve_binding(&self) -> Result<(), PendFail> {
         let mut members = self.bindings.lock();
-        if members.len() >= 1024 {
-            return Err(PendFail::OutOfMemory);
-        }
         members.try_reserve(1).map_err(|_| PendFail::OutOfMemory)
     }
 
@@ -383,7 +370,9 @@ impl SourceAuthorization {
 
     /// External access blocks private CPU publication until trusted settlement.
     pub(crate) fn ensure_internal(&self) -> Result<(), PendFail> {
-        if self.external.load(Ordering::Acquire) {
+        if self.external.load(Ordering::Acquire)
+            || self.qualification.state.load(Ordering::Acquire) == CLAIMED
+        {
             Err(PendFail::Busy)
         } else {
             Ok(())
@@ -427,6 +416,19 @@ impl SourceAuthorization {
         self.bindings.lock().first().cloned()
     }
 
+    /// Query outside source/Nest locks; upgrading a last Nest may run retirement.
+    pub(crate) fn pending_cpu(&self) -> bool {
+        let Ok(bindings) = self.bindings() else {
+            return true;
+        };
+        bindings.iter().any(|binding| {
+            binding
+                .nest()
+                .upgrade()
+                .is_none_or(|nest| !nest.is_external() && nest.binding_pending(binding))
+        })
+    }
+
     /// 未结 CPU 身份的快照；不复制关系或物理持有。
     pub(crate) fn bindings(&self) -> Result<Vec<Arc<RangeBinding>>, PendFail> {
         let held = self.bindings.lock();
@@ -441,33 +443,6 @@ impl SourceAuthorization {
     /// 已失活来源仍须保留补关入口的义务。
     pub(crate) fn pending_close(&self) -> bool {
         !self.bindings.lock().is_empty() || !self.inflight.lock().is_empty()
-    }
-
-    /// 这份来源登过关系的目标空间：由成员快照派生并去重。
-    ///
-    /// 先在源锁下克隆成员再放锁升级：最后一份 `Nest` 强引用不在源锁里析构。
-    pub(crate) fn spaces(&self) -> Result<Vec<Arc<Nest>>, PendFail> {
-        let members = self.bindings()?;
-        let mut spaces = Vec::new();
-        spaces
-            .try_reserve(members.len())
-            .map_err(|_| PendFail::OutOfMemory)?;
-        for binding in &members {
-            if let Some(space) = binding.nest().upgrade()
-                && !spaces.iter().any(|held| Arc::ptr_eq(held, &space))
-            {
-                spaces.push(space);
-            }
-        }
-        Ok(spaces)
-    }
-
-    /// 这份来源名下是否仍有这一份未结绑定。
-    pub(crate) fn owns_binding(&self, binding: &Arc<RangeBinding>) -> bool {
-        self.bindings
-            .lock()
-            .iter()
-            .any(|held| Arc::ptr_eq(held, binding))
     }
 
     /// 撤销这份来源：在途发布未结清时返回 `Busy`，由调用方重试。
@@ -582,14 +557,12 @@ impl Withdrawal<'_> {
         self.source.check_window(offset, count)
     }
 
-    /// Move the exact private range to the root's authority. The former range
-    /// is returned for rollback while this same admission gate is held.
     pub(crate) fn adopt(
         &self,
         meta: &Arc<Sharing>,
         token: PendId,
         authority: Arc<Pend>,
-    ) -> Result<FlatRange, PendFail> {
+    ) -> Result<(), PendFail> {
         if *self.gate || self.source.external.load(Ordering::Acquire) {
             return Err(PendFail::Denied);
         }
@@ -600,19 +573,12 @@ impl Withdrawal<'_> {
         if !range.same_range(&meta.source()) {
             return Err(PendFail::Denied);
         }
-        let range = range.clone();
         *phase = Phase::Root {
             meta: Arc::downgrade(meta),
             token,
             authority,
         };
-        Ok(range)
-    }
-
-    pub(crate) fn restore_private(&self, token: PendId, range: FlatRange) {
-        let mut phase = self.source.phase.lock();
-        assert!(matches!(&*phase, Phase::Root { token: current, .. } if *current == token));
-        *phase = Phase::Private(range);
+        Ok(())
     }
 }
 

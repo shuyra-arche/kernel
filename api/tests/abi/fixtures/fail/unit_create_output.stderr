@@ -1,0 +1,11 @@
+error[E0271]: type mismatch resolving `<Create as Operation>::Output == UnitTarget`
+ --> tests/abi/fixtures/fail/unit_create_output.rs:6:21
+  |
+6 |     discards_nest::<Create>();
+  |                     ^^^^^^ expected `UnitTarget`, found `CreatedUnit`
+  |
+note: required by a bound in `discards_nest`
+ --> tests/abi/fixtures/fail/unit_create_output.rs:4:31
+  |
+4 | fn discards_nest<C: Operation<Output = UnitTarget>>() {}
+  |                               ^^^^^^^^^^^^^^^^^^^ required by this bound in `discards_nest`

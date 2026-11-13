@@ -53,7 +53,13 @@ fn accord(frame: &mut TrapContext, ident: &TaskIdent, request: VirtAddr) {
             &target,
             request.limits,
             request.mark,
-            pend::Window::Parent(request.limits.range),
+            pend::Window::Parent(
+                request
+                    .limits
+                    .scope
+                    .range()
+                    .unwrap_or(kernel_api::model::pend::PendRange::Inherit),
+            ),
             None,
         )
     })();
@@ -84,17 +90,7 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
 }
 
 fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendEntry) -> PendInfo {
-    let mut limits = pend.authority().limits();
-    if let Some(meta) = pend.target().memory() {
-        let (offset, count) = pend.authority().window().unwrap_or((
-            kernel_api::address::PageOffset::ZERO,
-            meta.source().page_count(),
-        ));
-        limits.range = kernel_api::model::pend::PendRange::Pages {
-            offset: offset.get(),
-            count: count.get(),
-        };
-    }
+    let limits = pend.authority().limits();
     let target = pend.target().identity();
     PendInfo {
         token: pend.token(),
@@ -107,11 +103,7 @@ fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendEntry) -> 
             TaskId::new(0)
         },
         mark: pend.mark(),
-        status: if pend.target().alive() {
-            pend.authority().status()
-        } else {
-            kernel_api::model::pend::PendStatus::Dead
-        },
+        status: pend.status(),
     }
 }
 

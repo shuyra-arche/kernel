@@ -7,15 +7,16 @@ use kernel_api::{
         modifiable::Modifiable,
         nest::{NestInfo, NestKind},
         pend::{
-            AccordRequest, AccordTarget, Distributable, Limits, NestRights, Operations, PendRange,
+            AccordRequest, AccordTarget, Distributable, Limits, NestRights, NestScope, Operations,
+            PendScope,
         },
         unit::{
-            ControlId, ExitCause, ExitScope, ProgramKind, UnitCreate, UnitQuery, UnitState,
-            UnitTarget,
+            ControlId, CreatedUnit, ExitCause, ExitScope, ProgramKind, UnitCreate, UnitQuery,
+            UnitState, UnitTarget,
         },
     },
 };
-use kernel_client::call::{cell, nest, pend, share_view, unit};
+use kernel_client::call::{nest, pend, share_view, unit};
 core::arch::global_asm!(
  ".pushsection .text.nest_test,\"ax\"", ".balign 4", ".global nest_child_start", "nest_child_start:",
  "li a0, 83", "li a1, 0", "li a2, 0", "li a3, 0", "li a4, 0", "li a7, {exit}", "ebreak", "j .",
@@ -92,7 +93,7 @@ fn build(case: Case) {
             operations: Operations::Nest(NestRights::ATTACH),
             modifiable: Modifiable::Yes,
             distributable: Distributable::No,
-            range: PendRange::Inherit,
+            scope: PendScope::Nest(NestScope::Whole),
         },
         mark: Mark::NONE,
     }
@@ -101,10 +102,19 @@ fn build(case: Case) {
     assert!(unit::create(ptr(&request(child, member_exit))).is_err());
     assert!(unit::create(ptr(&request(root, member_exit))).is_err());
     pend::return_(child).unwrap();
-    let UnitTarget::Team(team) = unit::create(ptr(&request(root, member_exit))).unwrap() else {
+    let CreatedUnit::Team {
+        team,
+        nest: admitted,
+    } = unit::create(ptr(&request(root, member_exit))).unwrap()
+    else {
         panic!("expected Team")
     };
-    assert!(nest::inspect(root, VirtAddr::new(observation.as_mut_ptr() as usize)).is_err());
+    assert_eq!(admitted, root);
+    nest::inspect(root, VirtAddr::new(observation.as_mut_ptr() as usize)).unwrap();
+    assert_eq!(
+        crate::pend::inspect(root).limits.operations,
+        Operations::Nest(NestRights::INSPECT | NestRights::RESERVE)
+    );
     assert!(unit::create(ptr(&request(root, member_exit))).is_err());
     let reference = allocate(1);
     let (staging, address) = attach(reference, 1);
@@ -114,34 +124,16 @@ fn build(case: Case) {
     retract(staging, 0);
     delete(raw_memo(staging, 0).object);
     let source = share_view::create(crate::license::get(), reference, Modifiable::No).unwrap();
-    let descriptor = CellCreate::Memo {
-        source: CellSource::Pend {
-            token: source,
-            offset: 0,
-            count: 1,
-        },
-        destination: MemoDestination::Internal {
-            team,
-            placement: Placement::lowest(4096).unwrap(),
-            access: 10,
-        },
-    }
-    .to_bytes();
-    let CreatedCell::Memo {
-        token: mapping,
-        address,
-    } = cell::create(PendId::NONE, ptr(&descriptor)).unwrap()
-    else {
-        panic!("expected Memo")
-    };
-    let position = CellPosition {
-        object: CellObject::Memo(mapping),
-        page: 0,
-        generation: 2,
-    }
-    .to_bytes();
-    // Association advances the initial vacant generation once.
-    cell::publish(ptr(&position)).unwrap();
+    let (mapping, address) = crate::space::reserve(
+        admitted,
+        Placement::lowest(4096).unwrap(),
+        1,
+        CellLevel::BASE,
+        10,
+    );
+    assert_eq!(crate::info(raw_memo(mapping, 0)).state, CellState::Vacant);
+    crate::handoff(raw_memo(source, 0), crate::memo(mapping, 0), false);
+    crate::publish(mapping, 0);
     let mut tasks = [TaskId::new(0); 8];
     let tasks = if member_exit {
         &mut tasks[..2]
@@ -169,7 +161,7 @@ fn build(case: Case) {
         } else {
             address
         };
-        let UnitTarget::Task(id) = unit::create(ptr(&descriptor(entry))).unwrap() else {
+        let CreatedUnit::Task(id) = unit::create(ptr(&descriptor(entry))).unwrap() else {
             panic!("expected Task")
         };
         *task = id;
@@ -234,6 +226,8 @@ fn build(case: Case) {
             }
         }
     }
+    crate::lifecycle::return_pend(mapping);
+    crate::lifecycle::return_pend(admitted);
     pend::return_(source).unwrap();
     delete(CellObject::Slot(reference));
 }

@@ -1,4 +1,4 @@
-//! Slot and Memo identity, positions and handoff descriptors.
+//! Slot or live Pend endpoints, generation-qualified positions and handoffs.
 
 use super::SlotId;
 use crate::abi::layout::{fetch_words, store_words};
@@ -8,11 +8,11 @@ use crate::model::identity::PendId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CellObject {
     Slot(SlotId),
-    Memo(PendId),
+    Pend(PendId),
 }
 
 impl CellObject {
-    pub const WIDTH: usize = 32;
+    pub const WIDTH: usize = 16;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut bytes = [0; Self::WIDTH];
         store_words(self.words(), &mut bytes);
@@ -22,27 +22,27 @@ impl CellObject {
         Self::of(fetch_words(bytes)?)
     }
 
-    pub(crate) fn words(self) -> [usize; 4] {
+    pub(crate) fn words(self) -> [usize; 2] {
         match self {
-            Self::Slot(id) => [0, id.get(), 0, 0],
-            Self::Memo(token) => [1, token.get(), 0, 0],
+            Self::Slot(id) => [0, id.get()],
+            Self::Pend(token) => [1, token.get()],
         }
     }
-    pub(crate) fn of(w: [usize; 4]) -> Option<Self> {
-        match w {
-            [0, id, 0, 0] if id != 0 && id <= isize::MAX as usize => {
-                Some(Self::Slot(SlotId::new(id)))
-            }
-            [1, token, 0, 0] if token != 0 && token <= isize::MAX as usize => {
-                Some(Self::Memo(PendId::new(token)))
-            }
+    pub(crate) fn of([tag, id]: [usize; 2]) -> Option<Self> {
+        if id == 0 || id > isize::MAX as usize {
+            return None;
+        }
+        match tag {
+            0 => Some(Self::Slot(SlotId::new(id))),
+            1 => Some(Self::Pend(PendId::new(id))),
             _ => None,
         }
     }
 }
 
-/// Generation qualifies a Memo transition. Slot endpoints use generation zero;
+/// Generation qualifies a mapping transition. Slot endpoints use generation zero;
 /// they move the current unique holding and do not claim a content snapshot.
+/// The server checks the actual family and generation of a Pend endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellPosition {
     pub object: CellObject,
@@ -53,19 +53,16 @@ pub struct CellPosition {
 }
 
 impl CellPosition {
-    pub const WIDTH: usize = 48;
+    pub const WIDTH: usize = 32;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut out = [0; Self::WIDTH];
-        let o = self.object.words();
-        store_words(
-            [o[0], o[1], o[2], o[3], self.page, self.generation as usize],
-            &mut out,
-        );
+        let [tag, id] = self.object.words();
+        store_words([tag, id, self.page, self.generation as usize], &mut out);
         out
     }
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let [a, b, c, d, page, generation] = fetch_words(bytes)?;
-        let object = CellObject::of([a, b, c, d])?;
+        let [tag, id, page, generation] = fetch_words(bytes)?;
+        let object = CellObject::of([tag, id])?;
         page.checked_mul(BASE_PAGE_SIZE)?;
         if matches!(object, CellObject::Slot(_)) && generation != 0 {
             return None;
@@ -90,22 +87,25 @@ impl CellHandoff {
     pub const WIDTH: usize = CellPosition::WIDTH * 2;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut bytes = [0; Self::WIDTH];
-        bytes[..48].copy_from_slice(&self.local.to_bytes());
-        bytes[48..].copy_from_slice(&self.remote.to_bytes());
+        bytes[..CellPosition::WIDTH].copy_from_slice(&self.local.to_bytes());
+        bytes[CellPosition::WIDTH..].copy_from_slice(&self.remote.to_bytes());
         bytes
     }
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != Self::WIDTH {
             return None;
         }
-        Some(Self {
-            local: CellPosition::from_bytes(&bytes[..48])?,
-            remote: CellPosition::from_bytes(&bytes[48..])?,
-        })
+        let local = CellPosition::from_bytes(&bytes[..CellPosition::WIDTH])?;
+        let remote = CellPosition::from_bytes(&bytes[CellPosition::WIDTH..])?;
+        match (local.object, remote.object) {
+            (CellObject::Slot(_), CellObject::Slot(_)) => Some(Self { local, remote }),
+            _ => None,
+        }
     }
 }
 
-/// Insert a Page association without transferring its owning Slot.
+/// Insert a Page association without transferring its owning Slot. Source Pend
+/// authority is Flat/Share ASSOCIATE or mapping INSERT; the target requires mapping INSERT.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellAssociation {
     pub source: CellPosition,
@@ -116,8 +116,8 @@ impl CellAssociation {
     pub const WIDTH: usize = CellPosition::WIDTH * 2;
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut bytes = [0; Self::WIDTH];
-        bytes[..48].copy_from_slice(&self.source.to_bytes());
-        bytes[48..].copy_from_slice(&self.target.to_bytes());
+        bytes[..CellPosition::WIDTH].copy_from_slice(&self.source.to_bytes());
+        bytes[CellPosition::WIDTH..].copy_from_slice(&self.target.to_bytes());
         bytes
     }
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -125,8 +125,8 @@ impl CellAssociation {
             return None;
         }
         Some(Self {
-            source: CellPosition::from_bytes(&bytes[..48])?,
-            target: CellPosition::from_bytes(&bytes[48..])?,
+            source: CellPosition::from_bytes(&bytes[..CellPosition::WIDTH])?,
+            target: CellPosition::from_bytes(&bytes[CellPosition::WIDTH..])?,
         })
     }
 }

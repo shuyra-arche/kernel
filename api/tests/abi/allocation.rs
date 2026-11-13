@@ -1,6 +1,6 @@
 use kernel_api::abi::register::Wire;
 use kernel_api::address::{BASE_PAGE_SHIFT, BASE_PAGE_SIZE, PAGE_SHIFT, PAGE_SIZE, PageCount};
-use kernel_api::model::cell::{Allocation, CellCreate, CellLevel};
+use kernel_api::model::cell::{Allocation, CellLevel};
 
 #[test]
 fn allocation_requires_a_page_and_rounds_only_valid_requests() {
@@ -16,13 +16,6 @@ fn allocation_requires_a_page_and_rounds_only_valid_requests() {
             .bytes(),
             None
         );
-        let spec = kernel_api::model::cell::CellCreate::Slot(Allocation {
-            size,
-            align: 4096,
-            level: CellLevel::BASE,
-        })
-        .to_bytes();
-        assert!(kernel_api::model::cell::CellCreate::from_bytes(&spec).is_none());
         assert!(Allocation::unpack(&[size, 4096, 0, 0, 0, 0], &mut 0).is_err());
     }
     for (size, bytes) in [(4096, 4096), (4097, 8192), (12288, 12288)] {
@@ -58,10 +51,6 @@ fn levels_roundtrip_and_reject_noncanonical_geometry() {
         assert_eq!(level.pages(), Some(1 << (9 * n)));
         assert_eq!(level.bytes(), Some(1 << (12 + 9 * n)));
         let value = Allocation::at_level(level, 2).unwrap();
-        assert_eq!(
-            CellCreate::from_bytes(&CellCreate::Slot(value).to_bytes()),
-            Some(CellCreate::Slot(value))
-        );
         let mut words = [0; 6];
         value.pack(&mut words, &mut 0);
         assert_eq!(Allocation::unpack(&words, &mut 0).unwrap(), value);

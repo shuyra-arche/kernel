@@ -103,10 +103,6 @@ impl Team {
         self.node.state.lock().ready()
     }
 
-    pub(crate) fn constructing(&self) -> bool {
-        self.node.state.lock().constructing()
-    }
-
     pub(crate) fn operation(&self) -> Option<SpinLockGuard<'_, ()>> {
         self.operation.try_lock()
     }

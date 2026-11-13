@@ -1,8 +1,7 @@
 //! 一次选址的完整数据：选址方式与起始对齐。
-//! 选址值嵌入 CellCreate 的单次快照；ABI codec 负责 checked 解码。
+//! 选址值嵌入 ReserveRequest 的单次快照；ABI codec 负责 checked 解码。
 //!
-//! 描述里只有选址数据：没有来源、授权、清理，也没有第二份长度（长度只来自
-//! `ReferenceRange`）。区域固定为普通用户窗口（旧 `Mmap` 同口径）。
+//! 描述里只有选址数据：没有来源、授权、清理或长度。
 
 use crate::abi::layout::{WORD_BYTES, fetch_words, store_words};
 

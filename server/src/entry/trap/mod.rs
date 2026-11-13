@@ -72,7 +72,6 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
                 crate::basis::nest::authority::external::maintain();
             }
             interrupt::enable_external();
-            redeem();
             if let Some(running) = ident.as_ref().and_then(Identity::live)
                 && let Some(reason) = crate::basis::unit::lifecycle::take_doomed(running.id)
             {
@@ -82,6 +81,11 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
             if from_task {
                 run() as *mut TrapContext
             } else {
+                // Task entries redeem once under scheduler::run's COMMIT.
+                // A speculative try before that boundary can install a 100 us
+                // retry which expires during lock admission and immediately
+                // retraps the selected Task under contention.
+                redeem();
                 deadline::arm(deadline::blind_deadline());
                 frame as *mut TrapContext
             }

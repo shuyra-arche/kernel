@@ -34,6 +34,7 @@ pub struct TeamBuilder {
     creator: kernel_api::model::identity::TaskId,
     constructing: bool,
     member_exit: bool,
+    guarded: bool,
 }
 
 impl TeamBuilder {
@@ -44,6 +45,7 @@ impl TeamBuilder {
             creator: kernel_api::model::identity::TaskId::new(0),
             constructing: false,
             member_exit: false,
+            guarded: false,
         }
     }
 
@@ -67,6 +69,11 @@ impl TeamBuilder {
         self
     }
 
+    pub(crate) fn guarded(mut self, enabled: bool) -> Self {
+        self.guarded = enabled;
+        self
+    }
+
     pub(crate) fn prepare_nest(kind: SpaceKind) -> Result<Arc<Nest>, NestError> {
         let nest = Nest::new(kind)?;
         seed_trampoline(&nest, &kernel().ok_or(NestError::NoRegion)?.nest)?;
@@ -76,7 +83,8 @@ impl TeamBuilder {
     pub(crate) fn spawn_in(self, nest: Arc<Nest>) -> Result<Arc<Team>, NestError> {
         if nest.is_external()
             || nest.kind().is_supervisor() != self.kind.is_supervisor()
-            || nest.is_closed()
+            || !nest.is_open()
+            || nest.is_adopted()
         {
             return Err(NestError::NoRegion);
         }
@@ -87,10 +95,15 @@ impl TeamBuilder {
             self.creator,
             self.constructing,
             self.member_exit,
+            self.guarded,
+            |_| Ok(()),
         )
     }
 
-    pub fn spawn(self) -> Result<Arc<Team>, NestError> {
+    pub(crate) fn spawn(
+        self,
+        stage: impl FnOnce(&Arc<Team>) -> Result<(), NestError>,
+    ) -> Result<Arc<Team>, NestError> {
         let sire = match self.sire.upgrade() {
             Some(task) => Some(task),
             None if self.sire.as_weak().ptr_eq(&Weak::new()) => None,
@@ -103,6 +116,8 @@ impl TeamBuilder {
             self.creator,
             self.constructing,
             self.member_exit,
+            self.guarded,
+            stage,
         )
     }
 }
@@ -123,6 +138,8 @@ fn make_team(
     creator: TaskId,
     constructing: bool,
     member_exit: bool,
+    guarded: bool,
+    stage: impl FnOnce(&Arc<Team>) -> Result<(), NestError>,
 ) -> Result<Arc<Team>, NestError> {
     let parent = sire.as_ref().map(|task| task.ident.team.node.clone());
     let owner = sire.as_ref().map_or(TaskId::new(0), |task| task.ident.id);
@@ -149,6 +166,9 @@ fn make_team(
         termination: SpinLock::new(crate::basis::unit::lifecycle::Termination::new()),
     })
     .map_err(|_| NestError::OutOfMemory)?;
+    if guarded {
+        super::exit::arm(&life, creator).map_err(|_| NestError::NoRegion)?;
+    }
     let team = Arc::try_new(Team {
         nest,
         external: crate::basis::nest::authority::admission::Admission::new(),
@@ -165,6 +185,7 @@ fn make_team(
         operation: SpinLock::new(()),
     })
     .map_err(|_| NestError::OutOfMemory)?;
+    stage(&team)?;
     if let Some(sire) = sire {
         let parent = &sire.ident.team.node;
         {
@@ -202,8 +223,12 @@ fn make_team(
             return Err(NestError::OutOfMemory);
         }
         let at = children.partition_point(|node| node.id.get() < life.id.get());
+        team.nest.attach_team(id)?;
         children.insert(at, life);
         heirs.push(team.clone());
+    } else {
+        let _commit = commit();
+        team.nest.attach_team(id)?;
     }
     Ok(team)
 }
@@ -219,6 +244,8 @@ pub(crate) fn init_kernel(nest: Arc<Nest>) -> Result<&'static Arc<Team>, NestErr
             kernel_api::model::identity::TaskId::new(0),
             false,
             false,
+            false,
+            |_| Ok(()),
         )?;
         assert!(KERNEL_TEAM.set(team).is_ok());
     }

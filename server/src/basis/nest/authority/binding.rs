@@ -18,7 +18,7 @@ use kernel_api::{
     model::{
         identity::{PendId, TaskId},
         nest::{NestInfo, NestKind, NestPhase},
-        pend::{NestRights, Operations},
+        pend::{NestRights, NestScope, Operations, PendScope},
     },
 };
 
@@ -40,7 +40,16 @@ pub(crate) fn authorized(
     rights: NestRights,
 ) -> Result<Arc<PendEntry>, NestFail> {
     pend::locate(actor, token)
-        .filter(|e| e.permits(Operations::Nest(rights)) && e.target().nest().is_some())
+        .filter(|entry| {
+            pend::live(actor)
+                && (if rights == NestRights::INSPECT || rights == NestRights::DELETE {
+                    entry.authority().permits(Operations::Nest(rights))
+                } else {
+                    entry.permits(Operations::Nest(rights))
+                })
+                && entry.target().nest().is_some()
+                && entry.authority().scope() == PendScope::Nest(NestScope::Whole)
+        })
         .ok_or(NestFail::Denied)
 }
 
@@ -121,24 +130,40 @@ pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), NestFail> {
     let entry = authorized(actor, token, NestRights::DELETE)?;
     let nest = entry.target().nest().ok_or(NestFail::Denied)?;
     if !nest.is_external() {
+        if nest.is_adopted() {
+            return Err(NestFail::Denied);
+        }
         // CPU invalidation must not run under the global commit lock.
         return nest.delete_organization().map_err(|_| NestFail::Busy);
     }
-    if entry.sire().is_some() {
-        return Err(NestFail::Denied);
-    }
     let _commit = crate::basis::commit();
+    {
+        let records = ORGANIZATIONS.lock();
+        let record = records
+            .iter()
+            .find(|record| Arc::ptr_eq(&record.nest, &nest))
+            .ok_or(NestFail::Denied)?;
+        if !record.root.ptr_eq(&Arc::downgrade(entry.authority())) {
+            return Err(NestFail::Denied);
+        }
+    }
+    nest.close_external().map_err(|_| NestFail::Denied)?;
+    nest.progress_mappings();
+    if !super::external::discard(&nest) {
+        return Err(NestFail::Busy);
+    }
     let mut records = ORGANIZATIONS.lock();
     let at = records
         .iter()
-        .position(|r| Arc::ptr_eq(&r.nest, &nest))
+        .position(|record| Arc::ptr_eq(&record.nest, &nest))
         .ok_or(NestFail::Denied)?;
-    nest.close_external().map_err(|_| NestFail::Denied)?;
-    if records[at].binding.is_some() || !super::external::discard(&nest) {
+    if records[at].binding.is_some() {
         return Err(NestFail::Busy);
     }
     nest.delete_organization().map_err(|_| NestFail::Busy)?;
-    records.remove(at);
+    let removed = records.remove(at);
+    drop(records);
+    drop(removed);
     Ok(())
 }
 
@@ -146,71 +171,87 @@ pub(crate) fn maintain() -> bool {
     use core::sync::atomic::{AtomicUsize, Ordering};
     static CURSOR: AtomicUsize = AtomicUsize::new(0);
     for _ in 0..4 {
-        let mut notice = None;
-        let changed;
-        let _commit = crate::basis::commit();
-        let Some(mut records) = ORGANIZATIONS.try_lock() else {
-            return true;
+        let commit = crate::basis::commit();
+        let (nest, root, binding) = {
+            let Some(records) = ORGANIZATIONS.try_lock() else {
+                return true;
+            };
+            if records.is_empty() {
+                break;
+            }
+            let at = CURSOR.fetch_add(1, Ordering::Relaxed) % records.len();
+            let record = &records[at];
+            (
+                record.nest.clone(),
+                record.root.clone(),
+                record.binding.is_some(),
+            )
         };
-        if records.is_empty() {
-            break;
-        }
-        let at = CURSOR.fetch_add(1, Ordering::Relaxed) % records.len();
-        let record = &mut records[at];
-        let before = (record.nest.external_phase(), record.fault_sequence);
-        let id = record.nest.id();
-        let invalid = record.root.upgrade().is_none_or(|root| !root.alive());
+        // Inverse references and source loans never leave under the keeper lock.
+        let id = nest.id();
+        let before = nest.external_phase();
+        let invalid = root.upgrade().is_none_or(|root| !root.alive());
         if invalid {
-            let _ = record.nest.close_external();
+            let _ = nest.close_external();
         }
-        if record.binding.is_some() {
-            if before.0 != NestPhase::Closed {
-                for _ in 0..4 {
-                    match record.nest.external_fault() {
-                        Ok(Some(fault)) => {
-                            // A hardware fault has no Memo generation. Retain it
-                            // at binding scope without guessing a publication.
-                            record.fault.get_or_insert(fault);
-                            record.fault_sequence = record.fault_sequence.saturating_add(1);
-                        }
-                        Ok(None) => break,
-                        Err(_) => {
-                            let _ = record.nest.close_external();
-                            break;
-                        }
+        let mut faults = [None; 4];
+        if binding && before != NestPhase::Closed {
+            for slot in &mut faults {
+                match nest.external_fault() {
+                    Ok(Some(fault)) => *slot = Some(fault),
+                    Ok(None) => break,
+                    Err(_) => {
+                        let _ = nest.close_external();
+                        break;
                     }
                 }
             }
-            if record.nest.progress_external_close().unwrap_or(false) {
-                if let Some(root) = record.binding.take() {
-                    // SAFETY: Nest observed the exact complete binding proof,
-                    // including all payloads, queues, tables and platform ordering.
-                    unsafe { root.release_retirement() };
-                    notice = record.notification.as_ref().and_then(|(task, entry)| {
-                        entry.upgrade().map(|entry| (*task, entry.token()))
-                    });
-                }
+        }
+        nest.progress_mappings();
+        let settled = binding && nest.progress_external_close().unwrap_or(false);
+        let remove = invalid
+            && nest.external_settled()
+            && super::external::discard(&nest)
+            && nest.delete_organization().is_ok();
+        let (retired, observer, removed, fault_changed) = {
+            let mut records = ORGANIZATIONS.lock();
+            let Some(at) = records
+                .iter()
+                .position(|record| Arc::ptr_eq(&record.nest, &nest))
+            else {
+                continue;
+            };
+            let record = &mut records[at];
+            let fault_changed = faults.iter().any(Option::is_some);
+            for fault in faults.into_iter().flatten() {
+                record.fault.get_or_insert(fault);
+                record.fault_sequence = record.fault_sequence.saturating_add(1);
             }
+            let retired = if settled { record.binding.take() } else { None };
+            let observer = retired.as_ref().and(record.notification.clone());
+            let removed = (remove && record.binding.is_none()).then(|| records.remove(at));
+            (retired, observer, removed, fault_changed)
+        };
+        if let Some(root) = retired {
+            // SAFETY: the backend proved complete binding retirement, including
+            // payloads, queues, tables and trusted platform ordering.
+            unsafe { root.release_retirement() };
         }
-        changed = before != (record.nest.external_phase(), record.fault_sequence);
-        if invalid
-            && record.binding.is_none()
-            && record.nest.external_settled()
-            && super::external::discard(&record.nest)
-            && record.nest.delete_organization().is_ok()
-        {
-            records.remove(at);
-        }
-        drop(records);
-        drop(_commit);
+        let notice =
+            observer.and_then(|(task, entry)| entry.upgrade().map(|entry| (task, entry.token())));
+        drop(removed);
+        drop(commit);
         if let Some((task, token)) = notice {
             pend::notify(task, token);
         }
-        if changed {
+        if before != nest.external_phase() || fault_changed {
             crate::basis::sign::signal(crate::basis::sign::WakeKey::ExternalNest { id });
         }
     }
-    ORGANIZATIONS.lock().iter().any(|r| r.binding.is_some())
+    ORGANIZATIONS
+        .lock()
+        .iter()
+        .any(|record| record.binding.is_some())
 }
 
 pub(crate) fn event(

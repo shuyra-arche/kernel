@@ -1,7 +1,6 @@
 use alloc::sync::Arc;
 
 use kernel_api::model::identity::PendId;
-use kernel_api::model::modifiable::Modifiable;
 
 use crate::basis::pend::Pend;
 
@@ -26,12 +25,6 @@ impl Authority {
     /// 授权是否仍然有效（失效后 modifiable 为空）。
     pub(super) fn permitted(&self) -> bool {
         self.authority.modifiable().is_some()
-    }
-
-    pub(super) fn stores(&self) -> bool {
-        self.authority
-            .modifiable()
-            .is_some_and(|modifiable| modifiable == Modifiable::Yes)
     }
 
     pub(super) fn authority(&self) -> Arc<Pend> {

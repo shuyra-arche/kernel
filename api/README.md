@@ -10,7 +10,7 @@ code or runtime state. There is no Env package or compatibility facade.
 | --- | --- |
 | `address` | PhysAddr, VirtAddr, PageIndex, PageOffset, PageCount and page geometry constants |
 | `model::identity` | TaskId, TeamId, PendId and Mark |
-| `model::cell` | SlotId, MemoId, MappingId, allocation, Cell objects, positions, handoffs and observations |
+| `model::cell` | SlotId, descriptive MappingId, allocation, Cell objects, positions, handoffs and observations |
 | `model::modifiable` | Modifiable: write permission on a Pend |
 | `model::unit` | ProgramKind, UnitTarget, control authorities, creation descriptors, queries and stable results |
 | `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
@@ -64,9 +64,9 @@ not as a universal physical allocation or page-table leaf size.
 
 | Concept | Current representation | Contract |
 | --- | --- | --- |
-| ABI base page | `address::BASE_PAGE_SIZE` / `BASE_PAGE_SHIFT` (aliases `PAGE_SIZE` / `PAGE_SHIFT`) | `PageCount`, `PageIndex`, `PageOffset`, `CellPosition.page` and Slot/Memo spans count fixed 4 KiB units |
+| ABI base page | `address::BASE_PAGE_SIZE` / `BASE_PAGE_SHIFT` (aliases `PAGE_SIZE` / `PAGE_SHIFT`) | `PageCount`, `PageIndex`, `PageOffset`, `CellPosition.page` and Slot/mapping spans count fixed 4 KiB units |
 | Managed physical storage | `CellLevel`, size `2^(12 + 9*level)` | Each Cell is contiguous and aligned to its size; separate Cells need not be adjacent. Admission checks the active Sv mode and allocation checks physical capacity |
-| Hardware translation leaf | Selected by each MMU/IOMMU backend | RISC-V CPU Sv39 encodes 4 KiB, 2 MiB and 1 GiB leaves; Sv48 adds 512 GiB, Sv57 adds 256 TiB. Automatic coalescing currently stops at 1 GiB. External/IOMMU admits one whole level-0 or level-1 Cell per Memo, with 4 KiB leaves |
+| Hardware translation leaf | Selected by each MMU/IOMMU backend | RISC-V CPU Sv39 encodes 4 KiB, 2 MiB and 1 GiB leaves; Sv48 adds 512 GiB, Sv57 adds 256 TiB. Automatic coalescing currently stops at 1 GiB. External/IOMMU admits one whole level-0 or level-1 Cell per mapping, with 4 KiB leaves |
 
 A larger PTE leaf can cover multiple logical positions without merging their
 identities, authorization, freeze or retirement records. CPU leaf changes
@@ -75,7 +75,7 @@ independent trusted hardware obligations.
 `Allocation::at_level(level, count)` requests complete physical Cells.
 `Allocation::new(size, align)` remains level 0. Levels admitted by Sv39, Sv48 and
 Sv57 are respectively 0–2, 0–3 and 0–4; representability does not imply available
-RAM. Slot/Memo positions must name a Cell head; windows and transfers cover whole
+RAM. Slot/mapping positions must name a Cell head; windows and transfers cover whole
 Cells. ABI coordinates remain 4 KiB units, so a level-1 Cell spans 512 coordinates.
 
 ## Source migration and ABI compatibility
@@ -86,18 +86,18 @@ There are no compatibility aliases for retired operations.
 Rust callers match `OutOfMemory` for allocation failures. Each domain uses
 its existing numeric ABI code for this variant.
 
-Call numbers are `(version << 48) | (domain << 32) | operation`. The ABI version is **9**.
+Call numbers are `(version << 48) | (domain << 32) | operation`. The ABI version is **10**.
 Other versions are rejected before dispatch.
 All byte descriptors use fixed little-endian 64-bit words and checked tags and
 reserved fields. Boot Capsule format 2 declares the matching ABI in byte 11;
 old executable capsules are rejected before launch. The resource Ledger is
-**version 9**, with the same 40-byte entry layout introduced in version 7.
+**version 10**, with the same 40-byte entry layout introduced in version 7.
 
 | Domain | Current operations |
 | --- | --- |
 | Cell | Create (0), Delete (1), Push (2), Pull (3), Publish (4), Retract (5), Protect (6), Inspect (7), Split (8), Merge (9), Insert (10), Remove (11) |
 | Flat (12) | Create (0), Inspect (1), Slice (2), Delete (3), Block (4), Allow (5) |
-| Nest (13) | Create (0, Internal only), Inspect (1), Delete (4); slots 2/3 retired |
+| Nest (13) | Create (0, Internal only), Inspect (1), Delete (4), Reserve (5), Release (6); slots 2/3 retired |
 | Pend | Accord, Revoke, Narrow, Return, Inspect, Collect |
 | Clone View | Create, Delete, Push, Pull, Peek |
 | Share View | Create, Delete, Open, Shut |
@@ -106,7 +106,126 @@ old executable capsules are rejected before launch. The resource Ledger is
 | Room | Yield, SleepUntil, WaitValue, WakeValue, Clock, ClockInfo, Inspect |
 | Debug | Put, Get |
 
-### Migration from ABI v8 / Ledger v8 to ABI v9 / Ledger v9
+### Migration from ABI v9 / Ledger v9 to ABI v10 / Ledger v10
+
+Rebuild API, Client, Server and all executables together. Regenerate Capsule
+format 2 with ABI byte **10** and Ledger version **10**. Old and future versions
+are rejected; retired target/operation kinds 5 (Port) and 7 (Memo) remain invalid.
+There are no aliases for MemoId, MemoRights, MappingTarget, CellCreate,
+CellSource, MemoDestination or CreatedCell.
+
+| ABI 9 boundary | ABI 10 boundary | Consumer action |
+| --- | --- | --- |
+| Memo target and operation kind 7 | Nest target kind 4, with typed Whole or Mapping scope | Delegate a live scoped Nest Pend; never authorize from a MappingId or TeamId |
+| `Limits.range` | `Limits.scope: PendScope` | Use Object for None/Clone/Sign, Pages for Flat/Share, Nest for Nest operations |
+| 88-byte Accord / 64-byte Narrow / 112-byte PendInfo | 104 / 80 / 128 bytes | Resize copied descriptors and observation buffers |
+| Cell Create descriptor / three-register CreatedCell | `Create { license, allocation: Allocation } -> SlotId` | Pass allocation's three words in registers; create a mapping separately with Nest Reserve |
+| Cell Delete object pointer | `Delete { slot: SlotId } -> ()` | Delete only owning Slots; use Nest Release to retire a mapping |
+| 32-byte CellObject / 48-byte position / 96-byte pairs | 16 / 32 / 64 bytes | Encode Slot or Pend directly; Push/Pull accept only two Slots |
+| Team-selected CPU destination | Whole-scoped Nest RESERVE | Hold or receive explicit CPU Space authority; membership and management are not mapping permission |
+| Unit Create returns UnitTarget in two registers | CreatedUnit in three registers | Retain Team's returned Nest Pend; Task replies carry no grant |
+| No current CPU Ledger entry | `Name::Space`, name class 7/item 0, ResourceKind::Nest | Inspect the live grant; boot grants have Whole INSPECT\|RESERVE only |
+
+#### Scoped permission layout
+
+All descriptor words below are little-endian u64. A Scope is exactly five words
+`[tag, id, range_tag, offset, count]`:
+
+| Tag | Typed scope | Canonical payload |
+| --- | --- | --- |
+| 0 | `PendScope::Object` | `[0, 0, 0, 0]` |
+| 1 | `PendScope::Pages(range)` | `id = 0`, then PendRange |
+| 2 | `PendScope::Nest(NestScope::Whole)` | `[0, 0, 0, 0]` |
+| 3 | `PendScope::Nest(NestScope::Mapping { id, range })` | Nonzero MappingId at most isize::MAX, then PendRange |
+
+PendRange is `[0, 0, 0]` for Inherit or `[1, offset, count]` for Pages.
+Pages are nonempty and both coordinate addition and byte span must fit. Unknown
+tags, reserved payload, invalid IDs and overflow reject. Inherit is accepted in
+requests only; published ranged PendInfo contains resolved **absolute Pages**.
+The server resolves requested relative ranges against the parent's/current
+window and checks bounds at the authorization commit. Pure Limits attenuation
+checks do not resolve those relative bounds.
+
+Limits is nine words (72 bytes): `[operation_kind, operation_bits, modifiable,
+distributable, scope_tag, scope_id, range_tag, offset, count]`. None/Sign require
+Modifiable No; Distributable is independent. AccordRequest is 13 words (104 bytes):
+`[src, recipient_tag, recipient_id, mark, Limits...]`. Recipient tag 0 has ID zero;
+tag 1 names a Task. NarrowRequest is ten words (80 bytes): `[token, Limits...]`.
+PendInfo is 16 words (128 bytes): `[token, target_kind, target_id, owner, lender,
+mark, status, Limits...]`. Decoding checks both target family and full scope
+validity. A descriptive identity or observation never mints authority.
+
+| Nest right | Bit | Scope |
+| --- | --- | --- |
+| INSPECT | 1 | Whole or Mapping |
+| RESERVE | 2 | Whole |
+| RELEASE | 4 | Mapping |
+| ATTACH | 8 | Whole, Internal Team adoption only |
+| PUBLISH / RETRACT / PROTECT | 64 / 128 / 256 | Mapping |
+| DELETE | 512 | Whole |
+| INSERT / REMOVE | 1024 / 2048 | Mapping |
+
+Bits 16 (DETACH) and 32 (TRANSFER) are invalid. `NestRights::whole()` is
+INSPECT\|RESERVE\|ATTACH\|DELETE. `mapping()` is
+INSPECT\|RELEASE\|PUBLISH\|RETRACT\|PROTECT\|INSERT\|REMOVE. `all()` is their union,
+**not** valid authority for either single scope. Generic Accord/Narrow require
+valid limits, the same scope category and the same MappingId, and attenuate
+operations, Modifiable and Distributable. They never convert Whole to Mapping,
+Mapping to Whole, or one MappingId to another.
+
+#### Reservation and reply layouts
+
+Nest class 13 keeps Create 0, Inspect 1 and Delete 4; slots 2/3 stay invalid.
+Reserve 5 takes `(token: PendId, request: VirtAddr)` and returns `(PendId, VirtAddr)`
+in `a0`/`a1`, without a leading status word. Release 6 takes `(token: PendId)` and
+returns `()`. NestFail keeps Denied -1, Dead -2, Busy -3, OutOfMemory -4, and adds
+NotAligned -5, AlreadyMapped -6, NoRegion -7.
+
+ReserveRequest is six words (48 bytes): `[placement_tag, address, align, count,
+level, access]`. Placement retains Lowest 0 / Highest 1 (address zero), or Exact 2,
+with checked base-page/power-of-two alignment. PageCount is nonzero, byte size
+must fit, and count is a multiple of CellLevel.pages(). API checks representable
+levels; Kernel checks the active Sv mode. Access uses READ 2 / WRITE 4 / EXECUTE 8,
+requires READ or EXECUTE and forbids WRITE without READ. Cell level does not
+require a matching hardware leaf. External admission remains exact-only, one
+whole level-0 or level-1 Cell within the existing IOVA bounds and aligned 2 MiB
+window, READ or READ|WRITE, and unchanged private-source qualification.
+
+Reserve atomically creates a source-free **Vacant** reservation and fresh
+Mapping-scoped root Pend. It allocates no physical Page, materializes no Slot
+and never publishes. The mapping root has `mapping()` operations; Modifiable,
+Distributable and target write access are capped by its creating Whole. Only
+Reserve establishes this special Whole-to-fresh-Mapping ancestry; it cannot
+select an existing MappingId. Its real parent-child ledger edge prevents Whole
+Narrow and empty-root adoption while mapping descendants remain live.
+Release requires RELEASE over the full original mapping window; a full-span
+child may Release the entire relation, but child Return does not Release.
+Root Return retires the full original span even after Narrow. Busy retains
+metadata and forbids reuse; retry/inspection/cleanup remain available while
+Closing rejects fresh admission and Accord.
+
+Cell class 2 Create 0 takes `[license, size, align, level]` and returns SlotId
+through the ordinary API pair decoder: `a0` holds SlotId, not a fixed zero status
+prefix. Delete 1 takes SlotId directly. CellObject is `[tag, id]`, tag 0 Slot /
+1 Pend (16 bytes). CellPosition adds `[page, generation]` (32 bytes); Slot
+generation must be zero, and Kernel checks a Pend's actual family/generation.
+Flat/Share source positions for Insert also require generation zero.
+CellHandoff and CellAssociation each contain two positions (64 bytes).
+Handoff decoding rejects either Pend endpoint.
+
+Unit Create uses `[a0, a1, a2] = [kind, id, nest_pend]` on success.
+`CreatedUnit::Task(task)` is `[0, task_id, 0]`;
+`CreatedUnit::Team { team, nest }` is `[1, team_id, nest_pend]`.
+IDs must be nonzero and at most isize::MAX; unknown kinds and cross-kind payloads
+reject. Team's Nest is a live Whole INSPECT|RESERVE grant under the old limits,
+not a Team number accepted as authority. Explicit empty-root adoption preserves
+its live identity, consumes ATTACH/DELETE and binds once; automatic allocation
+returns a fresh limited Whole. Grant preparation precedes Team publication and
+failure changes neither the old adoption grant nor the table. Team owns the
+Nest lifetime; generic grants cannot restore consumed rights. Ordinary Task
+creation receives no default rights.
+
+### Historical migration from ABI v8 / Ledger v8 to ABI v9 / Ledger v9
 
 Rebuild all executables and regenerate Capsule format 2 with ABI byte 9. API,
 Client and Server must use the same revision; old binaries fail before dispatch.
@@ -181,7 +300,7 @@ migration, not permission to execute v5 binaries against a v6 Kernel.
 
 ### Ledger dispatch pairs
 
-Ledger v9 keeps the v7 40-byte entry shape: name `[0,16)`, resource kind at 16,
+Ledger v10 keeps the v7 40-byte entry shape: name `[0,16)`, resource kind at 16,
 optional View tag at 17 (0 absent, 1 Clone, 2 Share), zero reserved bytes
 `[18,24)`, primary Pend at `[24,32)` and View Pend at `[32,40)`. Handles are
 little-endian u64 values. `Name::Interrupt { controller, source }` requires a
@@ -189,6 +308,12 @@ Share View and Sign pair; `Entry::dispatch()` returns the explicit View kind
 and both handles. `Name::Memory` also requires a Share/Sign pair. Its companion
 `Name::Page(Page::Memory)` names the same Share. Other entry kinds, including
 Nest, have no paired View.
+
+`Name::Space` is name class 7/item 0 with all remaining name bytes zero, and
+ResourceKind::Nest. It supplies the initial current CPU Nest's live Whole
+INSPECT|RESERVE grant, with no ATTACH/DELETE. `Name::Nest { controller, requester }`
+(class 5) instead names a trusted External Nest root. Neither name, topology nor
+Team membership is accepted as authority; callers must retain the actual Pend.
 Malformed, incomplete and old-version ledgers fail validation. Sign operations
 retain their slots and payloads under the current ABI prefix.
 
@@ -200,82 +325,108 @@ consumption asynchronously; revocation/cancellation does not acknowledge hardwar
 
 ### Cell contracts
 
-CellCreate is 96 bytes, CellObject 32, CellPosition 48, CellHandoff and
-CellAssociation 96, and CellInfo 64. Requests are copied once before decoding.
+CellObject is 16 bytes, CellPosition 32, CellHandoff and CellAssociation 64,
+and CellInfo 64. Caller-memory descriptors are copied once before decoding.
 Keep inputs readable and outputs writable through return. No pointer is retained.
-Create returns `(kind, id, address)`: kind 0 identifies a Task-local Slot, kind 1
-a root Memo Pend. MemoId, MappingId and PageId are descriptions, not authority.
-CellObject::Memo accepts only a live Pend in the calling Task's ledger. Team
-membership alone confers no control. Positions are relative to that grant's
-current effective window; all windows cover complete physical Cells.
+Cell Create is allocation-only and returns a Task-local SlotId. Nest Reserve is
+source-free and returns a mapping root Pend plus virtual address. MappingId and
+PageId are descriptions, not authority. CellObject::Pend accepts only a live
+Pend in the calling Task's ledger; Kernel checks its actual family and scope.
+Pend positions are relative to that grant's current effective window; Slot
+positions are relative to their owning handle. Windows cover complete physical
+Cells. Team membership and management alone confer no control.
 
 | Call | Required authority and state | Effect |
 | --- | --- | --- |
-| Create Slot | None FLAT, valid geometry | Reserve lazy owning capacity; moved-out Slots never regenerate Pages |
+| Cell Create | None FLAT, valid Allocation | Reserve lazy owning capacity; moved-out Slots never regenerate Pages |
 | Split / Merge | Private exclusive complete contiguous Slots; no aliases or hardware obligations | Repartition unique allocation receipts; replace Slot only on success |
-| Create Memo | Authorized source window and destination control; Nest RESERVE for External | Reserve positions, return root control Pend; Slot source starts Vacant, Pend source supplies Ready associations |
-| Delete Slot | Owning Task-local Slot handle | Release the handle; existing Memo/hardware obligations survive |
-| Delete Memo | Memo DELETE over its entire original window | Require settled publication, delete associations and reservation |
+| Nest Reserve | Whole Nest RESERVE, valid ReserveRequest | Atomically reserve Vacant positions and fresh mapping authority; no Page or implicit publication |
+| Cell Delete | Owning Task-local Slot handle | Release the handle; existing mapping/hardware obligations survive |
+| Nest Release | Mapping RELEASE over its full original window | Retire associations and reservation; Busy retains cleanup |
 | Push / Pull | Independent ownership at both Slot endpoints; Flat TRANSFER where governed by Flat | Atomically move the unique holding; no association or hardware change |
-| Insert | Source Slot association authority or Memo INSERT, plus target Memo INSERT | Associate the same Page, checking source compatibility and both Memo generations; never create another owning Slot |
-| Remove | Memo REMOVE, unpublished and settled position | Clear association/freeze, advance generation; leave owning Slot untouched |
-| Publish | Memo PUBLISH, live creating source authority, Ready generation | Publish associated Page; writable access also requires Modifiable Yes |
-| Retract | Memo RETRACT, Published generation (External also Publishing) | Withdraw this hardware use, retaining obligations until completion |
-| Protect | Memo PROTECT, CPU position and original access ceiling | Change access/generation; WRITE requires Modifiable Yes; External rejects |
-| Inspect | Source ownership or Memo INSPECT | Observe without obtaining mutation rights |
+| Insert | Source Slot association authority, Flat/Share ASSOCIATE or Mapping INSERT; destination Mapping INSERT | Associate the same Page after source compatibility and generation checks; never create another owning Slot |
+| Remove | Mapping REMOVE, unpublished and settled position | Clear association/freeze, advance generation; leave owning Slot untouched |
+| Publish | Mapping PUBLISH, live original source authority, Ready generation | Recheck the exact held Page and mapping permissions; WRITE also requires Modifiable Yes |
+| Retract | Mapping RETRACT, Published generation (External also Publishing) | Withdraw this hardware use, retaining obligations until completion |
+| Protect | Mapping PROTECT, CPU position and original access ceiling | Change access/generation; WRITE requires Modifiable Yes; External rejects |
+| Inspect | Source ownership or Mapping INSPECT | Observe without obtaining mutation rights |
 
-Only Slot-to-Slot is accepted by Push/Pull. Insert accepts Slot-to-Memo or
-Memo-to-Memo. A Memo observation cannot be used to extract an owning Slot.
-Resolve and explicitly authorize the actual owning Slot for a transfer.
-Returning/revoking a child Memo grant withdraws publications made through that
-branch, not a sibling's publication. Inspector-only branches own no publication.
-Root Memo return additionally retires the object and its reservation. CPU
-publication provenance lives in the existing Nest Memo record.
+Push/Pull decode only two owning Slot endpoints. Insert accepts a Slot or
+qualified source Pend and requires a Mapping-scoped destination. A mapping
+observation cannot extract an owning Slot; resolve and independently authorize
+the actual owning Slot for a transfer. Mapping-to-mapping Insert copies an
+association, retaining the **original physical source branch, actor and Page**.
+Its sticky mutability ceiling is the minimum of the original association/source
+mapping ceiling and the supplying grant's Modifiable. There is no new owning
+Slot or second permission family. Later Return/Narrow of the supplying mapping
+grant does not retroactively revoke this independent destination association;
+loss of the actual original-source branch or actor still withdraws its uses.
 
-Memo identity survives replacement. Its stable states are Vacant, Ready(Page)
+Physical ownership movement preserves the old association, Page and generation,
+but a new Publish fails when the selected source no longer holds that exact Page.
+Insert from the new source is required. Returning/revoking a child mapping grant
+withdraws publications made through that branch, not a sibling's publication.
+Inspector-only branches own no publication. Child Return never releases the whole
+mapping. Root Return retires its full **original** reservation even after Narrow;
+RELEASE can also be delegated to a child retaining the complete original window,
+whose Release destroys the entire relation rather than only that branch.
+
+Mapping identity survives reassociation. Stable states are Vacant, Ready(Page)
 and Published(Page); Publishing/Retracting are retained flights, Failed retains
-an unresolved hardware error. Association insertion/removal, publication, retraction and protection
-advance a non-wrapping generation. Use Inspect to refresh after Busy; replaying
-an old generation never starts a later cycle. Slot positions use generation zero
-and act on the current holding, not on an alleged historical content snapshot.
+an unresolved hardware error. Insertion/removal, publication, retraction and
+protection advance a non-wrapping generation. Inspect refreshes after Busy;
+replaying an old generation never starts a later cycle. Slot positions use
+generation zero and act on the current holding, not a historical snapshot.
+A source-free reservation never materializes or publishes backing through a CPU
+page fault. A fault on a Vacant position waits for explicit Insert/Publish while
+the reservation remains live; Release makes that wait invalid. The missing PTE
+is not permission to remove or reuse the reservation.
 
-Retract returns Busy before changing the Memo if another publication still
+Retract returns Busy before changing the mapping if another publication still
 retains write access to the Page. Successful Retract retains a persistent freeze
-in the Memo. `frozen` proves the admission
-gate is closed, no writable hardware responsibility remains, and the Page is
-not quarantined. A sequence check alone proves none of this. An independent
-CPU Memo's freeze blocks a writable CPU publication. An authorized external
-handoff can use the sole freeze after CPU withdrawal, subject to exclusive
-Page access. Explicit read-only publication may preserve a frozen snapshot. Publish,
-association replacement or Delete ends that object's freeze. Failed publication
-may advance the generation and leave Ready with its freeze, so retry from Inspect.
-Historical observation references do not prolong deleted freezes after fencing.
+in the mapping. `frozen` proves the admission gate is closed, no writable hardware
+responsibility remains, and the Page is not quarantined. A sequence check alone
+proves none of this. An independent CPU mapping's freeze blocks a writable CPU
+publication. An authorized external handoff can use the sole freeze after CPU
+withdrawal, subject to exclusive Page access. Explicit read-only publication may
+preserve a frozen snapshot. Publish, association replacement or Release ends that
+mapping's freeze. Failed publication may advance the generation and leave Ready
+with its freeze, so retry from Inspect. Historical observation references do not
+prolong deleted freezes after fencing.
+
+External Retract may return Busy after starting an asynchronous withdrawal.
+Inspect distinguishes a rejected request from a retained Retracting flight with
+an advanced generation. Wait for that exact generation's MappingRetired event
+or inspect settled Ready state before treating this mapping's withdrawal as
+complete; Busy alone proves neither acceptance nor completion.
 
 Retract completion settles only this mapping. `external` and other retained
 CPU/device obligations may still forbid moving or reclaiming the Page. Physical
 reuse requires all such obligations to settle, independently of business results,
 Sign notifications, timeouts, handle deletion or Task exit. Ready is not a claim
 that memory has been freed. Task death and creating-branch revocation retain
-hardware records through completion. Their orphaned Memos, including unused
+hardware records through completion. Their orphaned mappings, including unused
 reservations, are then removed; later lookup of the old MappingId fails.
 
-External Memos use one complete level-0 or level-1 Cell, aligned to its size,
-a Memo Pend and READ or READ|WRITE. Overlapping ranges are rejected.
+External mappings use one complete level-0 or level-1 Cell, aligned to its size,
+a Mapping-scoped Nest Pend and READ or READ|WRITE. Reserve is Exact only;
+private-source admission at Insert/Publish is not relaxed. Overlaps reject.
 One binding supports up to 512 base-page Cells or one level-1 Cell within the
-aligned 2 MiB window selected by its first Memo. Positions outside that window
-are rejected. Pend handover does not reset this hardware window. A settled Memo
+aligned 2 MiB window selected by its first mapping. Positions outside that window
+are rejected. Pend handover does not reset this hardware window. A settled mapping
 can be reassociated and republished; retracting one leaf leaves other leaves
-accessible. Page substitution still requires an explicit Cell Insert
-association and a fresh generation from Inspect. Each range retirement requires
-matching invalidation/fence completion and trusted platform ordering. Binding
-retirement is a separate, whole-context boundary; it is not performed on every
-Pend handover. Unsupported aliases, shared controllers, ATS/PRI and noncoherent
-access are rejected.
+accessible. Page substitution requires explicit Cell Insert and a fresh generation
+from Inspect. Each range retirement requires matching invalidation/fence completion
+and trusted platform ordering. Binding retirement is a separate, whole-context
+boundary, not performed on every Pend handover. Unsupported aliases, shared
+controllers, ATS/PRI and noncoherent access are rejected.
 
-Public Acquire/Release, Attach/Detach, Begin/End, Traverse, Position, Attachment
-and general Retain authority are removed. Their replacements are Cell objects,
-qualified transitions and kernel-owned hardware retirement, not a public change
-receipt or duplicate reference lifecycle.
+The former Cell Acquire/Release receipt interface, Attach/Detach, Begin/End,
+Traverse, Position, Attachment and general Retain authority are removed. Their
+replacements are Cell objects, qualified transitions and kernel-owned hardware
+retirement, not a public change receipt or duplicate reference lifecycle.
+Nest Release retires a mapping reservation; it does not restore that receipt
+interface.
 
 Split/Merge operate on owning Slot collections, not PTE leaves. Flat/Share roots
 are not eligible. Every source Slot must be materialized; merge requires physical
@@ -289,7 +440,7 @@ and Distributable. The effective Flat window is the block's extent. Once
 registered, the block persists across Busy and failed hardware withdrawal.
 Block excludes new associations and hardware publication, withdraws existing
 CPU and External uses, and succeeds only after their exact obligations drain.
-It preserves Memo associations. It never treats a device notification as fencing.
+It preserves mapping associations. It never treats a device notification as fencing.
 An untracked alias still retaining the Page causes Busy until that alias retracts.
 
 The exact holder may continue authorized Slot transfers and associations using
@@ -304,7 +455,7 @@ then drops that branch's gate. Other blocks remain effective.
 
 ### Global memory observations
 
-Ledger 9 `Name::Memory` (name class 6, item 0) provides `(Share, Sign)`;
+Ledger 10 `Name::Memory` (name class 6, item 0) provides `(Share, Sign)`;
 `Name::Page(Page::Memory)` (class 2, item 3) names that Share. Initial access goes
 only to the bootstrap Task, which can explicitly delegate attenuated grants.
 Share is Modifiable No with OPEN/SHUT/ASSOCIATE; Sign permits LISTEN/CONSUME.
@@ -361,8 +512,8 @@ DELETE right. Generic Accord never changes target kind. Flat TRANSFER is checked
 separately at both ends of Cell Push/Pull into a Slot; it cannot be inferred from
 read/write access. A private allocation retains its original source ownership
 when adopted by its own Share root; delegated Share branches do not inherit
-that ownership. A Memo never supplies owning-transfer authority. Deriving a CPU Share Pend preserves the parent's existing
-mappings. Authorized CPU mappings of the same RAM Page may coexist, with write
+that ownership. A mapping never supplies owning-transfer authority. Deriving a
+CPU Share Pend preserves the parent's existing mappings. Authorized CPU mappings of the same RAM Page may coexist, with write
 permission checked separately for every branch. The caller coordinates writes
 and observations through its shared-memory protocol. Device register Views
 use exclusive writable custody. Delegation of such a View withdraws the
@@ -376,17 +527,18 @@ Nest Inspect writes 56 bytes with stable NestId, kind, phase and retained fault
 information. Public Port identities, rights, calls and a second authorization
 lineage do not exist.
 
-Keep the External Nest root with its manager. Accord delegates a subset of
-Nest operations, Modifiable and Distributable to workers. A worker cannot widen
-its rights or acquire another source by supplying a raw number. Its death,
-Return or Revoke invalidates the branch and retires its Memos, not the entire
-Nest. The exact creating branch remains retained until its positions are idle
-and removed; a live publication additionally retains its actual publishing
-permission and data borrow. Other branches of the same Task keep their live
-leaves. Only one Task at a time may reserve positions in an External Nest.
-A competing reservation returns Busy until the former Task's positions have
-all been removed. Reusing an old address requires hardware settlement, and
-the replacement Memo receives a different identity.
+Keep the External Nest Whole root with its manager. Accord delegates Whole
+INSPECT/RESERVE, Modifiable and Distributable to workers, which can reserve fresh
+mapping roots under those limits. Mapping operation grants remain scoped to the
+same MappingId/window. A worker cannot widen its rights or acquire another
+source by supplying a raw number. Death, Return or Revoke invalidates its branch
+and retires its descendant mappings, not an unrelated Whole root or branch.
+The exact creating branch remains retained until its positions are idle and
+removed; live publication additionally retains its actual publishing permission
+and original source borrow. Other branches keep their live leaves. Only one Task
+at a time may reserve positions in an External Nest. A competing reservation
+returns Busy until the former Task's positions have all been removed. Reusing an
+old address requires hardware settlement; a replacement has a new MappingId.
 
 Root loss, Delete by the External Nest root with DELETE permission, or an unsafe backend failure
 closes the entire address space. Delete starts irreversible Closing and returns
@@ -398,60 +550,70 @@ proof; failure retains Pages, table pages and queues. No temporary driver Task
 is the sole owner responsible for completing this cleanup.
 
 Sign Attach includes `generation`. MappingPublished (tag 11) and MappingRetired
-(tag 9) observe the exact Memo generation, including completion before registration.
-The immediate next generation may be armed before publication. An older generation
-reports Gone rather than matching a replacement publication. NestClosed (13) and
-NestFault (12) require generation zero and authorized Nest INSPECT. Hardware FQ
-records have no software Memo generation: the oldest fault is retained at Nest
-scope, subsequent faults increment a saturating sequence, and no unbounded queue
-or guessed Memo attribution is exposed. Listen/Consume and Pend handover do not
-clear Nest faults. MappingFault (tag 10) is retired. Whole-Nest close and ordinary
-branch retirement remain observably different.
+(tag 9) retain `{ token, mapping }`, but require live **Mapping-scoped Nest INSPECT**
+for that same MappingId and the full original mapping window, with the expected
+generation. The raw MappingId is an observation consistency check; Whole INSPECT
+plus a raw ID never substitutes.
+Existing External-only observation support is unchanged. Completion before
+registration is retained; the immediate next generation may be armed before
+publication. Older generations report Gone rather than matching replacements.
+NestClosed (13) and NestFault (12) require Whole INSPECT, generation zero and the
+existing External support. Hardware FQ records have no software mapping generation:
+the oldest unattributed fault stays at Nest scope, subsequent faults increment a
+saturating sequence, and no unbounded queue or guessed mapping attribution is
+exposed. Listen/Consume and Pend handover do not clear Nest faults. MappingFault
+(tag 10) stays invalid. Whole-Nest close and branch retirement remain distinct.
 
 | Operation | Required permission | Additional boundary |
 | --- | --- | --- |
-| Flat Create / legacy Slot allocation | None FLAT | Checked allocation geometry |
+| Flat Create / Cell allocation | None FLAT | Checked allocation geometry |
 | Flat Inspect / Slice / Delete | Flat INSPECT / ASSOCIATE / DELETE | Current window; Delete retains failed withdrawal |
 | Cell Push/Pull to a Flat Slot | Flat TRANSFER on each Flat endpoint | ASSOCIATE handle, Modifiable Yes, movable Page |
 | Share Create from Flat | None SHARE + Flat SHARE | Distributable, narrowing and source qualification |
-| Nest Create | None NEST | Internal only; no hardware source parameter |
-| Team Create with Internal Nest | Build + Nest ATTACH | Exclusive owned root; token consumed |
-| Nest Inspect / Delete | Nest INSPECT / DELETE | External Delete requires the boot root; Busy retains cleanup |
-| External Memo Create | Nest RESERVE | Source authority; exact supported position |
-| External Memo Delete | Memo DELETE | Complete settled window |
-| External Insert / Remove / Publish / Retract | Memo INSERT / REMOVE / PUBLISH / RETRACT | Exact generation and source access |
-| External Memo Inspect / Sign conditions | Memo INSPECT | Exact Memo identity; retained state |
-| External Protect | Unsupported | Reject; CPU Protect requires Memo PROTECT |
+| Nest Create | None NEST | Internal Whole root; no hardware source parameter |
+| Team Create with Internal Nest | Build + Whole ATTACH | Empty exclusive root, no descendants/borrows; preserve live identity and return limited Whole |
+| Nest Inspect / Delete | Whole INSPECT / DELETE | External Delete requires exact boot root; Busy retains cleanup |
+| Nest Reserve | Whole RESERVE | Fresh source-free Mapping root, never arbitrary existing ID |
+| Nest Release | Mapping RELEASE | Complete original window; Busy is not reuse permission |
+| Cell Insert / Remove / Publish / Retract | Mapping INSERT / REMOVE / PUBLISH / RETRACT | Qualified source, exact generation and original source access |
+| Cell mapping Inspect | Mapping INSPECT | Same mapping identity and effective window; observes the current generation |
+| Sign mapping conditions | Mapping INSPECT | External only; same MappingId, full original window and expected generation |
+| External Protect | Unsupported | Reject; CPU Protect requires Mapping PROTECT |
 
-Nest PROTECT is reserved and has no External implementation. None grants no
-external source creation, raw hardware access or arbitrary syscall permission.
-For Internal Nest, RESERVE/RELEASE/etc. do not create a second mapping API: once
-adopted by a Team, the existing Team/Cell contract controls its CPU Memos.
+External Protect stays unsupported; External Delete requires its exact boot
+Whole root. None grants no external source creation, raw hardware access or
+arbitrary syscall permission. Team adoption consumes Whole ATTACH/DELETE and
+caps CPU Whole authority to INSPECT|RESERVE under its previous limits. The Team
+owns that Nest's lifetime; membership/manager authority and generic Accord cannot
+restore the consumed bits or replace a live scoped Pend.
 
 ### Authority and control contracts
 
-Pend Accord snapshots an 88-byte request; Narrow snapshots a 64-byte request.
-Both carry typed operation permissions, independent Modifiable/Distributable
-limits, and a checked range. Derivation requires Distributable; neither
-derivation nor narrowing can add operations or change the target family.
-Both Accord and Narrow interpret a Pages range relative to the immediate
-parent's/current effective window. Narrow retains identity, rejects live
-descendants with Busy and withdraws old CPU access before committing a smaller
-window. Active data borrows and publication routes retain their constraints.
-Retirement-only holds keep cleanup responsible without preserving permission or
-permanently preventing Narrow. The 112-byte PendInfo identifies its target and
-includes effective permissions and source window. FlatId and NestId are stable
-object identities; they grant no access on their own.
-None, Sign, Flat, Nest and Memo use the same live Pend ledger and derivation tree
-as Views. No descriptive identity grants access. None is object-free call permission: its Modifiable
-must be No, its range Inherit, and it permits only the listed CreationRights.
-The Kernel mints the initial None root for the bootstrap Task in Ledger
-`Name::Call(Call::Create)`. A new Task receives no implicit creation permission;
-its manager must explicitly Accord a subset before it invokes creation calls.
-None and Sign accept no page range. Sign also normalizes Modifiable to No;
-LISTEN/TRIGGER/CONSUME/ROUTE/DELETE control behavior without claiming data access.
-Operation bits are typed by target and mapped to the fixed ABI operations below;
-the caller cannot supply a different target or operation identity to bypass them.
+Pend Accord snapshots 104 bytes; Narrow snapshots 80 bytes. Both carry typed
+operations, independent Modifiable/Distributable and a checked PendScope.
+Derivation requires Distributable. Neither operation adds rights, changes target
+family or scope category, converts Whole/Mapping, or changes a MappingId.
+A requested Pages range is relative to the immediate parent's/current effective
+window; the server resolves bounds at commit. Published 128-byte PendInfo uses
+absolute Pages and reports target identity, full scope and effective limits.
+FlatId, NestId and MappingId are stable descriptions, never authority.
+
+Narrow retains identity and rejects live descendants with Busy, including mapping
+descendants of a creating Whole grant. It withdraws publications made through the
+narrowed branch before committing reduced limits; a sibling's publication is not
+that branch's use. Active data borrows and publication routes must settle where
+required. Retirement-only holds keep cleanup responsible without preserving
+permission or permanently preventing Narrow.
+
+None, Sign, Flat, Nest and Views share one live Pend ledger and derivation tree.
+None is object-free call permission: Object scope, Modifiable No and only the
+listed CreationRights. Clone and Sign also use Object; Flat/Share use Pages;
+Nest uses Whole or Mapping with the matching rights mask. Sign requires
+Modifiable No; LISTEN/TRIGGER/CONSUME/ROUTE/DELETE are control rights, not mutable
+memory. The Kernel mints the bootstrap None root in `Name::Call(Call::Create)`.
+Ordinary Task creation supplies no default rights; managers must explicitly
+Accord permissions before a new Task invokes resource creation. Changing a raw
+number, target or operation identity cannot bypass live grant validation.
 
 | Live View operation | Required operation permission | Additional condition |
 | --- | --- | --- |
@@ -495,14 +657,20 @@ owned endpoints. Routes belong to their destination Pend; removing ROUTE or
 returning that Pend removes its routes and preserves other branches' routes.
 Direct event sequences and public authority IDs never wrap or revive stale uses.
 
-Unit Create snapshots a 48-byte Team or Task descriptor. Tasks start dormant.
-Team creation requires Build authority. Its optional `nest: PendId` (word 3, zero
-means allocate a new Nest) transfers an initialized Internal Nest into the new
-Team. The caller must hold its root Nest ATTACH Pend with Modifiable Yes, no
-children and no hardware holds. Success consumes the root token; failure does
-not publish a Team. External Nest, delegated roots, kind mismatch and repeated
-adoption are rejected. Later CPU Cell operations use the existing Team manager
-qualification. This does not attach an External Nest to CPU execution.
+Unit Create snapshots a 48-byte Team or Task descriptor. Tasks start dormant
+and receive no default rights. The three-register result is CreatedUnit, not
+UnitTarget. Team creation requires Build authority and returns `{ team, nest }`;
+`nest` is a live CPU Whole INSPECT|RESERVE Pend capped by its old limits.
+Its optional `nest: PendId` (word 3, zero allocates a new Nest) adopts an empty
+Internal Nest. The caller must hold its exclusive root Whole ATTACH grant with
+Modifiable Yes, no descendants and no borrows/hardware holds. Success preserves
+that live root identity, removes ATTACH/DELETE and binds it once to the Team,
+which owns the Nest's lifetime. Automatic allocation returns a fresh limited
+Whole. The returned grant is prepared before publishing the Team; failure leaves
+both an old adoption grant and the table unchanged. External Nest, delegated
+roots, kind mismatch and repeated adoption reject. TeamId, membership or manager
+qualification alone cannot authorize CPU mapping calls. This never attaches an
+External Nest to CPU execution.
 Supervisor creation additionally requires
 a Supervisor caller. A Guard authority may choose an immutable fail-stop policy
 at Team creation, before any member can execute; dynamic Guard/Unguard are gone.
@@ -535,7 +703,7 @@ revocable ancestry.
 | Share Open / Shut | Share OPEN / SHUT; range, Modifiable and Page admission | Opens/closes this caller's access using the common Nest publication machinery; Shut neither returns Pend nor deletes View |
 | Pend Accord | Delegable parent and non-expanding relative window/access | New local/remote branch; failed preparation does not publish partial authority |
 | Pend Revoke / Return | Direct grantor / holder | Retires the branch and its descendants; Busy retains withdrawal obligations |
-| Pend Narrow | Holder; no live descendants, conflicting data borrow or active publication | Same identity with reduced access/window; retirement-only retention is not live permission |
+| Pend Narrow | Holder; no live descendants or conflicting data borrow | Withdraw own publications before reducing limits; Busy retains routes; retirement-only retention is not live permission |
 | Pend Inspect / Collect | Caller-local table | Single/paged discovery; stable View identity allows comparison, never authorization |
 | Sign Create | None SIGN license | New endpoint and root Sign Pend |
 | Sign Delete | Sign DELETE | Closes endpoint and wakes all listeners |
@@ -569,7 +737,7 @@ crash backtraces and bounded Debug Put/Get remain available.
 
 Consumers must rebuild together with this API and regenerate capsules/ledgers.
 Provider and consumer revisions must move together. The following historical
-migration describes changes retained from ABI v4; current binaries must use v9.
+migration describes ABI v4; current binaries must use v10 and the layouts above.
 
 | Previous interface | ABI v4 / Ledger v5 change | Consumer migration |
 | --- | --- | --- |
@@ -614,9 +782,9 @@ migration above. The following independent changes remain in force:
 | Previous contract | Current replacement | Required migration |
 | --- | --- | --- |
 | External authority selected through BAR Share | Trusted External Nest Pend, independent of MMIO Share | Read the Nest grant and delegate existing Pend branches |
-| One-shot single-page external route | Repeatable Memo positions under one persistent Nest | Retract only the leaf; Delete only to terminate the entire Nest |
-| Sign Attach without generation; MappingFault | Generation-qualified MappingPublished/Retired and NestFault | Pass generation explicitly, use zero for non-Memo sources |
-| Team descriptor word 3 reserved zero | Optional owned Internal Nest root | Existing callers pass None; adopting callers consume root on success |
+| One-shot single-page external route | Repeatable mapping positions under one persistent Nest | Retract a leaf; Release a mapping; Delete only the entire owning Nest |
+| Sign Attach without generation; MappingFault | Generation-qualified MappingPublished/Retired and NestFault | Pass generation explicitly, zero for non-mapping sources; retain scoped observation authority |
+| Team descriptor word 3 reserved zero | Optional owned Internal Nest root | None allocates; adoption preserves live identity and returns limited Whole |
 | No runtime Flat/Nest calls | Classes 12/13 | Rebuild API, Client, executable and Capsule ABI byte together |
 | MMIO/aperture coupled to requester | `grant_mmio` plus independent trusted ExternalRoute controller/requester/proof | Platform establishes authentic routes before publishing Ledger grants |
 | Quiescence poll for whole shutdown | `prove(Retirement)` with Range/Binding scope | Exact-token proof; range must drain prior requests without closing other live leaves |

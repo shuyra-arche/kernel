@@ -5,7 +5,7 @@ use core::{
 };
 use kernel_api::model::unit::ExitScope;
 use kernel_api::{
-    abi::call::{cell::CellFail, nest::NestFail, sign::SignReply},
+    abi::call::{nest::NestFail, sign::SignReply},
     model::{
         identity::TaskId,
         pend::ShareRights,
@@ -26,7 +26,10 @@ fn delegate(root: PendId, task: TaskId, operations: Operations, modifiable: Modi
             operations,
             modifiable,
             distributable: Distributable::No,
-            range: PendRange::Inherit,
+            scope: crate::space::range(
+                crate::pend::inspect(root).limits.scope,
+                kernel_api::model::pend::PendRange::Inherit,
+            ),
         },
     }
     .to_bytes();
@@ -34,6 +37,7 @@ fn delegate(root: PendId, task: TaskId, operations: Operations, modifiable: Modi
 }
 fn prepare(bar: PendId, root: PendId, task: TaskId) -> PendId {
     crate::license::delegate(task);
+    crate::space::delegate(crate::space::get(), task);
     let bar_child = delegate(
         bar,
         task,
@@ -54,7 +58,7 @@ extern "C" fn publisher() -> ! {
     // Leave a vacant reservation as well as the active mapping.
     reserve(root, slot, ADDRESS + 4096, true).unwrap();
     publish(pos);
-    let CellObject::Memo(mapping) = pos.object else {
+    let CellObject::Pend(mapping) = pos.object else {
         unreachable!();
     };
     MEMO.store(mapping.get(), Ordering::Release);
@@ -118,13 +122,13 @@ pub(in super::super) fn death(at: usize, count: usize) {
     };
     assert_eq!(
         reserve(root, contender, ADDRESS + 8192, true),
-        Err(CellFail::Busy)
+        Err(NestFail::Busy)
     );
     EXIT.store(1, Ordering::Release);
     assert!(super::super::lifecycle::wait_task(task));
     assert_eq!(super::super::lifecycle::result(task), (1, 77));
     let pos = CellPosition {
-        object: CellObject::Memo(old_mapping),
+        object: CellObject::Pend(old_mapping),
         page: 0,
         generation: 1,
     };
@@ -143,8 +147,17 @@ pub(in super::super) fn death(at: usize, count: usize) {
     assert!(nest::inspect(nest_child, VirtAddr::new(info.as_mut_ptr() as usize)).is_err());
     let (registers, _) = share_view::open(bar).unwrap();
     assert_eq!(read(registers, 0x98) & 1, 0);
+    // A queued request may have finished before Task retirement began. Probe
+    // the now-retired address explicitly to establish denied late access.
+    let previous_faults = context(root).fault_sequence;
+    transfer(registers, ADDRESS, true);
+    let deadline = room::clock() + 2_000_000_000;
+    while context(root).fault_sequence == previous_faults {
+        assert!(room::clock() < deadline, "retired address accepted DMA");
+        room::sleep_until((room::clock() + 1_000_000).min(deadline)).unwrap();
+    }
     let faults = context(root).fault_sequence;
-    assert!(faults > 0);
+    assert!(faults > previous_faults);
     assert_eq!(context(root).fault_address, ADDRESS as u64);
     // Losing the old mapping does not authorize the new Task to use its ID.
     assert!(observed(pos).is_none());

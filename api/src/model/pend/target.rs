@@ -15,7 +15,6 @@ pub enum Target {
     Flat(FlatId),
     Nest(NestId),
     Sign(SignId),
-    Memo(crate::model::cell::MemoId),
 }
 impl Target {
     pub const fn words(self) -> [usize; 2] {
@@ -26,7 +25,6 @@ impl Target {
             Self::Flat(id) => [3, id.get()],
             Self::Nest(id) => [4, id.get()],
             Self::Sign(id) => [6, id.get()],
-            Self::Memo(id) => [7, id.get()],
         }
     }
     pub fn of([kind, id]: [usize; 2]) -> Option<Self> {
@@ -43,7 +41,6 @@ impl Target {
             4 => Self::Nest(NestId::new(id)?),
             // Kind 5 was Port and remains invalid.
             6 => Self::Sign(SignId::new(id)),
-            7 => Self::Memo(crate::model::cell::MemoId::new(id)?),
             _ => return None,
         })
     }

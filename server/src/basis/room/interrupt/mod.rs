@@ -248,11 +248,12 @@ impl Router {
         if hart::hart_id() != self.hart {
             return;
         }
-        let Some(_commit) = crate::basis::try_commit() else {
-            self.deferred.store(true, Ordering::Release);
-            super::deadline::retry();
-            return;
-        };
+        // This is maintenance, outside the hardware front half. Join the FIFO
+        // even when there is no retained IRQ: speculative rejection on every
+        // timer/IPI would manufacture another short retry, which can already
+        // be elapsed when the scheduler finally returns a Task under load.
+        // handle() still retains its nonblocking interrupt admission.
+        let _commit = crate::basis::commit();
         // Consume this request before callbacks: a remaining notification batch
         // can request another turn without this one clearing that continuation.
         let deferred = self.deferred.swap(false, Ordering::AcqRel);
@@ -309,7 +310,7 @@ impl Router {
             )?;
             let mut limits = root.authority().limits();
             limits.operations = Operations::Sign(SignRights::LISTEN | SignRights::CONSUME);
-            root.narrow(limits, None)?;
+            root.narrow(limits)?;
             registry
                 .register(
                     Name::Interrupt {

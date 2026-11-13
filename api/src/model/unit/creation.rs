@@ -4,7 +4,39 @@ use crate::abi::layout::{fetch_words, store_words};
 use crate::abi::register::{Decode, Wire};
 
 use super::ControlId;
-use crate::{address::VirtAddr, model::identity::TeamId};
+use crate::{
+    address::VirtAddr,
+    model::identity::{PendId, TaskId, TeamId},
+};
+
+/// A new Team includes its live, limited CPU Whole grant. Tasks receive no default grant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CreatedUnit {
+    Task(TaskId),
+    Team { team: TeamId, nest: PendId },
+}
+
+impl CreatedUnit {
+    pub fn decode(kind: usize, id: usize, nest: usize) -> Option<Self> {
+        if id == 0 || id > isize::MAX as usize {
+            return None;
+        }
+        match kind {
+            0 if nest == 0 => Some(Self::Task(TaskId::new(id))),
+            1 if nest != 0 && nest <= isize::MAX as usize => Some(Self::Team {
+                team: TeamId::new(id),
+                nest: PendId::new(nest),
+            }),
+            _ => None,
+        }
+    }
+}
+
+impl crate::abi::reply::FromTriple for CreatedUnit {
+    fn from_triple(kind: usize, id: usize, nest: usize) -> Self {
+        Self::decode(kind, id, nest).expect("invalid created Unit reply")
+    }
+}
 
 /// Snapshotted before allocation. Tasks are created dormant and require Resume.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,7 +44,8 @@ pub enum UnitCreate {
     Team {
         kind: ProgramKind,
         guard: ControlId,
-        /// Consume an unbound Internal Nest root; None allocates a new Nest.
+        /// Adopt an empty, exclusive Internal Nest root; None allocates a new Nest.
+        /// Success retains its identity, consumes ATTACH/DELETE and returns limited Whole authority.
         nest: Option<crate::model::identity::PendId>,
         /// Permit members to exit this Team through Unit.Exit.
         member_exit: bool,

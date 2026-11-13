@@ -36,7 +36,6 @@ use kernel_api::model::modifiable::Modifiable;
 
 use authority::Authority;
 use mapping::HeldMap;
-use mapping::Relation;
 
 pub(crate) use close::close;
 pub(crate) use close::pending_close;
@@ -55,7 +54,6 @@ pub struct Sharing {
     maps: SpinLock<Vec<HeldMap>>,
     authorities: SpinLock<Vec<Authority>>,
     live: AtomicBool,
-    committed: AtomicBool,
     operating: AtomicBool,
     owner: TaskId,
     pub(crate) id: usize,
@@ -83,7 +81,6 @@ impl Sharing {
             maps: SpinLock::new(maps),
             authorities: SpinLock::new_level(Level::L3, authorities),
             live: AtomicBool::new(true),
-            committed: AtomicBool::new(false),
             operating: AtomicBool::new(false),
             owner,
             id: crate::basis::view::next_id()?,
@@ -105,10 +102,6 @@ impl Sharing {
         Self::new(source, size, owner)
     }
 
-    /// 接管输入映射的关闭责任。
-    pub(crate) fn commit_source(&self) {
-        self.committed.store(true, Ordering::Release);
-    }
     pub(crate) fn owner(&self) -> TaskId {
         self.owner
     }
@@ -150,16 +143,6 @@ impl Sharing {
                 .try_reserve(1)
                 .map_err(|_| PendFail::OutOfMemory)?;
         }
-        self.reserve_records(1)?;
-        {
-            let mut maps = self.maps.lock();
-            if let Some(input) = maps
-                .iter_mut()
-                .find(|entry| entry.input() && entry.token.is_none())
-            {
-                input.token = Some(token);
-            }
-        }
         self.authorities
             .lock()
             .push(Authority::new(token, authority));
@@ -180,13 +163,6 @@ impl Sharing {
             .map(Authority::authority)
     }
 
-    pub(crate) fn readonly(&self) -> bool {
-        if self.authorities.lock().iter().any(Authority::stores) {
-            return false;
-        }
-        self.maps.lock().iter().all(|entry| !entry.writable())
-    }
-
     pub(crate) fn reserve_records(&self, count: usize) -> Result<(), PendFail> {
         let mut maps = self.maps.lock();
         if count > 1024usize.saturating_sub(maps.len()) {
@@ -195,32 +171,12 @@ impl Sharing {
         maps.try_reserve(count).map_err(|_| PendFail::OutOfMemory)
     }
 
-    /// 把一段已有关系关联到根 Pend：创建事务的 Input 交接。
-    ///
-    /// 它成为该 token 下的活跃关系——`open` 会复用它，撤销也关它。
-    pub(crate) fn adopt_input(&self, token: PendId, space: &Arc<Nest>, mapping: Arc<Span>) {
-        self.add(mapping, space, Some(token), Relation::Input);
-    }
-
-    fn add(
-        &self,
-        mapping: Arc<Span>,
-        space: &Arc<Nest>,
-        token: Option<PendId>,
-        relation: Relation,
-    ) {
-        self.maps
-            .lock()
-            .push(HeldMap::placed(mapping, space, token, relation));
-    }
-
     /// 把一段已落地的关系记入该 token：先核对授权记录，再入活跃 Span 表。
     pub(crate) fn record(
         &self,
         token: PendId,
         space: &Arc<Nest>,
         mapping: Arc<Span>,
-        opened: bool,
     ) -> Result<(), Arc<Span>> {
         let permitted = self
             .authorities
@@ -230,16 +186,9 @@ impl Sharing {
         if !self.alive() || !permitted {
             return Err(mapping);
         }
-        self.maps.lock().push(HeldMap::placed(
-            mapping,
-            space,
-            Some(token),
-            if opened {
-                Relation::Open
-            } else {
-                Relation::Span
-            },
-        ));
+        self.maps
+            .lock()
+            .push(HeldMap::placed(mapping, space, token));
         Ok(())
     }
 
@@ -259,7 +208,7 @@ impl Sharing {
                 let mut maps = self.maps.lock();
                 let index = maps
                     .iter()
-                    .position(|entry| token.is_none_or(|token| entry.closable(token)));
+                    .position(|entry| token.is_none_or(|token| entry.holds(token)));
                 match index {
                     Some(index) => maps.remove(index),
                     None => return Ok(()),
@@ -290,7 +239,7 @@ impl Sharing {
             .maps
             .lock()
             .iter()
-            .any(|entry| token.is_none_or(|t| entry.closable(t)))
+            .any(|entry| token.is_none_or(|t| entry.holds(t)))
         {
             Err(PendFail::Busy)
         } else {
@@ -307,7 +256,10 @@ impl Sharing {
 /// 却只有几个 PTE。
 fn covers_source(source: &FlatRange, entry: &HeldMap) -> bool {
     let mapping = &entry.mapping;
-    if !mapping.source().same_range(source) {
+    if mapping
+        .source()
+        .is_none_or(|mapped| !mapped.same_range(source))
+    {
         return false;
     }
     let (start, size) = mapping.initial_range();
@@ -359,9 +311,6 @@ impl Drop for Sharing {
         seal(self);
         let maps = core::mem::take(&mut *self.maps.lock());
         for entry in maps {
-            if entry.input() && !self.committed.load(Ordering::Acquire) {
-                continue;
-            }
             let space = entry.placement;
             let id = entry.mapping.identity();
             if !space.settled(id) {
@@ -446,7 +395,6 @@ pub(crate) fn open(
         maps.iter()
             .find(|entry| {
                 entry.holds(token)
-                    && entry.opened()
                     && entry.placed_in(space)
                     && entry.live()
                     && covers_source(&source, entry)
@@ -530,7 +478,7 @@ pub(crate) fn open(
     let address = mapping.initial_start().as_usize();
     let recorded = {
         let _commit = crate::basis::commit();
-        let result = meta.record(token, space, mapping.clone(), true);
+        let result = meta.record(token, space, mapping.clone());
         if result.is_ok() && authorization.is_some() {
             space.mappings.commit(id, mapping.clone());
         }

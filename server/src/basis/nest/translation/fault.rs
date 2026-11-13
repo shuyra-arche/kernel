@@ -55,18 +55,25 @@ impl FaultOutcome {
         address: VirtAddr,
         kind: FaultKind,
     ) -> Self {
-        if !state.retirement.invalidation().is_clean() {
-            return Self::Materialize;
-        }
         let Some(mapping) = state.index.find(address.as_usize()) else {
             return Self::Invalid;
         };
         let inner = mapping.state.lock();
+        if inner.phase != super::super::address::span::MappingPhase::Open {
+            return Self::Invalid;
+        }
         let Some(range) = inner.range_at(address.as_usize()) else {
             return Self::Invalid;
         };
         if !kind.allows(range.current) {
             return Self::Invalid;
+        }
+        if !state.retirement.invalidation().is_clean() {
+            return if inner.source.is_some() {
+                Self::Materialize
+            } else {
+                Self::Wait(mapping.identity())
+            };
         }
         let page = address.page_align();
         let offset = PageOffset::new(mapping.page_index(page));
@@ -78,15 +85,10 @@ impl FaultOutcome {
         {
             return Self::Resolved;
         }
-        if inner.explicit
-            || state.memos.controlled(
-                &mapping,
-                offset.get() / inner.source.grain() * inner.source.grain(),
-            )
-        {
+        let Some(source) = inner.source.as_ref() else {
             return Self::Wait(mapping.identity());
-        }
-        match inner.source.can_materialize(offset) {
+        };
+        match source.can_materialize(offset) {
             Ok(true) => {}
             // 承载已移走，或正被一次移交持有/预留：只能等。
             Ok(false) => return Self::Wait(mapping.identity()),

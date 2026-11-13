@@ -1,37 +1,46 @@
-//! 目标空间的 CPU 关系登记；仅显式控制记录授予 Memory 视图操作。
-//! 来源与登记项共享帧无关绑定，真实页表与失效责任仍由 Nest 承担。
+//! The Nest's span namespace and shared source-discovery bindings.
 
 pub(crate) mod admission;
 pub(crate) mod binding;
 pub(crate) mod external;
-pub(crate) mod memo;
+mod source;
+pub(crate) use source::{withdraw_source, withdraw_source_branch, withdraw_source_window};
 
-use alloc::sync::Arc;
-use alloc::sync::Weak;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
-use super::Span;
-use crate::basis::pend::SourceAuthorization;
-use crate::basis::unit::task::registry;
+use super::{Nest, Span};
+use crate::basis::pend::{Pend, SourceAuthorization};
 use crate::metal::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
-use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
+use kernel_api::model::pend::PendStatus;
 
-use super::Nest;
-
-// 目标空间与来源记录共享的 CPU 关系身份；不持帧，也不授予视图控制权。
-
+/// A discovery identity, shared verbatim with its source membership.
 pub(crate) struct RangeBinding {
     id: usize,
     nest: Weak<Nest>,
+    page: Option<usize>,
 }
 
 impl RangeBinding {
     pub(crate) fn new(id: usize, nest: &Arc<Nest>) -> Result<Arc<Self>, PendFail> {
+        Self::build(id, nest, None)
+    }
+
+    pub(crate) fn new_position(
+        id: usize,
+        nest: &Arc<Nest>,
+        page: usize,
+    ) -> Result<Arc<Self>, PendFail> {
+        Self::build(id, nest, Some(page))
+    }
+
+    fn build(id: usize, nest: &Arc<Nest>, page: Option<usize>) -> Result<Arc<Self>, PendFail> {
         Arc::try_new(Self {
             id,
             nest: Arc::downgrade(nest),
+            page,
         })
         .map_err(|_| PendFail::OutOfMemory)
     }
@@ -43,66 +52,68 @@ impl RangeBinding {
     pub(crate) fn nest(&self) -> &Weak<Nest> {
         &self.nest
     }
-}
 
-pub(crate) struct RangeControl {
-    control: SpinLock<(TaskId, Option<PendId>)>,
-}
-
-impl RangeControl {
-    pub(crate) fn new(controller: TaskId, branch: Option<PendId>) -> Result<Arc<Self>, PendFail> {
-        Arc::try_new(Self {
-            control: SpinLock::new((controller, branch)),
-        })
-        .map_err(|_| PendFail::OutOfMemory)
-    }
-
-    pub(crate) fn control(&self) -> (TaskId, Option<PendId>) {
-        *self.control.lock()
+    pub(crate) fn page(&self) -> Option<usize> {
+        self.page
     }
 }
 
 #[derive(Clone)]
+pub(in crate::basis::nest) struct MappingRoot {
+    pub(in crate::basis::nest) creator: TaskId,
+    pub(in crate::basis::nest) authority: Weak<Pend>,
+}
+
+#[derive(Clone)]
 pub(crate) struct RangeEntry {
-    /// 与来源名下那条成员**同一个** `Arc`：控制身份与结清都只有这一处。
     pub(crate) binding: Arc<RangeBinding>,
-    /// 资源映射没有 Memory 控制记录，不能凭关系号取得额外操作权。
-    pub(crate) control: Option<Arc<RangeControl>>,
     pub(crate) mapping: Option<Arc<Span>>,
-    pub(crate) source: Arc<SourceAuthorization>,
+    source: Option<Arc<SourceAuthorization>>,
+    pub(in crate::basis::nest) root: Option<MappingRoot>,
 }
 
 impl RangeEntry {
     pub(crate) fn mapping(&self) -> Option<&Arc<Span>> {
         self.mapping.as_ref()
     }
+
+    pub(crate) fn source(&self) -> Option<&Arc<SourceAuthorization>> {
+        self.source.as_ref()
+    }
+
+    fn reapable(&self, nest: &Nest) -> bool {
+        nest.settled(self.binding.id())
+            && self.root.as_ref().is_none_or(|root| {
+                self.mapping().is_some_and(|span| {
+                    span.state.lock().phase == super::address::span::MappingPhase::Gone
+                }) && root
+                    .authority
+                    .upgrade()
+                    .is_none_or(|authority| authority.status() == PendStatus::Dead)
+            })
+    }
+}
+
+struct Ranges {
+    entries: Vec<RangeEntry>,
+    /// Private staging owns capacity, not a visible mapping or root.
+    prepared: usize,
+    cursor: usize,
 }
 
 pub(crate) struct RangeRegistry {
-    entries: SpinLock<Vec<RangeEntry>>,
+    ranges: SpinLock<Ranges>,
 }
 
 impl RangeRegistry {
     pub(crate) fn new() -> Self {
         Self {
-            entries: SpinLock::new(Vec::new()),
+            ranges: SpinLock::new(Ranges {
+                entries: Vec::new(),
+                prepared: 0,
+                cursor: 0,
+            }),
         }
-    }
-
-    /// 占住这个号，并**同时**把这段关系登到来源名下：两表在同一个提交段里写。
-    ///
-    /// 可失败的准备（造绑定、查重号、两表各自备容量）全部先做完，之后两次短锁
-    /// 只做写入——写进去就不再失败，不留只有一边的半条登记。
-    pub(crate) fn claim(
-        &self,
-        id: usize,
-        nest: &Arc<Nest>,
-        controller: TaskId,
-        source: Arc<SourceAuthorization>,
-        branch: Option<PendId>,
-    ) -> Result<(), PendFail> {
-        let control = RangeControl::new(controller, branch)?;
-        self.claim_entry(id, nest, source, Some(control))
     }
 
     pub(crate) fn claim_mapping(
@@ -111,142 +122,332 @@ impl RangeRegistry {
         nest: &Arc<Nest>,
         source: Arc<SourceAuthorization>,
     ) -> Result<(), PendFail> {
-        self.claim_entry(id, nest, source, None)
-    }
-
-    fn claim_entry(
-        &self,
-        id: usize,
-        nest: &Arc<Nest>,
-        source: Arc<SourceAuthorization>,
-        control: Option<Arc<RangeControl>>,
-    ) -> Result<(), PendFail> {
         let _commit = crate::basis::commit();
         let binding = RangeBinding::new(id, nest)?;
         {
-            let mut entries = self.entries.lock();
-            if entries.iter().any(|entry| entry.binding.id() == id) {
+            let mut ranges = self.ranges.lock();
+            if ranges.entries.iter().any(|entry| entry.binding.id() == id) {
                 return Err(PendFail::Busy);
             }
-            entries.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
+            let capacity = ranges
+                .prepared
+                .checked_add(1)
+                .ok_or(PendFail::OutOfMemory)?;
+            ranges
+                .entries
+                .try_reserve(capacity)
+                .map_err(|_| PendFail::OutOfMemory)?;
         }
         source.reserve_binding()?;
         source.register_binding(binding.clone());
-        self.entries.lock().push(RangeEntry {
+        self.ranges.lock().entries.push(RangeEntry {
             binding,
-            control,
             mapping: None,
-            source,
+            source: Some(source),
+            root: None,
         });
         Ok(())
     }
 
-    /// 提交：只把已备槽填上真实关系，不分配。
     pub(crate) fn commit(&self, id: usize, mapping: Arc<Span>) {
-        let mut entries = self.entries.lock();
-        let entry = entries
+        let mut ranges = self.ranges.lock();
+        let entry = ranges
+            .entries
             .iter_mut()
             .find(|entry| entry.binding.id() == id)
-            .expect("prepared mapping registration");
+            .expect("prepared implicit mapping registration");
+        assert!(entry.root.is_none());
         entry.mapping = Some(mapping);
     }
 
-    /// 按号取回任意已登记关系；不以登记的存在代替控制授权。
-    ///
-    /// 不要拆成 `locate` + `pending` 两次查询：中间一旦提交，两次都会落空。
+    pub(in crate::basis::nest) fn prepare(&self) -> Result<(), PendFail> {
+        let mut ranges = self.ranges.lock();
+        let prepared = ranges
+            .prepared
+            .checked_add(1)
+            .ok_or(PendFail::OutOfMemory)?;
+        ranges
+            .entries
+            .try_reserve(prepared)
+            .map_err(|_| PendFail::OutOfMemory)?;
+        ranges.prepared = prepared;
+        Ok(())
+    }
+
+    pub(in crate::basis::nest) fn cancel_prepared(&self) {
+        let mut ranges = self.ranges.lock();
+        ranges.prepared = ranges.prepared.checked_sub(1).expect("prepared range");
+    }
+
+    pub(in crate::basis::nest) fn publish(
+        &self,
+        binding: Arc<RangeBinding>,
+        mapping: Arc<Span>,
+        creator: TaskId,
+        root: &Arc<Pend>,
+    ) {
+        let mut ranges = self.ranges.lock();
+        assert!(ranges.prepared != 0 && ranges.entries.len() < ranges.entries.capacity());
+        assert!(
+            !ranges
+                .entries
+                .iter()
+                .any(|entry| entry.binding.id() == binding.id())
+        );
+        ranges.prepared -= 1;
+        ranges.entries.push(RangeEntry {
+            binding,
+            mapping: Some(mapping),
+            source: None,
+            root: Some(MappingRoot {
+                creator,
+                authority: Arc::downgrade(root),
+            }),
+        });
+    }
+
     pub(crate) fn registered(&self, id: usize) -> Option<RangeEntry> {
-        self.entries
+        self.ranges
             .lock()
+            .entries
             .iter()
             .find(|entry| entry.binding.id() == id)
             .cloned()
     }
 
-    /// 按号取回可用控制；在途槽不算可用，号本身不授予任何东西。
-    pub(crate) fn locate(&self, id: usize) -> Option<RangeEntry> {
-        self.registered(id)
-            .filter(|entry| entry.mapping.is_some() && entry.control.is_some())
-    }
-
-    /// 取回这一段关系的登记（连同它持有的关系与来源），由调用方在锁外结清。
-    pub(crate) fn retire(&self, id: usize) -> Option<RangeEntry> {
-        let mut entries = self.entries.lock();
-        let at = entries.iter().position(|entry| entry.binding.id() == id)?;
-        Some(entries.remove(at))
-    }
-
-    /// 取出下一笔 CPU 关系已结清的登记；占用身份与全空间关闭由 Nest 判定。
-    ///
-    /// 在途槽同样适用：发布失败的清理链走完后，它也要退表并释放 controller。
-    pub(crate) fn take_settled(&self, nest: &Nest) -> Option<RangeEntry> {
-        let mut entries = self.entries.lock();
-        let at = entries
+    pub(in crate::basis::nest) fn next(&self, after: usize) -> Option<RangeEntry> {
+        self.ranges
+            .lock()
+            .entries
             .iter()
-            .position(|entry| nest.settled(entry.binding.id()))?;
-        Some(entries.remove(at))
+            .filter(|entry| entry.binding.id() > after)
+            .min_by_key(|entry| entry.binding.id())
+            .cloned()
     }
 
-    /// 一份来源名下已登记的项（撤销时取出，在锁外关）。
-    pub(crate) fn owned_by(
-        &self,
-        source: &Arc<SourceAuthorization>,
-    ) -> Result<Vec<RangeEntry>, PendFail> {
-        let entries = self.entries.lock();
-        let mut result = Vec::new();
-        result
-            .try_reserve(entries.len())
-            .map_err(|_| PendFail::OutOfMemory)?;
-        result.extend(
-            entries
-                .iter()
-                .filter(|entry| entry.mapping.is_some() && Arc::ptr_eq(&entry.source, source))
-                .cloned(),
-        );
-        Ok(result)
+    pub(in crate::basis::nest) fn progress_entry(&self) -> Option<RangeEntry> {
+        let mut ranges = self.ranges.lock();
+        let entry = ranges
+            .entries
+            .iter()
+            .filter(|entry| entry.root.is_some() && entry.binding.id() > ranges.cursor)
+            .min_by_key(|entry| entry.binding.id())
+            .or_else(|| {
+                ranges
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.root.is_some())
+                    .min_by_key(|entry| entry.binding.id())
+            })
+            .cloned()?;
+        ranges.cursor = entry.binding.id();
+        Some(entry)
+    }
+
+    pub(in crate::basis::nest) fn empty(&self) -> bool {
+        let ranges = self.ranges.lock();
+        ranges.entries.is_empty() && ranges.prepared == 0
+    }
+
+    pub(in crate::basis::nest) fn competing_reservation(&self, creator: TaskId) -> bool {
+        let mut cursor = 0;
+        while let Some(entry) = self.next(cursor) {
+            cursor = entry.binding.id();
+            if entry
+                .root
+                .as_ref()
+                .is_some_and(|root| root.creator != creator)
+                && entry.mapping().is_some_and(|span| {
+                    span.state.lock().phase != super::address::span::MappingPhase::Gone
+                })
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub(crate) fn retire(&self, id: usize) -> Option<RangeEntry> {
+        let mut ranges = self.ranges.lock();
+        let at = ranges
+            .entries
+            .iter()
+            .position(|entry| entry.binding.id() == id)?;
+        Some(ranges.entries.remove(at))
+    }
+
+    pub(crate) fn take_settled(&self, nest: &Nest) -> Option<RangeEntry> {
+        let mut cursor = 0;
+        while let Some(entry) = self.next(cursor) {
+            cursor = entry.binding.id();
+            // Upgrade/drop authority and Span references outside the registry lock.
+            if entry.reapable(nest) {
+                return self.retire(cursor);
+            }
+        }
+        None
     }
 }
 
+// PendId is observation metadata in SourceAuthorization, never a transferable handle here.
 unsafe impl Send for RangeRegistry {}
 unsafe impl Sync for RangeRegistry {}
 
 impl Nest {
-    /// 一段登记结清后的**唯一收尾**：源侧成员与 Registry 项一起撤，
-    /// 最后按登记身份放掉 controller；取出的 entry 在 Registry 锁外放掉它
-    /// 持有的关系与来源授权。
-    fn settle(entry: RangeEntry) {
-        let id = entry.binding.id();
-        entry.source.release_binding(&entry.binding);
-        if let Some(control) = &entry.control {
-            let (controller, _) = control.control();
-            if let Some(task) = registry::find(controller).and_then(|task| task.upgrade()) {
-                task.controls.remove(id);
+    fn settle(&self, entry: RangeEntry) {
+        if let Some(source) = entry.source() {
+            source.release_binding(&entry.binding);
+        }
+        if entry.root.is_some()
+            && let Some(mapping) = entry.mapping()
+        {
+            loop {
+                let memo = self.state.lock().memos.take_metadata(mapping);
+                if memo.is_none() {
+                    break;
+                }
+                drop(memo);
             }
         }
     }
 
-    /// 一段已结清登记的收尾入口：在途（未提交）与已提交同样适用。
-    ///
-    /// Registry 项与源侧成员在同一个 work 提交段里一起撤；没结清就什么都不撤，
-    /// 留给既有重试。
     pub(crate) fn retire_mapping(&self, id: usize) {
         let _commit = crate::basis::commit();
-        if !self.settled(id) {
+        let Some(entry) = self.mappings.registered(id) else {
             return;
-        }
-        if let Some(entry) = self.mappings.retire(id) {
-            Self::settle(entry);
+        };
+        if entry.reapable(self)
+            && let Some(entry) = self.mappings.retire(id)
+        {
+            self.settle(entry);
         }
     }
 
-    /// 把一个空间里已结清的登记都收掉；同样一条收尾，不再重复一份解除动作。
+    /// The whole-Nest keeper advances a bounded number of the real namespace records.
+    pub(crate) fn progress_mappings(self: &Arc<Self>) {
+        use kernel_api::model::cell::MappingId;
+        if !self.is_external() {
+            return;
+        }
+        for _ in 0..4 {
+            let _commit = crate::basis::commit();
+            let Some(entry) = self.mappings.progress_entry() else {
+                break;
+            };
+            let Some(mapping) = entry.mapping() else {
+                continue;
+            };
+            let Some(root) = entry.root.as_ref() else {
+                continue;
+            };
+            let Some(id) = MappingId::from_bytes(&(mapping.identity() as u64).to_le_bytes()) else {
+                continue;
+            };
+            let lost = root.authority.upgrade().is_none_or(|root| !root.alive());
+            if lost || !self.is_open() || !mapping.is_open() {
+                let _ = self.release_mapping(id);
+                self.retire_mapping(id.get());
+                continue;
+            }
+            let snapshot = {
+                let state = self.state.lock();
+                state
+                    .memos
+                    .get(mapping, 0)
+                    .map(|memo| (memo.association(), memo.principal()))
+            };
+            let Some((association, principal)) = snapshot else {
+                continue;
+            };
+            if let Some((_, source, binding)) = association {
+                if source.retiring() {
+                    let _ = self.withdraw_source(&binding, source.source(), None, None, true);
+                    continue;
+                }
+            }
+            if let Some(principal) = principal
+                && mapping.access(0).map_or(true, |(_, access)| {
+                    principal.check(self, mapping, 0, access).is_err()
+                })
+            {
+                if let Some(count) = kernel_api::address::PageCount::new(mapping.grain()) {
+                    let _ = self.withdraw_mapping(
+                        id,
+                        (kernel_api::address::PageOffset::ZERO, count),
+                        principal.authority(),
+                    );
+                }
+            } else if let Some(_operation) = mapping.operation() {
+                let before = self.inspect_memo(mapping, 0).ok();
+                let _ = self.progress_external(mapping);
+                if before != self.inspect_memo(mapping, 0).ok() {
+                    crate::basis::sign::signal(crate::basis::sign::WakeKey::ExternalMapping {
+                        id: id.get(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// CPU shutdown already proved every PTE absent; finish bounded namespace resources.
+    pub(in crate::basis::nest) fn drain_mapping_resources(&self) -> Result<(), super::NestError> {
+        if !self.is_closed() {
+            return Err(super::NestError::Busy);
+        }
+        for _ in 0..4 {
+            let Some(entry) = self.mappings.progress_entry() else {
+                break;
+            };
+            let Some(mapping) = entry.mapping() else {
+                continue;
+            };
+            if mapping.state.lock().phase == super::address::span::MappingPhase::Gone {
+                continue;
+            }
+            let id = kernel_api::model::cell::MappingId::from_bytes(
+                &(mapping.identity() as u64).to_le_bytes(),
+            )
+            .ok_or(super::NestError::NoRegion)?;
+            self.release_mapping(id)
+                .map_err(super::memo::source_error)?;
+        }
+        if self.mappings_gone() {
+            Ok(())
+        } else {
+            Err(super::NestError::Busy)
+        }
+    }
+
+    pub(in crate::basis::nest) fn mappings_gone(&self) -> bool {
+        let mut cursor = 0;
+        while let Some(entry) = self.mappings.next(cursor) {
+            cursor = entry.binding.id();
+            if entry.root.is_some()
+                && entry.mapping().is_some_and(|mapping| {
+                    mapping.state.lock().phase != super::address::span::MappingPhase::Gone
+                })
+            {
+                return false;
+            }
+        }
+        true
+    }
+
     pub(crate) fn reap_mappings(&self) -> bool {
         for _ in 0..4 {
             let _commit = crate::basis::commit();
             let Some(entry) = self.mappings.take_settled(self) else {
-                return true;
+                break;
             };
-            Self::settle(entry);
+            self.settle(entry);
         }
-        self.mappings.entries.lock().is_empty()
+        let mut cursor = 0;
+        while let Some(entry) = self.mappings.next(cursor) {
+            cursor = entry.binding.id();
+            if !self.settled(cursor) {
+                return false;
+            }
+        }
+        true
     }
 }

@@ -21,11 +21,11 @@ use kernel_api::{
             ShareRights,
         },
         sign::SignRights,
-        unit::{ControlId, ExitCause, ProgramKind, UnitCreate, UnitQuery, UnitTarget},
+        unit::{ControlId, CreatedUnit, ExitCause, ProgramKind, UnitCreate, UnitQuery, UnitTarget},
         wait::Wait,
     },
 };
-use kernel_client::call::{cell, pend, room, share_view, sign, unit};
+use kernel_client::call::{pend, room, share_view, sign, unit};
 
 // This is copied into a separate Team. Keep the instructions position-independent.
 core::arch::global_asm!(
@@ -144,7 +144,10 @@ fn grant(src: PendId, target: AccordTarget, operations: Operations, access: Modi
                 operations,
                 modifiable: access,
                 distributable: Distributable::No,
-                range: PendRange::Inherit,
+                scope: crate::space::range(
+                    crate::pend::inspect(src).limits.scope,
+                    PendRange::Inherit,
+                ),
             },
         }
         .to_bytes(),
@@ -152,8 +155,8 @@ fn grant(src: PendId, target: AccordTarget, operations: Operations, access: Modi
     .unwrap()
 }
 
-fn reader_team() -> (TeamId, SlotId, PendId, VirtAddr) {
-    let UnitTarget::Team(team) = unit::create(crate::ptr(
+fn reader_team() -> (TeamId, SlotId, [PendId; 3], VirtAddr) {
+    let CreatedUnit::Team { team, nest: whole } = unit::create(crate::ptr(
         &UnitCreate::Team {
             member_exit: false,
             nest: None,
@@ -174,38 +177,16 @@ fn reader_team() -> (TeamId, SlotId, PendId, VirtAddr) {
     crate::retract(staging, 0);
     crate::delete(crate::raw_memo(staging, 0).object);
     let source = share_view::create(crate::license::get(), code, Modifiable::No).unwrap();
-    let CreatedCell::Memo {
-        token: mapping,
-        address,
-    } = cell::create(
-        PendId::NONE,
-        crate::ptr(
-            &CellCreate::Memo {
-                source: CellSource::Pend {
-                    token: source,
-                    offset: 0,
-                    count: 1,
-                },
-                destination: MemoDestination::Internal {
-                    team,
-                    placement: Placement::lowest(4096).unwrap(),
-                    access: 10,
-                },
-            }
-            .to_bytes(),
-        ),
-    )
-    .unwrap()
-    else {
-        panic!("expected an executable Memo")
-    };
-    let position = CellPosition {
-        object: CellObject::Memo(mapping),
-        page: 0,
-        generation: 2,
-    };
-    cell::publish(crate::ptr(&position.to_bytes())).unwrap();
-    (team, code, source, address)
+    let (mapping, address) = crate::space::reserve(
+        whole,
+        Placement::lowest(4096).unwrap(),
+        1,
+        CellLevel::BASE,
+        10,
+    );
+    crate::handoff(crate::raw_memo(source, 0), crate::memo(mapping, 0), false);
+    crate::publish(mapping, 0);
+    (team, code, [source, mapping, whole], address)
 }
 
 fn trigger(token: PendId) {
@@ -222,7 +203,7 @@ fn listen(token: PendId) {
 }
 
 pub(super) fn run() {
-    let (team, code, code_pend, entry) = reader_team();
+    let (team, code, code_pends, entry) = reader_team();
     let data = crate::allocate(1);
     let cursor = crate::allocate(1);
     let producer = share_view::create(crate::license::get(), data, Modifiable::Yes).unwrap();
@@ -242,7 +223,7 @@ pub(super) fn run() {
         count: 0,
         stack: VirtAddr::new(0),
     };
-    let UnitTarget::Task(task) = unit::create(crate::ptr(&descriptor.to_bytes())).unwrap() else {
+    let CreatedUnit::Task(task) = unit::create(crate::ptr(&descriptor.to_bytes())).unwrap() else {
         panic!("expected a reader Task")
     };
     let remote = AccordTarget::Task(task);
@@ -304,7 +285,10 @@ pub(super) fn run() {
         sign::delete(endpoint).unwrap();
         crate::lifecycle::return_pend(endpoint);
     }
-    for token in [read_cursor, consumer, producer, code_pend] {
+    for token in [read_cursor, consumer, producer]
+        .into_iter()
+        .chain(code_pends)
+    {
         crate::lifecycle::return_pend(token);
     }
     for slot in [cursor, data, code] {

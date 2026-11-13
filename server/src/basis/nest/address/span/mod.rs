@@ -19,6 +19,7 @@ use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
 use kernel_api::address::VirtAddr;
+use kernel_api::model::cell::CellLevel;
 
 /// An occupied address span: reservation, permissions and source selection.
 ///
@@ -29,6 +30,7 @@ use kernel_api::address::VirtAddr;
 pub struct Span {
     pub(crate) reservation: Reservation,
     pub(crate) attrs: Attributes,
+    level: CellLevel,
     pub(crate) state: SpinLock<SpanState>,
     operation: core::sync::atomic::AtomicBool,
 }
@@ -57,7 +59,8 @@ impl Span {
         reservation: Reservation,
         attrs: Attributes,
         active: Vec<ActiveRange>,
-        source: FlatRange,
+        level: CellLevel,
+        source: Option<FlatRange>,
     ) -> Result<Arc<Self>, NestError> {
         let (start, size) = (reservation.start(), reservation.size());
         let end = start.as_usize().checked_add(size - 1);
@@ -69,10 +72,15 @@ impl Span {
         let Some(end) = end else {
             return Err(reject(NestError::NotAligned));
         };
+        let Some(cell_size) = level.bytes() else {
+            return Err(reject(NestError::NotAligned));
+        };
         if size == 0
-            || !size.is_multiple_of(PAGE_SIZE)
+            || !size.is_multiple_of(cell_size)
             || active.is_empty()
-            || source.page_count().checked_bytes() != Some(size)
+            || source.as_ref().is_some_and(|source| {
+                source.level() != level || source.page_count().checked_bytes() != Some(size)
+            })
         {
             return Err(reject(NestError::NotAligned));
         }
@@ -80,9 +88,8 @@ impl Span {
             let last = range.end();
             if range.start.as_usize() < start.as_usize()
                 || last > end
-                || !(range.start.as_usize() - start.as_usize())
-                    .is_multiple_of(source.grain() * PAGE_SIZE)
-                || !(last - range.start.as_usize() + 1).is_multiple_of(source.grain() * PAGE_SIZE)
+                || !(range.start.as_usize() - start.as_usize()).is_multiple_of(cell_size)
+                || !(last - range.start.as_usize() + 1).is_multiple_of(cell_size)
             {
                 return Err(reject(NestError::NoRegion));
             }
@@ -99,6 +106,7 @@ impl Span {
             reservation,
             operation: core::sync::atomic::AtomicBool::new(false),
             attrs,
+            level,
             state: SpinLock::new_level(Level::Mapping, SpanState::new(active, source)),
         }) {
             Ok(mapping) => Ok(mapping),
@@ -186,8 +194,56 @@ impl Span {
         NestRange::pages(self, offset, count)
     }
 
-    pub(crate) fn source(&self) -> FlatRange {
+    pub(crate) fn source(&self) -> Option<FlatRange> {
         self.state.lock().source.clone()
+    }
+
+    pub(crate) fn level(&self) -> CellLevel {
+        self.level
+    }
+
+    pub(crate) fn grain(&self) -> usize {
+        self.level.pages().expect("admitted Cell geometry")
+    }
+
+    pub(crate) fn access(&self, page: usize) -> Result<(Access, Access), NestError> {
+        let address = self.position(page)?;
+        let last = address
+            .checked_add(self.grain() * PAGE_SIZE - 1)
+            .ok_or(NestError::NoRegion)?;
+        let inner = self.state.lock();
+        let range = inner.range_at(address).ok_or(NestError::NoRegion)?;
+        if range.end() < last {
+            return Err(NestError::NoRegion);
+        }
+        Ok((range.ceiling, range.current))
+    }
+
+    /// Original geometry remains valid after the active address has retired.
+    pub(in crate::basis::nest) fn position(&self, page: usize) -> Result<usize, NestError> {
+        let grain = self.grain();
+        if !page.is_multiple_of(grain) {
+            return Err(NestError::NotAligned);
+        }
+        let end = page.checked_add(grain).ok_or(NestError::NoRegion)?;
+        if end > self.initial_size() / PAGE_SIZE {
+            return Err(NestError::NoRegion);
+        }
+        self.initial_start()
+            .get()
+            .checked_add(page.checked_mul(PAGE_SIZE).ok_or(NestError::NoRegion)?)
+            .ok_or(NestError::NoRegion)
+    }
+
+    pub(in crate::basis::nest) fn is_open(&self) -> bool {
+        self.state.lock().phase == MappingPhase::Open
+    }
+
+    pub(in crate::basis::nest) fn close(&self) {
+        let mut inner = self.state.lock();
+        if inner.phase == MappingPhase::Open {
+            inner.phase = MappingPhase::Closing;
+        }
     }
 
     /// 一段当前权限对应的叶子 PTE 位：V、RWX 与整段关系的 U/G/A/D。
@@ -244,17 +300,12 @@ impl Span {
             .ok()
             .map(|_| RangeOperation(&self.operation))
     }
-    pub(crate) fn advance_memo(&self, index: usize, expected: u64) -> Result<(), NestError> {
-        self.owner()
-            .ok_or(NestError::NoRegion)?
-            .advance_memo(self, index, expected)
-    }
-
     pub(crate) fn inspect_memo(
         &self,
         index: usize,
     ) -> Result<kernel_api::model::cell::CellInfo, NestError> {
-        self.owner()
+        self.reservation
+            .nest()
             .ok_or(NestError::NoRegion)?
             .inspect_memo(self, index)
     }
@@ -286,36 +337,31 @@ pub(crate) struct ProtectionTransition {
     pub updates: Vec<PermissionUpdate>,
 }
 
-/// Range policy and source selection; positions are owned by Nest.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::basis::nest) enum MappingPhase {
+    Open,
+    Closing,
+    Gone,
+}
+
+/// Range policy and optional implicit source; positions are owned by Nest.
 pub(crate) struct SpanState {
     // Reserved before publication so failed withdrawal can queue the Span
     // without allocating or making its address reusable.
     pub(in crate::basis::nest) cleanup: Option<Box<CleanupNode>>,
     pub(crate) active: Vec<ActiveRange>,
-    pub(crate) source: FlatRange,
-    pub(crate) explicit: bool,
+    pub(crate) source: Option<FlatRange>,
+    pub(in crate::basis::nest) phase: MappingPhase,
 }
 
 impl SpanState {
-    pub(crate) fn new(active: Vec<ActiveRange>, source: FlatRange) -> Self {
+    pub(crate) fn new(active: Vec<ActiveRange>, source: Option<FlatRange>) -> Self {
         Self {
             cleanup: None,
             active,
             source,
-            explicit: false,
+            phase: MappingPhase::Open,
         }
-    }
-
-    pub(crate) fn memo_address(&self, base: VirtAddr, index: usize) -> Result<usize, NestError> {
-        if !index.is_multiple_of(self.source.grain()) {
-            return Err(NestError::NotAligned);
-        }
-        let address = base
-            .get()
-            .checked_add(index.checked_mul(PAGE_SIZE).ok_or(NestError::NoRegion)?)
-            .ok_or(NestError::NoRegion)?;
-        self.range_at(address).ok_or(NestError::NoRegion)?;
-        Ok(address)
     }
 
     /// 活动区间是否连续覆盖 [lo, hi]。
@@ -370,7 +416,7 @@ impl SpanState {
         };
         let first = (lo - base.as_usize()) / PAGE_SIZE;
         let pages = (hi - lo + 1) / PAGE_SIZE;
-        let borrowed = self.source.is_borrowed();
+        let borrowed = self.source.as_ref().is_some_and(FlatRange::is_borrowed);
         let mut updates = Vec::new();
         updates
             .try_reserve(pages)

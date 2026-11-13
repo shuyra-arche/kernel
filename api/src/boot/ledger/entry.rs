@@ -116,7 +116,7 @@ impl Entry {
             )
     }
 }
-pub const VERSION: u32 = 9;
+pub const VERSION: u32 = 10;
 #[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub version: u32,

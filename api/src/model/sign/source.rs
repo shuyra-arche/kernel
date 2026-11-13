@@ -8,12 +8,14 @@ use crate::model::unit::UnitTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignSource {
-    /// Retained external mapping completion, independent of execution exit.
+    /// Retained external mapping completion. Requires mapping-scoped Nest INSPECT
+    /// for this identity/window; the numeric mapping is only a consistency check.
     MappingRetired {
         token: PendId,
         mapping: crate::model::cell::MappingId,
     },
-    /// Retained completion of one exact publication generation.
+    /// Retained completion of one exact publication generation, authorized by a
+    /// mapping-scoped Nest INSPECT grant for the same identity/window.
     MappingPublished {
         token: PendId,
         mapping: crate::model::cell::MappingId,

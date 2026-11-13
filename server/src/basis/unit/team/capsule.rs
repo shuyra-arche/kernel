@@ -38,50 +38,51 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
         }
         image_end = image_end.max(region.va.checked_add(size).ok_or(NestError::NoRegion)?);
     }
-    let team = TeamBuilder::new(SpaceKind::Supervisor).spawn()?;
-    let nest = &team.nest;
-    for i in 0..capsule.count {
-        let region = capsule.region(i).ok_or(NestError::NoRegion)?;
-        let size = region.pages.checked_mul(PAGE).ok_or(NestError::NoRegion)?;
-        let va = VirtAddr::wrap(region.va);
-        let access = Access::from_wire(region.flags).ok_or(NestError::WidenDenied)?;
-        let data_size = region
-            .data_pages
-            .checked_mul(PAGE)
-            .ok_or(NestError::NoRegion)?;
-        if data_size > 0 {
-            // 来源先备齐：可写段拷进新帧，只读段借用镜像自身那一段物理区间。
-            let source = if access.contains(Access::WRITE) {
-                image_frames(bytes, &region, data_size, team.cells.clone())?
-            } else {
-                let physical = bytes
-                    .as_ptr()
-                    .addr()
-                    .checked_add(region.payload)
-                    .ok_or(NestError::NoRegion)?;
-                let borrowed =
-                    unsafe { BorrowedRegion::new(PhysAddr::from_raw(physical), data_size)? };
-                Flat::from_region(borrowed)?.whole()
-            };
-            let reservation = reserve_at(nest, va, data_size)?;
-            nest.attach(reservation, source, access, access)?;
+    TeamBuilder::new(SpaceKind::Supervisor).spawn(|team| {
+        let nest = &team.nest;
+        for i in 0..capsule.count {
+            let region = capsule.region(i).ok_or(NestError::NoRegion)?;
+            let size = region.pages.checked_mul(PAGE).ok_or(NestError::NoRegion)?;
+            let va = VirtAddr::wrap(region.va);
+            let access = Access::from_wire(region.flags).ok_or(NestError::WidenDenied)?;
+            let data_size = region
+                .data_pages
+                .checked_mul(PAGE)
+                .ok_or(NestError::NoRegion)?;
+            if data_size > 0 {
+                // 来源先备齐：可写段拷进新帧，只读段借用镜像自身那一段物理区间。
+                let source = if access.contains(Access::WRITE) {
+                    image_frames(bytes, &region, data_size, team.cells.clone())?
+                } else {
+                    let physical = bytes
+                        .as_ptr()
+                        .addr()
+                        .checked_add(region.payload)
+                        .ok_or(NestError::NoRegion)?;
+                    let borrowed =
+                        unsafe { BorrowedRegion::new(PhysAddr::from_raw(physical), data_size)? };
+                    Flat::from_region(borrowed)?.whole()
+                };
+                let reservation = reserve_at(nest, va, data_size)?;
+                nest.attach(reservation, source, access, access)?;
+            }
+            if size > data_size {
+                let bss_start = va + data_size;
+                let bss_size = size - data_size;
+                let source = Flat::acquire(
+                    team.cells.clone(),
+                    Allocation::new(bss_size / PAGE_SIZE, PAGE_SIZE)?,
+                )?
+                .whole();
+                let reservation = reserve_at(nest, bss_start, bss_size)?;
+                nest.attach(reservation, source, access, access)?;
+            }
         }
-        if size > data_size {
-            let bss_start = va + data_size;
-            let bss_size = size - data_size;
-            let source = Flat::acquire(
-                team.cells.clone(),
-                Allocation::new(bss_size / PAGE_SIZE, PAGE_SIZE)?,
-            )?
-            .whole();
-            let reservation = reserve_at(nest, bss_start, bss_size)?;
-            nest.attach(reservation, source, access, access)?;
-        }
-    }
-    nest.advance_window(RegionKind::Normal, image_end)?;
-    crate::metal::mmu::identity::sync_instructions()?;
-    team.set_default_entry(capsule.entry);
-    Ok(team)
+        nest.advance_window(RegionKind::Normal, image_end)?;
+        crate::metal::mmu::identity::sync_instructions()?;
+        team.set_default_entry(capsule.entry);
+        Ok(())
+    })
 }
 
 /// 把镜像里的数据页拷进新帧，返回覆盖整段数据区的来源。

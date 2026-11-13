@@ -7,6 +7,7 @@ mod authority;
 mod metal {
     pub(crate) mod sync {
         pub(crate) use std::sync::OnceLock;
+        pub(crate) type SpinLockGuard<'a, T> = std::sync::MutexGuard<'a, T>;
         pub(crate) struct SpinLock<T>(std::sync::Mutex<T>);
         impl<T> SpinLock<T> {
             pub(crate) fn new(value: T) -> Self {
@@ -19,6 +20,7 @@ mod metal {
     }
 }
 mod ranges;
+mod scopes;
 #[path = "../../src/basis/pend/authority/state.rs"]
 mod state;
 #[path = "../../src/basis/pend/window.rs"]
@@ -91,13 +93,18 @@ fn cancellation_and_settlement_require_different_proofs() {
 
 #[test]
 fn live_permission_restricts_operations_without_changing_borrow_rules() {
-    use kernel_api::model::pend::{Distributable, Operations, ShareRights};
+    use kernel_api::model::pend::{Distributable, Operations, PendRange, PendScope, ShareRights};
     let all = Operations::Share(ShareRights::all());
     let open = Operations::Share(ShareRights::OPEN);
-    let root = State::authorized(Yes, all, Distributable::Yes);
+    let scope = PendScope::Pages(PendRange::Pages {
+        offset: 0,
+        count: 8,
+    });
+    let root = State::authorized(Yes, scope, all, Distributable::Yes);
     let limited = root
         .transition(Limit {
             access: Yes,
+            scope,
             operations: open,
             distributable: Distributable::No,
         })
@@ -107,6 +114,7 @@ fn live_permission_restricts_operations_without_changing_borrow_rules() {
     assert_eq!(
         limited.transition(Limit {
             access: Yes,
+            scope,
             operations: all,
             distributable: Distributable::No
         }),
@@ -115,6 +123,7 @@ fn live_permission_restricts_operations_without_changing_borrow_rules() {
     assert_eq!(
         limited.transition(Limit {
             access: Yes,
+            scope,
             operations: open,
             distributable: Distributable::Yes
         }),
@@ -125,6 +134,7 @@ fn live_permission_restricts_operations_without_changing_borrow_rules() {
     assert_eq!(
         lent.transition(Limit {
             access: No,
+            scope,
             operations: open,
             distributable: Distributable::No
         }),

@@ -5,11 +5,11 @@ use kernel_api::{
     abi::call::unit::UnitFail,
     address::VirtAddr,
     model::identity::{TaskId, TeamId},
-    model::unit::{ControlId, ExitScope, UnitQuery, UnitTarget},
+    model::unit::{ControlId, CreatedUnit, ExitScope, UnitQuery, UnitTarget},
 };
 
 typed_calls! {
-    fallible fn create(request: VirtAddr) -> Result<UnitTarget, erra::Error<UnitFail>> = op::Create { request };
+    fallible fn create(request: VirtAddr) -> Result<CreatedUnit, erra::Error<UnitFail>> = op::Create { request };
     fallible fn delete(target: UnitTarget) -> Result<(), erra::Error<UnitFail>> = op::Delete { target };
     fallible fn resume(target: UnitTarget) -> Result<(), erra::Error<UnitFail>> = op::Resume { target };
     fallible fn freeze(target: UnitTarget) -> Result<(), erra::Error<UnitFail>> = op::Freeze { target };

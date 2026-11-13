@@ -10,7 +10,8 @@ use kernel_api::{
         memory::{Snapshot, SnapshotPage, UNKNOWN},
         modifiable::Modifiable,
         pend::{
-            AccordRequest, AccordTarget, Distributable, Limits, Operations, PendRange, ShareRights,
+            AccordRequest, AccordTarget, Distributable, Limits, Operations, PendRange, PendScope,
+            ShareRights,
         },
         wait::Wait,
     },
@@ -46,7 +47,7 @@ pub(super) fn run(at: usize, count: usize) {
         operations: Operations::Share(ShareRights::OPEN | ShareRights::SHUT),
         modifiable: Modifiable::No,
         distributable: Distributable::No,
-        range: PendRange::Inherit,
+        scope: PendScope::Pages(PendRange::Inherit),
     };
     let request = |modifiable| {
         AccordRequest {
@@ -70,14 +71,9 @@ pub(super) fn run(at: usize, count: usize) {
     assert_eq!(before.capacity, before.available + before.resident);
     assert_eq!((before.accessed, before.dirty), (UNKNOWN, UNKNOWN));
     assert!(before.start_ns <= before.end_ns && before.end_ns <= room::clock());
-    use kernel_api::model::cell::{Allocation, CellCreate, CellLevel, CreatedCell};
-    let allocation =
-        CellCreate::Slot(Allocation::at_level(CellLevel::new(1).unwrap(), 1).unwrap()).to_bytes();
-    let CreatedCell::Slot(backing) =
-        kernel_client::call::cell::create(crate::license::get(), crate::ptr(&allocation)).unwrap()
-    else {
-        panic!("Slot expected");
-    };
+    use kernel_api::model::cell::{Allocation, CellLevel};
+    let allocation = Allocation::at_level(CellLevel::new(1).unwrap(), 1).unwrap();
+    let backing = kernel_client::call::cell::create(crate::license::get(), allocation).unwrap();
     let (mapping, at) = crate::reserve(backing, 512);
     crate::handoff(crate::slot(backing, 0), crate::memo(mapping, 0), false);
     crate::publish(mapping, 0);

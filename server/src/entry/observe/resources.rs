@@ -37,7 +37,6 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
             .map_err(|_| PendFail::Denied)?;
     let flat = Flat::from_region(region).map_err(|_| PendFail::OutOfMemory)?;
     let share = Sharing::from_source(flat.whole(), 4096, TaskId::new(0))?;
-    share.commit_source();
     let data = PendEntry::try_new(View::Share(share), Mark::NONE, Modifiable::No, None)?;
     registry
         .register(Name::Page(Page::Memory), data)
@@ -47,7 +46,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
     let event = PendEntry::try_new(Target::Sign(sign), Mark::NONE, Modifiable::No, None)?;
     let mut limits = event.authority().limits();
     limits.operations = Operations::Sign(SignRights::LISTEN | SignRights::CONSUME);
-    event.narrow(limits, None)?;
+    event.narrow(limits)?;
     registry
         .register(Name::Memory, event)
         .map_err(|e| e.into_parts().0)

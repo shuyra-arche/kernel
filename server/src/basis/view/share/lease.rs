@@ -1,12 +1,11 @@
 //! Authorized source adoption and CPU borrowing transactions.
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::cell::SlotId;
 use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
-use kernel_api::model::pend::{Operations, ShareRights};
+use kernel_api::model::pend::{Operations, PendRange, PendScope, ShareRights};
 
 use crate::basis::nest::Access;
 use crate::basis::pend;
@@ -69,6 +68,7 @@ pub(crate) fn create_share(
             &Arc::downgrade(task),
             kernel_api::model::pend::Limits {
                 modifiable: requested,
+                scope: PendScope::Pages(PendRange::Inherit),
                 ..limits
             },
             Mark::NONE,
@@ -112,45 +112,19 @@ pub(crate) fn create_share(
             pend::PendEntry::try_new(View::Share(meta.clone()), Mark::NONE, modifiable, None)?;
         let pend = Arc::try_new(pend).map_err(|_| PendFail::OutOfMemory)?;
         let token = pend.token();
-        let mut inputs = Vec::new();
-        for space in authorization.spaces()? {
-            let entries = space.mappings.owned_by(&authorization)?;
-            inputs
-                .try_reserve(entries.len())
-                .map_err(|_| PendFail::OutOfMemory)?;
-            for entry in entries {
-                if let Some(mapping) = entry.mapping() {
-                    inputs.push((space.clone(), mapping.clone()));
-                }
-            }
-        }
-        meta.reserve_records(inputs.len())?;
         let registration = task.pend.prepare(pend.clone())?;
-
+        // The creation claim closes private-source admission until adoption.
+        crate::basis::nest::authority::withdraw_source(&authorization, false)?;
         let _commit = crate::basis::commit();
         let withdrawal = authorization.begin_withdraw()?;
         if !pend::live(task) || !authorization.private_owner(task.ident.id) {
             return Err(PendFail::Denied);
         }
         meta.attach_source(&authorization);
-        let private = withdrawal.adopt(&meta, token, pend.authority().clone())?;
-        let transition = (|| {
-            for (space, mapping) in inputs {
-                meta.adopt_input(token, &space, mapping);
-            }
-            if modifiable == Modifiable::No {
-                meta.close_maps(Some(token))?;
-            }
-            meta.commit_source();
-            authorization.consume();
-            registration.publish();
-
-            Ok(token)
-        })();
-        if transition.is_err() {
-            withdrawal.restore_private(token, private);
-        }
-        transition
+        withdrawal.adopt(&meta, token, pend.authority().clone())?;
+        authorization.consume();
+        registration.publish();
+        Ok(token)
     })();
     if result.is_err() {
         authorization.release_claim();

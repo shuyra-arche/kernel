@@ -6,49 +6,56 @@ use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 
 use super::PendEntry;
-use super::ledger::{insert_heir, with_pair_uncommitted};
+use super::ledger::with_pair_uncommitted;
 use crate::basis::flat::sharing::SharingOperation;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::task::Task;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
-use kernel_api::model::pend::Limits;
+use kernel_api::model::pend::{Limits, NestScope, PendRange, PendScope};
 
-/// Resolve the window while the source/target transaction locks are held.
-fn effective_window(
-    pend_entry: &PendEntry,
+/// Caller holds the ledger serial through normalization and the authority effect.
+fn effective_limits(
+    entry: &PendEntry,
+    limits: Limits,
     requested: super::Window,
-) -> Result<Option<(PageOffset, PageCount)>, PendFail> {
-    if matches!(
-        requested,
-        super::Window::Parent(kernel_api::model::pend::PendRange::Inherit)
-    ) {
-        return Ok(pend_entry.authority().window());
+) -> Result<Limits, PendFail> {
+    if !limits.valid() {
+        return Err(PendFail::Denied);
     }
-    if let super::Target::Memo(memo) = pend_entry.target() {
-        let outer = pend_entry
-            .authority()
-            .window()
-            .unwrap_or((PageOffset::ZERO, memo.count));
-        let window = requested.resolve(outer)?;
-        if memo.nest.is_external() && window != (PageOffset::ZERO, memo.count) {
-            return Err(PendFail::NotAligned);
+    let scope = requested.scope(entry.scope(), limits.scope)?;
+    if let Some(PendRange::Pages { offset, count }) = scope.range() {
+        let offset = PageOffset::new(offset);
+        let count = PageCount::new(count).ok_or(PendFail::Denied)?;
+        match scope {
+            PendScope::Pages(_) => {
+                entry
+                    .target()
+                    .memory()
+                    .ok_or(PendFail::Denied)?
+                    .source()
+                    .range(offset, count)
+                    .map_err(|_| PendFail::NotAligned)?;
+            }
+            PendScope::Nest(NestScope::Mapping { id, .. }) => {
+                let nest = entry.target().nest().ok_or(PendFail::Denied)?;
+                if !nest.mapping_open(id) {
+                    return Err(PendFail::Dead);
+                }
+                let span = nest.mapping(id).ok_or(PendFail::Denied)?;
+                span.range(offset, count)
+                    .map_err(|_| PendFail::NotAligned)?;
+                if nest.is_external()
+                    && (offset != PageOffset::ZERO || Some(count) != nest.mapping_count(id))
+                {
+                    return Err(PendFail::NotAligned);
+                }
+            }
+            _ => return Err(PendFail::Denied),
         }
-        if !memo.nest.is_external() {
-            memo.span()
-                .map_err(|_| PendFail::Denied)?
-                .range(window.0, window.1)
-                .map_err(|_| PendFail::NotAligned)?;
-        }
-        return Ok(Some(window));
     }
-    let meta = pend_entry.target().memory().ok_or(PendFail::Denied)?;
-    let outer = pend_entry
-        .authority()
-        .window()
-        .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-    requested.resolve(outer).map(Some)
+    Ok(Limits { scope, ..limits })
 }
 
 /// Local derivation and cross-Task delegation share the same authorization commit.
@@ -75,7 +82,7 @@ pub(crate) fn accord(
         return Err(PendFail::Denied);
     }
     let observed = super::locate(caller, src).ok_or(PendFail::Denied)?;
-    if !derivable(&observed, limits, share) {
+    if !observed.derives(limits, share) {
         return Err(PendFail::Denied);
     }
     let share_view = observed.target().memory();
@@ -113,7 +120,7 @@ pub(crate) fn accord(
         if !pend_entry.alive() {
             return Err(PendFail::Dead);
         }
-        if !derivable(&pend_entry, limits, share) {
+        if !pend_entry.derives(limits, share) {
             return Err(PendFail::Denied);
         }
         let mark = if mark == Mark::NONE {
@@ -128,18 +135,22 @@ pub(crate) fn accord(
         } else if share_view.is_some() && pend_entry.authority().modifiable().is_none() {
             return Err(PendFail::Busy);
         }
-        let window = effective_window(&pend_entry, requested)?;
+        let limits = effective_limits(&pend_entry, limits, requested)?;
+        let window = match limits.scope.range() {
+            Some(PendRange::Pages { offset, count }) => Some((
+                PageOffset::new(offset),
+                PageCount::new(count).ok_or(PendFail::Denied)?,
+            )),
+            None => None,
+            _ => return Err(PendFail::Denied),
+        };
         check_source(window)?;
-        let mut granted = pend_entry.vest_window(mark, limits, window, share)?;
+        let mut granted = pend_entry.vest_scope(mark, limits, share)?;
         granted.parent(src, Arc::downgrade(caller));
         let granted = Arc::try_new(granted).map_err(|_| PendFail::OutOfMemory)?;
-        {
-            let mut heirs = caller.pend.heirs.lock();
-            if heirs.len() >= 1024 {
-                return Err(PendFail::OutOfMemory);
-            }
-            heirs.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
-        }
+        let heir = caller
+            .pend
+            .prepare_heir(src, Arc::downgrade(&target), granted.token())?;
         let registration = target.pend.prepare(granted.clone())?;
         if let Some(meta) = registers {
             if pend_entry.modifiable() == kernel_api::model::modifiable::Modifiable::Yes {
@@ -158,7 +169,7 @@ pub(crate) fn accord(
         }
         let token = granted.token();
         crate::basis::room::interrupt::dispatch(&target, &granted)?;
-        insert_heir(caller, src, Arc::downgrade(&target), token);
+        heir.publish();
         registration.publish();
         drop(commit);
         Ok(token)
@@ -177,7 +188,6 @@ pub(crate) fn accord(
 /// Narrow preserves identity. Live descendants/external loans return Busy before
 /// changing the window; the holder can Return/Revoke them and retry.
 pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<(), PendFail> {
-    let range = limits.range;
     let observed = super::locate(task, token).ok_or(PendFail::Denied)?;
     let share = observed.target().memory();
     let _operation = share
@@ -186,9 +196,14 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
         .transpose()?;
     let _serial = task.pend.lock();
     let observed = super::locate(task, token).ok_or(PendFail::Denied)?;
-    if !observed.alive() {
+    if !super::live(task) || !observed.alive() {
         return Err(PendFail::Dead);
     }
+    let limits = effective_limits(
+        &observed,
+        limits,
+        super::Window::Parent(limits.scope.range().unwrap_or(PendRange::Inherit)),
+    )?;
     observed.authority().can_narrow(limits)?;
     if task
         .pend
@@ -199,15 +214,6 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
     {
         return Err(PendFail::Busy);
     }
-    let window = effective_window(&observed, super::Window::Parent(range))?;
-    if let super::Target::Memo(memo) = observed.target() {
-        memo.withdraw(&observed)?;
-    }
-    if let (Some(meta), Some((offset, count))) = (&share, window) {
-        meta.source()
-            .range(offset, count)
-            .map_err(|_| PendFail::Invalid)?;
-    }
     let authorization = share.as_ref().and_then(|meta| meta.authorization());
     if authorization
         .as_ref()
@@ -215,18 +221,25 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
     {
         return Err(PendFail::Busy);
     }
-    // No in-flight publication may cross the narrowing commit.
     {
         let _commit = crate::basis::commit();
         let _withdraw = authorization
             .as_ref()
             .map(|source| source.begin_withdraw())
             .transpose()?;
+    }
+    // Persistent publisher routes discharge only through exact hardware withdrawal.
+    if let PendScope::Nest(NestScope::Mapping { id, .. }) = observed.scope() {
+        let window = observed.authority().window().ok_or(PendFail::Denied)?;
+        observed
+            .target()
+            .nest()
+            .ok_or(PendFail::Denied)?
+            .withdraw_mapping(id, window, observed.authority())?;
     }
     if let Some(meta) = &share {
-        if limits != observed.authority().limits() || window != observed.authority().window() {
-            meta.close_maps(Some(token))?;
-        }
+        meta.close_maps(Some(token))?;
+        crate::basis::nest::authority::withdraw_source_branch(meta, token, false)?;
     }
     {
         let _commit = crate::basis::commit();
@@ -234,41 +247,14 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
             .as_ref()
             .map(|source| source.begin_withdraw())
             .transpose()?;
-        let entries = task.pend.entries.lock();
-        let entry = entries.get(token).ok_or(PendFail::Denied)?;
-        entry.narrow(limits, window)?;
+        let current = super::locate(task, token).ok_or(PendFail::Denied)?;
+        if !super::live(task) || !Arc::ptr_eq(&current, &observed) {
+            return Err(PendFail::Dead);
+        }
+        current.narrow(limits)?;
     }
     drop(_serial);
     drop(_operation);
     super::notify(task.ident.id, token);
     Ok(())
-}
-
-/// Flat → Share is an explicit attenuating creation operation, never a generic
-/// Accord target change. Data operations and deletion cannot exceed the Flat.
-fn derivable(entry: &PendEntry, limits: Limits, share: bool) -> bool {
-    use kernel_api::model::pend::{Distributable, FlatRights, Operations, ShareRights};
-    let parent = entry.authority().limits();
-    if share && matches!(entry.target(), super::Target::Flat(_)) {
-        let Operations::Flat(rights) = parent.operations else {
-            return false;
-        };
-        let Operations::Share(requested) = limits.operations else {
-            return false;
-        };
-        let mut permitted = ShareRights::empty();
-        if rights.contains(FlatRights::ASSOCIATE) {
-            permitted |= ShareRights::OPEN | ShareRights::SHUT | ShareRights::ASSOCIATE;
-        }
-        if rights.contains(FlatRights::DELETE) {
-            permitted |= ShareRights::DELETE;
-        }
-        limits.valid()
-            && parent.distributable == Distributable::Yes
-            && parent.modifiable.allows(limits.modifiable)
-            && rights.contains(FlatRights::SHARE)
-            && permitted.contains(requested)
-    } else {
-        parent.permits_child(limits)
-    }
 }

@@ -11,7 +11,7 @@ use kernel_api::{
         modifiable::Modifiable,
         pend::{
             AccordRequest, AccordTarget, Distributable, Limits, NarrowRequest, Operations,
-            PendRange,
+            PendScope,
         },
         sign::{SignRights, SignSource},
         unit::UnitTarget,
@@ -49,7 +49,7 @@ fn accord(
             operations: Operations::Sign(rights),
             modifiable: Modifiable::No,
             distributable: Distributable::Yes,
-            range: PendRange::Inherit,
+            scope: PendScope::Object,
         },
     }
     .to_bytes();

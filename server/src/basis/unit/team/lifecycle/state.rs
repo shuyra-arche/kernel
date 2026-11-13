@@ -120,10 +120,6 @@ impl TeamState {
         matches!(self.stage, TeamStage::Ready { .. }) && !self.terminal()
     }
 
-    pub(crate) fn constructing(&self) -> bool {
-        matches!(self.stage, TeamStage::Constructing) && !self.terminal()
-    }
-
     pub(crate) fn default_entry(&self) -> usize {
         match (&self.stage, self.terminal()) {
             (TeamStage::Ready { default_entry }, false) => *default_entry,

@@ -1,5 +1,5 @@
 use kernel_api::{
-    address::VirtAddr,
+    address::{PageCount, VirtAddr},
     boot::{
         args,
         ledger::{Entries, Name, Page, ResourceKind},
@@ -10,7 +10,8 @@ use kernel_api::{
         modifiable::Modifiable,
         nest::{NestInfo, NestKind, NestPhase},
         pend::{
-            AccordRequest, AccordTarget, Distributable, Limits, NestRights, Operations, PendRange,
+            AccordRequest, AccordTarget, Distributable, Limits, NestRights, NestScope, Operations,
+            PendScope,
         },
         sign::SignSource,
         wait::Wait,
@@ -21,6 +22,8 @@ mod block;
 mod exit;
 mod levels;
 mod publication;
+mod publisher;
+mod reservation;
 pub(super) use exit::death;
 pub(super) use publication::run;
 const ADDRESS: usize = 0x400000;
@@ -55,12 +58,10 @@ fn context(token: PendId) -> NestInfo {
 }
 fn limits() -> Limits {
     Limits {
-        operations: Operations::Nest(
-            NestRights::all() & !(NestRights::DELETE | NestRights::ATTACH),
-        ),
+        operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
         modifiable: Modifiable::Yes,
         distributable: Distributable::No,
-        range: PendRange::Inherit,
+        scope: PendScope::Nest(NestScope::Whole),
     }
 }
 fn branch(root: PendId) -> PendId {
@@ -81,14 +82,14 @@ fn returned(token: PendId) {
             Err(error) => {
                 assert_eq!(error.source, kernel_api::abi::call::pend::PendFail::Busy);
                 assert!(room::clock() < until, "Pend return stalled");
-                room::yield_();
+                room::sleep_until((room::clock() + 1_000_000).min(until)).unwrap();
             }
         }
     }
 }
 fn alias(pos: CellPosition, token: PendId) -> CellPosition {
     CellPosition {
-        object: CellObject::Memo(token),
+        object: CellObject::Pend(token),
         ..pos
     }
 }
@@ -116,40 +117,28 @@ fn reserve(
     slot: SlotId,
     address: usize,
     writable: bool,
-) -> Result<CellPosition, kernel_api::abi::call::cell::CellFail> {
-    let bytes = CellCreate::Memo {
-        source: CellSource::Slot(ReferenceRange {
-            reference: slot,
-            offset: 0,
-            count: super::info(super::slot(slot, 0)).level.pages().unwrap(),
-        }),
-        destination: MemoDestination::External {
-            authority: token,
-            address: VirtAddr::new(address),
-            access: if writable {
-                Modifiable::Yes
-            } else {
-                Modifiable::No
-            },
-        },
-    }
-    .to_bytes();
-    let CreatedCell::Memo { token: mapping, .. } =
-        cell::create(PendId::NONE, super::ptr(&bytes)).map_err(|error| error.source)?
-    else {
-        panic!("Memo expected")
-    };
-    Ok(CellPosition {
-        object: CellObject::Memo(mapping),
-        page: 0,
-        generation: 1,
-    })
+) -> Result<CellPosition, kernel_api::abi::call::nest::NestFail> {
+    let level = super::info(super::slot(slot, 0)).level;
+    let (mapping, reserved) = nest::reserve(
+        token,
+        Placement::exact(VirtAddr::new(address), level.bytes().unwrap()).unwrap(),
+        PageCount::new(level.pages().unwrap()).unwrap(),
+        level,
+        if writable { 6 } else { 2 },
+    )
+    .map_err(|error| error.source)?;
+    assert_eq!(reserved.get(), address);
+    let position = super::memo(mapping, 0);
+    let observation = super::info(position);
+    assert_eq!(observation.state, CellState::Vacant);
+    assert_eq!(observation.level, level);
+    Ok(position)
 }
 fn wait(pos: CellPosition, state: CellState) {
     let until = room::clock() + 2_000_000_000;
     while super::info(pos).state != state {
         assert!(room::clock() < until, "Memo deadline {state:?}");
-        room::yield_();
+        room::sleep_until((room::clock() + 1_000_000).min(until)).unwrap();
     }
 }
 fn publish(pos: CellPosition) {
@@ -157,8 +146,38 @@ fn publish(pos: CellPosition) {
     wait(pos, CellState::Published);
 }
 fn retract(pos: CellPosition) {
-    cell::retract(super::ptr(&current(pos).to_bytes())).unwrap();
+    begin_retract(pos);
     wait(pos, CellState::Ready);
+}
+fn begin_retract(pos: CellPosition) {
+    let pos = current(pos);
+    let before = super::info(pos);
+    assert_eq!(before.state, CellState::Published);
+    let deadline = room::clock() + 2_000_000_000;
+    loop {
+        let result = cell::retract(super::ptr(&pos.to_bytes()));
+        if let Err(error) = &result {
+            assert_eq!(error.source, kernel_api::abi::call::cell::CellFail::Busy);
+        }
+        let after = super::info(pos);
+        assert_eq!(after.page, before.page);
+        if after.generation == before.generation + 1 {
+            // Busy can retain an accepted asynchronous withdrawal. Require
+            // this exact publication's new generation before waiting for it.
+            assert!(matches!(
+                after.state,
+                CellState::Retracting | CellState::Ready
+            ));
+            return;
+        }
+        // Maintenance may own the span before this attempt starts. A rejected
+        // Busy must leave the publication unchanged; retry within the same bound.
+        assert!(result.is_err());
+        assert_eq!(after.generation, before.generation);
+        assert_eq!(after.state, CellState::Published);
+        assert!(room::clock() < deadline, "External Retract did not start");
+        room::sleep_until((room::clock() + 1_000_000).min(deadline)).unwrap();
+    }
 }
 fn closed(token: PendId) {
     let until = room::clock() + 2_000_000_000;
@@ -168,7 +187,7 @@ fn closed(token: PendId) {
             "Nest close deadline {:?}",
             context(token)
         );
-        room::yield_();
+        room::sleep_until((room::clock() + 1_000_000).min(until)).unwrap();
     }
 }
 fn read(base: VirtAddr, offset: usize) -> u32 {
@@ -202,16 +221,15 @@ fn transfer(bar: VirtAddr, address: usize, writing: bool) {
     complete(bar);
 }
 fn source(pos: CellPosition, published: bool) -> SignSource {
-    let CellObject::Memo(token) = pos.object else {
+    let CellObject::Pend(token) = pos.object else {
         panic!("external position")
     };
     let mut bytes = [0; kernel_api::model::pend::PendInfo::SIZE];
     pend::inspect(token, VirtAddr::new(bytes.as_mut_ptr() as usize)).unwrap();
     let observation = kernel_api::model::pend::PendInfo::from_bytes(&bytes).unwrap();
-    let kernel_api::model::pend::Target::Memo(id) = observation.target else {
-        panic!("Memo target")
+    let PendScope::Nest(NestScope::Mapping { id: mapping, .. }) = observation.limits.scope else {
+        panic!("mapping-scoped Nest grant expected")
     };
-    let mapping = MappingId::from_bytes(&(id.get() as u64).to_le_bytes()).unwrap();
     if published {
         SignSource::MappingPublished { token, mapping }
     } else {

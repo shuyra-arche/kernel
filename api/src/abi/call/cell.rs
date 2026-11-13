@@ -27,26 +27,26 @@ pub mod operations {
         /// 这一页永久不可移交：来源不是普通来源，或它的旧映射无从核实。
         NotTransferable = -10,
     }
-    /// Create a Slot collection or vacant Memo collection from a CellCreate snapshot.
-    #[operation(slot = 0, output = crate::model::cell::CreatedCell, error = CellFail, reply = 3)]
+    /// Allocate a lazy owning Slot collection using None(FLAT) authority.
+    #[operation(slot = 0, output = crate::model::cell::SlotId, error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Create {
         pub license: crate::model::identity::PendId,
-        pub request: super::VirtAddr,
+        pub allocation: crate::model::cell::Allocation,
     }
-    /// Delete a CellObject. A published Memo must first be retracted and settled.
+    /// Release an owning Slot handle; retained mapping obligations survive.
     #[operation(slot = 1, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Delete {
-        pub object: super::VirtAddr,
+        pub slot: crate::model::cell::SlotId,
     }
-    /// Move the unique Slot holding from local to remote; no implicit Memo/PTE changes.
+    /// Move the unique Slot holding from local to remote; no implicit association/PTE changes.
     #[operation(slot = 2, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Push {
         pub request: super::VirtAddr,
     }
-    /// Move the unique Slot holding from remote to local; no implicit Memo/PTE changes.
+    /// Move the unique Slot holding from remote to local; no implicit association/PTE changes.
     #[operation(slot = 3, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Pull {
@@ -89,13 +89,13 @@ pub mod operations {
     pub struct Merge {
         pub slot: crate::model::cell::SlotId,
     }
-    /// Associate the source Page with the target Memo using CellAssociation.
+    /// Associate the source Page with a mapping-scoped target using CellAssociation.
     #[operation(slot = 10, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Insert {
         pub request: super::VirtAddr,
     }
-    /// Clear an unpublished, generation-qualified Memo association.
+    /// Clear an unpublished, generation-qualified mapping association.
     #[operation(slot = 11, output = (), error = CellFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Remove {

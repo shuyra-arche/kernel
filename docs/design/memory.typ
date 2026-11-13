@@ -5,7 +5,7 @@
 = Memory from allocation to reuse
 <memory>
 
-A Page can outlive the Slot that first held it, a Memo can outlive the
+A Page can outlive the Slot that first held it, a mapping can outlive the
 association it once recorded, and a hardware publication can outlive the
 Task that requested it. Treating all three as a single mapping lifetime
 would permit premature reuse after a handoff, fault, or device exit.
@@ -27,8 +27,8 @@ queued. Follow the holding, the mapping, and the work left for the Kernel.
   #node(0mm, 14mm, 45mm, 29mm, [Slot in a Flat], [
     A materialized position in the logical backing.
   ])
-  #node(57mm, 14mm, 45mm, 29mm, [Memo in a Nest], [
-    An address position in the External Nest.
+  #node(57mm, 14mm, 45mm, 29mm, [Nest position], [
+    An address position in the External mapping.
   ])
   #wire(((22mm, 43mm), (22mm, 76mm)))
   #wire(((79mm, 43mm), (79mm, 76mm)))
@@ -40,14 +40,14 @@ queued. Follow the holding, the mapping, and the work left for the Kernel.
 
   #wire(((102mm, 31mm), (112mm, 31mm)), dash: "dashed")
   #note(115mm, 24mm, 45mm, [The association persists], [
-    If the Slot later changes, the Memo keeps its recorded Page until an
-    explicit association transition.
+    If the Slot later changes, the position keeps its recorded Page until
+    an explicit association transition.
   ])
 
   #at(0mm, 112mm, line(length: 160mm, stroke: 0.65pt + rule))
   #label(0mm, 117mm, [A reservation can come first])
   #node(0mm, 129mm, 54mm, 26mm, [Vacant], [
-    A Slot-sourced Memo starts with an address reservation.
+    Nest Reserve creates an address without backing.
   ])
   #wire(((54mm, 142mm), (105mm, 142mm)))
   #label(64mm, 133mm, [Insert association])
@@ -64,12 +64,12 @@ queued. Follow the holding, the mapping, and the work left for the Kernel.
   #wire(((157mm, 109mm), (157mm, 150mm), (1mm, 150mm), (1mm, 22mm), (7mm, 22mm)),
     color: pending, dash: "dashed")
   #node(7mm, 9mm, 51mm, 26mm, [Ready], [
-    The Memo names its backing Page.
+    The position names its backing Page.
   ])
   #wire(((58mm, 22mm), (69mm, 22mm)), dash: "dashed")
   #note(73mm, 9mm, 79mm, [Who can ask for publication?], [
-    The worker holds a delegated External Nest Pend and the required
-    authority over the source.
+    The worker holds Mapping PUBLISH and live authority over the
+    original source.
   ])
   #wire(((32mm, 35mm), (32mm, 54mm)))
   #label(37mm, 42mm, [Publish])
@@ -80,8 +80,8 @@ queued. Follow the holding, the mapping, and the work left for the Kernel.
   #wire(((58mm, 70mm), (87mm, 70mm), (87mm, 85mm), (96mm, 85mm)), color: pending)
   #label(64mm, 62mm, [if it fails], color: pending)
   #node(96mm, 63mm, 64mm, 46mm, [Inspect again], [
-    A failed publication can advance the Memo generation. Read the current
-    state to see whether retry is allowed.
+    A failed publication can advance the position generation. Read the
+    current state to see whether retry is allowed.
   ], fill: amber)
 
   #wire(((32mm, 80mm), (32mm, 110mm)))
@@ -145,8 +145,8 @@ queued. Follow the holding, the mapping, and the work left for the Kernel.
   #wire(((123mm, 129mm), (123mm, 139mm), (37mm, 139mm), (37mm, 151mm)))
   #wire(((123mm, 139mm), (123mm, 151mm)))
   #node(0mm, 151mm, 74mm, 33mm, [Address handover], [
-    After the old positions are removed, a successor can use the same
-    External Nest with a fresh Memo identity.
+    After the old positions are removed, a successor can reserve in the
+    same External Nest with a fresh MappingId.
   ], fill: green)
   #node(86mm, 151mm, 74mm, 33mm, [Physical reuse], [
     Every CPU and device obligation must settle and every Page holder must

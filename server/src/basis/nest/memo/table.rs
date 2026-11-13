@@ -14,9 +14,7 @@ impl Memos {
         }
     }
     pub(in crate::basis::nest) fn idle(&self) -> bool {
-        self.entries
-            .iter()
-            .all(|(_, memo)| memo.publication().is_none())
+        self.entries.iter().all(|(_, memo)| !memo.busy())
     }
     fn key(span: &Span, page: usize) -> (usize, usize) {
         (span.identity(), page)
@@ -49,8 +47,27 @@ impl Memos {
         };
         Ok(&mut self.entries[at].1)
     }
-    pub(in crate::basis::nest) fn controlled(&self, span: &Span, page: usize) -> bool {
-        self.get(span, page).is_some_and(|m| m.controlled)
+    pub(in crate::basis::nest) fn existing_mut(
+        &mut self,
+        span: &Span,
+        page: usize,
+    ) -> Option<&mut Memo> {
+        let key = Self::key(span, page);
+        let at = self
+            .entries
+            .binary_search_by_key(&key, |(key, _)| *key)
+            .ok()?;
+        Some(&mut self.entries[at].1)
+    }
+
+    pub(in crate::basis::nest) fn next_page(
+        &self,
+        span: &Span,
+        after: Option<usize>,
+    ) -> Option<usize> {
+        self.entries.iter().find_map(|((id, page), _)| {
+            (*id == span.identity() && after.is_none_or(|after| *page > after)).then_some(*page)
+        })
     }
     pub(in crate::basis::nest) fn publication(
         &self,
@@ -122,11 +139,28 @@ impl Memos {
             }
         }
     }
+    pub(in crate::basis::nest) fn has_resources(&self, span: &Span) -> bool {
+        self.entries.iter().any(|((id, _), memo)| {
+            *id == span.identity() && (memo.page.is_some() || memo.freeze.is_some() || memo.busy())
+        })
+    }
+
+    pub(in crate::basis::nest) fn take_metadata(&mut self, span: &Span) -> Option<Memo> {
+        let at = self.entries.iter().position(|((id, _), memo)| {
+            *id == span.identity() && memo.page.is_none() && memo.freeze.is_none() && !memo.busy()
+        })?;
+        Some(self.entries.remove(at).1)
+    }
+
     /// Remove under the Nest lock, release Page/freeze outside it after the fence.
     pub(in crate::basis::nest) fn take_deleted(&mut self, span: &Span) -> Option<Memo> {
         let active = span.state.lock();
-        let at = self.entries.iter().position(|((id, page), _)| {
+        if active.source.is_none() {
+            return None;
+        }
+        let at = self.entries.iter().position(|((id, page), memo)| {
             *id == span.identity()
+                && !memo.busy()
                 && !active.active.iter().any(|r| {
                     r.contains(span.initial_start().get() + page * kernel_api::address::PAGE_SIZE)
                 })

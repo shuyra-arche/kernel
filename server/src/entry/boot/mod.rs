@@ -134,6 +134,12 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
     )?;
 
     let mut registry = crate::entry::boot::resources::Registry::default();
+    resources::register_space(&mut registry, team.nest.clone()).map_err(|source| {
+        BootError::Resources {
+            operation: ResourceOperation::Pend,
+            source,
+        }
+    })?;
     crate::entry::boot::devices::register(&mut registry).map_err(|source| {
         BootError::Resources {
             operation: ResourceOperation::Devices,

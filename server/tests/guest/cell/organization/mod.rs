@@ -20,6 +20,7 @@ pub(super) fn run(at: usize, count: usize) {
     nest::run();
     let owner = crate::lifecycle::spawn(nest::cascade as *const () as usize);
     crate::license::delegate(owner);
+    crate::space::delegate(crate::space::get(), owner);
     kernel_client::call::unit::accord(ControlId::new(build.handle()), owner, false).unwrap();
     kernel_client::call::unit::resume(kernel_api::model::unit::UnitTarget::Task(owner)).unwrap();
     assert!(crate::lifecycle::wait_task(owner));

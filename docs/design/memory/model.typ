@@ -51,7 +51,7 @@ record need not mean that the underlying allocation can be returned.
   #node(0mm, 10mm, 48mm, 27mm, [Flat / Slot], [
     Unique owning holding.
   ], fill: green)
-  #node(56mm, 10mm, 48mm, 27mm, [Nest / Memo], [
+  #node(56mm, 10mm, 48mm, 27mm, [Nest / mapping], [
     Address association.
   ])
   #node(112mm, 10mm, 48mm, 27mm, [Publication], [
@@ -65,11 +65,12 @@ record need not mean that the underlying allocation can be returned.
   ], fill: green)
 ]
 
-A `Slot` owns the unique holding; a `Memo` can retain a reference to
-the same `Page` without becoming a second owning Slot. A `Publication`
-retains the obligation created when an MMU or IOMMU path is made visible.
-`Cell` is the common way to select positions in these organizations,
-not another physical owner.
+A `Slot` owns the unique holding. Nest's internal `Memo` records a
+mapping position's association with the same `Page` without becoming a
+second owning Slot. A `Publication` retains the obligation created when
+an MMU or IOMMU path is made visible. `Cell` is the common way to select
+positions in these organizations, not another physical owner. The public
+authority is a scoped Nest Pend, not a separate Memo capability.
 
 #principle[
   The object that names a Page, the object that owns its holding, and
@@ -86,22 +87,23 @@ association at the same position.
 #contrast(
   [A raw address or reusable number carries too little information to
    distinguish the intended relationship and its current revision.],
-  [A Cell operation selects either a Slot position in Flat or a Memo
-   position in Nest. The operation checks the appropriate live authority
-   and, for Memo, its expected generation.],
+  [A Cell operation selects an owning Slot or a qualified Pend position.
+   The operation checks the live authority, its effective window and,
+   for a mapping transition, the position's expected generation.],
 )
 
-The Server's `Cell` has the two variants `Flat(FlatRange)` and
-`Nest(NestRange)`. At the ABI boundary, `CellObject` instead selects a
-Task-local `SlotId` or a live `Memo` `PendId`. `MemoId` and
-`MappingId` may identify objects for observation, but do not grant
-permission to operate on them.
+At the ABI boundary, `CellObject` selects a Task-local `SlotId` or a
+live `PendId`. Slot positions resolve their current holding in Flat;
+mapping positions resolve Nest's own per-position state. A Flat/Share Pend can supply a
+Page for Insert; a Mapping-scoped Nest Pend authorizes a mapping
+position. A descriptive `MappingId` names the reservation, not its
+authority. There is no public Memo target or rights family.
 
 #design-table(
   table.header([*Coordinate*], [*Meaning and rule*]),
   [`CellObject::Slot`], [Selects the current unique holding through a Task-local Slot. It is not a historical content snapshot.],
-  [`CellObject::Memo`], [Selects the mapping through a live Pend. A supplied descriptive ID cannot replace that authority.],
-  [`CellPosition`], [Adds a relative position and a generation. Slot uses generation zero; Memo operations reject stale generations.],
+  [`CellObject::Pend`], [Selects through a live Pend whose actual family, scope and operations the Kernel checks. A descriptive ID cannot replace it.],
+  [`CellPosition`], [Adds a relative position and a generation in 32 bytes. Slot and Flat/Share source positions use generation zero; mapping transitions reject stale generations.],
 )
 
 A logical ABI coordinate is a fixed 4 KiB unit, *not* a promise that
@@ -109,8 +111,8 @@ physical Cells or translation leaves are all 4 KiB. `CellLevel` chooses
 contiguous physical geometry of 4 KiB multiplied by 512 to the selected
 level, subject
 to the active Sv mode and physical capacity. Hardware backends choose
-their own translation leaves. In the current implementation External
-Memos admit complete level-0 or level-1 Cells, with 4 KiB IOMMU leaves.
+their own translation leaves. In the current implementation each External
+mapping admits one complete level-0 or level-1 Cell, with 4 KiB IOMMU leaves.
 
 #text(size: 9pt)[
   Implementation: #source("https://github.com/shuyra-arche/kernel/blob/main/server/src/basis/cell/mod.rs", [Cell])
@@ -159,18 +161,19 @@ restores both prior states.
 A `Push` moves `local -> remote` and a `Pull` moves
 `remote -> local`. Both endpoints must be owning Slots, with separate
 live transfer authorization. Neither operation copies the Page, changes
-the current Memo association, nor edits PTEs.
+the current mapping association or generation, nor edits PTEs.
 
 #design-table(
   table.header([*Operation*], [*Relationship it changes*]),
-  [`Push / Pull`], [Transfer the unique Page holding from one owning Slot to another. A Memo is never a handoff endpoint.],
-  [`Insert / Remove`], [Create or clear a Memo-to-Page association, with source checks and current Memo generation. The owning Slot does not move.],
+  [`Push / Pull`], [Transfer the unique Page holding from one owning Slot to another. A Pend is never a handoff endpoint.],
+  [`Insert / Remove`], [Create or clear a position's Page association, with source checks and the current mapping generation. The owning Slot does not move.],
   [`Publish / Retract`], [Establish or withdraw the hardware access path for an associated Page. The hardware obligation survives until settlement.],
+  [`Protect`], [Change a CPU position's access within its ceiling using Mapping PROTECT. It is separate from association and is unsupported for External mappings.],
 )
 
 This separation makes a user-space Page Service possible without giving
 it unconditional ownership over every client's memory. Flat TRANSFER
-must authorize both Slot endpoints when applicable; Memo authority cannot
+must authorize both Slot endpoints when applicable; mapping authority cannot
 be converted into an owning Slot. A transfer also requires a movable
 Page, so an outstanding hardware obligation is not bypassed by moving
 the handle.
@@ -192,42 +195,85 @@ through a stale translation.
 #contrast(
   [Reusing an address immediately after a request to unmap it confuses
    a software decision with completion on every possible initiator.],
-  [Nest retains address occupancy and Memo identity until the old
+  [Nest retains address occupancy and mapping identity until the old
    publication and its hardware retirement obligations have settled.],
 )
 
-A `Nest` owns address occupancy and its `Memo` records. `Internal`
-uses the CPU MMU; `External` represents an authenticated requester
-admitted at trusted boot and enforced by an IOMMU backend. They share
-the association and retirement vocabulary, *not* identical hardware
-instructions, placement limits, or concurrency protocols.
+A `Nest` owns reserved mapping spans and their internal per-position
+`Memo` records: Page associations, generations, freezes, publications
+and retained hardware obligations. Pend owns live authorization and scope,
+not a second copy of this mapping state. `Internal` uses the CPU MMU;
+`External` represents an authenticated requester admitted at trusted boot
+and enforced by an IOMMU backend. They share the association and retirement
+vocabulary, *not* identical hardware instructions, placement limits, or
+concurrency protocols.
+
+`NestScope::Whole` governs the address space. Whole RESERVE licenses
+`Nest.Reserve`, which atomically reserves source-free Vacant positions
+and creates a fresh Mapping-scoped root Pend. It allocates no Page or
+owning Slot and does not publish. The new root's Modifiable,
+Distributable and write access are capped by its creating Whole grant.
+Only Reserve creates this Whole-to-fresh-Mapping ancestry; it cannot
+select an existing MappingId. Live mapping descendants prevent Whole
+Narrow and empty-root Team adoption.
+
+`NestScope::Mapping { id, range }` grants only operations on that mapping
+and its checked window. Generic Accord/Narrow preserve the scope category
+and MappingId while attenuating rights, Modifiable and Distributable.
+Requested Pages are relative to the parent/current window; PendInfo reports
+resolved absolute Pages. A Team number or membership cannot replace this
+live authority. Team creation returns an explicit limited CPU Whole grant;
+adoption consumes ATTACH/DELETE and gives the Team the Nest's lifetime.
 
 #design-table(
-  table.header([*Memo observation*], [*Meaning for the caller*]),
+  table.header([*Position observation*], [*Meaning for the caller*]),
   [`Vacant`], [Address position exists, but no Page is associated. Insert may supply backing with appropriate authority.],
-  [`Ready`], [The Memo names a Page; publication is not yet established. Ready may also retain a freeze after withdrawal.],
+  [`Ready`], [The position names a Page; publication is not yet established. Ready may also retain a freeze after withdrawal.],
   [`Publishing / Published`], [Installation is in flight or the access path is installed. Caller success and hardware completion are distinct.],
   [`Retracting / Failed`], [Withdrawal is in flight, or an unresolved hardware failure remains. Neither state licenses physical reuse.],
 )
 
-An `Insert` can associate a Page without transferring its Slot.
+An `Insert` can associate a Page without transferring its Slot. It
+checks a qualified source and Mapping INSERT at the destination.
+Inserting from another mapping copies the actual original source branch,
+actor and Page, not the supplying mapping's authority as a new source.
+Its sticky access ceiling also includes the source mapping's ceiling
+and the supplying grant's Modifiable. Later Return/Narrow of that
+supplying grant does not revoke the independent destination association;
+loss of the original physical source branch or actor still withdraws its uses.
+After a holding moves, new Publish must revalidate that the original
+source still holds the exact same Page; otherwise Insert from the new
+source is required.
+
 `Publish` produces a hardware obligation; `Retract` withdraws that
 specific publication. `Remove` can clear the association only after
-publication has settled. Each Memo transition checks and may advance
-a non-wrapping generation. After `Busy` or a failed publication,
-`Inspect` must be used to recover the current state and generation;
+publication has settled. Each mapping transition checks and may advance
+the internal position's non-wrapping generation. After `Busy` or a failed
+publication, `Inspect` recovers the current state and generation;
 replaying a stale request never starts a new cycle.
 
-Delegating a Nest or Memo `Pend` grants a bounded operation set,
-not a raw hardware credential. A worker's branch can retire and its
-Memos can be cleaned up while a manager retains the parent External
-Nest. The manager can reuse settled address positions with new Memo
-identities, without pretending that the worker's exit settled earlier
-device operations.
+Returning or revoking a Mapping child withdraws its branch's and
+descendants' publications, not a sibling's. An inspector-only branch
+owns no publication. Root Return retires the full original reservation
+even after Narrow. Mapping RELEASE requires that complete original
+window; a full-span child can Release the entire relation, whereas child
+Return does not release it. Busy retains proof obligations and prevents
+address or Page reuse. Closing rejects new admission and Accord while
+retaining inspection, retry and cleanup.
+
+A worker Whole branch can retire and its descendant mappings can be
+cleaned up while a manager retains the parent External Nest root.
+After settlement and removal, the manager can reserve the same address
+positions with new MappingIds. Only the exact trusted Whole root can
+Delete that External Nest. A Sign mapping condition requires Mapping
+INSPECT for the same ID and full original window at the expected
+generation; Whole INSPECT plus a raw ID never substitutes. Neither
+notification nor worker exit proves earlier device operations settled.
 
 #text(size: 9pt)[
-  Implementation: #source("https://github.com/shuyra-arche/kernel/blob/main/server/src/basis/nest/memo/mod.rs", [Memo generation and flights])
-  · #source("https://github.com/shuyra-arche/kernel/blob/main/server/src/basis/nest/address/occupancy.rs", [Address occupancy])
+  Implementation: #source("https://github.com/shuyra-arche/kernel/blob/main/server/src/basis/nest/memo/mod.rs", [Position generation and flights])
+  · #source("https://github.com/shuyra-arche/kernel/blob/main/server/src/basis/nest/address/reservation.rs", [Mapping reservation])
+  · #source("https://github.com/shuyra-arche/kernel/blob/main/server/src/basis/pend/ledger/entry.rs", [Scoped grant preparation])
 ]
 
 == Page: access responsibility is not a reference count
@@ -287,14 +333,14 @@ explicitly verified synchronization and ownership protocol.
 
 == A combined failure: worker exit during device access
 
-The next worked example follows an External Memo while a worker exits
+The next worked example follows an External mapping while a worker exits
 with an earlier device write still queued. Read it as four distinct
 questions, not as a promise that a single call performs them all.
 
 #design-table(
   table.header([*Question*], [*Enforcing boundary*]),
   [Who may act now?], [The worker's Pend branch closes. It cannot authorize another publication; the manager may still hold the Nest root.],
-  [What address is reserved?], [Nest retains the affected positions while retirement is outstanding. An old Memo identity does not authorize its successor.],
+  [What address is reserved?], [Nest retains the affected positions while retirement is outstanding. An old MappingId describes only its original reservation and authorizes no successor.],
   [Can hardware still touch P?], [The Publication / Retention remains until the exact IOMMU invalidation, ordering, and trusted platform completion evidence is accepted.],
   [Can P be reused?], [Only after every CPU and External obligation settles and all remaining holders release the Page may the physical allocator receive it.],
 )

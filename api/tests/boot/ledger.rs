@@ -37,6 +37,7 @@ fn ledger_keeps_header_entry_offsets_and_reserved_bytes() {
     assert_eq!(bytes, expected);
     assert_eq!(kernel_api::boot::ledger::ENTRY_LEN, 40);
     assert_eq!(Header::LEN, 8);
+    assert_eq!(VERSION, 10);
     let entries = Entries::new(&bytes).unwrap();
     assert_eq!(entries.iter().collect::<Vec<_>>(), vec![entry()]);
     assert_eq!(entries.find(Name::Page(Page::Dtb)), Some(entry()));
@@ -230,5 +231,42 @@ fn dispatch_pairs_require_a_typed_view_and_sign() {
         let mut bad = bytes.clone();
         bad[at] = 255;
         assert!(Entries::new(&bad).is_none());
+    }
+}
+
+#[test]
+fn current_cpu_space_has_a_canonical_name_and_an_unpaired_nest_grant() {
+    assert_eq!(Name::Space.kind(), ResourceKind::Nest);
+    let mut name = [0xaa; Name::WIDTH];
+    Name::Space.store(&mut name);
+    assert_eq!(name, [7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(Name::fetch(&name), Some(Name::Space));
+    for index in 1..Name::WIDTH {
+        let mut invalid = name;
+        invalid[index] = 1;
+        assert_eq!(Name::fetch(&invalid), None, "name byte {index}");
+    }
+    let entry = Entry::new(Name::Space, ResourceKind::Nest, 71);
+    let bytes = ledger(&[entry]);
+    assert_eq!(Entries::new(&bytes).unwrap().find(Name::Space), Some(entry));
+    assert_eq!(entry.dispatch(), None);
+    assert_eq!(bytes[8], 7);
+    assert_eq!(bytes[24], 7);
+    for invalid in [
+        Entry::new(Name::Space, ResourceKind::Share, 71),
+        Entry::new(Name::Space, ResourceKind::Nest, 0),
+        Entry::pair(
+            Name::Space,
+            kernel_api::model::view::ViewKind::Share,
+            72,
+            71,
+        ),
+    ] {
+        assert!(Entries::new(&ledger(&[invalid])).is_none());
+    }
+    for version in (0..VERSION).chain([VERSION + 1, u32::MAX]) {
+        let mut invalid = bytes.clone();
+        invalid[..4].copy_from_slice(&version.to_le_bytes());
+        assert!(Entries::new(&invalid).is_none());
     }
 }

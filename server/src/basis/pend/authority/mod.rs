@@ -1,5 +1,5 @@
 //! Live authorization, immutable ancestry and unsettled device access.
-use crate::metal::sync::{OnceLock, SpinLock};
+use crate::metal::sync::{OnceLock, SpinLock, SpinLockGuard};
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::{
@@ -7,7 +7,7 @@ use kernel_api::{
     address::{PageCount, PageOffset},
     model::{
         modifiable::Modifiable,
-        pend::{Distributable, Limits, Operations, PendRange},
+        pend::{Distributable, Limits, Operations, PendRange, PendScope},
     },
 };
 mod state;
@@ -27,7 +27,6 @@ struct ParentBorrow {
 
 pub(crate) struct Pend {
     state: SpinLock<State>,
-    window: SpinLock<Option<(PageOffset, PageCount)>>,
     parent: SpinLock<Option<ParentBorrow>>,
     // Immutable authority ancestry applies to every target. ParentBorrow is
     // separately the data-access obligation returned only after settlement.
@@ -40,15 +39,14 @@ pub(crate) struct Pend {
 }
 
 impl Pend {
-    pub(crate) fn try_new_window(
+    pub(crate) fn try_new_scope(
         access: Modifiable,
-        window: Option<(PageOffset, PageCount)>,
+        scope: PendScope,
         operations: Operations,
         distributable: Distributable,
     ) -> Result<Arc<Self>, PendFail> {
         Arc::try_new(Self {
-            state: SpinLock::new(State::authorized(access, operations, distributable)),
-            window: SpinLock::new(window),
+            state: SpinLock::new(State::authorized(access, scope, operations, distributable)),
             parent: SpinLock::new(None),
             ancestor: OnceLock::new(),
             holder: OnceLock::new(),
@@ -57,8 +55,16 @@ impl Pend {
         })
         .map_err(|_| PendFail::OutOfMemory)
     }
+    pub(crate) fn scope(&self) -> PendScope {
+        self.state.lock().scope
+    }
     pub(crate) fn window(&self) -> Option<(PageOffset, PageCount)> {
-        *self.window.lock()
+        match self.scope().range()? {
+            PendRange::Pages { offset, count } => {
+                Some((PageOffset::new(offset), PageCount::new(count)?))
+            }
+            PendRange::Inherit => None,
+        }
     }
     pub(crate) fn contains(&self, offset: PageOffset, count: PageCount) -> bool {
         self.window().is_none_or(|(base, size)| {
@@ -181,19 +187,7 @@ impl Pend {
         Ok(())
     }
     pub(crate) fn limits(&self) -> Limits {
-        let state = self.state.lock();
-        let range = self
-            .window()
-            .map_or(PendRange::Inherit, |(offset, count)| PendRange::Pages {
-                offset: offset.get(),
-                count: count.get(),
-            });
-        Limits {
-            operations: state.operations,
-            modifiable: state.access,
-            distributable: state.distributable,
-            range,
-        }
+        self.state.lock().limits()
     }
     pub(crate) fn permits(&self, operations: Operations) -> bool {
         self.alive() && self.state.lock().permits(operations)
@@ -203,39 +197,42 @@ impl Pend {
             return Err(PendFail::Denied);
         }
         let state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) != 0 {
-            return Err(PendFail::Busy);
-        }
         state
             .transition(Event::Limit {
                 access: limits.modifiable,
                 operations: limits.operations,
+                scope: limits.scope,
                 distributable: limits.distributable,
             })
             .map(|_| ())
             .map_err(fail)
     }
-    pub(crate) fn narrow(
-        &self,
-        limits: Limits,
-        window: Option<(PageOffset, PageCount)>,
-    ) -> Result<(), PendFail> {
+    pub(crate) fn narrow(&self, limits: Limits) -> Result<(), PendFail> {
+        self.prepare_limit(limits)?.commit();
+        Ok(())
+    }
+
+    /// Caller holds COMMIT; no hardware withdrawal may cross this State guard.
+    pub(crate) fn prepare_limit(&self, limits: Limits) -> Result<PreparedLimit<'_>, PendFail> {
         if !limits.valid() {
             return Err(PendFail::Denied);
         }
-        let mut state = self.state.lock();
+        if !self.alive() {
+            return Err(PendFail::Dead);
+        }
+        let state = self.state.lock();
         if self.routing.load(Ordering::Acquire) != 0 {
             return Err(PendFail::Busy);
         }
-        *state = state
+        let next = state
             .transition(Event::Limit {
                 access: limits.modifiable,
                 operations: limits.operations,
+                scope: limits.scope,
                 distributable: limits.distributable,
             })
             .map_err(fail)?;
-        *self.window.lock() = window;
-        Ok(())
+        Ok(PreparedLimit { state, next })
     }
     pub(crate) fn external_pending(&self) -> bool {
         self.external.load(Ordering::Acquire) != 0 || self.routing.load(Ordering::Acquire) != 0
@@ -264,7 +261,7 @@ impl Pend {
     pub(crate) unsafe fn release_retirement(&self) {
         assert!(self.external.fetch_sub(1, Ordering::AcqRel) > 0);
     }
-    /// Retain one live Memo publication without lending data access. Operation
+    /// Retain one live mapping publication without lending data access. Operation
     /// permission is checked by the caller against its typed target. Unlike a
     /// retirement-only hold, this prevents narrowing a permission still in use.
     /// Caller holds work commit until publication is cancelled or retained.
@@ -327,6 +324,18 @@ impl Pend {
                 .expect("registered child borrow");
         }
         Ok(())
+    }
+}
+
+#[must_use = "an uncommitted limit leaves the current authority unchanged"]
+pub(crate) struct PreparedLimit<'a> {
+    state: SpinLockGuard<'a, State>,
+    next: State,
+}
+
+impl PreparedLimit<'_> {
+    pub(crate) fn commit(mut self) {
+        *self.state = self.next;
     }
 }
 

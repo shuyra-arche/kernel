@@ -164,18 +164,21 @@ fn compound_field_widths_match_their_actual_register_consumption() {
 }
 
 #[test]
-fn external_mapping_requires_a_target_pend_and_retired_device_abi_is_rejected() {
+fn mapping_observation_requires_a_pend_and_retired_device_abi_is_rejected() {
     use kernel_api::{
         abi::call::{EnvCall, cell::operations::Create},
-        model::{
-            cell::{MappingId, MappingTarget},
-            identity::{PendId, TeamId},
-            sign::SignSource,
-        },
+        model::{cell::MappingId, identity::PendId, sign::SignSource},
     };
     assert_eq!(Create::SLOT, kernel_api::abi::PREFIX | (2usize << 32));
+    for slot in [2, 3, 7, 8, 9] {
+        assert!(
+            EnvCall::from_wire(kernel_api::abi::PREFIX | (13usize << 32) | slot, &[1; 6]).is_err()
+        );
+    }
     for slot in 0..10 {
-        assert!(EnvCall::from_wire((13usize << 32) | slot, &[1; 6]).is_err());
+        assert!(
+            EnvCall::from_wire(kernel_api::abi::PREFIX | (14usize << 32) | slot, &[1; 6]).is_err()
+        );
     }
     for slot in 12..20 {
         assert!(
@@ -195,12 +198,9 @@ fn external_mapping_requires_a_target_pend_and_retired_device_abi_is_rejected() 
     }
     assert!(SignSource::of([7, 1, 0]).is_none());
     assert!(SignSource::of([8, 1, 0]).is_none());
-    use kernel_api::abi::register::Wire;
-    for target in [MappingTarget::Cpu(TeamId::new(0)), MappingTarget::Io(token)] {
-        let mut words = [0; 6];
-        target.pack(&mut words, &mut 0);
-        assert_eq!(MappingTarget::unpack(&words, &mut 0).unwrap(), target);
-    }
+    assert!(SignSource::of([10, 17, 23]).is_none());
+    assert!(SignSource::of([9, 0, 23]).is_none());
+    assert!(SignSource::of([11, 17, usize::MAX]).is_none());
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn data_authority_uses_one_bit_and_retired_signal_slots_are_invalid() {
         assert!(EnvCall::from_wire((class << 32) | slot, &[0; 6]).is_err());
     }
     use kernel_api::model::pend::PendInfo;
-    let active = [1, 1, 2, 3, 4, 5, 0, 1, 7, 1, 1, 0, 0, 0];
+    let active = [1, 1, 2, 3, 4, 5, 0, 1, 7, 1, 1, 0, 0, 0, 0, 0];
     assert_eq!(PendInfo::from_words(active).unwrap().words(), active);
     for (index, value) in [(0, 0), (1, 0), (2, 0), (9, 2), (6, 4)] {
         let mut bad = active;

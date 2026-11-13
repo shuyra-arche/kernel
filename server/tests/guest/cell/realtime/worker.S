@@ -16,9 +16,10 @@ realtime_worker_start:
     sd zero, 24(sp)
     sd zero, 32(sp)
     sd zero, 40(sp)
+    sd zero, 48(sp)
     li a0, 0
     addi a1, sp, 128
-    li a2, 6
+    li a2, 7
     li a7, {collect}
     ebreak
     bltz a0, worker_fail
@@ -28,33 +29,53 @@ realtime_worker_start:
     beqz t0, 2f
     ld t2, 40(t1)              // PendInfo.mark, not token order
     addi t2, t2, -1
-    li t3, 6
+    li t3, 7
     bgeu t2, t3, worker_fail
     slli t2, t2, 3
     add t2, sp, t2
     ld t3, 0(t1)
     sd t3, 0(t2)
-    addi t1, t1, 112
+    addi t1, t1, {pend_size}
     addi t0, t0, -1
     j 1b
 2:
     ld s9, 40(sp)             // only the compute worker owns the data grant
     beqz s9, 11f
-    sd s9, 32(s10)            // replace the source token in CellCreate
-    li a0, 0
+    ld a0, 48(sp)             // explicit Whole RESERVE grant
     mv a1, s10
-    li a7, {create_memo}
+    li a7, {reserve}
     ebreak
+    blez a0, worker_fail
+    li t0, 0x41000
+    bne a1, t0, worker_fail
     li t0, 1
-    bne a0, t0, worker_fail
-    sd t0, 128(sp)            // CellPosition: Memo/token/reserved/reserved/page/generation
-    sd a1, 136(sp)
+    sd t0, 128(sp)            // source: Share Pend, relative page, generation zero
+    sd s9, 136(sp)
     sd zero, 144(sp)
     sd zero, 152(sp)
-    sd zero, 160(sp)
-    li t0, 2
-    sd t0, 168(sp)
+    sd t0, 160(sp)            // target: mapping Pend, relative page, exact generation
+    sd a0, 168(sp)
+    sd zero, 176(sp)
+    sd zero, 184(sp)
+    addi a0, sp, 160
+    addi a1, sp, 192
+    li a7, {inspect}
+    ebreak
+    bnez a0, worker_fail
+    ld t0, 192(sp)
+    sd t0, 184(sp)
     addi a0, sp, 128
+    li a7, {insert}
+    ebreak
+    bnez a0, worker_fail
+    addi a0, sp, 160
+    addi a1, sp, 192
+    li a7, {inspect}
+    ebreak
+    bnez a0, worker_fail
+    ld t0, 192(sp)
+    sd t0, 184(sp)
+    addi a0, sp, 160
     li a7, {publish}
     ebreak
     bnez a0, worker_fail

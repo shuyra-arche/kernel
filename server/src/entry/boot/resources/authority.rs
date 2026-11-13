@@ -23,6 +23,36 @@ pub(crate) fn grant_controls(target: &Task) -> Result<[Entry; CONTROL_ENTRIES], 
     Ok(entries)
 }
 
+pub(crate) fn register_space(
+    registry: &mut super::Registry,
+    nest: alloc::sync::Arc<crate::basis::nest::Nest>,
+) -> Result<(), PendFail> {
+    use crate::basis::pend::{PendEntry, Target};
+    use kernel_api::model::{
+        identity::{Mark, TaskId},
+        modifiable::Modifiable,
+        pend::{Distributable, Limits, NestRights, NestScope, Operations, PendScope},
+    };
+    let root = PendEntry::try_new(
+        Target::Nest {
+            owner: TaskId::new(0),
+            nest,
+        },
+        Mark::NONE,
+        Modifiable::Yes,
+        None,
+    )?;
+    root.narrow(Limits {
+        operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
+        modifiable: Modifiable::Yes,
+        distributable: Distributable::Yes,
+        scope: PendScope::Nest(NestScope::Whole),
+    })?;
+    registry
+        .register(Name::Space, root)
+        .map_err(|failure| failure.into_parts().0)
+}
+
 pub(crate) const CALL_ENTRIES: usize = 1;
 pub(crate) fn grant_calls(target: &Task) -> Result<Entry, PendFail> {
     use crate::basis::pend::{self, PendEntry, Target};
