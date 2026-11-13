@@ -222,10 +222,10 @@ pub(crate) fn spawn(
     stack: usize,
 ) -> Result<Arc<Task>, UnitFail> {
     fn map_err(error: NestError) -> UnitFail {
-        if error == NestError::OutOfMemory {
-            UnitFail::OutOfMemory
-        } else {
-            UnitFail::Denied
+        match error {
+            NestError::OutOfMemory => UnitFail::OutOfMemory,
+            NestError::Busy => UnitFail::Busy,
+            _ => UnitFail::Denied,
         }
     }
     let _construction = target.operation().ok_or(UnitFail::Busy)?;

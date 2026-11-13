@@ -67,7 +67,7 @@ extern "C" fn recipient() -> ! {
         1
     );
     let token = PendInfo::from_words(words).unwrap().token;
-    let (address, len) = share_view::open(token).unwrap();
+    let (address, len) = crate::open_share(token).unwrap();
     assert_eq!(len, 4096);
     assert_eq!(super::read(address, 0), 0x13579);
     pend::return_(token).unwrap();
@@ -80,7 +80,7 @@ pub(super) fn run() {
     share::run();
     let reference = super::allocate(8);
     let root = share_view::create(crate::license::get(), reference, Modifiable::Yes).unwrap();
-    let (address, len) = share_view::open(root).unwrap();
+    let (address, len) = crate::open_share(root).unwrap();
     assert_eq!(len, 8 * 4096);
     super::write(address, 3 * 4096, 0x13579);
     let parent_address = address;
@@ -147,7 +147,7 @@ pub(super) fn run() {
         PendFail::Invalid
     );
 
-    let (address, len) = share_view::open(leaf).unwrap();
+    let (address, len) = crate::open_share(leaf).unwrap();
     assert_eq!(len, 4096);
     assert_eq!(super::read(address, 0), 0x13579);
     super::write(parent_address, 3 * 4096 + 8, 0x24680);
@@ -159,7 +159,7 @@ pub(super) fn run() {
         PendRange::pages(3, 1).unwrap(),
     )
     .unwrap();
-    let (alias, _) = share_view::open(writer).unwrap();
+    let (alias, _) = crate::open_share(writer).unwrap();
     super::write(alias, 8, 0x34567);
     assert_eq!(super::read(parent_address, 3 * 4096 + 8), 0x34567);
     assert_eq!(super::read(address, 8), 0x34567);
@@ -249,7 +249,7 @@ pub(super) fn run() {
         inspect(child).limits.scope.range(),
         Some(PendRange::pages(3, 1).unwrap())
     );
-    let (narrowed, len) = share_view::open(child).unwrap();
+    let (narrowed, len) = crate::open_share(child).unwrap();
     assert_eq!(len, 4096);
     assert_eq!(super::read(narrowed, 0), 0x13579);
     assert_eq!(
@@ -272,14 +272,14 @@ pub(super) fn run() {
         .unwrap();
         assert_ne!(next, previous);
         assert!(pend::inspect(previous, VirtAddr::new(words.as_mut_ptr() as usize)).is_err());
-        assert!(share_view::open(previous).is_err());
+        assert!(crate::open_share(previous).is_err());
         assert_eq!(inspect(next).status, PendStatus::Active);
         pend::return_(next).unwrap();
         previous = next;
     }
     assert!(pend::inspect(leaf, VirtAddr::new(words.as_mut_ptr() as usize)).is_err());
     assert_eq!(inspect(root).status, PendStatus::Active);
-    let (address, _) = share_view::open(root).unwrap();
+    let (address, _) = crate::open_share(root).unwrap();
     super::write(address, 3 * 4096, 0x24680);
     assert_eq!(super::read(address, 3 * 4096), 0x24680);
     pend::return_(root).unwrap();

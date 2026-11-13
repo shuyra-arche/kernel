@@ -50,6 +50,16 @@ pub(crate) mod publisher {
     }
 }
 use publisher::Publisher;
+pub(super) struct Memos;
+impl Memos {
+    pub(super) fn complete(&mut self, _: &Arc<super::Span>) {}
+    pub(super) fn next_page(&self, _: &Arc<super::Span>, _: Option<usize>) -> Option<usize> {
+        None
+    }
+    pub(super) fn take_deleted(&mut self, _: &Arc<super::Span>) -> Option<Box<()>> {
+        None
+    }
+}
 mod cases;
 #[path = "../../../../src/basis/nest/memo/state.rs"]
 mod state;

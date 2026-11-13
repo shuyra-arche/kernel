@@ -97,9 +97,16 @@ impl Nest {
         if start.as_usize().checked_add(size).is_none() {
             return false;
         }
-        let Ok(state) = self.ready_state() else {
+        // Kernel copies walk the current software PTEs and use the permanent
+        // physical mapping, not the Task's cached translations. Nest/Span locks
+        // pin that exact mapping through validation and copying; a peer's fence
+        // for another PTE cannot turn a valid user buffer into a denied one.
+        // This path may run under COMMIT and must never drive hardware progress.
+        let state = self.state.lock();
+        if !state.phase.is_open() || state.retirement.invalidation() == super::Invalidation::Failed
+        {
             return false;
-        };
+        }
         let Ok(root) = state.root.cpu() else {
             return false;
         };

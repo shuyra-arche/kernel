@@ -56,6 +56,12 @@ impl Retirement {
         domain: usize,
         asid: Asid,
     ) -> Result<Request<Asid>, super::super::NestError> {
+        if !matches!(
+            self.invalidation,
+            Invalidation::Dirty | Invalidation::Failed
+        ) {
+            return Err(super::super::NestError::Busy);
+        }
         let next = self
             .sequence
             .next()

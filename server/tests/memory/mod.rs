@@ -77,6 +77,9 @@ use external_error::Error;
 mod host_lock;
 mod metal {
     pub(crate) use crate::host_lock as sync;
+    pub(crate) mod mmu {
+        pub(crate) struct Table;
+    }
     pub(crate) mod memory {
         pub(crate) fn topology() -> Option<&'static crate::proof::topology::Topology> {
             None
@@ -86,5 +89,8 @@ mod metal {
     pub(crate) mod generic {
         pub(crate) use crate::contract as iommu;
         pub(crate) use crate::proof as memory;
+        pub(crate) mod mmu {
+            pub(crate) use crate::scope as fence;
+        }
     }
 }

@@ -366,18 +366,33 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
             member_exit,
         } => {
             let serial = me.pend.lock();
-            let _commit = crate::basis::commit();
-            if !crate::basis::pend::live(me) || !me.administration.allows(ControlKind::Build) {
-                return Err(UnitFail::Denied);
-            }
             let guarded = guard != ControlId::NONE;
-            if ((guarded || member_exit) && me.ident.team.node.protected())
-                || (guarded
-                    && (member_exit || !me.administration.matches(guard, ControlKind::Guard)))
+            let check = || {
+                if !crate::basis::pend::live(me) || !me.administration.allows(ControlKind::Build) {
+                    return Err(UnitFail::Denied);
+                }
+                if ((guarded || member_exit) && me.ident.team.node.protected())
+                    || (guarded
+                        && (member_exit || !me.administration.matches(guard, ControlKind::Guard)))
+                {
+                    return Err(UnitFail::Denied);
+                }
+                Ok(())
+            };
             {
-                return Err(UnitFail::Denied);
+                let _commit = crate::basis::commit();
+                check()?;
             }
             let kind = SpaceKind::User;
+            // A fresh Nest installs trampoline PTEs and completes their fence.
+            // Its private preparation/drop cannot retain the global commit lock.
+            let prepared = if nest.is_none() {
+                Some(TeamBuilder::prepare_nest(kind).map_err(map_err)?)
+            } else {
+                None
+            };
+            let _commit = crate::basis::commit();
+            check()?;
             let sire = TaskWeak::stored(Arc::downgrade(me), Origin::Sire);
             let builder = TeamBuilder::new(kind)
                 .sire(sire)
@@ -426,7 +441,10 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
                 limited.commit();
                 (team, token)
             } else {
-                let selected = TeamBuilder::prepare_nest(kind).map_err(map_err)?;
+                let selected = prepared
+                    .as_ref()
+                    .cloned()
+                    .expect("prepared fresh Team Nest");
                 let entry = PendEntry::try_new(
                     Target::Nest {
                         owner: me.ident.id,

@@ -82,7 +82,7 @@ pub(super) fn run() {
     // Flat -> Share is one child in the same revoke tree, with the same Page.
     let one = flat::slice(root, 1, 1).unwrap();
     let share = share_view::create(crate::license::get(), one, Modifiable::No).unwrap();
-    let (address, size) = share_view::open(share).unwrap();
+    let (address, size) = crate::open_share(share).unwrap();
     assert_eq!(size, 4096);
     assert_eq!(read(address, 0), 0x84);
     assert!(accessible(one));

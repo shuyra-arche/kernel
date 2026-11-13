@@ -63,7 +63,7 @@ pub(super) fn run(at: usize, count: usize) {
     };
     assert!(pend::accord(crate::ptr(&request(Modifiable::Yes))).is_err());
     let child = pend::accord(crate::ptr(&request(Modifiable::No))).unwrap();
-    let (address, len) = share_view::open(child).unwrap();
+    let (address, len) = crate::open_share(child).unwrap();
     assert_eq!(len, 4096);
     let page = unsafe { &*(address.get() as *const SnapshotPage) };
     let before = next(page, 0);
@@ -106,8 +106,8 @@ pub(super) fn run(at: usize, count: usize) {
     assert!(later.available > after.available);
     // Revoke closes the mapped child; no raw access is attempted after revocation.
     crate::lifecycle::return_pend(child);
-    assert!(share_view::open(child).is_err());
-    let (address, _) = share_view::open(view).unwrap();
+    assert!(crate::open_share(child).is_err());
+    let (address, _) = crate::open_share(view).unwrap();
     let page = unsafe { &*(address.get() as *const SnapshotPage) };
     let still_live = next(page, later.epoch);
     assert_eq!(
