@@ -1,32 +1,82 @@
 //! Explicit Flat residency operations for the staged next provider.
+mod maintenance;
 use crate::basis::{self, flat, pend, unit::task::Task};
 use alloc::sync::Arc;
 use kernel_api::{
     abi::memory::{self, Action, Failure, Observation, Query, Snapshot, Value},
     model::pend::FlatRights,
 };
+pub(in crate::entry::call) use maintenance::effect;
 
 pub(in crate::entry::call) fn inspect(
     actor: &Arc<Task>,
     query: Query,
 ) -> Result<Observation, Failure> {
-    let Query::Slot(position) = query else {
-        return Err(Failure::Unsupported);
-    };
     let _serial = actor.pend.lock();
     let _commit = basis::commit();
     if !pend::live(actor) {
         return Err(Failure::Dead);
     }
-    let range = resolve(actor, position, FlatRights::INSPECT)?;
-    Observation::new(Snapshot::Slot(
-        range.inspect_slot().map_err(residency_error)?,
-    ))
-    .ok_or(Failure::Invalid)
+    let snapshot = match query {
+        Query::Slot(position) => {
+            let range =
+                flat::authority::slot(actor, position, FlatRights::INSPECT).map_err(pend_error)?;
+            let mut status = range.inspect_slot().map_err(residency_error)?;
+            let entry = pend::locate(actor, position.token()).ok_or(Failure::Denied)?;
+            let meta = entry.target().memory().ok_or(Failure::Denied)?;
+            let source = meta.authorization().ok_or(Failure::Denied)?;
+            let offset = position
+                .page()
+                .checked_sub(meta.source().index().get())
+                .ok_or(Failure::Denied)?;
+            status.blocked |= source
+                .check_blocks(
+                    kernel_api::address::PageOffset::new(offset),
+                    range.page_count(),
+                    None,
+                )
+                .is_err();
+            Snapshot::Slot(status)
+        }
+        Query::Flat { token, flat: id } => {
+            let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
+            if !entry
+                .authority()
+                .permits(kernel_api::model::pend::Operations::Flat(
+                    FlatRights::INSPECT,
+                ))
+            {
+                return Err(Failure::Denied);
+            }
+            let pend::Target::Flat(meta) = entry.target() else {
+                return Err(Failure::Denied);
+            };
+            if meta.source().source_id() != id {
+                return Err(Failure::Denied);
+            }
+            let (offset, count) = entry.authority().window().ok_or(Failure::Denied)?;
+            Snapshot::Flat(kernel_api::model::flat::FlatStatus {
+                id,
+                version: meta.source().flat().revision(),
+                offset: offset.get(),
+                count: count.get(),
+                phase: if meta.alive() {
+                    kernel_api::model::flat::FlatPhase::Open
+                } else {
+                    kernel_api::model::flat::FlatPhase::Closing
+                },
+            })
+        }
+        Query::Block(maintenance) => {
+            let (_, _, block) = maintenance::resolve(actor, maintenance, false)?;
+            Snapshot::Block(block.inspect())
+        }
+        _ => return Err(Failure::Unsupported),
+    };
+    Observation::new(snapshot).ok_or(Failure::Invalid)
 }
 
-/// Selection is repeated at commit. In this first slice blocked or hardware-busy
-/// observations fail rather than reporting fabricated zero obligations.
+/// Mutation admission is repeated at commit; inspection observes blocked state.
 fn resolve(
     actor: &Arc<Task>,
     position: kernel_api::model::flat::SlotPosition,
@@ -148,13 +198,7 @@ pub(in crate::entry::call) fn mutate(
             slot,
             expected,
             maintenance,
-        } => {
-            let range =
-                flat::authority::slot(actor, slot, memory::rights::VACATE).map_err(pend_error)?;
-            require_maintenance(actor, maintenance)?;
-            let version = range.vacate(expected).map_err(residency_error)?;
-            Ok(Value::Slot { version, page: 0 })
-        }
+        } => maintenance::vacate(actor, slot, expected, maintenance),
         _ => Err(Failure::Unsupported),
     }
 }

@@ -92,6 +92,7 @@ struct CpuContext {
 
 pub struct Nest {
     id: NestId,
+    revision: core::sync::atomic::AtomicU64,
     cpu: Option<CpuContext>,
     life: Arc<Anchor>,
     pub(crate) reservations: authority::ReservationRegistry,
@@ -101,6 +102,53 @@ pub struct Nest {
 }
 
 impl Nest {
+    /// Called under COMMIT after live whole-resource authority/version checks.
+    pub(crate) fn begin_delete(&self) -> Result<(), NestError> {
+        if self.is_external() || self.is_adopted() || self.asid().is_kernel() {
+            return Err(NestError::Pinned);
+        }
+        let mut state = self.state.lock();
+        if state.phase.is_open() {
+            self.version().next().ok_or(NestError::OutOfMemory)?;
+            state.phase = translation::phase::ClosePhase::Draining;
+            self.changed();
+        }
+        Ok(())
+    }
+
+    /// Closing admission is separate from draining hardware or reusing addresses.
+    pub(crate) fn begin_release(
+        &self,
+        span: &Arc<Span>,
+        expected: kernel_api::model::nest::ReservationVersion,
+    ) -> Result<(), NestError> {
+        self.check_owner(&span.reservation)?;
+        let _state = self.state.lock();
+        if span.version() != expected {
+            return Err(NestError::Busy);
+        }
+        if span.is_open() {
+            span.prepare_revision()?;
+            self.version().next().ok_or(NestError::OutOfMemory)?;
+            span.close();
+            self.changed();
+        }
+        Ok(())
+    }
+    pub(crate) fn version(&self) -> kernel_api::model::nest::NestVersion {
+        kernel_api::model::nest::NestVersion::new(
+            self.revision.load(core::sync::atomic::Ordering::Acquire),
+        )
+        .expect("Nest revision")
+    }
+    pub(crate) fn changed(&self) {
+        let _ = self.revision.try_update(
+            core::sync::atomic::Ordering::AcqRel,
+            core::sync::atomic::Ordering::Acquire,
+            |v| v.checked_add(1),
+        );
+    }
+
     /// 用户地址空间：动态取一个 ASID，窗口按平台布局登记。
     pub(crate) fn new(kind: SpaceKind) -> Result<Arc<Self>, NestError> {
         Self::build(kind, false)
@@ -138,6 +186,7 @@ impl Nest {
         let domain = mmu::Domain::create(id.get(), kernel)?;
         let nest = Arc::try_new(Self {
             id,
+            revision: core::sync::atomic::AtomicU64::new(1),
             cpu: Some(CpuContext { domain, kind }),
             life,
             reservations: authority::ReservationRegistry::new(),
@@ -239,6 +288,42 @@ impl Nest {
             Some(ReservationPhase::Open | ReservationPhase::Closing) => PendStatus::Retiring,
             Some(ReservationPhase::Gone) | None => PendStatus::Dead,
         }
+    }
+
+    /// Sample phase and revision under the same owner lock as physical completion.
+    /// The caller holds COMMIT while selecting the live authority window.
+    pub(crate) fn reservation_snapshot(
+        &self,
+        span: &Arc<Span>,
+        offset: PageOffset,
+        count: PageCount,
+        writable: bool,
+    ) -> Result<kernel_api::model::nest::ReservationStatus, NestError> {
+        use kernel_api::model::nest::{ReservationId, ReservationPhase, ReservationStatus};
+        self.check_owner(&span.reservation)?;
+        let state = self.state.lock();
+        let inner = span.state.lock();
+        let phase = match inner.phase {
+            address::span::ReservationPhase::Open if state.is_open() => ReservationPhase::Open,
+            address::span::ReservationPhase::Gone => ReservationPhase::Released,
+            _ => ReservationPhase::Releasing,
+        };
+        let mut access = span.initial_access();
+        if !writable {
+            access.remove(Access::WRITE);
+        }
+        Ok(ReservationStatus {
+            nest: self.id(),
+            reservation: ReservationId::from_bytes(&(span.identity() as u64).to_le_bytes())
+                .expect("reservation identity"),
+            version: span.version(),
+            offset: offset.get(),
+            count: count.get(),
+            address: span.initial_start(),
+            level: span.level(),
+            access: access.bits() << 1,
+            phase,
+        })
     }
 
     pub(crate) fn reservation_root(
@@ -378,6 +463,9 @@ impl Nest {
         };
         {
             let _commit = crate::basis::commit();
+            if mapping.is_open() {
+                self.changed();
+            }
             mapping.close();
         }
         let _operation = mapping.operation().ok_or(CellFail::Busy)?;
@@ -431,9 +519,15 @@ impl Nest {
                     .existing_mut(&mapping, index)
                     .expect("selected Memo")
                     .clear()
+                    .map(|removed| {
+                        mapping.changed();
+                        removed
+                    })
             };
             match cleared {
-                Ok(cleared) => cleared.release(),
+                Ok(cleared) => {
+                    cleared.release();
+                }
                 Err(_) => busy = true,
             }
         }
@@ -458,6 +552,7 @@ impl Nest {
             let mut inner = mapping.state.lock();
             inner.active.clear();
             inner.phase = ReservationPhase::Gone;
+            mapping.changed();
         }
         sign::signal(self.reservation_key(&mapping));
         if self.is_external() {
@@ -635,7 +730,9 @@ impl Nest {
                 if !memo.matches(binding) {
                     return Ok(());
                 }
-                memo.clear().map_err(|_| PendFail::Busy)?
+                let removed = memo.clear().map_err(|_| PendFail::Busy)?;
+                mapping.changed();
+                removed
             };
             cleared.release();
         }
@@ -1165,6 +1262,7 @@ impl Nest {
                 return Err(NestError::Pinned);
             }
             memo.can_associate(expected)?;
+            mapping.prepare_revision()?;
         }
         if !self.is_external() {
             index::source::register(&range, mapping, Some(&binding))?;
@@ -1190,6 +1288,7 @@ impl Nest {
                 .expect("prepared Memo")
                 .associate(expected, page, source, binding.clone())
         };
+        mapping.changed();
         authorization.register_binding(binding);
         replaced.release();
         Ok(())
@@ -1256,43 +1355,27 @@ impl Nest {
         mapping: &Arc<Span>,
         index: usize,
     ) -> Result<kernel_api::model::nest::MemoStatus, NestError> {
-        use kernel_api::model::{
-            nest::ReservationId,
-            nest::{MemoGeneration, MemoPhase, MemoStatus},
-        };
         self.check_owner(&mapping.reservation)?;
         mapping.position(index)?;
         if mapping.source().is_some() {
             return Err(NestError::Pinned);
         }
         let state = self.state.lock();
-        let memo = state.memos.get(mapping, index);
-        if memo.is_some_and(|memo| !memo.accepts_logical()) {
+        let vacant = memo::Memo::vacant();
+        let memo = state.memos.get(mapping, index).unwrap_or(&vacant);
+        if !memo.accepts_logical() {
             return Err(NestError::Pinned);
         }
-        if memo.is_some_and(memo::Memo::busy) {
-            return Err(NestError::Busy);
-        }
-        let source = memo
-            .and_then(memo::Memo::association)
-            .map(|(_, source, _)| source.position());
-        Ok(MemoStatus {
-            nest: self.id(),
-            reservation: ReservationId::from_bytes(&(mapping.identity() as u64).to_le_bytes())
-                .expect("Reservation identity"),
-            coordinate: index,
-            generation: MemoGeneration::new(memo.map_or(1, memo::Memo::generation))
-                .expect("nonzero generation"),
-            phase: if source.is_some() {
-                MemoPhase::Associated
-            } else {
-                MemoPhase::Empty
-            },
-            source,
-            page: 0,
-            access: 0,
-            level: mapping.level(),
-        })
+        Ok(memo.snapshot(
+            self.id(),
+            kernel_api::model::nest::ReservationId::from_bytes(
+                &(mapping.identity() as u64).to_le_bytes(),
+            )
+            .expect("reservation identity"),
+            index,
+            mapping.level(),
+            state.retirement.invalidation() == Invalidation::Failed,
+        ))
     }
 
     /// Next Remove never starts unrelated hardware work under its atomic commit.
@@ -1318,7 +1401,10 @@ impl Nest {
             if !memo.accepts_logical() {
                 return Err(NestError::Pinned);
             }
-            memo.remove(expected)?
+            mapping.prepare_revision()?;
+            let removed = memo.remove(expected)?;
+            mapping.changed();
+            removed
         };
         removed.release();
         Ok(())
@@ -1343,7 +1429,10 @@ impl Nest {
             if mapping.state.lock().phase == address::span::ReservationPhase::Gone {
                 return Err(NestError::NoRegion);
             }
-            state.memos.get_mut(mapping, index)?.remove(expected)?
+            mapping.prepare_revision()?;
+            let removed = state.memos.get_mut(mapping, index)?.remove(expected)?;
+            mapping.changed();
+            removed
         };
         removed.release();
         Ok(())
@@ -1368,10 +1457,14 @@ impl Nest {
             if !state.retirement.invalidation().is_clean() {
                 return;
             }
-            state
-                .memos
-                .existing_mut(mapping, index)
-                .map(memo::Memo::finish)
+            state.memos.existing_mut(mapping, index).map(|memo| {
+                let before = memo.inspect(VirtAddr::new(0));
+                let settled = memo.finish();
+                if memo.inspect(VirtAddr::new(0)) != before {
+                    mapping.changed();
+                }
+                settled
+            })
         };
         if let Some(settled) = settled {
             settled.release();
@@ -1385,6 +1478,18 @@ impl Nest {
         expected: u64,
         change: Arc<Change>,
         publisher: memo::Publisher,
+    ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
+        self.publish_memo_report(mapping, index, expected, change, publisher, &mut |_| {})
+    }
+
+    pub(crate) fn publish_memo_report(
+        self: &Arc<Self>,
+        mapping: &Arc<Span>,
+        index: usize,
+        expected: u64,
+        change: Arc<Change>,
+        publisher: memo::Publisher,
+        accepted: &mut impl FnMut(u64),
     ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
         use kernel_api::abi::call::cell::CellFail;
         let _operation = mapping.operation().ok_or(CellFail::Busy)?;
@@ -1446,6 +1551,7 @@ impl Nest {
                 &mut borrow,
             )
             .map_err(memo::publication_failure)?;
+            accepted(expected.checked_add(1).expect("prepared generation"));
             // Responsibility is in Memo, and its loan/route are marked published
             // before the first backend write, including a partially failed submit.
             let result = self
@@ -1476,8 +1582,11 @@ impl Nest {
             if !memo.matches(&binding) {
                 return Err(CellFail::Busy);
             }
-            memo.begin_publish(expected, change.clone())?;
+            mapping.prepare_revision()?;
+            memo.begin_publish(expected, change.clone(), access.bits() << 1)?;
+            mapping.changed();
             memo.retain(publisher.take().expect("prepared publishing route"), None);
+            accepted(memo.generation());
             state.publish_page(
                 self.geometry(),
                 mapping,
@@ -1525,11 +1634,38 @@ impl Nest {
         expected: u64,
         change: Arc<Change>,
     ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
+        self.retract_memo_report(
+            mapping,
+            index,
+            expected,
+            change,
+            &mut || Ok(()),
+            &mut |_| {},
+        )
+    }
+
+    pub(crate) fn retract_memo_report(
+        self: &Arc<Self>,
+        mapping: &Arc<Span>,
+        index: usize,
+        expected: u64,
+        change: Arc<Change>,
+        authorize: &mut impl FnMut() -> Result<(), kernel_api::abi::call::cell::CellFail>,
+        accepted: &mut impl FnMut(u64),
+    ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
         use kernel_api::abi::call::cell::CellFail;
         let _operation = mapping.operation().ok_or(CellFail::Busy)?;
         self.ensure_reservation(mapping)?;
         mapping.position(index)?;
-        let result = self.retract_position(mapping, index, Some(expected), change, false);
+        let result = self.retract_position_report(
+            mapping,
+            index,
+            Some(expected),
+            change,
+            false,
+            authorize,
+            accepted,
+        );
         sign::signal(self.reservation_key(mapping));
         if self.is_external() {
             sign::signal(WakeKey::ExternalReservation {
@@ -1548,6 +1684,27 @@ impl Nest {
         change: Arc<Change>,
         forced: bool,
     ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
+        self.retract_position_report(
+            mapping,
+            index,
+            expected,
+            change,
+            forced,
+            &mut || Ok(()),
+            &mut |_| {},
+        )
+    }
+
+    fn retract_position_report(
+        &self,
+        mapping: &Arc<Span>,
+        index: usize,
+        expected: Option<u64>,
+        change: Arc<Change>,
+        forced: bool,
+        authorize: &mut impl FnMut() -> Result<(), kernel_api::abi::call::cell::CellFail>,
+        accepted: &mut impl FnMut(u64),
+    ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
         use kernel_api::abi::call::cell::CellFail;
         if !self.is_external() {
             self.finish_invalidation()?;
@@ -1555,6 +1712,7 @@ impl Nest {
         self.finish_memo(mapping, index);
         let page = {
             let _commit = crate::basis::commit();
+            authorize()?;
             let mut state = self.state.lock();
             let Some(memo) = state.memos.existing_mut(mapping, index) else {
                 return if forced {
@@ -1578,8 +1736,13 @@ impl Nest {
                 };
             }
             if !memo.retracting() {
+                if !forced {
+                    mapping.prepare_revision()?;
+                }
                 memo.begin_retract(memo.generation(), change, forced)?;
+                mapping.changed();
             }
+            accepted(memo.generation());
             page
         };
         if self.is_external() {
@@ -1610,6 +1773,18 @@ impl Nest {
         expected: u64,
         access: Access,
         authority: &Arc<crate::basis::pend::Pend>,
+    ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
+        self.protect_memo_report(mapping, index, expected, access, authority, &mut |_| {})
+    }
+
+    pub(crate) fn protect_memo_report(
+        self: &Arc<Self>,
+        mapping: &Arc<Span>,
+        index: usize,
+        expected: u64,
+        access: Access,
+        authority: &Arc<crate::basis::pend::Pend>,
+        accepted: &mut impl FnMut(u64),
     ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
         use kernel_api::abi::call::cell::CellFail;
         use kernel_api::model::modifiable::Modifiable;
@@ -1650,7 +1825,7 @@ impl Nest {
             (
                 {
                     let (_, source, binding) = memo.association().ok_or(CellFail::SourceEmpty)?;
-                    (memo.page().ok_or(CellFail::SourceEmpty)?, source, binding)
+                    (memo.page(), source, binding)
                 },
                 memo.publication().map(|publication| publication.writable()),
             )
@@ -1659,6 +1834,32 @@ impl Nest {
             return Err(CellFail::WidenDenied);
         }
         let range = source.check(access)?;
+        if page.is_none() {
+            let mut state = self.state.lock();
+            let memo = state
+                .memos
+                .existing_mut(mapping, index)
+                .ok_or(CellFail::SourceEmpty)?;
+            if !memo.logical() || memo.busy() || !memo.matches(&binding) {
+                return Err(CellFail::Busy);
+            }
+            memo.can_advance(expected)?;
+            mapping.prepare_revision()?;
+            let selection = mapping.range(PageOffset::new(index), count)?;
+            let mut inner = mapping.state.lock();
+            let transition = inner.protection_transition(
+                mapping.initial_start(),
+                selection.window(),
+                address::span::Protection::SetAccess(access),
+                |_| false,
+            )?;
+            memo.advance(expected)?;
+            inner.active = transition.active;
+            mapping.changed();
+            accepted(memo.generation());
+            return Ok(());
+        }
+        let page = page.expect("retained publication Page");
         source.same_page(&page)?;
         let change = crate::basis::cell::change::acquire(&page)?;
         let flight = source.begin_cpu(mapping.identity(), access)?;
@@ -1701,12 +1902,17 @@ impl Nest {
                 None
             };
             let selection = mapping.range(PageOffset::new(index), count)?;
+            mapping.prepare_revision()?;
             state.protect(
                 self.geometry(),
                 mapping,
                 selection.window(),
                 address::span::Protection::SetAccess(access),
                 replacement,
+                &mut || {
+                    mapping.changed();
+                    accepted(expected.checked_add(1).expect("prepared generation"));
+                },
             )?;
             state
                 .memos
@@ -1876,7 +2082,14 @@ impl Nest {
         let mapping = selection.reservation().clone();
         let mut state = self.ready_state()?;
         self.ensure_owned(&mapping, &state)?;
-        state.protect(self.geometry(), &mapping, selection.window(), request, None)?;
+        state.protect(
+            self.geometry(),
+            &mapping,
+            selection.window(),
+            request,
+            None,
+            &mut || {},
+        )?;
         drop(state);
         self.finish_invalidation()
     }
@@ -2241,7 +2454,14 @@ impl Nest {
             let fenced = {
                 let mut state = self.state.lock();
                 match result {
-                    Ok(proof) => state.settle(proof)?,
+                    Ok(proof) => {
+                        let phase = state.phase;
+                        let fenced = state.settle(proof)?;
+                        if phase != state.phase {
+                            self.changed();
+                        }
+                        fenced
+                    }
                     Err(_) => {
                         state.retirement.fail();
                         return Err(NestError::Shootdown);
@@ -2276,7 +2496,12 @@ impl Nest {
             drop(state);
             self.finish_invalidation()?;
         };
-        state.close_mappings(self.geometry())?;
+        let phase = state.phase;
+        let result = state.close_mappings(self.geometry());
+        if phase != state.phase {
+            self.changed();
+        }
+        result?;
         drop(state);
         self.finish_invalidation()?;
         self.drain_closed();

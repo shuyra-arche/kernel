@@ -6,6 +6,7 @@ extern crate alloc;
 // implementations, or changes to the production library's no_std configuration.
 #[path = "../../src/basis/cell/page/mod.rs"]
 pub(crate) mod cell;
+use cell as page;
 
 #[allow(dead_code)]
 #[path = "../../src/basis/flat/error.rs"]
@@ -42,6 +43,9 @@ mod retention;
 mod support;
 
 mod change;
+#[allow(dead_code)]
+#[path = "../../src/basis/cell/change.rs"]
+pub(crate) mod changes;
 #[allow(dead_code)]
 #[path = "../../src/basis/nest/memo/publication/receipt.rs"]
 mod memo;

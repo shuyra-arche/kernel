@@ -14,3 +14,8 @@ pub(crate) mod authority {
     pub(crate) struct RangeBinding;
 }
 mod memo;
+pub(crate) mod index {
+    pub(crate) mod source {
+        pub(crate) fn wake_all() {}
+    }
+}

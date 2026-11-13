@@ -30,6 +30,7 @@ impl Nest {
     pub(crate) fn external_empty() -> Result<Arc<Self>, NestError> {
         Arc::try_new(Self {
             id: super::super::next_id()?,
+            revision: core::sync::atomic::AtomicU64::new(1),
             cpu: None,
             life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
             reservations: super::super::authority::ReservationRegistry::new(),
@@ -81,11 +82,13 @@ impl Nest {
             writable,
             Some(&change),
         )?;
-        memo.begin_publish(expected, change)
+        span.prepare_revision().map_err(|_| Error::OutOfMemory)?;
+        memo.begin_publish(expected, change, if writable { 6 } else { 2 })
             .map_err(|error| match error {
                 NestError::OutOfMemory => Error::OutOfMemory,
                 _ => Error::InvalidState,
             })?;
+        span.changed();
         memo.retain(
             publisher.take().expect("prepared publishing route"),
             borrow.take(),
@@ -133,13 +136,21 @@ impl Nest {
             return Ok(());
         };
         let retracting = memo.retracting();
-        let settled = match external.progress(memo.publication_mut(), retracting)? {
+        let before = memo.inspect(span.initial_start());
+        let progress = external.progress(memo.publication_mut(), retracting);
+        if progress.is_err() && memo.inspect(span.initial_start()) != before {
+            span.changed();
+        }
+        let settled = match progress? {
             state::Progress::Published => memo.finish(),
             state::Progress::Withdrawn => memo.settle_external(),
             state::Progress::Pending | state::Progress::Closed => {
                 super::super::memo::Settled::default()
             }
         };
+        if memo.inspect(span.initial_start()) != before {
+            span.changed();
+        }
         drop(state);
         settled.release();
         // The binding worker owns the final transition and its NestClosed wakeup.

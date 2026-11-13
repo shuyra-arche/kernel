@@ -4,6 +4,7 @@ pub(crate) use crate::name;
 pub(crate) fn commit() {}
 pub(crate) mod cell {
     pub(crate) use crate::cell as page;
+    pub(crate) use crate::changes as change;
 }
 pub(crate) mod flat {
     pub(crate) use crate::error::FlatError;

@@ -93,3 +93,19 @@ python3 tools/diagnostics/symbolize.py \
 
 Match the ELF to its recorded SHA-256. A stack-scan hit is a candidate address.
 The report labels frame-chain evidence separately.
+
+## Staged memory v11 host evidence
+
+The `invocation` target imports the production next-memory descriptor dispatcher
+and result receipt code. Task/user buffers and resource effects are fixtures;
+it checks complete input copying, lost replies, replay, result inspection,
+Pending/Failed retention and release of ledger/journal/COMMIT locks across an
+effect boundary. It is not a native trap, permission or MMU test.
+
+The `memory` target additionally imports production Flat/Page/Memo state and the
+Page change registry. Its maintenance tests exercise exact Held-reference
+consumption and refusal with strong/weak observers, overlapping blocks, stale
+versions or unfinished hardware obligations. Memo observation tests retain the
+exact Page and access across failed fences and whole-namespace withdrawal.
+Receipt completion is explicitly scripted. See the [M3 evidence matrix](../../api/memory-m3.md#verification-and-limits)
+for the boundary between these tests, ledger/lineage tests and RV64 compilation.

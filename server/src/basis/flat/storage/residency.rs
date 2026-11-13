@@ -134,6 +134,7 @@ impl FlatState {
         &mut self,
         index: PageIndex,
         expected: SlotVersion,
+        blocks: Option<&mut Vec<Block>>,
     ) -> Result<(SlotVersion, Page), Error> {
         self.explicit()?;
         self.revision.prepare(index, expected)?;
@@ -156,6 +157,21 @@ impl FlatState {
             .any(|r| r.index.get() < end && index.get() < r.index.get() + r.count.get())
         {
             return Err(Error::Busy);
+        }
+        if let Some(blocks) = blocks {
+            let at = blocks
+                .iter()
+                .position(|block| Arc::ptr_eq(block.page(), page))
+                .ok_or(Error::Busy)?;
+            let block = blocks.remove(at);
+            if let Err(block) = crate::basis::cell::change::release_block(block, page) {
+                blocks.insert(at, block);
+                return Err(Error::Busy);
+            }
+            assert!(
+                page.allows_return() && Arc::get_mut(page).is_some(),
+                "exclusive maintenance return"
+            );
         }
         if !page.allows_return() || Arc::get_mut(page).is_none() {
             return Err(Error::Busy);

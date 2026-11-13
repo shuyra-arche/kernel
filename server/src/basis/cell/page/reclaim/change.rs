@@ -18,14 +18,14 @@ enum Phase {
 }
 
 pub(crate) struct Change {
-    page: Arc<Page>,
+    page: Option<Arc<Page>>,
     phase: Phase,
     blocks: crate::metal::sync::SpinLock<usize>,
 }
 impl Change {
     pub(in super::super) fn begin(page: &Arc<Page>) -> Result<Arc<Self>, RetainError> {
         let mut change = Arc::try_new(Self {
-            page: page.clone(),
+            page: Some(page.clone()),
             phase: Phase::Prepared,
             blocks: crate::metal::sync::SpinLock::new(0),
         })
@@ -35,7 +35,7 @@ impl Change {
         Ok(change)
     }
     pub(crate) fn page(&self) -> &Arc<Page> {
-        &self.page
+        self.page.as_ref().expect("live Page change")
     }
     pub(crate) fn hardware(&self, modifiable: bool) -> Result<Retention, RetainError> {
         // CPU Memo publication holds its own freeze before preparing a PTE.
@@ -58,7 +58,7 @@ impl Change {
 impl Drop for Change {
     fn drop(&mut self) {
         if self.phase == Phase::Held {
-            self.page.reclaim.end();
+            self.page().reclaim.end();
             COMPLETED.store(true, Ordering::Release);
         }
     }
@@ -76,13 +76,13 @@ impl Freeze {
     pub(crate) fn new(change: Arc<Change>, retracts: Option<bool>) -> Result<Self, RetainError> {
         // Admission and the writer check are one transition. A prepared or
         // retiring writer still counts until its exact obligation discharges.
-        change.page.reclaim.freeze(retracts)?;
+        change.page().reclaim.freeze(retracts)?;
         Ok(Self { change })
     }
 }
 impl Drop for Freeze {
     fn drop(&mut self) {
-        self.change.page.reclaim.thaw();
+        self.change.page().reclaim.thaw();
     }
 }
 
@@ -92,6 +92,34 @@ pub(crate) struct Block {
     change: Arc<Change>,
 }
 impl Block {
+    pub(crate) fn change(&self) -> &Arc<Change> {
+        &self.change
+    }
+
+    /// Remove our own Page reference while retaining the closed admission gate.
+    /// Arc::get_mut then atomically excludes every other strong/weak Page holder;
+    /// refusal restores our reference without allocation or reopening admission.
+    pub(crate) fn release_unique(&mut self, holding: &mut Arc<Page>) -> bool {
+        if !Arc::ptr_eq(holding, self.page()) || !self.settled() {
+            return false;
+        }
+        let Some(change) = Arc::get_mut(&mut self.change) else {
+            return false;
+        };
+        if *change.blocks.lock() != 1 {
+            return false;
+        }
+        drop(change.page.take());
+        if let Some(page) = Arc::get_mut(holding) {
+            page.reclaim.end();
+            change.phase = Phase::Prepared;
+            COMPLETED.store(true, Ordering::Release);
+            true
+        } else {
+            change.page = Some(holding.clone());
+            false
+        }
+    }
     pub(crate) fn new(change: Arc<Change>) -> Result<Self, RetainError> {
         {
             let mut count = change.blocks.lock();
@@ -103,7 +131,7 @@ impl Block {
         self.change.page()
     }
     pub(crate) fn settled(&self) -> bool {
-        self.change.page.reclaim.hardware_idle()
+        self.change.page().reclaim.hardware_idle()
     }
 }
 impl Drop for Block {

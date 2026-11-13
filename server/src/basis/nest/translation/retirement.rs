@@ -74,6 +74,11 @@ impl Retirement {
 
     /// Keep all obligations available for the retry.
     pub(in crate::basis::nest) fn fail(&mut self) {
+        if self.invalidation != Invalidation::Failed {
+            for mapping in &self.mappings {
+                mapping.changed();
+            }
+        }
         self.invalidation = self.invalidation.fail();
     }
 
@@ -94,6 +99,7 @@ impl Retirement {
         self.pending = None;
         for mapping in &self.mappings {
             memos.complete(mapping);
+            mapping.changed();
         }
         self.tickets.settle();
         self.invalidation = self.invalidation.complete();

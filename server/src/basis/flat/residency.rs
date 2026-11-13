@@ -3,10 +3,7 @@
 pub(crate) use super::storage::residency::Error;
 use super::{Flat, FlatRange, FlatSource, Slot};
 use crate::basis::cell::page::{Page, PageId};
-use kernel_api::{
-    address::PageOffset,
-    model::flat::{FlatVersion, SlotPhase, SlotStatus, SlotVersion},
-};
+use kernel_api::model::flat::{FlatVersion, SlotPhase, SlotStatus, SlotVersion};
 
 impl Flat {
     pub(crate) fn is_explicit(&self) -> bool {
@@ -66,16 +63,18 @@ impl FlatRange {
             return Err(Error::Unsupported);
         };
         let (at, present) = super::slot::spot(slots, self.index());
-        let (phase, page) = if !present {
-            (SlotPhase::Fresh, 0)
+        let (phase, page, obligations, blocked) = if !present {
+            (SlotPhase::Fresh, 0, 0, false)
         } else {
             match &slots[at].1 {
-                Slot::Resident(page) if page.allows_return() => {
-                    (SlotPhase::Resident, page.id().get() as u64)
-                }
-                Slot::Resident(_) => return Err(Error::Busy),
-                Slot::Missing => (SlotPhase::Missing, 0),
-                _ => (SlotPhase::Moving, 0),
+                Slot::Resident(page) => (
+                    SlotPhase::Resident,
+                    page.id().get() as u64,
+                    page.obligations(),
+                    page.changing(),
+                ),
+                Slot::Missing => (SlotPhase::Missing, 0, 0, false),
+                _ => (SlotPhase::Moving, 0, 0, false),
             }
         };
         Ok(SlotStatus {
@@ -85,8 +84,8 @@ impl FlatRange {
             level: self.level(),
             phase,
             page,
-            obligations: 0,
-            blocked: false,
+            obligations,
+            blocked,
         })
     }
 
@@ -111,13 +110,19 @@ impl FlatRange {
             .lock()
             .occupy(self.index(), expected, page)
     }
-    pub(crate) fn vacate(&self, expected: SlotVersion) -> Result<SlotVersion, Error> {
-        self.cell(PageOffset::ZERO)
-            .map_err(|_| Error::Unsupported)?;
+    pub(crate) fn vacate_held(
+        &self,
+        expected: SlotVersion,
+        blocks: &mut alloc::vec::Vec<crate::basis::cell::page::Block>,
+    ) -> Result<SlotVersion, Error> {
         if self.page_count().get() != self.grain() {
             return Err(Error::Unsupported);
         }
-        let (stamp, page) = self.flat().state.lock().vacate(self.index(), expected)?;
+        let (stamp, page) =
+            self.flat()
+                .state
+                .lock()
+                .vacate(self.index(), expected, Some(blocks))?;
         drop(page);
         Ok(stamp)
     }

@@ -286,11 +286,13 @@ pub(crate) fn retire_block(
     };
     if let Some(block) = source.blocking(authority) {
         settle_block(meta, &source, &block)?;
-        source.allow(authority);
+        if !block.native() {
+            source.allow(authority);
+        }
     }
     Ok(())
 }
-fn settle_block(
+pub(crate) fn settle_block(
     meta: &Arc<Sharing>,
     source: &Arc<SourceAuthorization>,
     block: &Arc<pend::RangeBlock>,
@@ -360,6 +362,12 @@ pub(crate) fn allow(task: &Arc<Task>, token: PendId) -> Result<(), PendFail> {
         .memory()
         .and_then(|m| m.authorization())
         .ok_or(PendFail::Denied)?;
+    if source
+        .blocking(entry.authority())
+        .is_some_and(|block| block.native())
+    {
+        return Err(PendFail::Denied);
+    }
     source.allow(entry.authority());
     Ok(())
 }

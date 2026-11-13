@@ -1,6 +1,8 @@
 //! Staged next-version provider. Dispatch remains disabled by the active ABI.
 //! Implemented residency commits use the actual Task's bounded result journal;
 //! unsupported lifecycle/maintenance operations fail before resource effects.
+#[path = "next_memory/receipt.rs"]
+mod receipt;
 use crate::{
     basis::{
         self,
@@ -16,6 +18,7 @@ use kernel_api::{
     },
     address::VirtAddr,
 };
+pub(super) use receipt::Receipt;
 
 pub(super) fn dispatch(
     frame: &mut TrapContext,
@@ -71,6 +74,7 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
         .map(|value| value.to_bytes());
     }
     let _serial = actor.pend.lock();
+    let admission_commit = basis::commit();
     let mut window = actor.memory_results.lock();
     if window.is_none() {
         let journal = Journal::new(actor.ident.id).ok_or(Failure::Denied)?;
@@ -100,6 +104,29 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
         Admission::InFlight(None) => return Err(Failure::Busy),
         Admission::Execute(accepted) => accepted,
     };
+    drop(window);
+    drop(admission_commit);
+    drop(_serial);
+    let mut receipt = Receipt::new(actor, request, accepted);
+    if matches!(
+        request.action(),
+        Action::Block { .. } | Action::Allow { .. }
+    ) {
+        let result = super::flat::next::effect(actor, request.action(), &mut receipt);
+        return Ok(receipt.finish(result));
+    }
+    if matches!(
+        request.action(),
+        Action::Publish { .. }
+            | Action::Retract { .. }
+            | Action::Protect { .. }
+            | Action::Release { .. }
+            | Action::DeleteNest { .. }
+    ) {
+        let result = super::nest::next::effect(actor, request.action(), &mut receipt);
+        return Ok(receipt.finish(result));
+    }
+    let _serial = actor.pend.lock();
     // Occupy allocates/zeroes before COMMIT, then rechecks both live selection
     // and expected version. A losing preparation remains private and is freed.
     let prepared = super::flat::next::prepare(actor, request.action());
@@ -108,18 +135,5 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
         memory::Domain::Flat => super::flat::next::mutate(actor, request.action(), prepared),
         memory::Domain::Nest => super::nest::next::mutate(actor, request.action()),
     });
-    let outcome = match result {
-        Ok(value) => Outcome::Committed(value),
-        Err(error) => Outcome::Rejected(error),
-    };
-    let reply = Reply::new(
-        request.id().expect("mutation identity"),
-        request.action().opcode(),
-        outcome,
-    )
-    .expect("operation result");
-    journal
-        .record(&accepted, reply)
-        .expect("record before output while resource commit remains held");
-    Ok(reply.to_bytes())
+    Ok(receipt.finish(result))
 }

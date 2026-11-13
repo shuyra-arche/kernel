@@ -7,6 +7,31 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use kernel_api::abi::call::cell::CellFail;
 static LIVE: SpinLock<Vec<Weak<Change>>> = SpinLock::new_level(Level::L3, Vec::new());
+
+/// Caller holds COMMIT and the holding's Flat lock. Detach the registry's weak
+/// upgrade path while proving exclusive ownership; restore it without allocation
+/// on refusal. No hardware receipt is discharged by this operation.
+pub(crate) fn release_block(
+    mut block: super::page::Block,
+    page: &mut Arc<Page>,
+) -> Result<(), super::page::Block> {
+    let mut live = LIVE.lock();
+    let at = live
+        .iter()
+        .position(|known| known.as_ptr() == Arc::as_ptr(block.change()));
+    if let Some(at) = at {
+        live.remove(at);
+    }
+    if block.release_unique(page) {
+        drop(block);
+        Ok(())
+    } else {
+        if let Some(at) = at {
+            live.insert(at, Arc::downgrade(block.change()));
+        }
+        Err(block)
+    }
+}
 pub(crate) fn acquire(page: &Arc<Page>) -> Result<Arc<Change>, CellFail> {
     let mut live = LIVE.lock();
     live.retain(|change| change.strong_count() != 0);
@@ -18,9 +43,12 @@ pub(crate) fn acquire(page: &Arc<Page>) -> Result<Arc<Change>, CellFail> {
         return Ok(change);
     }
     live.try_reserve(1).map_err(|_| CellFail::OutOfMemory)?;
-    let change = page
-        .begin()
-        .map_err(|e| CellFail::from(crate::basis::nest::NestError::from(e)))?;
+    let change = page.begin().map_err(|error| match error {
+        super::page::RetainError::Exhausted => CellFail::OutOfMemory,
+        super::page::RetainError::Quarantined => CellFail::Denied,
+        super::page::RetainError::Busy | super::page::RetainError::Borrowed => CellFail::Busy,
+        super::page::RetainError::Unbalanced => unreachable!("unbalanced Page change"),
+    })?;
     live.push(Arc::downgrade(&change));
     Ok(change)
 }

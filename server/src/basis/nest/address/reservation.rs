@@ -170,6 +170,10 @@ impl PreparedReservation {
         {
             return Err(super::super::NestError::AlreadyMapped);
         }
+        self.nest
+            .version()
+            .next()
+            .ok_or(super::super::NestError::OutOfMemory)?;
         self.nest.reservations.publish(
             self.binding.take().expect("prepared range identity"),
             self.span.clone(),
@@ -181,6 +185,7 @@ impl PreparedReservation {
             .insert(self.node.take().expect("prepared address index"));
         self.prepared = false;
         self.published = true;
+        self.nest.changed();
         Ok(self.span.clone())
     }
 }

@@ -62,6 +62,10 @@ path = "allocator/mod.rs"
 name = "registration"
 path = "registration/mod.rs"
 
+[[test]]
+name = "invocation"
+path = "invocation/mod.rs"
+
 # Opt-in exploration; excluded from both the normal and ignored test runs.
 [[bench]]
 name = "ticket-storage"

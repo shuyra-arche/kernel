@@ -201,6 +201,9 @@ impl Page {
     pub(crate) fn allows_return(&self) -> bool {
         self.reclaim.allows_return()
     }
+    pub(crate) fn obligations(&self) -> u64 {
+        self.reclaim.obligations()
+    }
 }
 
 impl Drop for Page {
