@@ -16,10 +16,10 @@ pub(crate) mod control;
 #[allow(dead_code, unused_imports)]
 #[path = "../../src/basis/pend/ledger/mod.rs"]
 mod ledger;
-mod mapping;
 #[allow(dead_code, unused_imports)]
 #[path = "../../src/basis/name/mod.rs"]
 mod name;
+mod reservation;
 #[path = "ledger.rs"]
 mod reservations;
 mod retirement;

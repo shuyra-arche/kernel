@@ -5,9 +5,10 @@ use kernel_api::{
     },
     address::VirtAddr,
     model::{
-        cell::{CellLevel, MappingId},
+        cell::CellLevel,
         identity::PendId,
-        nest::{MappingPhase, MappingStatus, MappingVersion, NestId, NestVersion},
+        nest::ReservationId,
+        nest::{NestId, NestVersion, ReservationPhase, ReservationStatus, ReservationVersion},
     },
 };
 use kernel_client::memory::{Error, Response, invoke_with};
@@ -130,28 +131,28 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
 #[test]
 fn observations_require_the_requested_mapping_and_cannot_replace_mutation_results() {
     let nest = NestId::new(19).unwrap();
-    let mapping = MappingId::from_bytes(&23u64.to_le_bytes()).unwrap();
+    let reservation = ReservationId::from_bytes(&23u64.to_le_bytes()).unwrap();
     let request = memory::nest::Call::new(
         None,
-        Action::Inspect(Query::Mapping {
+        Action::Inspect(Query::Reservation {
             token: PendId::mint(17),
             nest,
-            mapping,
+            reservation,
         }),
     )
     .unwrap();
-    let status = MappingStatus {
+    let status = ReservationStatus {
         nest,
-        mapping,
-        version: MappingVersion::INITIAL,
+        reservation,
+        version: ReservationVersion::INITIAL,
         offset: 0,
         count: 1,
         address: VirtAddr::new(4096),
         level: CellLevel::BASE,
         access: 2,
-        phase: MappingPhase::Open,
+        phase: ReservationPhase::Open,
     };
-    let observation = Observation::new(Snapshot::Mapping(status)).unwrap();
+    let observation = Observation::new(Snapshot::Reservation(status)).unwrap();
     assert_eq!(
         invoke_with(request, |_, _, out| {
             *out = observation.to_bytes();
@@ -166,7 +167,7 @@ fn observations_require_the_requested_mapping_and_cannot_replace_mutation_result
         }),
         Err(Error::Protocol)
     );
-    let wrong = Observation::new(Snapshot::Mapping(MappingStatus {
+    let wrong = Observation::new(Snapshot::Reservation(ReservationStatus {
         nest: NestId::new(20).unwrap(),
         ..status
     }))

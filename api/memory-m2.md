@@ -6,12 +6,16 @@ review and merge after M1 (#145). This milestone does not activate ABI 11.
 The [M1 activation order](memory-m1.md#migration-order-and-acceptance-gates) still
 requires M3–M5 before a coordinated provider/consumer/image switch.
 
+Section 14 of #142 adds [Reservation and Pend acceptance](memory-reservation.md)
+to this same round. The names below reflect that revision; M2's original delivery
+does not prove the added source-export, distribution or lifecycle scenarios.
+
 ## Acceptance matrix
 
 | #142 M2 requirement | Delivered implementation | Compatibility boundary |
 | --- | --- | --- |
 | Public Cell operations belong to Flat/Nest | `abi::memory::{flat,nest}::Call` and `kernel_client::memory::{flat,nest}` are the next interface. Frame admits only version 11, domains 12/13 and the frozen operation slots; Cell domain 2 and alternate creation cannot decode. Server Cell entry only parses v10 descriptors and delegates to Flat or Nest | The separately documented v10 API/Client adapter remains until the coordinated switch; there is no v11-to-v10 fallback |
-| Align with #141 | Whole versus Mapping scope, exact Mapping identity and full narrowed windows are checked by the existing live Pend owner; `Mapping::position` also matches token and Nest identity | Whole cannot impersonate a Mapping grant; no new Mapping authorization root |
+| Align with #141 | Whole versus Reservation scope, exact Reservation identity and full narrowed windows are checked by the existing live Pend owner; `Reservation::position` also matches token and Nest identity | Whole cannot impersonate a Reservation grant; no new Reservation authorization root |
 | Remove duplicate creation | Flat owns the one logical allocation/source preparation path; the v10 Slot-returning adapter calls it, while the next interface has only Flat Create | The legacy return representation survives only for ABI 10; no additional physical owner is created |
 | Remove cross-Team dependence on Task-local handles | The Flat transfer mechanism takes `Endpoint::Flat(SlotPosition)` and resolves both grants in the actual caller's ledger. It has no SlotId, remote Task or scheduler argument. The v10 adapter normalizes a Flat-backed handle once into that same fixed position. Flat/Share association directly constructs Source without a temporary SlotId | Private/Share-root v10 handles have a separate compatibility endpoint; the next wire cannot express it |
 | Preserve both endpoint authorities | Both fixed positions resolve under COMMIT, then resolve again before admission. Rights, data ceilings, complete geometry, original source and exact Page identity are checked before flights. Source retirement gates retain authorization across the holding transaction | Request versions and v11 maintenance/result policy attach at the later resource mutation layer; an Endpoint alone does not authorize a v11 mutation |
@@ -70,9 +74,9 @@ version switch, never silently reinterpret its descriptors.
   register padding, address overflow, snapshot length and opcode substitution.
 - Client tests use an explicit host transport to check one invocation, canonical
   buffers, loss of delivery, malformed success, stale replies, result recovery,
-  exact Mapping observations and mutation/observation separation.
+  exact Reservation observations and mutation/observation separation.
 - Production Pend/State tests check fixed ranges after Narrow, full units,
-  Whole/Mapping separation, independent endpoint rights, TRANSFER without
+  Whole/Reservation separation, independent endpoint rights, TRANSFER without
   ASSOCIATE, ancestor revocation, holder death and data suspension.
 - Production weak-registry tests check bounded cleanup discovery independently
   of public handles. Existing Page/storage tests continue to cover holding

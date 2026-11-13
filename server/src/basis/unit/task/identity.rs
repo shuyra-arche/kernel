@@ -49,7 +49,7 @@ impl TaskMemory {
             }
             self.guard = None;
         }
-        self.nest.reap_mappings();
+        self.nest.reap_reservations();
         Ok(())
     }
 }
@@ -63,7 +63,7 @@ impl Drop for TaskMemory {
             let _ = self.nest.dispose(mapping);
         }
         if let Some(guard) = self.guard.take() {
-            let _ = self.nest.release_reservation(guard);
+            let _ = self.nest.cancel_reservation(guard);
         }
     }
 }

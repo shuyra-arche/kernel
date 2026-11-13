@@ -4,10 +4,11 @@ use kernel_api::{
     abi::call::{cell::CellFail, pend::PendFail},
     address::{PageCount, PageOffset},
     model::{
-        cell::{CellLevel, MappingId},
+        cell::CellLevel,
         flat::FlatId,
         identity::{PendId, TaskId, TeamId},
         nest::NestId,
+        nest::ReservationId,
         pend::{PendScope, PendStatus},
         view::ViewKind,
     },
@@ -89,11 +90,11 @@ pub(crate) struct Nest {
     pub(crate) adopted: AtomicBool,
     pub(crate) external: AtomicBool,
     pub(crate) busy: AtomicBool,
-    pub(crate) mappings: Mutex<Vec<(MappingId, PendStatus)>>,
-    spans: Mutex<Vec<(MappingId, Arc<Span>, Weak<Pend>)>>,
-    publications: Mutex<Vec<(MappingId, Arc<Pend>)>>,
-    pub(crate) withdrawn: Mutex<Vec<(MappingId, (PageOffset, PageCount), Weak<Pend>)>>,
-    pub(crate) released: Mutex<Vec<(MappingId, PageCount)>>,
+    pub(crate) reservations: Mutex<Vec<(ReservationId, PendStatus)>>,
+    spans: Mutex<Vec<(ReservationId, Arc<Span>, Weak<Pend>)>>,
+    publications: Mutex<Vec<(ReservationId, Arc<Pend>)>>,
+    pub(crate) withdrawn: Mutex<Vec<(ReservationId, (PageOffset, PageCount), Weak<Pend>)>>,
+    pub(crate) released: Mutex<Vec<(ReservationId, PageCount)>>,
 }
 pub(crate) struct Span {
     count: PageCount,
@@ -123,7 +124,7 @@ impl Nest {
             adopted: AtomicBool::new(false),
             external: AtomicBool::new(false),
             busy: AtomicBool::new(false),
-            mappings: Mutex::new(Vec::new()),
+            reservations: Mutex::new(Vec::new()),
             spans: Mutex::new(Vec::new()),
             publications: Mutex::new(Vec::new()),
             withdrawn: Mutex::new(Vec::new()),
@@ -132,26 +133,29 @@ impl Nest {
     }
     pub(crate) fn install(
         &self,
-        id: MappingId,
+        id: ReservationId,
         count: PageCount,
         level: CellLevel,
         root: &Arc<Pend>,
     ) {
-        self.mappings.lock().unwrap().push((id, PendStatus::Active));
+        self.reservations
+            .lock()
+            .unwrap()
+            .push((id, PendStatus::Active));
         self.spans.lock().unwrap().push((
             id,
             Arc::new(Span { count, level }),
             Arc::downgrade(root),
         ));
     }
-    pub(crate) fn publish(&self, id: MappingId, publisher: &Arc<Pend>) {
+    pub(crate) fn publish(&self, id: ReservationId, publisher: &Arc<Pend>) {
         publisher.retain_route().unwrap();
         self.publications
             .lock()
             .unwrap()
             .push((id, publisher.clone()));
     }
-    fn complete(&self, id: MappingId, publisher: Option<&Arc<Pend>>) {
+    fn complete(&self, id: ReservationId, publisher: Option<&Arc<Pend>>) {
         self.publications.lock().unwrap().retain(|(known, route)| {
             if *known != id || publisher.is_some_and(|publisher| !Arc::ptr_eq(route, publisher)) {
                 return true;
@@ -176,7 +180,7 @@ impl Nest {
     pub(crate) fn is_external(&self) -> bool {
         self.external.load(Ordering::Acquire)
     }
-    pub(crate) fn mapping(&self, id: MappingId) -> Option<Arc<Span>> {
+    pub(crate) fn reservation(&self, id: ReservationId) -> Option<Arc<Span>> {
         self.spans
             .lock()
             .unwrap()
@@ -184,30 +188,30 @@ impl Nest {
             .find(|(known, _, _)| *known == id)
             .map(|(_, span, _)| span.clone())
     }
-    pub(crate) fn mapping_count(&self, id: MappingId) -> Option<PageCount> {
-        Some(self.mapping(id)?.count)
+    pub(crate) fn reservation_count(&self, id: ReservationId) -> Option<PageCount> {
+        Some(self.reservation(id)?.count)
     }
-    pub(crate) fn mapping_root(&self, id: MappingId, root: &Arc<Pend>) -> bool {
+    pub(crate) fn reservation_root(&self, id: ReservationId, root: &Arc<Pend>) -> bool {
         self.spans
             .lock()
             .unwrap()
             .iter()
             .any(|(known, _, original)| *known == id && original.ptr_eq(&Arc::downgrade(root)))
     }
-    pub(crate) fn mapping_open(&self, id: MappingId) -> bool {
-        self.is_open() && self.mapping_status(id) == PendStatus::Active
+    pub(crate) fn reservation_open(&self, id: ReservationId) -> bool {
+        self.is_open() && self.reservation_status(id) == PendStatus::Active
     }
-    pub(crate) fn mapping_status(&self, id: MappingId) -> PendStatus {
-        self.mappings
+    pub(crate) fn reservation_status(&self, id: ReservationId) -> PendStatus {
+        self.reservations
             .lock()
             .unwrap()
             .iter()
             .find(|(known, _)| *known == id)
             .map_or(PendStatus::Dead, |(_, status)| *status)
     }
-    pub(crate) fn withdraw_mapping(
+    pub(crate) fn withdraw_reservation(
         &self,
-        id: MappingId,
+        id: ReservationId,
         window: (PageOffset, PageCount),
         publisher: &Arc<Pend>,
     ) -> Result<(), PendFail> {
@@ -221,14 +225,14 @@ impl Nest {
         self.complete(id, Some(publisher));
         Ok(())
     }
-    pub(crate) fn release_mapping(&self, id: MappingId) -> Result<(), CellFail> {
-        let count = self.mapping_count(id).ok_or(CellFail::Denied)?;
+    pub(crate) fn release_reservation(&self, id: ReservationId) -> Result<(), CellFail> {
+        let count = self.reservation_count(id).ok_or(CellFail::Denied)?;
         if self.busy.load(Ordering::Acquire) {
             return Err(CellFail::Busy);
         }
         self.complete(id, None);
         self.released.lock().unwrap().push((id, count));
-        self.mappings
+        self.reservations
             .lock()
             .unwrap()
             .iter_mut()
@@ -237,10 +241,10 @@ impl Nest {
             .1 = PendStatus::Dead;
         Ok(())
     }
-    pub(crate) fn retire_mapping(&self, raw: usize) {
+    pub(crate) fn retire_reservation(&self, raw: usize) {
         let removable = self.spans.lock().unwrap().iter().any(|(id, _, root)| {
             id.get() == raw
-                && self.mapping_status(*id) == PendStatus::Dead
+                && self.reservation_status(*id) == PendStatus::Dead
                 && root
                     .upgrade()
                     .is_none_or(|root| root.status() == PendStatus::Dead)
@@ -250,7 +254,7 @@ impl Nest {
                 .lock()
                 .unwrap()
                 .retain(|(id, _, _)| id.get() != raw);
-            self.mappings
+            self.reservations
                 .lock()
                 .unwrap()
                 .retain(|(id, _)| id.get() != raw);

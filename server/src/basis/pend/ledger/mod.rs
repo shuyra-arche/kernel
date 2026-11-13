@@ -15,7 +15,9 @@ use crate::basis::unit::task::Task;
 
 use super::{HoldTable, live};
 pub(crate) use cleanup::{doom, retire, return_, revoke};
-pub(crate) use entry::{PendEntry, PreparedMapping, accede, locate, prepare_mapping, vestor};
+pub(crate) use entry::{
+    PendEntry, PreparedReservationGrant, accede, locate, prepare_reservation, vestor,
+};
 
 const RETRIES: usize = 8;
 

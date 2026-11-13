@@ -117,9 +117,9 @@ fn remove(task: &Arc<Task>, entry: &Arc<PendEntry>) -> Result<(), PendFail> {
     })?;
     entry.release();
     if let crate::basis::pend::Target::Nest { nest, .. } = entry.target()
-        && let PendScope::Nest(NestScope::Mapping { id, .. }) = entry.scope()
+        && let PendScope::Nest(NestScope::Reservation { id, .. }) = entry.scope()
     {
-        nest.retire_mapping(id.get());
+        nest.retire_reservation(id.get());
     }
     super::notify(task.ident.id, entry.token());
     if let (Some(source), Some(parent)) = (entry.sire(), entry.lord().upgrade()) {
@@ -147,12 +147,12 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
         }
         if let crate::basis::pend::Target::Nest { nest, .. } = entry.target() {
             match entry.scope() {
-                PendScope::Nest(NestScope::Mapping { id, .. }) => {
-                    if nest.mapping_root(id, entry.authority()) {
-                        nest.release_mapping(id).map_err(mapping_failure)?;
+                PendScope::Nest(NestScope::Reservation { id, .. }) => {
+                    if nest.reservation_root(id, entry.authority()) {
+                        nest.release_reservation(id).map_err(reservation_failure)?;
                     } else {
                         let window = entry.authority().window().ok_or(PendFail::Denied)?;
-                        nest.withdraw_mapping(id, window, entry.authority())?;
+                        nest.withdraw_reservation(id, window, entry.authority())?;
                     }
                 }
                 PendScope::Nest(NestScope::Whole)
@@ -171,7 +171,7 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
     Err(PendFail::Busy)
 }
 
-fn mapping_failure(error: CellFail) -> PendFail {
+fn reservation_failure(error: CellFail) -> PendFail {
     match error {
         CellFail::Busy => PendFail::Busy,
         CellFail::OutOfMemory => PendFail::OutOfMemory,

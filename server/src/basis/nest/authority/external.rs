@@ -4,23 +4,24 @@ use crate::basis::pend::{self, PendEntry};
 use crate::basis::unit::{anchor::Anchor, task::Task};
 use alloc::sync::{Arc, Weak};
 use kernel_api::abi::call::cell::CellFail;
-use kernel_api::model::cell::{CellState, MappingId};
+use kernel_api::model::cell::CellState;
 use kernel_api::model::identity::PendId;
+use kernel_api::model::nest::ReservationId;
 use kernel_api::model::pend::{NestRights, NestScope, Operations, PendScope};
 
-fn authorized(actor: &Task, token: PendId, id: MappingId) -> Result<Arc<PendEntry>, CellFail> {
+fn authorized(actor: &Task, token: PendId, id: ReservationId) -> Result<Arc<PendEntry>, CellFail> {
     let entry = pend::locate(actor, token).ok_or(CellFail::Denied)?;
     let nest = entry.target().nest().ok_or(CellFail::Denied)?;
     if !pend::live(actor)
         || !entry
             .authority()
             .permits(Operations::Nest(NestRights::INSPECT))
-        || !matches!(entry.authority().scope(), PendScope::Nest(NestScope::Mapping { id: selected, .. }) if selected == id)
+        || !matches!(entry.authority().scope(), PendScope::Nest(NestScope::Reservation { id: selected, .. }) if selected == id)
         || !nest.is_external()
     {
         return Err(CellFail::Denied);
     }
-    let span = nest.mapping(id).ok_or(CellFail::Denied)?;
+    let span = nest.reservation(id).ok_or(CellFail::Denied)?;
     let count = kernel_api::address::PageCount::new(span.grain()).ok_or(CellFail::Denied)?;
     if !entry
         .authority()
@@ -34,7 +35,7 @@ fn authorized(actor: &Task, token: PendId, id: MappingId) -> Result<Arc<PendEntr
 pub(crate) fn event(
     actor: &Task,
     token: PendId,
-    id: MappingId,
+    id: ReservationId,
     published: bool,
     expected: u64,
 ) -> Result<
@@ -47,7 +48,7 @@ pub(crate) fn event(
     use kernel_api::abi::call::sign::SignEventFail;
     let entry = authorized(actor, token, id)?;
     let nest = entry.target().nest().ok_or(CellFail::Denied)?;
-    let span = nest.mapping(id).ok_or(CellFail::Denied)?;
+    let span = nest.reservation(id).ok_or(CellFail::Denied)?;
     let info = span.inspect_memo(0)?;
     if expected == 0 {
         return Err(CellFail::Denied);
@@ -90,5 +91,5 @@ pub(crate) fn maintain() -> bool {
 
 /// Gone metadata is not an occupied address or an unsettled device use.
 pub(super) fn discard(nest: &Arc<Nest>) -> bool {
-    nest.mappings_gone()
+    nest.reservations_gone()
 }

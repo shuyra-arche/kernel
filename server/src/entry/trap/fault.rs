@@ -57,9 +57,9 @@ pub(super) fn wait(
     // 登记失败要终止任务时，身份已经交出去了：先把这一 id 标量留下来。
     let tid = ident.as_ref().map_or(0, Identity::task_id);
     let life = nest.life();
-    let key = WakeKey::Mapping {
+    let key = WakeKey::Reservation {
         space: nest.id(),
-        mapping,
+        reservation: mapping,
     };
     let waiting = FaultWait::new(nest, fault.addr, fault.kind, mapping);
     // 先放掉任务身份；地址探针在提交边界内执行后释放。

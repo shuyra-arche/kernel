@@ -190,10 +190,10 @@ impl Target {
                         NestRights::INSPECT | NestRights::RESERVE
                     }
                     PendScope::Nest(NestScope::Whole) => NestRights::whole(),
-                    PendScope::Nest(NestScope::Mapping {
+                    PendScope::Nest(NestScope::Reservation {
                         range: PendRange::Pages { .. },
                         ..
-                    }) if PendScope::of(scope.words()) == Some(scope) => NestRights::mapping(),
+                    }) if PendScope::of(scope.words()) == Some(scope) => NestRights::reservation(),
                     _ => return Err(PendFail::Denied),
                 };
                 (scope, Operations::Nest(rights))

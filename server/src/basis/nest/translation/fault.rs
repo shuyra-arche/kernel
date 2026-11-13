@@ -59,7 +59,7 @@ impl FaultOutcome {
             return Self::Invalid;
         };
         let inner = mapping.state.lock();
-        if inner.phase != super::super::address::span::MappingPhase::Open {
+        if inner.phase != super::super::address::span::ReservationPhase::Open {
             return Self::Invalid;
         }
         let Some(range) = inner.range_at(address.as_usize()) else {

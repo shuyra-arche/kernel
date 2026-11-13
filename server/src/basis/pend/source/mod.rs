@@ -1,7 +1,7 @@
 //! 一份**来源授权**：某个来源下所有普通引用与已建关系共享的唯一记录。
 //!
 //! 它住在工作层（与引用表、创建资格、事务同处），由执行入口与 Share 创建共同使用；
-//! 核心 `Mapping` 不回指它。私有根 → 根 Pend 的交接只改这里的 `phase` 一处权威，
+//! 核心 `Reservation` 不回指它。私有根 → 根 Pend 的交接只改这里的 `phase` 一处权威，
 //! 不为每份引用复制一份状态再扫表更新。资格只属于这份记录，
 //! 普通引用的有无靠显式语义判断，不数 `Arc` 强引用。
 //!
@@ -112,7 +112,7 @@ pub(crate) struct SourceAuthorization {
     /// 未结 CPU 关系：包含显式 Attach 控制与资源 Open 映射。
     ///
     /// 成员与 Registry 项是同一个 `Arc<RangeBinding>`，所以“还欠着谁”只有这一份
-    /// 事实：只有显式结清（`Nest::retire_mapping` / `reap_mappings`）才撒下成员，
+    /// 事实：只有显式结清（`Nest::retire_reservation` / `reap_reservations`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
     bindings: SpinLock<Vec<Arc<RangeBinding>>>,
     blocks: SpinLock<Vec<Arc<RangeBlock>>>,
@@ -267,7 +267,7 @@ impl SourceAuthorization {
             return false;
         }
         // 先把相位拷出来放锁，再升弱引用：临时 `Arc` 可能是最后一份强持，
-        // 它的析构会走到 `retire_mapping` / `settle` 再回本文件取锁。同 `manages`。
+        // 它的析构会走到 `retire_reservation` / `settle` 再回本文件取锁。同 `manages`。
         let meta = {
             let phase = self.phase.lock();
             match &*phase {
@@ -359,7 +359,7 @@ impl SourceAuthorization {
         self.bindings.lock().push(binding);
     }
 
-    /// 撒下一条成员：这份绑定已结清（`Nest::retire_mapping` / `reap_mappings` 的唯一收尾）。
+    /// 撒下一条成员：这份绑定已结清（`Nest::retire_reservation` / `reap_reservations` 的唯一收尾）。
     ///
     /// 最后一条成员撤下就是显式的“结清”事件：来源不再占着任何东西时顺带向上收尾，
     /// 不在 `Drop` 里猜。
@@ -516,7 +516,7 @@ impl SourceAuthorization {
 
     /// 解除一份普通引用。最后一份普通引用消失时，**未消费的一次性资格显式结束**。
     ///
-    /// 这一定不靠 `Arc` 计数也不再靠授权记录被回收：接上 Mapping 登记后仍有人持着
+    /// 这一定不靠 `Arc` 计数也不再靠授权记录被回收：接上 Reservation 登记后仍有人持着
     /// 这份记录，资格该结束还是结束。
     pub(crate) fn release_hold(&self) {
         if self.holds.fetch_sub(1, Ordering::AcqRel) == 1 {

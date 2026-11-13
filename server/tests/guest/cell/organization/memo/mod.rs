@@ -107,7 +107,7 @@ pub(super) fn run() {
     let manager = grant(
         mapping,
         AccordTarget::Caller,
-        Operations::Nest(NestRights::mapping()),
+        Operations::Nest(NestRights::reservation()),
         1,
         1,
     );

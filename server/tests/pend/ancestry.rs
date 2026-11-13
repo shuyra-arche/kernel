@@ -16,8 +16,8 @@ fn root(operations: Operations) -> Arc<Pend> {
         Operations::Nest(rights) if NestRights::whole().contains(rights) => {
             PendScope::Nest(NestScope::Whole)
         }
-        Operations::Nest(_) => PendScope::Nest(NestScope::Mapping {
-            id: kernel_api::model::cell::MappingId::from_bytes(&1u64.to_le_bytes()).unwrap(),
+        Operations::Nest(_) => PendScope::Nest(NestScope::Reservation {
+            id: kernel_api::model::nest::ReservationId::from_bytes(&1u64.to_le_bytes()).unwrap(),
             range: PendRange::Pages {
                 offset: 0,
                 count: 8,

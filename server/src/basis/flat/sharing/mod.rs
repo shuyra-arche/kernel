@@ -232,7 +232,7 @@ impl Sharing {
                     self.maps.lock().push(entry);
                     return Err(pend_map_error(error));
                 }
-                space.retire_mapping(id);
+                space.retire_reservation(id);
             }
         }
         if self
@@ -316,7 +316,7 @@ impl Drop for Sharing {
             if !space.settled(id) {
                 let _ = space.dispose(entry.mapping);
             }
-            space.retire_mapping(id);
+            space.retire_reservation(id);
         }
     }
 }
@@ -436,32 +436,32 @@ pub(crate) fn open(
     let commit = crate::basis::commit();
     if !meta.alive() || authority.modifiable().is_none() {
         drop(commit);
-        let _ = space.release_reservation(reservation);
+        let _ = space.cancel_reservation(reservation);
         return Err(PendFail::Dead);
     }
     if let (Some(authorization), Some(window)) = (&authorization, &window) {
         let (offset, count) = window.window();
         if let Err(error) = authorization.check_publish(offset, count) {
             drop(commit);
-            let _ = space.release_reservation(reservation);
+            let _ = space.cancel_reservation(reservation);
             return Err(error);
         }
     }
     if let Some(authorization) = &authorization
         && let Err(error) = space
-            .mappings
-            .claim_mapping(id, space, authorization.clone())
+            .reservations
+            .claim_reservation(id, space, authorization.clone())
     {
-        let _ = space.release_reservation(reservation);
-        space.retire_mapping(id);
+        let _ = space.cancel_reservation(reservation);
+        space.retire_reservation(id);
         return Err(error);
     }
     if let (Some(authorization), Some(window)) = (&authorization, &window)
         && let Err(error) = authorization.enter_publish_range(id, window.clone(), Some(&authority))
     {
         drop(commit);
-        let _ = space.release_reservation(reservation);
-        space.retire_mapping(id);
+        let _ = space.cancel_reservation(reservation);
+        space.retire_reservation(id);
         return Err(error);
     }
     drop(commit);
@@ -471,7 +471,7 @@ pub(crate) fn open(
             if let Some(authorization) = &authorization {
                 authorization.leave_publish(id);
             }
-            space.retire_mapping(id);
+            space.retire_reservation(id);
             return Err(pend_map_error(error));
         }
     };
@@ -480,14 +480,14 @@ pub(crate) fn open(
         let _commit = crate::basis::commit();
         let result = meta.record(token, space, mapping.clone());
         if result.is_ok() && authorization.is_some() {
-            space.mappings.commit(id, mapping.clone());
+            space.reservations.commit(id, mapping.clone());
         }
         result
     };
     if let Err(rejected) = recorded {
         drop(mapping);
         let _ = space.dispose(rejected);
-        space.retire_mapping(id);
+        space.retire_reservation(id);
         if let Some(authorization) = &authorization {
             authorization.leave_publish(id);
         }

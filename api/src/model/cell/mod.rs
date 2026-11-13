@@ -3,7 +3,6 @@
 mod allocation;
 mod info;
 mod level;
-mod mapping;
 mod object;
 mod placement;
 mod slot;
@@ -11,7 +10,6 @@ mod slot;
 pub use allocation::Allocation;
 pub use info::{CellInfo, CellState};
 pub use level::CellLevel;
-pub use mapping::MappingId;
 pub use object::{CellAssociation, CellHandoff, CellObject, CellPosition};
 pub use placement::{Placement, PlacementAt, PlacementError};
 pub use slot::{ReferenceRange, SlotId};

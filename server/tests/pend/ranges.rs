@@ -3,7 +3,7 @@ use kernel_api::{
     abi::call::pend::PendFail,
     address::{PageCount, PageOffset},
     model::{
-        cell::MappingId,
+        nest::ReservationId,
         pend::{NestScope, PendRange, PendScope},
     },
 };
@@ -63,8 +63,8 @@ fn empty_expanding_and_overflowing_windows_are_denied() {
 }
 
 fn mapping(id: usize, range: PendRange) -> PendScope {
-    PendScope::Nest(NestScope::Mapping {
-        id: MappingId::from_bytes(&(id as u64).to_le_bytes()).unwrap(),
+    PendScope::Nest(NestScope::Reservation {
+        id: ReservationId::from_bytes(&(id as u64).to_le_bytes()).unwrap(),
         range,
     })
 }

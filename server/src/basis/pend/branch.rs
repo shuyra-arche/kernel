@@ -38,16 +38,16 @@ fn effective_limits(
                     .range(offset, count)
                     .map_err(|_| PendFail::NotAligned)?;
             }
-            PendScope::Nest(NestScope::Mapping { id, .. }) => {
+            PendScope::Nest(NestScope::Reservation { id, .. }) => {
                 let nest = entry.target().nest().ok_or(PendFail::Denied)?;
-                if !nest.mapping_open(id) {
+                if !nest.reservation_open(id) {
                     return Err(PendFail::Dead);
                 }
-                let span = nest.mapping(id).ok_or(PendFail::Denied)?;
+                let span = nest.reservation(id).ok_or(PendFail::Denied)?;
                 span.range(offset, count)
                     .map_err(|_| PendFail::NotAligned)?;
                 if nest.is_external()
-                    && (offset != PageOffset::ZERO || Some(count) != nest.mapping_count(id))
+                    && (offset != PageOffset::ZERO || Some(count) != nest.reservation_count(id))
                 {
                     return Err(PendFail::NotAligned);
                 }
@@ -229,13 +229,13 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
             .transpose()?;
     }
     // Persistent publisher routes discharge only through exact hardware withdrawal.
-    if let PendScope::Nest(NestScope::Mapping { id, .. }) = observed.scope() {
+    if let PendScope::Nest(NestScope::Reservation { id, .. }) = observed.scope() {
         let window = observed.authority().window().ok_or(PendFail::Denied)?;
         observed
             .target()
             .nest()
             .ok_or(PendFail::Denied)?
-            .withdraw_mapping(id, window, observed.authority())?;
+            .withdraw_reservation(id, window, observed.authority())?;
     }
     if let Some(meta) = &share {
         meta.close_maps(Some(token))?;

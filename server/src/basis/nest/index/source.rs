@@ -28,19 +28,19 @@ use crate::basis::nest::{NestError, authority::RangeBinding};
 
 struct Record {
     source_id: kernel_api::model::flat::FlatId,
-    mapping: Weak<Span>,
+    reservation: Weak<Span>,
     binding: Option<Weak<RangeBinding>>,
     next: Option<alloc::boxed::Box<Record>>,
 }
 
 /// 全核唯一的一份关联：单链头，每条一个关系。
-struct SourceMappings {
+struct SourceReservations {
     head: SpinLock<Option<Box<Record>>>,
 }
 
-fn registry() -> &'static SourceMappings {
-    static REGISTRY: OnceLock<SourceMappings> = OnceLock::new();
-    REGISTRY.get_or_init(|| SourceMappings {
+fn registry() -> &'static SourceReservations {
+    static REGISTRY: OnceLock<SourceReservations> = OnceLock::new();
+    REGISTRY.get_or_init(|| SourceReservations {
         head: SpinLock::new_level(Level::L3, None),
     })
 }
@@ -54,7 +54,7 @@ fn rebuild(head: &mut Option<Box<Record>>, mut keep: impl FnMut(&Record)) {
     let mut cursor = head.take();
     while let Some(mut node) = cursor {
         cursor = node.next.take();
-        if node.mapping.strong_count() == 0
+        if node.reservation.strong_count() == 0
             || node
                 .binding
                 .as_ref()
@@ -93,24 +93,24 @@ pub(crate) fn forget() {
 /// 键按**强持的** `FlatRange` 取（调用方持有它），不缓存可回收的裸身份。
 pub(crate) fn register(
     source: &FlatRange,
-    mapping: &Arc<Span>,
+    reservation: &Arc<Span>,
     binding: Option<&Arc<RangeBinding>>,
 ) -> Result<(), NestError> {
     let source_id = source.source_id();
     // 先备好节点：锁内不分配也不升级任何强引用。
     let record = Box::try_new(Record {
         source_id,
-        mapping: Arc::downgrade(mapping),
+        reservation: Arc::downgrade(reservation),
         binding: binding.map(Arc::downgrade),
         next: None,
     })
     .map_err(|_| NestError::OutOfMemory)?;
-    let identity = Arc::as_ptr(mapping);
+    let identity = Arc::as_ptr(reservation);
     let mut head = registry().head.lock();
     let mut duplicate = false;
     rebuild(&mut head, |known| {
         if known.source_id == source_id
-            && known.mapping.as_ptr() == identity
+            && known.reservation.as_ptr() == identity
             && match (&known.binding, binding) {
                 (None, None) => true,
                 (Some(known), Some(binding)) => known.as_ptr() == Arc::as_ptr(binding),
@@ -163,10 +163,10 @@ pub(crate) fn candidates_over(
     let mut cursor = head.as_deref();
     while let Some(node) = cursor {
         if node.source_id == source_id {
-            candidates.push(node.mapping.clone());
+            candidates.push(node.reservation.clone());
         }
         if node.source_id == target_id {
-            candidates.push(node.mapping.clone());
+            candidates.push(node.reservation.clone());
         }
         cursor = node.next.as_deref();
     }
@@ -187,11 +187,11 @@ pub(crate) fn affected_over(
 ) -> Vec<Weak<Span>> {
     let mut affected = candidates;
     affected.retain(|candidate| {
-        let Some(mapping) = candidate.upgrade() else {
+        let Some(reservation) = candidate.upgrade() else {
             return false;
         };
-        pressing_page(&mapping, source, source_page).is_some()
-            || pressing_page(&mapping, target, target_page).is_some()
+        pressing_page(&reservation, source, source_page).is_some()
+            || pressing_page(&reservation, target, target_page).is_some()
     });
     distinct(&mut affected);
     affected
@@ -213,11 +213,11 @@ fn distinct(mappings: &mut Vec<Weak<Span>>) {
 }
 
 /// 这段关系把来源 `source` 上的 `page` 放在哪个虚拟页上；不是它的窗口就没有。
-fn pressing_page(mapping: &Span, source: &FlatRange, page: PageIndex) -> Option<VirtAddr> {
-    let Some(selected) = mapping.source() else {
+fn pressing_page(reservation: &Span, source: &FlatRange, page: PageIndex) -> Option<VirtAddr> {
+    let Some(selected) = reservation.source() else {
         // Manual positions are independent; the weak snapshot is an upper bound
         // for wakeups only. A waiter rechecks its actual position and authority.
-        return Some(mapping.initial_start());
+        return Some(reservation.initial_start());
     };
     if selected.source_id() != source.source_id() {
         return None;
@@ -226,7 +226,7 @@ fn pressing_page(mapping: &Span, source: &FlatRange, page: PageIndex) -> Option<
     if offset >= selected.page_count().get() {
         return None;
     }
-    let address = mapping
+    let address = reservation
         .initial_start()
         .as_usize()
         .checked_add(offset.checked_mul(kernel_api::address::PAGE_SIZE)?)?;
@@ -245,9 +245,9 @@ pub(crate) fn wake_all() {
             let mut node = head.as_deref();
             let mut next: Option<(usize, Weak<Span>)> = None;
             while let Some(record) = node {
-                let key = record.mapping.as_ptr() as usize;
+                let key = record.reservation.as_ptr() as usize;
                 if key > cursor && next.as_ref().is_none_or(|(known, _)| key < *known) {
-                    next = Some((key, record.mapping.clone()));
+                    next = Some((key, record.reservation.clone()));
                 }
                 node = record.next.as_deref();
             }
@@ -257,9 +257,14 @@ pub(crate) fn wake_all() {
             break;
         };
         cursor = key;
-        let route = candidate.upgrade().and_then(|mapping| mapping.wake_key());
-        if let Some((space, mapping)) = route {
-            crate::basis::sign::signal(crate::basis::sign::WakeKey::Mapping { space, mapping });
+        let route = candidate
+            .upgrade()
+            .and_then(|reservation| reservation.wake_key());
+        if let Some((space, reservation)) = route {
+            crate::basis::sign::signal(crate::basis::sign::WakeKey::Reservation {
+                space,
+                reservation: reservation,
+            });
         }
     }
 }

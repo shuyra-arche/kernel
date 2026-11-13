@@ -68,7 +68,7 @@ impl NestRights {
             .union(Self::DELETE)
     }
 
-    pub const fn mapping() -> Self {
+    pub const fn reservation() -> Self {
         Self::INSPECT
             .union(Self::RELEASE)
             .union(Self::PUBLISH)
@@ -174,8 +174,8 @@ impl Limits {
             (Operations::Nest(rights), PendScope::Nest(NestScope::Whole)) => {
                 NestRights::whole().contains(rights)
             }
-            (Operations::Nest(rights), PendScope::Nest(NestScope::Mapping { .. })) => {
-                NestRights::mapping().contains(rights)
+            (Operations::Nest(rights), PendScope::Nest(NestScope::Reservation { .. })) => {
+                NestRights::reservation().contains(rights)
             }
             _ => false,
         }
@@ -185,7 +185,7 @@ impl Limits {
     pub fn permits_child(self, child: Self) -> bool {
         self.permits_narrowing(child) && self.distributable == Distributable::Yes
     }
-    /// Whole and Mapping scopes, or different MappingIds, never attenuate into
+    /// Whole and Reservation scopes, or different ReservationIds, never attenuate into
     /// one another. Relative range bounds must also be checked by the server.
     pub fn permits_narrowing(self, child: Self) -> bool {
         self.valid()

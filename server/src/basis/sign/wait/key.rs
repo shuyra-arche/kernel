@@ -7,19 +7,19 @@ use crate::basis::nest::NestId;
 
 /// 等待位的键。
 ///
-/// `Mapping` 是内部键：同一段关系上不同页的等待者按整段一起放行，醒后各自重查；
-/// 空间清场按 NestId 一并清掉 `Value` 与 `Mapping`。
+/// `Reservation` 是内部键：同一段关系上不同页的等待者按整段一起放行，醒后各自重查；
+/// 空间清场按 NestId 一并清掉 `Value` 与 `Reservation`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WakeKey {
     ExternalNest {
         id: NestId,
     },
-    ExternalMapping {
+    ExternalReservation {
         id: usize,
     },
-    Mapping {
+    Reservation {
         space: NestId,
-        mapping: usize,
+        reservation: usize,
     },
     Value {
         space: NestId,
@@ -68,12 +68,12 @@ impl WakeKey {
     pub(super) fn fold(self) -> u64 {
         match self {
             WakeKey::ExternalNest { id } => (id.get() as u64).wrapping_mul(0x1c69_b3f7_4ac4_ae35),
-            WakeKey::ExternalMapping { id } => (id as u64).wrapping_mul(0xB8A7_641D_2C39_EF05),
+            WakeKey::ExternalReservation { id } => (id as u64).wrapping_mul(0xB8A7_641D_2C39_EF05),
             WakeKey::Value { space, address } => {
                 (space.get() as u64).wrapping_mul(0xA24B_AED4_963E_E407) ^ address as u64
             }
-            WakeKey::Mapping { space, mapping } => {
-                (space.get() as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93) ^ mapping as u64
+            WakeKey::Reservation { space, reservation } => {
+                (space.get() as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93) ^ reservation as u64
             }
             WakeKey::Clone { clone_view, dir } => {
                 (clone_view as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ dir as u64

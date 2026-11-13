@@ -5,7 +5,7 @@ pub enum Level {
     Scheduler = 1,
     Address = 2,
     Nest = 3,
-    Mapping = 4,
+    Reservation = 4,
     Flat = 5,
     TeamTasks = 6,
     L3 = 7,

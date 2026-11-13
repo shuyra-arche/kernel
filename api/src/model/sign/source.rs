@@ -8,17 +8,17 @@ use crate::model::unit::UnitTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignSource {
-    /// Retained external mapping completion. Requires mapping-scoped Nest INSPECT
-    /// for this identity/window; the numeric mapping is only a consistency check.
-    MappingRetired {
+    /// Retained external reservation completion. Requires reservation-scoped Nest INSPECT
+    /// for this identity/window; the numeric reservation is only a consistency check.
+    ReservationRetired {
         token: PendId,
-        mapping: crate::model::cell::MappingId,
+        reservation: crate::model::nest::ReservationId,
     },
     /// Retained completion of one exact publication generation, authorized by a
-    /// mapping-scoped Nest INSPECT grant for the same identity/window.
-    MappingPublished {
+    /// reservation-scoped Nest INSPECT grant for the same identity/window.
+    ReservationPublished {
         token: PendId,
-        mapping: crate::model::cell::MappingId,
+        reservation: crate::model::nest::ReservationId,
     },
     /// Oldest unattributed fault retained by this binding; never a reclaim proof.
     NestFault {
@@ -47,8 +47,10 @@ pub enum SignSource {
 impl SignSource {
     pub fn words(self) -> [usize; 3] {
         match self {
-            Self::MappingRetired { token, mapping } => [9, token.get(), mapping.get()],
-            Self::MappingPublished { token, mapping } => [11, token.get(), mapping.get()],
+            Self::ReservationRetired { token, reservation } => [9, token.get(), reservation.get()],
+            Self::ReservationPublished { token, reservation } => {
+                [11, token.get(), reservation.get()]
+            }
             Self::NestFault { token } => [12, token.get(), 0],
             Self::NestClosed { token } => [13, token.get(), 0],
             Self::Clone { token, condition } => [1, token.get(), condition as usize],
@@ -65,19 +67,19 @@ impl SignSource {
 
     pub fn of(words: [usize; 3]) -> Option<Self> {
         match words {
-            [tag, token, mapping]
+            [tag, token, reservation]
                 if matches!(tag, 9 | 11)
                     && token != 0
-                    && mapping != 0
+                    && reservation != 0
                     && token <= isize::MAX as usize
-                    && mapping <= isize::MAX as usize =>
+                    && reservation <= isize::MAX as usize =>
             {
                 let token = PendId::new(token);
-                let mapping = crate::model::cell::MappingId::new(mapping);
+                let reservation = crate::model::nest::ReservationId::new(reservation);
                 Some(if tag == 9 {
-                    Self::MappingRetired { token, mapping }
+                    Self::ReservationRetired { token, reservation }
                 } else {
-                    Self::MappingPublished { token, mapping }
+                    Self::ReservationPublished { token, reservation }
                 })
             }
             [12, token, 0] if token > 0 && token <= isize::MAX as usize => Some(Self::NestFault {

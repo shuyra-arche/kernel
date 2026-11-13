@@ -1,5 +1,10 @@
 # Kernel Client
 
+The [Reservation migration](../api/memory-reservation.md) changes address-reservation
+Rust names across API and Client without aliases. Existing source consumers must
+update and rebuild; running v10 wire labels and layouts remain unchanged. This
+does not activate the staged ABI 11 calls.
+
 `kernel-client` is a `no_std` library for executing Kernel calls. It depends on
 `kernel-api` and the declared error type, and needs no allocator or runtime state.
 
@@ -43,7 +48,7 @@ and operation kinds 5 (Port) and 7 (Memo) are invalid, not repurposed.
 | `cell::create(license, request)` | `cell::create(license, allocation: Allocation)` | SlotId, ordinary two-register convention |
 | `cell::delete(object_address)` | `cell::delete(slot: SlotId)` | `()` |
 | Cell Create mapping variant | `nest::reserve(token, placement, count: PageCount, level: CellLevel, access: u64)` | `(PendId, VirtAddr)` in two success registers |
-| Mapping deletion | `nest::release(token)` | `()`; Busy retains cleanup |
+| Reservation deletion | `nest::release(token)` | `()`; Busy retains cleanup |
 | `unit::create(request) -> UnitTarget` | `unit::create(request) -> CreatedUnit` | Three success registers; never discard Team's Nest grant |
 
 Cell class 2 keeps slots 0/1 for allocation/deletion. Create packs
@@ -67,11 +72,11 @@ only, one whole level-0/1 Cell within the existing IOVA bounds and aligned
 2 MiB window, READ or READ|WRITE and unchanged private-source qualification.
 
 Reserve requires Whole RESERVE and atomically returns a source-free **Vacant**
-reservation plus a fresh Mapping-scoped root. It creates no physical Page or
-owning Slot and does not publish. The root has `NestRights::mapping()` operations;
+reservation plus a fresh Reservation-scoped root. It creates no physical Page or
+owning Slot and does not publish. The root has `NestRights::reservation()` operations;
 Modifiable, Distributable and target write access are capped by the creating
-Whole. Only Reserve creates this Whole-to-fresh-Mapping ancestry; it cannot pick
-an existing MappingId. The real parent-child ledger edge makes live mapping
+Whole. Only Reserve creates this Whole-to-fresh-Reservation ancestry; it cannot pick
+an existing ReservationId. The real parent-child ledger edge makes live mapping
 descendants block Whole Narrow and empty-root Team adoption.
 
 ### Scoped delegation and observations
@@ -80,10 +85,10 @@ Limits now contains `operations`, `modifiable`, `distributable`, `scope`, not a
 separate range. Use `PendScope::Object` for None/Clone/Sign, `Pages(PendRange)` for
 Flat/Share, and `Nest(NestScope)` for Nest operations. None/Sign require Modifiable
 No. Whole permits only `NestRights::whole()` (INSPECT 1, RESERVE 2, ATTACH 8,
-DELETE 512). Mapping permits only `mapping()` (INSPECT 1, RELEASE 4, PUBLISH 64,
+DELETE 512). Reservation permits only `reservation()` (INSPECT 1, RELEASE 4, PUBLISH 64,
 RETRACT 128, PROTECT 256, INSERT 1024, REMOVE 2048). Bits 16/32 remain invalid;
 `all()` is the union, not valid for either single scope. Generic Accord/Narrow
-cannot switch scope category, convert Whole/Mapping or change MappingId. Rights,
+cannot switch scope category, convert Whole/Reservation or change ReservationId. Rights,
 mutability and distribution only attenuate; read-only and non-distributable
 limits cannot be restored by deriving another grant.
 
@@ -98,12 +103,12 @@ All words below are little-endian u64:
 | PendInfo | `[token, target_kind, target_id, owner, lender, mark, status, Limits...]` | 16 words / 128 bytes |
 
 Scope tags are Object 0 (all payload zero), Pages 1 (id zero), Nest Whole 2
-(all payload zero), Nest Mapping 3 (nonzero valid MappingId). PendRange is
+(all payload zero), Nest Reservation 3 (nonzero valid ReservationId). PendRange is
 `[0,0,0]` for Inherit or `[1,offset,count]` for nonempty, nonoverflowing Pages.
 Unknown/reserved/noncanonical payload rejects. Requests accept Inherit and
 relative Pages. The server resolves bounds at commit; pure Limits checks are
 not a substitute. Published PendInfo uses resolved absolute Pages and validates
-the full scope as well as target family. MappingId and NestId are descriptive,
+the full scope as well as target family. ReservationId and NestId are descriptive,
 not capabilities; Team membership/management and raw IDs never replace a Pend.
 
 `pend::accord(request)` takes the address of `AccordRequest::to_bytes()`; retain
@@ -140,8 +145,8 @@ Slot generation must be zero. Kernel validates a Pend's actual family and
 generation; Flat/Share source positions for Insert also use generation zero.
 Positions are relative to the Slot handle or the Pend's effective window.
 Push moves local to remote; Pull moves remote to local, and decoding requires
-two owning Slots. Insert accepts a Slot or Flat/Share ASSOCIATE or Nest Mapping
-INSERT source; the destination requires Mapping INSERT. Insert/Remove change
+two owning Slots. Insert accepts a Slot or Flat/Share ASSOCIATE or Nest Reservation
+INSERT source; the destination requires Reservation INSERT. Insert/Remove change
 associations, never transfer ownership or extract a Slot from a live Pend.
 Other mapping transitions require their corresponding scoped Nest rights.
 Inspect ignores the supplied mapping generation and observes the current one;
@@ -190,9 +195,9 @@ Whole INSPECT|RESERVE grant, ResourceKind::Nest. Neither name nor membership is
 authority. There is no runtime external Attach/Detach, caller-supplied requester
 or ambient Team destination. `nest::inspect` writes 56-byte NestInfo.
 
-Sign Attach keeps `{ token, mapping }` for MappingPublished/Retired and requires
-Mapping-scoped Nest INSPECT for that same MappingId and full original mapping
-window, with the expected generation; a Whole grant plus a raw MappingId cannot
+Sign Attach keeps `{ token, reservation }` for ReservationPublished/Retired and requires
+Reservation-scoped Nest INSPECT for that same ReservationId and full original mapping
+window, with the expected generation; a Whole grant plus a raw ReservationId cannot
 substitute. NestFault/Closed use Whole INSPECT and generation zero.
 Existing External-only support is unchanged;
 MappingFault stays retired. Fault observations survive Pend handover.

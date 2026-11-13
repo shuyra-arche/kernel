@@ -42,8 +42,8 @@ pub(crate) fn accord(src: PendId, target: AccordTarget, limits: Limits) -> PendI
     pend::accord(crate::ptr(&bytes)).unwrap()
 }
 
-pub(crate) fn id(token: PendId) -> kernel_api::model::cell::MappingId {
-    let PendScope::Nest(NestScope::Mapping { id, .. }) = crate::pend::inspect(token).limits.scope
+pub(crate) fn id(token: PendId) -> kernel_api::model::nest::ReservationId {
+    let PendScope::Nest(NestScope::Reservation { id, .. }) = crate::pend::inspect(token).limits.scope
     else {
         panic!("mapping scope expected")
     };
@@ -134,8 +134,8 @@ pub(crate) fn reserve(
 pub(crate) fn range(scope: PendScope, range: PendRange) -> PendScope {
     match scope {
         PendScope::Pages(_) => PendScope::Pages(range),
-        PendScope::Nest(NestScope::Mapping { id, .. }) => {
-            PendScope::Nest(NestScope::Mapping { id, range })
+        PendScope::Nest(NestScope::Reservation { id, .. }) => {
+            PendScope::Nest(NestScope::Reservation { id, range })
         }
         PendScope::Object | PendScope::Nest(NestScope::Whole) => {
             assert_eq!(range, PendRange::Inherit);
@@ -146,6 +146,6 @@ pub(crate) fn range(scope: PendScope, range: PendRange) -> PendScope {
 
 pub(crate) fn mapping(token: PendId, range: PendRange) -> PendScope {
     let scope = crate::pend::inspect(token).limits.scope;
-    assert!(matches!(scope, PendScope::Nest(NestScope::Mapping { .. })));
+    assert!(matches!(scope, PendScope::Nest(NestScope::Reservation { .. })));
     self::range(scope, range)
 }

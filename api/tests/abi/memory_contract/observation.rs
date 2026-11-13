@@ -6,15 +6,16 @@ use kernel_api::{
     },
     address::VirtAddr,
     model::{
-        cell::{CellLevel, MappingId},
+        cell::CellLevel,
         flat::{
             BlockPhase, BlockStatus, FlatPhase, FlatStatus, FlatVersion, SlotPhase, SlotStatus,
             SlotVersion,
         },
         identity::{PendId, TaskId},
+        nest::ReservationId,
         nest::{
-            MappingPhase, MappingStatus, MappingVersion, MemoGeneration, MemoPhase, MemoStatus,
-            NestInfo, NestKind, NestPhase, NestStatus, NestVersion,
+            MemoGeneration, MemoPhase, MemoStatus, NestInfo, NestKind, NestPhase, NestStatus,
+            NestVersion, ReservationPhase, ReservationStatus, ReservationVersion,
         },
     },
 };
@@ -22,7 +23,7 @@ use kernel_api::{
 fn fixtures() -> Vec<(Query, Snapshot)> {
     let flat = slot(0).flat();
     let nest = memo(0).nest();
-    let mapping = memo(0).mapping();
+    let reservation = memo(0).reservation();
     vec![
         (
             Query::Flat {
@@ -85,7 +86,7 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
             Query::Memo(memo(512)),
             Snapshot::Memo(MemoStatus {
                 nest,
-                mapping,
+                reservation,
                 coordinate: 512,
                 generation: MemoGeneration::new(6).unwrap(),
                 phase: MemoPhase::Published,
@@ -96,21 +97,21 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
             }),
         ),
         (
-            Query::Mapping {
+            Query::Reservation {
                 token: PendId::mint(13),
                 nest,
-                mapping,
+                reservation,
             },
-            Snapshot::Mapping(MappingStatus {
+            Snapshot::Reservation(ReservationStatus {
                 nest,
-                mapping,
-                version: MappingVersion::new(7).unwrap(),
+                reservation,
+                version: ReservationVersion::new(7).unwrap(),
                 offset: 512,
                 count: 512,
                 address: VirtAddr::new(0x8000),
                 level: CellLevel::new(1).unwrap(),
                 access: 6,
-                phase: MappingPhase::Open,
+                phase: ReservationPhase::Open,
             }),
         ),
     ]
@@ -161,10 +162,10 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
     assert!(
         Request::new(
             None,
-            Action::Inspect(Query::Mapping {
+            Action::Inspect(Query::Reservation {
                 token: PendId::mint(1),
                 nest: memo(0).nest(),
-                mapping: MappingId::NONE
+                reservation: ReservationId::NONE
             })
         )
         .is_none()
@@ -460,11 +461,11 @@ fn malformed_observations_reject_headers_geometry_flags_and_reserved_payloads() 
             "fixture {fixture}, word {word}, value {value}"
         );
     }
-    let Snapshot::Mapping(status) = fixtures()[5].1 else {
+    let Snapshot::Reservation(status) = fixtures()[5].1 else {
         unreachable!()
     };
     assert!(
-        Observation::new(Snapshot::Mapping(MappingStatus {
+        Observation::new(Snapshot::Reservation(ReservationStatus {
             address: VirtAddr::new(usize::MAX & !4095),
             ..status
         }))

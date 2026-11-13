@@ -20,9 +20,9 @@ use kernel_api::{
     },
     address::{PAGE_SIZE, VirtAddr},
     model::{
-        cell::MappingId,
         identity::{Mark, PendId},
         modifiable::Modifiable,
+        nest::ReservationId,
         nest::ReserveRequest,
         pend::{CreationRights, NestRights, NestScope, Operations, PendScope},
     },
@@ -67,7 +67,7 @@ fn placement(nest: &Nest, request: ReserveRequest) -> Result<Placement, NestFail
         kernel_api::model::cell::PlacementAt::Highest => PlacementAt::Highest,
         kernel_api::model::cell::PlacementAt::Exact(address) => {
             // CPU reservations belong to the Team's Normal window. External
-            // exact addresses use the backend geometry checked by reserve_mapping;
+            // exact addresses use the backend geometry checked by reserve_reservation;
             // their Layout only records occupancy and has no dynamic windows.
             if !nest.is_external() {
                 if !Nest::user_range(address, size) {
@@ -111,7 +111,7 @@ fn reserve(
     }
     let nest = parent.target().nest().ok_or(NestFail::Denied)?;
     let reserved = nest
-        .reserve_mapping(
+        .reserve_reservation(
             placement(&nest, request)?,
             request.level,
             access,
@@ -119,12 +119,12 @@ fn reserve(
         )
         .map_err(nest_fail)?;
     let span = reserved.span();
-    let id = MappingId::from_bytes(&(span.identity() as u64).to_le_bytes())
-        .filter(|id| *id != MappingId::NONE)
+    let id = ReservationId::from_bytes(&(span.identity() as u64).to_le_bytes())
+        .filter(|id| *id != ReservationId::NONE)
         .ok_or(NestFail::OutOfMemory)?;
     let address = span.initial_start();
-    let grant: pend::PreparedMapping<'_> =
-        pend::prepare_mapping(actor, &parent, id, request.count).map_err(pend_fail)?;
+    let grant: pend::PreparedReservationGrant<'_> =
+        pend::prepare_reservation(actor, &parent, id, request.count).map_err(pend_fail)?;
     let result = grant.entry().token();
     if !pend::live(actor)
         || !parent.permits(Operations::Nest(NestRights::RESERVE))
@@ -147,7 +147,7 @@ fn release(actor: &Arc<Task>, token: PendId) -> Result<usize, NestFail> {
             return Err(NestFail::Dead);
         }
         let entry = pend::locate(actor, token).ok_or(NestFail::Denied)?;
-        let PendScope::Nest(NestScope::Mapping { id, .. }) = entry.scope() else {
+        let PendScope::Nest(NestScope::Reservation { id, .. }) = entry.scope() else {
             return Err(NestFail::Denied);
         };
         if !entry
@@ -157,14 +157,14 @@ fn release(actor: &Arc<Task>, token: PendId) -> Result<usize, NestFail> {
             return Err(NestFail::Denied);
         }
         let nest = entry.target().nest().ok_or(NestFail::Denied)?;
-        let span = nest.mapping(id).ok_or(NestFail::Dead)?;
+        let span = nest.reservation(id).ok_or(NestFail::Dead)?;
         let (offset, count) = entry.authority().window().ok_or(NestFail::Denied)?;
         if offset.get() != 0 || count.get().checked_mul(PAGE_SIZE) != Some(span.initial_size()) {
             return Err(NestFail::Denied);
         }
         (nest, id)
     };
-    nest.release_mapping(id).map_err(cell_fail)?;
+    nest.release_reservation(id).map_err(cell_fail)?;
     Ok(0)
 }
 

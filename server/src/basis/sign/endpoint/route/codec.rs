@@ -41,8 +41,8 @@ pub(crate) fn source_watch(source: SignSource) -> Option<(PendId, Need)> {
         SignSource::Sign { .. }
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
-        | SignSource::MappingRetired { .. }
-        | SignSource::MappingPublished { .. }
+        | SignSource::ReservationRetired { .. }
+        | SignSource::ReservationPublished { .. }
         | SignSource::NestFault { .. }
         | SignSource::NestClosed { .. } => None,
     }
@@ -67,8 +67,8 @@ pub(crate) fn source_key(
         SignSource::Sign { .. }
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
-        | SignSource::MappingRetired { .. }
-        | SignSource::MappingPublished { .. }
+        | SignSource::ReservationRetired { .. }
+        | SignSource::ReservationPublished { .. }
         | SignSource::NestFault { .. }
         | SignSource::NestClosed { .. } => None,
     }
@@ -87,8 +87,8 @@ pub(crate) fn source_ready(pend_entry: &PendEntry, source: SignSource) -> Option
         SignSource::Sign { .. }
         | SignSource::Join { .. }
         | SignSource::Inspect { .. }
-        | SignSource::MappingRetired { .. }
-        | SignSource::MappingPublished { .. }
+        | SignSource::ReservationRetired { .. }
+        | SignSource::ReservationPublished { .. }
         | SignSource::NestFault { .. }
         | SignSource::NestClosed { .. } => None,
     }

@@ -4,10 +4,11 @@ use kernel_api::{
     abi::memory::{Action, Domain, Failure, Opcode, Outcome, Reply, Request, Value},
     address::{PageCount, VirtAddr},
     model::{
-        cell::{CellLevel, MappingId, Placement},
+        cell::{CellLevel, Placement},
         flat::{FlatPhase, FlatVersion},
         identity::PendId,
-        nest::{MappingPhase, MappingVersion, NestPhase, NestVersion, ReserveRequest},
+        nest::ReservationId,
+        nest::{NestPhase, NestVersion, ReservationPhase, ReservationVersion, ReserveRequest},
     },
 };
 
@@ -49,8 +50,8 @@ pub(super) fn mutations() -> Vec<Action> {
         Action::Release {
             token: PendId::mint(7),
             nest: memo(0).nest(),
-            mapping: memo(0).mapping(),
-            expected: MappingVersion::new(u64::MAX).unwrap(),
+            reservation: memo(0).reservation(),
+            expected: ReservationVersion::new(u64::MAX).unwrap(),
         },
     ]
 }
@@ -58,10 +59,10 @@ pub(super) fn mutations() -> Vec<Action> {
 pub(super) fn results() -> Vec<Reply> {
     let f = FlatVersion::new(1 << 63).unwrap();
     let n = NestVersion::new(1 << 63).unwrap();
-    let m = MappingVersion::new(1 << 63).unwrap();
+    let m = ReservationVersion::new(1 << 63).unwrap();
     let flat = slot(0).flat();
     let nest = memo(0).nest();
-    let mapping = memo(0).mapping();
+    let reservation = memo(0).reservation();
     let mut results = vec![
         Reply::new(
             id(),
@@ -90,7 +91,7 @@ pub(super) fn results() -> Vec<Reply> {
                 token: PendId::mint(5),
                 nest,
                 nest_version: n,
-                mapping,
+                reservation,
                 version: m,
                 address: VirtAddr::new(0x8000),
             }),
@@ -130,19 +131,19 @@ pub(super) fn results() -> Vec<Reply> {
         results.push(Reply::new(id(), Opcode::Delete(Domain::Nest), outcome).unwrap());
     }
     for phase in [
-        MappingPhase::Releasing,
-        MappingPhase::Released,
-        MappingPhase::Failed,
+        ReservationPhase::Releasing,
+        ReservationPhase::Released,
+        ReservationPhase::Failed,
     ] {
-        let value = Value::MappingLifecycle {
+        let value = Value::ReservationLifecycle {
             nest,
-            mapping,
+            reservation,
             version: m,
             phase,
         };
         let outcome = match phase {
-            MappingPhase::Releasing => Outcome::Pending(value),
-            MappingPhase::Released => Outcome::Committed(value),
+            ReservationPhase::Releasing => Outcome::Pending(value),
+            ReservationPhase::Released => Outcome::Committed(value),
             _ => Outcome::Failed {
                 failure: Failure::Hardware,
                 retained: Some(value),
@@ -260,8 +261,8 @@ fn creation_reservation_and_release_reject_bad_geometry_identity_or_version() {
             Action::Release {
                 token: PendId::mint(1),
                 nest: memo(0).nest(),
-                mapping: MappingId::NONE,
-                expected: MappingVersion::INITIAL
+                reservation: ReservationId::NONE,
+                expected: ReservationVersion::INITIAL
             }
         )
         .is_none()
@@ -298,11 +299,11 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
         ),
         (
             Opcode::Release,
-            Value::MappingLifecycle {
+            Value::ReservationLifecycle {
                 nest: memo(0).nest(),
-                mapping: memo(0).mapping(),
-                version: MappingVersion::INITIAL,
-                phase: MappingPhase::Releasing,
+                reservation: memo(0).reservation(),
+                version: ReservationVersion::INITIAL,
+                phase: ReservationPhase::Releasing,
             },
         ),
     ];
@@ -417,10 +418,10 @@ fn reservation_result_carries_the_new_grant_and_both_structural_versions() {
 fn structural_versions_are_nonzero_full_width_and_never_wrap() {
     assert!(FlatVersion::new(0).is_none());
     assert!(NestVersion::new(0).is_none());
-    assert!(MappingVersion::new(0).is_none());
+    assert!(ReservationVersion::new(0).is_none());
     assert_eq!(FlatVersion::INITIAL.get(), 1);
     assert_eq!(NestVersion::INITIAL.get(), 1);
-    assert_eq!(MappingVersion::INITIAL.get(), 1);
+    assert_eq!(ReservationVersion::INITIAL.get(), 1);
     for value in [1, 1 << 63, u64::MAX - 1, u64::MAX] {
         assert_eq!(
             FlatVersion::new(value)
@@ -437,10 +438,10 @@ fn structural_versions_are_nonzero_full_width_and_never_wrap() {
             value.checked_add(1)
         );
         assert_eq!(
-            MappingVersion::new(value)
+            ReservationVersion::new(value)
                 .unwrap()
                 .next()
-                .map(MappingVersion::get),
+                .map(ReservationVersion::get),
             value.checked_add(1)
         );
     }

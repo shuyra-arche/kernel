@@ -30,7 +30,7 @@ pub(crate) fn find(page: &Arc<Page>) -> Option<Arc<Change>> {
         .filter_map(Weak::upgrade)
         .find(|c| Arc::ptr_eq(c.page(), page))
 }
-/// Completion notification runs outside Task/Flat/Mapping locks, including death cleanup.
+/// Completion notification runs outside Task/Flat/Reservation locks, including death cleanup.
 pub(crate) fn maintain() {
     if super::page::reclaim::change::take_completion() {
         LIVE.lock().retain(|change| change.strong_count() != 0);

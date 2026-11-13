@@ -75,7 +75,7 @@ unsafe impl Sync for Reservation {}
 
 /// A private address reservation with every namespace allocation prepared.
 /// No Page or hardware publication can exist before this value is consumed.
-pub(crate) struct ReservedMapping {
+pub(crate) struct PreparedReservation {
     nest: Arc<Nest>,
     span: Arc<super::span::Span>,
     node: Option<alloc::boxed::Box<super::super::IndexNode>>,
@@ -85,7 +85,7 @@ pub(crate) struct ReservedMapping {
     published: bool,
 }
 
-impl ReservedMapping {
+impl PreparedReservation {
     pub(in crate::basis::nest) fn new(
         nest: &Arc<Nest>,
         reservation: Reservation,
@@ -124,7 +124,7 @@ impl ReservedMapping {
                 .map_err(|_| NestError::OutOfMemory)?,
         );
         staged.span.prepare_cleanup()?;
-        nest.mappings
+        nest.reservations
             .prepare()
             .map_err(|_| NestError::OutOfMemory)?;
         staged.prepared = true;
@@ -152,12 +152,12 @@ impl ReservedMapping {
                     )
                     .expect("admitted mapping extent"),
                 ))
-            || !matches!(root.scope(), PendScope::Nest(NestScope::Mapping { id, .. })
+            || !matches!(root.scope(), PendScope::Nest(NestScope::Reservation { id, .. })
                 if id.get() == self.span.identity())
         {
             return Err(super::super::NestError::NoRegion);
         }
-        if self.nest.is_external() && self.nest.mappings.competing_reservation(self.creator) {
+        if self.nest.is_external() && self.nest.reservations.competing_reservation(self.creator) {
             return Err(super::super::NestError::Busy);
         }
         if state
@@ -170,7 +170,7 @@ impl ReservedMapping {
         {
             return Err(super::super::NestError::AlreadyMapped);
         }
-        self.nest.mappings.publish(
+        self.nest.reservations.publish(
             self.binding.take().expect("prepared range identity"),
             self.span.clone(),
             self.creator,
@@ -185,11 +185,11 @@ impl ReservedMapping {
     }
 }
 
-impl Drop for ReservedMapping {
+impl Drop for PreparedReservation {
     fn drop(&mut self) {
         if !self.published {
             if self.prepared {
-                self.nest.mappings.cancel_prepared();
+                self.nest.reservations.cancel_prepared();
             }
             // This staged value has never admitted an association or a PTE.
             assert!(Nest::give_back_unpublished(&self.span.reservation));

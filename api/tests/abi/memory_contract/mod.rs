@@ -7,15 +7,17 @@ mod objects;
 mod observation;
 mod reply;
 mod request;
+mod reservation;
 mod reshape;
 
 use kernel_api::{
     abi::{self, call::EnvCall},
     address::BASE_PAGE_SIZE,
     model::{
-        cell::{CellLevel, MappingId},
+        cell::CellLevel,
         flat::{BlockGeneration, BlockRef, FlatId, SlotPosition, SlotVersion},
         identity::PendId,
+        nest::ReservationId,
         nest::{MemoGeneration, MemoPosition, NestId},
     },
 };
@@ -28,7 +30,7 @@ fn memo(page: usize) -> MemoPosition {
     MemoPosition::new(
         PendId::mint(13),
         NestId::new(17).unwrap(),
-        MappingId::from_bytes(&19u64.to_le_bytes()).unwrap(),
+        ReservationId::from_bytes(&19u64.to_le_bytes()).unwrap(),
         page,
     )
     .unwrap()
@@ -58,7 +60,7 @@ fn positions_encode_identity_separately_from_expected_revision() {
         (
             memo.token().get(),
             memo.nest().get(),
-            memo.mapping().get(),
+            memo.reservation().get(),
             memo.page()
         ),
         (13, 17, 19, 512)
@@ -142,7 +144,13 @@ fn position_decoders_reject_sentinels_overflow_and_nonexact_lengths() {
     assert!(MemoPosition::from_bytes(&[0; MemoPosition::WIDTH + 1]).is_none());
     assert!(SlotPosition::new(PendId::NONE, FlatId::new(1).unwrap(), 0).is_none());
     assert!(
-        MemoPosition::new(PendId::mint(1), NestId::new(1).unwrap(), MappingId::NONE, 0).is_none()
+        MemoPosition::new(
+            PendId::mint(1),
+            NestId::new(1).unwrap(),
+            ReservationId::NONE,
+            0
+        )
+        .is_none()
     );
 }
 

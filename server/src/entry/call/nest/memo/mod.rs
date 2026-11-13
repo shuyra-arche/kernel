@@ -1,9 +1,9 @@
-//! Mapping-scoped operations; the v10 adapter supplies normalized descriptors.
+//! Reservation-scoped operations; the v10 adapter supplies normalized descriptors.
 use super::super::memory::{caller, source_fail};
 use crate::basis::{
     cell::page::Page,
     nest::Access,
-    pend::{self, access::Mapping},
+    pend::{self, access::Reservation},
     unit::task::{Task, TaskIdent},
 };
 use alloc::sync::Arc;
@@ -20,14 +20,14 @@ fn with_mapping<T>(
     pos: CellPosition,
     rights: NestRights,
     ident: &Arc<TaskIdent>,
-    run: impl FnOnce(&Arc<Task>, &Mapping, usize) -> Result<T, CellFail>,
+    run: impl FnOnce(&Arc<Task>, &Reservation, usize) -> Result<T, CellFail>,
 ) -> Result<T, CellFail> {
     let actor = caller(ident).ok_or(CellFail::Denied)?;
     let _serial = actor.pend.lock();
     let CellObject::Pend(token) = pos.object else {
         return Err(CellFail::Denied);
     };
-    let mapping = Mapping::acquire(&actor, token, rights).map_err(source_fail)?;
+    let mapping = Reservation::acquire(&actor, token, rights).map_err(source_fail)?;
     let page = mapping.page(pos.page).map_err(source_fail)?;
     let result = run(&actor, &mapping, page);
     if !pend::live(&actor) || !mapping.entry().authority().alive() {
@@ -42,7 +42,7 @@ pub(in crate::entry::call) fn inspect(
 ) -> Result<CellInfo, CellFail> {
     with_mapping(pos, NestRights::INSPECT, ident, |_, mapping, page| {
         let span = mapping.span().map_err(source_fail)?;
-        mapping.nest().progress_mappings();
+        mapping.nest().progress_reservations();
         let _ = mapping.nest().retry_invalidation();
         mapping.nest().finish_memo(&span, page);
         span.inspect_memo(page).map_err(CellFail::from)

@@ -278,9 +278,9 @@ impl<'a> Reader<'a> {
         valid_token(value).then(|| crate::model::identity::PendId::mint(value))
     }
 
-    fn mapping(&mut self) -> Option<crate::model::cell::MappingId> {
+    fn reservation(&mut self) -> Option<crate::model::nest::ReservationId> {
         let value = self.size()?;
-        valid_token(value).then(|| crate::model::cell::MappingId::new(value))
+        valid_token(value).then(|| crate::model::nest::ReservationId::new(value))
     }
 
     fn finish(self) -> Option<()> {
