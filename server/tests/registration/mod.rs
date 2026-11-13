@@ -13,6 +13,7 @@ mod branch;
 #[allow(dead_code)]
 #[path = "../../src/basis/unit/control/mod.rs"]
 pub(crate) mod control;
+mod delegation;
 #[path = "../../src/basis/pend/source/epoch.rs"]
 mod epoch;
 mod exports;
@@ -51,7 +52,6 @@ use window::Window;
 mod basis {
     pub(crate) use crate::name;
     pub(crate) mod unit {
-        pub(crate) use crate::control;
         pub(crate) mod task {
             pub(crate) use crate::support::Task;
         }
@@ -169,7 +169,7 @@ fn entry() -> Arc<PendEntry> {
 
 #[test]
 fn unpublished_pend_rolls_back_and_keeps_one_record_on_publish() {
-    let table = ledger::Table::new().unwrap();
+    let table = ledger::Table::new(kernel_api::model::identity::TaskId::new(0)).unwrap();
     let _transaction = table.lock();
     let entry = entry();
     let failed = (|| -> Result<(), ()> {
@@ -197,13 +197,13 @@ fn unpublished_pend_rolls_back_and_keeps_one_record_on_publish() {
 #[test]
 fn failed_pend_preparation_and_batch_leave_no_hidden_reservations() {
     for fail in [0, 1] {
-        let table = ledger::Table::new().unwrap();
+        let table = ledger::Table::new(kernel_api::model::identity::TaskId::new(0)).unwrap();
         let entry = entry();
         assert!(allocation::fail_after(fail, || table.prepare(entry.clone())).is_err());
         table.prepare(entry).unwrap().publish();
         assert_eq!(table.entries.lock().len(), 1);
     }
-    let table = ledger::Table::new().unwrap();
+    let table = ledger::Table::new(kernel_api::model::identity::TaskId::new(0)).unwrap();
     let records: Vec<_> = (1..=8).map(|_| entry()).collect();
     // Simulate an error during a multi-record delivery after several reservations.
     let prepared: Vec<_> = records

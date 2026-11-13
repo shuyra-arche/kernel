@@ -64,17 +64,20 @@ pub(crate) struct Task {
 }
 impl Task {
     pub(crate) fn new(id: usize) -> Arc<Self> {
+        Self::in_team(id, 1)
+    }
+    pub(crate) fn in_team(id: usize, team: usize) -> Arc<Self> {
         Arc::new(Self {
             ident: Ident {
                 id: TaskId::new(id),
                 controller: TaskId::new(0),
                 team: Team {
-                    id: TeamId::new(1),
+                    id: TeamId::new(team),
                     creator: TaskId::new(0),
                 },
             },
             administration: super::control::Table::new(),
-            pend: super::ledger::Table::new().unwrap(),
+            pend: super::ledger::Table::new(TaskId::new(id)).unwrap(),
             dead: AtomicBool::new(false),
         })
     }

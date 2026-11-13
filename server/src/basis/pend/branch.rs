@@ -78,9 +78,6 @@ pub(crate) fn accord(
         kernel_api::model::pend::Operations::Share(_)
     );
     let target = dst.upgrade().ok_or(PendFail::Denied)?;
-    if !crate::basis::unit::control::adjacent(caller, &target) {
-        return Err(PendFail::Denied);
-    }
     let observed = super::locate(caller, src).ok_or(PendFail::Denied)?;
     if !observed.derives(limits, share) {
         return Err(PendFail::Denied);
@@ -162,6 +159,14 @@ pub(crate) fn accord(
                 commit = crate::basis::commit();
                 if !super::live(caller) || !super::live(&target) {
                     return Err(PendFail::Dead);
+                }
+                if !pend_entry.alive()
+                    || !pend_entry.derives(limits, share)
+                    || permit.is_some_and(|(token, operation)| {
+                        !super::locate(caller, token).is_some_and(|entry| entry.permits(operation))
+                    })
+                {
+                    return Err(PendFail::Denied);
                 }
                 check_source(window)?;
             }

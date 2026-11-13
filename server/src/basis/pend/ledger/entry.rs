@@ -7,6 +7,7 @@ use kernel_api::model::identity::Mark;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
 
+use super::admission::{Charge, Sender};
 use super::table::{HeirRegistration, Registration};
 use crate::basis::pend::Target;
 use crate::basis::unit::task::Task;
@@ -26,10 +27,20 @@ pub(crate) struct PendEntry {
     mark: Mark,
     sire: Option<PendId>,
     lord: Weak<Task>,
+    sender: Option<Sender>,
+    charge: crate::metal::sync::SpinLock<Option<Charge>>,
     meta: Target,
 }
 
 impl PendEntry {
+    pub(super) fn sender(&self) -> Option<Sender> {
+        self.sender
+    }
+    pub(super) fn charge(&self, charge: Charge) {
+        let mut held = self.charge.lock();
+        assert!(held.is_none(), "one ledger registration per PendEntry");
+        *held = Some(charge);
+    }
     /// 这一枚 PendEntry 的 Pend：持有它的调用方据此知道自己的分支在哪条撤销边上。
     pub(crate) fn authority(&self) -> &Arc<Pend> {
         &self.authority
@@ -216,6 +227,8 @@ impl PendEntry {
             mark,
             sire,
             lord: Weak::new(),
+            sender: None,
+            charge: crate::metal::sync::SpinLock::new(None),
             meta,
         })
     }
@@ -226,6 +239,7 @@ impl PendEntry {
             .swap(true, core::sync::atomic::Ordering::AcqRel)
         {
             self.meta.release_pend(self.token);
+            self.charge.lock().take();
         }
     }
 
@@ -236,6 +250,10 @@ impl PendEntry {
 
     pub(crate) fn parent(&mut self, token: PendId, task: Weak<Task>) {
         self.sire = Some(token);
+        self.sender = task.upgrade().map(|sender| Sender {
+            task: sender.ident.id,
+            team: sender.ident.team.id,
+        });
         self.lord = task;
     }
 
