@@ -18,6 +18,35 @@ use core::num::NonZeroU64;
 /// Proposed activation version; distinct from the currently supported ABI.
 pub const VERSION: u64 = 11;
 
+/// Frozen next-version rights. Keeping them outside the v10 bitflag definition
+/// preserves rejection by the running Pend wire decoder.
+pub mod rights {
+    use crate::model::pend::{FlatRights, Limits, Operations};
+    pub const OCCUPY: FlatRights = FlatRights::from_bits_retain(1 << 6);
+    pub const VACATE: FlatRights = FlatRights::from_bits_retain(1 << 7);
+    pub const RESHAPE: FlatRights = FlatRights::from_bits_retain(1 << 8);
+
+    /// Selection of already-issued next Flat rights, not a v10 decoder or a
+    /// delegation API. Normalize only the three frozen additions, then reuse
+    /// the existing scope/access attenuation rule. Unknown bits still reject.
+    pub fn selects(parent: Limits, selected: Limits) -> bool {
+        let (Operations::Flat(held), Operations::Flat(need)) =
+            (parent.operations, selected.operations)
+        else {
+            return false;
+        };
+        let known = FlatRights::all() | OCCUPY | VACATE | RESHAPE;
+        if !known.contains(held) || !known.contains(need) || !held.contains(need) {
+            return false;
+        }
+        let legacy = |limits: Limits, bits: FlatRights| Limits {
+            operations: Operations::Flat(FlatRights::from_bits_truncate(bits.bits())),
+            ..limits
+        };
+        legacy(parent, held).permits_narrowing(legacy(selected, need))
+    }
+}
+
 /// Proposed per-Task result window for these requests. Server integration must
 /// reserve capacity before admission and must never evict a Pending operation.
 pub const RESULT_CAPACITY: usize = 16;

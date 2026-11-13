@@ -62,6 +62,7 @@ mod memo;
 #[path = "../../src/basis/flat/storage/mod.rs"]
 mod state;
 
+mod residency;
 mod transaction;
 #[allow(dead_code)]
 #[path = "../../src/basis/flat/transfer/error.rs"]

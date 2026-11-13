@@ -116,6 +116,7 @@ impl PreparedTask {
                     life: self.life.clone(),
                     state: self.state.clone(),
                     pend,
+                    memory_results: SpinLock::new(None),
                     administration: crate::basis::unit::control::Table::new(),
                     heir: SpinLock::new(Vec::new()),
                     retirement: SpinLock::new(super::super::retirement::Retirement::new()),

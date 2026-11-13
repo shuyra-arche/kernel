@@ -273,6 +273,12 @@ fn unsupported<T>() -> T {
 pub(crate) struct Anchor;
 pub(crate) struct Source;
 impl Source {
+    pub(crate) fn flat(&self) -> &Self {
+        unsupported()
+    }
+    pub(crate) fn is_explicit(&self) -> bool {
+        unsupported()
+    }
     pub(crate) fn source_id(&self) -> FlatId {
         unsupported()
     }

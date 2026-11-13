@@ -342,6 +342,10 @@ gates are unchanged. M2 does not activate the next syscall version.
 
 ## Verification boundary
 
+The [M3 progress record](memory-m3.md) describes the first explicit-residency
+implementation, staged Task result path and remaining logical-source work. M3
+is not complete and this does not activate the next syscall version.
+
 `api/tests/abi/memory_contract/` verifies exact byte layouts, identity/sentinel
 rejection, full-width non-wrapping revisions, unchanged coordinate meaning after
 window narrowing, complete large-Page geometry and continued rejection of ABI 11

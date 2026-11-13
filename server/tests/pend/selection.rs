@@ -17,6 +17,33 @@ use std::sync::{
 fn pages(offset: usize, count: usize) -> PendScope {
     PendScope::Pages(PendRange::Pages { offset, count })
 }
+
+#[test]
+fn next_residency_selection_requires_an_explicit_live_grant() {
+    use kernel_api::abi::memory::rights;
+    let root = Pend::try_new_scope(
+        Yes,
+        pages(10, 8),
+        Operations::Flat(FlatRights::INSPECT | rights::OCCUPY),
+        Distributable::Yes,
+    )
+    .unwrap();
+    assert!(root.selects(Operations::Flat(rights::OCCUPY), pages(10, 1)));
+    assert!(root.selects(Operations::Flat(FlatRights::INSPECT), pages(10, 1)));
+    assert!(!root.selects(Operations::Flat(rights::VACATE), pages(10, 1)));
+    assert!(!root.selects(Operations::Flat(rights::OCCUPY), pages(9, 1)));
+    assert!(!flat().selects(Operations::Flat(rights::OCCUPY), pages(10, 1)));
+    let unknown = Pend::try_new_scope(
+        Yes,
+        pages(10, 8),
+        Operations::Flat(rights::OCCUPY | FlatRights::from_bits_retain(1 << 20)),
+        Distributable::Yes,
+    )
+    .unwrap();
+    assert!(!unknown.selects(Operations::Flat(rights::OCCUPY), pages(10, 1)));
+    root.invalidate();
+    assert!(!root.selects(Operations::Flat(rights::OCCUPY), pages(10, 1)));
+}
 fn mapping(id: usize, offset: usize, count: usize) -> PendScope {
     PendScope::Nest(NestScope::Mapping {
         id: MappingId::from_bytes(&(id as u64).to_le_bytes()).unwrap(),

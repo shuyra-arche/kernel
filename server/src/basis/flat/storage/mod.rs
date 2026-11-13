@@ -1,6 +1,7 @@
 //! Backing and residency state for a linear source.
 
 mod region;
+pub(super) mod residency;
 pub(super) mod slot;
 
 use alloc::sync::Arc;
@@ -31,6 +32,8 @@ pub(super) struct ResidencyEntry {
 }
 
 pub(super) struct FlatState {
+    pub explicit: bool,
+    pub revision: residency::Revision,
     pub source: FlatSource,
     pub residencies: Vec<ResidencyEntry>,
     pub next_residency: usize,
@@ -42,6 +45,8 @@ pub(super) struct FlatState {
 impl FlatState {
     pub fn new(source: FlatSource, transferable: bool) -> Self {
         Self {
+            explicit: false,
+            revision: residency::Revision::new(),
             source,
             residencies: Vec::new(),
             next_residency: 1,
@@ -77,7 +82,7 @@ impl FlatState {
     /// 以及任何一次内核或全局发布都会把它整份置假——全局条目对 ASID 定向失效免疫，
     /// 旧 TLB 无从确认，而关联退场并不能证明它没了。
     fn plain_origin(&self) -> Result<(), TransferError> {
-        if !self.transferable {
+        if !self.transferable || self.explicit {
             return Err(TransferError::NotTransferable);
         }
         Ok(())

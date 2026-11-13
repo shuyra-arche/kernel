@@ -48,6 +48,9 @@ pub struct Task {
     pub(crate) life: Arc<Anchor>,
     pub(crate) state: Arc<SpinLock<TaskState>>,
     pub(crate) pend: Table,
+    /// One lazy, bounded next-memory result window for this actual Task.
+    pub(crate) memory_results:
+        SpinLock<Option<alloc::boxed::Box<kernel_api::abi::memory::journal::Journal>>>,
     pub(crate) administration: crate::basis::unit::control::Table,
     pub(crate) heir: SpinLock<Vec<Arc<Team>>>,
     extensions: SpinLock<crate::metal::switcher::context::extension::ExtendedContext>,

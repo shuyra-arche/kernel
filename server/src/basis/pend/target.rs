@@ -168,10 +168,13 @@ impl Target {
                         PageCount::new(count).ok_or(PendFail::Denied)?,
                     )
                     .map_err(|_| PendFail::NotAligned)?;
-                (
-                    scope,
-                    Operations::Flat(kernel_api::model::pend::FlatRights::all()),
-                )
+                let mut rights = kernel_api::model::pend::FlatRights::all();
+                if meta.source().flat().is_explicit() {
+                    rights |= kernel_api::abi::memory::rights::OCCUPY
+                        | kernel_api::abi::memory::rights::VACATE
+                        | kernel_api::abi::memory::rights::RESHAPE;
+                }
+                (scope, Operations::Flat(rights))
             }
             Self::View(view) => return view.new_pend(modifiable, token, scope),
             Self::Sign(_)
