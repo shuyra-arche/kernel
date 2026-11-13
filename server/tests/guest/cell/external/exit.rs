@@ -52,7 +52,7 @@ fn prepare(bar: PendId, root: PendId, task: TaskId) -> PendId {
 extern "C" fn publisher() -> ! {
     let bar_token = PendId::mint(BAR.load(Ordering::Acquire));
     let root = PendId::mint(NEST.load(Ordering::Acquire));
-    let (bar, _) = share_view::open(bar_token).unwrap();
+    let (bar, _) = crate::open_share(bar_token).unwrap();
     let slot = super::super::allocate(1);
     let pos = create(root, slot, ADDRESS, true);
     // Leave a vacant reservation as well as the active mapping.
@@ -73,7 +73,7 @@ extern "C" fn publisher() -> ! {
 extern "C" fn successor() -> ! {
     let bar_token = PendId::mint(BAR.load(Ordering::Acquire));
     let token = PendId::mint(NEST.load(Ordering::Acquire));
-    let (bar, _) = share_view::open(bar_token).unwrap();
+    let (bar, _) = crate::open_share(bar_token).unwrap();
     assert_eq!(context(token).phase, NestPhase::Bound);
     let slot = super::super::allocate(1);
     let (cpu, address) = super::super::attach(slot, 1);
@@ -114,7 +114,7 @@ pub(in super::super) fn death(at: usize, count: usize) {
     sign::attach(closed_event, SignSource::NestClosed { token: root }, 0).unwrap();
     let task = super::super::lifecycle::spawn(publisher as *const () as usize);
     let nest_child = prepare(bar, root, task);
-    assert!(share_view::open(bar).is_err());
+    assert!(crate::open_share(bar).is_err());
     unit::resume(UnitTarget::Task(task)).unwrap();
     let until = room::clock() + 2_000_000_000;
     let old_mapping = loop {
@@ -156,7 +156,7 @@ pub(in super::super) fn death(at: usize, count: usize) {
     );
     let mut info = [0; NestInfo::WIDTH];
     assert!(nest::inspect(nest_child, VirtAddr::new(info.as_mut_ptr() as usize)).is_err());
-    let (registers, _) = share_view::open(bar).unwrap();
+    let (registers, _) = crate::open_share(bar).unwrap();
     assert_eq!(read(registers, 0x98) & 1, 0);
     // A queued request may have finished before Task retirement began. Probe
     // the now-retired address explicitly to establish denied late access.

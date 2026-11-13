@@ -221,7 +221,7 @@ fn pair(view: PendId, sign: PendId, task: TaskId) -> (PendId, PendId) {
     (view, sign)
 }
 fn open(view: PendId) {
-    let (address, _) = share_view::open(view).unwrap();
+    let (address, _) = crate::open_share(view).unwrap();
     UART.store(address.get(), Ordering::Release);
     write(1, 0);
 }

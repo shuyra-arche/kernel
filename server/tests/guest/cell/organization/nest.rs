@@ -11,8 +11,8 @@ use kernel_api::{
             PendScope,
         },
         unit::{
-            ControlId, CreatedUnit, ExitCause, ExitScope, UnitCreate, UnitQuery,
-            UnitState, UnitTarget,
+            ControlId, CreatedUnit, ExitCause, ExitScope, UnitCreate, UnitQuery, UnitState,
+            UnitTarget,
         },
     },
 };

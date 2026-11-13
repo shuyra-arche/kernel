@@ -55,6 +55,25 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 fn ptr(bytes: &[u8]) -> VirtAddr {
     VirtAddr::new(bytes.as_ptr() as usize)
 }
+// An unrelated Task may own this Nest's fence. Busy retains no caller-owned
+// address result; retry across a scheduling boundary under a fixed deadline.
+fn open_share(
+    token: kernel_api::model::identity::PendId,
+) -> kernel_api::abi::call::share_view::ShareResult<(VirtAddr, usize)> {
+    let deadline = room_call::clock().saturating_add(5_000_000_000);
+    loop {
+        match kernel_client::call::share_view::open(token) {
+            Err(error) if error.source == kernel_api::abi::call::share_view::ShareFail::Busy => {
+                assert!(
+                    room_call::clock() < deadline,
+                    "Share.Open continuation timed out"
+                );
+                room_call::yield_();
+            }
+            result => return result,
+        }
+    }
+}
 fn allocate(count: usize) -> SlotId {
     cell::create(
         crate::license::get(),
