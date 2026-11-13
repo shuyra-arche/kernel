@@ -3,10 +3,7 @@
 use super::*;
 use kernel_api::{
     address::{PageCount, PageOffset},
-    model::{
-        flat::BlockPhase,
-        pend::{Operations, PendRange, PendScope},
-    },
+    model::{flat::BlockPhase, pend::Operations},
 };
 
 pub(in crate::entry::call) fn effect(
@@ -34,9 +31,9 @@ pub(in crate::entry::call) fn effect(
                     .page()
                     .checked_sub(meta.source().index().get())
                     .ok_or(Failure::Denied)?;
-                if !entry.authority().selects(
-                    Operations::Flat(FlatRights::BLOCK),
-                    PendScope::Pages(PendRange::Pages { offset, count }),
+                if !entry.authority().contains(
+                    PageOffset::new(offset),
+                    PageCount::new(count).ok_or(Failure::NotAligned)?,
                 ) {
                     return Err(Failure::Denied);
                 }
@@ -84,13 +81,19 @@ pub(in crate::entry::call) fn effect(
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
                 if !pend::live(actor)
-                    || !entry.permits(kernel_api::model::pend::Operations::Flat(FlatRights::BLOCK))
+                    || !(entry.alive()
+                        && entry
+                            .authority()
+                            .limits()
+                            .operations
+                            .contains(Operations::Flat(FlatRights::BLOCK)))
                 {
                     return Err(Failure::Denied);
                 }
                 block
                     .recover(reference, actor, start.token(), entry.authority())
                     .map_err(pend_error)?;
+                source.recover_origins(actor.ident.id, entry.authority(), &block);
                 // Takeover is already committed even if a later bounded drain
                 // fails. Reply recovery must identify the new, usable epoch.
                 receipt.start(Value::Maintenance {
@@ -180,7 +183,13 @@ pub(in crate::entry::call) fn resolve(
         return Err(Failure::Dead);
     }
     let entry = pend::locate(actor, maintenance.token).ok_or(Failure::Denied)?;
-    if !entry.permits(Operations::Flat(FlatRights::BLOCK)) {
+    if !(entry.alive()
+        && entry
+            .authority()
+            .limits()
+            .operations
+            .contains(Operations::Flat(FlatRights::BLOCK)))
+    {
         return Err(Failure::Denied);
     }
     let pend::Target::Flat(meta) = entry.target() else {
@@ -195,13 +204,7 @@ pub(in crate::entry::call) fn resolve(
         return Err(Failure::Denied);
     }
     let (offset, count) = block.window();
-    if !entry.authority().selects(
-        Operations::Flat(FlatRights::BLOCK),
-        PendScope::Pages(PendRange::Pages {
-            offset: offset.get(),
-            count: count.get(),
-        }),
-    ) {
+    if !entry.authority().contains(offset, count) {
         return Err(Failure::Denied);
     }
     if held && !matches!(block.phase(), BlockPhase::Held | BlockPhase::Releasing) {
@@ -250,6 +253,12 @@ pub(super) fn vacate(
             Arc::ptr_eq(&source, &target_source).then_some(entry.authority().as_ref()),
         )
         .map_err(pend_error)?;
+    if let Some(origin) = range.provenance() {
+        origin
+            .check(actor.ident.id, None, memory::rights::VACATE, false)
+            .map_err(pend_error)?;
+        origin.admit(Some(entry.authority())).map_err(pend_error)?;
+    }
     let version = block.vacate(&range, expected).map_err(residency_error)?;
     Ok(Value::Slot { version, page: 0 })
 }
@@ -284,32 +293,6 @@ pub(super) fn transfer(
         .ok_or(Failure::SourceEmpty)?;
     let in_origin = block.covers(&from);
     let target_origin = block.covers(&target);
-    let origin_entry = pend::locate(actor, from_token).ok_or(Failure::Denied)?;
-    if in_origin && !Arc::ptr_eq(origin_entry.authority(), entry.authority()) {
-        return Err(Failure::Denied);
-    }
-    if !in_origin && from.stage_origin(&block, page.id()).is_none() {
-        // Importing an untracked replacement cannot wash a restricted donor
-        // branch into the destination's stronger rights. The initial import is
-        // limited to the caller's unrestricted root allocation; tracked Pages
-        // instead carry their original maintenance record on every hop.
-        let donor = origin_entry
-            .target()
-            .memory()
-            .and_then(|meta| meta.authorization())
-            .ok_or(Failure::Denied)?;
-        let root = donor.root().ok_or(Failure::Denied)?;
-        let limits = origin_entry.authority().limits();
-        if !Arc::ptr_eq(&root.2, origin_entry.authority())
-            || origin_entry.modifiable() != kernel_api::model::modifiable::Modifiable::Yes
-            || limits.distributable != kernel_api::model::pend::Distributable::Yes
-            || !origin_entry.permits(Operations::Flat(
-                FlatRights::ASSOCIATE | memory::rights::VACATE | FlatRights::TRANSFER,
-            ))
-        {
-            return Err(Failure::Denied);
-        }
-    }
     let origin = if in_origin {
         from.index().get()
     } else if let Some(origin) = from.stage_origin(&block, page.id()) {
@@ -342,22 +325,42 @@ pub(super) fn transfer(
             )
             .map_err(pend_error)?;
     }
+    if let Some(origin) = from.provenance() {
+        origin.admit(Some(entry.authority())).map_err(pend_error)?;
+    }
     let was_retained = block.retained(&page);
+    let (provenance, restore) = pend::Provenance::prepare(
+        actor,
+        from_token,
+        &from,
+        to.token(),
+        &target,
+        Some(&block),
+        !was_retained,
+    )
+    .map_err(pend_error)?;
     block.retain(page.clone()).map_err(pend_error)?;
     let result = (|| {
         let permit = block.permit(&page).map_err(pend_error)?;
         if page.obligations() != 0 || page.quarantined() {
             return Err(Failure::Busy);
         }
-        let stage = if target_origin {
+        let stage = if target_origin || restore {
             None
         } else {
             Some(block.stage(page.id(), origin).map_err(pend_error)?)
         };
-        from.transfer_held(from_version, &target, to_version, permit.change(), stage)
-            .map_err(residency_error)
+        from.transfer_held(
+            from_version,
+            &target,
+            to_version,
+            permit.change(),
+            stage,
+            provenance,
+        )
+        .map_err(residency_error)
     })();
-    if result.is_err() && !was_retained {
+    if result.is_err() && !was_retained || result.is_ok() && restore {
         block.cancel_page(&page);
     }
     result

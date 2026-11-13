@@ -52,7 +52,12 @@ impl Epoch {
         }
     }
     pub(super) fn live(&self, window: (PageOffset, PageCount)) -> bool {
-        self.authority.permits(Operations::Flat(FlatRights::BLOCK))
+        self.authority.alive()
+            && self
+                .authority
+                .limits()
+                .operations
+                .contains(Operations::Flat(FlatRights::BLOCK))
             && self.authority.contains(window.0, window.1)
             && self.task.upgrade().is_some_and(|task| pend::live(&task))
     }
@@ -68,12 +73,24 @@ impl Epoch {
             || self.live(window)
             || !pend::live(actor)
             || !self.authority.descends_from(authority)
-            || !authority.permits(Operations::Flat(FlatRights::BLOCK))
+            || !(authority.alive()
+                && authority
+                    .limits()
+                    .operations
+                    .contains(Operations::Flat(FlatRights::BLOCK)))
             || !authority.contains(window.0, window.1)
         {
             return Err(PendFail::Denied);
         }
         let generation = expected.generation().next().ok_or(PendFail::OutOfMemory)?;
+        if self.authority.configured() == Modifiable::No {
+            self.data = Modifiable::No;
+        }
+        self.associate &= self
+            .authority
+            .limits()
+            .operations
+            .contains(Operations::Flat(FlatRights::ASSOCIATE));
         self.reference =
             BlockRef::new(expected.flat(), expected.record(), generation).expect("successor");
         self.actor = actor.ident.id;

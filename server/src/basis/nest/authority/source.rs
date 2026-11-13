@@ -14,6 +14,9 @@ pub(crate) fn withdraw_source_branch(
     let Some(source) = meta.authorization() else {
         return Ok(());
     };
+    if let Some(branch) = meta.authority(token) {
+        source.retire_origins(Some(&branch), None)?;
+    }
     for binding in source.bindings()? {
         if binding.page().is_none() {
             continue;
@@ -28,6 +31,7 @@ pub(crate) fn withdraw_source(
     source: &Arc<SourceAuthorization>,
     clear: bool,
 ) -> Result<(), PendFail> {
+    source.retire_origins(None, None)?;
     for binding in source.bindings()? {
         let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
         nest.withdraw_source(&binding, source, None, None, clear)?;
@@ -39,6 +43,7 @@ pub(crate) fn withdraw_source_window(
     source: &Arc<SourceAuthorization>,
     block: &RangeBlock,
 ) -> Result<(), PendFail> {
+    source.retire_origins(None, Some(block))?;
     let (offset, count) = block.window();
     let end = offset
         .get()

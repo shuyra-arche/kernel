@@ -62,6 +62,7 @@ impl Nest {
         publisher: &mut Option<Publisher>,
         borrow: &mut Option<ExternalBorrow>,
         maintenance: &mut Option<Arc<crate::basis::pend::MaintenanceUse>>,
+        provenance: Option<Arc<crate::basis::pend::Provenance>>,
     ) -> Result<(), Error> {
         let mut state = self.state.lock();
         if !state.is_open() || !span.is_open() {
@@ -102,6 +103,7 @@ impl Nest {
             })?;
         span.changed();
         memo.maintenance = maintenance.take();
+        memo.provenance = provenance;
         memo.retain(
             publisher.take().expect("prepared publishing route"),
             borrow.take(),

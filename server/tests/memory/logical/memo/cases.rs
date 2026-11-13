@@ -267,6 +267,7 @@ fn holding_move_and_restore_preserve_logical_binding_and_page_identity() {
             &mut target,
             PageIndex::ZERO,
             SlotVersion::INITIAL,
+            None
         ),
         Err(Error::Busy)
     );
@@ -282,6 +283,7 @@ fn holding_move_and_restore_preserve_logical_binding_and_page_identity() {
             &mut target,
             PageIndex::ZERO,
             SlotVersion::INITIAL,
+            None,
         )
         .unwrap();
     assert_eq!(actual, id);
@@ -301,6 +303,7 @@ fn holding_move_and_restore_preserve_logical_binding_and_page_identity() {
             &mut source,
             PageIndex::ZERO,
             missing,
+            None,
         )
         .unwrap();
     assert_eq!(actual, id);
@@ -348,4 +351,25 @@ fn unfinished_publication_retains_exact_page_and_prevents_replacement() {
     assert!(memo.page().is_none());
     memo.clear().unwrap().release();
     assert_eq!(registry.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn exact_publication_retains_provenance_through_withdrawal_until_settlement() {
+    let (mut memo, _, _) = logical();
+    let pool = Pool::new(0);
+    let page = page(pool);
+    let origin = Arc::new(crate::basis::pend::Provenance);
+    let weak = Arc::downgrade(&origin);
+    publish(&mut memo, &page);
+    memo.provenance = Some(origin);
+    let publication = memo.withdraw().unwrap();
+    // A failed/unfinished fence must not lose the original authorization route.
+    assert!(memo.provenance.is_some());
+    assert!(weak.upgrade().is_some());
+    unsafe { publication.settle() }; // host model only, not hardware evidence
+    let settled = memo.finish();
+    assert!(memo.provenance.is_none());
+    assert!(weak.upgrade().is_some());
+    settled.release();
+    assert!(weak.upgrade().is_none());
 }

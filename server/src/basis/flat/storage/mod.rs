@@ -37,6 +37,8 @@ pub(super) struct FlatState {
     pub source: FlatSource,
     pub residencies: Vec<ResidencyEntry>,
     pub next_residency: usize,
+    /// Original branch restrictions follow this holding after Allow as well.
+    pub provenance: Vec<(PageIndex, Arc<crate::basis::pend::Provenance>)>,
     /// A staged holding retains its original maintenance record, even if the
     /// originating source loses its last public owner. This is no new authority.
     pub staged: Vec<(PageIndex, Arc<crate::basis::pend::Stage>)>,
@@ -54,6 +56,7 @@ impl FlatState {
             residencies: Vec::new(),
             next_residency: 1,
             staged: Vec::new(),
+            provenance: Vec::new(),
             transferable,
         }
     }

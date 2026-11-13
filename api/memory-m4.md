@@ -54,17 +54,32 @@ No physical allocation owner changes.
 Staged access requires the original block owner's live ASSOCIATE/data ceiling
 in addition to the selected Slot's source authority. Staged Vacate requires
 VACATE at both the selected Slot and original block range. A maintenance stage
-cannot be exported as a new Memo-source authority. Moving an original Page out
-uses the block's actual Pend branch, preventing an unrelated endpoint branch
-from supplying stronger provenance. Pure staging itself requires TRANSFER, not
-ASSOCIATE.
+cannot be exported as a new Memo-source authority. Pure staging and initial
+replacement import require TRANSFER at both endpoints; they do not additionally
+require ASSOCIATE, writable data or distribution permission.
 
-The initial import of an untracked replacement is conservative: the actual
-source branch must be its root allocation, writable and distributable, with
-ASSOCIATE, TRANSFER and VACATE. Restricted donor imports reject before transfer;
-this implementation does not claim a general transfer of restricted donor
-provenance. Existing tracked Pages instead carry their original block on each
-hop. This boundary must be reviewed before expanding replacement-source support.
+Every transfer atomically carries the actual donor Pend, actor, fixed window
+and operation/data/distribution ceilings with the holding. This provenance is
+independent of temporary stage metadata: it survives Allow and later ordinary
+transfers. Publish/Protect require every original branch's live ASSOCIATE and
+data permission; export and use by another actor require original distribution
+permission; Vacate independently requires original VACATE. A transfer-only
+grant can move a holding without granting any of these other actions. The
+chain is bounded at 64 hops and source/publication discovery lists at 1024
+entries; exhaustion rejects preparation before changing either holding.
+
+Returning to an exact original source and fixed window through its actual
+branch or real ancestor restores the pre-transfer chain. A sibling grant,
+another Flat or shifted coordinate cannot erase provenance. Returning an
+initially imported replacement also releases that import's own maintenance
+gate, after the successful holding commit. Other blocks remain effective.
+
+Original-source Narrow, revocation and Block discover moved publications through
+weak reverse bindings. Memo retains the exact provenance of its physical
+publication until settlement, independently of the current holding. Publication
+preparation acquires nonblocking operation leases for original sources to
+serialize with Narrow; no source lock crosses a hardware fence. These records
+retain restrictions and discovery routes, not a second live authorization root.
 
 ## Retirement, failure and takeover
 
@@ -88,8 +103,12 @@ be an actual ancestor of the old owner and cover the whole original window.
 Old uses and physical obligations must settle before ownership changes. The
 new epoch is checked against overflow and recorded in the bounded request
 journal at the ownership commit, even if later work fails. Old credentials
-permanently fail. Recovery preserves the original staged data ceiling; siblings,
-unrelated managers and numerical handle copies cannot supply ancestry.
+permanently fail. Recovery preserves the original staged data ceiling and the
+captured provenance restrictions, including subsequent rights/data/distribution
+narrowing. Only dead original grants in the recovered source window can retarget
+to the actual ancestor; siblings, unrelated managers and numerical handle copies
+cannot supply ancestry. A legitimate External data loan does not orphan the
+maintenance owner or remove its BLOCK/INSPECT management permission.
 
 CPU readers/writers and External readers/writers have distinct checked counters;
 maintenance is an exact tag on each non-clonable Retention. Preparation rollback
@@ -112,21 +131,24 @@ committed ownership or clears a hardware responsibility.
 | Evidence | Coverage |
 | --- | --- |
 | Production Page/Retention host tests | Independent maintenance CPU writers and External readers, conservative device-write exclusion, overlapping blocks, stale physical permits, racing registration/block arrival, checked counter exhaustion, lost completion quarantine |
-| Production Flat storage host tests | Exact Page movement with stage metadata, stale and hardware-busy rollback, return to original holding, allocator return once |
+| Production Flat storage host tests | Exact Page movement with stage/provenance metadata, stale and hardware-busy rollback, allocation-failure atomicity, provenance surviving gate release and later movement, allocator return once |
 | Production Publication host test with scripted Hardware | Shared CPU/External maintenance accounting, partial backend submission, wrong completion batch rejection, exact individual completion |
-| Production Epoch/Pend host tests | Real immutable ancestry, owner death/revocation/narrowing, sibling/unrelated manager rejection, full-window requirement, immutable read-only ceiling, non-wrapping epoch |
+| Production Epoch/Pend/Carried host tests | TRANSFER-only capture, independent data/distribution/disposal restrictions, live Narrow and Task death, actual ancestor recovery preserving later restrictions, exact return coordinates, External-loan management liveness, non-wrapping epoch |
+| Production Memo state host test | Exact publication provenance retained through withdrawal until physical settlement |
 | Production Journal host test | New takeover epoch retained through later failure and replay |
 | RV64 debug and release builds | Complete actual provider integration, including inactive entry paths, with production warnings denied |
 
-The host storage fixture uses opaque Stage metadata and does not prove Stage
-permission checks. Epoch tests use the existing Task lifetime fixture and do
-not settle hardware. Scripted Hardware completion is not an MMU/IOMMU fence.
-Native entry, cross-Task dispatch, staged source authority and full service
-composition are target-compiled, not end-to-end executed by these fixtures.
+The host storage/Memo fixtures use opaque Stage/Provenance metadata and do not
+prove the full provenance graph or Stage permission checks. Carried tests use
+production Pend permission and ancestry logic; Epoch tests use the existing
+Task lifetime fixture and do not settle hardware. Scripted Hardware completion
+is not an MMU/IOMMU fence. Native entry, cross-Task dispatch, source-discovery
+retirement, staged source authority and full service composition are
+target-compiled, not end-to-end executed by these fixtures.
 
 Verification uses the root README commands: formatting, locked workspace host
 tests, RV64 debug and release builds, plus `git diff --check`. The final delivery
-has 406 host tests passing and 14 hardware tests ignored. No QEMU or physical
+has 416 host tests passing and 14 hardware tests ignored. No QEMU or physical
 run is claimed; the current guest fixture consumes ABI v10.
 
 M5 retains trusted platform/requester and compatibility expansion. M6 retains

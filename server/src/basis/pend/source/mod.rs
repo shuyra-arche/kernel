@@ -31,7 +31,9 @@ use kernel_api::model::modifiable::Modifiable;
 
 mod admission;
 mod epoch;
+mod provenance;
 pub(crate) use admission::RangeBlock;
+pub(crate) use provenance::Provenance;
 mod external;
 mod geometry;
 mod hold;
@@ -119,6 +121,7 @@ pub(crate) struct SourceAuthorization {
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
     bindings: SpinLock<Vec<Arc<RangeBinding>>>,
     blocks: SpinLock<Vec<Arc<RangeBlock>>>,
+    origins: SpinLock<Vec<Weak<Provenance>>>,
     phase: SpinLock<Phase>,
 }
 
@@ -149,6 +152,7 @@ impl SourceAuthorization {
             revoked: SpinLock::new(false),
             bindings: SpinLock::new(Vec::new()),
             blocks: SpinLock::new(Vec::new()),
+            origins: SpinLock::new(Vec::new()),
             phase: SpinLock::new(Phase::Private(range)),
         })
         .map_err(|_| PendFail::OutOfMemory)

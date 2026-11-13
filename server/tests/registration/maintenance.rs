@@ -139,3 +139,17 @@ fn removing_block_right_or_revoking_branch_invalidates_live_credential() {
     other.invalidate();
     assert!(!revoked.live(window));
 }
+
+#[test]
+fn external_data_loan_does_not_orphan_maintenance_management() {
+    let owner = Task::new(15);
+    let parent = grant(Modifiable::Yes, 0, 8);
+    let borrower = grant(Modifiable::No, 0, 8);
+    let epoch = Epoch::new(reference(), &owner, token(15), &parent, 0);
+    parent.borrow_external(&borrower).unwrap();
+    assert!(parent.modifiable().is_none());
+    assert!(epoch.live((PageOffset::ZERO, PageCount::new(8).unwrap())));
+    borrower.invalidate();
+    borrower.settle().unwrap();
+    assert!(epoch.live((PageOffset::ZERO, PageCount::new(8).unwrap())));
+}

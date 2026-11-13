@@ -99,8 +99,8 @@ impl MaintenanceUse {
             .is_ok_and(|(owner, _)| Arc::ptr_eq(&owner, actor))
             && self.block.reference() == self.reference
     }
-    pub(crate) fn source_owner(&self, source: &Source) -> Option<Arc<Pend>> {
-        Arc::ptr_eq(source.source(), &self.origin).then(|| self.block.owner())
+    pub(crate) fn source_owner(&self, _source: &Source) -> Option<Arc<Pend>> {
+        Some(self.block.owner())
     }
     pub(crate) fn check(&self, source: &Source, access: Access) -> Result<(), CellFail> {
         self.check_retained(source, access)?;
@@ -143,6 +143,7 @@ impl MaintenanceUse {
             .check_blocks(offset, count, Some(entry.authority()))
             .map_err(failure)?;
         let owner = self.source_owner(source);
+        source.admit_provenance(owner.as_deref())?;
         let (offset, count) = source.window();
         source
             .source()

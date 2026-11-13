@@ -210,6 +210,9 @@ pub(in crate::entry::call) fn effect(
                 .check_retained(&source, span.access(index).map_err(nest_error)?.1)
                 .map_err(cell_error)?;
         }
+        if maintenance_check.is_none() {
+            source.admit_provenance(None).map_err(cell_error)?;
+        }
         if route.nest().is_external() {
             if source.retiring() {
                 return Err(Failure::Denied);

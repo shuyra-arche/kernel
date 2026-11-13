@@ -181,6 +181,7 @@ impl FlatState {
         };
         let page = Arc::try_unwrap(page).ok().expect("exclusive holding");
         self.staged.retain(|(at, _)| *at != index);
+        self.provenance.retain(|(at, _)| *at != index);
         let version = self.revision.commit(index);
         Ok((version, page))
     }
@@ -281,8 +282,18 @@ impl FlatState {
         target: &mut Self,
         to: PageIndex,
         target_version: SlotVersion,
+        provenance: Option<Arc<crate::basis::pend::Provenance>>,
     ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
-        self.move_to_during(from, expected, target, to, target_version, None, None)
+        self.move_to_during(
+            from,
+            expected,
+            target,
+            to,
+            target_version,
+            None,
+            None,
+            provenance,
+        )
     }
     pub fn move_to_during(
         &mut self,
@@ -293,6 +304,7 @@ impl FlatState {
         target_version: SlotVersion,
         maintenance: Option<&Arc<crate::basis::cell::page::Change>>,
         stage: Option<Arc<crate::basis::pend::Stage>>,
+        provenance: Option<Arc<crate::basis::pend::Provenance>>,
     ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
         let block = self.move_source(from, expected, maintenance)?;
         target.move_target(to, target_version, block.page().pages())?;
@@ -302,9 +314,19 @@ impl FlatState {
                 .try_reserve(1)
                 .map_err(|_| Error::OutOfMemory)?;
         }
+        if provenance.is_some() {
+            target
+                .provenance
+                .try_reserve(1)
+                .map_err(|_| Error::OutOfMemory)?;
+        }
         let id = block.page().id();
         let page = self.take_holding(from);
         target.put_holding(to, page);
+        self.provenance.retain(|(at, _)| *at != from);
+        if let Some(provenance) = provenance {
+            target.provenance.push((to, provenance));
+        }
         self.staged.retain(|(at, _)| *at != from);
         if let Some(stage) = stage {
             target.staged.push((to, stage));
@@ -320,8 +342,9 @@ impl FlatState {
         expected: SlotVersion,
         to: PageIndex,
         target_version: SlotVersion,
+        provenance: Option<Arc<crate::basis::pend::Provenance>>,
     ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
-        self.move_within_during(from, expected, to, target_version, None, None)
+        self.move_within_during(from, expected, to, target_version, None, None, provenance)
     }
     pub fn move_within_during(
         &mut self,
@@ -331,6 +354,7 @@ impl FlatState {
         target_version: SlotVersion,
         maintenance: Option<&Arc<crate::basis::cell::page::Change>>,
         stage: Option<Arc<crate::basis::pend::Stage>>,
+        provenance: Option<Arc<crate::basis::pend::Provenance>>,
     ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
         if from == to {
             return Err(Error::Occupied);
@@ -344,9 +368,18 @@ impl FlatState {
             .slots
             .try_reserve(2)
             .map_err(|_| Error::OutOfMemory)?;
+        if provenance.is_some() {
+            self.provenance
+                .try_reserve(1)
+                .map_err(|_| Error::OutOfMemory)?;
+        }
         let id = block.page().id();
         let page = self.take_holding(from);
         self.put_holding(to, page);
+        self.provenance.retain(|(at, _)| *at != from);
+        if let Some(provenance) = provenance {
+            self.provenance.push((to, provenance));
+        }
         self.staged.retain(|(at, _)| *at != from);
         if let Some(stage) = stage {
             self.staged.push((to, stage));

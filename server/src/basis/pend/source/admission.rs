@@ -77,9 +77,12 @@ impl RangeBlock {
         let entry = crate::basis::pend::locate(&task, r.token).ok_or(PendFail::Denied)?;
         if !r.live(self.window())
             || !Arc::ptr_eq(entry.authority(), &r.authority)
-            || !entry.permits(kernel_api::model::pend::Operations::Flat(
-                kernel_api::model::pend::FlatRights::BLOCK,
-            ))
+            || !(entry.alive()
+                && entry.authority().limits().operations.contains(
+                    kernel_api::model::pend::Operations::Flat(
+                        kernel_api::model::pend::FlatRights::BLOCK,
+                    ),
+                ))
         {
             return Err(PendFail::Denied);
         }
@@ -217,6 +220,7 @@ impl SourceAuthorization {
         block: &RangeBlock,
     ) -> Result<kernel_api::model::flat::BlockStatus, PendFail> {
         let mut status = block.inspect();
+        status.failed |= self.failed_origins(block)?;
         for binding in self.bindings()? {
             let Some(nest) = binding.nest().upgrade() else {
                 continue;

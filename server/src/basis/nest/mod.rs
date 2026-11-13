@@ -113,9 +113,7 @@ impl Nest {
             memo.maintenance
                 .as_ref()
                 .is_some_and(|known| Arc::ptr_eq(known, usage))
-                && (memo.inspect(VirtAddr::new(0)).state
-                    == kernel_api::model::cell::CellState::Failed
-                    || memo.in_flight() && state.retirement.invalidation() == Invalidation::Failed)
+                && memo.failed(state.retirement.invalidation() == Invalidation::Failed)
         })
     }
     pub(crate) fn retire_maintenance(
@@ -449,6 +447,48 @@ impl Nest {
         self.is_closed() || !self.contains_reservation(id)
     }
 
+    /// Retire a moved Page through its retained original source, without
+    /// clearing an unrelated logical association or trusting a stale binding.
+    pub(crate) fn withdraw_provenance(
+        &self,
+        binding: &Arc<authority::RangeBinding>,
+        origin: &Arc<crate::basis::pend::Provenance>,
+        block: Option<&crate::basis::pend::RangeBlock>,
+    ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
+        use kernel_api::abi::call::pend::PendFail;
+        let Some(index) = binding.page() else {
+            return Ok(());
+        };
+        let Some(record) = self.reservations.registered(binding.id()) else {
+            return Ok(());
+        };
+        let Some(span) = record.reservation() else {
+            return Err(PendFail::Busy);
+        };
+        let _operation = span.operation().ok_or(PendFail::Busy)?;
+        let change = {
+            let _commit = crate::basis::commit();
+            let state = self.state.lock();
+            let Some(memo) = state.memos.get(span, index) else {
+                return Ok(());
+            };
+            if !memo.matches(binding) {
+                return Ok(());
+            }
+            if memo.provenance.as_ref().is_none_or(|p| !p.contains(origin)) {
+                return Ok(());
+            }
+            let Some(page) = memo.page() else {
+                return Ok(());
+            };
+            if let Some(block) = block {
+                block.retain(page.clone())?;
+            }
+            crate::basis::cell::change::acquire(&page).map_err(|_| PendFail::Busy)?
+        };
+        self.retract_position(span, index, None, change, true)
+            .map_err(|_| PendFail::Busy)
+    }
     pub(crate) fn binding_source(
         &self,
         binding: &Arc<authority::RangeBinding>,
@@ -476,12 +516,31 @@ impl Nest {
         let state = self.state.lock();
         state.memos.get(span, index).is_some_and(|memo| {
             memo.matches(binding)
-                && (memo.inspect(VirtAddr::new(0)).state
-                    == kernel_api::model::cell::CellState::Failed
-                    || memo.in_flight() && state.retirement.invalidation() == Invalidation::Failed)
+                && memo.failed(state.retirement.invalidation() == Invalidation::Failed)
         })
     }
 
+    pub(crate) fn provenance_failed(
+        &self,
+        binding: &Arc<authority::RangeBinding>,
+        origin: &crate::basis::pend::Provenance,
+    ) -> bool {
+        let Some(index) = binding.page() else {
+            return false;
+        };
+        let Some(record) = self.reservations.registered(binding.id()) else {
+            return false;
+        };
+        let Some(span) = record.reservation() else {
+            return false;
+        };
+        let state = self.state.lock();
+        state.memos.get(span, index).is_some_and(|memo| {
+            memo.matches(binding)
+                && memo.provenance.as_ref().is_some_and(|p| p.contains(origin))
+                && memo.failed(state.retirement.invalidation() == Invalidation::Failed)
+        })
+    }
     pub(crate) fn binding_pending(&self, binding: &Arc<authority::RangeBinding>) -> bool {
         let Some(entry) = self.reservations.registered(binding.id()) else {
             return false;
@@ -1597,7 +1656,13 @@ impl Nest {
         if !Arc::ptr_eq(&page, change.page()) || page.level() != mapping.level() {
             return Err(CellFail::Busy);
         }
+        let _provenance = source.hold_provenance()?;
         source.check(access)?;
+        if let Some(origin) = source.provenance() {
+            origin
+                .remember(&binding)
+                .map_err(|_| CellFail::OutOfMemory)?;
+        }
         if let Some(usage) = &maintenance {
             usage.check(&source, access)?;
         }
@@ -1630,6 +1695,7 @@ impl Nest {
                 &mut publisher,
                 &mut borrow,
                 &mut maintenance,
+                source.provenance(),
             )
             .map_err(memo::publication_failure)?;
             accepted(expected.checked_add(1).expect("prepared generation"));
@@ -1668,6 +1734,7 @@ impl Nest {
             mapping.changed();
             memo.retain(publisher.take().expect("prepared publishing route"), None);
             memo.maintenance = maintenance.clone();
+            memo.provenance = source.provenance();
             accepted(memo.generation());
             state.publish_page(
                 self.geometry(),
@@ -1697,10 +1764,11 @@ impl Nest {
                 && if let Some(usage) = &maintenance {
                     usage.check_retained(&source, access).is_ok()
                 } else {
-                    source
-                        .source()
-                        .check_publish(source.window().0, source.window().1)
-                        .is_ok()
+                    source.admit_provenance(None).is_ok()
+                        && source
+                            .source()
+                            .check_publish(source.window().0, source.window().1)
+                            .is_ok()
                 }
         };
         if !valid {
@@ -1930,6 +1998,7 @@ impl Nest {
         if !ceiling.contains(access) || !source.ceiling().contains(access) {
             return Err(CellFail::WidenDenied);
         }
+        let _provenance = source.hold_provenance()?;
         let range = source.check(access)?;
         if let Some(usage) = &maintenance {
             if !actor.is_some_and(|actor| usage.owned_by(actor)) {
@@ -2052,10 +2121,11 @@ impl Nest {
                 && if let Some(usage) = &maintenance {
                     usage.check_retained(&source, access).is_ok()
                 } else {
-                    source
-                        .source()
-                        .check_publish(source.window().0, source.window().1)
-                        .is_ok()
+                    source.admit_provenance(None).is_ok()
+                        && source
+                            .source()
+                            .check_publish(source.window().0, source.window().1)
+                            .is_ok()
                 }
         };
         if !valid {

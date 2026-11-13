@@ -19,6 +19,15 @@ impl Flat {
 }
 
 impl FlatRange {
+    pub(crate) fn provenance(&self) -> Option<alloc::sync::Arc<crate::basis::pend::Provenance>> {
+        self.flat()
+            .state
+            .lock()
+            .provenance
+            .iter()
+            .find(|(at, _)| *at == self.index())
+            .map(|(_, p)| p.clone())
+    }
     pub(crate) fn staged(&self) -> bool {
         self.flat()
             .state
@@ -69,6 +78,7 @@ impl FlatRange {
         target_version: SlotVersion,
         change: &alloc::sync::Arc<crate::basis::cell::page::Change>,
         stage: Option<alloc::sync::Arc<crate::basis::pend::Stage>>,
+        provenance: Option<alloc::sync::Arc<crate::basis::pend::Provenance>>,
     ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
         if self.page_count().get() != self.grain()
             || target.page_count().get() != target.grain()
@@ -84,6 +94,7 @@ impl FlatRange {
                 target_version,
                 Some(change),
                 stage,
+                provenance,
             )
         } else {
             crate::metal::sync::with_pair(&self.flat().state, &target.flat().state, |from, to| {
@@ -95,6 +106,7 @@ impl FlatRange {
                     target_version,
                     Some(change),
                     stage,
+                    provenance,
                 )
             })
         }
@@ -104,6 +116,7 @@ impl FlatRange {
         expected: SlotVersion,
         target: &Self,
         target_version: SlotVersion,
+        provenance: Option<alloc::sync::Arc<crate::basis::pend::Provenance>>,
     ) -> Result<(SlotVersion, SlotVersion, PageId), Error> {
         if self.page_count().get() != self.grain()
             || target.page_count().get() != target.grain()
@@ -117,10 +130,18 @@ impl FlatRange {
                 expected,
                 target.index(),
                 target_version,
+                provenance,
             )
         } else {
             crate::metal::sync::with_pair(&self.flat().state, &target.flat().state, |from, to| {
-                from.move_to(self.index(), expected, to, target.index(), target_version)
+                from.move_to(
+                    self.index(),
+                    expected,
+                    to,
+                    target.index(),
+                    target_version,
+                    provenance,
+                )
             })
         }
     }

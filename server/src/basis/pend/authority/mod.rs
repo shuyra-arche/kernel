@@ -10,6 +10,8 @@ use kernel_api::{
         pend::{Distributable, Limits, Operations, PendRange, PendScope},
     },
 };
+mod carried;
+pub(crate) use carried::Carried;
 mod export;
 mod state;
 pub(crate) use export::Export;

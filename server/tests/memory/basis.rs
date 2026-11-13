@@ -20,6 +20,7 @@ pub(crate) mod pend {
     // Opaque native owner references. These fixtures never authorize a transfer
     // or publication; the physical/storage tests exercise the production gate.
     pub(crate) struct Stage;
+    pub(crate) struct Provenance;
     pub(crate) struct MaintenanceUse;
     pub(crate) struct ExternalBorrow;
     impl ExternalBorrow {

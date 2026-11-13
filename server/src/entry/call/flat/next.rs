@@ -40,11 +40,10 @@ pub(in crate::entry::call) fn inspect(
         }
         Query::Flat { token, flat: id } => {
             let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
-            if !entry
-                .authority()
-                .permits(kernel_api::model::pend::Operations::Flat(
-                    FlatRights::INSPECT,
-                ))
+            if !entry.alive()
+                || !entry.authority().limits().operations.contains(
+                    kernel_api::model::pend::Operations::Flat(FlatRights::INSPECT),
+                )
             {
                 return Err(Failure::Denied);
             }
@@ -69,9 +68,11 @@ pub(in crate::entry::call) fn inspect(
         }
         Query::Block(maintenance) => {
             let entry = pend::locate(actor, maintenance.token).ok_or(Failure::Denied)?;
-            if !entry.permits(kernel_api::model::pend::Operations::Flat(
-                FlatRights::INSPECT,
-            )) {
+            if !entry.alive()
+                || !entry.authority().limits().operations.contains(
+                    kernel_api::model::pend::Operations::Flat(FlatRights::INSPECT),
+                )
+            {
                 return Err(Failure::Denied);
             }
             let pend::Target::Flat(meta) = entry.target() else {
@@ -197,13 +198,51 @@ pub(in crate::entry::call) fn mutate(
             }
             let local_range = resolve(actor, local, FlatRights::TRANSFER)?;
             let remote_range = resolve(actor, remote, FlatRights::TRANSFER)?;
+            let donor = if matches!(action, Action::Push { .. }) {
+                &local_range
+            } else {
+                &remote_range
+            };
+            if let Some(origin) = donor.provenance() {
+                origin.admit(None).map_err(pend_error)?;
+            }
             let (local, remote, page) = if matches!(action, Action::Push { .. }) {
                 local_range
-                    .transfer_to(local_version, &remote_range, remote_version)
+                    .transfer_to(
+                        local_version,
+                        &remote_range,
+                        remote_version,
+                        pend::Provenance::prepare(
+                            actor,
+                            local.token(),
+                            &local_range,
+                            remote.token(),
+                            &remote_range,
+                            None,
+                            false,
+                        )
+                        .map_err(pend_error)?
+                        .0,
+                    )
                     .map_err(residency_error)?
             } else {
                 let (remote, local, page) = remote_range
-                    .transfer_to(remote_version, &local_range, local_version)
+                    .transfer_to(
+                        remote_version,
+                        &local_range,
+                        local_version,
+                        pend::Provenance::prepare(
+                            actor,
+                            remote.token(),
+                            &remote_range,
+                            local.token(),
+                            &local_range,
+                            None,
+                            false,
+                        )
+                        .map_err(pend_error)?
+                        .0,
+                    )
                     .map_err(residency_error)?;
                 (local, remote, page)
             };
