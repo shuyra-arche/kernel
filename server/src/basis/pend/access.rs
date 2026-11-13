@@ -89,6 +89,18 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
             None
         };
         let _commit = crate::basis::commit();
+        // DELETE seals the entire Share target. A child window cannot turn a
+        // branch exit into destruction of its siblings or the original source.
+        // Keep this check on retries too; pending cleanup does not widen scope.
+        if let Some(meta) = &share_view
+            && pend.authority().window()
+                != Some((
+                    kernel_api::address::PageOffset::ZERO,
+                    meta.source().page_count(),
+                ))
+        {
+            return Err(PendFail::Denied);
+        }
         pend.target().seal()?;
         (share_view, operation)
     };

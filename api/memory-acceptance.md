@@ -18,6 +18,8 @@ ceilings and actual ancestry remain enforced by the existing Pend transaction.
 The recipient is Caller or an authorized adjacent Task. No Cell reference or
 physical ownership is created. v10 rejects slot 4; v11 still rejects old Share
 Create/Open/Shut and Cell adapters. Ordinary Accord does not change target kinds.
+Share Delete validates the complete original View window under the same commit
+as sealing, including cleanup retries; a partial DELETE branch must use Return.
 
 `Block { recover: Some(reference), ... }` has two explicit execution paths:
 
