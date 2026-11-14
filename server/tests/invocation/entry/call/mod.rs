@@ -60,11 +60,27 @@ mod nest {
         }
         pub(crate) fn effect(
             actor: &Arc<Task>,
-            _: Action,
+            action: Action,
             receipt: &mut next_memory::Receipt<'_>,
         ) -> Result<Value, Failure> {
             if actor.mode.load(Ordering::SeqCst) == 1 {
                 return Err(Failure::Denied);
+            }
+            if matches!(action, Action::CreateNest { .. }) {
+                // Private address-space preparation may fence. The dispatcher
+                // must release admission locks before entering this boundary.
+                assert_eq!(commit_depth(), 0);
+                assert!(actor.pend.0.try_lock().is_ok());
+                assert!(actor.memory_results.0.try_lock().is_ok());
+                actor.effects.fetch_add(1, Ordering::SeqCst);
+                let value = Value::CreatedNest {
+                    token: kernel_api::model::identity::PendId::mint(7),
+                    nest: kernel_api::model::nest::NestId::new(8).unwrap(),
+                    version: kernel_api::model::nest::NestVersion::INITIAL,
+                };
+                let _commit = commit();
+                receipt.committed(value);
+                return Ok(value);
             }
             let value = Value::Memo {
                 generation: kernel_api::model::nest::MemoGeneration::new(2).unwrap(),

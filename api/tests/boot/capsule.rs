@@ -30,7 +30,7 @@ fn capsule_preserves_entry_and_region_layout() {
     let bytes = capsule();
     let image = Capsule::parse(&bytes).unwrap();
     assert_eq!(kernel_api::boot::capsule::VERSION, 2);
-    assert_eq!(bytes[11], 10);
+    assert_eq!(bytes[11], 11);
     assert_eq!(image.entry, 0x1000);
     assert_eq!(image.count, 1);
     let region = image.region(0).unwrap();

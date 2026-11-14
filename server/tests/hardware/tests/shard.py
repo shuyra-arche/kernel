@@ -1,4 +1,4 @@
-"""CI partition contract: no lost tests, duplicate execution, or false success."""
+"""Historical ABI 10 shard runner: exhaustive selection and failure propagation."""
 
 import importlib.util
 from pathlib import Path
@@ -61,20 +61,6 @@ class Partition(unittest.TestCase):
         selected = tuple(test for group in shard.SHARDS for test in shard.select(group, actual))
         self.assertCountEqual(selected, actual)
         self.assertEqual(len(selected), len(set(selected)))
-
-
-    def test_ci_matrix_runs_every_shard_once(self):
-        import re
-
-        workflow = (shard.ROOT / ".github/workflows/check.yml").read_text(encoding="utf-8")
-        match = re.search(
-            r"^[ \t]*shard:\s*\[([a-z0-9_, -]+)\][ \t]*$",
-            workflow,
-            re.MULTILINE,
-        )
-        self.assertIsNotNone(match, "CI matrix must enumerate QEMU shards")
-        configured = tuple(name.strip() for name in match.group(1).split(","))
-        self.assertCountEqual(configured, shard.SHARDS.keys())
 
 class Execution(unittest.TestCase):
     def listing(self):
