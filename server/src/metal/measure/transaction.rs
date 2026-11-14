@@ -7,11 +7,50 @@ pub(crate) struct Transaction {
     pub(crate) start: u64,
     pub(crate) wait: u64,
 }
+/// Inclusive stage durations. Stages can nest, so they must not be summed or
+/// subtracted from independent maxima to infer an exclusive cost partition.
+#[derive(Clone, Copy)]
+#[repr(usize)]
+pub(crate) enum Work {
+    Scheduler,
+    SignWait,
+    IrqMaintenance,
+    ControllerClaim,
+    SpinWait,
+    TimerArm,
+    SignRedeem,
+    DueDrain,
+    WaitDetach,
+    ReadyWake,
+    DoomCheck,
+}
+pub(crate) const WORKS: usize = 11;
+pub(super) const ORDER: &str = "scheduler,sign-wait,irq-maintenance,controller-claim,spin-wait,timer-arm,sign-redeem,due-drain,wait-detach,ready-wake,doom-check";
+#[derive(Clone, Copy)]
+pub(crate) struct Parts {
+    pub(crate) ticks: [u64; WORKS],
+    pub(crate) calls: [u64; WORKS],
+}
+impl Parts {
+    pub(crate) const fn new() -> Self {
+        Self {
+            ticks: [0; WORKS],
+            calls: [0; WORKS],
+        }
+    }
+    pub(crate) fn record(&mut self, work: Work, ticks: u64) {
+        let at = work as usize;
+        self.ticks[at] = self.ticks[at].saturating_add(ticks);
+        self.calls[at] = self.calls[at].saturating_add(1);
+    }
+}
 #[derive(Clone, Copy)]
 pub(super) struct Sample {
     pub(super) site: &'static Location<'static>,
     pub(super) hold: u64,
     pub(super) wait: u64,
+    pub(super) transaction: u64,
+    pub(super) parts: Parts,
 }
 pub(super) struct Slowest {
     pub(super) samples: [Option<Sample>; 8],

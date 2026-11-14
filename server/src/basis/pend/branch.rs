@@ -154,7 +154,7 @@ pub(crate) fn accord(
                 // Task ledgers and the Share operation remain serialized while
                 // remote TLB completion proceeds outside COMMIT.
                 drop(commit);
-                crate::basis::room::interrupt::withdraw(src);
+                crate::basis::room::interrupt::withdraw(src, pend_entry.target());
                 meta.close_maps(Some(src))?;
                 commit = crate::basis::commit();
                 if !super::live(caller) || !super::live(&target) {

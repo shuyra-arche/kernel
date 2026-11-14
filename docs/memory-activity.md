@@ -15,11 +15,13 @@ is not evidence of current ABI 11 acceptance.
 
 The RV64 backend selects Sv39/Sv48/Sv57 geometry. `Nest::attrs` currently
 presets both ACCESSED and DIRTY when publishing CPU PTEs. Those bits therefore
-cannot establish that a guest accessed or wrote a page. `PageTableEntry`
-currently stores ordinary u64 values; `set_flags` performs a load/modify/store.
-Enabling hardware changes to A/D requires atomic full-width PTE access and an
-audit of permission changes, splitting, replacement and retirement, not just
-an A/D getter. Neither the paging mode nor an ISA extension name alone proves
+cannot establish that a guest accessed or wrote a page. At that checkpoint,
+`PageTableEntry` stores ordinary u64 values and `set_flags` performs a
+load/modify/store. [#181](https://github.com/shuyra-arche/kernel/pull/181)
+supplies the atomic full-width PTE prerequisite and preserves hardware A/D
+during permission changes. It does not enable clearing or qualify sampling;
+splitting, replacement and retirement still require an audit before enabling
+sampling, beyond an A/D getter. Neither the paging mode nor an ISA extension name alone proves
 that hardware updating is enabled for this execution environment.
 
 Architecture reference: RISC-V Instruction Set Manual, Volume II, release
@@ -160,8 +162,9 @@ receiver-local Share/Sign. M3 requires current-ABI host contract tests, actual
 RV64 debug/release builds, a restricted consumer, and QEMU tests for reads,
 writes, idle periods, multiple readers, alias isolation, stale identity,
 partial synchronization and revocation. Multi-Hart continuous writers and
-unsupported configurations require separate evidence. The current native
-composition's one-Hart qualification cannot stand in for those scenarios.
+unsupported configurations require separate evidence. Native data or
+instruction completion qualification alone cannot stand in for sampling
+capability or those scenarios.
 
 Record exact source/fixture/toolchain, firmware capability settings, commands,
 failures, distributions, per-turn step counts, fence attempts and load impact.
