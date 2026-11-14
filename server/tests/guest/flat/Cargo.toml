@@ -1,0 +1,22 @@
+[package]
+name = "flat-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[workspace]
+[dependencies]
+kernel = { path = "../../.." }
+platform-riscv = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "dd32c35dbb67e2e78edb00ad35f968d16423249e" }
+[patch."https://github.com/shuyra-arche/kernel.git"]
+kernel = { path = "../../.." }
+kernel-api = { path = "../../../../api" }
+[profile.dev]
+panic = "abort"
+[profile.release]
+panic = "abort"
+
+[[bin]]
+name = "flat-guest"
+path = "main.rs"
+test = false
+bench = false
