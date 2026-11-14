@@ -79,7 +79,7 @@ def main():
             "        assert!(matches!(tree.cpus().count(), 1 | 2 | 4));\n"
         ) + s[end:]
     edit("tests/memory/platform/main.rs", platform)
-    edit("tests/memory/guest/main.rs", lambda s: s.replace("mod virtqueue;", "mod smp;")
+    edit("tests/memory/guest/main.rs", lambda s: s.replace("mod virtqueue;", "mod smp;\nmod recovery;")
          .replace("    virtqueue::run();", "    smp::run();")
          .replace("mod ipc;\n", "")
          .replace("    ipc::run();\n", ""))
@@ -100,8 +100,30 @@ def main():
     # It remains outside the data-only qualification, rather than weakening it.
     edit("tests/memory/guest/acceptance/mod.rs", lambda s:
          s.replace("mod authority;\n", "").replace("    authority::run();\n", ""))
+    for relative in ["tests/memory/guest/support.rs", "tests/memory/guest/acceptance/mod.rs"]:
+        edit(relative, lambda s: s.replace(
+            "match Call::from_request(request(action)) {\n"
+            "        Call::Flat(c) => kernel_client::memory::flat::invoke(c),\n"
+            "        Call::Nest(c) => kernel_client::memory::nest::invoke(c),\n"
+            "    }", "crate::recovery::call(action)"))
+    edit("tests/memory/guest/support.rs", lambda s:
+         s.replace("crate::recovery::call(action)", "crate::recovery::block(action)"))
+    edit("tests/memory/guest/acceptance/worker.rs", lambda s: s.replace(
+        "        self.begin(action);\n        self.finish()",
+        "        let deadline = room::clock() + 5_000_000_000;\n"
+        "        loop {\n"
+        "            self.begin(action);\n"
+        "            let response = self.finish()?;\n"
+        "            if matches!(action, Action::Block { .. }) && matches!(&response, Response::Reply(r) if r.outcome() == Outcome::Rejected(Failure::Busy)) {\n"
+        "                assert!(room::clock() < deadline);\n"
+        "                room::yield_();\n"
+        "                continue;\n"
+        "            }\n"
+        "            return Ok(response);\n"
+        "        }"))
     suite = Path(__file__).resolve().parent
     shutil.copy2(suite / "cases.rs", fixture / "tests/memory/guest/smp.rs")
+    shutil.copy2(suite / "recovery.rs", fixture / "tests/memory/guest/recovery.rs")
     probe = provider / "server/tests/guest/smp/probe.rs"
     edit("server/src/metal/riscv/mmu/completion.rs", lambda s: s +
          '\n#[path = ' + json.dumps(str(probe)) + ']\npub(crate) mod probe;\n', provider)
