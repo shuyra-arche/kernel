@@ -261,6 +261,7 @@ pub fn run() {
     authority();
     safety();
     consumer_exit();
+    incoming_budget();
     large_leaf();
     capacity();
     writers();
@@ -548,5 +549,44 @@ pub fn stopped(slot: kernel_api::model::flat::SlotPosition, memo: MemoPosition, 
     let _ = writeln!(
         Console,
         "PASS activity observer-stopped=1 retained-pending=1 ordinary-retirement=1 output-return=1 allocation=1"
+    );
+}
+
+extern "C" fn dormant() -> ! {
+    exit(0)
+}
+fn incoming_budget() {
+    let (_, memo, _) = page();
+    let receiver = spawn(dormant);
+    let root = sign::create(license()).unwrap();
+    let mut limits = pend_info(root).limits;
+    limits.operations = Operations::Sign(kernel_api::model::sign::SignRights::LISTEN);
+    limits.distributable = Distributable::No;
+    for _ in 0..31 {
+        accord(root, receiver, limits);
+    }
+    // One ordinary foreign-sender slot remains. A pair needs two; no half
+    // publication or leaked reservation may consume that last slot on OOM.
+    assert_eq!(
+        derive(memo, AccordTarget::Task(receiver)),
+        Err(ShareFail::OutOfMemory)
+    );
+    accord(root, receiver, limits);
+    let request = AccordRequest {
+        src: root,
+        target: AccordTarget::Task(receiver),
+        limits,
+        mark: Mark::NONE,
+    }
+    .to_bytes();
+    assert_eq!(
+        pend::accord(VirtAddr::new(request.as_ptr() as usize)).map_err(|e| e.source),
+        Err(kernel_api::abi::call::pend::PendFail::OutOfMemory)
+    );
+    unit::resume(receiver.into()).unwrap();
+    assert_eq!(join(receiver).result, Some(0));
+    let _ = writeln!(
+        Console,
+        "PASS activity incoming-budget=32 atomic-pair-oom=1 rollback=1"
     );
 }

@@ -198,16 +198,15 @@ fn prepare(
     let source_root =
         SourceAuthorization::new(flat.whole(), Access::READ, TaskId::new(0)).map_err(failure)?;
     let view = Sharing::from_source(flat.whole(), size, TaskId::new(0)).map_err(failure)?;
-    let output = Arc::try_new(
-        PendEntry::try_new(
-            View::Share(view.clone()),
-            request.mark,
-            Modifiable::No,
-            None,
-        )
-        .map_err(failure)?,
+    let mut output = PendEntry::try_new(
+        View::Share(view.clone()),
+        request.mark,
+        Modifiable::No,
+        None,
     )
-    .map_err(|_| Failure::OutOfMemory)?;
+    .map_err(failure)?;
+    output.requested_by(sender);
+    let output = Arc::try_new(output).map_err(|_| Failure::OutOfMemory)?;
     let mut limits = output.authority().limits();
     limits.operations = Operations::Share(ShareRights::ASSOCIATE);
     limits.scope = request.limits.scope;
@@ -217,16 +216,15 @@ fn prepare(
         output.narrow(limits).map_err(failure)?;
     }
     let sign = Endpoint::try_new(TaskId::new(0)).map_err(|_| Failure::OutOfMemory)?;
-    let event = Arc::try_new(
-        PendEntry::try_new(
-            Target::Sign(sign.clone()),
-            Mark::new(output.token().get() as u64),
-            Modifiable::No,
-            None,
-        )
-        .map_err(failure)?,
+    let mut event = PendEntry::try_new(
+        Target::Sign(sign.clone()),
+        Mark::new(output.token().get() as u64),
+        Modifiable::No,
+        None,
     )
-    .map_err(|_| Failure::OutOfMemory)?;
+    .map_err(failure)?;
+    event.requested_by(sender);
+    let event = Arc::try_new(event).map_err(|_| Failure::OutOfMemory)?;
     let mut limits = event.authority().limits();
     limits.operations = Operations::Sign(SignRights::LISTEN | SignRights::CONSUME);
     limits.distributable = Distributable::No;

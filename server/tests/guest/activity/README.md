@@ -45,6 +45,7 @@ Existing production boot providers default to unqualified.
 | Minimal policy consumer | Child maps its own readonly data, reads two streams, sorts candidates in user space and exits with mappings and an unread sample |
 | Output withdrawal | Actual user store to readonly data faults; RW publication rejects; cancelled mappings reach Empty and an actual later read faults |
 | Capacity/fairness | Sixteen subscriptions receive notifications, seventeenth gets Busy, retained slots become reusable after cancellation |
+| Admission rollback | With 31 foreign-sender charges, a two-Pend pair fails atomically and the last ordinary slot remains usable |
 | Large geometry | A real level-1 Cell/reservation is Unsupported; it is not split for sampling |
 | Continuous writing | Three real user Tasks write the same CPU mapping during repeated clears/fences; dirty evidence survives; writer Hart masks are recorded |
 | Partial synchronization | Early-boot real Harts withhold acknowledgements; production Pending and History keep exact facts; a delayed prior acknowledgement cannot finish the next round |

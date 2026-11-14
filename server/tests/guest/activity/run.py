@@ -164,7 +164,7 @@ def boot(qemu, firmware, binaries, capsule, destination, harts, unsupported, sto
     markers = ["PASS activity unsupported=1"] if unsupported else [
         "PASS activity read=1", "PASS activity aliases=3", "PASS activity window=1",
         "PASS activity capacity=16", "PASS activity writers=3",
-        "PASS activity readonly=1", "PASS activity consumer-exit=1", "PASS activity large-unsupported=1"]
+        "PASS activity readonly=1", "PASS activity consumer-exit=1", "PASS activity incoming-budget=32", "PASS activity large-unsupported=1"]
     if stopped:
         markers = ["TRACE activity-observer-stop", "PASS activity observer-stopped=1"]
     markers += [f"PASS activity-fences harts={harts}", "task: all tasks exited"]

@@ -178,7 +178,10 @@ permission. Live sender/recipient, source rights/window and exact publication
 identity are revalidated before the two grants are published in one COMMIT.
 The recipient cannot trigger the Sign, write the View or redistribute either
 Pend. The source sender can withdraw its original authority independently of
-the recipient; sender exit also stops delivery. Returning either output cancels
+the recipient; sender exit also stops delivery. Both output registrations
+charge the real requester's ordinary incoming/per-Task/per-Team admission
+budgets, even though their producer/owner is Kernel. Preparing the second
+registration can fail without publishing the first or leaking its charge. Returning either output cancels
 the stream while the original source grant keeps its ordinary ownership.
 
 Busy before Share.Derive returns has admitted no pair. Once the View is returned,
