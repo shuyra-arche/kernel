@@ -6,6 +6,7 @@ pub(crate) mod source;
 mod table;
 pub(super) use table::Memos;
 
+pub(crate) mod activity;
 mod state;
 use crate::basis::nest::NestError;
 use kernel_api::abi::call::{cell::CellFail, pend::PendFail};

@@ -166,6 +166,32 @@ jobs:
             .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-guest
             .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-platform
           if-no-files-found: warn
+      - name: Check CPU activity (debug, 1/4 Harts)
+        run: python3 server/tests/guest/activity/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-debug --profile debug
+      - name: Check CPU activity (release, 1/4 Harts)
+        run: python3 server/tests/guest/activity/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-release
+      - name: Reject unqualified Svade activity (1/4 Harts)
+        run: python3 server/tests/guest/activity/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-unsupported --unsupported
+      - name: Check stopped observation Task (1/4 Harts)
+        run: python3 server/tests/guest/activity/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-stopped --stopped
+      - name: Preserve CPU activity evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cpu-activity
+          include-hidden-files: true
+          path: |
+            .integration/activity-*/inputs.json
+            .integration/activity-*/composition.diff
+            .integration/activity-*/build.log
+            .integration/activity-*/harts-*/*.log
+            .integration/activity-*/harts-*/result.json
+            .integration/activity-*/fixture/tests/memory/Cargo.lock
+            .integration/activity-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-guest
+            .integration/activity-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-platform
+            .integration/activity-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-guest
+            .integration/activity-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-platform
+          if-no-files-found: warn
       - name: Check implicit Flat contracts (debug, 1/4 Harts)
         run: python3 server/tests/guest/flat/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/flat-debug
       - name: Check implicit Flat contracts (release, 1/4 Harts)

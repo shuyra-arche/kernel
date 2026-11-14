@@ -17,6 +17,7 @@ pub(in crate::basis::nest) struct Retirement {
     scope: Scope,
     sequence: crate::basis::name::Generation,
     pending: Option<Request<Asid>>,
+    deferred: Option<crate::metal::mmu::Deferred>,
     pub(in crate::basis::nest) tickets: Tickets,
     pub(in crate::basis::nest) tables: Vec<Table>,
     pub(in crate::basis::nest) cells: Vec<Publication>,
@@ -30,11 +31,31 @@ impl Retirement {
             scope: Scope::AddressSpace,
             sequence: crate::basis::name::Generation::first(),
             pending: None,
+            deferred: None,
             tickets: Tickets::new(),
             tables: Vec::new(),
             cells: Vec::new(),
             mappings: Vec::new(),
         }
+    }
+
+    pub(in crate::basis::nest) fn deferred(&self) -> Option<&crate::metal::mmu::Deferred> {
+        self.deferred.as_ref()
+    }
+    pub(in crate::basis::nest) fn park(
+        &mut self,
+        round: crate::metal::mmu::Deferred,
+    ) -> Result<(), super::super::NestError> {
+        if !self.invalidation.is_fencing()
+            || self.deferred.is_some()
+            || self
+                .pending
+                .is_none_or(|expected| !round.confirms(expected))
+        {
+            return Err(super::super::NestError::Shootdown);
+        }
+        self.deferred = Some(round);
+        Ok(())
     }
 
     pub(in crate::basis::nest) fn invalidation(&self) -> Invalidation {
@@ -85,6 +106,7 @@ impl Retirement {
 
     /// Keep all obligations available for the retry.
     pub(in crate::basis::nest) fn fail(&mut self) {
+        self.deferred = None;
         if self.invalidation != Invalidation::Failed {
             for mapping in &self.mappings {
                 mapping.changed();
@@ -120,6 +142,7 @@ impl Retirement {
             return Err(super::super::NestError::OutOfMemory);
         }
         self.pending = None;
+        self.deferred = None;
         for mapping in &self.mappings {
             memos.complete(mapping, &mut settled);
             mapping.changed();

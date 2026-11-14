@@ -53,7 +53,11 @@ authorizes them. `Entry::dispatch()` returns a distinct `(View, Sign)`
 pair. Sign delivery, memory publication and verified CPU/IOMMU
 retirement are different events. The read-only global memory
 snapshot reports per-page A/D as `UNKNOWN` rather than assuming
-cleanliness.
+cleanliness. `call::nest::observe` accepts the versioned activity request and
+returns a receiver-local read-only Share/Sign pair. Follow the
+[activity contract](../docs/memory-activity.md), consume only after a coherent
+page read, and Return either grant to cancel. Pin and rebuild a matching
+API/Client/Server image; old strict rights decoders reject SAMPLE.
 
 Read the [current memory contract](../api/memory.md) and
 [Boot contracts](../api/src/boot/) for lifetime and version rules.

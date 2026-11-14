@@ -14,6 +14,8 @@ pub mod operations {
         NotAligned = -5,
         AlreadyMapped = -6,
         NoRegion = -7,
+        Unsupported = -8,
+        Stale = -9,
     }
     /// Create a private Internal Nest using None(NEST) authority.
     #[operation(slot = 0, output = super::PendId, error = NestFail)]
@@ -28,6 +30,13 @@ pub mod operations {
         pub out: super::VirtAddr,
     }
     // Slots 2/3 (Attach/Detach) are retired. Pend delegation does not bind hardware.
+    /// Register one authorized CPU Memo observation; returns a readonly Share
+    /// and a LISTEN/CONSUME Sign. Return either Pend to cancel the subscription.
+    #[operation(slot = 27, output = (super::PendId, super::PendId), error = NestFail)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Observe {
+        pub request: super::VirtAddr,
+    }
     /// Close the entire Nest. Busy retains cleanup until hardware has settled;
     /// retrying Delete completes deletion. Revoking a child Pend is not Delete.
     #[operation(slot = 4, output = (), error = NestFail)]

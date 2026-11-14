@@ -213,3 +213,31 @@ fn failed_or_unrelated_proofs_keep_page_and_address_responsibility_until_exact_r
         assert_eq!(pool.gives(), 1);
     }
 }
+
+#[test]
+fn retained_nonblocking_retirement_rejects_another_request_and_preserves_one_initiator() {
+    let mut retirement = Retirement::new();
+    retirement.mark_dirty(false);
+    let exact = retirement.begin(7, 3).unwrap();
+    let wrong = Request {
+        attempt: exact.attempt + 1,
+        ..exact
+    };
+    assert_eq!(
+        retirement.park(crate::metal::mmu::Deferred::new(wrong)),
+        Err(NestError::Shootdown)
+    );
+    assert!(retirement.deferred().is_none());
+    retirement
+        .park(crate::metal::mmu::Deferred::new(exact))
+        .unwrap();
+    assert!(retirement.deferred().unwrap().confirms(exact));
+    assert_eq!(retirement.begin(7, 3), Err(NestError::Busy));
+    retirement.fail();
+    assert!(retirement.deferred().is_none());
+    let retry = retirement.begin(7, 3).unwrap();
+    assert!(retry.attempt > exact.attempt);
+    let proof = scope::invalidate(&Cpu, retry).unwrap();
+    retirement.complete(proof, &mut Memos::new()).unwrap();
+    assert!(retirement.invalidation().is_clean());
+}

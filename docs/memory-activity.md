@@ -1,28 +1,25 @@
 # Authorized memory activity sampling
 
-Status: M0 proposal for #139. This document does not enable page sampling or
-claim completion of M1–M3. The current implementation still reports UNKNOWN in
-the global memory snapshot. Public operation numbers and rights are not issued
-by this proposal; they require the API/Client/Server compatibility review below.
+Status: version 1 CPU sampling implementation for #139. Only explicitly
+qualified hardware-updated 4 KiB CPU leaves are supported. External and larger
+Cell/leaf geometry return Unsupported. The global statistics page still returns
+UNKNOWN for A/D; no per-recipient facts are added to that page.
 
-## Current provider and architecture
+## Provider and architecture
 
-The source checkpoint is Kernel `b2eb37e2af134e4bb4248df454c437b06c1f93c0`,
-with ABI 11 as its sole dispatch contract. The Kernel Team observation Task is
-in `server/src/entry/observe/`; its global Share/Sign page has no per-page data.
-The earlier #138 implementation is present, but its historical guest fixture
-is not evidence of current ABI 11 acceptance.
+The implementation extends the atomic PTE prerequisite
+[#181](https://github.com/shuyra-arche/kernel/pull/181), the all-Hart data
+completion backend [#182](https://github.com/shuyra-arche/kernel/pull/182),
+and the M0 contract [#177](https://github.com/shuyra-arche/kernel/pull/177).
+The original M0 checkpoint was `b2eb37e2af134e4bb4248df454c437b06c1f93c0`.
 
-The RV64 backend selects Sv39/Sv48/Sv57 geometry. `Nest::attrs` currently
-presets both ACCESSED and DIRTY when publishing CPU PTEs. Those bits therefore
-cannot establish that a guest accessed or wrote a page. At that checkpoint,
-`PageTableEntry` stores ordinary u64 values and `set_flags` performs a
-load/modify/store. [#181](https://github.com/shuyra-arche/kernel/pull/181)
-supplies the atomic full-width PTE prerequisite and preserves hardware A/D
-during permission changes. It does not enable clearing or qualify sampling;
-splitting, replacement and retirement still require an audit before enabling
-sampling, beyond an A/D getter. Neither the paging mode nor an ISA extension name alone proves
-that hardware updating is enabled for this execution environment.
+The RV64 backend selects Sv39/Sv48/Sv57 geometry. Normal publication presets
+A/D. A sampler's first atomic clear discards those preset and pre-authorization
+bits. Its Memo owns cumulative history and exact nonblocking fence progress;
+receiver subscriptions own delivery cursors. Full-width CAS preserves all
+non-A/D bits and refuses a replaced PTE. Existing split/replacement/retirement
+still owns physical lifetime; sampling neither splits a leaf nor retains a
+physical Page reference as a reclamation interlock.
 
 Architecture reference: RISC-V Instruction Set Manual, Volume II, release
 20250508, source
@@ -39,7 +36,7 @@ applies when that extension is present.
 
 | Backend capability | Initial behavior |
 | --- | --- |
-| Qualified CPU hardware A/D update, selected paging mode and fence path | May arm a sampling epoch after full-width atomic PTE support and exact cross-Hart synchronization are verified |
+| Qualified CPU hardware A/D update, selected paging mode and fence path | May arm a version 1 epoch for an actual 4 KiB leaf |
 | Svade/software-managed A/D | Unsupported until fault handling explicitly maintains equivalent facts |
 | Unknown ADUE/firmware/virtualization configuration | Unsupported; retain preset A/D and normal memory behavior |
 | External/IOMMU/device writes | Unsupported in the first implementation |
@@ -47,7 +44,9 @@ applies when that extension is present.
 The boot provider must explicitly qualify the capability and its Hart coverage.
 It must not infer it from QEMU's name, the host architecture, a global memory
 Share, or successful DMA command completion. Existing providers default to no
-sampling capability. No current boot attestation grants this capability.
+sampling capability. The unsafe `boot::qualify_activity` boot attestation is separate from data or
+instruction completion qualification. Existing providers remain unqualified
+until their boot owner explicitly attests these conditions.
 
 ## Observation and authority
 
@@ -66,9 +65,9 @@ other Memos, other Nests or unauthorised aliases of the same Page.
 
 | Operation | Required authority | Result or failure |
 | --- | --- | --- |
-| Read an already available Memo sample | INSPECT in the current reservation window | Descriptive sample, Busy if incomplete, Stale on identity change |
+| Inspect Memo metadata | INSPECT in the current reservation window | Existing descriptive Memo metadata; no A/D clearing or activity grant |
 | Register or rearm a period that clears A/D | INSPECT plus a separate, explicitly delegated sampling right | Bounded subscription and receiver-local Share/Sign; INSPECT alone is Denied |
-| Inspect backend capability | Live INSPECT in the selected scope | Qualified capability or Unsupported; no Page facts outside the window |
+| Observe on an unsupported backend/geometry | Live INSPECT plus SAMPLE in the selected scope | Unsupported before grants or PTE changes |
 | Cancel | Actual subscription owner, or loss of any required live authority | Stop delivery and retract its output mappings; repeat cancellation is harmless |
 
 Read-only data access and the sampling right are separate from permissions to
@@ -131,13 +130,15 @@ writeback completion are deliberately unrepresentable.
 | Consumer or observation Task stops | No effect on allocation, faults, mapping retirement or Page reclamation responsibility |
 | Cancel during an unfinished fence | Stop delivery immediately; keep backend progress until its exact synchronization responsibility settles |
 
-Use the existing Kernel observation Task. Proposed initial bounds are 16 live
+Use the existing Kernel observation Task. The implementation bounds are 16 live
 subscriptions system-wide, one page of output per subscription and at most
 eight Memo steps per turn, with a persistent fair cursor. A step can submit or
 poll one covering synchronization attempt; it cannot spin waiting for a Hart.
 Cross-source traversal and allocator calls are outside global COMMIT. Full
 subscription capacity returns Busy without evicting a reader. No turn walks all
-page tables or aliases. These bounds need measured verification before release.
+page tables or aliases. The executable budget check and timing histograms are in the
+[activity guest](../server/tests/guest/activity/README.md). A count bound does
+not imply a hard time bound for locks, allocator work or emulator scheduling.
 
 Output Share grants are read-only and scoped to the actual recipient. Sign
 announces only that its snapshot changed; it is not a sampling or retirement
@@ -145,28 +146,81 @@ proof. The output must be tied to the original live authority for withdrawal,
 including already mapped copies. The global Memory Share remains unchanged
 and never contains the union of per-Unit samples.
 
-## Compatibility and implementation gates
+## Public interface and compatibility review
 
-Before assigning calls, review the smallest request/result form, new sampling
-right, cancellation/acknowledgement rule, descriptor widths, codec validation,
-protocol negotiation and old-client behavior together across API, Client and
-Server. No Swap-specific call or independent resource domain is needed. Paired
-public names, if any are necessary, must meet the equal-length and semantic
-duality convention. The current ABI 11 global statistics contract remains
-explainable; an incompatible wire change requires a coordinated ABI migration.
+API, Client and Server change together in one provider revision. This is an
+extension of the source-pinned ABI 11 contract, not a mixed-revision binary
+compatibility guarantee:
 
-M1 requires atomic PTE access across every mutator, backend qualification,
-checked leaf geometry and retained exact fence progress. M2 requires grant
-withdrawal through real mapping retirement, fair budgeted Task execution and
-receiver-local Share/Sign. M3 requires current-ABI host contract tests, actual
-RV64 debug/release builds, a restricted consumer, and QEMU tests for reads,
-writes, idle periods, multiple readers, alias isolation, stale identity,
-partial synchronization and revocation. Multi-Hart continuous writers and
-unsupported configurations require separate evidence. Native data or
-instruction completion qualification alone cannot stand in for sampling
-capability or those scenarios.
+| Surface | Version 1 decision |
+| --- | --- |
+| Call | Nest class 13, new slot 27: Observe(request pointer); all retired memory slots remain rejected |
+| Request | 56 little-endian bytes: MemoPosition (32), MemoGeneration (8), period_ns (8), protocol version (8) |
+| Envelope | Only a nonzero, nonoverflowing request pointer in a0; unused input registers must be zero |
+| Authority | Reservation-only `NestRights::SAMPLE = 8192` plus INSPECT; fresh Reservation roots receive SAMPLE, derived grants can attenuate it |
+| Result | Two distinct receiver-local PendIds in a0/a1: read-only Share and LISTEN/CONSUME Sign; neither is distributable |
+| Sample | Protocol 1, 128 bytes of checked fields in a 4096-byte seqlock page; allocation and all counters stop on exhaustion |
+| Period/capacity | 10 ms–10 s requested period, 16 admitted/pending subscriptions, eight slot visits per turn |
+| Cancel/ack | Return either output grant to cancel; consume the exact Sign receipt only after a coherent page read |
 
-Record exact source/fixture/toolchain, firmware capability settings, commands,
-failures, distributions, per-turn step counts, fence attempts and load impact.
+No existing descriptor width, Capsule format (2), Ledger version (11) or global
+memory-page layout changes. No new authorization domain, Swap call, opaque
+subscription handle or decorative operation pair is introduced. Observe is a
+bounded registration rather than a journaled migration; Busy before grant
+publication has admitted nothing. Once admitted, later work and failures are
+represented by the retained subscription, never by silently retrying Observe.
+
+Old strict PendInfo/Limits decoders do not know bit 8192 and may reject a newly
+issued Reservation. Upgrade API, Client, Server, consumer binaries and image
+producers to one matching full source SHA and rebuild the complete image.
+Do not combine an old ABI 11 rights decoder with this Server. Rollback requires
+rebuilding the complete old pinned image. Existing release tags remain
+immutable and do not acquire sampling. The per-recipient protocol has its own
+explicit version; an unknown request version is rejected, not downgraded.
+
+## Progress, cancellation and validity
+
+`SamplePage::read() == None` means no completed coherent sample, including first
+arm and an unfinished fence; Sign remains Pending. It does not mean false A/D.
+Observed implies a qualified CPU leaf and one complete interval after the
+reader's fresh baseline. `start_ns` and `end_ns` label the preceding and current
+atomic clears; `synchronized_ns` is the covering completion after the current
+clear. The interval between either clear and its covering synchronization can
+include old translations or speculative walks. NotObserved is only absence of
+captured evidence for that declared uncertainty, never a safe-clean proof.
+
+The Memo stores the last completed epoch containing each true bit. A reader's
+cursor advances only on its own exact Sign acknowledgement. Unread output is
+not rewritten; another reader can keep sampling without erasing its facts.
+A replacement yields one terminal Stale sample with the original identity and
+Unknown evidence. The old subscription does not follow the replacement.
+
+Narrow, Revoke, Return and Task/Team exit invalidate output grants before future
+writes. Existing SourceAuthorization and Nest retirement retract actual output
+mappings. Cancellation processes one native binding and one nonblocking fence
+post/poll per visit; the registry slot and output storage remain retained until
+withdrawal and the captured sampling round both settle. Peers can finish the
+same parked Nest retirement; they cannot substitute another request.
+
+Stopping the observation Task can retain at most the admitted subscription
+storage/progress and fill this service's capacity. It does not retain observed
+physical Pages, authorize new writes, or prevent ordinary Retract/Block/Vacate,
+allocation or explicit output Return from completing through existing owners.
+The stopped-task QEMU scenario exits the real Kernel Task immediately after its
+first captured clear, then checks those operations without restarting it.
+
+## Verification boundary
+
+The [test guide](../server/tests/guest/activity/README.md) records reproducible
+host, RV64 and QEMU checks, test-only instrumentation and fault injection.
+Evidence records exact source/fixture/toolchain, CPU configuration, firmware,
+composition diff, lockfile and ELF hashes, per-turn counts, timing histograms
+and raw writer throughput. The restricted consumer sorts two authorized
+candidates itself; the Kernel implements no eviction or writeback policy.
+
+The tested emulator configuration uses Sv57 and QEMU's legacy hardware A/D
+mode with Svade/Svadu explicitly disabled. Unqualified Svade is a separate
+negative case. Sv39/Sv48, ADUE-enabled Svadu firmware, physical hardware,
+hotplug and External activity have no sampling execution evidence here.
 Neither QEMU maxima nor CPU D bits establish real-hardware WCET, device-write
 absence, persistence, or permission to reclaim a Page.

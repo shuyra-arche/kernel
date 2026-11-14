@@ -78,6 +78,9 @@ mod basis {
         }
     }
     pub(crate) mod nest {
+        pub(crate) mod activity {
+            pub(crate) fn withdraw() {}
+        }
         pub(crate) use crate::support::{Nest, Span};
         pub(crate) mod authority {
             pub(crate) fn withdraw_source_branch(

@@ -26,6 +26,7 @@ fn now() -> u64 {
 }
 extern "C" fn run() -> ! {
     let mut epoch = 0u64;
+    let mut next_global = 0u64;
     loop {
         // Shutdown lookup temporarily holds a Hart-tracked TaskWeak. Unlike a
         // trap handler, this ordinary Kernel Task runs with interrupts enabled:
@@ -38,32 +39,42 @@ extern "C" fn run() -> ! {
         if stopping {
             break;
         }
-        let Some(next) = epoch.checked_add(1) else {
-            break;
-        };
-        epoch = next;
-        let start_ns = now();
-        let (capacity, available, resident) = crate::metal::allocator::frame::snapshot();
-        let retained = crate::basis::cell::page::statistics::snapshot();
-        let snapshot = Snapshot {
-            epoch,
-            start_ns,
-            end_ns: now(),
-            capacity,
-            available,
-            resident,
-            cpu_retained: retained.cpu,
-            io_retained: retained.external,
-            retiring: retained.retiring,
-            abandoned: retained.abandoned,
-            accessed: UNKNOWN,
-            dirty: UNKNOWN,
-        };
-        if !PAGE.publish(snapshot) {
-            break;
+        if now() >= next_global {
+            let Some(next) = epoch.checked_add(1) else {
+                break;
+            };
+            epoch = next;
+            let start_ns = now();
+            let (capacity, available, resident) = crate::metal::allocator::frame::snapshot();
+            let retained = crate::basis::cell::page::statistics::snapshot();
+            let snapshot = Snapshot {
+                epoch,
+                start_ns,
+                end_ns: now(),
+                capacity,
+                available,
+                resident,
+                cpu_retained: retained.cpu,
+                io_retained: retained.external,
+                retiring: retained.retiring,
+                abandoned: retained.abandoned,
+                accessed: UNKNOWN,
+                dirty: UNKNOWN,
+            };
+            if !PAGE.publish(snapshot) {
+                break;
+            }
+            resources::notify();
+            next_global = now().saturating_add(100_000_000);
         }
-        resources::notify();
-        sleep(now().saturating_add(100_000_000));
+        crate::basis::nest::activity::advance();
+        sleep(
+            now().saturating_add(if crate::basis::nest::activity::active() {
+                10_000_000
+            } else {
+                100_000_000
+            }),
+        );
     }
     exit()
 }

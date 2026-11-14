@@ -116,3 +116,15 @@ See [Nest retirement](../docs/nest-retirement.md),
 [Pend delegation](../docs/pend-delegation.md) for the current
 failure and authorization boundaries. [Verification](../server/tests/README.md)
 separates Host, RV64, QEMU and real hardware evidence.
+
+## Authorized CPU activity
+
+[Nest.Observe](src/abi/call/nest.rs) at new slot 27 selects one current
+MemoPosition and MemoGeneration through live INSPECT plus SAMPLE rights.
+Only explicitly qualified 4 KiB CPU leaves are supported; larger leaves,
+External and unqualified configurations return Unsupported. The receiver gets
+a read-only, nondistributable Share and LISTEN/CONSUME Sign, using
+[protocol 1](src/model/memory/activity.rs). Return either grant to cancel.
+The full [contract and migration](../docs/memory-activity.md) explains fresh
+epochs, retained unread facts, revocation and uncertainty. A/D observations
+never authorize physical reuse. The global statistics page remains unchanged.

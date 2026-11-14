@@ -1,6 +1,7 @@
 //! Global observations, never authority or proof that a Page can be reclaimed.
 //! All quantities are bytes. Retention quantities count obligations, so aliases
 //! may count a physical byte more than once. UNKNOWN never means zero.
+pub mod activity;
 use core::sync::atomic::{AtomicU64, Ordering};
 pub const UNKNOWN: u64 = u64::MAX;
 pub const VERSION: u64 = 1;

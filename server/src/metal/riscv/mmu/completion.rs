@@ -90,3 +90,56 @@ fn synchronize_mailboxes(mailboxes: &[Mailbox; MAX_HART_SLOTS]) -> Result<(), Er
     }
     Err(Error::TimedOut)
 }
+
+/// A retained, nonblocking observation round. A failed notification leaves the
+/// exact target/round live; polling resends IPIs without clearing a PTE again.
+pub(crate) struct Pending {
+    round: crate::metal::generic::mmu::completion::Round,
+    participants: [usize; MAX_HART_SLOTS / usize::BITS as usize],
+}
+impl Pending {
+    pub(crate) fn begin() -> Result<Self, Error> {
+        let _local = unsafe { crate::metal::sync::TrapGuard::save() };
+        Self::begin_on(&MAILBOXES)
+    }
+    fn begin_on(mailboxes: &[Mailbox; MAX_HART_SLOTS]) -> Result<Self, Error> {
+        crate::metal::allocator::assert_allocation_allowed();
+        let round = SEQUENCE.next().ok_or(Error::Capacity)?;
+        let me = hart::hart_id();
+        let mut participants = [0usize; MAX_HART_SLOTS / usize::BITS as usize];
+        // Pair with mark_online's fence before its first address-space activation.
+        unsafe { core::arch::asm!("fence rw, rw", options(nostack)) };
+        for slot in (0..hart::hart_count()).map(hart::HartId::new) {
+            if slot == me || hart::online(slot) {
+                let (word, bit) = slot.bit();
+                participants[word] |= bit;
+                mailboxes[slot.get()].request(round);
+                if slot != me {
+                    let _ = interrupt::ipi::send_completion(slot);
+                }
+            }
+        }
+        Ok(Self {
+            round,
+            participants,
+        })
+    }
+    pub(crate) fn poll(&self) -> bool {
+        let _local = unsafe { crate::metal::sync::TrapGuard::save() };
+        self.poll_on(&MAILBOXES)
+    }
+    fn poll_on(&self, mailboxes: &[Mailbox; MAX_HART_SLOTS]) -> bool {
+        service();
+        let mut complete = true;
+        for slot in (0..hart::hart_count()).map(hart::HartId::new) {
+            let (word, bit) = slot.bit();
+            if self.participants[word] & bit != 0 && !mailboxes[slot.get()].covers(self.round) {
+                complete = false;
+                if slot != hart::hart_id() {
+                    let _ = interrupt::ipi::send_completion(slot);
+                }
+            }
+        }
+        complete
+    }
+}
