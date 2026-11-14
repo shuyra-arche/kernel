@@ -170,6 +170,7 @@ dependencies = [
 name = "kernel-memory-tests"
 version = "0.0.1"
 dependencies = [
+ "bitflags",
  "erra",
  "fack",
  "hashbrown",
