@@ -286,6 +286,18 @@ fn safety() {
     let Target::View(ViewTarget::Share(view)) = pend_info(reader.data).target else {
         panic!("View")
     };
+    let (copy, copy_address) = reserve_at(space(), Placement::lowest(4096).unwrap(), 2);
+    mutate(Action::Insert {
+        target: copy,
+        expected: memo_status(copy).generation,
+        source: Source::Share {
+            token: reader.data,
+            view,
+            page: 0,
+            count: 1,
+        },
+    });
+    publish(copy);
     let (rw, _) = reserve(space());
     mutate(Action::Insert {
         target: rw,
@@ -307,6 +319,7 @@ fn safety() {
     assert_eq!(reply.outcome(), Outcome::Rejected(Failure::Denied));
     reader.cancel();
     withdrawn(reader.mapping, reader.address);
+    withdrawn(copy, copy_address);
     let (again, _) = reserve_at(space(), Placement::lowest(4096).unwrap(), 2);
     let kernel_client::memory::Response::Reply(reply) = call(Action::Insert {
         target: again,
@@ -328,6 +341,8 @@ fn safety() {
 }
 static CHILD_POSITIONS: [[AtomicU64; 4]; 2] = [const { [const { AtomicU64::new(0) }; 4] }; 2];
 static CHILD_SPACE: AtomicUsize = AtomicUsize::new(0);
+static CHILD_SORTED: AtomicBool = AtomicBool::new(false);
+static CHILD_REVOKED: AtomicBool = AtomicBool::new(false);
 static CHILD_READY: AtomicBool = AtomicBool::new(false);
 static CHILD_WRITE: AtomicU64 = AtomicU64::new(0);
 extern "C" fn consumer() -> ! {
@@ -370,6 +385,18 @@ extern "C" fn consumer() -> ! {
     });
     assert_eq!(candidates[0].page, accessed.page);
     assert_ne!(accessed.page, idle.page);
+    CHILD_SORTED.store(true, Release);
+    let deadline = room::clock() + 8_000_000_000;
+    while !CHILD_REVOKED.load(Acquire) {
+        assert!(room::clock() < deadline);
+        pause();
+    }
+    assert!(sign::listen(hot.event, Wait::Poll).is_err());
+    assert_eq!(pend_info(hot.data).status, PendStatus::Dead);
+    while memo_status(hot.mapping).phase != MemoPhase::Empty {
+        assert!(room::clock() < deadline);
+        pause();
+    }
     // The consumer chooses a ranking; this does not authorize eviction/reuse.
     // Leave both output mappings, grants and an unread snapshot to Task exit.
     let _ = cold.pending();
@@ -379,12 +406,16 @@ fn consumer_exit() {
     let (_, cold, _) = page();
     let (_, hot, address) = page();
     let child = spawn(consumer);
+    let mut hot_token = None;
     for (position, words) in [cold, hot].into_iter().zip(CHILD_POSITIONS.iter()) {
         let mut limits = pend_info(position.token()).limits;
         limits.operations = Operations::Nest(NestRights::INSPECT | NestRights::SAMPLE);
         limits.modifiable = kernel_api::model::modifiable::Modifiable::No;
         limits.distributable = Distributable::No;
         let token = accord(position.token(), child, limits);
+        if position == hot {
+            hot_token = Some(token);
+        }
         let received = MemoPosition::new(
             token,
             position.nest(),
@@ -410,11 +441,25 @@ fn consumer_exit() {
     }
     unsafe { (address.get() as *mut u64).write_volatile(121) };
     CHILD_WRITE.store(room::clock(), Release);
+    let deadline = room::clock() + 8_000_000_000;
+    while !CHILD_SORTED.load(Acquire) {
+        assert!(room::clock() < deadline);
+        pause();
+    }
+    loop {
+        match pend::revoke(child, hot_token.unwrap()) {
+            Ok(()) => break,
+            Err(e) => assert_eq!(e.source, kernel_api::abi::call::pend::PendFail::Busy),
+        }
+        assert!(room::clock() < deadline);
+        pause();
+    }
+    CHILD_REVOKED.store(true, Release);
     assert_eq!(join(child).result, Some(0));
     // Capacity below must still admit all 16 entries after this consumer exits.
     let _ = writeln!(
         Console,
-        "PASS activity consumer-exit=1 restricted-readonly=1 unread=1 sorted-candidates=2"
+        "PASS activity consumer-exit=1 restricted-readonly=1 unread=1 sorted-candidates=2 ancestor-revoke=1"
     );
 }
 fn large_leaf() {

@@ -160,7 +160,10 @@ pub(crate) fn register(
     let mut limits = output.authority().limits();
     limits.operations = Operations::Share(ShareRights::ASSOCIATE);
     limits.distributable = Distributable::No;
-    output.narrow(limits).map_err(failure)?;
+    {
+        let _commit = crate::basis::commit();
+        output.narrow(limits).map_err(failure)?;
+    }
     let sign = Endpoint::try_new(actor.ident.id).map_err(|_| Failure::OutOfMemory)?;
     let event = Arc::try_new(
         PendEntry::try_new(Target::Sign(sign.clone()), Mark::NONE, Modifiable::No, None)
@@ -170,7 +173,10 @@ pub(crate) fn register(
     let mut limits = event.authority().limits();
     limits.operations = Operations::Sign(SignRights::LISTEN | SignRights::CONSUME);
     limits.distributable = Distributable::No;
-    event.narrow(limits).map_err(failure)?;
+    {
+        let _commit = crate::basis::commit();
+        event.narrow(limits).map_err(failure)?;
+    }
     let s = Arc::try_new(Subscription {
         actor: Arc::downgrade(actor),
         source,

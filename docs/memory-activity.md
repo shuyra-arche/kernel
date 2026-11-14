@@ -188,6 +188,9 @@ atomic clears; `synchronized_ns` is the covering completion after the current
 clear. The interval between either clear and its covering synchronization can
 include old translations or speculative walks. NotObserved is only absence of
 captured evidence for that declared uncertainty, never a safe-clean proof.
+Other readers may cause intermediate clears while a recipient accumulates an
+interval; their clear/fence uncertainty also applies. The last synchronization
+timestamp is not a continuous-write coverage guarantee.
 
 The Memo stores the last completed epoch containing each true bit. A reader's
 cursor advances only on its own exact Sign acknowledgement. Unread output is
