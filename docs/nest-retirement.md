@@ -96,8 +96,8 @@ wait reception windows. Simultaneous initiators service each other's requests
 while polling; no global owner lock serializes their waits. Caller-only Team
 operation/Pend ledger serialization can remain: responders never acquire those
 locks, and even a peer queued on them services its mailbox in the lock wait.
-COMMIT/Nest/Page locks do not cross initiation. Polling ends after 100 ms of the admitted timebase
-or one million iterations, whichever comes first. IPI submission errors, timeout
+COMMIT/Nest/Page locks do not cross initiation. Polling ends after one second of the admitted timebase
+or five million iterations, whichever comes first. IPI submission errors, timeout
 and partial completion return failure with no receipt. These bounds cover Kernel
 polling, not a firmware call that never returns. A late response is harmless;
 a retry receives a fresh round and still owns the original retained resources.

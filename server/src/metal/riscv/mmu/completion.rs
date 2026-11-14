@@ -49,14 +49,14 @@ pub(crate) fn synchronize() -> Result<(), Error> {
             participants[word] |= bit;
             MAILBOXES[slot.get()].request(round);
             if slot != me {
-                interrupt::ipi::send(slot).map_err(|_| Error::Fault)?;
+                interrupt::ipi::send_completion(slot).map_err(|_| Error::Fault)?;
             }
         }
     }
     // Bound both elapsed time and polling work, including a stalled timebase.
     let start = crate::metal::clock::now().as_ticks();
-    let budget = (crate::entry::boot::facts::info().hart.hertz() as u64 / 10).max(1);
-    for _ in 0..1_000_000 {
+    let budget = (crate::entry::boot::facts::info().hart.hertz() as u64).max(1);
+    for _ in 0..5_000_000 {
         service();
         let complete = (0..hart::hart_count()).map(hart::HartId::new).all(|slot| {
             let (word, bit) = slot.bit();

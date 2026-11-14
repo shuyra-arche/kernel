@@ -51,13 +51,14 @@ def main():
     extract(args.fixture, FIXTURE, fixture)
     patches = []
 
-    def edit(relative, transform):
-        path = fixture / relative
+    def edit(relative, transform, root=fixture):
+        path = root / relative
         before = path.read_text()
         after = transform(before)
         assert after != before, relative
         patches.extend(difflib.unified_diff(before.splitlines(True), after.splitlines(True),
-            fromfile="a/" + relative, tofile="b/" + relative))
+            fromfile="a/" + root.name + "/" + relative,
+            tofile="b/" + root.name + "/" + relative))
         path.write_text(after)
 
     for relative in ["tests/memory/Cargo.toml", "platform/riscv/Cargo.toml"]:
@@ -79,9 +80,20 @@ def main():
         ) + s[end:]
     edit("tests/memory/platform/main.rs", platform)
     edit("tests/memory/guest/main.rs", lambda s: s.replace("mod virtqueue;", "mod smp;")
-         .replace("    virtqueue::run();", "    smp::run();"))
+         .replace("    virtqueue::run();", "    smp::run();")
+         .replace("    ipc::run();\n", ""))
+    # This case builds a new executable Team through native RX publication.
+    # It remains outside the data-only qualification, rather than weakening it.
+    edit("tests/memory/guest/acceptance/mod.rs", lambda s:
+         s.replace("mod authority;\n", "").replace("    authority::run();\n", ""))
     suite = Path(__file__).resolve().parent
     shutil.copy2(suite / "cases.rs", fixture / "tests/memory/guest/smp.rs")
+    probe = provider / "server/tests/guest/smp/probe.rs"
+    edit("server/src/metal/riscv/mmu/completion.rs", lambda s: s +
+         '\n#[path = ' + json.dumps(str(probe)) + ']\npub(crate) mod probe;\n', provider)
+    edit("server/src/entry/boot/mod.rs", lambda s: s.replace(
+        'extern "C" fn run_on_stack() -> ! {',
+        'extern "C" fn run_on_stack() -> ! {\n    crate::metal::mmu::completion::probe::run();'), provider)
     (args.output / "composition.diff").write_text("".join(patches))
     manifest = fixture / "tests/memory/Cargo.toml"
     command = ["cargo", "build", "--manifest-path", str(manifest), "--target", TARGET]
@@ -133,7 +145,8 @@ def main():
         log = (evidence / "serial.log").read_text()
         markers = ["PASS native-memory", "PASS native-fault", "PASS acceptance-unit",
                    "PASS acceptance-scopes", "PASS acceptance-lineage", "PASS acceptance-maintenance",
-                   "PASS smp-retirement", "PASS smp-executable-rejected", "task: all tasks exited"]
+                   "PASS smp-completion", "PASS smp-retirement",
+                   "PASS smp-executable-rejected", "task: all tasks exited"]
         passed = status == 0 and "FAIL" not in log and "[kernel] fatal" not in log and all(m in log for m in markers)
         (evidence / "result.json").write_text(json.dumps({"command": command, "status": status,
             "elapsed_seconds": time.monotonic() - start, "passed": passed}, indent=2))

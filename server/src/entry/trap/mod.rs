@@ -92,7 +92,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
             }
         }
         TrapEvent::Ipi => {
-            ipi::acknowledge();
+            let schedule = ipi::acknowledge();
             crate::basis::sign::endpoint::delivery::advance();
             if let Some(route) = crate::basis::room::interrupt::external() {
                 route.rearm();
@@ -104,7 +104,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
                 return quit(ident, reason);
             }
             drop(ident);
-            if from_task {
+            if from_task && schedule {
                 run() as *mut TrapContext
             } else {
                 frame as *mut TrapContext
