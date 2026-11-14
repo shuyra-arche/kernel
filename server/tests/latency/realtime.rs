@@ -121,6 +121,13 @@ fn spec(priority: u64, budget: u64, period: u64) -> Schedule {
 fn join(task: TaskId) {
     assert_eq!(support::join(task).exit.map(|(_, code)| code), Some(0));
 }
+fn stopped(task: TaskId) {
+    let info = support::join(task);
+    assert_eq!(
+        info.exit.map(|(cause, _)| cause),
+        Some(kernel_api::model::unit::ExitCause::Slay)
+    );
+}
 fn gate(task: TaskId) -> (PendId, PendId) {
     let root = sign::create(support::license()).unwrap();
     let request = AccordRequest {
@@ -183,7 +190,7 @@ extern "C" fn run(at: usize, count: usize) -> ! {
         marker(b"ROOM:steady\n");
         assert_eq!(admit(worker, schedule), Err(UnitFail::Denied));
         unit::stop(UnitTarget::Task(worker)).unwrap();
-        join(worker);
+        stopped(worker);
         marker(b"ROOM:teardown\n");
         let _ = writeln!(Console, "PASS realtime harts=1 unsupported=1");
         exit(0)
@@ -237,7 +244,7 @@ extern "C" fn run(at: usize, count: usize) -> ! {
     );
     assert_eq!(profile(low_task).schedule, slow);
     unit::stop(UnitTarget::Task(excess)).unwrap();
-    join(excess);
+    stopped(excess);
     resume(high_task);
     wait(|| {
         support::task_info(UnitQuery::Target(UnitTarget::Task(high_task))).state

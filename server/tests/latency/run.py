@@ -87,6 +87,12 @@ def compose(args, kernel, destination):
     unsafe { boot::configure(description)?; }
 ''')
         edit(fixture / "platform/riscv/src/boot/mod.rs", uart_owner)
+    if args.mode == "realtime":
+        # Native's system entry is normally Supervisor and correctly fails RT
+        # admission. This isolated boot composition instead loads the same ELF
+        # into a genuine User Team through the production builder. The RT
+        # admission checks and resident preparation stay unchanged.
+        edit(provider / "server/src/basis/unit/team/capsule.rs", lambda s: s.replace('TeamBuilder::new(SpaceKind::Supervisor)', 'TeamBuilder::new(SpaceKind::User)'))
     guest = SUITE / ({"irq": "interrupt.rs", "realtime": "realtime.rs", "room": "guest.rs"}[args.mode])
     edit(root / "guest/main.rs", lambda _: guest.read_text())
     # These workloads use same-Team Tasks and static boot MMIO, not native RAM
