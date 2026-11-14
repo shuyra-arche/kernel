@@ -15,7 +15,9 @@ Vanllia/System product are published.
 
 The [release workflow](https://github.com/shuyra-arche/kernel/actions/runs/43581620935)
 passed all checks before publication: locked host tests, RV64 debug/release,
-ABI/native selections and all six QEMU shards. The preparation and exact
+ABI/native selections and all six QEMU shards. The publication build used
+`rustc 1.102.0-nightly (5f4effd57 2026-11-13)`; pre-tag candidate and component
+checks used the earlier `8eb778d04` nightly (Twine Rust 1.99.0). The preparation and exact
 consumer input records are in [#165](https://github.com/shuyra-arche/kernel/pull/165).
 Per-page A/D stays Unknown/Unsupported, memory-v11 is optional, and full System
 migration and physical-hardware qualification remain outside this preview.
