@@ -8,7 +8,7 @@ use core::{
 };
 use kernel_api::{
     abi::memory::*,
-    model::{flat::*, nest::*},
+    model::{cell::Placement, flat::*},
 };
 use kernel_client::{
     call::{room, unit},
