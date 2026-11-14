@@ -131,7 +131,7 @@ impl Slot {
         inner.running = Some(task);
         #[cfg(feature = "latency")]
         let _timer = crate::metal::measure::scope(crate::metal::measure::Work::TimerArm, _commit);
-        deadline::arm(self.ceiling(inner, clock::now().as_ticks()));
+        deadline::stage(self.ceiling(inner, clock::now().as_ticks()));
         pa
     }
     fn leave(&self, inner: &mut Inner, _commit: &CommitGuard) -> Arc<Task> {
@@ -224,7 +224,7 @@ impl Slot {
                     #[cfg(feature = "latency")]
                     let _timer =
                         crate::metal::measure::scope(crate::metal::measure::Work::TimerArm, commit);
-                    deadline::arm(ceiling);
+                    deadline::stage(ceiling);
                 }
                 Some(cur.ident.frame_pa.as_usize())
             }
@@ -322,7 +322,7 @@ impl Slot {
         self.inner.lock().pending.enqueue(task);
         #[cfg(feature = "latency")]
         let _timer = crate::metal::measure::scope(crate::metal::measure::Work::TimerArm, commit);
-        deadline::arm(self.deadline(clock::now().as_ticks()));
+        deadline::stage(self.deadline(clock::now().as_ticks()));
         next
     }
     pub(crate) fn detach_local(&self, task: &Arc<Task>) -> bool {
