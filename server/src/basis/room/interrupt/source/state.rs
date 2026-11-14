@@ -102,6 +102,10 @@ impl<R> State<R> {
     }
     /// Retain the physical claim even without a live receiver.
     pub(super) fn claimed(&mut self) -> bool {
+        assert!(
+            matches!(self.claim, Claim::Clear),
+            "duplicate controller claim"
+        );
         self.claim = Claim::Held;
         self.armed()
     }

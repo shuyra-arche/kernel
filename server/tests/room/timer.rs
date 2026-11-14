@@ -1,3 +1,5 @@
+#[path = "../../src/basis/room/deadline/local.rs"]
+mod deadline;
 #[path = "../../src/metal/riscv/clock/timer/local.rs"]
 mod local;
 
@@ -86,4 +88,50 @@ fn retry_is_retained_until_due_and_contention_does_not_create_a_past_comparator(
     assert_eq!(retry.request(20, 0), 21);
     retry.elapsed(21);
     assert_eq!(retry.request(DISARMED - 10, 20), DISARMED - 1);
+}
+
+#[test]
+fn staged_deadline_uses_the_last_commit_and_never_programs_before_flush() {
+    let desired = deadline::Local::new();
+    let writes = Cell::new(0);
+    let mut program = |value| {
+        writes.set(writes.get() + 1);
+        assert_eq!(value, 200);
+        Ok::<_, ()>(())
+    };
+    assert_eq!(desired.flush(&mut program), Ok(false));
+    desired.stage(100);
+    desired.stage(200);
+    assert_eq!(writes.get(), 0);
+    assert_eq!(desired.flush(&mut program), Ok(true));
+    assert_eq!(desired.flush(&mut program), Ok(false));
+    assert_eq!(writes.get(), 1);
+}
+
+#[test]
+fn failed_programming_keeps_staged_work_and_refresh_rechecks_external_deadlines() {
+    let desired = deadline::Local::new();
+    let backend = ScriptedComparator {
+        hardware: Cell::new(Compare::OFF),
+        fail: Cell::new(false),
+    };
+    let timer = LocalTimer::new(&backend).unwrap();
+    let shared = Cell::new(100);
+    let program = |value: u64| {
+        timer
+            .set(Compare::from_ticks(value.min(shared.get())))
+            .map(|_| ())
+    };
+    desired.stage(200);
+    backend.fail.set(true);
+    assert_eq!(desired.flush(program), Err(()));
+    assert_eq!(timer.setting(), None);
+    shared.set(50);
+    assert_eq!(desired.flush(program), Ok(true));
+    assert_eq!(backend.hardware.get().ticks(), 50);
+    // A heap removal/IPI refresh is needed even without another staged seat.
+    shared.set(u64::MAX);
+    assert_eq!(desired.refresh(program), Ok(()));
+    assert_eq!(backend.hardware.get().ticks(), 200);
+    assert_eq!(desired.flush(program), Ok(false));
 }
