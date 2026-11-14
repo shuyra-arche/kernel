@@ -2,6 +2,7 @@
 
 mod geometry;
 mod lifecycle;
+pub(super) mod materialize;
 mod region;
 pub(super) mod reshape;
 pub(super) mod residency;
@@ -84,7 +85,7 @@ impl FlatState {
         let first = slots.partition_point(|(slot, _)| slot.get() < index.get());
         let last = slots.partition_point(|(slot, _)| slot.get() < end);
         slots[first..last].iter().any(|(_, state)| match state {
-            Slot::Moving { .. } | Slot::Reserved { .. } => true,
+            Slot::Moving { .. } | Slot::Reserved { .. } | Slot::Allocating { .. } => true,
             Slot::Resident(page) => page.changing(),
             Slot::Missing => false,
         })
@@ -123,7 +124,9 @@ impl FlatState {
         match slots[at].1 {
             Slot::Resident(_) => Ok(()),
             Slot::Missing => Err(TransferError::SourceEmpty),
-            Slot::Moving { .. } | Slot::Reserved { .. } => Err(TransferError::Busy),
+            Slot::Moving { .. } | Slot::Reserved { .. } | Slot::Allocating { .. } => {
+                Err(TransferError::Busy)
+            }
         }
     }
 
@@ -145,7 +148,9 @@ impl FlatState {
         match slots[at].1 {
             Slot::Resident(_) => Err(TransferError::DestinationOccupied),
             Slot::Missing => Ok(true),
-            Slot::Moving { .. } | Slot::Reserved { .. } => Err(TransferError::Busy),
+            Slot::Moving { .. } | Slot::Reserved { .. } | Slot::Allocating { .. } => {
+                Err(TransferError::Busy)
+            }
         }
     }
 
