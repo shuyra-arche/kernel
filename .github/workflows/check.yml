@@ -204,8 +204,14 @@ jobs:
             python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --baseline .integration/room-control --fixture .integration/vanllia --output ".integration/compare-$mode-on" --mode "$mode" --rounds 5
             python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --baseline .integration/room-control --fixture .integration/vanllia --output ".integration/compare-$mode-off" --mode "$mode" --rounds 5 --no-latency
           done
+      - name: Fetch original provider for first-use study
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 5ec49757b92e129822a50e543a999fb4ea509036
+          path: .integration/room-first-use
+          persist-credentials: false
       - name: Separate first timed wake from warmed scheduling
-        run: python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/compare-warmup-on --mode room --harts 1 --rounds 5 --compare-room-warmup
+        run: python3 server/tests/latency/run.py --kernel .integration/room-first-use --fixture .integration/vanllia --output .integration/compare-warmup-on --mode room --harts 1 --rounds 5 --compare-room-warmup
       - name: Preserve every comparison boot
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

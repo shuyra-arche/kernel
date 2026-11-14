@@ -29,14 +29,14 @@ neither their physical duration nor firmware latency is established by QEMU.
 
 Diagnostics are optional (`kernel/latency`), fixed-capacity and initialized
 in place before secondary startup. Reports print actual storage bytes per Hart
-(currently 24,512), plus Task-owned observation atomics. Sampling introduces no
+(currently 27,136), plus Task-owned observation atomics. Sampling introduces no
 allocation, formatting, log I/O or new global lock. Observations never authorize
 queue membership or resource access.
 
 | Record | Meaning and limits |
 | --- | --- |
 | `latency-phase` / `latency-window` | Boot/setup, warmed workload and teardown use explicit boundaries. A span belongs to a phase only when its entire interval fits. Crossing spans stay in aggregate metrics and `latency-crossed`, avoiding contamination of steady distributions. Normal production boot uses the lifetime window; only the archived test composition brackets the warmed workload via existing Debug.Put markers. |
-| `latency-phase-outer` / `latency-outer-parts` | Same-transaction timestamp, outer site, inclusive duration and call counts for scheduler step, Sign wait, IRQ maintenance, controller claim, nested SpinLock acquisition and scheduling timer arm. Eight sites per Hart/phase retain their own largest transaction. Nested durations overlap; never sum them as an exclusive partition. Uninstrumented work remains unknown. |
+| `latency-phase-outer` / `latency-outer-parts` | Same-transaction timestamp, outer site, inclusive duration and call counts for scheduler step, Sign wait, IRQ maintenance, controller claim, nested SpinLock acquisition and scheduling timer arm, plus Sign deadline redemption, due-heap drain, exact waiter detach, continuation/wake placement and doomed-Task inspection. Eight sites per Hart/phase retain their own largest transaction. Nested durations overlap; never sum them as an exclusive partition. Uninstrumented work remains unknown. |
 | `latency-phase-ready` / `latency-ready` | Initial/current queue Hart, destination, enqueue occupancy, queue entries, reselections and rejection bits (ineligible, budget, outranked). Task notification attempt, target and nonwrapping generation are matched to actual SSIP receipt and selection. A receipt can cover coalesced notifications; it does not prove one SBI call caused it. Stealing/uncovered generations report receipt zero (unknown). Queue counts are boundary snapshots, not a continuous runnable competitor census. |
 | `latency-phase-irq` / `latency-irq` | IRQ-off origin and transaction active at entry. That transaction can finish within the interval. Reception windows end/restart the interval around actual SIE enablement; the assembly reception handler does not mutate Rust attribution. Firmware, host descheduling and uninstrumented kernel time cannot be separated. |
 | `controller-claim` / `timer-return` | Hardware claim interval and deferred timer merge/programming. Leaving COMMIT does not remove these costs from IRQ-off or whole response measurements. |
@@ -49,7 +49,7 @@ observed maximum is a WCET or deployment response guarantee.
 
 ## Workloads and boot policy
 
-- `room`: eight same-Team Tasks each warm up with 64 Yield turns, then execute
+- `room`: eight same-Team Tasks each warm up with 64 Yield turns and eight timer sleeps, then execute
   512 timed Yield turns and eight sleeps. Workers stay alive until the main
   Task closes the observation window, separating exit/reclamation costs.
 - `irq`: real UART THRE / PLIC line 10; four Yield competitors and six LISTEN-only
@@ -96,7 +96,7 @@ rules. Diagnostic-on/off elapsed times expose workload perturbation; do not
 subtract an assumed constant instrumentation cost.
 
 A published control for #120 is
-`c45d8bc5aced4000685f605de2d43accb3279f82` (`exp/room-control`). It retains the
+`ab4dd4cb0a16c257627a6bff3c7f76bf383dcdb6` (`exp/room-control`). It retains the
 original IRQ and scheduling-timer COMMIT boundaries with the same diagnostics
 and native ASSOCIATE compatibility correction. It is an instrumented control,
 not unmodified main. The final PR records candidate revisions, repeated results,
@@ -111,8 +111,21 @@ pushing an update:
 
 ```text
 Room comparison: requested
-Room baseline: c45d8bc5aced4000685f605de2d43accb3279f82
+Room baseline: ab4dd4cb0a16c257627a6bff3c7f76bf383dcdb6
 ```
+
+For first-use analysis, `--cold-room` retains the former Yield-only warmup.
+`--compare-room-warmup --mode room --harts 1 --rounds 5` builds cold and warm
+images of the same provider before alternating their boot order. The timed
+512 Yield turns and eight sleeps per worker stay identical. Raw boot/setup
+histograms retain first-use work; warming does not remove that cost from the
+record. A warmup marker and inputs.json record the selected policy.
+
+The opt-in job also runs this ten-boot study with provider
+`5ec49757b92e129822a50e543a999fb4ea509036`, whose tree matches the previous
+CI merge exactly. This separates a warmup effect from the newer diagnostic
+scopes changing code layout. QEMU first-use translation, cache and firmware
+costs are not independently measured.
 
 The opt-in job fetches the validated full control SHA from this repository and
 uploads all rounds as `room-comparison`. Its host is separate from a local
