@@ -6,11 +6,28 @@ actual tag and exact Git SHA after its checks pass. The release preparation PR
 records the exact candidate, locked validation and immutable consumer pins.
 
 Before creating any tag, establish active protection against updates and deletion
-for `refs/tags/*-preview-*`, with no bypass actors. An administrator can apply the
-[prepared ruleset](preview-tags.ruleset.json):
+for every date-based release Tag, with no bypass actors. This covers all three
+non-stable channels (`explore`, `develop`, `preview`) and stable codenames.
+
+In the GitHub web UI's Tag pattern input, enter only:
+
+```text
+[0-9][0-9].[0-9][0-9].[0-9][0-9]-*
+```
+
+The API represents the same pattern as
+`refs/tags/[0-9][0-9].[0-9][0-9].[0-9][0-9]-*`. The web UI adds `refs/tags/`
+automatically; including it in that input produces a duplicate prefix and does
+not match real release refs. The pattern protects the release-name namespace;
+the release workflow separately validates calendar dates, channels and suffixes.
+
+An administrator can apply the [prepared ruleset](preview-tags.ruleset.json)
+through the API:
 
 ```sh
 gh api --method POST repos/shuyra-arche/kernel/rulesets --input docs/releases/preview-tags.ruleset.json
+# For an existing ruleset, PUT its ID instead of creating a second ruleset:
+# gh api --method PUT repos/shuyra-arche/kernel/rulesets/RULESET_ID --input docs/releases/preview-tags.ruleset.json
 gh api repos/shuyra-arche/kernel/rulesets
 # Fetch the returned ruleset ID and verify target=tag, enforcement=active,
 # the include pattern, no bypass, and update/deletion rules before tagging.
