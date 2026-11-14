@@ -92,6 +92,7 @@ impl<T: ?Sized> SpinLock<T> {
         #[cfg(feature = "latency")]
         let start = crate::metal::measure::stamp();
 
+        crate::metal::sync::depend_check!(self, caller);
         if !self.turns.try_enter() {
             return None;
         }
