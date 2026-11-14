@@ -23,8 +23,14 @@ def output(command, **kwargs):
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
+def git(repo, *args):
+    # Container checkouts can have a different UID. Trust only the explicitly
+    # selected input for this read-only invocation; do not change global config.
+    repo = repo.resolve()
+    return ["git", "-c", "safe.directory=" + str(repo), "-C", str(repo), *args]
+
 def extract(repo, revision, destination, *paths):
-    data = subprocess.check_output(["git", "-C", str(repo), "archive", revision, *paths])
+    data = subprocess.check_output(git(repo, "archive", revision, *paths))
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
         archive.extractall(destination, filter="data")
 
@@ -43,8 +49,8 @@ def main():
     args.kernel = args.kernel.resolve()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
-    source = output(["git", "-C", str(args.kernel), "rev-parse", "HEAD"])
-    assert output(["git", "-C", str(args.fixture), "rev-parse", "HEAD"]) == FIXTURE
+    source = output(git(args.kernel, "rev-parse", "HEAD"))
+    assert output(git(args.fixture, "rev-parse", "HEAD")) == FIXTURE
     provider = args.output / "provider"
     provider.mkdir()
     extract(args.kernel, source, provider)
