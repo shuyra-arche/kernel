@@ -59,7 +59,15 @@ also have their own metadata allocations; those are outside this change.
 Host tests exercise the production reservation, slot/transfer/residency checks
 and Page destruction with paused concurrent preparation, allocation failure,
 prefix retry, stale-slot fault injection, owner closure and geometry rejection.
-They do not execute interrupt masking or prove target timing. Native ABI 11
-guest acceptance covers the assembled system, but is not a concurrent implicit
-Flat guest fixture. No physical-hardware latency bound or measured speed-up is
-claimed here.
+They do not execute interrupt masking or prove target timing. The separate
+[RV64 probe](../server/tests/guest/flat/README.md) runs real implicit allocation
+and four competing Kernel Tasks on 1/4 Harts. It exercises actual allocator
+exhaustion, prefix retry, Busy during reservation/transfer, unpublished Page
+return, Owner epoch closure and Task exit. Owner closure is not a complete user
+Team destruction test, and cancellation occurs before the worker exits.
+
+Its optional timing mode records the same state-lock ownership intervals and
+whole-call distributions on baseline and candidate providers. Ownership time
+includes reception windows; it is not a continuous interrupt-masking bound.
+Native ABI 11 guest acceptance separately covers the assembled public system.
+No physical-hardware latency bound is claimed here.

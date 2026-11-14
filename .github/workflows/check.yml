@@ -107,6 +107,25 @@ jobs:
         run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --no-build --capsule-version 10
       - name: Run current native provider (release)
         run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --profile release
+      - name: Check implicit Flat contracts (debug, 1/4 Harts)
+        run: python3 server/tests/guest/flat/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/flat-debug
+      - name: Check implicit Flat contracts (release, 1/4 Harts)
+        run: python3 server/tests/guest/flat/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/flat-release --profile release
+      - name: Preserve implicit Flat evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: implicit-flat
+          path: |
+            .integration/flat-*/inputs.json
+            .integration/flat-*/composition.diff
+            .integration/flat-*/build.log
+            .integration/flat-*/harts-*/*.log
+            .integration/flat-*/harts-*/result.json
+            .integration/flat-*/provider/server/tests/guest/flat/Cargo.lock
+            .integration/flat-*/provider/server/tests/guest/flat/target/riscv64gc-unknown-none-elf/debug/flat-guest
+            .integration/flat-*/provider/server/tests/guest/flat/target/riscv64gc-unknown-none-elf/release/flat-guest
+          if-no-files-found: warn
       - name: Preserve native image evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
