@@ -74,7 +74,16 @@ def compose(provider, fixture, unsupported, stopped):
     edit(fixture, "tests/memory/guest/main.rs", lambda _: (suite / "main.rs").read_text().replace(
         "const SUPPORTED: bool = true;", "const SUPPORTED: bool = " + str(not unsupported).lower() + ";").replace(
         "const STOPPED: bool = false;", "const STOPPED: bool = " + str(stopped).lower() + ";"))
-    shutil.copy2(suite / "cases.rs", fixture / "tests/memory/guest/cases.rs")
+    for name in ["cases.rs","reservation.rs"]:
+        shutil.copy2(suite / name, fixture / "tests/memory/guest" / name)
+    def reservations(s):
+        begin=s.index("pub fn reserve_pages(")
+        end=s.index("pub fn insert(",begin)
+        return s[:begin]+'''pub fn reserve_pages(token:PendId,placement:Placement,access:u64,count:usize)->(MemoPosition,VirtAddr) {
+    crate::reservation::reserve(token,ReserveRequest {placement,access,count:PageCount::new(count).unwrap(),level:CellLevel::new(0).unwrap()})
+}
+'''+s[end:]
+    edit(fixture,"tests/memory/guest/support.rs",reservations)
     edit(fixture, "tests/memory/guest/support.rs", lambda s:
         s[:s.index("pub fn image()")] + s[s.index("pub fn accord("):])
     # Rejected Busy has made no mutation; accepted operations retain their IDs.
@@ -118,6 +127,15 @@ def compose(provider, fixture, unsupported, stopped):
         '        unsafe { task.capture_extensions(frame.status()) };'))
     edit(provider, "server/src/entry/report/shutdown.rs", lambda s: s.replace(
         'pub(crate) fn report() {', 'pub(crate) fn report() {\n    crate::basis::nest::activity::probe::report();'))
+    edit(provider,"server/src/metal/riscv/mmu/completion.rs",lambda s:s.replace(
+        'interrupt::ipi::send_completion(slot).map_err(|_| Error::Fault)?;',
+        'interrupt::ipi::send_completion(slot).map_err(|_| { crate::basis::nest::activity::probe::notify_failed(); Error::Fault })?;').replace(
+        '    Err(Error::TimedOut)',
+        '    let mut missing=0usize; for id in 0..hart::hart_count() {let slot=hart::HartId::new(id);let (word,bit)=slot.bit();if participants[word]&bit!=0 && !mailboxes[id].covers(round) {missing|=1<<id;}}\n'
+        '    crate::basis::nest::activity::probe::timeout(missing,crate::metal::clock::now().as_ticks().wrapping_sub(start));\n    Err(Error::TimedOut)'))
+    edit(provider,"server/src/basis/nest/translation/retirement.rs",lambda s:s.replace(
+        '    pub(in crate::basis::nest) fn fail(&mut self) {',
+        '    pub(in crate::basis::nest) fn fail(&mut self) {\n        crate::basis::nest::activity::probe::failed();'))
     if stopped:
         edit(provider, "server/tests/guest/activity/probe.rs", lambda s: s +
             '\npub(crate) fn stop() { STOPPED.store(true,Relaxed); }\n')

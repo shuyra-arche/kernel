@@ -67,53 +67,108 @@ fn coherent_sample_page_never_decodes_a_mixed_publication() {
 }
 
 #[test]
-fn observation_is_an_additive_bounded_descriptor_without_reopening_old_memory_slots() {
-    use kernel_api::{
-        abi::{
-            call::{
-                EnvCall,
-                nest::{NestCall, operations::Observe},
-            },
-            operation::RegisterCall,
-        },
-        address::VirtAddr,
-        model::{
-            identity::PendId,
-            nest::{MemoGeneration, MemoPosition, NestId, ReservationId},
-        },
+fn activity_reuses_existing_share_derive_and_keeps_all_new_nest_slots_closed() {
+    use kernel_api::abi::{
+        call::{EnvCall, share_view::operations::Derive},
+        operation::RegisterCall,
     };
-    let input = VirtAddr::new(0x10000);
-    assert!(
-        matches!(EnvCall::from_wire(Observe::SLOT,&[input.get(),0,0,0,0,0]),
-        Ok(EnvCall::Nest(NestCall::Observe {request})) if request==input)
+    assert_eq!(
+        Derive::SLOT,
+        ((kernel_api::abi::VERSION as usize) << 48) | (10 << 32) | 4
     );
-    for slot in 0..27 {
+    for slot in 0..64 {
         let number = ((kernel_api::abi::VERSION as usize) << 48) | (13 << 32) | slot;
-        assert!(EnvCall::from_wire(number, &[input.get(), 0, 0, 0, 0, 0]).is_err());
+        assert!(EnvCall::from_wire(number, &[0x1000, 0, 0, 0, 0, 0]).is_err());
     }
-    let position = MemoPosition::new(
-        PendId::from_bytes(&1u64.to_le_bytes()).unwrap(),
-        NestId::new(2).unwrap(),
-        ReservationId::from_bytes(&3u64.to_le_bytes()).unwrap(),
-        0,
-    )
-    .unwrap();
-    let request = Request {
-        position,
-        generation: MemoGeneration::new(4).unwrap(),
-        period_ns: MIN_PERIOD_NS,
+    assert!(limits(usize::MAX).is_none());
+}
+#[test]
+fn pair_is_sign_then_share_and_rejects_forged_origin_writable_or_redistributable_views() {
+    use kernel_api::model::{
+        identity::{Mark, PendId, TaskId},
+        modifiable::Modifiable,
+        pend::*,
+        sign::{SignId, SignRights},
+        view::ViewId,
     };
-    assert_eq!(Request::from_bytes(&request.to_bytes()), Some(request));
-    let mut bad = request.to_bytes();
-    bad[48..].copy_from_slice(&(VERSION + 1).to_le_bytes());
-    assert!(Request::from_bytes(&bad).is_none());
-    for period in [0, MIN_PERIOD_NS - 1, MAX_PERIOD_NS + 1, u64::MAX] {
-        let bad = Request {
-            period_ns: period,
-            ..request
-        }
-        .to_bytes();
-        assert!(Request::from_bytes(&bad).is_none());
-    }
-    assert!(Request::from_bytes(&request.to_bytes()[..48]).is_none());
+    let id = |n: u64| PendId::from_bytes(&n.to_le_bytes()).unwrap();
+    let view = PendInfo {
+        token: id(7),
+        target: Target::View(ViewTarget::Share(ViewId::new(1))),
+        limits: limits(3).unwrap(),
+        owner: TaskId::new(0),
+        lender: TaskId::new(0),
+        mark: Mark::NONE,
+        status: PendStatus::Active,
+    };
+    let sign = PendInfo {
+        token: id(8),
+        target: Target::Sign(SignId::new(2)),
+        limits: Limits {
+            operations: Operations::Sign(SignRights::LISTEN | SignRights::CONSUME),
+            modifiable: Modifiable::No,
+            distributable: Distributable::No,
+            scope: PendScope::Object,
+        },
+        mark: Mark::new(7),
+        ..view
+    };
+    assert_eq!(pair(sign, view), Some((id(8), id(7))));
+    assert!(pair(view, sign).is_none());
+    assert!(
+        pair(
+            PendInfo {
+                mark: Mark::new(6),
+                ..sign
+            },
+            view
+        )
+        .is_none()
+    );
+    assert!(
+        pair(
+            PendInfo {
+                owner: TaskId::new(9),
+                ..sign
+            },
+            view
+        )
+        .is_none()
+    );
+    assert!(
+        pair(
+            PendInfo {
+                lender: TaskId::new(9),
+                ..sign
+            },
+            view
+        )
+        .is_none()
+    );
+    assert!(
+        pair(
+            sign,
+            PendInfo {
+                limits: Limits {
+                    modifiable: Modifiable::Yes,
+                    ..view.limits
+                },
+                ..view
+            }
+        )
+        .is_none()
+    );
+    assert!(
+        pair(
+            sign,
+            PendInfo {
+                limits: Limits {
+                    distributable: Distributable::Yes,
+                    ..view.limits
+                },
+                ..view
+            }
+        )
+        .is_none()
+    );
 }

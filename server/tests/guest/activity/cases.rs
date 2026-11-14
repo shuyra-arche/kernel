@@ -56,18 +56,14 @@ fn aliases() {
         assert_eq!(hit.page, idle.page);
         assert_ne!((hit.nest, hit.reservation), (idle.nest, idle.reservation));
     }
-    let old = sampling::Request {
-        position: memo,
-        generation: memo_status(memo).generation,
-        period_ns: sampling::MIN_PERIOD_NS,
-    };
+    let old = memo_status(memo).generation;
     retract(memo);
-    assert_eq!(observe_request(old), Err(NestFail::Stale));
+    assert_eq!(derive(memo, AccordTarget::Caller), Err(ShareFail::Busy));
     let end = room::clock() + 8_000_000_000;
     loop {
         let s = a.next();
         if s.validity == Validity::Stale {
-            assert_eq!(s.generation, old.generation.get());
+            assert_eq!(s.generation, old.get());
             assert_eq!(
                 (s.accessed, s.dirty),
                 (Evidence::Unknown, Evidence::Unknown)
@@ -89,7 +85,7 @@ fn aliases() {
     publish(memo);
     let fresh = Reader::open(memo);
     let current = fresh.expect(Evidence::NotObserved, Evidence::NotObserved);
-    assert!(current.generation > old.generation.get());
+    assert!(current.generation > old.get());
     assert_ne!(current.page, hit.page);
     assert!(sign::listen(a.event, Wait::Poll).is_ok()); // Terminal is not republished after ACK.
     for reader in [&a, &b, &c, &fresh] {
@@ -101,39 +97,59 @@ fn aliases() {
     );
 }
 fn authority() {
-    let (memo, _) = reserve_pages(space(), Placement::lowest(4096).unwrap(), 6, 2);
-    let mut limits = pend_info(memo.token()).limits;
+    let slot = create(1);
+    mutate(Action::Occupy {
+        slot,
+        expected: slot_status(slot).version,
+    });
+    let (root, address) = reserve_pages(space(), Placement::lowest(4096).unwrap(), 6, 2);
+    let second = MemoPosition::new(root.token(), root.nest(), root.reservation(), 1).unwrap();
+    insert(second, slot);
+    publish(second);
+    let parent = match task_info(kernel_api::model::unit::UnitQuery::Caller).target {
+        kernel_api::model::unit::UnitTarget::Task(id) => id,
+        _ => panic!("Task"),
+    };
+    let mut limits = pend_info(root.token()).limits;
     limits.operations = Operations::Nest(NestRights::INSPECT | NestRights::SAMPLE);
+    limits.modifiable = kernel_api::model::modifiable::Modifiable::No;
+    limits.distributable = Distributable::No;
     limits.scope = PendScope::Nest(NestScope::Reservation {
-        id: memo.reservation(),
+        id: root.reservation(),
         range: PendRange::Pages {
             offset: 1,
             count: 1,
         },
     });
-    let request = NarrowRequest {
-        token: memo.token(),
-        limits,
+    let selected = accord(root.token(), parent, limits);
+    let outside = MemoPosition::new(selected, root.nest(), root.reservation(), 0).unwrap();
+    assert_eq!(observe(outside), Err(ShareFail::Denied));
+    let inside = MemoPosition::new(selected, root.nest(), root.reservation(), 1).unwrap();
+    let reader = Reader::open(inside);
+    let sample = reader.expect(Evidence::NotObserved, Evidence::NotObserved);
+    assert_eq!(sample.position, 1);
+    assert_eq!(
+        unsafe { ((address.get() + 4096) as *const u64).read_volatile() },
+        0
+    );
+    reader.expect(Evidence::Observed, Evidence::NotObserved);
+    let request = AccordRequest {
+        src: PendId::from_bytes(&0x100000u64.to_le_bytes()).unwrap(),
+        target: AccordTarget::Caller,
+        limits: sampling::limits(1).unwrap(),
+        mark: Mark::NONE,
     }
     .to_bytes();
-    pend::narrow(VirtAddr::new(request.as_ptr() as usize)).unwrap();
-    let select = |position| sampling::Request {
-        position,
-        generation: MemoGeneration::new(1).unwrap(),
-        period_ns: sampling::MIN_PERIOD_NS,
-    };
-    assert_eq!(observe_request(select(memo)), Err(NestFail::Denied));
-    let inside = MemoPosition::new(memo.token(), memo.nest(), memo.reservation(), 1).unwrap();
-    assert_eq!(observe_request(select(inside)), Err(NestFail::Stale)); // Correct scope, no associated Memo identity yet.
-    let forged = MemoPosition::new(
-        memo.token(),
-        memo.nest(),
-        ReservationId::from_bytes(&((memo.reservation().get() + 1) as u64).to_le_bytes()).unwrap(),
-        1,
-    )
-    .unwrap();
-    assert_eq!(observe_request(select(forged)), Err(NestFail::Denied));
-    let _ = writeln!(Console, "PASS activity window=1 forged=1 inspect-alone=1");
+    assert_eq!(
+        share_view::derive(license(), VirtAddr::new(request.as_ptr() as usize))
+            .map_err(|e| e.source),
+        Err(ShareFail::Denied)
+    );
+    reader.cancel();
+    let _ = writeln!(
+        Console,
+        "PASS activity window=1 forged=1 inspect-alone=1 sparse-view=1 pair-order=sign-share"
+    );
 }
 fn capacity() {
     let (_, memo, _) = page();
@@ -147,14 +163,14 @@ fn capacity() {
         *out = Some(loop {
             match observe(memo) {
                 Ok(pair) => break pair,
-                Err(NestFail::Busy) => pause(),
+                Err(ShareFail::Busy) => pause(),
                 Err(e) => panic!("capacity {e:?}"),
             }
             assert!(room::clock() < deadline, "cancelled slot did not settle");
         });
     }
     let deadline = room::clock() + 8_000_000_000;
-    for (_, event) in tokens.iter().flatten() {
+    for (event, _) in tokens.iter().flatten() {
         while !matches!(
             sign::listen(*event, Wait::Poll).unwrap(),
             kernel_api::abi::reply::SignReply::Triggered { .. }
@@ -163,8 +179,8 @@ fn capacity() {
             pause();
         }
     }
-    assert_eq!(observe(memo), Err(NestFail::Busy));
-    for (_, event) in tokens.into_iter().flatten() {
+    assert_eq!(observe(memo), Err(ShareFail::Busy));
+    for (event, _) in tokens.into_iter().flatten() {
         pend::return_(event).unwrap();
     }
     let r = Reader::open(memo);
@@ -339,7 +355,7 @@ fn safety() {
         "PASS activity readonly=1 write-upgrade-denied=1 physical-withdrawal=1 reuse-denied=1"
     );
 }
-static CHILD_POSITIONS: [[AtomicU64; 4]; 2] = [const { [const { AtomicU64::new(0) }; 4] }; 2];
+static CHILD_VIEWS: [AtomicUsize; 2] = [const { AtomicUsize::new(0) }; 2];
 static CHILD_SPACE: AtomicUsize = AtomicUsize::new(0);
 static CHILD_SORTED: AtomicBool = AtomicBool::new(false);
 static CHILD_REVOKED: AtomicBool = AtomicBool::new(false);
@@ -347,21 +363,11 @@ static CHILD_READY: AtomicBool = AtomicBool::new(false);
 static CHILD_WRITE: AtomicU64 = AtomicU64::new(0);
 extern "C" fn consumer() -> ! {
     let namespace = PendId::from_bytes(&(CHILD_SPACE.load(Acquire) as u64).to_le_bytes()).unwrap();
-    let positions = CHILD_POSITIONS.each_ref().map(|words| {
-        let mut bytes = [0; MemoPosition::WIDTH];
-        for (word, out) in words.iter().zip(bytes.chunks_exact_mut(8)) {
-            out.copy_from_slice(&word.load(Acquire).to_le_bytes());
-        }
-        MemoPosition::from_bytes(&bytes).unwrap()
-    });
-    for position in positions {
-        assert_eq!(
-            pend_info(position.token()).limits.operations,
-            Operations::Nest(NestRights::INSPECT | NestRights::SAMPLE)
-        );
-    }
-    let cold = Reader::open_in(positions[0], namespace);
-    let hot = Reader::open_in(positions[1], namespace);
+    let views = CHILD_VIEWS
+        .each_ref()
+        .map(|word| PendId::from_bytes(&(word.load(Acquire) as u64).to_le_bytes()).unwrap());
+    let cold = Reader::from_pair(pair(views[0]), namespace);
+    let hot = Reader::from_pair(pair(views[1]), namespace);
     cold.expect(Evidence::NotObserved, Evidence::NotObserved);
     hot.expect(Evidence::NotObserved, Evidence::NotObserved);
     CHILD_READY.store(true, Release);
@@ -406,27 +412,28 @@ fn consumer_exit() {
     let (_, cold, _) = page();
     let (_, hot, address) = page();
     let child = spawn(consumer);
-    let mut hot_token = None;
-    for (position, words) in [cold, hot].into_iter().zip(CHILD_POSITIONS.iter()) {
-        let mut limits = pend_info(position.token()).limits;
-        limits.operations = Operations::Nest(NestRights::INSPECT | NestRights::SAMPLE);
-        limits.modifiable = kernel_api::model::modifiable::Modifiable::No;
-        limits.distributable = Distributable::No;
-        let token = accord(position.token(), child, limits);
-        if position == hot {
-            hot_token = Some(token);
-        }
-        let received = MemoPosition::new(
-            token,
-            position.nest(),
-            position.reservation(),
-            position.page(),
-        )
-        .unwrap()
-        .to_bytes();
-        for (word, input) in words.iter().zip(received.chunks_exact(8)) {
-            word.store(u64::from_le_bytes(input.try_into().unwrap()), Release);
-        }
+    let parent = match task_info(kernel_api::model::unit::UnitQuery::Caller).target {
+        kernel_api::model::unit::UnitTarget::Task(id) => id,
+        _ => panic!("Task"),
+    };
+    let mut control = pend_info(hot.token()).limits;
+    control.operations = Operations::Nest(NestRights::INSPECT | NestRights::SAMPLE);
+    control.modifiable = kernel_api::model::modifiable::Modifiable::No;
+    control.distributable = Distributable::No;
+    let hot_token = accord(hot.token(), parent, control);
+    let hot_selected =
+        MemoPosition::new(hot_token, hot.nest(), hot.reservation(), hot.page()).unwrap();
+    for (position, word) in [cold, hot_selected].into_iter().zip(CHILD_VIEWS.iter()) {
+        let end = room::clock() + 8_000_000_000;
+        let token = loop {
+            match derive(position, AccordTarget::Task(child)) {
+                Ok(token) => break token,
+                Err(ShareFail::Busy) => pause(),
+                Err(e) => panic!("derive recipient {e:?}"),
+            }
+            assert!(room::clock() < end);
+        };
+        word.store(token.get(), Release);
     }
     let mut namespace = pend_info(space()).limits;
     namespace.operations = Operations::Nest(NestRights::INSPECT | NestRights::RESERVE);
@@ -447,7 +454,7 @@ fn consumer_exit() {
         pause();
     }
     loop {
-        match pend::revoke(child, hot_token.unwrap()) {
+        match pend::revoke(parent, hot_token) {
             Ok(()) => break,
             Err(e) => assert_eq!(e.source, kernel_api::abi::call::pend::PendFail::Busy),
         }
@@ -476,38 +483,18 @@ fn large_leaf() {
         slot,
         expected: slot_status(slot).version,
     });
-    let Target::Nest(nest) = pend_info(space()).target else {
-        panic!("Nest")
-    };
-    let Snapshot::Nest(state) = inspect(Query::Nest {
-        token: space(),
-        nest,
-    }) else {
-        panic!("Nest")
-    };
-    let Value::Reservation {
-        token,
-        nest,
-        reservation,
-        ..
-    } = mutate(Action::Reserve {
-        token: space(),
-        nest,
-        expected: state.version,
-        reservation: ReserveRequest {
+    let (memo, _) = crate::reservation::reserve(
+        space(),
+        ReserveRequest {
             placement: Placement::lowest(2 * 1024 * 1024).unwrap(),
             count: PageCount::new(512).unwrap(),
             level,
             access: 6,
         },
-    })
-    else {
-        panic!("reservation")
-    };
-    let memo = MemoPosition::new(token, nest, reservation, 0).unwrap();
+    );
     insert(memo, slot);
     publish(memo);
-    assert_eq!(observe(memo), Err(NestFail::Unsupported));
+    assert_eq!(observe(memo), Err(ShareFail::Unsupported));
     let _ = writeln!(
         Console,
         "PASS activity large-unsupported=1 geometry-preserved=1"

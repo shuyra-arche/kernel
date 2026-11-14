@@ -8,8 +8,6 @@ use kernel_api::{
     },
 };
 typed_calls! {
-    // Register one authorized CPU PTE activity stream; Return either grant to cancel.
-    fallible fn observe(request:VirtAddr) -> NestResult<(PendId,PendId)> = operations::Observe { request };
     fallible fn create(license:PendId) -> NestResult<PendId> = operations::Create { license };
     fallible fn inspect(token:PendId,out:VirtAddr) -> NestResult<()> = operations::Inspect { token,out };
     fallible fn delete(token:PendId) -> NestResult<()> = operations::Delete { token };

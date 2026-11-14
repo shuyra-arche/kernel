@@ -17,6 +17,8 @@ pub enum Error {
     Protocol,
 }
 
+pub mod activity;
+
 pub mod flat {
     pub use kernel_api::abi::memory::flat::Call;
     pub fn invoke(call: Call) -> Result<super::Response, super::Error> {

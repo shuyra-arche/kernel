@@ -16,6 +16,8 @@ pub mod operations {
         OutOfMemory = -4,
         HandedOver = -5,
         NotAligned = -6,
+        /// This source has no qualified CPU activity provider or supported geometry.
+        Unsupported = -7,
     }
     #[operation(slot = 0, output = super::PendId, error = ShareFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +43,9 @@ pub mod operations {
     }
     /// Native v11 source derivation. `request` points to one AccordRequest;
     /// its source must be a live Flat/Share and its limits must select Share rights.
+    /// A Reservation source with INSPECT|SAMPLE derives one readonly activity
+    /// page in the requested Pages window and a companion Sign in the recipient
+    /// ledger. The two Pends form (Sign, Share View); no new call is needed.
     /// The creation license and source authority are checked in one commit.
     #[operation(slot = 4, output = super::PendId, error = ShareFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

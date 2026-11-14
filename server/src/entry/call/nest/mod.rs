@@ -172,32 +172,6 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: NestCall, ident: &Arc<Task
     let Some(actor) = crate::basis::room::scheduler::slot::current().running_task() else {
         return super::outcome::ret_err(frame, NestFail::Denied);
     };
-    if let NestCall::Observe { request } = call {
-        use crate::basis::nest::memo::activity::Failure;
-        let result = (|| {
-            let mut bytes = [0; kernel_api::model::memory::activity::Request::WIDTH];
-            if !ident.team.nest.copy_in(&mut bytes, request) {
-                return Err(NestFail::Denied);
-            }
-            let request = kernel_api::model::memory::activity::Request::from_bytes(&bytes)
-                .ok_or(NestFail::Denied)?;
-            crate::basis::nest::activity::register(&actor, request).map_err(|e| match e {
-                Failure::Denied => NestFail::Denied,
-                Failure::Busy => NestFail::Busy,
-                Failure::Unsupported => NestFail::Unsupported,
-                Failure::Stale => NestFail::Stale,
-                Failure::OutOfMemory => NestFail::OutOfMemory,
-            })
-        })();
-        match result {
-            Ok((view, sign)) => {
-                frame.gpr.set_x(Gprs::A0, view.get());
-                frame.gpr.set_x(Gprs::A1, sign.get());
-            }
-            Err(e) => super::outcome::ret_err(frame, e),
-        }
-        return;
-    }
     if let NestCall::Reserve { token, request } = call {
         match reserve(&actor, token, request, ident) {
             Ok((token, address)) => {
@@ -270,10 +244,7 @@ pub(super) fn dispatch(frame: &mut TrapContext, call: NestCall, ident: &Arc<Task
                     }
                     Ok(0)
                 }
-                NestCall::Observe { .. }
-                | NestCall::Delete { .. }
-                | NestCall::Reserve { .. }
-                | NestCall::Release { .. } => {
+                NestCall::Delete { .. } | NestCall::Reserve { .. } | NestCall::Release { .. } => {
                     unreachable!()
                 }
             }

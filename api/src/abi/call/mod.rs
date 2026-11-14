@@ -36,18 +36,7 @@ impl EnvCall {
         let class = (slot >> 32) & 0xffff;
         // Native memory has only bounded Flat/Nest descriptors. Old operation
         // slots cannot fall through into the v10 register adapter.
-        // Observe is a new bounded descriptor at Nest slot 27. It issues two
-        // recipient grants atomically; it never reopens a retired memory call.
-        if matches!(class, 2 | 12)
-            || (class == 13
-                && (slot as u32 != 27
-                    || regs[0] == 0
-                    || regs[0]
-                        .checked_add(crate::model::memory::activity::Request::WIDTH)
-                        .is_none()
-                    || regs[1..].iter().any(|word| *word != 0)))
-            || (class == 10 && !matches!(slot as u32, 1 | 4))
-        {
+        if matches!(class, 2 | 12 | 13) || (class == 10 && !matches!(slot as u32, 1 | 4)) {
             return Err(crate::abi::register::Decode::BadSlot);
         }
         match class {

@@ -1,44 +1,19 @@
 //! Per-recipient CPU leaf observations. NotObserved is never global cleanliness,
 //! device-write exclusion, persistence or permission to reclaim a Page.
-use crate::{
-    abi::layout::{fetch_words, store_words},
-    model::nest::{MemoGeneration, MemoPosition},
-};
+use crate::abi::layout::{fetch_words, store_words};
 use core::sync::atomic::{AtomicU64, Ordering};
 pub const VERSION: u64 = 1;
 pub const MAX_SUBSCRIPTIONS: usize = 16;
 pub const MIN_PERIOD_NS: u64 = 10_000_000;
 pub const MAX_PERIOD_NS: u64 = 10_000_000_000;
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Request {
-    pub position: MemoPosition,
-    pub generation: MemoGeneration,
-    pub period_ns: u64,
-}
-impl Request {
-    pub const WIDTH: usize = 56;
-    pub fn to_bytes(self) -> [u8; Self::WIDTH] {
-        let mut b = [0; Self::WIDTH];
-        b[..32].copy_from_slice(&self.position.to_bytes());
-        b[32..40].copy_from_slice(&self.generation.to_bytes());
-        b[40..48].copy_from_slice(&self.period_ns.to_le_bytes());
-        b[48..].copy_from_slice(&VERSION.to_le_bytes());
-        b
-    }
-    pub fn from_bytes(b: &[u8]) -> Option<Self> {
-        if b.len() != Self::WIDTH || u64::from_le_bytes(b[48..].try_into().ok()?) != VERSION {
-            return None;
-        }
-        let r = Self {
-            position: MemoPosition::from_bytes(&b[..32])?,
-            generation: MemoGeneration::from_bytes(&b[32..40])?,
-            period_ns: u64::from_le_bytes(b[40..48].try_into().ok()?),
-        };
-        (MIN_PERIOD_NS..=MAX_PERIOD_NS)
-            .contains(&r.period_ns)
-            .then_some(r)
-    }
-}
+/// Receiver-local (Sign Pend, Share View Pend). The Sign's descriptive Mark is
+/// the Share Pend's non-reusing ID, not a new subscription authority/handle.
+pub type Pair = (
+    crate::model::identity::PendId,
+    crate::model::identity::PendId,
+);
+/// Initial provider policy. Clients can aggregate intervals in user space.
+pub const PERIOD_NS: u64 = MIN_PERIOD_NS;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u64)]
 pub enum Validity {
@@ -217,20 +192,52 @@ impl SamplePage {
         Sample::from_bytes(&b)
     }
 }
-impl crate::abi::reply::FromPair
-    for (
-        crate::model::identity::PendId,
-        crate::model::identity::PendId,
-    )
-{
-    fn from_pair(a: usize, b: usize) -> Self {
-        assert!(
-            a > 0 && a <= isize::MAX as usize && b > 0 && b <= isize::MAX as usize && a != b,
-            "invalid activity grants"
-        );
-        (
-            crate::model::identity::PendId::mint(a),
-            crate::model::identity::PendId::mint(b),
+
+/// Readonly View limits, using the observed Reservation's fixed-origin page.
+/// Only that coordinate is backed in the new View; no adjacent facts exist.
+pub fn limits(page: usize) -> Option<crate::model::pend::Limits> {
+    use crate::model::{modifiable::Modifiable, pend::*};
+    page.checked_add(1)?.checked_mul(4096)?;
+    Some(Limits {
+        operations: Operations::Share(ShareRights::ASSOCIATE),
+        modifiable: Modifiable::No,
+        distributable: Distributable::No,
+        scope: PendScope::Pages(PendRange::Pages {
+            offset: page,
+            count: 1,
+        }),
+    })
+}
+/// Check a collected pair's Kernel-origin metadata and least-privilege shape.
+/// Marks correlate the two Pends; live authority is still checked by each call.
+pub fn pair(
+    sign: crate::model::pend::PendInfo,
+    view: crate::model::pend::PendInfo,
+) -> Option<Pair> {
+    use crate::model::{modifiable::Modifiable, pend::*, sign::SignRights};
+    if sign.token == view.token
+        || sign.owner.get() != 0
+        || view.owner.get() != 0
+        || sign.lender.get() != 0
+        || view.lender.get() != 0
+        || sign.status != PendStatus::Active
+        || view.status != PendStatus::Active
+        || sign.mark.get() != view.token.get() as u64
+        || sign.limits.modifiable != Modifiable::No
+        || view.limits.modifiable != Modifiable::No
+        || sign.limits.distributable != Distributable::No
+        || view.limits.distributable != Distributable::No
+        || !matches!(sign.target, Target::Sign(_))
+        || !matches!(view.target, Target::View(ViewTarget::Share(_)))
+        || sign.limits.operations != Operations::Sign(SignRights::LISTEN | SignRights::CONSUME)
+        || sign.limits.scope != PendScope::Object
+        || view.limits.operations != Operations::Share(ShareRights::ASSOCIATE)
+        || !matches!(
+            view.limits.scope,
+            PendScope::Pages(PendRange::Pages { count: 1, .. })
         )
+    {
+        return None;
     }
+    Some((sign.token, view.token))
 }

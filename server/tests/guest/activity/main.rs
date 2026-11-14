@@ -1,12 +1,13 @@
 #![no_std]
 #![no_main]
 mod cases;
+mod reservation;
 #[allow(dead_code)]
 mod support;
 use core::fmt::Write;
 use kernel_api::{
     abi::{
-        call::{nest::NestFail, room::RoomFail},
+        call::{room::RoomFail, share_view::ShareFail},
         memory::*,
     },
     address::*,
@@ -20,7 +21,7 @@ use kernel_api::{
         wait::Wait,
     },
 };
-use kernel_client::call::{nest, pend, room, sign, unit};
+use kernel_client::call::{pend, room, share_view, sign, unit};
 use support::*;
 core::arch::global_asm!(
     ".section .text.entry",
@@ -45,16 +46,35 @@ fn pause() {
         }
     }
 }
-fn observe(m: MemoPosition) -> Result<(PendId, PendId), NestFail> {
-    observe_request(sampling::Request {
-        position: m,
-        generation: memo_status(m).generation,
-        period_ns: sampling::MIN_PERIOD_NS,
-    })
+fn derive(m: MemoPosition, target: AccordTarget) -> Result<PendId, ShareFail> {
+    let source = pend_info(m.token());
+    if !matches!(source.target,Target::Nest(id) if id==m.nest())
+        || !matches!(source.limits.scope,PendScope::Nest(NestScope::Reservation {id,..}) if id==m.reservation())
+    {
+        return Err(ShareFail::Denied);
+    }
+    let request = AccordRequest {
+        src: m.token(),
+        target,
+        limits: sampling::limits(m.page()).unwrap(),
+        mark: Mark::NONE,
+    }
+    .to_bytes();
+    share_view::derive(license(), VirtAddr::new(request.as_ptr() as usize)).map_err(|e| e.source)
 }
-fn observe_request(request: sampling::Request) -> Result<(PendId, PendId), NestFail> {
-    let r = request.to_bytes();
-    nest::observe(VirtAddr::new(r.as_ptr() as usize)).map_err(|e| e.source)
+fn pair(data: PendId) -> sampling::Pair {
+    let end = room::clock() + 8_000_000_000;
+    loop {
+        match kernel_client::memory::activity::pair(data) {
+            Ok(pair) => return pair,
+            Err(e) => assert_eq!(e.source, kernel_api::abi::call::pend::PendFail::Busy),
+        }
+        assert!(room::clock() < end);
+        pause();
+    }
+}
+fn observe(m: MemoPosition) -> Result<sampling::Pair, ShareFail> {
+    derive(m, AccordTarget::Caller).map(pair)
 }
 struct Reader {
     data: PendId,
@@ -68,16 +88,19 @@ impl Reader {
     }
     fn open_in(m: MemoPosition, namespace: PendId) -> Self {
         let end = room::clock() + 8_000_000_000;
-        let (data, event) = loop {
+        let (event, data) = loop {
             match observe(m) {
                 Ok(v) => break v,
-                Err(NestFail::Busy) => {
+                Err(ShareFail::Busy) => {
                     assert!(room::clock() < end);
                     pause();
                 }
                 Err(e) => panic!("observe {e:?}"),
             }
         };
+        Self::from_pair((event, data), namespace)
+    }
+    fn from_pair((event, data): sampling::Pair, namespace: PendId) -> Self {
         let kernel_api::model::pend::Target::View(ViewTarget::Share(view)) = pend_info(data).target
         else {
             panic!("sample View")
@@ -89,7 +112,10 @@ impl Reader {
             source: Source::Share {
                 token: data,
                 view,
-                page: 0,
+                page: match pend_info(data).limits.scope {
+                    PendScope::Pages(PendRange::Pages { offset, .. }) => offset,
+                    _ => panic!("View window"),
+                },
                 count: 1,
             },
         });
@@ -166,7 +192,7 @@ extern "C" fn run(at: usize, count: usize) -> ! {
     }
     if !SUPPORTED {
         let before = memo_status(memo);
-        assert_eq!(observe(memo), Err(NestFail::Unsupported));
+        assert_eq!(observe(memo), Err(ShareFail::Unsupported));
         assert_eq!(memo_status(memo), before);
         unsafe { (address.get() as *mut u64).write_volatile(51) };
         assert_eq!(unsafe { (address.get() as *const u64).read_volatile() }, 51);
@@ -202,7 +228,7 @@ extern "C" fn run(at: usize, count: usize) -> ! {
     }
     .to_bytes();
     pend::narrow(VirtAddr::new(request.as_ptr() as usize)).unwrap();
-    assert_eq!(observe(memo), Err(NestFail::Denied));
+    assert_eq!(observe(memo), Err(ShareFail::Denied));
     assert!(sign::listen(one.event, Wait::Poll).is_err());
     assert_eq!(pend_info(one.data).status, PendStatus::Dead);
     assert_eq!(pend_info(two.data).status, PendStatus::Dead);

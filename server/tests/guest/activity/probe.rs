@@ -44,7 +44,31 @@ pub(crate) fn task(id: usize) {
         mask.fetch_or(1 << crate::metal::hart::hart_id().get(), Relaxed);
     }
 }
+static TIMEOUTS: AtomicU64 = AtomicU64::new(0);
+static MISSING: AtomicUsize = AtomicUsize::new(0);
+static ELAPSED: AtomicU64 = AtomicU64::new(0);
+static NOTIFIED: AtomicU64 = AtomicU64::new(0);
+static FAILED: AtomicU64 = AtomicU64::new(0);
+pub(crate) fn timeout(missing: usize, ticks: u64) {
+    TIMEOUTS.fetch_add(1, Relaxed);
+    MISSING.store(missing, Relaxed);
+    ELAPSED.store(ticks, Relaxed);
+}
+pub(crate) fn notify_failed() {
+    NOTIFIED.fetch_add(1, Relaxed);
+}
+pub(crate) fn failed() {
+    FAILED.fetch_add(1, Relaxed);
+}
 pub(crate) fn report() {
+    crate::putln!(
+        "TRACE activity-completion timeouts={} missing={} elapsed_ticks={} notify_failed={} retirement_failed={}",
+        TIMEOUTS.load(Relaxed),
+        MISSING.load(Relaxed),
+        ELAPSED.load(Relaxed),
+        NOTIFIED.load(Relaxed),
+        FAILED.load(Relaxed)
+    );
     if STOPPED.load(Relaxed) {
         crate::putln!("TRACE activity-observer-stop");
     }

@@ -159,6 +159,44 @@ impl Nest {
         drop(spare);
         Ok(result)
     }
+    /// Caller holds COMMIT. Revalidate the selected publication after output
+    /// preparation, without changing a PTE or waiting for another Hart.
+    pub(crate) fn current_activity(
+        &self,
+        span: &Arc<Span>,
+        page: usize,
+        sampling: &Arc<State>,
+    ) -> Result<(), Failure> {
+        let state = self.state.lock();
+        self.ensure_owned(span, &state)
+            .map_err(|_| Failure::Stale)?;
+        if !state.retirement.invalidation().is_clean() {
+            return Err(Failure::Busy);
+        }
+        let memo = state.memos.get(span, page).ok_or(Failure::Stale)?;
+        if memo.generation() != sampling.identity.generation
+            || memo.in_flight()
+            || memo
+                .publication()
+                .is_none_or(|p| p.cell().id().get() != sampling.identity.page)
+        {
+            return Err(Failure::Stale);
+        }
+        let physical = memo.publication().unwrap().cell().physical_address();
+        if !state
+            .root
+            .cpu()
+            .map_err(|_| Failure::Unsupported)?
+            .activity_supported(
+                VirtAddr::new(sampling.identity.address),
+                PhysAddr::from_raw(physical),
+                self.geometry(),
+            )
+        {
+            return Err(Failure::Unsupported);
+        }
+        Ok(())
+    }
     /// One capture and one post/poll at most, no cross-Hart waiting. The Span's
     /// operation excludes software replacement through the short handoff; no
     /// COMMIT/Nest/Span guard survives this call or a Task scheduling boundary.

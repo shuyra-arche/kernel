@@ -22,15 +22,18 @@ use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use kernel_api::{
-    abi::call::pend::PendFail,
+    abi::call::{pend::PendFail, share_view::ShareFail},
     address::{PageCount, PageIndex},
     model::{
-        identity::Mark,
-        memory::activity::{self as protocol, Evidence, Request, Sample, SamplePage, Validity},
+        identity::{Mark, PendId, TaskId},
+        memory::activity::{self as protocol, Evidence, Sample, SamplePage, Validity},
         modifiable::Modifiable,
-        pend::{Distributable, NestRights, Operations, ShareRights},
+        pend::{
+            AccordRequest, CreationRights, Distributable, NestRights, Operations, PendRange,
+            PendScope, ShareRights,
+        },
         sign::SignRights,
     },
 };
@@ -82,6 +85,7 @@ struct Delivery {
 }
 struct Subscription {
     actor: Weak<Task>,
+    source_actor: Weak<Task>,
     source: Arc<PendEntry>,
     nest: Arc<Nest>,
     span: Arc<Span>,
@@ -94,7 +98,7 @@ struct Subscription {
     event: Arc<PendEntry>,
     sign: Arc<Endpoint>,
     address: usize,
-    registered: u64,
+    registered: AtomicU64,
     cancelled: AtomicBool,
     delivery: SpinLock<Delivery>,
 }
@@ -110,30 +114,70 @@ fn failure(e: PendFail) -> Failure {
         _ => Failure::Denied,
     }
 }
-pub(crate) fn register(
+fn error(e: Failure) -> ShareFail {
+    match e {
+        Failure::Denied => ShareFail::Denied,
+        Failure::Busy | Failure::Stale => ShareFail::Busy,
+        Failure::Unsupported => ShareFail::Unsupported,
+        Failure::OutOfMemory => ShareFail::OutOfMemory,
+    }
+}
+/// Share.Derive supplies the source, recipient and ordinary readonly View
+/// limits. The source's actual reservation window selects one current Memo;
+/// no numeric identity, mark or output token substitutes for that authority.
+pub(crate) fn derive(
+    sender: &Arc<Task>,
     actor: &Arc<Task>,
-    request: Request,
-) -> Result<
-    (
-        kernel_api::model::identity::PendId,
-        kernel_api::model::identity::PendId,
-    ),
-    Failure,
-> {
-    let slot = Reservation::take()?;
-    let _serial = actor.pend.lock();
+    license: PendId,
+    request: AccordRequest,
+) -> Result<PendId, ShareFail> {
+    pend::with_pair_uncommitted(sender, actor, || prepare(sender, actor, license, request))
+        .map_err(|e| error(failure(e)))?
+        .map_err(error)
+}
+fn prepare(
+    sender: &Arc<Task>,
+    actor: &Arc<Task>,
+    license: PendId,
+    request: AccordRequest,
+) -> Result<PendId, Failure> {
+    let PendScope::Pages(PendRange::Pages {
+        offset: page,
+        count: 1,
+    }) = request.limits.scope
+    else {
+        return Err(Failure::Denied);
+    };
+    if request.limits.operations != Operations::Share(ShareRights::ASSOCIATE)
+        || request.limits.modifiable != Modifiable::No
+        || request.limits.distributable != Distributable::No
+    {
+        return Err(Failure::Denied);
+    }
+    {
+        let _commit = crate::basis::commit();
+        pend::access::license(sender, license, CreationRights::SHARE).map_err(failure)?;
+    }
     let route = pend::access::Reservation::acquire(
-        actor,
-        request.position.token(),
+        sender,
+        request.src,
         NestRights::INSPECT | NestRights::SAMPLE,
     )
     .map_err(failure)?;
-    let page = route.position(request.position).map_err(failure)?;
     let nest = route.nest();
     let span = route.span().map_err(failure)?;
+    let position =
+        kernel_api::model::nest::MemoPosition::new(request.src, nest.id(), route.id(), page)
+            .ok_or(Failure::Denied)?;
+    route.position(position).map_err(failure)?;
     let source = route.entry().clone();
-    let sampling =
-        nest.prepare_activity(&span, page, request.generation.get(), source.authority())?;
+    let generation = nest
+        .inspect_logical(&span, page)
+        .map_err(|_| Failure::Busy)?
+        .generation
+        .get();
+    let slot = Reservation::take()?;
+    let sampling = nest.prepare_activity(&span, page, generation, source.authority())?;
     let identity = sampling.identity();
     let cell = cell::allocate(Owner::Kernel).map_err(|_| Failure::OutOfMemory)?;
     let address = cell.physical_address();
@@ -146,28 +190,41 @@ pub(crate) fn register(
     cells
         .try_reserve_exact(1)
         .map_err(|_| Failure::OutOfMemory)?;
-    cells.push((PageIndex::ZERO, cell));
-    let flat = Flat::from_cells(Owner::Kernel, PageCount::new(1).unwrap(), cells)
-        .map_err(|_| Failure::OutOfMemory)?;
+    cells.push((PageIndex::new(page), cell));
+    let pages =
+        PageCount::new(page.checked_add(1).ok_or(Failure::Denied)?).ok_or(Failure::Denied)?;
+    let size = pages.checked_bytes().ok_or(Failure::Denied)?;
+    let flat = Flat::from_cells(Owner::Kernel, pages, cells).map_err(|_| Failure::OutOfMemory)?;
     let source_root =
-        SourceAuthorization::new(flat.whole(), Access::READ, actor.ident.id).map_err(failure)?;
-    let view = Sharing::from_source(flat.whole(), 4096, actor.ident.id).map_err(failure)?;
+        SourceAuthorization::new(flat.whole(), Access::READ, TaskId::new(0)).map_err(failure)?;
+    let view = Sharing::from_source(flat.whole(), size, TaskId::new(0)).map_err(failure)?;
     let output = Arc::try_new(
-        PendEntry::try_new(View::Share(view.clone()), Mark::NONE, Modifiable::No, None)
-            .map_err(failure)?,
+        PendEntry::try_new(
+            View::Share(view.clone()),
+            request.mark,
+            Modifiable::No,
+            None,
+        )
+        .map_err(failure)?,
     )
     .map_err(|_| Failure::OutOfMemory)?;
     let mut limits = output.authority().limits();
     limits.operations = Operations::Share(ShareRights::ASSOCIATE);
+    limits.scope = request.limits.scope;
     limits.distributable = Distributable::No;
     {
         let _commit = crate::basis::commit();
         output.narrow(limits).map_err(failure)?;
     }
-    let sign = Endpoint::try_new(actor.ident.id).map_err(|_| Failure::OutOfMemory)?;
+    let sign = Endpoint::try_new(TaskId::new(0)).map_err(|_| Failure::OutOfMemory)?;
     let event = Arc::try_new(
-        PendEntry::try_new(Target::Sign(sign.clone()), Mark::NONE, Modifiable::No, None)
-            .map_err(failure)?,
+        PendEntry::try_new(
+            Target::Sign(sign.clone()),
+            Mark::new(output.token().get() as u64),
+            Modifiable::No,
+            None,
+        )
+        .map_err(failure)?,
     )
     .map_err(|_| Failure::OutOfMemory)?;
     let mut limits = event.authority().limits();
@@ -179,11 +236,12 @@ pub(crate) fn register(
     }
     let s = Arc::try_new(Subscription {
         actor: Arc::downgrade(actor),
+        source_actor: Arc::downgrade(sender),
         source,
         nest: nest.clone(),
         span,
         page,
-        period: request.period_ns,
+        period: protocol::PERIOD_NS,
         identity,
         sampling,
         view,
@@ -191,7 +249,7 @@ pub(crate) fn register(
         event: event.clone(),
         sign,
         address,
-        registered: now(),
+        registered: AtomicU64::new(0),
         cancelled: AtomicBool::new(false),
         delivery: SpinLock::new(Delivery {
             cursor: None,
@@ -206,6 +264,9 @@ pub(crate) fn register(
     if !s.live() {
         return Err(Failure::Denied);
     }
+    pend::access::license(sender, license, CreationRights::SHARE).map_err(failure)?;
+    s.nest.current_activity(&s.span, s.page, &s.sampling)?;
+    s.registered.store(now(), Ordering::Release);
     let claim = source_root.claim().map_err(failure)?;
     s.view.attach_source(&source_root);
     source_root
@@ -216,7 +277,7 @@ pub(crate) fn register(
     claim.commit();
     data.publish();
     wake.publish();
-    let result = (output.token(), event.token());
+    let result = output.token();
     slot.publish(s);
     Ok(result)
 }
@@ -224,6 +285,7 @@ impl Subscription {
     fn live(&self) -> bool {
         !self.cancelled.load(Ordering::Acquire)
             && self.actor.upgrade().is_some_and(|t| pend::live(&t))
+            && self.source_actor.upgrade().is_some_and(|t| pend::live(&t))
             && self
                 .source
                 .permits(Operations::Nest(NestRights::INSPECT | NestRights::SAMPLE))
@@ -301,7 +363,7 @@ impl Subscription {
             }
         };
         if d.cursor.is_none() {
-            if snapshot.end >= self.registered && snapshot.epoch > 0 {
+            if snapshot.end >= self.registered.load(Ordering::Acquire) && snapshot.epoch > 0 {
                 d.cursor = Some(Cursor {
                     epoch: snapshot.epoch,
                     end: snapshot.end,
