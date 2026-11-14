@@ -128,6 +128,11 @@ Host tests check actual Flat/Page/Nest state transitions, failure
 injection, authority and result-journal correlation. Host fixtures
 do not execute guest traps or establish hardware quiescence.
 
+The `translation` host target compiles the production RV64 PTE storage,
+decoder and flags. Its atomic hardware participant checks preservation of
+concurrent A/D evidence during permission changes and coherent full-word
+snapshots. It does not enable A/D clearing or qualify a sampling backend.
+
 The current native composition exercises real Task/Team startup, CPU mappings
 and qualified IOMMU/Virtqueue paths using the single ABI 11 contract.
 A successful QEMU device scenario is not a real-hardware proof.

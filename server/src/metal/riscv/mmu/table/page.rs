@@ -13,7 +13,7 @@ pub(super) struct PageTable {
 impl Default for PageTable {
     fn default() -> Self {
         Self {
-            entries: [PageTableEntry::default(); 512],
+            entries: core::array::from_fn(|_| PageTableEntry::default()),
         }
     }
 }
