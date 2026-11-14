@@ -45,6 +45,11 @@ pub(in super::super) fn admit(
 pub(in super::super) enum Slot {
     Resident(Arc<Page>),
     Missing,
+    /// A fresh position exclusively retained by an off-lock allocation. Only
+    /// its reservation can publish or restore Fresh; transfers see Busy.
+    Allocating {
+        reservation: usize,
+    },
     Moving {
         cell: Arc<Page>,
         transaction: usize,

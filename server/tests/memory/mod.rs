@@ -40,6 +40,7 @@ mod admission;
 mod allocation;
 mod levels;
 mod maintenance;
+mod materialize;
 mod ownership;
 mod retention;
 mod support;

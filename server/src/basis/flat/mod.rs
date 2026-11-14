@@ -255,46 +255,30 @@ impl Flat {
         if end > self.page_count.get() {
             return Err(FlatError::OutOfRange);
         }
-        let mut guard = self.state.lock();
-        let explicit = guard.explicit;
-        let storage::FlatState {
-            source, geometry, ..
-        } = &mut *guard;
-        if !geometry.covers(index.get(), count.get(), self.level) {
+        if !self
+            .state
+            .lock()
+            .geometry
+            .covers(index.get(), count.get(), self.level)
+        {
             return Err(FlatError::NotAligned);
         }
-        let FlatSource::Managed(slots) = source else {
-            return Ok(());
-        };
         let mut page = index.get();
-        let mut at = slots.partition_point(|(slot, _)| slot.get() < page);
         while page < end {
-            let level = geometry.head(page, self.level).1;
-            let grain = level.pages().unwrap();
-            if slots.get(at).is_some_and(|(slot, _)| slot.get() == page) {
-                match slots[at].1 {
-                    // 承载已移出：不补零、不新分配。
-                    Slot::Missing => return Err(FlatError::Missing),
-                    // 正被一次移交持有/预留：何时能用不由物化说了算。
-                    Slot::Moving { .. } | Slot::Reserved { .. } => return Err(FlatError::Busy),
-                    Slot::Resident(_) => {}
+            use storage::materialize::{Reservation, Step};
+            match Reservation::prepare(&self.state, PageIndex::new(page), end, self.level)? {
+                Step::Ready(pages) => page += pages,
+                Step::Allocate(reservation) => {
+                    let level = reservation.level();
+                    let cell = Arc::try_new(crate::basis::cell::allocate_level(
+                        self.allocation_owner.clone(),
+                        level,
+                    )?)
+                    .map_err(|_| FlatError::OutOfMemory)?;
+                    reservation.publish(cell, self.allocation_owner.identity())?;
+                    page += level.pages().unwrap();
                 }
-                page += grain;
-                at += 1;
-                continue;
             }
-            if explicit {
-                return Err(FlatError::Missing);
-            }
-            slots.try_reserve(1).map_err(|_| FlatError::OutOfMemory)?;
-            let cell = Arc::try_new(crate::basis::cell::allocate_level(
-                self.allocation_owner.clone(),
-                level,
-            )?)
-            .map_err(|_| FlatError::OutOfMemory)?;
-            slots.insert(at, (PageIndex::new(page), Slot::Resident(cell)));
-            page += grain;
-            at += 1;
         }
         Ok(())
     }
@@ -389,7 +373,9 @@ impl Flat {
                     // 承载已移出：这是页槽自己的状态，不抹成“越界”。
                     Slot::Missing => Err(FlatError::Missing),
                     // 在途事务持有/预留的页没有可交出去的物理坐标。
-                    Slot::Moving { .. } | Slot::Reserved { .. } => Err(FlatError::Busy),
+                    Slot::Moving { .. } | Slot::Reserved { .. } | Slot::Allocating { .. } => {
+                        Err(FlatError::Busy)
+                    }
                 }
             }
         }
