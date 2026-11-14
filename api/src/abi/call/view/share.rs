@@ -38,10 +38,3 @@ pub mod operations {
 }
 pub use operations::ShareCall;
 pub use operations::ShareFail;
-
-/// Share Open returns the view's address and length.
-impl crate::abi::reply::FromPair for (VirtAddr, usize) {
-    fn from_pair(v0: usize, v1: usize) -> Self {
-        (VirtAddr(v0), v1)
-    }
-}
