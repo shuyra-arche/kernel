@@ -66,8 +66,8 @@ other Memos, other Nests or unauthorised aliases of the same Page.
 | Operation | Required authority | Result or failure |
 | --- | --- | --- |
 | Inspect Memo metadata | INSPECT in the current reservation window | Existing descriptive Memo metadata; no A/D clearing or activity grant |
-| Register or rearm a period that clears A/D | INSPECT plus a separate, explicitly delegated sampling right | Bounded subscription and receiver-local Share/Sign; INSPECT alone is Denied |
-| Observe on an unsupported backend/geometry | Live INSPECT plus SAMPLE in the selected scope | Unsupported before grants or PTE changes |
+| Derive an activity View | INSPECT plus SAMPLE in the selected reservation, and the existing SHARE creation license | Receiver-local `(Sign, Share View)` Pends; INSPECT alone is Denied |
+| Derive on an unsupported backend/geometry | Live INSPECT plus SAMPLE in the selected scope | Unsupported before grants or PTE changes |
 | Cancel | Actual subscription owner, or loss of any required live authority | Stop delivery and retract its output mappings; repeat cancellation is harmless |
 
 Read-only data access and the sampling right are separate from permissions to
@@ -154,29 +154,45 @@ compatibility guarantee:
 
 | Surface | Version 1 decision |
 | --- | --- |
-| Call | Nest class 13, new slot 27: Observe(request pointer); all retired memory slots remain rejected |
-| Request | 56 little-endian bytes: MemoPosition (32), MemoGeneration (8), period_ns (8), protocol version (8) |
-| Envelope | Only a nonzero, nonoverflowing request pointer in a0; unused input registers must be zero |
-| Authority | Reservation-only `NestRights::SAMPLE = 8192` plus INSPECT; fresh Reservation roots receive SAMPLE, derived grants can attenuate it |
-| Result | Two distinct receiver-local PendIds in a0/a1: read-only Share and LISTEN/CONSUME Sign; neither is distributable |
-| Sample | Protocol 1, 128 bytes of checked fields in a 4096-byte seqlock page; allocation and all counters stop on exhaustion |
-| Period/capacity | 10 ms–10 s requested period, 16 admitted/pending subscriptions, eight slot visits per turn |
-| Cancel/ack | Return either output grant to cancel; consume the exact Sign receipt only after a coherent page read |
+| Entry | Existing Share.Derive (class 10, slot 4); no added call or reopened retired memory slot |
+| Request | Existing 104-byte AccordRequest: source Pend, Caller/Task recipient, descriptive Mark and ordinary readonly Share limits |
+| Selection | Limits select one fixed-origin Pages coordinate; the live source must be a Reservation Pend with INSPECT and SAMPLE |
+| Authority | Reservation-only `NestRights::SAMPLE = 8192`; the sender authorizes sampling, while the recipient needs only the delivered readonly View and notification |
+| Result | Existing call returns the receiver-local Share Pend; its companion Sign is published atomically in the same recipient ledger, marked with that Share Pend ID |
+| Pair | `(Sign Pend, Share View Pend)` in that order; API validates the Kernel-origin metadata, Client resolves it using existing Pend.Inspect/Collect |
+| View | One actual 4096-byte page at the selected Reservation coordinate; inaccessible sparse holes contain no other samples; map the View Pend's actual page window |
+| Sample | Protocol 1, 128 checked bytes in a 4096-byte seqlock page; allocation/counters stop on exhaustion |
+| Period/capacity | Initial fixed 10 ms policy, 16 admitted/pending subscriptions, eight slot visits per turn; actual intervals include fair scheduling and fence completion |
+| Cancel/ack | Return either output Pend to stop delivery; consume the exact Sign receipt only after a coherent read; return remaining dead registrations to release their ledger charges |
 
-No existing descriptor width, Capsule format (2), Ledger version (11) or global
-memory-page layout changes. No new authorization domain, Swap call, opaque
-subscription handle or decorative operation pair is introduced. Observe is a
-bounded registration rather than a journaled migration; Busy before grant
-publication has admitted nothing. Once admitted, later work and failures are
-represented by the retained subscription, never by silently retrying Observe.
+No operation number, request width, Capsule format (2), Ledger version (11) or
+global memory-page layout changes. No new authorization domain, Swap call,
+opaque subscription identity or decorative operation pair is introduced.
+Share.Derive keeps its ordinary Flat/Share behavior; only a qualified Reservation
+source with explicit sampling authority produces activity data. Unsupported is
+an added Share failure vocabulary, not a new call. Period aggregation and
+candidate ranking belong to the consumer.
+
+The pair's Mark is descriptive correlation; it never supplies sampling
+permission. Live sender/recipient, source rights/window and exact publication
+identity are revalidated before the two grants are published in one COMMIT.
+The recipient cannot trigger the Sign, write the View or redistribute either
+Pend. The source sender can withdraw its original authority independently of
+the recipient; sender exit also stops delivery. Returning either output cancels
+the stream while the original source grant keeps its ordinary ownership.
+
+Busy before Share.Derive returns has admitted no pair. Once the View is returned,
+keep that same View if a bounded Client pair lookup needs retrying. Do not issue
+a second Derive to recover a lookup or lost notification. The existing source
+and output Pends own authorization and cancellation; Mark and Page IDs do not.
 
 Old strict PendInfo/Limits decoders do not know bit 8192 and may reject a newly
 issued Reservation. Upgrade API, Client, Server, consumer binaries and image
 producers to one matching full source SHA and rebuild the complete image.
 Do not combine an old ABI 11 rights decoder with this Server. Rollback requires
 rebuilding the complete old pinned image. Existing release tags remain
-immutable and do not acquire sampling. The per-recipient protocol has its own
-explicit version; an unknown request version is rejected, not downgraded.
+immutable and do not acquire sampling. The sample page has its own explicit protocol version; an unknown page version
+does not decode as a completed sample.
 
 ## Progress, cancellation and validity
 
@@ -198,7 +214,7 @@ not rewritten; another reader can keep sampling without erasing its facts.
 A replacement yields one terminal Stale sample with the original identity and
 Unknown evidence. The old subscription does not follow the replacement.
 
-Narrow, Revoke, Return and Task/Team exit invalidate output grants before future
+Narrow, Revoke, Return and sender/recipient Task/Team exit invalidate output grants before future
 writes. Existing SourceAuthorization and Nest retirement retract actual output
 mappings. Cancellation processes one native binding and one nonblocking fence
 post/poll per visit; the registry slot and output storage remain retained until

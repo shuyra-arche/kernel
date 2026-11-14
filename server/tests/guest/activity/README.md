@@ -31,7 +31,7 @@ two Harts. Each boot has a 120-second outer timeout and bounded internal waits.
 The supported CPU is explicitly `rv64,svade=off,svadu=off`: legacy hardware A/D
 updates with no unknown ADUE policy. The disposable boot provider attests only
 this configuration. `--unsupported` uses Svade with no sampling qualification;
-Observe must reject before altering the preset bits or publishing grants.
+Share.Derive must reject before altering the preset bits or publishing grants.
 Existing production boot providers default to unqualified.
 
 ## Executed boundaries
@@ -41,7 +41,7 @@ Existing production boot providers default to unqualified.
 | Actual read/write/idle | Native user volatile loads/stores and successive completed epochs; initial preset A/D is discarded |
 | Independent readers | Two recipients, unchanged unread output, captured true retained until each exact acknowledgement |
 | Aliases and replacement | Three Memos in two Nests of one Page; only the accessed PTE reports activity; Stale identity never follows a replacement Page |
-| Authority | INSPECT alone, out-of-window and forged Reservation reject; a readonly child receives only two selected INSPECT/SAMPLE grants |
+| Authority | INSPECT alone, out-of-window and forged source Pends reject; a child receives two readonly Sign/View pairs without sampling control |
 | Minimal policy consumer | Child maps its own readonly data, reads two streams, sorts candidates in user space and exits with mappings and an unread sample |
 | Output withdrawal | Actual user store to readonly data faults; RW publication rejects; cancelled mappings reach Empty and an actual later read faults |
 | Capacity/fairness | Sixteen subscriptions receive notifications, seventeenth gets Busy, retained slots become reusable after cancellation |
@@ -64,7 +64,7 @@ results. `TRACE activity-step` records log2-nanosecond bins; bin n represents
 `[2^n, 2^(n+1))` ns. Counts include cancellation visits. Asynchronous round
 counts also include the boot probe and output retirement. Durations include
 preemption and emulator scheduling. Writer throughput is a sequential 500 ms
-baseline followed by 500 ms with one active stream in the same boot; order,
+baseline followed by at least 500 ms and three completed epochs with one active stream in the same boot; order,
 TCG, instrumentation and sample period confound causal comparisons. Repeat
 and report distributions, never a WCET or a claim that sampling improves speed.
 
@@ -72,3 +72,12 @@ CI retains raw evidence and executable artifacts for supported debug/release,
 unqualified Svade and stopped-observer scenarios. Host tests and target builds
 have separate claims. This suite does not qualify physical hardware,
 Sv39/Sv48, Svadu/ADUE firmware, hotplug, External activity or persistence.
+
+## Interface
+
+No new Kernel call is declared. Use existing Share.Derive with AccordRequest,
+a live sampling source and `model::memory::activity::limits(page)`. The existing
+return is the receiver-local Share Pend. `Client::memory::activity::pair(view)`
+resolves `(Sign, Share View)` using Pend.Inspect/Collect; a foreign recipient
+runs that lookup in its own Task. For a nonzero source coordinate, map the
+View Pend's actual Pages offset, not an assumed zero.

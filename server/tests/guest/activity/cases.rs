@@ -231,9 +231,14 @@ fn writers() {
     let begin = room::clock();
     let before = WRITES.load(Acquire);
     let mut samples = 0;
-    while room::clock() - begin < 500_000_000 {
+    let deadline = begin + 8_000_000_000;
+    let mut previous = 0;
+    while room::clock() - begin < 500_000_000 || samples < 3 {
+        assert!(room::clock() < deadline, "three completed writer epochs");
         let s = reader.next();
         assert_eq!(s.validity, Validity::Observed);
+        assert!(s.epoch > previous);
+        previous = s.epoch;
         assert_eq!(s.dirty, Evidence::Observed);
         samples += 1;
     }
