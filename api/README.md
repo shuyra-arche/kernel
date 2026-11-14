@@ -2,7 +2,7 @@
 
 `kernel-api` is one `no_std` Cargo package. It owns the public Kernel contracts;
 Client executes them and Server implements them. It requires no heap, startup
-code or runtime state. There is no Env package or compatibility facade.
+code or runtime state.
 
 ## Public modules
 
@@ -54,9 +54,7 @@ decoding perform no trap, retry or rollback.
 Kernel reads the initrd's initial eight-byte offset/length preamble and parses
 the selected Capsule. The resource Ledger contains named initial capabilities.
 Deployment selection, program catalogs, image packing and service protocols
-belong to the integration owner, not this package. The former deployment
-manifest parser and packer have been removed.
-
+belong to the integration owner, not this package. 
 ## Memory geometry: three distinct units
 
 The current public contracts use **4 KiB as their base coordinate**,
