@@ -85,12 +85,16 @@ pub(crate) fn stage(local: u64) {
 pub(crate) fn flush() {
     #[cfg(debug_assertions)]
     crate::basis::assert_unlocked();
+    // Suppress ordinary reception callbacks until the selected value and its
+    // hardware effect have settled together. This retains no global lock.
+    let _interrupts = unsafe { crate::metal::sync::TrapGuard::save() };
     let _ = LOCAL[hart::hart_id().get()].flush(program);
 }
 
 /// Acknowledge the software interrupt before calling this on the owner.
 /// A later heap mutation then either appears in this snapshot or leaves an IPI.
 pub fn refresh() {
+    let _interrupts = unsafe { crate::metal::sync::TrapGuard::save() };
     let _ = LOCAL[hart::hart_id().get()].refresh(program);
 }
 
