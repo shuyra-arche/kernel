@@ -79,3 +79,29 @@ pub fn block(action: Action) -> Result<Response, Error> {
         return Ok(response);
     }
 }
+
+/// Cleanup may race Task exit, which advances the same Memo's generation.
+/// Observe that exact position again; never treat Stale itself as completion.
+pub fn retract(memo: kernel_api::model::nest::MemoPosition) {
+    let deadline = room::clock() + 5_000_000_000;
+    loop {
+        let status = crate::support::memo_status(memo);
+        if status.phase == kernel_api::model::nest::MemoPhase::Associated {
+            return;
+        }
+        let Response::Reply(reply) = call(Action::Retract {
+            memo,
+            expected: status.generation,
+        })
+        .unwrap() else {
+            panic!("retract")
+        };
+        match reply.outcome() {
+            Outcome::Committed(_) => return,
+            Outcome::Rejected(Failure::Busy | Failure::Stale) => {}
+            other => panic!("retract: {other:?}"),
+        }
+        assert!(room::clock() < deadline, "Memo cleanup did not progress");
+        room::yield_();
+    }
+}

@@ -110,6 +110,9 @@ def main():
     edit("tests/memory/guest/support.rs", lambda s:
          s.replace("crate::recovery::call(action)", "crate::recovery::block(action)"))
     edit("tests/memory/guest/support.rs", lambda s: s.replace(
+        "    mutate(Action::Retract {\n        memo,\n        expected: memo_status(memo).generation,\n    });",
+        "    crate::recovery::retract(memo);"))
+    edit("tests/memory/guest/support.rs", lambda s: s.replace(
         "kernel_client::call::unit::create(VirtAddr::new(bytes.as_ptr() as usize)).unwrap()",
         "({\n            let deadline = room::clock() + 5_000_000_000;\n"
         "            loop {\n"
