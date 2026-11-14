@@ -69,19 +69,33 @@ struct Local {
 // additionally retain their COMMIT admission. Reporting follows the Hart barrier.
 unsafe impl Sync for Local {}
 impl Local {
-    const fn new() -> Self {
-        Self {
-            metrics: [const { Distribution::new() }; METRICS],
-            phases: [const { [const { Distribution::new() }; METRICS] }; 3],
-            slowest: UnsafeCell::new(transaction::Slowest::new()),
-            transaction: AtomicU64::new(0),
-            parts: UnsafeCell::new(transaction::Parts::new()),
-            ready: UnsafeCell::new(None),
-            irq_site: UnsafeCell::new(None),
-            irq_transaction: AtomicU64::new(0),
-            irq_top: UnsafeCell::new(None),
-            kernel: AtomicU64::new(0),
-            irq: AtomicU64::new(0),
+    /// # Safety
+    /// `slot` uniquely names aligned, allocated storage for one uninitialized
+    /// Local. No reader can access it until every field is initialized.
+    unsafe fn initialize(slot: *mut Self) {
+        // A Local is much larger than a boot stack's usable temporary space in
+        // debug code. Construct each small field in its final allocation;
+        // passing Local::new() by value can overflow before secondary startup.
+        unsafe {
+            let metrics = core::ptr::addr_of_mut!((*slot).metrics).cast::<Distribution>();
+            for index in 0..METRICS {
+                metrics.add(index).write(Distribution::new());
+            }
+            let phases = core::ptr::addr_of_mut!((*slot).phases).cast::<Distribution>();
+            for index in 0..3 * METRICS {
+                phases.add(index).write(Distribution::new());
+            }
+            core::ptr::addr_of_mut!((*slot).slowest)
+                .write(UnsafeCell::new(transaction::Slowest::new()));
+            core::ptr::addr_of_mut!((*slot).transaction).write(AtomicU64::new(0));
+            core::ptr::addr_of_mut!((*slot).parts)
+                .write(UnsafeCell::new(transaction::Parts::new()));
+            core::ptr::addr_of_mut!((*slot).ready).write(UnsafeCell::new(None));
+            core::ptr::addr_of_mut!((*slot).irq_site).write(UnsafeCell::new(None));
+            core::ptr::addr_of_mut!((*slot).irq_transaction).write(AtomicU64::new(0));
+            core::ptr::addr_of_mut!((*slot).irq_top).write(UnsafeCell::new(None));
+            core::ptr::addr_of_mut!((*slot).kernel).write(AtomicU64::new(0));
+            core::ptr::addr_of_mut!((*slot).irq).write(AtomicU64::new(0));
         }
     }
 }
@@ -100,7 +114,9 @@ pub(crate) fn init() -> Result<(), crate::basis::nest::NestError> {
     let mut storage = Box::<[Local]>::try_new_uninit_slice(hart::hart_count())
         .map_err(|_| crate::basis::nest::NestError::OutOfMemory)?;
     for slot in storage.iter_mut() {
-        slot.write(Local::new());
+        // SAFETY: each Box slot is disjoint and remains unpublished until the
+        // completed array is installed in LOCALS below.
+        unsafe { Local::initialize(slot.as_mut_ptr()) };
     }
     LOCALS
         .set(unsafe { storage.assume_init() })
