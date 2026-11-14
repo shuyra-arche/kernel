@@ -19,7 +19,7 @@ binaries and future ABI declarations are rejected. Cell allocation creates a
 Slot; Nest.Reserve uses an actual Whole-Nest Pend, then generation-qualified
 Insert and Publish establish associations and hardware visibility. Task/Team,
 Nest and mapping identifiers describe objects; they do not grant authority.
-See the [API migration](https://github.com/shuyra-arche/kernel/blob/{{RELEASE_COMMIT}}/api/README.md#source-migration-and-abi-compatibility)
+See the [selected API contract](https://github.com/shuyra-arche/kernel/blob/{{RELEASE_COMMIT}}/api/README.md#version-selection)
 and [Client guide](https://github.com/shuyra-arche/kernel/blob/{{RELEASE_COMMIT}}/client/README.md).
 
 ## Changes
