@@ -171,6 +171,11 @@ fn prepare(
             .ok_or(Failure::Denied)?;
     route.position(position).map_err(failure)?;
     let source = route.entry().clone();
+    let mark = if request.mark == Mark::NONE {
+        source.mark()
+    } else {
+        request.mark
+    };
     let generation = nest
         .inspect_logical(&span, page)
         .map_err(|_| Failure::Busy)?
@@ -194,7 +199,13 @@ fn prepare(
     let pages =
         PageCount::new(page.checked_add(1).ok_or(Failure::Denied)?).ok_or(Failure::Denied)?;
     let size = pages.checked_bytes().ok_or(Failure::Denied)?;
-    let flat = Flat::from_cells(Owner::Kernel, pages, cells).map_err(|_| Failure::OutOfMemory)?;
+    let mut flat =
+        Flat::from_cells(Owner::Kernel, pages, cells).map_err(|_| Failure::OutOfMemory)?;
+    // This private output owns its allocation. Logical closure can release
+    // the real Page after CPU withdrawal even while dead Pend metadata remains.
+    Arc::get_mut(&mut flat)
+        .expect("fresh private output Flat")
+        .explicit();
     let source_root =
         SourceAuthorization::new(flat.whole(), Access::READ, TaskId::new(0)).map_err(failure)?;
     let view = Sharing::from_source(flat.whole(), size, TaskId::new(0)).map_err(failure)?;
@@ -302,6 +313,8 @@ impl Subscription {
             self.output.invalidate();
             self.event.invalidate();
             sharing::seal(&self.view);
+            let source = self.view.source();
+            let _ = source.flat().begin_close(source.flat().revision());
         }
     }
     fn step(&self) -> bool {

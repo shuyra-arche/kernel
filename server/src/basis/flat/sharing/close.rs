@@ -62,6 +62,13 @@ pub(crate) fn poll_close(root: &Arc<Sharing>) -> Result<(), PendFail> {
     if source.pending_close() {
         Err(PendFail::Busy)
     } else {
+        if root.source().flat().phase() == kernel_api::model::flat::FlatPhase::Closing {
+            source.close_blocks()?;
+            root.source()
+                .flat()
+                .finish_close()
+                .map_err(|_| PendFail::Busy)?;
+        }
         Ok(())
     }
 }

@@ -567,10 +567,19 @@ fn incoming_budget() {
     }
     // One ordinary foreign-sender slot remains. A pair needs two; no half
     // publication or leaked reservation may consume that last slot on OOM.
-    assert_eq!(
-        derive(memo, AccordTarget::Task(receiver)),
-        Err(ShareFail::OutOfMemory)
-    );
+    let deadline = room::clock() + 8_000_000_000;
+    loop {
+        match derive(memo, AccordTarget::Task(receiver)) {
+            Err(ShareFail::Busy) => {
+                assert!(room::clock() < deadline);
+                pause();
+            }
+            other => {
+                assert_eq!(other, Err(ShareFail::OutOfMemory));
+                break;
+            }
+        }
+    }
     accord(root, receiver, limits);
     let request = AccordRequest {
         src: root,

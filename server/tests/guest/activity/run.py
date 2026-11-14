@@ -110,7 +110,7 @@ def compose(provider, fixture, unsupported, stopped):
     edit(provider, "server/src/basis/nest/activity.rs", lambda s: s.replace(
         'pub(crate) fn advance() {', 'pub(crate) fn advance() {\n    let at=probe::stamp();let mut steps=0;').replace(
         '            if s.step() {',
-        '            steps+=1;let started=probe::stamp();let done=s.step();probe::step(started);\n            if done {').replace(
+        '            steps+=1;let started=probe::stamp();let done=s.step();probe::step(started);\n            if done { probe::closed(s.view.source().flat().phase());').replace(
         '\n}\n/// Bounded lifecycle hook;', '\n    probe::turn(at,steps);\n}\n/// Bounded lifecycle hook;'))
     edit(provider, "server/src/metal/riscv/mmu/table/mod.rs", lambda s: s.replace(
         'return entry.capture_activity(snapshot).ok_or(NestError::Busy);',

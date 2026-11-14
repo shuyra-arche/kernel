@@ -23,6 +23,13 @@ pub(crate) fn turn(start: u64, steps: u64) {
     MAX_STEPS.fetch_max(steps, Relaxed);
     MAX_TURN.fetch_max(stamp() - start, Relaxed);
 }
+pub(crate) fn closed(phase: kernel_api::model::flat::FlatPhase) {
+    assert_eq!(
+        phase,
+        kernel_api::model::flat::FlatPhase::Closed,
+        "retired output retained its allocation"
+    );
+}
 pub(crate) fn step(start: u64) {
     let elapsed = stamp() - start;
     STEPS.fetch_add(1, Relaxed);

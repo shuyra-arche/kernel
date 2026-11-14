@@ -221,7 +221,9 @@ Narrow, Revoke, Return and sender/recipient Task/Team exit invalidate output gra
 writes. Existing SourceAuthorization and Nest retirement retract actual output
 mappings. Cancellation processes one native binding and one nonblocking fence
 post/poll per visit; the registry slot and output storage remain retained until
-withdrawal and the captured sampling round both settle. Peers can finish the
+withdrawal and the captured sampling round both settle. The private output
+Flat closes through the same physical-return checks; retaining dead Pend
+metadata does not keep its Page allocation alive. Peers can finish the
 same parked Nest retirement; they cannot substitute another request.
 
 Stopping the observation Task can retain at most the admitted subscription

@@ -42,7 +42,7 @@ pub mod operations {
         pub token: super::PendId,
     }
     /// Native v11 source derivation. `request` points to one AccordRequest;
-    /// its source must be a live Flat/Share and its limits must select Share rights.
+    /// A live Flat/Share source derives ordinary Share access.
     /// A Reservation source with INSPECT|SAMPLE derives one readonly activity
     /// page in the requested Pages window and a companion Sign in the recipient
     /// ledger. The two Pends form (Sign, Share View); no new call is needed.
