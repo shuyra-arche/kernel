@@ -52,7 +52,10 @@ pub(crate) mod publisher {
 use publisher::Publisher;
 pub(super) struct Memos;
 impl Memos {
-    pub(super) fn complete(&mut self, _: &Arc<super::Span>) {}
+    pub(super) fn count(&self, _: &Arc<super::Span>) -> usize {
+        0
+    }
+    pub(super) fn complete(&mut self, _: &Arc<super::Span>, _: &mut Vec<Settled>) {}
     pub(super) fn next_page(&self, _: &Arc<super::Span>, _: Option<usize>) -> Option<usize> {
         None
     }
@@ -63,3 +66,4 @@ impl Memos {
 mod cases;
 #[path = "../../../../src/basis/nest/memo/state.rs"]
 mod state;
+pub(super) use state::Settled;

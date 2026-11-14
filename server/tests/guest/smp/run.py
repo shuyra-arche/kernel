@@ -85,6 +85,17 @@ def main():
          .replace("    ipc::run();\n", ""))
     edit("tests/memory/guest/support.rs", lambda s:
          s[:s.index("pub fn image()")] + s[s.index("pub fn accord("):])
+    # Only rejected requests are retried with a fresh identity. Never turn an
+    # accepted Failed/Pending result into a second mutation.
+    edit("tests/memory/guest/support.rs", lambda s: s.replace(
+        "    let Response::Reply(r) = call(action) else {\n        panic!(\"mutation reply\")\n    };",
+        "    let deadline = room::clock() + 5_000_000_000;\n"
+        "    let r = loop {\n"
+        "        let Response::Reply(r) = call(action) else { panic!(\"mutation reply\") };\n"
+        "        if r.outcome() != Outcome::Rejected(Failure::Busy) { break r; }\n"
+        "        assert!(room::clock() < deadline, \"rejected Busy did not progress\");\n"
+        "        room::yield_();\n"
+        "    };"))
     # This case builds a new executable Team through native RX publication.
     # It remains outside the data-only qualification, rather than weakening it.
     edit("tests/memory/guest/acceptance/mod.rs", lambda s:

@@ -131,12 +131,23 @@ impl Memos {
             }
         }
     }
-    pub(in crate::basis::nest) fn complete(&mut self, span: &Span) {
+    pub(in crate::basis::nest) fn count(&self, span: &Span) -> usize {
+        self.entries
+            .iter()
+            .filter(|((id, _), _)| *id == span.identity())
+            .count()
+    }
+    pub(in crate::basis::nest) fn complete(
+        &mut self,
+        span: &Span,
+        settled: &mut Vec<super::Settled>,
+    ) {
         for ((id, _), memo) in &mut self.entries {
             if *id == span.identity() {
                 if let Some(publication) = memo.publication_mut() {
                     publication.complete();
                 }
+                settled.push(memo.finish());
             }
         }
     }

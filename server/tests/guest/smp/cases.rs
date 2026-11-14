@@ -104,7 +104,7 @@ pub fn run() {
                 "write after retirement completion"
             );
         }
-        unit::stop(worker.into()).unwrap();
+        // The retired access terminates the writer through its page fault.
         join(worker);
         retract(observer);
         assert_eq!(slot_status(slot).obligations, 0);
