@@ -17,6 +17,10 @@ pub(crate) struct Sample {
     pub(crate) entries: u64,
     pub(crate) selections: u64,
     pub(crate) rejected: u64,
+    pub(crate) notified: u64,
+    pub(crate) notification: u64,
+    pub(crate) notification_hart: usize,
+    pub(crate) received: u64,
 }
 pub(crate) struct Execution {
     ready: AtomicU64,
@@ -29,6 +33,10 @@ pub(crate) struct Execution {
     entries: AtomicU64,
     selections: AtomicU64,
     rejected: AtomicU64,
+    notified: AtomicU64,
+    notification: AtomicU64,
+    notification_hart: AtomicUsize,
+    received: AtomicU64,
 }
 impl Execution {
     pub(crate) const fn new() -> Self {
@@ -43,6 +51,10 @@ impl Execution {
             entries: AtomicU64::new(0),
             selections: AtomicU64::new(0),
             rejected: AtomicU64::new(0),
+            notified: AtomicU64::new(0),
+            notification: AtomicU64::new(0),
+            notification_hart: AtomicUsize::new(0),
+            received: AtomicU64::new(0),
         }
     }
     pub(crate) fn enqueue(&self, now: u64, hart: usize, ordinary: usize, fixed: usize) {
@@ -53,6 +65,9 @@ impl Execution {
         {
             self.origin.store(hart, Ordering::Relaxed);
         }
+        self.notification.store(0, Ordering::Relaxed);
+        self.notified.store(0, Ordering::Relaxed);
+        self.received.store(0, Ordering::Relaxed);
         self.queue.store(hart, Ordering::Relaxed);
         self.ordinary.store(ordinary, Ordering::Relaxed);
         self.fixed.store(fixed, Ordering::Relaxed);
@@ -61,7 +76,27 @@ impl Execution {
     pub(crate) fn reject(&self, reason: u64) {
         self.rejected.fetch_or(reason, Ordering::Relaxed);
     }
-    pub(crate) fn dispatch(&self, now: u64, hart: usize) {
+    pub(crate) fn notify(&self, generation: u64, now: u64, hart: usize) {
+        self.notification.store(generation, Ordering::Relaxed);
+        self.notified.store(now, Ordering::Relaxed);
+        self.notification_hart.store(hart, Ordering::Relaxed);
+    }
+    pub(crate) fn dispatch(&self, now: u64, hart: usize, receipt: (u64, u64)) {
+        let generation = self.notification.load(Ordering::Relaxed);
+        let sent = self.notified.load(Ordering::Relaxed);
+        self.received.store(
+            if generation != 0
+                && generation <= receipt.0
+                && sent <= receipt.1
+                && receipt.1 <= now
+                && self.notification_hart.load(Ordering::Relaxed) == hart
+            {
+                receipt.1
+            } else {
+                0
+            },
+            Ordering::Relaxed,
+        );
         self.seated.store(now, Ordering::Relaxed);
         self.destination.store(hart, Ordering::Relaxed);
         self.selections.fetch_add(1, Ordering::Relaxed);
@@ -88,6 +123,10 @@ impl Execution {
             entries: self.entries.swap(0, Ordering::Relaxed),
             selections: self.selections.swap(0, Ordering::Relaxed),
             rejected: self.rejected.swap(0, Ordering::Relaxed),
+            notified: self.notified.load(Ordering::Relaxed),
+            notification: self.notification.load(Ordering::Relaxed),
+            notification_hart: self.notification_hart.load(Ordering::Relaxed),
+            received: self.received.load(Ordering::Relaxed),
         };
         (ready != 0 && seated >= ready && now >= seated).then_some(sample)
     }

@@ -114,8 +114,11 @@ impl Slot {
             task.schedule.lock().enter(clock::now().as_ticks());
         }
         #[cfg(feature = "latency")]
-        task.observation
-            .dispatch(crate::metal::measure::stamp(), self.hart.get());
+        task.observation.dispatch(
+            crate::metal::measure::stamp(),
+            self.hart.get(),
+            crate::metal::measure::receipt(),
+        );
         task.transform_checked(TaskState::running(self.hart, QUANTUM_TICKS));
         let pa = task.ident.frame_pa.as_usize();
         unsafe {
@@ -343,9 +346,6 @@ impl Slot {
     }
     pub(crate) fn reschedule(&self) -> usize {
         let commit = crate::basis::commit();
-        if let Some(route) = crate::basis::room::interrupt::external() {
-            route.retry(&commit);
-        }
         if self.running_task().is_some_and(|t| t.doomed()) {
             drop(commit);
             return crate::basis::unit::lifecycle::quit();

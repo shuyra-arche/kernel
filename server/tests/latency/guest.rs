@@ -21,6 +21,7 @@ use support::Console;
 const WORKERS: usize = 8;
 const TURNS: usize = 512;
 static ARRIVED: AtomicUsize = AtomicUsize::new(0);
+static RELEASE: AtomicBool = AtomicBool::new(false);
 static START: AtomicBool = AtomicBool::new(false);
 static DONE: AtomicUsize = AtomicUsize::new(0);
 static STEPS: AtomicUsize = AtomicUsize::new(0);
@@ -75,6 +76,9 @@ fn sleep(at: u64) {
     }
 }
 extern "C" fn worker() -> ! {
+    for _ in 0..64 {
+        room::yield_();
+    }
     ARRIVED.fetch_add(1, Ordering::Release);
     while !START.load(Ordering::Acquire) {
         room::yield_();
@@ -87,6 +91,9 @@ extern "C" fn worker() -> ! {
         }
     }
     DONE.fetch_add(1, Ordering::Release);
+    while !RELEASE.load(Ordering::Acquire) {
+        room::yield_();
+    }
     unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 #[unsafe(no_mangle)]
@@ -108,6 +115,7 @@ extern "C" fn run(at: usize, count: usize) -> ! {
         "room-setup: create_busy={}",
         CREATE_RETRIES.load(Ordering::Relaxed)
     );
+    marker(b"ROOM:steady\n");
     let start = room::clock();
     START.store(true, Ordering::Release);
     while DONE.load(Ordering::Acquire) != WORKERS {
@@ -115,6 +123,8 @@ extern "C" fn run(at: usize, count: usize) -> ! {
         sleep(room::clock() + 1_000_000);
     }
     let elapsed = room::clock() - start;
+    marker(b"ROOM:teardown\n");
+    RELEASE.store(true, Ordering::Release);
     assert_eq!(STEPS.load(Ordering::Relaxed), WORKERS * TURNS);
     for task in tasks {
         assert_eq!(support::join(task).exit.map(|(_, code)| code), Some(0));
@@ -125,4 +135,12 @@ extern "C" fn run(at: usize, count: usize) -> ! {
         WORKERS * TURNS
     );
     unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
+}
+
+fn marker(bytes: &[u8]) {
+    assert_eq!(
+        kernel_client::call::debug::put(VirtAddr::new(bytes.as_ptr() as usize), bytes.len())
+            .unwrap(),
+        bytes.len()
+    );
 }

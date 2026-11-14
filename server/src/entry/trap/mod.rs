@@ -280,14 +280,19 @@ pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
     crate::metal::measure::elapsed(crate::metal::measure::Metric::TimerReturn, timer_start);
     #[cfg(feature = "latency")]
     {
+        let returned = crate::metal::measure::stamp();
         if let Some(task) = observed
-            && let Some(sample) = task.observation.finish(crate::metal::measure::stamp())
+            && let Some(sample) = task.observation.finish(returned)
         {
             use crate::metal::measure::{Metric, record};
-            record(Metric::ReadyQueue, sample.queue_ticks);
-            record(Metric::DispatchRun, sample.dispatch_ticks);
-            record(Metric::ReadyRun, sample.total_ticks);
-            crate::metal::measure::ready(task.ident.id.get(), sample);
+            record(
+                Metric::ReadyQueue,
+                sample.queue_ticks,
+                returned.saturating_sub(sample.dispatch_ticks),
+            );
+            record(Metric::DispatchRun, sample.dispatch_ticks, returned);
+            record(Metric::ReadyRun, sample.total_ticks, returned);
+            crate::metal::measure::ready(task.ident.id.get(), sample, returned);
         }
         crate::metal::measure::leave();
     }

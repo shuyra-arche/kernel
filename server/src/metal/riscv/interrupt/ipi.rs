@@ -6,6 +6,8 @@ use sbi::{Ipi, IpiCall, ecall::SArgs};
 /// racing that snapshot either publishes visible work or leaves an interrupt.
 pub(crate) fn acknowledge() {
     unsafe { core::arch::asm!("csrci sip, 2", "fence o, rw", options(nostack)) };
+    #[cfg(feature = "latency")]
+    crate::metal::measure::ipi_received();
 }
 
 /// Publish shared work before requesting an interrupt on the destination Hart.

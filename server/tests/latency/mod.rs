@@ -37,8 +37,9 @@ fn execution_preserves_queue_origin_and_partitions_one_return() {
     let e = execution::Execution::new();
     e.enqueue(10, 0, 2, 1);
     e.enqueue(20, 1, 4, 0); // transfer does not erase the initial ready publication
-    e.dispatch(30, 1);
-    e.dispatch(40, 2); // selected again before an actual return
+    e.notify(7, 25, 1);
+    e.dispatch(30, 1, (7, 28));
+    e.dispatch(40, 2, (7, 28)); // selected again before an actual return
     e.reject(execution::INELIGIBLE | execution::BUDGET | execution::OUTRANKED);
     let sample = e.finish(45).unwrap();
     assert_eq!(
@@ -62,7 +63,7 @@ fn execution_preserves_queue_origin_and_partitions_one_return() {
     );
     assert_eq!(e.finish(46), None);
     e.enqueue(50, 0, 0, 0);
-    e.dispatch(60, 0);
+    e.dispatch(60, 0, (0, 0));
     e.cancel();
     assert_eq!(e.finish(70), None);
 }
@@ -129,4 +130,48 @@ fn attribution_retains_bounded_distinct_sites_and_paired_wait() {
     );
     assert_eq!(found[0].parts.ticks, [7; transaction::WORKS]);
     assert_eq!(found[0].parts.calls, [1; transaction::WORKS]);
+}
+
+#[path = "../../src/metal/measure/timeline.rs"]
+mod timeline;
+#[test]
+fn phase_windows_reject_crossing_samples_and_never_reopen() {
+    let window = timeline::Timeline::new();
+    assert_eq!(window.phase(1, 9), Some(0));
+    window.open(10);
+    window.open(11);
+    assert_eq!(window.phase(1, 10), None);
+    assert_eq!(window.phase(10, 20), Some(1));
+    window.close(30);
+    window.close(40);
+    window.open(50);
+    assert_eq!(window.bounds(), (10, 30));
+    assert_eq!(window.phase(20, 31), None);
+    assert_eq!(window.phase(30, 40), Some(2));
+    assert_eq!(window.phase(20, 19), None);
+}
+
+#[test]
+fn task_notification_receipt_requires_generation_destination_and_time_coverage() {
+    let e = execution::Execution::new();
+    e.enqueue(10, 2, 1, 0);
+    e.notify(3, 12, 2);
+    e.dispatch(20, 2, (2, 15));
+    assert_eq!(e.finish(21).unwrap().received, 0);
+    e.enqueue(30, 2, 1, 0);
+    e.notify(4, 31, 2);
+    e.dispatch(40, 2, (4, 33));
+    let sample = e.finish(41).unwrap();
+    assert_eq!(
+        (sample.notification, sample.notified, sample.received),
+        (4, 31, 33)
+    );
+    e.enqueue(50, 2, 1, 0);
+    e.notify(5, 52, 2);
+    e.dispatch(60, 3, (5, 55));
+    assert_eq!(
+        e.finish(61).unwrap().received,
+        0,
+        "stealing must not borrow another Hart's receipt"
+    );
 }

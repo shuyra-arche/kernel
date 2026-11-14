@@ -172,6 +172,10 @@ impl Source {
         false
     }
     pub(super) fn maintain(&self) {
+        let commit = crate::basis::commit();
+        #[cfg(feature = "latency")]
+        let measure =
+            crate::metal::measure::scope(crate::metal::measure::Work::IrqMaintenance, &commit);
         if !self.live() {
             self.detach();
         }
@@ -189,6 +193,9 @@ impl Source {
                 .expect("source router")
                 .finish(self.irq, true),
         }
+        #[cfg(feature = "latency")]
+        drop(measure);
+        drop(commit);
         if announce && endpoint::announce(&self.endpoint) {
             self.state.lock().request_notice();
             super::external().expect("source router").request();

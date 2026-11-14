@@ -2,9 +2,10 @@
 //! occurs in a sample; storage is allocated once before secondary harts start.
 use crate::metal::{clock, hart, sync::OnceLock};
 use alloc::boxed::Box;
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 mod distribution;
 pub(crate) mod execution;
+mod timeline;
 mod transaction;
 use core::cell::UnsafeCell;
 use distribution::Distribution;
@@ -30,8 +31,9 @@ pub(crate) enum Metric {
     IrqAdmit,
     IrqPublish,
     TimerReturn,
+    ControllerClaim,
 }
-const METRICS: usize = 17;
+const METRICS: usize = 18;
 const NAMES: [&str; METRICS] = [
     "irq-off",
     "kernel-active",
@@ -50,18 +52,26 @@ const NAMES: [&str; METRICS] = [
     "irq-admit",
     "irq-publish",
     "timer-return",
+    "controller-claim",
 ];
 #[repr(align(64))]
 struct Local {
     metrics: [Distribution; METRICS],
     phases: [[Distribution; METRICS]; 3],
     slowest: UnsafeCell<transaction::Slowest>,
+    phase_slowest: [UnsafeCell<transaction::Slowest>; 3],
+    phase_ready: [UnsafeCell<Option<(usize, execution::Sample)>>; 3],
+    phase_irq: [UnsafeCell<Option<(&'static core::panic::Location<'static>, u64, u64)>>; 3],
     transaction: AtomicU64,
     parts: UnsafeCell<transaction::Parts>,
     ready: UnsafeCell<Option<(usize, execution::Sample)>>,
     irq_site: UnsafeCell<Option<&'static core::panic::Location<'static>>>,
     irq_transaction: AtomicU64,
     irq_top: UnsafeCell<Option<(&'static core::panic::Location<'static>, u64, u64)>>,
+    posted: AtomicU64,
+    received: AtomicU64,
+    received_at: AtomicU64,
+    crossed: AtomicU64,
     kernel: AtomicU64,
     irq: AtomicU64,
 }
@@ -87,6 +97,17 @@ impl Local {
             }
             core::ptr::addr_of_mut!((*slot).slowest)
                 .write(UnsafeCell::new(transaction::Slowest::new()));
+            for phase in 0..3 {
+                core::ptr::addr_of_mut!((*slot).phase_slowest)
+                    .cast::<UnsafeCell<transaction::Slowest>>()
+                    .add(phase)
+                    .write(UnsafeCell::new(transaction::Slowest::new()));
+                core::ptr::addr_of_mut!((*slot).phase_ready)
+                    .cast::<UnsafeCell<Option<(usize, execution::Sample)>>>()
+                    .add(phase)
+                    .write(UnsafeCell::new(None));
+                core::ptr::addr_of_mut!((*slot).phase_irq).cast::<UnsafeCell<Option<(&'static core::panic::Location<'static>, u64, u64)>>>().add(phase).write(UnsafeCell::new(None));
+            }
             core::ptr::addr_of_mut!((*slot).transaction).write(AtomicU64::new(0));
             core::ptr::addr_of_mut!((*slot).parts)
                 .write(UnsafeCell::new(transaction::Parts::new()));
@@ -94,6 +115,10 @@ impl Local {
             core::ptr::addr_of_mut!((*slot).irq_site).write(UnsafeCell::new(None));
             core::ptr::addr_of_mut!((*slot).irq_transaction).write(AtomicU64::new(0));
             core::ptr::addr_of_mut!((*slot).irq_top).write(UnsafeCell::new(None));
+            core::ptr::addr_of_mut!((*slot).posted).write(AtomicU64::new(0));
+            core::ptr::addr_of_mut!((*slot).received).write(AtomicU64::new(0));
+            core::ptr::addr_of_mut!((*slot).received_at).write(AtomicU64::new(0));
+            core::ptr::addr_of_mut!((*slot).crossed).write(AtomicU64::new(0));
             core::ptr::addr_of_mut!((*slot).kernel).write(AtomicU64::new(0));
             core::ptr::addr_of_mut!((*slot).irq).write(AtomicU64::new(0));
         }
@@ -101,14 +126,14 @@ impl Local {
 }
 static LOCALS: OnceLock<Box<[Local]>> = OnceLock::new();
 static ACTIVE: AtomicBool = AtomicBool::new(false);
-// Completion-phase distributions. Running includes guest setup unless a fixture
-// explicitly measures its own steady interval; it is not a steady-state claim.
-static PHASE: AtomicU8 = AtomicU8::new(0);
+// Ordinary boot uses the whole running lifetime. A test composition can
+// bracket its warmed workload through these same private diagnostic transitions.
+static TIMELINE: timeline::Timeline = timeline::Timeline::new();
 pub(crate) fn running() {
-    let _ = PHASE.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed);
+    TIMELINE.open(stamp());
 }
 pub(crate) fn stopping() {
-    PHASE.store(2, Ordering::Relaxed);
+    TIMELINE.close(stamp());
 }
 pub(crate) fn init() -> Result<(), crate::basis::nest::NestError> {
     let mut storage = Box::<[Local]>::try_new_uninit_slice(hart::hart_count())
@@ -138,16 +163,56 @@ pub(crate) fn stamp() -> u64 {
         0
     }
 }
-pub(crate) fn record(metric: Metric, ticks: u64) {
+pub(crate) fn record(metric: Metric, ticks: u64, end: u64) {
     if !ACTIVE.load(Ordering::Relaxed) {
         return;
     }
     if let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) {
         local.metrics[metric as usize].record(ticks);
-        local.phases[PHASE.load(Ordering::Relaxed) as usize][metric as usize].record(ticks);
+        if let Some(phase) = TIMELINE.phase(end.saturating_sub(ticks), end) {
+            local.phases[phase][metric as usize].record(ticks);
+        } else {
+            local.crossed.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }
-pub(crate) fn ready(task: usize, sample: execution::Sample) {
+/// This generation describes a published scheduling notification attempt,
+/// not a firmware-delivery proof. Exhaustion yields unknown rather than reuse.
+pub(crate) fn notification(destination: usize) -> (u64, u64) {
+    let Some(local) = LOCALS.get().and_then(|all| all.get(destination)) else {
+        return (0, 0);
+    };
+    let generation = local
+        .posted
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+            old.checked_add(1)
+        })
+        .ok()
+        .and_then(|old| old.checked_add(1))
+        .unwrap_or(0);
+    (generation, stamp())
+}
+pub(crate) fn ipi_received() {
+    if let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) {
+        local
+            .received
+            .store(local.posted.load(Ordering::Acquire), Ordering::Relaxed);
+        local.received_at.store(stamp(), Ordering::Release);
+    }
+}
+pub(crate) fn receipt() -> (u64, u64) {
+    LOCALS
+        .get()
+        .and_then(|all| all.get(hart::hart_id().get()))
+        .map(|local| {
+            (
+                local.received.load(Ordering::Relaxed),
+                local.received_at.load(Ordering::Relaxed),
+            )
+        })
+        .unwrap_or((0, 0))
+}
+pub(crate) fn ready(task: usize, sample: execution::Sample, end: u64) {
     if let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) {
         // Trap return still masks local interrupts. The scheduler cannot move
         // this running Task while the continuation owns its context.
@@ -158,14 +223,27 @@ pub(crate) fn ready(task: usize, sample: execution::Sample) {
         {
             *top = Some((task, sample));
         }
+        if let Some(phase) = TIMELINE.phase(end.saturating_sub(sample.total_ticks), end) {
+            let top = unsafe { &mut *local.phase_ready[phase].get() };
+            if top
+                .as_ref()
+                .is_none_or(|(_, old)| sample.total_ticks > old.total_ticks)
+            {
+                *top = Some((task, sample));
+            }
+        }
     }
 }
 pub(crate) fn elapsed(metric: Metric, start: u64) {
     if start != 0 {
-        let ticks = clock::now().as_ticks().saturating_sub(start);
-        record(metric, ticks);
+        let end = clock::now().as_ticks();
+        let ticks = end.saturating_sub(start);
+        record(metric, ticks, end);
         if matches!(metric, Metric::SpinWait) {
             account(Work::SpinWait, ticks, None);
+        }
+        if matches!(metric, Metric::ControllerClaim) {
+            account(Work::ControllerClaim, ticks, None);
         }
     }
 }
@@ -193,12 +271,19 @@ pub(crate) fn pause_irq() -> bool {
     };
     let start = local.irq.swap(0, Ordering::Relaxed);
     if start != 0 {
-        let ticks = stamp().saturating_sub(start);
-        record(Metric::IrqOff, ticks);
+        let end = stamp();
+        let ticks = end.saturating_sub(start);
+        record(Metric::IrqOff, ticks, end);
         if let Some(site) = unsafe { *local.irq_site.get() } {
             let top = unsafe { &mut *local.irq_top.get() };
             if top.as_ref().is_none_or(|(_, old, _)| ticks > *old) {
                 *top = Some((site, ticks, local.irq_transaction.load(Ordering::Relaxed)));
+            }
+            if let Some(phase) = TIMELINE.phase(start, end) {
+                let top = unsafe { &mut *local.phase_irq[phase].get() };
+                if top.as_ref().is_none_or(|(_, old, _)| ticks > *old) {
+                    *top = Some((site, ticks, local.irq_transaction.load(Ordering::Relaxed)));
+                }
             }
         }
     }
@@ -221,7 +306,7 @@ pub(crate) fn transaction(
     let now = stamp();
     let wait = now.saturating_sub(start);
     if start != 0 {
-        record(Metric::OuterWait, wait);
+        record(Metric::OuterWait, wait, now);
     }
     if let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) {
         // The newly admitted outer owner has interrupts masked. No sampling
@@ -239,18 +324,23 @@ pub(crate) fn complete(transaction: Transaction) {
     if transaction.start == 0 || !ACTIVE.load(Ordering::Relaxed) {
         return;
     }
-    let hold = stamp().saturating_sub(transaction.start);
-    record(Metric::OuterHold, hold);
+    let end = stamp();
+    let hold = end.saturating_sub(transaction.start);
+    record(Metric::OuterHold, hold, end);
     if let Some(local) = LOCALS.get().and_then(|all| all.get(hart::hart_id().get())) {
         local.transaction.store(0, Ordering::Relaxed);
         // Called only by the last COMMIT guard, before releasing ownership.
-        unsafe { &mut *local.slowest.get() }.record(transaction::Sample {
+        let sample = transaction::Sample {
             site: transaction.site,
             hold,
             wait: transaction.wait,
             transaction: transaction.start,
             parts: unsafe { *local.parts.get() },
-        });
+        };
+        unsafe { &mut *local.slowest.get() }.record(sample);
+        if let Some(phase) = TIMELINE.phase(transaction.start, end) {
+            unsafe { &mut *local.phase_slowest[phase].get() }.record(sample);
+        }
     }
 }
 
@@ -311,11 +401,22 @@ pub(crate) fn report() {
         crate::entry::boot::facts::info().hart.hertz()
     );
     crate::putln!(
-        "latency-storage: harts={} bytes-per-hart={} outer-sites=8 ready-max=1 irq-max=1",
+        "latency-storage: harts={} bytes-per-hart={} outer-sites=8-per-phase+8-all ready-max=1-per-phase+1-all irq-max=1-per-phase+1-all",
         all.len(),
         core::mem::size_of::<Local>()
     );
+    let (opened, closed) = TIMELINE.bounds();
+    crate::putln!(
+        "latency-window: opened={} closed={} boundary=whole-interval",
+        opened,
+        closed
+    );
     for (hart, local) in all.iter().enumerate() {
+        crate::putln!(
+            "latency-crossed: hart={} count={}",
+            hart,
+            local.crossed.load(Ordering::Relaxed)
+        );
         if let Some((site, ticks, transaction)) = unsafe { &*local.irq_top.get() } {
             crate::putln!(
                 "latency-irq: hart={} ticks={} start-transaction={} origin={}:{}:{} cause=unknown-host-firmware-or-kernel",
@@ -329,11 +430,51 @@ pub(crate) fn report() {
         }
         if let Some((task, sample)) = unsafe { &*local.ready.get() } {
             crate::putln!(
-                "latency-ready: hart={} task={} sample={:?} reasons=1:ineligible,2:budget,4:outranked unknown=host-pause,firmware,notification",
+                "latency-ready: hart={} task={} sample={:?} reasons=1:ineligible,2:budget,4:outranked notice=attempt,receipt-covers-posted-generation unknown=host-pause,firmware,coalescing,uncovered-notice",
                 hart,
                 task,
                 sample
             );
+        }
+        for (phase, label) in ["boot", "running", "teardown"].iter().enumerate() {
+            for sample in unsafe { &*local.phase_slowest[phase].get() }
+                .samples
+                .iter()
+                .flatten()
+            {
+                crate::putln!(
+                    "latency-phase-outer: hart={} phase={} transaction={} hold={} wait={} site={}:{} ticks={:?} calls={:?} order=scheduler,sign-wait,irq-maintenance,controller-claim,spin-wait,timer-arm inclusive=1",
+                    hart,
+                    label,
+                    sample.transaction,
+                    sample.hold,
+                    sample.wait,
+                    sample.site.file(),
+                    sample.site.line(),
+                    sample.parts.ticks,
+                    sample.parts.calls
+                );
+            }
+            if let Some((task, sample)) = unsafe { &*local.phase_ready[phase].get() } {
+                crate::putln!(
+                    "latency-phase-ready: hart={} phase={} task={} sample={:?}",
+                    hart,
+                    label,
+                    task,
+                    sample
+                );
+            }
+            if let Some((site, ticks, transaction)) = unsafe { &*local.phase_irq[phase].get() } {
+                crate::putln!(
+                    "latency-phase-irq: hart={} phase={} ticks={} start-transaction={} origin={}:{} cause=unknown-host-firmware-or-kernel",
+                    hart,
+                    label,
+                    ticks,
+                    transaction,
+                    site.file(),
+                    site.line()
+                );
+            }
         }
         // All writers are quiescent at the shutdown barrier.
         for sample in unsafe { &*local.slowest.get() }.samples.iter().flatten() {
@@ -372,7 +513,7 @@ pub(crate) fn report() {
                 let (count, max, bins) = metric.snapshot();
                 if count != 0 {
                     crate::putln!(
-                        "latency-phase: hart={} phase={} metric={} count={} max={} bins={:?} boundary=completion",
+                        "latency-phase: hart={} phase={} metric={} count={} max={} bins={:?} boundary=whole-interval",
                         hart,
                         phase,
                         name,

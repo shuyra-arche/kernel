@@ -1,5 +1,15 @@
+#[allow(dead_code)]
+#[path = "../../src/metal/generic/interrupt.rs"]
+mod mechanism;
 #[path = "../../src/basis/room/interrupt/source/state.rs"]
 mod state;
+mod metal {
+    pub(crate) mod generic {
+        pub(crate) use crate::mechanism as interrupt;
+    }
+}
+#[path = "../../src/basis/room/interrupt/progress.rs"]
+mod progress;
 use kernel_api::model::identity::{PendId, TaskId};
 use state::{Action, Error, Holder, State};
 fn holder(actor: usize, permit: usize) -> Holder {
@@ -95,4 +105,64 @@ fn receiver_lifetime_follows_binding_and_claim_survives_detachment() {
     s.attach(holder(3, 4), receiver.clone(), 3).unwrap();
     assert_eq!(s.consume(2), Action::None);
     assert_eq!(s.consume(3), Action::Complete);
+}
+
+#[test]
+fn controller_claims_survive_failed_admission_and_move_only_once() {
+    use mechanism::Irq;
+    use progress::{BATCH, Claim, Progress};
+    let mut work = Progress::new();
+    for line in 1..=BATCH {
+        assert!(work.vacant());
+        work.retain(Claim {
+            irq: Irq {
+                controller: 0xc000000,
+                line: line as u32,
+            },
+        });
+    }
+    assert!(
+        !work.vacant(),
+        "never issue another hardware claim without storage"
+    );
+    // A rejected COMMIT makes no software delivery or completion: the owner
+    // keeps all four physical claims while other work requests a scan.
+    work.refresh(64);
+    assert!(work.pending());
+    let claims = work.take();
+    assert_eq!(
+        claims
+            .into_iter()
+            .flatten()
+            .map(|c| c.irq.line)
+            .collect::<Vec<_>>(),
+        [1, 2, 3, 4]
+    );
+    assert!(work.take().iter().all(Option::is_none));
+    assert!(work.vacant());
+}
+
+#[test]
+fn repeated_requests_do_not_starve_later_sources_or_expand_one_turn() {
+    use progress::{BATCH, Progress};
+    let mut work = Progress::new();
+    let mut visited = [0; 64];
+    for _ in 0..16 {
+        work.refresh(64); // the first source keeps asking for notification
+        for _ in 0..BATCH {
+            visited[work.next(64).unwrap()] += 1;
+        }
+    }
+    assert_eq!(visited, [1; 64]);
+    let mut left = 0;
+    while work.next(64).is_some() {
+        left += 1;
+    }
+    assert_eq!(left, 60);
+    assert!(!work.pending());
+    assert_eq!(work.next(0), None);
+    work.refresh(2);
+    assert_eq!(work.next(2), Some(0));
+    assert_eq!(work.next(2), Some(1));
+    assert_eq!(work.next(2), None);
 }
