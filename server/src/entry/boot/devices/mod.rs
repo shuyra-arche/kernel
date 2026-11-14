@@ -48,14 +48,16 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
             .register(name, root)
             .map_err(|e| e.into_parts().0)?;
     }
-    let meta = crate::basis::flat::sharing::region(dtb.base, dtb.size, TaskId::new(0))?;
-    let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
+    // SAFETY: boot memory admission validated and retains this immutable DTB.
+    // Copy it into managed Cells so native Insert has real source authority;
+    // raw BorrowedRegion/legacy Share Open is not a native RAM source.
+    let root = unsafe { super::resources::snapshot(dtb.base, dtb.size) }?;
     registry
         .register(Name::Page(Page::Dtb), root)
         .map_err(|e| e.into_parts().0)?;
     if let Some(initrd) = facts::info().initrd() {
-        let meta = crate::basis::flat::sharing::region(initrd.base, initrd.size, TaskId::new(0))?;
-        let root = pend::PendEntry::try_new(View::Share(meta), Mark::NONE, Modifiable::No, None)?;
+        // SAFETY: the firmware initrd is admitted and immutable through copy.
+        let root = unsafe { super::resources::snapshot(initrd.base, initrd.size) }?;
         registry
             .register(Name::Page(Page::Initrd), root)
             .map_err(|e| e.into_parts().0)?;
