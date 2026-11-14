@@ -156,6 +156,25 @@ def main():
             " Err(error) => assert_eq!(error.into_source(), kernel_api::abi::call::pend::PendFail::Busy),\n"
             " }\n assert!(kernel_client::call::room::clock() < deadline);\n"
             " kernel_client::call::room::yield_();\n }\n }"))
+    edit("tests/memory/guest/acceptance/maintenance.rs", lambda s: s.replace(
+        "        assert!(\n            matches!(worker.call(Action::Publish {memo:local,expected:memo_status(memo).generation,maintenance:Some(held)}),Ok(Response::Reply(r)) if matches!(r.outcome(),Outcome::Committed(_)))\n        );",
+        "        publish_held(&worker, local, memo, held);") + '''
+fn publish_held(worker: &Worker, local: MemoPosition, observed: MemoPosition, held: Maintenance) {
+    let deadline = kernel_client::call::room::clock() + 5_000_000_000;
+    loop {
+        let Response::Reply(reply) = worker.call(Action::Publish {
+            memo: local, expected: memo_status(observed).generation, maintenance: Some(held),
+        }).unwrap() else { panic!("Publish") };
+        match reply.outcome() {
+            Outcome::Committed(_) => return,
+            Outcome::Rejected(Failure::Busy | Failure::Stale) => {},
+            other => panic!("maintenance Publish: {other:?}"),
+        }
+        assert!(kernel_client::call::room::clock() < deadline);
+        kernel_client::call::room::yield_();
+    }
+}
+''')
     suite = Path(__file__).resolve().parent
     shutil.copy2(suite / "cases.rs", fixture / "tests/memory/guest/smp.rs")
     shutil.copy2(suite / "recovery.rs", fixture / "tests/memory/guest/recovery.rs")
