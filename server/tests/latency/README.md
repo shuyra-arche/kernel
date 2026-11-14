@@ -116,7 +116,10 @@ Room baseline: ab4dd4cb0a16c257627a6bff3c7f76bf383dcdb6
 
 For first-use analysis, `--cold-room` retains the former Yield-only warmup.
 `--compare-room-warmup --mode room --harts 1 --rounds 5` builds cold and warm
-images of the same provider before alternating their boot order. The timed
+images of the same provider before alternating their boot order. Both guests
+execute the exact same platform/Kernel ELF, recorded in `boot_platform` and
+each result's `platform_sha256`; differing build paths cannot change the kernel
+code layout between variants. The timed
 512 Yield turns and eight sleeps per worker stay identical. Raw boot/setup
 histograms retain first-use work; warming does not remove that cost from the
 record. A warmup marker and inputs.json record the selected policy.
