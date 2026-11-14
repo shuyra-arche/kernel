@@ -43,10 +43,7 @@ pub fn shootdown(asid: Asid) -> Result<(), Deaf> {
     if hart::hart_count() > 1 {
         // All ever-online Harts, including former leases after Task migration.
         // This completes explicit accesses as well as translations.
-        return super::super::completion::synchronize().map_err(|error| {
-            log::error!("CPU completion {error:?} asid={}", asid.get());
-            Deaf { asid }
-        });
+        return super::super::completion::synchronize().map_err(|_| Deaf { asid });
     }
     // 调用方已经写下的 PTE 排在本地 flush 与下面那次租约扫描之前：漏掉这一序，
     // 远端可能按旧翻译继续用这条 ASID。

@@ -90,13 +90,52 @@ pub fn run() {
         };
         let request = request(action);
         let original = invoke(request);
-        assert!(
-            matches!(original.outcome(), Outcome::Committed(_)),
-            "{:?}",
-            original.outcome()
-        );
         // Treat the original delivery as lost. Replaying the same request must
         // return the exact result even though the original generation is stale.
+        assert_eq!(invoke(request), original);
+        match original.outcome() {
+            Outcome::Committed(_) => {}
+            Outcome::Failed {
+                failure: Failure::Busy,
+                retained: Some(_),
+            } if !release => {
+                crate::recovery::retract(memo);
+            }
+            Outcome::Failed {
+                failure: Failure::Busy,
+                retained: Some(_),
+            } => {
+                let deadline = room::clock() + 5_000_000_000;
+                loop {
+                    let Snapshot::Reservation(status) = inspect(Query::Reservation {
+                        token: memo.token(),
+                        nest: memo.nest(),
+                        reservation: memo.reservation(),
+                    }) else {
+                        panic!("reservation")
+                    };
+                    let reply = invoke(crate::support::request(Action::Release {
+                        token: memo.token(),
+                        nest: memo.nest(),
+                        reservation: memo.reservation(),
+                        expected: status.version,
+                    }));
+                    match reply.outcome() {
+                        Outcome::Committed(_) => break,
+                        Outcome::Rejected(Failure::Busy | Failure::Stale)
+                        | Outcome::Failed {
+                            failure: Failure::Busy,
+                            retained: Some(_),
+                        } => {}
+                        other => panic!("Release recovery: {other:?}"),
+                    }
+                    assert!(room::clock() < deadline);
+                    room::yield_();
+                }
+            }
+            other => panic!("retirement: {other:?}"),
+        }
+        // Explicit cleanup cannot rewrite the original failed request either.
         assert_eq!(invoke(request), original);
         let after = observed.load(Acquire);
         assert_ne!(after, 0);

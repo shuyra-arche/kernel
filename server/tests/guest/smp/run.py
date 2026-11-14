@@ -147,6 +147,15 @@ def main():
         "                assert!(kernel_client::call::room::clock() < deadline);\n"
         "                kernel_client::call::room::yield_();\n"
         "            }"))
+    for relative in ["tests/memory/guest/support.rs", "tests/memory/guest/acceptance/worker.rs"]:
+        edit(relative, lambda s: s.replace(
+            "pend::accord(VirtAddr::new(bytes.as_ptr() as usize)).unwrap()",
+            "{\n let deadline = kernel_client::call::room::clock() + 5_000_000_000;\n"
+            " loop {\n match pend::accord(VirtAddr::new(bytes.as_ptr() as usize)) {\n"
+            " Ok(token) => break token,\n"
+            " Err(error) => assert_eq!(error.into_source(), kernel_api::abi::call::pend::PendFail::Busy),\n"
+            " }\n assert!(kernel_client::call::room::clock() < deadline);\n"
+            " kernel_client::call::room::yield_();\n }\n }"))
     suite = Path(__file__).resolve().parent
     shutil.copy2(suite / "cases.rs", fixture / "tests/memory/guest/smp.rs")
     shutil.copy2(suite / "recovery.rs", fixture / "tests/memory/guest/recovery.rs")
