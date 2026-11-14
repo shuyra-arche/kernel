@@ -40,6 +40,9 @@ and [Client guide](https://github.com/shuyra-arche/kernel/blob/{{RELEASE_COMMIT}
   Revoke and exit release charges after cleanup settles. Unit management rights
   remain independent. This policy bounds resource use without promising sender
   fairness under incoming saturation.
+- PendInfo keeps the actual immediate lender identity under source-ledger
+  contention and after lender exit. That descriptive identity cannot revive
+  revoked authority; operations continue to check live ancestry.
 - A schedulable Kernel observer publishes versioned, consistent global memory
   facts through read-only Share and Sign. The snapshot cannot authorize access
   or prove physical reclamation; consumers receive no arbitrary physical address,
@@ -47,7 +50,7 @@ and [Client guide](https://github.com/shuyra-arche/kernel/blob/{{RELEASE_COMMIT}
 
 The retirement and delegation ownership records are
 [here](https://github.com/shuyra-arche/kernel/blob/{{RELEASE_COMMIT}}/docs/nest-retirement.md), [here](https://github.com/shuyra-arche/kernel/blob/{{RELEASE_COMMIT}}/docs/iommu-failure.md) and
-[here](https://github.com/shuyra-arche/kernel/blob/{{RELEASE_COMMIT}}/docs/pend-delegation.md). PRs #162, #163 and #164 contain focused reviews
+[here](https://github.com/shuyra-arche/kernel/blob/{{RELEASE_COMMIT}}/docs/pend-delegation.md). PRs #162, #163, #164 and #166 contain focused reviews
 and pre-merge validation.
 
 ## Verification and limits
