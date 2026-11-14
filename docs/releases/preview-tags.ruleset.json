@@ -1,0 +1,8 @@
+{
+  "name": "Immutable preview release tags",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": {"ref_name": {"include": ["refs/tags/*-preview-*"], "exclude": []}},
+  "bypass_actors": [],
+  "rules": [{"type": "update"}, {"type": "deletion"}]
+}
