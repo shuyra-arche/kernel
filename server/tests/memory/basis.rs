@@ -4,7 +4,7 @@ pub(crate) use crate::name;
 pub(crate) fn commit() {}
 pub(crate) mod unit {
     pub(crate) mod task {
-        pub(crate) mod memory_result {
+        pub(crate) mod request {
             #[derive(Debug, PartialEq, Eq)]
             pub(crate) enum Transition {
                 Published,

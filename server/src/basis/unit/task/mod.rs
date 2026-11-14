@@ -23,8 +23,8 @@ pub(crate) mod chain;
 mod creation;
 mod execution;
 mod identity;
-pub(crate) mod memory_result;
 pub(crate) mod registry;
+pub(crate) mod request;
 mod retirement;
 pub(crate) mod schedule;
 mod weak;
@@ -50,8 +50,7 @@ pub struct Task {
     pub(crate) state: Arc<SpinLock<TaskState>>,
     pub(crate) pend: Table,
     /// One lazy, bounded next-memory result window for this actual Task.
-    pub(crate) memory_results:
-        SpinLock<Option<alloc::boxed::Box<kernel_api::abi::memory::journal::Journal>>>,
+    requests: request::Requests,
     pub(crate) administration: crate::basis::unit::control::Table,
     pub(crate) heir: SpinLock<Vec<Arc<Team>>>,
     extensions: SpinLock<crate::metal::switcher::context::extension::ExtendedContext>,

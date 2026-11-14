@@ -5,7 +5,7 @@ use crate::basis::cell::page::{Change, Freeze, Page};
 use crate::basis::nest::NestError;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::{ExternalBorrow, Pend};
-use crate::basis::unit::task::memory_result::Transition;
+use crate::basis::unit::task::request::Transition;
 use alloc::sync::Arc;
 use kernel_api::address::VirtAddr;
 use kernel_api::model::cell::{CellInfo, CellState};
@@ -55,10 +55,7 @@ impl Detached {
 /// Completion resources leave the Nest lock before inverse owners are touched.
 #[derive(Default)]
 pub(in crate::basis::nest) struct Settled {
-    completion: Option<(
-        crate::basis::unit::task::memory_result::Completion,
-        Transition,
-    )>,
+    completion: Option<(crate::basis::unit::task::request::Completion, Transition)>,
     publisher: Option<Publisher>,
     borrow: Option<ExternalBorrow>,
     freeze: Option<Freeze>,
@@ -120,11 +117,11 @@ enum Activity {
     Idle(Option<Freeze>),
     Publishing {
         freeze: Freeze,
-        completion: Option<crate::basis::unit::task::memory_result::Completion>,
+        completion: Option<crate::basis::unit::task::request::Completion>,
     },
     Retracting {
         freeze: Option<Freeze>,
-        completion: Option<crate::basis::unit::task::memory_result::Completion>,
+        completion: Option<crate::basis::unit::task::request::Completion>,
     },
 }
 impl Activity {
@@ -141,9 +138,7 @@ impl Activity {
             Self::Publishing { freeze, .. } => Some(freeze),
         }
     }
-    fn completion(
-        &mut self,
-    ) -> Option<&mut Option<crate::basis::unit::task::memory_result::Completion>> {
+    fn completion(&mut self) -> Option<&mut Option<crate::basis::unit::task::request::Completion>> {
         match self {
             Self::Idle(_) => None,
             Self::Publishing { completion, .. } | Self::Retracting { completion, .. } => {
@@ -155,7 +150,7 @@ impl Activity {
         &mut self,
     ) -> (
         Option<Freeze>,
-        Option<crate::basis::unit::task::memory_result::Completion>,
+        Option<crate::basis::unit::task::request::Completion>,
     ) {
         match core::mem::replace(self, Self::Idle(None)) {
             Self::Idle(freeze) => (freeze, None),
@@ -193,7 +188,7 @@ impl Memo {
     }
     pub(in crate::basis::nest) fn retain_completion(
         &mut self,
-        completion: crate::basis::unit::task::memory_result::Completion,
+        completion: crate::basis::unit::task::request::Completion,
     ) {
         let slot = self
             .activity
@@ -204,7 +199,7 @@ impl Memo {
     }
     pub(in crate::basis::nest) fn take_completion(
         &mut self,
-    ) -> Option<crate::basis::unit::task::memory_result::Completion> {
+    ) -> Option<crate::basis::unit::task::request::Completion> {
         self.activity.completion().and_then(Option::take)
     }
     pub(in crate::basis::nest) fn maintenance(

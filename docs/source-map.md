@@ -12,6 +12,7 @@ specification. Use the [design](design/main.typ) for reasons and the
 | Who delegates or revokes resource access? | [Pend](../api/src/abi/call/pend.rs), [scopes](../api/src/model/pend/scope.rs) | [Pend](../server/src/basis/pend/) |
 | How are data and control delivered? | [Clone](../api/src/abi/call/view/clone.rs), [Share](../api/src/abi/call/view/share.rs), [Sign](../api/src/abi/call/sign.rs) | [View](../server/src/basis/view/), [Sign](../server/src/basis/sign/) |
 | Where is a call decoded? | [ABI](../api/src/abi/call/), [native Frame](../api/src/abi/memory/call.rs) | [Entry](../server/src/entry/) |
+| Who accepts, replays and records memory requests? | [Memory requests](../api/src/abi/memory/request.rs) | [Task request owner](../server/src/basis/unit/task/request/); Entry copies/routes descriptors and resource owners enforce transitions |
 | What supplies trusted external hardware facts? | [Boot](../api/src/boot/), [memory contract](../api/memory.md) | [Boot](../server/src/entry/boot/), [Metal](../server/src/metal/) |
 | What retains retired resource responsibility? | [Memory](../api/memory.md#coherence-and-retirement) | [Nest translation](../server/src/basis/nest/translation/), [IOMMU](../server/src/metal/riscv/iommu/) |
 | Who supplies global memory observations? | [Snapshot](../api/src/model/memory.rs) | [Observer](../server/src/entry/observe/), [Allocator](../server/src/metal/allocator/) |

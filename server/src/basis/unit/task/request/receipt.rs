@@ -14,7 +14,7 @@ enum State {
     Deferred,
 }
 
-pub(in crate::entry::call) struct Receipt<'a> {
+pub(crate) struct Receipt<'a> {
     actor: &'a Arc<Task>,
     request: Request,
     state: State,
@@ -27,14 +27,14 @@ impl<'a> Receipt<'a> {
             state: State::Ready(accepted),
         }
     }
-    pub(in crate::entry::call) fn committed(&mut self, value: memory::Value) {
+    pub(crate) fn committed(&mut self, value: memory::Value) {
         let accepted = match core::mem::replace(&mut self.state, State::Deferred) {
             State::Ready(accepted) | State::Started { accepted, .. } => accepted,
             _ => panic!("completion already transferred"),
         };
         self.state = State::Committed(self.record(&accepted, Outcome::Committed(value)));
     }
-    pub(in crate::entry::call) fn start(&mut self, value: memory::Value) {
+    pub(crate) fn start(&mut self, value: memory::Value) {
         let accepted = match core::mem::replace(&mut self.state, State::Deferred) {
             State::Ready(accepted) | State::Started { accepted, .. } => accepted,
             _ => panic!("completion already transferred"),
@@ -42,26 +42,19 @@ impl<'a> Receipt<'a> {
         self.record(&accepted, Outcome::Pending(value));
         self.state = State::Started { accepted, value };
     }
-    pub(in crate::entry::call) fn started(&self) -> Option<memory::Value> {
+    pub(crate) fn started(&self) -> Option<memory::Value> {
         match self.state {
             State::Started { value, .. } => Some(value),
             _ => None,
         }
     }
-    pub(in crate::entry::call) fn defer(
-        &mut self,
-    ) -> crate::basis::unit::task::memory_result::Completion {
+    pub(crate) fn defer(&mut self) -> super::Completion {
         let State::Started { accepted, value } =
             core::mem::replace(&mut self.state, State::Deferred)
         else {
             panic!("only accepted work can transfer completion")
         };
-        crate::basis::unit::task::memory_result::Completion::new(
-            self.actor,
-            self.request,
-            accepted,
-            value,
-        )
+        super::Completion::new(self.actor, self.request, accepted, value)
     }
     fn record(&self, accepted: &Accepted, outcome: Outcome) -> Reply {
         let _commit = basis::commit();
@@ -71,27 +64,16 @@ impl<'a> Receipt<'a> {
             outcome,
         )
         .expect("operation result");
-        self.actor
-            .memory_results
-            .lock()
-            .as_mut()
-            .expect("admitted Task journal")
-            .record(accepted, reply)
-            .expect("record accepted operation before output");
+        self.actor.record_memory(accepted, reply);
         reply
     }
-    pub(super) fn finish(mut self, result: Result<memory::Value, Failure>) -> [u8; Reply::WIDTH] {
+    pub(crate) fn finish(mut self, result: Result<memory::Value, Failure>) -> [u8; Reply::WIDTH] {
         let state = core::mem::replace(&mut self.state, State::Deferred);
         match state {
             State::Committed(reply) => reply,
             State::Deferred => self
                 .actor
-                .memory_results
-                .lock()
-                .as_ref()
-                .unwrap()
-                .inspect(
-                    self.actor.ident.id,
+                .inspect_memory(
                     self.request.action().opcode().domain(),
                     self.request.id().unwrap(),
                 )

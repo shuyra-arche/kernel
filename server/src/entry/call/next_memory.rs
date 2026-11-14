@@ -1,8 +1,6 @@
 //! Native Flat/Nest memory provider.
 //! Mutations use the actual Task's bounded result journal; finite event reads
 //! retain a scheduler continuation and revalidate the exact live route on delivery.
-#[path = "next_memory/receipt.rs"]
-mod receipt;
 use crate::{
     basis::{
         self,
@@ -10,15 +8,13 @@ use crate::{
     },
     metal::switcher::context::{Gprs, TrapContext},
 };
-use alloc::{boxed::Box, sync::Arc};
+use alloc::sync::Arc;
+use basis::unit::task::request::Admission;
+pub(super) use basis::unit::task::request::Receipt;
 use kernel_api::{
-    abi::memory::{
-        self, Action, Delivery, Failure, Frame, Outcome, Reply, Request,
-        journal::{Admission, Journal},
-    },
+    abi::memory::{self, Action, Delivery, Failure, Frame, Reply, Request},
     address::VirtAddr,
 };
-pub(super) use receipt::Receipt;
 
 pub(super) fn dispatch(
     frame: &mut TrapContext,
@@ -92,41 +88,10 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
         }
         .map(|value| value.to_bytes());
     }
-    let _serial = actor.pend.lock();
-    let admission_commit = basis::commit();
-    let mut window = actor.memory_results.lock();
-    if window.is_none() {
-        let journal = Journal::new(actor.ident.id).ok_or(Failure::Denied)?;
-        *window = Some(Box::try_new(journal).map_err(|_| Failure::OutOfMemory)?);
-    }
-    let journal = window.as_mut().expect("prepared Task journal");
-    if let Action::InspectResult {
-        domain,
-        request: id,
-    } = request.action()
-    {
-        return match journal.inspect(actor.ident.id, domain, id) {
-            Ok(Some(reply)) => Ok(reply.to_bytes()),
-            Ok(None) => Err(Failure::Busy),
-            Err(Failure::ResultExpired) => {
-                Ok(
-                    Reply::new(id, memory::Opcode::Inspect(domain), Outcome::Expired)
-                        .expect("expired result")
-                        .to_bytes(),
-                )
-            }
-            Err(error) => Err(error),
-        };
-    }
-    let accepted = match journal.begin(actor.ident.id, request)? {
-        Admission::Replay(reply) | Admission::InFlight(Some(reply)) => return Ok(reply.to_bytes()),
-        Admission::InFlight(None) => return Err(Failure::Busy),
-        Admission::Execute(accepted) => accepted,
+    let mut receipt = match actor.admit_memory(request)? {
+        Admission::Replay(reply) => return Ok(reply.to_bytes()),
+        Admission::Execute(receipt) => receipt,
     };
-    drop(window);
-    drop(admission_commit);
-    drop(_serial);
-    let mut receipt = Receipt::new(actor, request, accepted);
     if matches!(
         request.action(),
         Action::Block { .. } | Action::Allow { .. } | Action::DeleteFlat { .. }
