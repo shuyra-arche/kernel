@@ -90,6 +90,12 @@ hardware rounds are not public IDs: only the successful invocation creates the
 existing exact `Completed<Request<Asid>>`, which Retirement revalidates under
 its own lock before releasing anything.
 
+Memo activity finishes under that same Nest lock before the batch becomes
+Clean. Its completion callbacks, freezes and physical holdings leave the lock
+in a preallocated release batch. A different invalidation starting before these
+releases cannot strand the first batch's Memo in Retracting. Allocation failure
+before this transition preserves the complete original batch for retry.
+
 Responders allocate nothing and take no locks. They run at trap entry/return,
 after SSIP is cleared (including the IRQ-off idle loop), and in existing lock
 wait reception windows. Simultaneous initiators service each other's requests
