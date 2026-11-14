@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -132,6 +133,17 @@ def main():
         "            }\n"
         "            return Ok(response);\n"
         "        }"))
+    edit("tests/memory/guest/acceptance/maintenance.rs", lambda s: s.replace(
+        "            pend::revoke(worker.0, token).unwrap();",
+        "            let deadline = kernel_client::call::room::clock() + 5_000_000_000;\n"
+        "            loop {\n"
+        "                match pend::revoke(worker.0, token) {\n"
+        "                    Ok(()) => break,\n"
+        "                    Err(error) => assert_eq!(error.into_source(), kernel_api::abi::call::pend::PendFail::Busy),\n"
+        "                }\n"
+        "                assert!(kernel_client::call::room::clock() < deadline);\n"
+        "                kernel_client::call::room::yield_();\n"
+        "            }"))
     suite = Path(__file__).resolve().parent
     shutil.copy2(suite / "cases.rs", fixture / "tests/memory/guest/smp.rs")
     shutil.copy2(suite / "recovery.rs", fixture / "tests/memory/guest/recovery.rs")
@@ -141,6 +153,10 @@ def main():
     edit("server/src/entry/boot/mod.rs", lambda s: s.replace(
         'extern "C" fn run_on_stack() -> ! {',
         'extern "C" fn run_on_stack() -> ! {\n    crate::metal::mmu::completion::probe::run();'), provider)
+    edit("server/src/entry/trap/mod.rs", lambda s: s.replace(
+        '        unsafe { task.capture_extensions(frame.status()) };',
+        '        crate::metal::mmu::completion::probe::entered_task(task.ident.id.get());\n'
+        '        unsafe { task.capture_extensions(frame.status()) };'), provider)
     (args.output / "composition.diff").write_text("".join(patches))
     manifest = fixture / "tests/memory/Cargo.toml"
     command = ["cargo", "build", "--manifest-path", str(manifest), "--target", TARGET]
@@ -185,16 +201,31 @@ def main():
                    "-bios", str(firmware), "-kernel", str(platform_elf), "-initrd", str(initrd)]
         start = time.monotonic()
         with (evidence / "serial.log").open("w") as log, (evidence / "stderr.log").open("w") as errors:
-            try:
-                status = subprocess.run(command, stdout=log, stderr=errors, timeout=120).returncode
-            except subprocess.TimeoutExpired:
-                status = "timeout"
+            with subprocess.Popen(command, stdout=log, stderr=errors) as process:
+                while True:
+                    try:
+                        status = process.wait(timeout=0.2)
+                        break
+                    except subprocess.TimeoutExpired:
+                        serial = (evidence / "serial.log").read_text()
+                        if "FAIL" in serial or "[kernel] fatal" in serial:
+                            status = "guest-failure"
+                        elif time.monotonic() - start >= 120:
+                            status = "timeout"
+                        else:
+                            continue
+                        process.kill()
+                        process.wait()
+                        break
         log = (evidence / "serial.log").read_text()
         markers = ["PASS native-memory", "PASS native-fault", "PASS acceptance-unit",
                    "PASS acceptance-scopes", "PASS acceptance-lineage", "PASS acceptance-maintenance",
                    "PASS smp-completion", "PASS smp-retirement",
                    "PASS smp-executable-rejected", "task: all tasks exited"]
         passed = status == 0 and "FAIL" not in log and "[kernel] fatal" not in log and all(m in log for m in markers)
+        writers = re.findall(r"PASS smp-writer task=(\d+)", log)
+        migrants = set(re.findall(r"TRACE smp-migration task=(\d+)", log))
+        passed = passed and len(writers) == 2 and (harts == 1 or all(w in migrants for w in writers))
         (evidence / "result.json").write_text(json.dumps({"command": command, "status": status,
             "elapsed_seconds": time.monotonic() - start, "passed": passed}, indent=2))
         print(f"{'PASS' if passed else 'FAIL'} {args.profile} harts={harts}: {evidence}", flush=True)

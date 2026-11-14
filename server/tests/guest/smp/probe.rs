@@ -7,6 +7,19 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*};
 static ARRIVED: AtomicUsize = AtomicUsize::new(0);
 static PHASE: AtomicUsize = AtomicUsize::new(0);
 static STALE: AtomicBool = AtomicBool::new(false);
+static TASK_HARTS: [AtomicUsize; 256] = [const { AtomicUsize::new(0) }; 256];
+
+/// Observe real user traps, without changing scheduling or supplying evidence
+/// to the production completion path. The runner matches the writer's Task ID.
+pub(crate) fn entered_task(id: usize) {
+    if let Some(seen) = TASK_HARTS.get(id) {
+        let bit = 1usize << hart::hart_id().get();
+        let old = seen.fetch_or(bit, AcqRel);
+        if old & bit == 0 && old.count_ones() == 1 {
+            crate::putln!("TRACE smp-migration task={} mask={}", id, old | bit);
+        }
+    }
+}
 
 fn until(mut ready: impl FnMut() -> bool) {
     let deadline = crate::metal::clock::now().as_ticks()

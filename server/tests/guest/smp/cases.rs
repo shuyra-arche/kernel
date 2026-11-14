@@ -20,11 +20,15 @@ static STARTED: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn writer() -> ! {
     let pointer = ADDRESS.load(Acquire) as *const AtomicU64;
+    for _ in 0..16 {
+        unsafe { &*pointer }.fetch_add(1, Relaxed);
+        room::sleep_until(room::clock() + 1_000_000).unwrap();
+    }
+    STARTED.store(true, Release);
     // The owner publishes the RW mapping before resuming this Task. Removal
     // deliberately faults this access; it cannot reach the observer alias.
     loop {
         unsafe { &*pointer }.fetch_add(1, Relaxed);
-        STARTED.store(true, Release);
         // Also exercise leaving/re-entering the address space and migration.
         room::yield_();
     }
@@ -126,6 +130,11 @@ pub fn run() {
         publish(next);
         assert_eq!(unsafe { (address.get() as *const u64).read_volatile() }, 0);
         retract(next);
+        let _ = writeln!(
+            Console,
+            "PASS smp-writer task={} release={release}",
+            worker.get()
+        );
     }
     let _ = writeln!(
         Console,
