@@ -81,7 +81,10 @@ def main():
     edit("tests/memory/platform/main.rs", platform)
     edit("tests/memory/guest/main.rs", lambda s: s.replace("mod virtqueue;", "mod smp;")
          .replace("    virtqueue::run();", "    smp::run();")
+         .replace("mod ipc;\n", "")
          .replace("    ipc::run();\n", ""))
+    edit("tests/memory/guest/support.rs", lambda s:
+         s[:s.index("pub fn image()")] + s[s.index("pub fn accord("):])
     # This case builds a new executable Team through native RX publication.
     # It remains outside the data-only qualification, rather than weakening it.
     edit("tests/memory/guest/acceptance/mod.rs", lambda s:
