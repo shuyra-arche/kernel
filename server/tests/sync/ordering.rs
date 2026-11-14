@@ -1,5 +1,7 @@
 //! Production lock-order predicates with real atomics/guards and host IRQs.
-use super::{depend, level::Level, metal, pair, reentrant::RelLock, spin::SpinLock, trap, verdict};
+#[cfg(debug_assertions)]
+use super::{depend, reentrant::RelLock};
+use super::{level::Level, metal, pair, spin::SpinLock, trap, verdict};
 #[cfg(debug_assertions)]
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
