@@ -58,7 +58,7 @@ impl Source {
         };
         task.is_some_and(|t| pend::live(&t))
             && view.is_some_and(|v| {
-                v.allows(pend::Need::Write) && v.permits(Operations::Share(ShareRights::OPEN))
+                v.allows(pend::Need::Write) && v.permits(Operations::Share(ShareRights::ASSOCIATE))
             })
             && sign.is_some_and(|s| {
                 s.permits(Operations::Sign(SignRights::LISTEN | SignRights::CONSUME))
@@ -86,7 +86,7 @@ impl Source {
                     .is_some_and(|v| Arc::ptr_eq(&v, shared))
                     && entry.modifiable() == Modifiable::Yes
                     && entry.allows(pend::Need::Write)
-                    && entry.permits(Operations::Share(ShareRights::OPEN))
+                    && entry.permits(Operations::Share(ShareRights::ASSOCIATE))
                     && entry.authority().window().is_none_or(|(offset, count)| {
                         offset.get() == 0 && count == shared.source().page_count()
                     })

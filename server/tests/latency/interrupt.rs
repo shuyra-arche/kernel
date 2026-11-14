@@ -121,6 +121,7 @@ fn grant(
     .to_bytes();
     pend::accord(VirtAddr::new(bytes.as_ptr() as usize))
 }
+#[track_caller]
 fn required(root: PendId, target: AccordTarget, rights: Operations, mutable: Modifiable) -> PendId {
     let end = until();
     loop {
@@ -147,6 +148,7 @@ fn release(token: PendId) {
         }
     }
 }
+#[track_caller]
 fn consumer(root: PendId, target: AccordTarget) -> PendId {
     required(
         root,
@@ -159,7 +161,7 @@ fn pair(view: PendId, root: PendId, task: TaskId) -> (PendId, PendId) {
     let view = required(
         view,
         AccordTarget::Task(task),
-        Operations::Share(ShareRights::OPEN | ShareRights::SHUT),
+        Operations::Share(ShareRights::ASSOCIATE),
         Modifiable::Yes,
     );
     (view, consumer(root, AccordTarget::Task(task)))
