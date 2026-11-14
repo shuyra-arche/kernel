@@ -173,9 +173,11 @@ def main():
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--no-latency", action="store_true")
     parser.add_argument("--cold-room", action="store_true", help="Room first-use experiment: warm Yield only, leaving timed Sleep paths cold")
+    parser.add_argument("--compare-room-warmup", action="store_true", help="alternate cold/warm Room boots of the same provider, building both images first")
     args = parser.parse_args()
     assert 1 <= args.rounds <= 100 and 16 <= args.events <= 4096 and len(args.harts) == len(set(args.harts))
     assert not args.cold_room or args.mode == "room"
+    assert not args.compare_room_warmup or (args.mode == "room" and not args.cold_room and not args.baseline)
     assert output(git(args.fixture, "rev-parse", "HEAD")) == FIXTURE
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
@@ -183,8 +185,13 @@ def main():
     args.firmware = Path(os.environ["QEMU_OPENSBI"]).resolve()
     assert "version 10.0." in output([args.qemu, "--version"])
     variants = []
-    if args.baseline: variants.append(compose(args, args.baseline, args.output / "baseline"))
-    variants.append(compose(args, args.kernel, args.output / "candidate"))
+    if args.compare_room_warmup:
+        for label, cold in [("cold", True), ("warm", False)]:
+            choice = argparse.Namespace(**(vars(args) | {"cold_room": cold}))
+            variants.append(compose(choice, args.kernel, args.output / label))
+    else:
+        if args.baseline: variants.append(compose(args, args.baseline, args.output / "baseline"))
+        variants.append(compose(args, args.kernel, args.output / "candidate"))
     failures = []
     order = []
     for harts in args.harts:
