@@ -1775,6 +1775,15 @@ impl Nest {
             principal.check(self, mapping, index, access)?;
             source.check(access)?;
             source.same_page(&page)?;
+            if let Some(usage) = &maintenance {
+                usage.check(&source, access)?;
+            } else {
+                source.admit_provenance(None)?;
+                source
+                    .source()
+                    .check_publish(source.window().0, source.window().1)
+                    .map_err(|_| CellFail::Denied)?;
+            }
             commit
         } else {
             commit
@@ -2146,6 +2155,15 @@ impl Nest {
             }
             source.check(access)?;
             source.same_page(&page)?;
+            if let Some(usage) = &maintenance {
+                usage.check(&source, access)?;
+            } else {
+                source.admit_provenance(None)?;
+                source
+                    .source()
+                    .check_publish(source.window().0, source.window().1)
+                    .map_err(|_| CellFail::Denied)?;
+            }
             commit
         } else {
             commit
