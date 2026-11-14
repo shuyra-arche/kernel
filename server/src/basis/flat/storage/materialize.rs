@@ -108,7 +108,10 @@ impl<'a> Reservation<'a> {
         self.level
     }
 
-    pub fn publish(self, page: Arc<Page>, owner: PageOwner) -> Result<(), FlatError> {
+    pub fn publish(self, page: Page, owner: PageOwner) -> Result<(), FlatError> {
+        // Consume the allocation itself, never an Arc borrowed from another
+        // slot/mapping. Arc allocation remains outside the Flat state lock.
+        let page = Arc::try_new(page).map_err(|_| FlatError::OutOfMemory)?;
         // Keep page owned by this frame until after releasing the guard, even
         // on rejection. A stale publisher cannot erase its replacement.
         let result = {

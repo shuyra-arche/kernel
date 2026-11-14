@@ -14,7 +14,7 @@ use kernel_api::{
     address::{PageCount, PageIndex},
     model::{cell::CellLevel, flat::FlatPhase, identity::TeamId},
 };
-use std::sync::{Arc, Barrier};
+use std::sync::Barrier;
 
 fn source() -> SpinLock<FlatState> {
     SpinLock::new(FlatState::new(FlatSource::Managed(Vec::new()), true))
@@ -25,8 +25,8 @@ fn reserve(state: &SpinLock<FlatState>, at: usize) -> Result<Reservation<'_>, Fl
         Step::Ready(_) => panic!("expected Fresh"),
     }
 }
-fn page(pool: &'static Pool) -> Arc<Page> {
-    Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap())
+fn page(pool: &'static Pool) -> Page {
+    Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap()
 }
 
 #[test]
@@ -106,10 +106,7 @@ fn metadata_and_arc_allocation_failure_restore_fresh_without_leaking_the_page() 
     let r = reserve(&state, 0).unwrap();
     let pool = Pool::new(0);
     let cell = Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap();
-    let failed = crate::allocation::fail_after(0, || {
-        let cell = Arc::try_new(cell).map_err(|_| FlatError::OutOfMemory)?;
-        r.publish(cell, Owner::Kernel.identity())
-    });
+    let failed = crate::allocation::fail_after(0, || r.publish(cell, Owner::Kernel.identity()));
     assert_eq!(failed, Err(FlatError::OutOfMemory));
     assert_eq!(pool.gives(), 1);
     assert!(reserve(&state, 0).is_ok());
@@ -121,7 +118,7 @@ fn team_exit_adopts_the_inflight_allocation_without_a_second_owner() {
     let r = reserve(&state, 0).unwrap();
     let owner = Owner::team(TeamId::new(7)).unwrap();
     let pool = Pool::new(0);
-    let cell = Arc::new(Page::from_internal(owner.clone(), pool.page().unwrap()).unwrap());
+    let cell = Page::from_internal(owner.clone(), pool.page().unwrap()).unwrap();
     let id = cell.id();
     owner.close();
     r.publish(cell, owner.identity()).unwrap();

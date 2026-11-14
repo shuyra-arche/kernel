@@ -270,11 +270,8 @@ impl Flat {
                 Step::Ready(pages) => page += pages,
                 Step::Allocate(reservation) => {
                     let level = reservation.level();
-                    let cell = Arc::try_new(crate::basis::cell::allocate_level(
-                        self.allocation_owner.clone(),
-                        level,
-                    )?)
-                    .map_err(|_| FlatError::OutOfMemory)?;
+                    let cell =
+                        crate::basis::cell::allocate_level(self.allocation_owner.clone(), level)?;
                     reservation.publish(cell, self.allocation_owner.identity())?;
                     page += level.pages().unwrap();
                 }
