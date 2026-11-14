@@ -165,11 +165,37 @@ fn publish(mapping: kernel_api::model::identity::PendId, page: usize) {
 }
 #[track_caller]
 fn retract(mapping: kernel_api::model::identity::PendId, page: usize) {
-    let pos = memo(mapping, page).to_bytes();
-    cell::retract(ptr(&pos)).unwrap();
-    let info = info(raw_memo(mapping, page));
-    assert_eq!(info.state, CellState::Ready);
-    assert!(info.frozen);
+    let pos = memo(mapping, page);
+    let before = info(pos);
+    assert_eq!(before.state, CellState::Published);
+    let next = before.generation.checked_add(1).unwrap();
+    let deadline = room_call::clock().saturating_add(5_000_000_000);
+    let mut accepted = false;
+    loop {
+        if !accepted {
+            match cell::retract(ptr(&pos.to_bytes())) {
+                Ok(()) => accepted = true,
+                Err(error) if error.source == kernel_api::abi::call::cell::CellFail::Busy => (),
+                Err(error) => panic!("Cell.Retract: {error:?}"),
+            }
+        }
+        let current = info(raw_memo(mapping, page));
+        assert_eq!(current.page, before.page);
+        if current.generation == next {
+            accepted = true;
+            assert!(matches!(current.state, CellState::Retracting | CellState::Ready));
+            if current.state == CellState::Ready {
+                assert!(current.frozen);
+                return;
+            }
+        } else {
+            assert!(!accepted);
+            assert_eq!(current.generation, before.generation);
+            assert_eq!(current.state, CellState::Published);
+        }
+        assert!(room_call::clock() < deadline, "Cell.Retract continuation timed out");
+        room_call::yield_();
+    }
 }
 #[track_caller]
 fn delete(object: CellObject) {
