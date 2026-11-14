@@ -154,6 +154,9 @@ def boot(args, variant, harts, round_):
     log = (evidence / "serial.log").read_text()
     markers = ["task: all tasks exited", "ROOM:steady", "ROOM:teardown", "iommu: command engine closed"]
     markers += {"irq": [f"PASS irq rounds={args.events}", "observers=6", "revoke-sign=1 revoke-view=1 ancestor-view=1 rebind=4"], "room": ["PASS room workers=8 turns=512 steps=4096"], "realtime": ["PASS realtime harts=" + str(harts), "unsupported=1" if harts == 1 else "budget=1 replenishment=1 freeze=1 no-credit-reset=1 preemption=1 fixed-hart=1 overload=denied ordinary-pool=restored"]}[args.mode]
+    if args.mode == "room":
+        cold = json.loads((destination / "inputs.json").read_text())["cold_room"]
+        markers.append("warmup_timers=" + str(not cold).lower())
     passed = status == 0 and "FAIL" not in log and "[kernel] fatal" not in log and all(m in log for m in markers)
     if not args.no_latency:
         passed &= "latency-window:" in log and "boundary=whole-interval" in log and "phase=running" in log
