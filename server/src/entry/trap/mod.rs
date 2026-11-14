@@ -270,16 +270,24 @@ pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
         }
     }
     asid::occupy(space);
+    // Seat, cancellation, affinity and budget decisions have already committed.
+    // Program the retained deadline before any selected context can execute.
+    // No guard is carried through this local firmware/comparator effect.
+    #[cfg(feature = "latency")]
+    let timer_start = crate::metal::measure::stamp();
+    crate::basis::room::deadline::flush();
+    #[cfg(feature = "latency")]
+    crate::metal::measure::elapsed(crate::metal::measure::Metric::TimerReturn, timer_start);
     #[cfg(feature = "latency")]
     {
         if let Some(task) = observed
-            && let Some((queue, dispatch, total)) =
-                task.observation.finish(crate::metal::measure::stamp())
+            && let Some(sample) = task.observation.finish(crate::metal::measure::stamp())
         {
             use crate::metal::measure::{Metric, record};
-            record(Metric::ReadyQueue, queue);
-            record(Metric::DispatchRun, dispatch);
-            record(Metric::ReadyRun, total);
+            record(Metric::ReadyQueue, sample.queue_ticks);
+            record(Metric::DispatchRun, sample.dispatch_ticks);
+            record(Metric::ReadyRun, sample.total_ticks);
+            crate::metal::measure::ready(task.ident.id.get(), sample);
         }
         crate::metal::measure::leave();
     }

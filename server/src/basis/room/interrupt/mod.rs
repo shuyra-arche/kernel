@@ -173,7 +173,15 @@ impl Router {
         let admitted = crate::metal::measure::stamp();
         let mut claimed = false;
         for _ in 0..4 {
-            let Some(irq) = self.controller.claim_masked() else {
+            let irq = {
+                #[cfg(feature = "latency")]
+                let _measure = crate::metal::measure::scope(
+                    crate::metal::measure::Work::ControllerClaim,
+                    &_commit,
+                );
+                self.controller.claim_masked()
+            };
+            let Some(irq) = irq else {
                 break;
             };
             note_external();
@@ -254,6 +262,9 @@ impl Router {
         // be elapsed when the scheduler finally returns a Task under load.
         // handle() still retains its nonblocking interrupt admission.
         let _commit = crate::basis::commit();
+        #[cfg(feature = "latency")]
+        let _measure =
+            crate::metal::measure::scope(crate::metal::measure::Work::IrqMaintenance, &_commit);
         // Consume this request before callbacks: a remaining notification batch
         // can request another turn without this one clearing that continuation.
         let deferred = self.deferred.swap(false, Ordering::AcqRel);

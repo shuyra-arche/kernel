@@ -1,3 +1,4 @@
+mod local;
 mod queue;
 mod retry;
 use crate::metal::sync::OnceLock;
@@ -16,8 +17,7 @@ use crate::metal::sync::SpinLock;
 // The boot Hart remains online until all Tasks exit. Only it arms and
 // drains the global heap; other comparators serve local scheduling.
 const OWNER: HartId = HartId::new(0);
-static LOCAL: [AtomicU64; MAX_HART_SLOTS] =
-    [const { AtomicU64::new(crate::metal::generic::clock::DISARMED) }; MAX_HART_SLOTS];
+static LOCAL: [local::Local; MAX_HART_SLOTS] = [const { local::Local::new() }; MAX_HART_SLOTS];
 static RETRIES: [retry::Retry; MAX_HART_SLOTS] = [const { retry::Retry::new() }; MAX_HART_SLOTS];
 
 pub const BLIND_MS: u64 = 100;
@@ -70,27 +70,48 @@ pub fn is_owner() -> bool {
 }
 
 pub fn arm(local: u64) {
-    LOCAL[hart::hart_id().get()].store(local, Ordering::Relaxed);
+    stage(local);
     refresh();
+}
+
+/// Scheduler commits retain the desired comparator without entering firmware
+/// while global COMMIT or the execution-slot lock is held.
+pub(crate) fn stage(local: u64) {
+    LOCAL[hart::hart_id().get()].stage(local);
+}
+
+/// All Task returns pass this boundary after releasing scheduler/COMMIT guards.
+/// A failed heap snapshot retains both staged work and the existing timer retry.
+pub(crate) fn flush() {
+    #[cfg(debug_assertions)]
+    crate::basis::assert_unlocked();
+    // Suppress ordinary reception callbacks until the selected value and its
+    // hardware effect have settled together. This retains no global lock.
+    let _interrupts = unsafe { crate::metal::sync::TrapGuard::save() };
+    let _ = LOCAL[hart::hart_id().get()].flush(program);
 }
 
 /// Acknowledge the software interrupt before calling this on the owner.
 /// A later heap mutation then either appears in this snapshot or leaves an IPI.
 pub fn refresh() {
+    let _interrupts = unsafe { crate::metal::sync::TrapGuard::save() };
+    let _ = LOCAL[hart::hart_id().get()].refresh(program);
+}
+
+fn program(local: u64) -> Result<(), ()> {
     let me = hart::hart_id();
-    let local = LOCAL[me.get()]
-        .load(Ordering::Relaxed)
-        .min(RETRIES[me.get()].deadline());
+    let local = local.min(RETRIES[me.get()].deadline());
     let next = if me == OWNER {
         let Some(queue) = timers().try_lock() else {
             retry();
-            return;
+            return Err(());
         };
         queue.nearest().map_or(local, |head| head.min(local))
     } else {
         local
     };
     timer::set_timer(next);
+    Ok(())
 }
 
 fn head_changed(changed: bool) {
