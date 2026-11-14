@@ -608,7 +608,7 @@ impl Nest {
         if mapping.source().is_some() {
             return Err(CellFail::Denied);
         }
-        if !self.is_external() {
+        if !self.is_external() && self.state.lock().retirement.pending_for(&mapping) {
             self.finish_invalidation()?;
         }
         let mut cursor = None;
@@ -677,7 +677,9 @@ impl Nest {
             let _commit = crate::basis::commit();
             let mut layout = self.layout.lock();
             let mut state = self.state.lock();
-            if !state.retirement.invalidation().is_clean() || state.memos.has_resources(&mapping) {
+            // An unrelated Reservation may already own a newer fence. Only
+            // this mapping's retained batch and resources prevent its release.
+            if state.retirement.pending_for(&mapping) || state.memos.has_resources(&mapping) {
                 return Err(CellFail::Busy);
             }
             state.index.remove(&mapping);

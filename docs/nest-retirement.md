@@ -102,6 +102,10 @@ releases cannot strand the first batch's Memo in Retracting. Allocation failure
 before this transition preserves the complete original batch for retry.
 Release capacity counts only hardware states covered by this batch, rather than
 every coordinate of a large Reservation for each single-page publication.
+Reservation Release likewise checks its own retained mappings and Memo resources;
+a newer fence for another Reservation cannot turn already completed retirement
+into an accepted Busy failure. A batch still retaining this Reservation continues
+to prevent release, including its detached tables and address tickets.
 
 Responders allocate nothing and take no locks. They run at trap entry/return,
 after SSIP is cleared (including the IRQ-off idle loop), and in existing lock

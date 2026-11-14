@@ -41,6 +41,11 @@ impl Retirement {
         self.invalidation
     }
 
+    /// Only this batch's retained mappings still depend on its completion.
+    pub(in crate::basis::nest) fn pending_for(&self, mapping: &Arc<Span>) -> bool {
+        self.mappings.iter().any(|held| Arc::ptr_eq(held, mapping))
+    }
+
     pub(in crate::basis::nest) fn mark_dirty(&mut self, global: bool) {
         assert!(
             !self.invalidation.is_fencing(),

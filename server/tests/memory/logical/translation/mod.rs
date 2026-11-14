@@ -73,6 +73,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
     assert_eq!(memos.awaiting_cpu(&span), 1);
     let mut pending = Retirement::new();
     pending.mappings.push(span.clone());
+    assert!(pending.pending_for(&span));
     pending.mark_dirty(false);
     let request = pending.begin(7, 3).unwrap();
     let fenced = pending
@@ -81,6 +82,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
     assert!(!memos.get(&span, 0).unwrap().in_flight());
     assert!(memos.get(&span, 1).unwrap().in_flight());
     assert_eq!(memos.awaiting_cpu(&span), 0);
+    assert!(!pending.pending_for(&span));
     let nest = Nest {
         state: crate::host_lock::SpinLock::new(RetirementState { memos }),
     };
@@ -102,8 +104,12 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
     assert!(!state.memos.get(&span, 0).unwrap().busy());
     // A different PTE batch starts before callbacks and Page drops of the old
     // batch. Its unfinished fence cannot strand the old Memo's activity.
+    let unrelated = Arc::new(super::Span::new(10));
+    pending.mappings.push(unrelated.clone());
     pending.mark_dirty(false);
     pending.begin(7, 3).unwrap();
+    assert!(pending.pending_for(&unrelated));
+    assert!(!pending.pending_for(&span));
     drop(state);
     drop(page);
     assert_eq!(pool.gives(), 0);
