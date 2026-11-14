@@ -14,9 +14,15 @@ static TASK_HARTS: [AtomicUsize; 256] = [const { AtomicUsize::new(0) }; 256];
 pub(crate) fn entered_task(id: usize) {
     if let Some(seen) = TASK_HARTS.get(id) {
         let bit = 1usize << hart::hart_id().get();
-        let old = seen.fetch_or(bit, AcqRel);
-        if old & bit == 0 && old.count_ones() == 1 {
-            crate::putln!("TRACE smp-migration task={} mask={}", id, old | bit);
+        seen.fetch_or(bit, AcqRel);
+    }
+}
+
+pub(crate) fn report_migrations() {
+    for (id, seen) in TASK_HARTS.iter().enumerate() {
+        let mask = seen.load(Acquire);
+        if mask.count_ones() > 1 {
+            crate::putln!("TRACE smp-migration task={} mask={}", id, mask);
         }
     }
 }

@@ -169,6 +169,9 @@ def main():
         '        unsafe { task.capture_extensions(frame.status()) };',
         '        crate::metal::mmu::completion::probe::entered_task(task.ident.id.get());\n'
         '        unsafe { task.capture_extensions(frame.status()) };'), provider)
+    edit("server/src/entry/report/shutdown.rs", lambda s: s.replace(
+        'pub(crate) fn report() {',
+        'pub(crate) fn report() {\n    crate::metal::mmu::completion::probe::report_migrations();'), provider)
     (args.output / "composition.diff").write_text("".join(patches))
     manifest = fixture / "tests/memory/Cargo.toml"
     command = ["cargo", "build", "--manifest-path", str(manifest), "--target", TARGET]

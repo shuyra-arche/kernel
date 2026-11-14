@@ -332,6 +332,7 @@ impl Memo {
             .expect("prepared protection generation");
         if let Some(freeze) = freeze {
             assert!(self.publication().is_some() && self.activity.freeze().is_none());
+            self.publication_mut().expect("protected PTE").changed();
             self.activity = Activity::Publishing {
                 freeze,
                 completion: None,
