@@ -50,6 +50,21 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
     let mut publication = Publication::prepare(&page, true, Some(&change)).unwrap();
     publication.publish();
     memo.install(publication);
+    // Another position accepted Publish, but has not installed its PTE. Even
+    // though it shares this Span, this fence does not complete its operation.
+    let neighbor_pool = Pool::new(0);
+    let neighbor =
+        Arc::new(Page::from_internal(Owner::Kernel, neighbor_pool.page().unwrap()).unwrap());
+    let memo = memos.get_mut(&span, 1).unwrap();
+    memo.associate(
+        1,
+        None,
+        Source(Arc::new(Registry(AtomicUsize::new(0)))),
+        Arc::new(super::authority::RangeBinding),
+    )
+    .release();
+    memo.begin_publish(memo.generation(), neighbor.begin().unwrap(), 6)
+        .unwrap();
     let mut pending = Retirement::new();
     pending.mappings.push(span.clone());
     pending.mark_dirty(false);
@@ -58,10 +73,12 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
         .complete(scope::invalidate(&Cpu, request).unwrap(), &mut memos)
         .unwrap();
     assert!(!memos.get(&span, 0).unwrap().in_flight());
+    assert!(memos.get(&span, 1).unwrap().in_flight());
     let nest = Nest {
         state: crate::host_lock::SpinLock::new(RetirementState { memos }),
     };
     fenced.release(&nest);
+    assert!(nest.state.lock().memos.get(&span, 1).unwrap().in_flight());
     drop(change);
 
     let mut state = nest.state.lock();

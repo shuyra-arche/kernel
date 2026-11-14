@@ -144,10 +144,9 @@ impl Memos {
     ) {
         for ((id, _), memo) in &mut self.entries {
             if *id == span.identity() {
-                if let Some(publication) = memo.publication_mut() {
-                    publication.complete();
+                if let Some(completion) = memo.complete_cpu() {
+                    settled.push(completion);
                 }
-                settled.push(memo.finish());
             }
         }
     }

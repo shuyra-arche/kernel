@@ -24,7 +24,6 @@ pub(crate) fn service() {
                 "fence rw, rw",
                 "sfence.vma",
                 "fence rw, rw",
-                "fence.i",
                 options(nostack)
             );
             mailbox.complete(round);

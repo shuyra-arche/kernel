@@ -98,7 +98,7 @@ pub fn retract(memo: kernel_api::model::nest::MemoPosition) {
         };
         match reply.outcome() {
             Outcome::Committed(_) => return,
-            Outcome::Rejected(Failure::Busy | Failure::Stale) => {}
+            Outcome::Rejected(Failure::Busy | Failure::Stale | Failure::SourceEmpty) => {}
             other => panic!("retract: {other:?}"),
         }
         assert!(room::clock() < deadline, "Memo cleanup did not progress");

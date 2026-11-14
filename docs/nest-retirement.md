@@ -76,7 +76,7 @@ After publishing PTE/payload edits, an initiator obtains a non-reusing round
 from one atomic sequence. AcqRel allocation chains earlier initiators' edits
 into later rounds. Each participant's requested round is a monotonic maximum;
 an Acquire observation of a later round therefore covers all earlier edits.
-The responder executes `FENCE RW,RW; SFENCE.VMA; FENCE RW,RW; FENCE.I`, then
+The responder executes `FENCE RW,RW; SFENCE.VMA; FENCE RW,RW`, then
 Release-publishes the **observed** round. SFENCE excludes future accesses using
 old translations. The second explicit data fence orders prior loads/stores
 before the acknowledgement; the initiator's Acquire observation orders resource
@@ -112,8 +112,10 @@ Data visibility relies on the separately supplied complete coherent normal-RAM
 fabric and the publication fence before PTE exposure. Unknown fabrics remain
 unsupported. Native executable SMP Publish/Protect remains **unsupported**:
 `with_local_instructions` is rejected at installation on SMP, and data-only
-qualification cannot admit RX. The responder's conservative FENCE.I does not
-qualify instruction-fetch topology or the executable PTE exposure boundary.
+qualification cannot admit RX. Internal instruction synchronization first runs
+the data round, then the existing local FENCE.I and SBI remote FENCE.I on every
+online Hart, including former leases. That internal path does not qualify the
+native executable PTE exposure boundary. Data-only rounds do not execute FENCE.I.
 Page-wide W/X exclusion and External/IOMMU draining conditions remain intact.
 
 ABI, Ledger and Capsule stay 11/11/2. API and Client have no changed descriptor

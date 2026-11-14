@@ -511,6 +511,19 @@ impl Memo {
         self.hardware = Hardware::Empty;
         self.finish()
     }
+    /// Only hardware edits in the current CPU batch authorize completion.
+    /// A neighboring position may have accepted a logical operation without
+    /// editing its PTE yet; the batch must not consume that activity.
+    pub(in crate::basis::nest) fn complete_cpu(&mut self) -> Option<Settled> {
+        match &mut self.hardware {
+            Hardware::Installed(publication) if publication.phase() == Phase::Publishing => {
+                publication.complete();
+            }
+            Hardware::Retiring(_) => {}
+            _ => return None,
+        }
+        Some(self.finish())
+    }
     /// Caller has the matching CPU fence or external publication/withdrawal proof.
     pub(in crate::basis::nest) fn finish(&mut self) -> Settled {
         match self.publication().map(Publication::phase) {

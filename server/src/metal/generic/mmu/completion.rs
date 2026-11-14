@@ -41,8 +41,9 @@ impl Mailbox {
     }
     /// # Safety
     /// On this mailbox's CPU, after acquiring this exact pending round, execute
-    /// global translation invalidation, prior explicit-access ordering and
-    /// instruction synchronization. An IPI or SFENCE alone is insufficient.
+    /// global translation invalidation and prior explicit-access ordering.
+    /// Instruction visibility is a separate protocol. An IPI or SFENCE alone
+    /// is insufficient.
     pub(crate) unsafe fn complete(&self, round: Round) {
         self.completed.fetch_max(round.0, Ordering::Release);
     }
