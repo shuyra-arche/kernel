@@ -54,7 +54,7 @@ decoding perform no trap, retry or rollback.
 Kernel reads the initrd's initial eight-byte offset/length preamble and parses
 the selected Capsule. The resource Ledger contains named initial capabilities.
 Deployment selection, program catalogs, image packing and service protocols
-belong to the integration owner, not this package. 
+belong to the integration owner, not this package.
 ## Memory geometry: three distinct units
 
 The current public contracts use **4 KiB as their base coordinate**,
