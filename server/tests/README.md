@@ -6,6 +6,35 @@ paths. The QEMU suite executes real RV64 traps, boot, scheduling, and CPU and
 device translation on emulated hardware. Physical controller behavior needs
 separate hardware evidence.
 
+## Current native ABI 11 composition
+
+The `Guest tests (QEMU)` check uses the pinned Vanllia native composition in
+[Check](../../.github/workflows/check.yml). It patches API, Client and Server
+to the current checkout, without an ABI feature. The historical fixture's
+`memory-v11` dependency entries are removed before resolving the local provider.
+
+With that fixture prepared, run from the Kernel root:
+
+```sh
+python3 /absolute/path/to/vanllia/tests/memory/run.py --kernel "$PWD"
+python3 /absolute/path/to/vanllia/tests/memory/run.py --kernel "$PWD" --no-build --capsule-version 10
+python3 /absolute/path/to/vanllia/tests/memory/run.py --kernel "$PWD" --profile release
+```
+
+Supply `QEMU_OPENSBI` and the reviewed QEMU 10.0.x executable. The native guest
+covers Task/Team isolation, authority, faults, shared memory, maintenance,
+withdrawal, lifecycle and virtio-blk/IOMMU shutdown. Evidence is uploaded as
+`native-memory`. QEMU evidence does not establish physical hardware behavior
+or native SMP acceptance. The historical scheduling/vector/diagnostics cases
+below have not all been migrated to this native composition; their previous
+results must not be reported as current ABI 11 acceptance.
+
+## Historical ABI 10 guest suite
+
+The remaining instructions describe the preserved ABI 10 suite. Run these only
+from an ABI 10 Kernel checkout (for example Preview Alpha), with Vanllia fixture
+`eb37b0b0db299513274864cec23cee509a3cd3cc`. They are not current ABI 11 CI commands.
+
 ## Set up the QEMU fixture
 
 Start with the root README's Rust toolchain. Install Python 3, GNU `nm` and
@@ -16,8 +45,7 @@ a binary other than `qemu-system-riscv64`, or `QEMU_OPENSBI` to select a firmwar
 image instead of QEMU's default.
 
 Check out Vanllia in a dedicated fixture checkout at the revision listed in
-the `Fetch external QEMU fixture` step of the
-[Check workflow](../../.github/workflows/check.yml). The setup below patches
+the historical fixture pin above. The setup below patches
 the two fixture manifests to use the Kernel checkout under test and refreshes
 their lockfiles. Run it once from the Kernel repository root with the fixture's
 absolute path:
@@ -100,12 +128,9 @@ Host tests check actual Flat/Page/Nest state transitions, failure
 injection, authority and result-journal correlation. Host fixtures
 do not execute guest traps or establish hardware quiescence.
 
-The default QEMU suite checks the ABI 10 image. Native ABI 11
-requires `memory-v11` on the matching API, Client, Server, boot
-image and Capsule; its [Vanllia memory integration](https://github.com/shuyra-arche/vanllia/tree/main/tests/memory)
-exercises real Task/Team startup, CPU mappings and qualified IOMMU/
-Virtqueue paths. A successful QEMU device scenario is not a
-real-hardware proof.
+The current native composition exercises real Task/Team startup, CPU mappings
+and qualified IOMMU/Virtqueue paths using the single ABI 11 contract.
+A successful QEMU device scenario is not a real-hardware proof.
 
 Report the exact source/fixture revision, command, ABI selection,
 firmware and emulator versions, output, errors and skipped checks

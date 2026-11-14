@@ -1,11 +1,7 @@
 use kernel_api::{
     abi::{
         self,
-        call::{
-            EnvCall,
-            flat::{FlatCall, operations as flat},
-            nest::{NestCall, operations as nest},
-        },
+        call::{EnvCall, flat::operations as flat, nest::operations as nest},
         operation::RegisterCall,
     },
     address::{PageCount, VirtAddr},
@@ -25,31 +21,14 @@ fn runtime_calls_keep_distinct_domains_and_reject_retired_bindings() {
         level: 0,
     };
     assert_eq!(flat::Create::SLOT, abi::PREFIX | (12 << 32));
-    assert_eq!(
-        EnvCall::from_wire(flat::Create::SLOT, &create.pack()).unwrap(),
-        EnvCall::Flat(FlatCall::Create {
-            license,
-            size: 8192,
-            align: 4096,
-            level: 0,
-        })
-    );
+    assert!(EnvCall::from_wire(flat::Create::SLOT, &create.pack()).is_err());
     let create = nest::Create { license };
-    assert_eq!(
-        EnvCall::from_wire(nest::Create::SLOT, &create.pack()).unwrap(),
-        EnvCall::Nest(NestCall::Create { license })
-    );
+    assert!(EnvCall::from_wire(nest::Create::SLOT, &create.pack()).is_err());
     let inspect = nest::Inspect {
         token: license,
         out: VirtAddr::new(4096),
     };
-    assert_eq!(
-        EnvCall::from_wire(nest::Inspect::SLOT, &inspect.pack()).unwrap(),
-        EnvCall::Nest(NestCall::Inspect {
-            token: license,
-            out: VirtAddr::new(4096)
-        })
-    );
+    assert!(EnvCall::from_wire(nest::Inspect::SLOT, &inspect.pack()).is_err());
     for number in [
         abi::PREFIX | (14 << 32),
         abi::PREFIX | (14 << 32) | 1,
@@ -200,13 +179,7 @@ fn reserve_and_release_have_additive_slots_pair_reply_and_stable_failures() {
     };
     assert_eq!(nest::Reserve::SLOT, abi::PREFIX | (13 << 32) | 5);
     assert_eq!(reserve.pack(), [7, 0x4000, 0, 0, 0, 0]);
-    assert_eq!(
-        EnvCall::from_wire(nest::Reserve::SLOT, &reserve.pack()),
-        Ok(EnvCall::Nest(NestCall::Reserve {
-            token,
-            request: reserve.request
-        }))
-    );
+    assert!(EnvCall::from_wire(nest::Reserve::SLOT, &reserve.pack()).is_err());
     assert_eq!(
         nest::Reserve::decode_return((11, 0x8000, 99)).unwrap(),
         (PendId::mint(11), VirtAddr::new(0x8000))
@@ -214,10 +187,7 @@ fn reserve_and_release_have_additive_slots_pair_reply_and_stable_failures() {
     let release = nest::Release { token };
     assert_eq!(nest::Release::SLOT, abi::PREFIX | (13 << 32) | 6);
     assert_eq!(release.pack(), [7, 0, 0, 0, 0, 0]);
-    assert_eq!(
-        EnvCall::from_wire(nest::Release::SLOT, &release.pack()),
-        Ok(EnvCall::Nest(NestCall::Release { token }))
-    );
+    assert!(EnvCall::from_wire(nest::Release::SLOT, &release.pack()).is_err());
     assert_eq!(nest::Release::decode_return((0, 0, 0)).unwrap(), ());
     for (fail, code) in [
         (NestFail::Denied, -1),

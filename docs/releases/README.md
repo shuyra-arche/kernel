@@ -19,7 +19,7 @@ ABI/native selections and all six QEMU shards. The publication build used
 `rustc 1.102.0-nightly (5f4effd57 2026-11-13)`; pre-tag candidate and component
 checks used the earlier `8eb778d04` nightly (Twine Rust 1.99.0). The preparation and exact
 consumer input records are in [#165](https://github.com/shuyra-arche/kernel/pull/165).
-Per-page A/D stays Unknown/Unsupported, memory-v11 is optional, and full System
+Per-page A/D stays Unknown/Unsupported, ABI selection depends on the recorded release revision, and full System
 migration and physical-hardware qualification remain outside this preview.
 
 The preview-matching ruleset 27257248 was verified before Tag creation with

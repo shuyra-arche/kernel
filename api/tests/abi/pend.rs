@@ -27,7 +27,7 @@ fn request() -> AccordRequest {
         src: PendId::mint(17),
         target: AccordTarget::Caller,
         limits: Limits {
-            operations: Operations::Share(ShareRights::OPEN),
+            operations: Operations::Share(ShareRights::ASSOCIATE),
             modifiable: Modifiable::No,
             distributable: Distributable::No,
             scope: PendScope::Pages(PendRange::pages(2, 3).unwrap()),
@@ -42,7 +42,7 @@ fn accord_and_narrow_snapshots_have_exact_checked_little_endian_layouts() {
     assert_eq!(NarrowRequest::WIDTH, 80);
     assert_eq!(
         fetch_words::<13>(&request().to_bytes()).unwrap(),
-        [17, 0, 0, usize::MAX, 2, 1, 0, 0, 1, 0, 1, 2, 3]
+        [17, 0, 0, usize::MAX, 2, 4, 0, 0, 1, 0, 1, 2, 3]
     );
     let mut value = request();
     for target in [AccordTarget::Caller, AccordTarget::Task(TaskId::new(23))] {

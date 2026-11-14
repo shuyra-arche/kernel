@@ -42,11 +42,8 @@ bitflags::bitflags! {
         const SHARE = 8;
         const DELETE = 16;
         const BLOCK = 32;
-        #[cfg(feature = "memory-v11")]
         const OCCUPY = 64;
-        #[cfg(feature = "memory-v11")]
         const VACATE = 128;
-        #[cfg(feature = "memory-v11")]
         const RESHAPE = 256;
     }
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,19 +60,14 @@ bitflags::bitflags! {
         const DELETE = 512;
         const INSERT = 1024;
         const REMOVE = 2048;
-        #[cfg(feature = "memory-v11")]
         const FAULT = 4096;
     }
 }
 
 impl ShareRights {
-    /// Source use in the selected wire contract; v11 publishes only through Nest.
+    /// Source use; publication is authorized only through Nest.
     pub const fn association() -> Self {
-        if cfg!(feature = "memory-v11") {
-            Self::ASSOCIATE
-        } else {
-            Self::OPEN.union(Self::SHUT).union(Self::ASSOCIATE)
-        }
+        Self::ASSOCIATE
     }
 }
 
@@ -88,16 +80,14 @@ impl NestRights {
     }
 
     pub const fn reservation() -> Self {
-        let rights = Self::INSPECT
+        Self::INSPECT
             .union(Self::RELEASE)
             .union(Self::PUBLISH)
             .union(Self::RETRACT)
             .union(Self::PROTECT)
             .union(Self::INSERT)
-            .union(Self::REMOVE);
-        #[cfg(feature = "memory-v11")]
-        let rights = rights.union(Self::FAULT);
-        rights
+            .union(Self::REMOVE)
+            .union(Self::FAULT)
     }
 }
 
@@ -127,7 +117,7 @@ impl Operations {
     pub fn of([kind, bits]: [usize; 2]) -> Option<Self> {
         let bits = u32::try_from(bits).ok()?;
         // Open/Shut are retired; v11 Share only selects logical sources.
-        if cfg!(feature = "memory-v11") && kind == 2 && bits & 3 != 0 {
+        if kind == 2 && bits & 3 != 0 {
             return None;
         }
         Some(match kind {

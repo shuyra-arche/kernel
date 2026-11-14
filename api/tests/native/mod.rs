@@ -16,6 +16,7 @@ mod unit;
 #[test]
 fn native_calls_reject_v10_and_removed_adapters() {
     assert_eq!(abi::VERSION, 11);
+    assert_eq!(abi::memory::VERSION, abi::VERSION as u64);
     let call = SleepUntil { at: 123 };
     assert!(EnvCall::from_wire(SleepUntil::SLOT, &call.pack()).is_ok());
     for version in [0, 10, 12, u16::MAX] {

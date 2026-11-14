@@ -1,4 +1,4 @@
-//! Native ABI 11 Flat/Nest contracts, selected by a coordinated `memory-v11` image.
+//! Native ABI 11 Flat/Nest contracts.
 //! No per-call ABI 10 fallback exists. Each token still requires live caller-local
 //! authorization at the Server's commit boundary.
 
@@ -15,38 +15,26 @@ pub use request::{Action, Maintenance, Request, Source};
 
 use core::num::NonZeroU64;
 
-/// Native memory version, selected for the complete image by `memory-v11`.
-pub const VERSION: u64 = 11;
+/// The same version governs calls, memory descriptors, Ledger and Capsule ABI.
+pub const VERSION: u64 = crate::abi::VERSION as u64;
 
-/// ABI 11 rights, selected only by a matching `memory-v11` image.
-/// The default ABI 10 decoder rejects their unknown bits.
+/// Rights for native holding and reservation operations.
 pub mod rights {
     use crate::model::pend::{FlatRights, Limits, Operations};
-    pub const OCCUPY: FlatRights = FlatRights::from_bits_retain(1 << 6);
-    pub const VACATE: FlatRights = FlatRights::from_bits_retain(1 << 7);
-    pub const RESHAPE: FlatRights = FlatRights::from_bits_retain(1 << 8);
-    /// Reservation-only native fault control. The v10 rights decoder stays closed.
-    pub const FAULT: crate::model::pend::NestRights =
-        crate::model::pend::NestRights::from_bits_retain(1 << 12);
+    pub const OCCUPY: FlatRights = FlatRights::OCCUPY;
+    pub const VACATE: FlatRights = FlatRights::VACATE;
+    pub const RESHAPE: FlatRights = FlatRights::RESHAPE;
+    /// Reservation-only native fault control.
+    pub const FAULT: crate::model::pend::NestRights = crate::model::pend::NestRights::FAULT;
 
-    /// Selection of already-issued next Flat rights, not a v10 decoder or a
-    /// delegation API. Normalize only the three frozen additions, then reuse
-    /// the existing scope/access attenuation rule. Unknown bits still reject.
+    /// Select already-issued Flat rights using the common attenuation rule.
+    /// Unknown bits and widening of access, scope or distribution reject.
     pub fn selects(parent: Limits, selected: Limits) -> bool {
-        let (Operations::Flat(held), Operations::Flat(need)) =
-            (parent.operations, selected.operations)
+        let (Operations::Flat(_), Operations::Flat(_)) = (parent.operations, selected.operations)
         else {
             return false;
         };
-        let known = FlatRights::all() | OCCUPY | VACATE | RESHAPE;
-        if !known.contains(held) || !known.contains(need) || !held.contains(need) {
-            return false;
-        }
-        let legacy = |limits: Limits, bits: FlatRights| Limits {
-            operations: Operations::Flat(FlatRights::from_bits_truncate(bits.bits())),
-            ..limits
-        };
-        legacy(parent, held).permits_narrowing(legacy(selected, need))
+        parent.permits_narrowing(selected)
     }
 }
 
