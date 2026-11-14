@@ -94,7 +94,7 @@ def compose(args, kernel, destination):
         # admission checks and resident preparation stay unchanged.
         edit(provider / "server/src/basis/unit/team/capsule.rs", lambda s: s.replace('TeamBuilder::new(SpaceKind::Supervisor)', 'TeamBuilder::new(SpaceKind::User)'))
     guest = SUITE / ({"irq": "interrupt.rs", "realtime": "realtime.rs", "room": "guest.rs"}[args.mode])
-    edit(root / "guest/main.rs", lambda _: guest.read_text())
+    edit(root / "guest/main.rs", lambda _: guest.read_text().replace('const ROUNDS: usize = 256;', f'const ROUNDS: usize = {args.events};'))
     # These workloads use same-Team Tasks and static boot MMIO, not native RAM
     # Publish or DMA. Leave the provider's SMP qualification gate closed.
     def platform(s):
@@ -151,7 +151,7 @@ def boot(args, variant, harts, round_):
     (evidence / "result.json").write_text(json.dumps({"command": command, "status": status, "elapsed_seconds": time.monotonic()-started, "host_load_start": load, "host_load_end": os.getloadavg(), "image_sha256": digest(image)}, indent=2))
     log = (evidence / "serial.log").read_text()
     markers = ["task: all tasks exited", "ROOM:steady", "ROOM:teardown", "iommu: command engine closed"]
-    markers += {"irq": ["PASS irq rounds=256", "observers=6", "revoke-sign=1 revoke-view=1 rebind=3"], "room": ["PASS room workers=8 turns=512 steps=4096"], "realtime": ["PASS realtime harts=" + str(harts), "unsupported=1" if harts == 1 else "budget=1 replenishment=1 freeze=1 no-credit-reset=1 preemption=1 fixed-hart=1 overload=denied ordinary-pool=restored"]}[args.mode]
+    markers += {"irq": [f"PASS irq rounds={args.events}", "observers=6", "revoke-sign=1 revoke-view=1 rebind=3"], "room": ["PASS room workers=8 turns=512 steps=4096"], "realtime": ["PASS realtime harts=" + str(harts), "unsupported=1" if harts == 1 else "budget=1 replenishment=1 freeze=1 no-credit-reset=1 preemption=1 fixed-hart=1 overload=denied ordinary-pool=restored"]}[args.mode]
     passed = status == 0 and "FAIL" not in log and "[kernel] fatal" not in log and all(m in log for m in markers)
     if not args.no_latency:
         passed &= "latency-window:" in log and "boundary=whole-interval" in log and "phase=running" in log
@@ -166,11 +166,12 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="new evidence directory")
     parser.add_argument("--profile", choices=["debug", "release"], default="release")
     parser.add_argument("--mode", choices=["room", "irq", "realtime"], default="room")
+    parser.add_argument("--events", type=int, default=256, help="UART events, use 16 for the bounded correctness check")
     parser.add_argument("--harts", type=int, choices=[1, 4], nargs="+", default=[1, 4])
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--no-latency", action="store_true")
     args = parser.parse_args()
-    assert 1 <= args.rounds <= 100 and len(args.harts) == len(set(args.harts))
+    assert 1 <= args.rounds <= 100 and 16 <= args.events <= 4096 and len(args.harts) == len(set(args.harts))
     assert output(git(args.fixture, "rev-parse", "HEAD")) == FIXTURE
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)

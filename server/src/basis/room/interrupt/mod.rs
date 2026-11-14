@@ -75,10 +75,8 @@ pub(crate) fn identifies(
 }
 
 pub(crate) fn consumed(endpoint: &crate::basis::sign::endpoint::Endpoint) {
-    if let Some(router) = external()
-        && router.source(endpoint).is_some()
-    {
-        router.request();
+    if let Some(source) = external().and_then(|router| router.source(endpoint)) {
+        source.request();
     }
 }
 
@@ -86,7 +84,6 @@ pub(crate) struct Router {
     controller: SpinLock<Box<dyn Delivery>>,
     progress: SpinLock<Progress>,
     serving: AtomicBool,
-    requested: AtomicBool,
     physical: usize,
     limit: usize,
     hart: hart::HartId,
@@ -106,7 +103,6 @@ pub(crate) fn install(controller: Box<dyn Delivery>, plan: Plan<'_>) -> Result<(
             controller: SpinLock::new(controller),
             progress: SpinLock::new(Progress::new()),
             serving: AtomicBool::new(false),
-            requested: AtomicBool::new(false),
             physical: plan.base,
             limit: plan.sources,
             hart: hart::hart_id(),
@@ -142,7 +138,8 @@ pub(crate) fn register(controller: usize, line: u32, region: usize) -> Result<()
         return Err(PendFail::Denied);
     }
     sources.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
-    let source = Arc::try_new(Source::new(irq, region)?).map_err(|_| PendFail::OutOfMemory)?;
+    let source = Arc::try_new(Source::new(irq, region, sources.len())?)
+        .map_err(|_| PendFail::OutOfMemory)?;
     let controller = route.controller.lock();
     controller.mask(irq);
     controller.prioritize(irq);
@@ -257,7 +254,7 @@ impl Router {
                 }
                 // Source now owns the masked claim, including no live receiver
                 // or a retained pending Sign. No completion is inferred here.
-                self.requested.store(true, Ordering::Release);
+                self.progress.lock().request(source.maintenance_slot);
             } else {
                 complete[at] = Some(claim);
             }
@@ -312,10 +309,16 @@ impl Router {
     pub(crate) fn open(&self, irq: Irq) {
         self.controller.lock().unmask(irq);
     }
-    pub(crate) fn request(&self) {
-        self.requested.store(true, Ordering::Release);
-        self.deferred.store(true, Ordering::Release);
-        let _ = crate::metal::interrupt::ipi::send(self.hart);
+    pub(super) fn request(&self, slot: usize) {
+        self.progress.lock().request(slot);
+        self.schedule();
+    }
+    fn schedule(&self) {
+        // All ways of retaining deferred work already have an IPI, timer retry
+        // or the currently executing service turn. Coalesce repeated notices.
+        if !self.deferred.swap(true, Ordering::AcqRel) {
+            let _ = crate::metal::interrupt::ipi::send(self.hart);
+        }
     }
     /// Safe trap-return/idle boundary, outside scheduler ownership. FIFO COMMIT
     /// admission here prevents a stream of peer Yield calls starving a claim.
@@ -340,9 +343,6 @@ impl Router {
         drop(commit);
         self.complete(complete);
         let count = self.sources.lock().len();
-        if self.requested.swap(false, Ordering::AcqRel) {
-            self.progress.lock().refresh(count);
-        }
         for _ in 0..BATCH {
             let Some(at) = self.progress.lock().next(count) else {
                 break;
@@ -356,7 +356,7 @@ impl Router {
                 self.controller.lock().unmask(*irq);
             }
         }
-        if self.progress.lock().pending() || self.requested.load(Ordering::Acquire) {
+        if self.progress.lock().pending() {
             self.deferred.store(true, Ordering::Release);
             super::deadline::retry();
         }
@@ -421,6 +421,10 @@ impl Router {
             let source = self.sources.lock()[at].clone();
             source.withdraw(token);
         }
+        // The named Pend may be an ancestor of a bound grant. Revalidate all
+        // sources over bounded later turns as well as detaching exact matches.
+        self.progress.lock().refresh(count);
+        self.schedule();
     }
 }
 

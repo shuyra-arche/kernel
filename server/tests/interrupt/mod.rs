@@ -148,7 +148,10 @@ fn repeated_requests_do_not_starve_later_sources_or_expand_one_turn() {
     let mut work = Progress::new();
     let mut visited = [0; 64];
     for _ in 0..16 {
-        work.refresh(64); // the first source keeps asking for notification
+        if visited == [0; 64] {
+            work.refresh(64);
+        }
+        work.request(0); // one busy source cannot restart a full scan
         for _ in 0..BATCH {
             visited[work.next(64).unwrap()] += 1;
         }
@@ -158,11 +161,16 @@ fn repeated_requests_do_not_starve_later_sources_or_expand_one_turn() {
     while work.next(64).is_some() {
         left += 1;
     }
-    assert_eq!(left, 60);
+    assert_eq!(left, 1);
     assert!(!work.pending());
     assert_eq!(work.next(0), None);
     work.refresh(2);
-    assert_eq!(work.next(2), Some(0));
-    assert_eq!(work.next(2), Some(1));
+    let mut next = [work.next(2).unwrap(), work.next(2).unwrap()];
+    next.sort();
+    assert_eq!(next, [0, 1]);
     assert_eq!(work.next(2), None);
+    work.request(7);
+    work.request(7);
+    assert_eq!(work.next(64), Some(7));
+    assert_eq!(work.next(64), None, "coalesced work has one owner");
 }

@@ -26,6 +26,8 @@ use state::{Action, Holder, State};
 pub(crate) struct Source {
     pub(crate) irq: Irq,
     pub(crate) region: usize,
+    /// Immutable, never-reused router registration slot; not the hardware line.
+    pub(super) maintenance_slot: usize,
     pub(crate) endpoint: Arc<Endpoint>,
     view: OnceLock<Arc<Sharing>>,
     state: SpinLock<State<Receiver>>,
@@ -36,14 +38,20 @@ struct Receiver {
     sign: Weak<PendEntry>,
 }
 impl Source {
-    pub(super) fn new(irq: Irq, region: usize) -> Result<Self, PendFail> {
+    pub(super) fn new(irq: Irq, region: usize, maintenance_slot: usize) -> Result<Self, PendFail> {
         Ok(Self {
             irq,
             region,
+            maintenance_slot,
             endpoint: Endpoint::try_new(TaskId::new(0)).map_err(|_| PendFail::OutOfMemory)?,
             view: OnceLock::new(),
             state: SpinLock::new_level(Level::L3, State::new()),
         })
+    }
+    pub(super) fn request(&self) {
+        super::external()
+            .expect("source router")
+            .request(self.maintenance_slot);
     }
     pub(super) fn associate(&self, view: Arc<Sharing>) -> Result<(), PendFail> {
         self.view.set(view).map_err(|_| PendFail::Denied)
@@ -119,7 +127,7 @@ impl Source {
                 sequence,
             )
             .expect("preflighted source binding under COMMIT");
-        super::external().expect("source router").request();
+        self.request();
         Ok(())
     }
     pub(super) fn authorize(&self, task: &Task, token: PendId) -> Result<(), SignFail> {
@@ -154,7 +162,7 @@ impl Source {
         }
         self.state.lock().detach();
         endpoint::discard(&self.endpoint);
-        super::external().expect("source router").request();
+        self.request();
     }
     pub(super) fn deliver(&self) -> bool {
         if !self.live() {
@@ -201,7 +209,7 @@ impl Source {
         drop(commit);
         if announce && endpoint::announce(&self.endpoint) {
             self.state.lock().request_notice();
-            super::external().expect("source router").request();
+            self.request();
         }
     }
 }
