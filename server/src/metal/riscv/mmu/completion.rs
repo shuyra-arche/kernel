@@ -12,9 +12,15 @@ use crate::metal::{
 static SEQUENCE: Sequence = Sequence::new();
 static MAILBOXES: [Mailbox; MAX_HART_SLOTS] = [const { Mailbox::new() }; MAX_HART_SLOTS];
 
+static INSTRUCTIONS: [Mailbox; MAX_HART_SLOTS] = [const { Mailbox::new() }; MAX_HART_SLOTS];
+
 /// Service only the observed round. A racing newer request remains pending.
 pub(crate) fn service() {
-    let mailbox = &MAILBOXES[hart::hart_id().get()];
+    service_mailbox(&MAILBOXES[hart::hart_id().get()], false);
+    service_mailbox(&INSTRUCTIONS[hart::hart_id().get()], true);
+}
+
+fn service_mailbox(mailbox: &Mailbox, instructions: bool) {
     if let Some(round) = mailbox.pending() {
         // Acquire observed the initiator's PTE/payload edits. SFENCE excludes
         // further old translations; the explicit data fence orders prior CPU
@@ -26,6 +32,9 @@ pub(crate) fn service() {
                 "fence rw, rw",
                 options(nostack)
             );
+            if instructions {
+                core::arch::asm!("fence.i", options(nostack));
+            }
             mailbox.complete(round);
         }
     }
@@ -36,6 +45,16 @@ pub(crate) fn service() {
 /// Caller serialization (Team operation/Pend ledger) is not used by responders.
 /// Failure leaves all ownership with the caller; no Drop retry or receipt.
 pub(crate) fn synchronize() -> Result<(), Error> {
+    synchronize_mailboxes(&MAILBOXES)
+}
+
+/// A data acknowledgement never substitutes for instruction visibility.
+pub(crate) fn synchronize_instructions() -> Result<(), Error> {
+    hart::request_instruction_sync();
+    synchronize_mailboxes(&INSTRUCTIONS)
+}
+
+fn synchronize_mailboxes(mailboxes: &[Mailbox; MAX_HART_SLOTS]) -> Result<(), Error> {
     crate::metal::allocator::assert_allocation_allowed();
     let round = SEQUENCE.next().ok_or(Error::Capacity)?;
     let me = hart::hart_id();
@@ -46,7 +65,7 @@ pub(crate) fn synchronize() -> Result<(), Error> {
         if slot == me || hart::online(slot) {
             let (word, bit) = slot.bit();
             participants[word] |= bit;
-            MAILBOXES[slot.get()].request(round);
+            mailboxes[slot.get()].request(round);
             if slot != me {
                 interrupt::ipi::send_completion(slot).map_err(|_| Error::Fault)?;
             }
@@ -59,7 +78,7 @@ pub(crate) fn synchronize() -> Result<(), Error> {
         service();
         let complete = (0..hart::hart_count()).map(hart::HartId::new).all(|slot| {
             let (word, bit) = slot.bit();
-            participants[word] & bit == 0 || MAILBOXES[slot.get()].covers(round)
+            participants[word] & bit == 0 || mailboxes[slot.get()].covers(round)
         });
         if complete {
             return Ok(());

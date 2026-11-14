@@ -108,3 +108,21 @@ fn simultaneous_initiators_preserve_every_request_without_an_owner_lock() {
         assert!(harts.iter().all(|hart| hart.covers(round)));
     }
 }
+
+#[test]
+fn data_completion_cannot_cover_a_pending_instruction_round() {
+    let sequence = Sequence::new();
+    let data = Mailbox::new();
+    let instructions = Mailbox::new();
+    let code = sequence.next().unwrap();
+    instructions.request(code);
+    let later_data = sequence.next().unwrap();
+    data.request(later_data);
+    // Model the receipts; this is not execution evidence for either fence.
+    unsafe { data.complete(later_data) };
+    assert!(data.covers(code));
+    assert!(!instructions.covers(code));
+    unsafe { instructions.complete(code) };
+    assert!(instructions.covers(code));
+    assert!(!instructions.covers(later_data));
+}
