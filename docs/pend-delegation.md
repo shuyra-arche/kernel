@@ -64,3 +64,13 @@ identity. Provider changes land first; consumers pin the verified immutable
 Kernel revision before replacing older adjacency-rejection integration tests.
 Host ledger tests exercise production authority/admission and scripted effects;
 RV64/QEMU and consumer tests establish their separately recorded boundaries.
+
+## Identity observations
+
+PendInfo.lender reports the immutable actual immediate sending Task (zero for
+roots), including after that Task exits. Reading it does not acquire the
+sender's transaction lock and cannot turn contention into a fabricated zero.
+This is descriptive identity from the existing PendEntry, not a second authority
+ledger or a live-source proof. Revocation, source exit and cleanup still use the
+original live ancestor/Weak Task links; retired grants cannot regain permission
+because their historical lender identity remains available.

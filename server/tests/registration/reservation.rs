@@ -105,7 +105,7 @@ fn licensed_reservation_root_retains_parent_limits_and_actual_creation_edge() {
     assert!(receiver.ptr_eq(&Arc::downgrade(&task)));
     drop(heirs);
     drop(serial);
-    assert_eq!(ledger::vestor(&task, entry.token()), Some(task.ident.id));
+    assert_eq!(ledger::vestor(&entry), Some(task.ident.id));
     parent.invalidate();
     assert!(!entry.authority().alive());
     assert!(!entry.permits(Operations::Nest(NestRights::PUBLISH)));
@@ -291,7 +291,7 @@ fn namespace_and_mapping_closure_reject_authority_without_losing_observation_ide
         Some(PendFail::Dead)
     );
     drop(serial);
-    assert_eq!(ledger::vestor(&task, entry.token()), Some(TaskId::new(1)));
+    assert_eq!(ledger::vestor(&entry), Some(TaskId::new(1)));
     assert_eq!(
         super::branch::accord(
             &task,

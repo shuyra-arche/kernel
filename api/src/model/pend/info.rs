@@ -10,6 +10,8 @@ pub struct PendInfo {
     pub target: Target,
     pub limits: Limits,
     pub owner: TaskId,
+    /// Actual immediate delegating Task; zero for roots. Retained after lender
+    /// exit. This identity does not establish live authorization or ownership.
     pub lender: TaskId,
     pub mark: Mark,
     pub status: PendStatus,
