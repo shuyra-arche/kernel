@@ -37,6 +37,51 @@ impl Drop for TableNode {
 }
 
 impl TableNode {
+    pub(crate) fn activity_supported(
+        &self,
+        address: VirtAddr,
+        physical: PhysAddr,
+        geo: mode::Geo,
+    ) -> bool {
+        self.leaf_ref_geometry(address, geo)
+            .is_ok_and(|(leaf, level)| {
+                level == 0
+                    && leaf.is_valid()
+                    && leaf.is_leaf()
+                    && leaf.paddr() as usize == physical.as_usize()
+            })
+    }
+    /// Existing geometry only: never allocate/split a leaf merely to sample it.
+    pub(crate) fn capture_activity(
+        &self,
+        address: VirtAddr,
+        physical: PhysAddr,
+        geo: mode::Geo,
+    ) -> Result<(bool, bool), NestError> {
+        let mut node = self;
+        for level in (0..geo.levels as usize).rev() {
+            let entry = &node.page.entries[address.vpn(level as u8)];
+            let snapshot = entry.read();
+            if snapshot.is_leaf() && snapshot.is_valid() {
+                // First provider supports exact base leaves. A large leaf is
+                // unsupported, not evidence about one of its constituent pages.
+                if level != 0 || snapshot.paddr() as usize != physical.as_usize() {
+                    return Err(NestError::NotAligned);
+                }
+                return entry.capture_activity(snapshot).ok_or(NestError::Busy);
+            }
+            if !snapshot.is_valid() {
+                return Err(NestError::NotMapped);
+            }
+            node = &node
+                .children
+                .iter()
+                .find(|(slot, _)| *slot == address.vpn(level as u8))
+                .ok_or(NestError::NotMapped)?
+                .1;
+        }
+        Err(NestError::NotMapped)
+    }
     fn ppn(&self) -> usize {
         Box::as_ptr(&self.page) as usize >> PAGE_SHIFT
     }

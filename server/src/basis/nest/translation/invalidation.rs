@@ -1,7 +1,8 @@
 /// 失效状态机。
 ///
-/// `Fencing` has one synchronous initiator. Observers return Busy and retain
-/// their continuation; they neither spin nor initiate a second attempt.
+/// `Fencing` has one initiator, either synchronous or a retained nonblocking
+/// round. Peers retain Busy until that exact round can settle; they never
+/// replace it with another attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Invalidation {
     /// 无待失效的 PTE 修改。

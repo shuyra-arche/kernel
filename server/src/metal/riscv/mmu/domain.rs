@@ -111,3 +111,50 @@ impl Drop for Domain {
         // A published but unfinished domain deliberately keeps its ASID reserved.
     }
 }
+
+/// One exact data-retirement request, retained by the Nest until completion.
+/// All-Hart global SFENCE covers both address-space and global requests.
+pub(crate) struct Deferred {
+    target: Request<Asid>,
+    round: super::completion::Pending,
+}
+impl Domain {
+    pub(crate) fn defer(&self, target: Request<Asid>) -> Result<Deferred, NestError> {
+        if target.domain != self.instance
+            || target.identifier != self.identifier
+            || self.released() && !self.identifier.is_kernel()
+        {
+            return Err(NestError::Shootdown);
+        }
+        Ok(Deferred {
+            target,
+            round: super::completion::Pending::begin().map_err(|_| NestError::Shootdown)?,
+        })
+    }
+}
+// SAFETY: the exact request was admitted by its Domain; only a completed round
+// covering every participating Hart returns success. Busy retains the round.
+unsafe impl Shootdown for Deferred {
+    type Target = Request<Asid>;
+    type Error = NestError;
+    fn invalidate(&self, target: &Self::Target) -> Result<(), NestError> {
+        if *target != self.target {
+            return Err(NestError::Shootdown);
+        }
+        if self.round.poll() {
+            Ok(())
+        } else {
+            Err(NestError::Busy)
+        }
+    }
+}
+impl Deferred {
+    pub(crate) fn confirms(&self, target: Request<Asid>) -> bool {
+        self.target == target
+    }
+    pub(crate) fn poll(
+        &self,
+    ) -> Result<crate::metal::generic::mmu::fence::Completed<Request<Asid>>, NestError> {
+        crate::metal::generic::mmu::fence::invalidate(self, self.target)
+    }
+}

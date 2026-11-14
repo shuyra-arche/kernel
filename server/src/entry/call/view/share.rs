@@ -27,22 +27,31 @@ pub(in crate::entry::call) fn dispatch(
                 use kernel_api::model::pend::{
                     AccordRequest, AccordTarget, CreationRights, Operations,
                 };
-                let task = current().running_task().ok_or(PendFail::Denied)?;
+                let task = current().running_task().ok_or(ShareFail::Denied)?;
                 let mut bytes = [0; AccordRequest::WIDTH];
                 if !ident.team.nest.copy_in(&mut bytes, request) {
-                    return Err(PendFail::Denied);
+                    return Err(ShareFail::Denied);
                 }
-                let request = AccordRequest::from_bytes(&bytes).ok_or(PendFail::Invalid)?;
+                let request = AccordRequest::from_bytes(&bytes).ok_or(ShareFail::Denied)?;
                 if !matches!(request.limits.operations, Operations::Share(_)) {
-                    return Err(PendFail::Denied);
+                    return Err(ShareFail::Denied);
                 }
                 let target = match request.target {
                     AccordTarget::Caller => Arc::downgrade(&task),
                     AccordTarget::Task(id) => crate::basis::unit::task::registry::find(id)
-                        .ok_or(PendFail::Denied)?
+                        .ok_or(ShareFail::Denied)?
                         .as_weak()
                         .clone(),
                 };
+                let recipient = target.upgrade().ok_or(ShareFail::Denied)?;
+                if crate::basis::pend::locate(&task, request.src).is_some_and(|entry| {
+                    matches!(entry.scope(), kernel_api::model::pend::PendScope::Nest(_))
+                }) {
+                    return crate::basis::nest::activity::derive(
+                        &task, &recipient, license, request,
+                    )
+                    .map(|p| p.get());
+                }
                 crate::basis::pend::accord(
                     &task,
                     request.src,
@@ -50,12 +59,13 @@ pub(in crate::entry::call) fn dispatch(
                     request.limits,
                     request.mark,
                     crate::basis::pend::Window::Parent(
-                        request.limits.scope.range().ok_or(PendFail::Denied)?,
+                        request.limits.scope.range().ok_or(ShareFail::Denied)?,
                     ),
                     Some((license, Operations::None(CreationRights::SHARE))),
                 )
+                .map_err(fail)
             })();
-            answer(frame, result.map_err(fail));
+            answer(frame, result);
         }
         ShareCall::Create {
             license,

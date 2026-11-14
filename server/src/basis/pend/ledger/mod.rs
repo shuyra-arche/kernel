@@ -5,7 +5,8 @@ mod cleanup;
 mod entry;
 mod table;
 pub(crate) use table::Table;
-pub(super) use table::{with_pair, with_pair_uncommitted};
+pub(super) use table::with_pair;
+pub(crate) use table::with_pair_uncommitted;
 
 use alloc::sync::Arc;
 

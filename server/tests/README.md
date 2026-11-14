@@ -158,7 +158,12 @@ do not execute guest traps or establish hardware quiescence.
 The `translation` host target compiles the production RV64 PTE storage,
 decoder and flags. Its atomic hardware participant checks preservation of
 concurrent A/D evidence during permission changes and coherent full-word
-snapshots. It does not enable A/D clearing or qualify a sampling backend.
+snapshots, capture/clear races and rejected replacement identities. Host
+threads do not qualify a hardware sampling backend. The
+[activity guest](guest/activity/README.md) executes qualified/unqualified CPU
+configurations, real reads/writes, restricted consumers, multiple readers,
+aliases, replacement, revocation, output faults, stopped observation and
+withheld real-Hart completion. Its measurements are emulator evidence.
 
 The current native composition exercises real Task/Team startup, CPU mappings
 and qualified IOMMU/Virtqueue paths using the single ABI 11 contract.

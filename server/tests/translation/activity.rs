@@ -87,3 +87,36 @@ fn walk_observes_one_complete_pte_word() {
         }
     });
 }
+
+#[test]
+fn capture_rejects_replacement_and_conserves_racing_hardware_bits() {
+    for _ in 0..256 {
+        let entry = PageTableEntry::default();
+        entry.set(0x107, PteFlags::V | PteFlags::R | PteFlags::W);
+        let expected = entry.read();
+        let start = Barrier::new(2);
+        let captured = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                start.wait();
+                hardware(&entry).fetch_or((PteFlags::A | PteFlags::D).bits(), Ordering::AcqRel);
+            });
+            start.wait();
+            entry.capture_activity(expected).unwrap()
+        });
+        let after = entry.read();
+        assert!(captured.0 || after.flags().contains(PteFlags::A));
+        assert!(captured.1 || after.flags().contains(PteFlags::D));
+        assert_eq!(after.paddr(), 0x107000);
+        assert!(
+            after
+                .flags()
+                .contains(PteFlags::V | PteFlags::R | PteFlags::W)
+        );
+        let stale = after;
+        entry.set(0x108, PteFlags::V | PteFlags::R | PteFlags::A | PteFlags::D);
+        assert_eq!(entry.capture_activity(stale), None);
+        assert!(entry.read().flags().contains(PteFlags::A | PteFlags::D));
+        entry.clear();
+        assert_eq!(entry.capture_activity(entry.read()), None);
+    }
+}

@@ -116,3 +116,20 @@ See [Nest retirement](../docs/nest-retirement.md),
 [Pend delegation](../docs/pend-delegation.md) for the current
 failure and authorization boundaries. [Verification](../server/tests/README.md)
 separates Host, RV64, QEMU and real hardware evidence.
+
+## Authorized CPU activity
+
+Existing [Share.Derive](src/abi/call/view/share.rs) accepts a Reservation source
+with live INSPECT plus SAMPLE. Its unchanged AccordRequest selects one
+fixed-origin page and a recipient. It atomically issues a readonly Share View
+and LISTEN/CONSUME Sign, forming `(Sign Pend, Share View Pend)` in that order.
+The existing call returns the View Pend; use existing Pend.Inspect/Collect to
+find the correlated Sign, or `Client::memory::activity::pair`.
+
+Only explicitly qualified 4 KiB CPU leaves are supported. Larger geometry,
+External and unqualified configurations return ShareFail::Unsupported before
+publishing grants or clearing bits. The
+[protocol and migration](../docs/memory-activity.md) explain sparse View
+coordinates, fresh epochs, unread facts, cancellation and uncertainty.
+No call number or descriptor width is added. A/D never authorizes physical
+reuse; the global statistics page remains unchanged.

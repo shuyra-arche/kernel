@@ -49,6 +49,22 @@ impl PageTableEntry {
             .expect("flag update always supplies a value");
     }
 
+    /// Capture only this exact leaf's A/D evidence. The Nest owner excludes
+    /// software replacement; hardware A/D writers race this CAS atomically.
+    /// The caller owns the subsequent covering translation-completion round.
+    pub(crate) fn capture_activity(&self, expected: Snapshot) -> Option<(bool, bool)> {
+        let activity = (PteFlags::A | PteFlags::D).bits();
+        if !expected.is_valid() || !expected.is_leaf() {
+            return None;
+        }
+        self.bits
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |bits| {
+                ((bits & !activity) == (expected.bits & !activity)).then_some(bits & !activity)
+            })
+            .ok()
+            .map(|old| (old & PteFlags::A.bits() != 0, old & PteFlags::D.bits() != 0))
+    }
+
     #[inline(always)]
     pub fn clear(&self) {
         self.bits.store(0, Ordering::Release);

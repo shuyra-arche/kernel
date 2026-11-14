@@ -1,3 +1,4 @@
+pub mod activity;
 pub(crate) mod completion;
 pub(crate) mod domain;
 pub(crate) mod identity;
@@ -48,7 +49,7 @@ pub(crate) unsafe fn activate(root: crate::metal::mmu::Root) {
     }
 }
 
-pub(crate) use domain::Domain;
+pub(crate) use domain::{Deferred, Domain};
 pub(crate) use mode::{Geo as Geometry, lower, upper};
 pub(crate) use table::TableNode as Table;
 pub(crate) type Root = crate::metal::generic::mmu::Root<identity::Asid>;

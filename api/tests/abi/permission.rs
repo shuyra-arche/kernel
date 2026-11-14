@@ -333,7 +333,7 @@ fn whole_and_mapping_rights_have_distinct_masks_and_retired_bits_stay_invalid() 
     assert_eq!(NestRights::whole().bits(), 1 | 2 | 8 | 512);
     assert_eq!(
         NestRights::reservation().bits(),
-        1 | 4 | 64 | 128 | 256 | 1024 | 2048 | 4096
+        1 | 4 | 64 | 128 | 256 | 1024 | 2048 | 4096 | 8192
     );
     assert_eq!(
         NestRights::all(),
@@ -343,7 +343,7 @@ fn whole_and_mapping_rights_have_distinct_masks_and_retired_bits_stay_invalid() 
         (PendScope::Nest(NestScope::Whole), NestRights::whole()),
         (mapping(7, PendRange::Inherit), NestRights::reservation()),
     ] {
-        for bit in 0..13 {
+        for bit in 0..14 {
             let bits = 1u32 << bit;
             let rights = NestRights::from_bits_retain(bits);
             let limits = Limits {
@@ -359,7 +359,7 @@ fn whole_and_mapping_rights_have_distinct_masks_and_retired_bits_stay_invalid() 
         assert!(!all.valid());
         assert_eq!(Limits::of(all.words()), None);
     }
-    for bits in [16, 32, 8192, u32::MAX] {
+    for bits in [16, 32, 16384, u32::MAX] {
         assert!(NestRights::from_bits(bits).is_none());
         assert!(Operations::of([4, bits as usize]).is_none());
     }

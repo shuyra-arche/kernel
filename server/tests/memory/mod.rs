@@ -83,6 +83,17 @@ mod metal {
     pub(crate) use crate::host_lock as sync;
     pub(crate) mod mmu {
         pub(crate) struct Table;
+        pub(crate) struct Deferred {
+            target: crate::scope::Request<usize>,
+        }
+        impl Deferred {
+            pub(crate) fn new(target: crate::scope::Request<usize>) -> Self {
+                Self { target }
+            }
+            pub(crate) fn confirms(&self, target: crate::scope::Request<usize>) -> bool {
+                self.target == target
+            }
+        }
     }
     pub(crate) mod memory {
         pub(crate) fn topology() -> Option<&'static crate::proof::topology::Topology> {

@@ -37,8 +37,8 @@ use kernel_api::model::modifiable::Modifiable;
 use authority::Authority;
 use mapping::HeldMap;
 
-pub(crate) use close::close;
 pub(crate) use close::pending_close;
+pub(crate) use close::{close, poll_close};
 
 /// 资源授权：一段经过授权的来源范围，它的授权记录与活跃关系。
 ///

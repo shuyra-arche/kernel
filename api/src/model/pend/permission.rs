@@ -61,6 +61,8 @@ bitflags::bitflags! {
         const INSERT = 1024;
         const REMOVE = 2048;
         const FAULT = 4096;
+        /// Clear and rearm CPU activity observations in the live reservation window.
+        const SAMPLE = 8192;
     }
 }
 
@@ -88,6 +90,7 @@ impl NestRights {
             .union(Self::INSERT)
             .union(Self::REMOVE)
             .union(Self::FAULT)
+            .union(Self::SAMPLE)
     }
 }
 

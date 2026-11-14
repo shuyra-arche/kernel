@@ -53,7 +53,13 @@ authorizes them. `Entry::dispatch()` returns a distinct `(View, Sign)`
 pair. Sign delivery, memory publication and verified CPU/IOMMU
 retirement are different events. The read-only global memory
 snapshot reports per-page A/D as `UNKNOWN` rather than assuming
-cleanliness.
+cleanliness. Use existing `call::share_view::derive` with a sampling-authorized Reservation
+source and readonly Share limits. `memory::activity::pair(view)` resolves the
+receiver-local `(Sign Pend, Share View Pend)` using existing Pend calls.
+A Busy lookup retains the same View; retry the lookup, not Derive. Follow the
+[activity contract](../docs/memory-activity.md), consume only after a coherent
+page read, and Return either grant to cancel. Pin and rebuild a matching
+API/Client/Server image; old strict rights decoders reject SAMPLE.
 
 Read the [current memory contract](../api/memory.md) and
 [Boot contracts](../api/src/boot/) for lifetime and version rules.

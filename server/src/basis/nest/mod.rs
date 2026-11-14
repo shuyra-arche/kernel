@@ -3,6 +3,7 @@
 //! Flat 继续独立管理来源与物化；这里不保存来源页槽。
 
 mod access;
+pub(crate) mod activity;
 pub(crate) mod address;
 pub(crate) mod authority;
 mod error;
@@ -768,6 +769,29 @@ impl Nest {
         actor: Option<kernel_api::model::identity::TaskId>,
         clear: bool,
     ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
+        self.withdraw_source_with(binding, authorization, token, actor, clear, false)
+    }
+
+    pub(crate) fn poll_withdraw_source(
+        self: &Arc<Self>,
+        binding: &Arc<authority::RangeBinding>,
+        authorization: &Arc<crate::basis::pend::SourceAuthorization>,
+    ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
+        if self.is_external() {
+            return Err(kernel_api::abi::call::pend::PendFail::Denied);
+        }
+        self.withdraw_source_with(binding, authorization, None, None, true, true)
+    }
+
+    fn withdraw_source_with(
+        self: &Arc<Self>,
+        binding: &Arc<authority::RangeBinding>,
+        authorization: &Arc<crate::basis::pend::SourceAuthorization>,
+        token: Option<kernel_api::model::identity::PendId>,
+        actor: Option<kernel_api::model::identity::TaskId>,
+        clear: bool,
+        polling: bool,
+    ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
         use kernel_api::abi::call::pend::PendFail;
         let Some(entry) = self.reservations.registered(binding.id()) else {
             return Ok(());
@@ -777,6 +801,9 @@ impl Nest {
         };
         let _operation = mapping.operation().ok_or(PendFail::Busy)?;
         let Some(index) = binding.page() else {
+            if polling {
+                return Err(PendFail::Busy);
+            }
             let selected = {
                 let _commit = crate::basis::commit();
                 Arc::ptr_eq(&entry.binding, binding)
@@ -839,7 +866,8 @@ impl Nest {
             page
         };
         if !self.is_external() {
-            self.finish_invalidation().map_err(|_| PendFail::Busy)?;
+            self.finish_invalidation_with(polling)
+                .map_err(|_| PendFail::Busy)?;
         }
         self.finish_memo(mapping, index);
         let pending = self
@@ -851,8 +879,17 @@ impl Nest {
         if pending {
             let page = page.ok_or(PendFail::Busy)?;
             let change = crate::basis::cell::change::acquire(&page).map_err(|_| PendFail::Busy)?;
-            self.retract_position(mapping, index, None, change, true)
-                .map_err(|_| PendFail::Busy)?;
+            self.retract_position_report(
+                mapping,
+                index,
+                None,
+                change,
+                true,
+                polling,
+                &mut || Ok(()),
+                &mut |_| {},
+            )
+            .map_err(|_| PendFail::Busy)?;
         }
         if clear {
             let cleared = {
@@ -1904,6 +1941,7 @@ impl Nest {
             Some(expected),
             change,
             false,
+            false,
             authorize,
             accepted,
         );
@@ -1931,6 +1969,7 @@ impl Nest {
             expected,
             change,
             forced,
+            false,
             &mut || Ok(()),
             &mut |_| {},
         )
@@ -1943,12 +1982,13 @@ impl Nest {
         expected: Option<u64>,
         change: Arc<Change>,
         forced: bool,
+        polling: bool,
         authorize: &mut impl FnMut() -> Result<(), kernel_api::abi::call::cell::CellFail>,
         accepted: &mut impl FnMut(u64),
     ) -> Result<(), kernel_api::abi::call::cell::CellFail> {
         use kernel_api::abi::call::cell::CellFail;
         if !self.is_external() {
-            self.finish_invalidation()?;
+            self.finish_invalidation_with(polling)?;
         }
         self.finish_memo(mapping, index);
         let page = {
@@ -1990,8 +2030,12 @@ impl Nest {
             self.progress_external(mapping)
                 .map_err(memo::publication_failure)?;
         } else {
-            let result =
-                self.unpublish_page(mapping, VirtAddr::new(mapping.position(index)?), &page);
+            let result = self.unpublish_page_with(
+                mapping,
+                VirtAddr::new(mapping.position(index)?),
+                &page,
+                polling,
+            );
             self.finish_memo(mapping, index);
             result?;
         }
@@ -2335,6 +2379,16 @@ impl Nest {
         address: VirtAddr,
         expected: &Arc<Page>,
     ) -> Result<(), NestError> {
+        self.unpublish_page_with(mapping, address, expected, false)
+    }
+
+    fn unpublish_page_with(
+        &self,
+        mapping: &Arc<Span>,
+        address: VirtAddr,
+        expected: &Arc<Page>,
+        polling: bool,
+    ) -> Result<(), NestError> {
         if self.asid().is_kernel() || mapping.is_global() {
             return Err(NestError::Pinned);
         }
@@ -2349,7 +2403,7 @@ impl Nest {
                 .is_some_and(|owner| core::ptr::eq(Arc::as_ptr(&owner), self)),
             "unpublish_page requires the mapping's own live nest"
         );
-        self.finish_invalidation()?;
+        self.finish_invalidation_with(polling)?;
 
         let mut state = self.state.lock();
         if !state.retirement.invalidation().is_clean() {
@@ -2361,7 +2415,7 @@ impl Nest {
         let target = state.retirement.begin(self.id.get(), self.asid())?;
         drop(state);
         // Release retained resources only after this exact invocation completes.
-        self.invalidate(target)?;
+        self.start_invalidation(target, polling)?;
         self.finish_memo(mapping, mapping.page_index(address));
         Ok(())
     }
@@ -2776,19 +2830,57 @@ impl Nest {
     }
 
     fn finish_invalidation(&self) -> Result<(), NestError> {
+        self.finish_invalidation_with(false)
+    }
+
+    fn finish_invalidation_with(&self, polling: bool) -> Result<(), NestError> {
         let mut state = self.state.lock();
         if state.retirement.invalidation().is_clean() {
             return Ok(());
         }
-        // Retirement admits exactly one fence initiator. A peer gets Busy;
-        // its caller retains the operation and retries across a scheduling
-        // boundary, while this initiator retains the exact pending request.
+        if let Some(round) = state.retirement.deferred() {
+            // Service is lockless, one poll, with no cross-Hart waiting.
+            let proof = round.poll()?;
+            let phase = state.phase;
+            let fenced = state.settle(proof)?;
+            if phase != state.phase {
+                self.changed();
+            }
+            drop(state);
+            fenced.release(self);
+            return Ok(());
+        }
         if self.cpu.is_none() {
             return Err(NestError::NoRegion);
         }
         let target = state.retirement.begin(self.id.get(), self.asid())?;
         drop(state);
-        self.invalidate(target)
+        self.start_invalidation(target, polling)
+    }
+
+    fn start_invalidation(
+        &self,
+        target: fence::Request<Asid>,
+        polling: bool,
+    ) -> Result<(), NestError> {
+        if !polling {
+            return self.invalidate(target);
+        }
+        let cpu = self.cpu.as_ref().ok_or(NestError::NoRegion)?;
+        // The Fencing state already reserves this exact initiator. No COMMIT
+        // or Nest lock crosses round submission; peers retain Busy until parked.
+        let round = cpu.domain.defer(target);
+        let mut state = self.state.lock();
+        match round {
+            Ok(round) => {
+                state.retirement.park(round)?;
+                Err(NestError::Busy)
+            }
+            Err(error) => {
+                state.retirement.fail();
+                Err(error)
+            }
+        }
     }
 
     /// The request's initiator owns this one hardware invocation through its

@@ -248,6 +248,17 @@ impl PendEntry {
         self.meta.changed(self.token, false);
     }
 
+    /// Attribute Kernel-created output registrations to the actual requester.
+    /// This reserves the ordinary foreign-sender budget without inventing a
+    /// lender/authority edge; the root's owner and revocation stay independent.
+    pub(crate) fn requested_by(&mut self, requester: &Task) {
+        assert!(self.sire.is_none() && self.sender.is_none());
+        self.sender = Some(Sender {
+            task: requester.ident.id,
+            team: requester.ident.team.id,
+        });
+    }
+
     pub(crate) fn parent(&mut self, token: PendId, task: Weak<Task>) {
         self.sire = Some(token);
         self.sender = task.upgrade().map(|sender| Sender {

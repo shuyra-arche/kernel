@@ -58,3 +58,8 @@ mod cases;
 #[path = "../../../../src/basis/nest/memo/state.rs"]
 mod state;
 pub(super) use state::Settled;
+
+// Sampling owners are target-only; this suite verifies existing Memo lifecycle.
+mod activity {
+    pub(crate) struct State;
+}

@@ -171,6 +171,7 @@ struct Attribution {
     provenance: Option<Arc<crate::basis::pend::Provenance>>,
 }
 pub(crate) struct Memo {
+    pub(in crate::basis::nest) sampling: Option<alloc::sync::Weak<super::activity::State>>,
     generation: crate::basis::name::Generation,
     page: Option<MemoPage>,
     activity: Activity,
@@ -182,6 +183,7 @@ impl Memo {
     pub(crate) const fn vacant() -> Self {
         Self {
             generation: crate::basis::name::Generation::first(),
+            sampling: None,
             page: None,
             activity: Activity::Idle(None),
             publication_access: 0,

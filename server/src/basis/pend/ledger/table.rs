@@ -202,7 +202,7 @@ pub(in super::super) fn with_pair<T>(
     })?
 }
 
-pub(in super::super) fn with_pair_uncommitted<T>(
+pub(crate) fn with_pair_uncommitted<T>(
     a: &Task,
     b: &Task,
     run: impl FnOnce() -> T,

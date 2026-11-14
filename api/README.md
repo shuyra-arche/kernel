@@ -14,7 +14,7 @@ code or runtime state.
 | `model::modifiable` | Modifiable: write permission on a Pend |
 | `model::unit` | User-only creation, UnitTarget, control authorities, creation descriptors, queries and stable results |
 | `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
-| `model::memory` | Bounded, atomic reads of versioned global memory observations |
+| `model::memory` | Bounded global memory observations and authorized CPU leaf activity streams |
 | `model::{flat,nest}` | Source, Nest and ReservationId identities and observations; never independent authorization |
 | `model::{wait,exit}` | Waiting and exit vocabulary |
 | `abi::call` | Operation declarations, domain failures and aggregate dispatch |
@@ -150,8 +150,11 @@ Read the [current memory contract](memory.md), not a staged design record.
 authorized access; the selected ABI determines its operations.
 An explicit `(View, Sign)` boot dispatch pair does not authorize physical
 device reassignment or declare DMA quiescence. The Kernel observer publishes
-read-only versioned global memory statistics via Share and Sign. Per-page
-A/D readings remain `UNKNOWN`, not zero or proof of a clean Page.
+read-only versioned global memory statistics via Share and Sign. The global A/D fields remain `UNKNOWN`. A separate
+[authorized CPU activity stream](../docs/memory-activity.md) requires INSPECT
+and SAMPLE in a current Reservation window and explicit boot qualification.
+NotObserved never proves global cleanliness. Upgrade the complete matching
+source-pinned image: older strict rights decoders reject the new SAMPLE bit.
 
 ## Verification
 

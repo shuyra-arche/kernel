@@ -42,3 +42,33 @@ pub(crate) fn close(root: &Arc<Sharing>) -> Result<(), PendFail> {
         Ok(())
     }
 }
+
+/// Native CPU source retirement, one binding and one nonblocking fence poll.
+/// Storage and the registry slot stay retained until every real mapping settles.
+pub(crate) fn poll_close(root: &Arc<Sharing>) -> Result<(), PendFail> {
+    if root.has_maps() {
+        return Err(PendFail::Busy);
+    }
+    let source = root.authorization().ok_or(PendFail::Denied)?;
+    {
+        let _commit = crate::basis::commit();
+        source.revoke()?;
+        seal(root);
+    }
+    if let Some(binding) = source.first_binding() {
+        let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
+        nest.poll_withdraw_source(&binding, &source)?;
+    }
+    if source.pending_close() {
+        Err(PendFail::Busy)
+    } else {
+        if root.source().flat().phase() == kernel_api::model::flat::FlatPhase::Closing {
+            source.close_blocks()?;
+            root.source()
+                .flat()
+                .finish_close()
+                .map_err(|_| PendFail::Busy)?;
+        }
+        Ok(())
+    }
+}

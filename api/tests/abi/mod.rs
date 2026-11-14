@@ -27,3 +27,5 @@ fn fetch_words<const N: usize>(bytes: &[u8]) -> Option<[usize; N]> {
     }
     Some(words)
 }
+
+mod activity;
