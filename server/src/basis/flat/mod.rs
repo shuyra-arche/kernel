@@ -9,7 +9,7 @@ mod range;
 pub(crate) mod residency;
 mod shape;
 use kernel_api::model::cell::CellLevel;
-pub(crate) mod sharing;
+pub(crate) mod source;
 mod storage;
 pub(crate) mod transaction;
 pub(crate) mod transfer;

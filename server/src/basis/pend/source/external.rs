@@ -5,7 +5,7 @@ use super::SourceAuthorization;
 use super::hold::Hold;
 use crate::basis::cell::page::Exposure;
 use crate::basis::cell::page::Page;
-use crate::basis::flat::sharing::SharingOperation;
+use crate::basis::flat::source::Operation;
 use crate::basis::flat::{FlatError, Pages};
 use crate::basis::nest::Access;
 use crate::basis::pend;
@@ -105,7 +105,7 @@ impl ExternalBorrow {
             crate::metal::memory::topology().is_some() && change.is_some() && root.is_some();
         let (loan, parent, observer) = if let Some((meta, root, authority)) = root {
             let (token, authority) = hold.branch().unwrap_or((root, &authority));
-            let _operation = SharingOperation::acquire(&meta).ok_or(PendFail::Busy)?;
+            let _operation = Operation::acquire(&meta).ok_or(PendFail::Busy)?;
             let pending_cpu = authority.configured() == Modifiable::Yes
                 && (meta.pending_maps(token) || source.pending_cpu());
             let withdrawal = source.begin_withdraw()?;

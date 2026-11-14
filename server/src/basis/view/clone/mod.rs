@@ -47,7 +47,7 @@ impl CloneView {
     ) -> Result<Arc<Self>, crate::basis::nest::NestError> {
         let life = Anchor::try_new()?;
         Arc::try_new(Self {
-            id: super::next_id().map_err(|_| crate::basis::nest::NestError::OutOfMemory)?,
+            id: crate::basis::name::view().ok_or(crate::basis::nest::NestError::OutOfMemory)?,
             life,
             owner,
             pending: SpinLock::new_level(Level::L3, Pending::Queue(Queue::default())),

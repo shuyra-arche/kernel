@@ -10,7 +10,7 @@ use kernel_api::model::identity::PendId;
 use kernel_api::model::pend::{CloneRights, Operations, ShareRights};
 use kernel_api::model::view::ViewKind;
 
-use crate::basis::flat::sharing::SharingOperation;
+use crate::basis::flat::source::Operation;
 use crate::basis::pend;
 use crate::basis::pend::Need;
 use crate::basis::pend::PendEntry;
@@ -67,12 +67,12 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         if !pend.alive()
             && !share_view
                 .as_ref()
-                .is_some_and(|meta| crate::basis::flat::sharing::pending_close(meta))
+                .is_some_and(|meta| crate::basis::flat::source::pending_close(meta))
         {
             return Err(PendFail::Dead);
         }
         let operation = if let Some(p) = &share_view {
-            Some(SharingOperation::acquire(p).ok_or(PendFail::Busy)?)
+            Some(Operation::acquire(p).ok_or(PendFail::Busy)?)
         } else {
             None
         };
@@ -105,7 +105,7 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         (share_view, operation)
     };
     if let Some(share_view) = share_view {
-        crate::basis::flat::sharing::close(&share_view)?;
+        crate::basis::flat::source::close(&share_view)?;
     }
     Ok(0)
 }

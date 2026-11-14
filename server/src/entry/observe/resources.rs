@@ -1,7 +1,7 @@
 //! Boot grants only read access and update observation, with independent Pend
 //! revocation for the data and notification. No observer control is exported.
 use crate::basis::{
-    flat::{BorrowedRegion, Flat, sharing::Sharing},
+    flat::{BorrowedRegion, Flat, source::Export},
     pend::{PendEntry, Target},
     sign::endpoint::{self, Endpoint},
     view::View,
@@ -36,7 +36,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), PendFail> {
         unsafe { BorrowedRegion::new(PhysAddr::from_raw(&super::PAGE as *const _ as usize), 4096) }
             .map_err(|_| PendFail::Denied)?;
     let flat = Flat::from_region(region).map_err(|_| PendFail::OutOfMemory)?;
-    let share = Sharing::from_source(flat.whole(), 4096, TaskId::new(0))?;
+    let share = Export::from_source(flat.whole(), 4096, TaskId::new(0))?;
     let data = PendEntry::try_new(View::Share(share), Mark::NONE, Modifiable::No, None)?;
     registry
         .register(Name::Page(Page::Memory), data)
