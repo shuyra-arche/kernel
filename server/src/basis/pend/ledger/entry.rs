@@ -401,28 +401,10 @@ pub(crate) fn locate(task: &Task, token: PendId) -> Option<Arc<PendEntry>> {
     entries.get(token).cloned()
 }
 
+/// Report the actual immediate lender, independently of transaction admission.
+/// Identity is immutable metadata, not proof that its authority is still live.
 pub(crate) fn vestor(task: &Arc<Task>, token: PendId) -> Option<TaskId> {
-    for _ in 0..super::RETRIES {
-        let observed = {
-            let _pend = task.pend.lock();
-            locate(task, token)?
-        };
-        let parent = observed.sire()?;
-        let lord = observed.lord().upgrade()?;
-        let result = super::with_pair(task, &lord, || {
-            let Some(current) = locate(task, token) else {
-                return Some(None);
-            };
-            if current.sire() != Some(parent) || !current.lord().ptr_eq(observed.lord()) {
-                return None;
-            }
-            Some(locate(&lord, parent).map(|_| lord.ident.id))
-        });
-        if let Ok(Some(result)) = result {
-            return result;
-        }
-    }
-    None
+    locate(task, token)?.sender.map(|sender| sender.task)
 }
 
 pub(crate) fn accede(

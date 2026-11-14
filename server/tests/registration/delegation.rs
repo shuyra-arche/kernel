@@ -182,3 +182,27 @@ fn incoming_saturation_preserves_recipient_capacity_and_every_preparation_rolls_
         ledger::return_(&target, token).unwrap();
     }
 }
+
+#[test]
+fn lender_identity_survives_source_ledger_contention_and_does_not_grant_authority() {
+    let sender = Task::in_team(71, 7);
+    let receiver = Task::in_team(81, 8);
+    let source = root(&sender);
+    let identity = sender.ident.id;
+    let token = grant(&sender, &receiver, &source).unwrap();
+    let received = ledger::locate(&receiver, token).unwrap();
+    {
+        // The source can be constructing/cleaning another object while its
+        // live child is inspected. Contention cannot fabricate lender zero.
+        let _source_transaction = sender.pend.lock();
+        assert_eq!(ledger::vestor(&receiver, token), Some(identity));
+    }
+    source.invalidate();
+    drop(source);
+    drop(sender);
+    assert_eq!(ledger::vestor(&receiver, token), Some(identity));
+    assert!(!received.alive());
+    assert!(!received.permits(Operations::None(CreationRights::SIGN)));
+    ledger::return_(&receiver, token).unwrap();
+    assert_eq!(ledger::vestor(&receiver, token), None);
+}

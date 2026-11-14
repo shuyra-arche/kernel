@@ -177,6 +177,11 @@ tag 1 names a Task. NarrowRequest is ten words (80 bytes): `[token, Limits...]`.
 PendInfo is 16 words (128 bytes): `[token, target_kind, target_id, owner, lender,
 mark, status, Limits...]`. Decoding checks both target family and full scope
 validity. A descriptive identity or observation never mints authority.
+The lender is the actual immediate delegating Task, or zero for a root. Its
+immutable identity remains observable after lender exit and does not become
+zero merely because the source ledger is busy. Neither owner nor lender proves
+live authority; status and every operation's live ancestry checks remain separate.
+
 
 Accord delegation is independent of Team/creator adjacency and accepts a live
 Dormant Task. It preserves the caller's live source/ancestor, distribution,
