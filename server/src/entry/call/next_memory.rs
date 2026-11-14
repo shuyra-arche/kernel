@@ -136,7 +136,8 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
     }
     if matches!(
         request.action(),
-        Action::Publish { .. }
+        Action::CreateNest { .. }
+            | Action::Publish { .. }
             | Action::Retract { .. }
             | Action::Protect { .. }
             | Action::Release { .. }

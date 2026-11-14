@@ -19,7 +19,10 @@ pub(in crate::entry::call) fn effect(
     action: Action,
     receipt: &mut super::super::next_memory::Receipt<'_>,
 ) -> Result<Value, Failure> {
-    if matches!(action, Action::Release { .. } | Action::DeleteNest { .. }) {
+    if matches!(
+        action,
+        Action::CreateNest { .. } | Action::Release { .. } | Action::DeleteNest { .. }
+    ) {
         return lifecycle::effect(actor, action, receipt);
     }
     use basis::nest::{Access, memo::Publisher};
@@ -352,7 +355,7 @@ pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Resul
     }
     match action {
         Action::FaultRoute { .. } => basis::nest::fault::configure(actor, action),
-        Action::CreateNest { .. } | Action::Reserve { .. } => lifecycle::mutate(actor, action),
+        Action::Reserve { .. } => lifecycle::mutate(actor, action),
         Action::Insert {
             target,
             expected,

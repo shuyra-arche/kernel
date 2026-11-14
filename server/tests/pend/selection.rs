@@ -32,7 +32,14 @@ fn next_residency_selection_requires_an_explicit_live_grant() {
     assert!(root.selects(Operations::Flat(FlatRights::INSPECT), pages(10, 1)));
     assert!(!root.selects(Operations::Flat(rights::VACATE), pages(10, 1)));
     assert!(!root.selects(Operations::Flat(rights::OCCUPY), pages(9, 1)));
-    assert!(!flat().selects(Operations::Flat(rights::OCCUPY), pages(10, 1)));
+    let inspect_only = Pend::try_new_scope(
+        Yes,
+        pages(10, 8),
+        Operations::Flat(FlatRights::INSPECT),
+        Distributable::Yes,
+    )
+    .unwrap();
+    assert!(!inspect_only.selects(Operations::Flat(rights::OCCUPY), pages(10, 1)));
     let unknown = Pend::try_new_scope(
         Yes,
         pages(10, 8),

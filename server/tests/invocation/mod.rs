@@ -119,6 +119,34 @@ fn invoke(task: &Task, request: Request, output: usize) -> (Delivery, Option<Rep
 }
 
 #[test]
+fn nest_creation_prepares_outside_commit_and_lost_output_replays_one_result() {
+    let task = Task::new();
+    let req = Request::new(
+        Some(RequestId::new(1).unwrap()),
+        Action::CreateNest {
+            license: PendId::mint(3),
+        },
+    )
+    .unwrap();
+    task.ident.team.nest.fail.store(true, Ordering::SeqCst);
+    assert_eq!(
+        invoke(&task, req, 0x1100).0,
+        Delivery::Failed(Failure::ReplyFault)
+    );
+    assert_eq!(task.effects.load(Ordering::SeqCst), 1);
+    task.ident.team.nest.fail.store(false, Ordering::SeqCst);
+    let first = invoke(&task, req, 0x1100).1.unwrap();
+    assert!(matches!(
+        first.outcome(),
+        Outcome::Committed(Value::CreatedNest { .. })
+    ));
+    for _ in 0..8 {
+        assert_eq!(invoke(&task, req, 0x1100).1, Some(first));
+    }
+    assert_eq!(task.effects.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn deferred_completion_preserves_pending_replay_and_releases_journal_capacity() {
     let task = Task::new();
     task.mode.store(3, Ordering::SeqCst);

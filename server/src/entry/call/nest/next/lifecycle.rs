@@ -26,31 +26,6 @@ fn error(error: NestFail) -> Failure {
 
 pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure> {
     match action {
-        Action::CreateNest { license } => {
-            pend::access::license(actor, license, CreationRights::NEST).map_err(pend_error)?;
-            let nest = basis::unit::team::TeamBuilder::prepare_nest(SpaceKind::User)
-                .map_err(nest_error)?;
-            let root = Arc::try_new(
-                pend::PendEntry::try_new(
-                    pend::Target::Nest {
-                        owner: actor.ident.id,
-                        nest: nest.clone(),
-                    },
-                    Mark::NONE,
-                    Modifiable::Yes,
-                    None,
-                )
-                .map_err(pend_error)?,
-            )
-            .map_err(|_| Failure::OutOfMemory)?;
-            let token = root.token();
-            actor.pend.prepare(root).map_err(pend_error)?.publish();
-            Ok(Value::CreatedNest {
-                token,
-                nest: nest.id(),
-                version: nest.version(),
-            })
-        }
         Action::Reserve {
             token,
             nest: id,
@@ -158,6 +133,47 @@ pub(super) fn effect(
     receipt: &mut crate::entry::call::next_memory::Receipt<'_>,
 ) -> Result<Value, Failure> {
     match action {
+        Action::CreateNest { license } => {
+            let _serial = actor.pend.lock();
+            {
+                let _commit = basis::commit();
+                pend::access::license(actor, license, CreationRights::NEST).map_err(pend_error)?;
+            }
+            // A private Nest installs trampoline PTEs and completes their fence.
+            // Keep both preparation and failed cleanup outside COMMIT.
+            let nest = basis::unit::team::TeamBuilder::prepare_nest(SpaceKind::User)
+                .map_err(nest_error)?;
+            let root = Arc::try_new(
+                pend::PendEntry::try_new(
+                    pend::Target::Nest {
+                        owner: actor.ident.id,
+                        nest: nest.clone(),
+                    },
+                    Mark::NONE,
+                    Modifiable::Yes,
+                    None,
+                )
+                .map_err(pend_error)?,
+            )
+            .map_err(|_| Failure::OutOfMemory)?;
+            let value = Value::CreatedNest {
+                token: root.token(),
+                nest: nest.id(),
+                version: nest.version(),
+            };
+            let _commit = basis::commit();
+            // The preparation is not authority: recheck live creation rights
+            // at publication, and commit the journal before releasing COMMIT.
+            // Retained root/Nest references outlive this guard on every error.
+            pend::access::license(actor, license, CreationRights::NEST).map_err(pend_error)?;
+            actor
+                .pend
+                .prepare(root.clone())
+                .map_err(pend_error)?
+                .publish();
+            receipt.committed(value);
+            Ok(value)
+        }
         Action::Release {
             token,
             nest: id,

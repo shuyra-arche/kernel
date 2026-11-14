@@ -115,7 +115,7 @@ fn bytes<const N: usize>(words: &[u64]) -> [u8; N] {
 
 #[test]
 fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
-    assert!(NestRights::from_bits(1 << 12).is_none()); // proposed right remains inactive
+    assert_eq!(NestRights::from_bits(1 << 12), Some(NestRights::FAULT));
     for (index, (action, reply)) in mutations().into_iter().zip(results()).enumerate() {
         let request = Request::new(Some(id()), action).unwrap();
         let mut expected = bytes::<256>(&[11, 13, 26, u64::MAX, 13, 17, 19, 7, 3, index as u64]);
