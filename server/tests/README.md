@@ -10,10 +10,13 @@ separate hardware evidence.
 
 The `Guest tests (QEMU)` check uses the pinned Vanllia native composition in
 [Check](../../.github/workflows/check.yml). It patches API, Client and Server
-to the current checkout, without an ABI feature. The historical fixture's
-`memory-v11` dependency entries are removed before resolving the local provider.
+to the current checkout, without an ABI feature. The [preparation step](guest/native/prepare.py) removes the historical fixture's
+`memory-v11` dependency entries and adapts Release to reobserve a version only
+after `Rejected(Stale)`. Hardware settlement may advance that version between
+observation and admission. Accepted Pending/Failed operations are never retried
+as fresh requests. The source diff is preserved with native-memory evidence.
 
-With that fixture prepared, run from the Kernel root:
+Prepare a fresh fixture with `python3 server/tests/guest/native/prepare.py --fixture /absolute/path/to/vanllia`, then run from the Kernel root:
 
 ```sh
 python3 /absolute/path/to/vanllia/tests/memory/run.py --kernel "$PWD"
