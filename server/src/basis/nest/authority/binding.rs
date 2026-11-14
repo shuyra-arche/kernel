@@ -14,7 +14,7 @@ use alloc::{
     vec::Vec,
 };
 use kernel_api::{
-    abi::call::{nest::NestFail, pend::PendFail},
+    abi::call::pend::PendFail,
     model::{
         identity::{PendId, TaskId},
         nest::{NestInfo, NestKind, NestPhase},
@@ -38,7 +38,7 @@ pub(crate) fn authorized(
     actor: &Task,
     token: PendId,
     rights: NestRights,
-) -> Result<Arc<PendEntry>, NestFail> {
+) -> Result<Arc<PendEntry>, Error> {
     pend::locate(actor, token)
         .filter(|entry| {
             pend::live(actor)
@@ -50,7 +50,7 @@ pub(crate) fn authorized(
                 && entry.target().nest().is_some()
                 && entry.authority().scope() == PendScope::Nest(NestScope::Whole)
         })
-        .ok_or(NestFail::Denied)
+        .ok_or(Error::Denied)
 }
 
 /// Trusted boot has already bound the complete, authenticated isolation domain.
@@ -94,9 +94,9 @@ pub(crate) fn deliver(root: &Arc<PendEntry>, holder: TaskId) {
     record.notification = Some((holder, entry));
 }
 
-pub(crate) fn inspect(actor: &Task, token: PendId) -> Result<NestInfo, NestFail> {
+pub(crate) fn inspect(actor: &Task, token: PendId) -> Result<NestInfo, Error> {
     let entry = authorized(actor, token, NestRights::INSPECT)?;
-    let nest = entry.target().nest().ok_or(NestFail::Denied)?;
+    let nest = entry.target().nest().ok_or(Error::Denied)?;
     let mut info = NestInfo {
         id: nest.id(),
         kind: if nest.is_external() {
@@ -115,7 +115,7 @@ pub(crate) fn inspect(actor: &Task, token: PendId) -> Result<NestInfo, NestFail>
         let record = records
             .iter()
             .find(|r| Arc::ptr_eq(&r.nest, &nest))
-            .ok_or(NestFail::Denied)?;
+            .ok_or(Error::Denied)?;
         info.fault_sequence = record.fault_sequence;
         if let Some(fault) = record.fault {
             info.fault_cause = fault.cause as u64;
@@ -126,15 +126,15 @@ pub(crate) fn inspect(actor: &Task, token: PendId) -> Result<NestInfo, NestFail>
     Ok(info)
 }
 
-pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), NestFail> {
+pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), Error> {
     let entry = authorized(actor, token, NestRights::DELETE)?;
-    let nest = entry.target().nest().ok_or(NestFail::Denied)?;
+    let nest = entry.target().nest().ok_or(Error::Denied)?;
     if !nest.is_external() {
         if nest.is_adopted() {
-            return Err(NestFail::Denied);
+            return Err(Error::Denied);
         }
         // CPU invalidation must not run under the global commit lock.
-        return nest.delete_organization().map_err(|_| NestFail::Busy);
+        return nest.delete_organization().map_err(|_| Error::Busy);
     }
     let _commit = crate::basis::commit();
     {
@@ -142,25 +142,25 @@ pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), NestFail> {
         let record = records
             .iter()
             .find(|record| Arc::ptr_eq(&record.nest, &nest))
-            .ok_or(NestFail::Denied)?;
+            .ok_or(Error::Denied)?;
         if !record.root.ptr_eq(&Arc::downgrade(entry.authority())) {
-            return Err(NestFail::Denied);
+            return Err(Error::Denied);
         }
     }
-    nest.close_external().map_err(|_| NestFail::Denied)?;
+    nest.close_external().map_err(|_| Error::Denied)?;
     nest.progress_reservations();
     if !super::external::discard(&nest) {
-        return Err(NestFail::Busy);
+        return Err(Error::Busy);
     }
     let mut records = ORGANIZATIONS.lock();
     let at = records
         .iter()
         .position(|record| Arc::ptr_eq(&record.nest, &nest))
-        .ok_or(NestFail::Denied)?;
+        .ok_or(Error::Denied)?;
     if records[at].binding.is_some() {
-        return Err(NestFail::Busy);
+        return Err(Error::Busy);
     }
-    nest.delete_organization().map_err(|_| NestFail::Busy)?;
+    nest.delete_organization().map_err(|_| Error::Busy)?;
     let removed = records.remove(at);
     drop(records);
     drop(removed);
@@ -169,7 +169,7 @@ pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), NestFail> {
 
 /// Whole scope alone cannot close another branch's trusted hardware lease.
 /// Check the exact registered root before a versioned close commits anything.
-pub(crate) fn check_delete_root(nest: &Arc<Nest>, entry: &PendEntry) -> Result<(), NestFail> {
+pub(crate) fn check_delete_root(nest: &Arc<Nest>, entry: &PendEntry) -> Result<(), Error> {
     if !nest.is_external() {
         return Ok(());
     }
@@ -177,9 +177,9 @@ pub(crate) fn check_delete_root(nest: &Arc<Nest>, entry: &PendEntry) -> Result<(
     let record = records
         .iter()
         .find(|r| Arc::ptr_eq(&r.nest, nest))
-        .ok_or(NestFail::Denied)?;
+        .ok_or(Error::Denied)?;
     if !record.root.ptr_eq(&Arc::downgrade(entry.authority())) {
-        return Err(NestFail::Denied);
+        return Err(Error::Denied);
     }
     Ok(())
 }
@@ -280,17 +280,17 @@ pub(crate) fn event(
         Weak<crate::basis::unit::anchor::Anchor>,
         Option<Option<kernel_api::abi::call::sign::SignEventFail>>,
     ),
-    NestFail,
+    Error,
 > {
     use kernel_api::abi::call::sign::SignEventFail;
     let info = inspect(actor, token)?;
     if info.kind != NestKind::External {
-        return Err(NestFail::Denied);
+        return Err(Error::Denied);
     }
     let nest = authorized(actor, token, NestRights::INSPECT)?
         .target()
         .nest()
-        .ok_or(NestFail::Denied)?;
+        .ok_or(Error::Denied)?;
     let result = if fault && info.fault_sequence != 0 {
         Some(None)
     } else if info.phase == NestPhase::Failed {
@@ -301,4 +301,15 @@ pub(crate) fn event(
         None
     };
     Ok((nest.life(), result))
+}
+
+/// Authorization/organization failures owned by the Nest binding boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Error {
+    Denied,
+    Busy,
+    OutOfMemory,
+    NotAligned,
+    AlreadyMapped,
+    NoRegion,
 }

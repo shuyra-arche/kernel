@@ -12,12 +12,7 @@ use crate::basis::flat::BorrowedRegion;
 use crate::basis::flat::Flat;
 use crate::basis::flat::FlatError;
 use crate::basis::flat::FlatRange;
-use crate::basis::nest::Access;
-use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
-use crate::basis::nest::Placement;
-use crate::basis::nest::RegionKind;
-use crate::basis::nest::Span;
 use crate::basis::pend::Pend;
 use crate::basis::pend::SourceAuthorization;
 use crate::basis::sign;
@@ -27,12 +22,9 @@ use crate::metal::sync::Level;
 use crate::metal::sync::SpinLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PAGE_SIZE;
-use kernel_api::address::PageCount;
-use kernel_api::address::PageOffset;
 use kernel_api::address::PhysAddr;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::identity::TaskId;
-use kernel_api::model::modifiable::Modifiable;
 
 use authority::Authority;
 use mapping::HeldMap;
@@ -163,35 +155,6 @@ impl Sharing {
             .map(Authority::authority)
     }
 
-    pub(crate) fn reserve_records(&self, count: usize) -> Result<(), PendFail> {
-        let mut maps = self.maps.lock();
-        if count > 1024usize.saturating_sub(maps.len()) {
-            return Err(PendFail::OutOfMemory);
-        }
-        maps.try_reserve(count).map_err(|_| PendFail::OutOfMemory)
-    }
-
-    /// 把一段已落地的关系记入该 token：先核对授权记录，再入活跃 Span 表。
-    pub(crate) fn record(
-        &self,
-        token: PendId,
-        space: &Arc<Nest>,
-        mapping: Arc<Span>,
-    ) -> Result<(), Arc<Span>> {
-        let permitted = self
-            .authorities
-            .lock()
-            .iter()
-            .any(|record| record.authorizes(token) && record.permitted());
-        if !self.alive() || !permitted {
-            return Err(mapping);
-        }
-        self.maps
-            .lock()
-            .push(HeldMap::placed(mapping, space, token));
-        Ok(())
-    }
-
     pub(crate) fn pending_maps(&self, token: PendId) -> bool {
         self.maps
             .lock()
@@ -248,34 +211,6 @@ impl Sharing {
     }
 }
 
-/// 这条关系能不能代表**整份来源**被复用。
-///
-/// 来源窗口必须与 Share 整窗一致（同一 Flat 的同一段），活动区间必须从起点连续
-/// 覆盖到末尾：Unseal 前允许同源多个 Attach（slice、中间有洞），那些关系仍归撤销
-/// 清理，但不能顶替整窗去复用——否则会把 slice 的第 1 页当成源 0 页，或报整长
-/// 却只有几个 PTE。
-fn covers_source(source: &FlatRange, entry: &HeldMap) -> bool {
-    let mapping = &entry.mapping;
-    if mapping
-        .source()
-        .is_none_or(|mapped| !mapped.same_range(source))
-    {
-        return false;
-    }
-    let (start, size) = mapping.initial_range();
-    let Ok(active) = mapping.active() else {
-        return false;
-    };
-    let mut covered = 0usize;
-    for range in active {
-        if range.start.as_usize() != start.as_usize() + covered {
-            return false;
-        }
-        covered += range.size.get();
-    }
-    covered == size
-}
-
 fn pend_map_error(error: NestError) -> PendFail {
     match error {
         NestError::OutOfMemory => PendFail::OutOfMemory,
@@ -319,189 +254,6 @@ impl Drop for Sharing {
             space.retire_reservation(id);
         }
     }
-}
-
-/// 把一条关系的每个活动区间的上限与当前权限都收到 `access`。
-///
-/// 收窄是幂等的：已在同一上限上的区间重放不改变库存与 PTE。
-fn narrow_mapping(space: &Arc<Nest>, mapping: &Arc<Span>, access: Access) -> Result<(), NestError> {
-    for range in mapping.active()? {
-        let offset = (range.start.as_usize() - mapping.initial_start().as_usize()) / PAGE_SIZE;
-        let count = PageCount::new(range.size.get() / PAGE_SIZE).ok_or(NestError::NotAligned)?;
-        space.narrow(mapping.range(PageOffset::new(offset), count)?, access)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn open(
-    meta: &Arc<Sharing>,
-    token: PendId,
-    space: &Arc<Nest>,
-    access: Access,
-) -> Result<(usize, usize), PendFail> {
-    let _operation = SharingOperation::acquire(meta).ok_or(PendFail::Busy)?;
-    if !meta.alive() {
-        return Err(PendFail::Dead);
-    }
-    let authority = meta.authority(token).ok_or(PendFail::Denied)?;
-    let modifiable = authority.modifiable().ok_or(PendFail::Dead)?;
-    if !modifiable.allows(Modifiable::No)
-        || access.contains(Access::WRITE) && modifiable != Modifiable::Yes
-    {
-        return Err(PendFail::Denied);
-    }
-    // 这一枚分支的有效窗口：有窗口就只映那一段，本域看到的与报出去的都只是它。
-    let source = match authority.window() {
-        Some((offset, count)) => meta
-            .source()
-            .range(offset, count)
-            .map_err(|_| PendFail::Denied)?,
-        None => meta.source(),
-    };
-    let size = source
-        .page_count()
-        .checked_bytes()
-        .ok_or(PendFail::NotAligned)?;
-    let authorization = meta.authorization();
-    let window = authorization
-        .as_ref()
-        .map(|_| {
-            let (offset, count) = authority
-                .window()
-                .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-            crate::basis::pend::Geometry::new(offset, count)
-        })
-        .transpose()?;
-    // The operation lease serializes Open with derivation, narrowing and
-    // physical withdrawal. Source flight registration additionally prevents
-    // retirement from settling this publication while the ledger closes.
-    // Neither lease requires COMMIT across page-table work or remote fences.
-    let commit = crate::basis::commit();
-    if !meta.alive()
-        || !authority.permits(kernel_api::model::pend::Operations::Share(
-            kernel_api::model::pend::ShareRights::OPEN,
-        ))
-    {
-        return Err(PendFail::Dead);
-    }
-    if let Some(authorization) = &authorization {
-        let (offset, count) = authority
-            .window()
-            .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-        authorization.check_publish(offset, count)?;
-    }
-    let reusable = {
-        let maps = meta.maps.lock();
-        maps.iter()
-            .find(|entry| {
-                entry.holds(token)
-                    && entry.placed_in(space)
-                    && entry.live()
-                    && covers_source(&source, entry)
-            })
-            .map(|entry| entry.mapping.clone())
-    };
-    if let Some(mapping) = reusable {
-        let id = mapping.identity();
-        if let (Some(authorization), Some(window)) = (&authorization, &window) {
-            authorization.enter_publish_range(id, window.clone(), Some(&authority))?;
-        }
-        drop(commit);
-        let result = narrow_mapping(space, &mapping, access).map_err(pend_map_error);
-        let permitted = {
-            let _commit = crate::basis::commit();
-            meta.alive() && authority.modifiable().is_some()
-        };
-        if let Some(authorization) = &authorization {
-            authorization.leave_publish(id);
-        }
-        // A stopped holder can close its ledger during the operation. The
-        // existing mapping remains in the same retained withdrawal record.
-        if !permitted {
-            return Err(PendFail::Dead);
-        }
-        result?;
-        return Ok((mapping.initial_range().0.as_usize(), size));
-    }
-    drop(commit);
-    meta.reserve_records(1)?;
-    // 来源已在手上：先选址登记，再按来源范围挂载，不经任何 kernel / canonical 视图。
-    let reservation = space
-        .reserve(
-            Placement::lowest(RegionKind::Normal, size, PAGE_SIZE)
-                .map_err(|e| pend_map_error(e.into()))?,
-        )
-        .map_err(pend_map_error)?;
-    let id = reservation.id();
-    let commit = crate::basis::commit();
-    if !meta.alive() || authority.modifiable().is_none() {
-        drop(commit);
-        let _ = space.cancel_reservation(reservation);
-        return Err(PendFail::Dead);
-    }
-    if let (Some(authorization), Some(window)) = (&authorization, &window) {
-        let (offset, count) = window.window();
-        if let Err(error) = authorization.check_publish(offset, count) {
-            drop(commit);
-            let _ = space.cancel_reservation(reservation);
-            return Err(error);
-        }
-    }
-    if let Some(authorization) = &authorization
-        && let Err(error) = space
-            .reservations
-            .claim_reservation(id, space, authorization.clone())
-    {
-        let _ = space.cancel_reservation(reservation);
-        space.retire_reservation(id);
-        return Err(error);
-    }
-    if let (Some(authorization), Some(window)) = (&authorization, &window)
-        && let Err(error) = authorization.enter_publish_range(id, window.clone(), Some(&authority))
-    {
-        drop(commit);
-        let _ = space.cancel_reservation(reservation);
-        space.retire_reservation(id);
-        return Err(error);
-    }
-    drop(commit);
-    let mapping = match space.attach(reservation, source, access, access) {
-        Ok(mapping) => mapping,
-        Err(error) => {
-            if let Some(authorization) = &authorization {
-                authorization.leave_publish(id);
-            }
-            space.retire_reservation(id);
-            return Err(pend_map_error(error));
-        }
-    };
-    let address = mapping.initial_start().as_usize();
-    let recorded = {
-        let _commit = crate::basis::commit();
-        let result = meta.record(token, space, mapping.clone());
-        if result.is_ok() && authorization.is_some() {
-            space.reservations.commit(id, mapping.clone());
-        }
-        result
-    };
-    if let Err(rejected) = recorded {
-        drop(mapping);
-        let _ = space.dispose(rejected);
-        space.retire_reservation(id);
-        if let Some(authorization) = &authorization {
-            authorization.leave_publish(id);
-        }
-        return Err(PendFail::Dead);
-    }
-    if let Some(authorization) = &authorization {
-        authorization.leave_publish(id);
-    }
-    Ok((address, size))
-}
-
-pub(crate) fn shut(meta: &Arc<Sharing>, token: PendId) -> Result<(), PendFail> {
-    let _operation = SharingOperation::acquire(meta).ok_or(PendFail::Busy)?;
-    meta.close_maps(Some(token))
 }
 
 /// 设备区域：借用的物理区间代替存储保留。

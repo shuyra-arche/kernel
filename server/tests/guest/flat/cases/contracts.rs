@@ -1,7 +1,6 @@
 use super::super::{
     Allocation, Flat, FlatError, FlatSource, Slot,
     storage::materialize::{Reservation, Step},
-    transfer::{Transfer, TransferError},
 };
 use super::*;
 use crate::basis::{
@@ -19,7 +18,7 @@ use core::{
     time::Duration,
 };
 use kernel_api::{
-    address::{PageIndex, PageOffset},
+    address::PageIndex,
     model::{
         cell::CellLevel,
         identity::{TaskId, TeamId},
@@ -251,15 +250,6 @@ fn run_worker(role: usize) -> ! {
                 Err(FlatError::Busy)
             ));
             assert!(matches!(case.source.whole().reside(), Err(FlatError::Busy)));
-            let outcome = Transfer::new(
-                case.source.whole(),
-                PageOffset::ZERO,
-                case.target.whole(),
-                PageOffset::ZERO,
-            )
-            .unwrap()
-            .execute(None);
-            assert_eq!(outcome.result, Err(TransferError::Busy));
             case.owner.close();
             case.release.store(true, Ordering::Release);
             case.done.fetch_or(2, Ordering::Release);
@@ -309,56 +299,25 @@ fn run_worker(role: usize) -> ! {
 }
 
 fn transfer(case: &Case) {
+    use kernel_api::model::flat::SlotVersion;
+    use super::super::residency::Error;
     let before = resident(&case.source, 0);
     unsafe { (before.1 as *mut u64).write_volatile(COOKIE) };
-    let (transaction, ()) = super::super::transaction::Transaction::claim(
-        &case.source.whole(),
-        PageIndex::ZERO,
-        &case.target.whole(),
-        PageIndex::ZERO,
-        None,
-        || Ok(()),
-    )
-    .unwrap();
-    assert!(matches!(
-        case.source.whole().materialize(),
-        Err(FlatError::Busy)
-    ));
-    assert!(matches!(
-        case.target.whole().materialize(),
-        Err(FlatError::Busy)
-    ));
-    drop(transaction);
+    // Test-owned promotion after all implicit materializers have exited. Real
+    // user Flats enter explicit residency before registration, not this way.
+    case.source.state.lock().explicit = true;
+    case.target.state.lock().explicit = true;
+    let from = case.source.whole();
+    let to = case.target.whole();
+    let initial = SlotVersion::INITIAL;
+    assert_eq!(from.transfer_to(initial, &to, SlotVersion::new(99).unwrap(), None), Err(Error::Stale));
     assert_eq!(resident(&case.source, 0), before);
-    assert!(case.target.can_materialize(PageIndex::ZERO).unwrap());
-    let outcome = Transfer::new(
-        case.source.whole(),
-        PageOffset::ZERO,
-        case.target.whole(),
-        PageOffset::ZERO,
-    )
-    .unwrap()
-    .execute(None);
-    assert_eq!(outcome.result, Ok(()));
+    let (source_stamp, target_stamp, _) = from.transfer_to(initial, &to, initial, None).unwrap();
     assert_eq!(resident(&case.target, 0), before);
-    assert!(matches!(
-        case.source.whole().materialize(),
-        Err(FlatError::Missing)
-    ));
-    let (transaction, ()) = super::super::transaction::Transaction::claim(
-        &case.target.whole(),
-        PageIndex::ZERO,
-        &case.source.whole(),
-        PageIndex::ZERO,
-        None,
-        || Ok(()),
-    )
-    .unwrap();
-    drop(transaction); // restore the old Missing destination, never Fresh
-    assert!(matches!(
-        case.source.whole().materialize(),
-        Err(FlatError::Missing)
-    ));
+    assert!(matches!(from.materialize(), Err(FlatError::Missing)));
+    assert_eq!(to.transfer_to(target_stamp, &from, initial, None), Err(Error::Stale));
+    assert_eq!(from.slot_version().unwrap(), source_stamp);
+    assert!(matches!(from.materialize(), Err(FlatError::Missing)));
     assert_eq!(unsafe { (before.1 as *const u64).read_volatile() }, COOKIE);
 }
 

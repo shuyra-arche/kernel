@@ -24,10 +24,6 @@ fn nested_offsets_are_relative_to_the_immediate_parent() {
         Window::Parent(PendRange::pages(2, 3).unwrap()).resolve(child),
         Ok(span(15, 3))
     );
-    assert_eq!(
-        Window::Source(PageOffset::new(15), PageCount::new(3).unwrap()).resolve(child),
-        Ok(span(15, 3))
-    );
 }
 
 #[test]
@@ -36,13 +32,6 @@ fn empty_expanding_and_overflowing_windows_are_denied() {
     for (offset, count) in [(0, 0), (0, 6), (5, 1), (usize::MAX, 1), (1, usize::MAX)] {
         assert_eq!(
             Window::Parent(PendRange::Pages { offset, count }).resolve(parent),
-            Err(PendFail::Denied)
-        );
-    }
-    for (offset, count) in [(12, 1), (18, 1), (13, 6), (usize::MAX, 1)] {
-        let (offset, count) = span(offset, count);
-        assert_eq!(
-            Window::Source(offset, count).resolve(parent),
             Err(PendFail::Denied)
         );
     }
@@ -147,23 +136,11 @@ fn ordinary_scope_resolution_cannot_select_another_mapping_or_category() {
 }
 
 #[test]
-fn source_coordinate_override_is_internal_and_still_cannot_escape_the_parent() {
+fn scope_must_match_the_explicit_parent_relative_descriptor() {
     let parent = PendScope::Pages(PendRange::Pages {
         offset: 13,
         count: 5,
     });
-    let inherited = PendScope::Pages(PendRange::Inherit);
-    assert_eq!(
-        Window::Source(PageOffset::new(15), PageCount::new(3).unwrap()).scope(parent, inherited),
-        Ok(PendScope::Pages(PendRange::Pages {
-            offset: 15,
-            count: 3
-        }))
-    );
-    assert_eq!(
-        Window::Source(PageOffset::new(12), PageCount::new(3).unwrap()).scope(parent, inherited),
-        Err(PendFail::Denied)
-    );
     assert_eq!(
         Window::Parent(PendRange::Inherit).scope(
             parent,

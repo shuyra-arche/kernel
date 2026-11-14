@@ -22,11 +22,6 @@ impl Authority {
         self.token == token
     }
 
-    /// 授权是否仍然有效（失效后 modifiable 为空）。
-    pub(super) fn permitted(&self) -> bool {
-        self.authority.modifiable().is_some()
-    }
-
     pub(super) fn authority(&self) -> Arc<Pend> {
         self.authority.clone()
     }

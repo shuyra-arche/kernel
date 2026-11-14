@@ -1,18 +1,12 @@
 //! Memory identities, ranges and placement descriptors.
 
 mod allocation;
-mod info;
 mod level;
-mod object;
 mod placement;
-mod slot;
 
 pub use allocation::Allocation;
-pub use info::{CellInfo, CellState};
 pub use level::CellLevel;
-pub use object::{CellAssociation, CellHandoff, CellObject, CellPosition};
 pub use placement::{Placement, PlacementAt, PlacementError};
-pub use slot::{ReferenceRange, SlotId};
 
 /// Existing alias for the 4 KiB ABI coordinate. This is not physical Cell geometry.
 pub use crate::address::PAGE_SIZE;

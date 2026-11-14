@@ -83,11 +83,6 @@ impl Hold {
         self.branch.as_ref().map(|(_, authority)| authority)
     }
 
-    /// Resolve current source and branch authority without creating a hardware hold.
-    pub(crate) fn resolve(&self) -> Option<FlatRange> {
-        self.resolve_window(self.offset, self.count)
-    }
-
     /// Absolute source coordinates stay within this Hold's immutable bounds.
     pub(crate) fn resolve_window(&self, offset: PageOffset, count: PageCount) -> Option<FlatRange> {
         let end = offset.get().checked_add(count.get())?;
@@ -137,45 +132,12 @@ pub(crate) struct HoldTable {
     sources: SpinLock<Tracking<SourceAuthorization>>,
 }
 
-/// 铸一个全局唯一的引用号；耗尽（或超出符号上界）即明确失败，不回收旧号。
-fn next_id() -> Result<usize, PendFail> {
-    static NEXT: crate::basis::name::Serial =
-        crate::basis::name::Serial::new(1, isize::MAX as usize);
-    NEXT.allocate().ok_or(PendFail::OutOfMemory)
-}
-
 impl HoldTable {
     pub(crate) const fn new() -> Self {
         Self {
             holds: SpinLock::new(Vec::new()),
             sources: SpinLock::new(Tracking::new()),
         }
-    }
-
-    /// 登记一份新引用；容量与弧先备齐，失败不留下半份引用。
-    pub(crate) fn insert(
-        &self,
-        source: Arc<SourceAuthorization>,
-        offset: PageOffset,
-        count: PageCount,
-        ceiling: Access,
-        branch: Option<(
-            kernel_api::model::identity::PendId,
-            Arc<crate::basis::pend::Pend>,
-        )>,
-    ) -> Result<usize, PendFail> {
-        let mut holds = self.holds.lock();
-        if holds.len() >= 1024 {
-            return Err(PendFail::OutOfMemory);
-        }
-        holds.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
-        let id = next_id()?;
-        let hold = Arc::try_new(Hold::new(source, offset, count, ceiling, branch))
-            .map_err(|_| PendFail::OutOfMemory)?;
-        self.track(hold.source())?;
-        hold.source().claim_hold();
-        holds.push((id, hold));
-        Ok(id)
     }
 
     /// Remember cleanup independently of public Slot registration. Must succeed
@@ -194,24 +156,6 @@ impl HoldTable {
         crate::basis::nest::memo::source::exports::withdraw(&self.sources, |source| {
             source.exported_by(task, token)
         })
-    }
-
-    pub(crate) fn get(&self, id: usize) -> Option<Arc<Hold>> {
-        self.holds
-            .lock()
-            .iter()
-            .find(|(known, _)| *known == id)
-            .map(|(_, hold)| hold.clone())
-    }
-
-    /// 解除这一份引用；只从这个表里摘掉它，不动其他引用，也不分配。
-    pub(crate) fn remove(&self, id: usize) -> Option<Arc<Hold>> {
-        let mut holds = self.holds.lock();
-        let at = holds.iter().position(|(known, _)| *known == id)?;
-        let (_, hold) = holds.remove(at);
-        drop(holds);
-        hold.source().release_hold();
-        Some(hold)
     }
 
     /// A removed Slot can still source foreign publications. Keep discovery until

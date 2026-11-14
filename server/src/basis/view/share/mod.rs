@@ -1,2 +1,1 @@
-//! Share access mode: explicit source adoption and CPU borrowing operations.
-pub(crate) mod lease;
+//! Share instances are derived from live Flat/Nest authority by Pend.

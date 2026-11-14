@@ -9,7 +9,6 @@ use kernel_api::{
 #[derive(Clone, Copy)]
 pub(crate) enum Window {
     Parent(PendRange),
-    Source(PageOffset, PageCount),
 }
 
 impl Window {
@@ -18,10 +17,9 @@ impl Window {
         parent: PendScope,
         requested: PendScope,
     ) -> Result<PendScope, PendFail> {
-        if let Self::Parent(range) = self {
-            if range != requested.range().unwrap_or(PendRange::Inherit) {
-                return Err(PendFail::Denied);
-            }
+        let Self::Parent(range) = self;
+        if range != requested.range().unwrap_or(PendRange::Inherit) {
+            return Err(PendFail::Denied);
         }
         let range = match (parent, requested) {
             (PendScope::Object, PendScope::Object)
@@ -69,7 +67,6 @@ impl Window {
                 parent.0.get().checked_add(offset).ok_or(PendFail::Denied)?,
                 PageCount::new(count).ok_or(PendFail::Denied)?,
             ),
-            Self::Source(offset, count) => (offset.get(), count),
         };
         let parent_end = parent
             .0

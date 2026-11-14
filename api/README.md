@@ -10,7 +10,7 @@ code or runtime state.
 | --- | --- |
 | `address` | PhysAddr, VirtAddr, PageIndex, PageOffset, PageCount and page geometry constants |
 | `model::identity` | TaskId, TeamId, PendId and Mark |
-| `model::cell` | SlotId, allocation, Cell objects, positions, handoffs and observations |
+| `model::cell` | CellLevel, checked physical allocation and placement geometry |
 | `model::modifiable` | Modifiable: write permission on a Pend |
 | `model::unit` | User-only creation, UnitTarget, control authorities, creation descriptors, queries and stable results |
 | `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
@@ -62,7 +62,7 @@ not as a universal physical allocation or page-table leaf size.
 
 | Concept | Current representation | Contract |
 | --- | --- | --- |
-| ABI base page | `address::BASE_PAGE_SIZE` / `BASE_PAGE_SHIFT` (aliases `PAGE_SIZE` / `PAGE_SHIFT`) | `PageCount`, `PageIndex`, `PageOffset`, `CellPosition.page` and Slot/mapping spans count fixed 4 KiB units |
+| ABI base page | `address::BASE_PAGE_SIZE` / `BASE_PAGE_SHIFT` (aliases `PAGE_SIZE` / `PAGE_SHIFT`) | `PageCount`, `PageIndex`, `PageOffset`, native Slot/Memo positions and mapping spans count fixed 4 KiB units |
 | Managed physical storage | `CellLevel`, size `2^(12 + 9*level)` | Each Cell is contiguous and aligned to its size; separate Cells need not be adjacent. Admission checks the active Sv mode and allocation checks physical capacity |
 | Hardware translation leaf | Selected by each MMU/IOMMU backend | RISC-V CPU Sv39 encodes 4 KiB, 2 MiB and 1 GiB leaves; Sv48 adds 512 GiB, Sv57 adds 256 TiB. Automatic coalescing currently stops at 1 GiB. External/IOMMU admits one whole level-0 or level-1 Cell per mapping, with 4 KiB leaves |
 
@@ -162,3 +162,7 @@ Use the [build/test commands](../README.md#build-and-test) and
 [Kernel verification guide](../server/tests/README.md). Host tests verify
 types and contracts; RV64 builds verify compilation; QEMU executes real
 guest traps and selected hardware paths. Neither replaces physical evidence.
+
+Retired Cell/Flat/Nest register calls and Share Create/Open/Shut declarations
+were removed from the source API. Use native bounded memory requests; see the
+[source migration](../docs/memory-migration.md). Retired numbers remain rejected.

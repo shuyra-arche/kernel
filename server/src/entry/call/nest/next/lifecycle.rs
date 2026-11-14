@@ -2,24 +2,24 @@
 //! release proceeds without ledger/result locks, retaining exact namespace IDs.
 use super::*;
 use crate::basis::nest::{Access, SpaceKind, authority::binding};
-use kernel_api::{
-    abi::call::nest::NestFail,
-    model::{
-        identity::Mark,
-        modifiable::Modifiable,
-        nest::{NestPhase, NestStatus, ReservationId, ReservationPhase},
-        pend::{CreationRights, NestScope, PendScope},
-    },
+use crate::basis::nest::{
+    Nest, Placement, PlacementAt, RegionKind, authority::binding::Error as BindingError,
+};
+use kernel_api::model::nest::ReserveRequest;
+use kernel_api::model::{
+    identity::Mark,
+    modifiable::Modifiable,
+    nest::{NestPhase, NestStatus, ReservationId, ReservationPhase},
+    pend::{CreationRights, NestScope, PendScope},
 };
 
-fn error(error: NestFail) -> Failure {
+fn error(error: BindingError) -> Failure {
     match error {
-        NestFail::OutOfMemory => Failure::OutOfMemory,
-        NestFail::Busy => Failure::Busy,
-        NestFail::Dead => Failure::Dead,
-        NestFail::NotAligned => Failure::NotAligned,
-        NestFail::AlreadyMapped => Failure::DestinationOccupied,
-        NestFail::NoRegion => Failure::NoRegion,
+        BindingError::OutOfMemory => Failure::OutOfMemory,
+        BindingError::Busy => Failure::Busy,
+        BindingError::NotAligned => Failure::NotAligned,
+        BindingError::AlreadyMapped => Failure::DestinationOccupied,
+        BindingError::NoRegion => Failure::NoRegion,
         _ => Failure::Denied,
     }
 }
@@ -50,7 +50,7 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
             }
             let prepared = nest
                 .reserve_reservation(
-                    super::super::placement(&nest, reservation).map_err(error)?,
+                    placement(&nest, reservation).map_err(error)?,
                     reservation.level,
                     access,
                     actor.ident.id,
@@ -60,7 +60,7 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
             span.faults.lock().enable_native();
             let id = ReservationId::from_bytes(&(span.identity() as u64).to_le_bytes())
                 .expect("reservation identity");
-            let grant = pend::prepare_native_reservation(actor, &parent, id, reservation.count)
+            let grant = pend::prepare_reservation(actor, &parent, id, reservation.count)
                 .map_err(pend_error)?;
             let token = grant.entry().token();
             let span = prepared
@@ -270,5 +270,44 @@ pub(super) fn effect(
             Ok(value)
         }
         _ => Err(Failure::Unsupported),
+    }
+}
+
+fn placement(nest: &Nest, request: ReserveRequest) -> Result<Placement, BindingError> {
+    let size = request
+        .count
+        .checked_bytes()
+        .ok_or(BindingError::NotAligned)?;
+    let at = match request.placement.at() {
+        kernel_api::model::cell::PlacementAt::Lowest => PlacementAt::Lowest,
+        kernel_api::model::cell::PlacementAt::Highest => PlacementAt::Highest,
+        kernel_api::model::cell::PlacementAt::Exact(address) => {
+            // CPU reservations belong to the Team's Normal window. External
+            // exact addresses use the backend geometry checked by reserve_reservation;
+            // their Layout only records occupancy and has no dynamic windows.
+            if !nest.is_external() {
+                if !Nest::user_range(address, size) {
+                    return Err(BindingError::NotAligned);
+                }
+                if !nest.window_contains(RegionKind::Normal, address, size) {
+                    return Err(BindingError::NoRegion);
+                }
+            }
+            PlacementAt::Exact(address)
+        }
+    };
+    Placement::new(RegionKind::Normal, size, request.placement.align(), at)
+        .map_err(|error| placement_error(error.into()))
+}
+
+fn placement_error(error: crate::basis::nest::NestError) -> BindingError {
+    use crate::basis::nest::NestError;
+    match error {
+        NestError::OutOfMemory => BindingError::OutOfMemory,
+        NestError::Busy | NestError::Shootdown => BindingError::Busy,
+        NestError::NotAligned => BindingError::NotAligned,
+        NestError::AlreadyMapped => BindingError::AlreadyMapped,
+        NestError::NoRegion | NestError::Missing | NestError::NotMapped => BindingError::NoRegion,
+        _ => BindingError::Denied,
     }
 }

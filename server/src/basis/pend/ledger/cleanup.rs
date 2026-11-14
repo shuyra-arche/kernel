@@ -1,10 +1,11 @@
 //! Logical closure is local; postorder withdrawal advances a bounded leaf batch.
 //! The root stays registered on Busy until all descendant obligations settle.
 use super::entry::PendEntry;
+use crate::basis::nest::memo::AccessError;
 use crate::basis::{flat::sharing::SharingOperation, unit::task::Task};
 use alloc::sync::{Arc, Weak};
 use kernel_api::{
-    abi::call::{cell::CellFail, pend::PendFail},
+    abi::call::pend::PendFail,
     model::{
         identity::PendId,
         pend::{NestScope, PendScope},
@@ -175,10 +176,10 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
     Err(PendFail::Busy)
 }
 
-fn reservation_failure(error: CellFail) -> PendFail {
+fn reservation_failure(error: AccessError) -> PendFail {
     match error {
-        CellFail::Busy => PendFail::Busy,
-        CellFail::OutOfMemory => PendFail::OutOfMemory,
+        AccessError::Busy => PendFail::Busy,
+        AccessError::OutOfMemory => PendFail::OutOfMemory,
         _ => PendFail::Denied,
     }
 }

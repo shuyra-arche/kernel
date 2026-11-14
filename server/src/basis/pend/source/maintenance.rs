@@ -1,6 +1,7 @@
 //! References to one native maintenance epoch. The range record owns admission;
 //! Memo owns each use and its hardware receipt. Weak lists only discover cleanup.
 use super::{RangeBlock, SourceAuthorization};
+use crate::basis::nest::memo::AccessError;
 use crate::basis::{
     cell::page::{Maintenance, Page, PageId},
     nest::{Access, Nest, Span, memo::source::Source},
@@ -12,7 +13,7 @@ use alloc::{
     vec::Vec,
 };
 use kernel_api::{
-    abi::call::{cell::CellFail, pend::PendFail},
+    abi::call::pend::PendFail,
     model::{
         flat::{BlockPhase, BlockRef},
         modifiable::Modifiable,
@@ -50,22 +51,22 @@ impl MaintenanceUse {
         index: usize,
         generation: u64,
         access: Access,
-    ) -> Result<Arc<Self>, CellFail> {
+    ) -> Result<Arc<Self>, AccessError> {
         let (owner, entry) = block.owner_entry().map_err(failure)?;
         if !Arc::ptr_eq(&owner, actor)
             || (!nest.is_external() && !Arc::ptr_eq(nest, &actor.ident.team.nest))
         {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         let origin = entry
             .target()
             .memory()
             .and_then(|m| m.authorization())
-            .ok_or(CellFail::Denied)?;
+            .ok_or(AccessError::Denied)?;
         let range = source.check(access)?;
         let staged = !block.covers(&range);
         if staged && !range.staged_by(&block, page.id()) {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         let permit = block.permit(page).map_err(failure)?;
         let usage = Arc::try_new(Self {
@@ -79,14 +80,14 @@ impl MaintenanceUse {
             generation,
             staged,
         })
-        .map_err(|_| CellFail::OutOfMemory)?;
+        .map_err(|_| AccessError::OutOfMemory)?;
         usage.check(source, access)?;
         let mut uses = block.uses.lock();
         uses.retain(|u| u.strong_count() != 0);
         if uses.len() >= 1024 {
-            return Err(CellFail::OutOfMemory);
+            return Err(AccessError::OutOfMemory);
         }
-        uses.try_reserve(1).map_err(|_| CellFail::OutOfMemory)?;
+        uses.try_reserve(1).map_err(|_| AccessError::OutOfMemory)?;
         uses.push(Arc::downgrade(&usage));
         Ok(usage)
     }
@@ -102,15 +103,15 @@ impl MaintenanceUse {
     pub(crate) fn source_owner(&self, _source: &Source) -> Option<Arc<Pend>> {
         Some(self.block.owner())
     }
-    pub(crate) fn check(&self, source: &Source, access: Access) -> Result<(), CellFail> {
+    pub(crate) fn check(&self, source: &Source, access: Access) -> Result<(), AccessError> {
         self.check_retained(source, access)?;
         let range = source.check(access)?;
         if self.staged {
             if !range.staged_by(&self.block, self.permit.change().page().id()) {
-                return Err(CellFail::Denied);
+                return Err(AccessError::Denied);
             }
         } else if !Arc::ptr_eq(source.source(), &self.origin) || !self.block.covers(&range) {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         let (offset, count) = self.block.window();
         self.origin
@@ -121,13 +122,17 @@ impl MaintenanceUse {
     }
     /// Recheck a registered publication without treating its own External loan
     /// as revoked data authority. The retained receipt prevents holding moves.
-    pub(crate) fn check_retained(&self, source: &Source, access: Access) -> Result<(), CellFail> {
+    pub(crate) fn check_retained(
+        &self,
+        source: &Source,
+        access: Access,
+    ) -> Result<(), AccessError> {
         let (_, entry) = self.block.owner_entry().map_err(failure)?;
         if self.block.reference() != self.reference
             || self.block.phase() != BlockPhase::Held
             || source.retiring()
         {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         if self.staged {
             if !self.block.staged_access(access)
@@ -135,7 +140,7 @@ impl MaintenanceUse {
                 || access.contains(Access::WRITE) && entry.modifiable() != Modifiable::Yes
                 || !self.origin.ceiling().contains(access)
             {
-                return Err(CellFail::Denied);
+                return Err(AccessError::Denied);
             }
         }
         let (offset, count) = self.block.window();
@@ -230,10 +235,10 @@ impl RangeBlock {
         }
     }
 }
-fn failure(error: PendFail) -> CellFail {
+fn failure(error: PendFail) -> AccessError {
     match error {
-        PendFail::Busy => CellFail::Busy,
-        PendFail::OutOfMemory => CellFail::OutOfMemory,
-        _ => CellFail::Denied,
+        PendFail::Busy => AccessError::Busy,
+        PendFail::OutOfMemory => AccessError::OutOfMemory,
+        _ => AccessError::Denied,
     }
 }

@@ -27,18 +27,6 @@ pub(crate) fn withdraw_source_branch(
     Ok(())
 }
 
-pub(crate) fn withdraw_source(
-    source: &Arc<SourceAuthorization>,
-    clear: bool,
-) -> Result<(), PendFail> {
-    source.retire_origins(None, None)?;
-    for binding in source.bindings()? {
-        let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
-        nest.withdraw_source(&binding, source, None, None, clear)?;
-    }
-    Ok(())
-}
-
 pub(crate) fn withdraw_source_window(
     source: &Arc<SourceAuthorization>,
     block: &RangeBlock,

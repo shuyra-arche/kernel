@@ -4,19 +4,6 @@ use alloc::{sync::Arc, vec::Vec};
 use core::{alloc::Layout, mem::ManuallyDrop, ptr::NonNull};
 use kernel_api::model::cell::CellLevel;
 impl Page {
-    pub(crate) fn reshape(
-        pages: &mut Vec<Arc<Self>>,
-        level: CellLevel,
-    ) -> Result<Vec<Arc<Self>>, PageError> {
-        Self::reshape_with(pages, level, |pages| {
-            if pages.iter().any(|page| {
-                Arc::strong_count(page) != 1 || Arc::weak_count(page) != 0 || !page.allows_return()
-            }) {
-                return Err(PageError::Busy);
-            }
-            Ok(())
-        })
-    }
     /// Prepare identities/layout before the caller consumes its exact settled
     /// gates. The callback must leave exclusive Pages on success; on failure it
     /// must preserve the complete original gate set.

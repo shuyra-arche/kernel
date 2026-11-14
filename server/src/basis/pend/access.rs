@@ -179,30 +179,6 @@ impl Reservation {
         self.nest().reservation(self.id()).ok_or(PendFail::Dead)
     }
 
-    pub(crate) fn page(&self, relative: usize) -> Result<usize, PendFail> {
-        let grain = self.span()?.grain();
-        let (offset, count) = self.entry.authority().window().ok_or(PendFail::Denied)?;
-        if !relative.is_multiple_of(grain)
-            || relative
-                .checked_add(grain)
-                .is_none_or(|end| end > count.get())
-        {
-            return Err(PendFail::NotAligned);
-        }
-        let page = offset
-            .get()
-            .checked_add(relative)
-            .ok_or(PendFail::NotAligned)?;
-        let position = kernel_api::model::nest::MemoPosition::new(
-            self.entry.token(),
-            self.nest().id(),
-            self.id(),
-            page,
-        )
-        .ok_or(PendFail::NotAligned)?;
-        self.position(position)
-    }
-
     /// The v10 adapter above normalizes once. The common resolver never adds
     /// the current Pend window to a fixed Reservation-origin coordinate.
     pub(crate) fn position(

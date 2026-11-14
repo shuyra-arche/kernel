@@ -1,7 +1,8 @@
 use crate::authority::Pend;
+use crate::basis::nest::memo::AccessError;
 pub(crate) use crate::ledger::PendEntry;
 use kernel_api::{
-    abi::call::{cell::CellFail, pend::PendFail},
+    abi::call::pend::PendFail,
     address::{PageCount, PageOffset},
     model::{
         cell::CellLevel,
@@ -240,10 +241,10 @@ impl Nest {
         self.complete(id, Some(publisher));
         Ok(())
     }
-    pub(crate) fn release_reservation(&self, id: ReservationId) -> Result<(), CellFail> {
-        let count = self.reservation_count(id).ok_or(CellFail::Denied)?;
+    pub(crate) fn release_reservation(&self, id: ReservationId) -> Result<(), AccessError> {
+        let count = self.reservation_count(id).ok_or(AccessError::Denied)?;
         if self.busy.load(Ordering::Acquire) {
-            return Err(CellFail::Busy);
+            return Err(AccessError::Busy);
         }
         self.complete(id, None);
         self.released.lock().unwrap().push((id, count));

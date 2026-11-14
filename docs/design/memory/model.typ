@@ -92,19 +92,12 @@ association at the same position.
    for a mapping transition, the position's expected generation.],
 )
 
-At the ABI boundary, `CellObject` selects a Task-local `SlotId` or a
-live `PendId`. Slot positions resolve their current holding in Flat;
-mapping positions resolve Nest's own per-position state. A Flat/Share Pend can supply a
-Page for Insert; a Mapping-scoped Nest Pend authorizes a mapping
-position. A descriptive `MappingId` names the reservation, not its
-authority. There is no public Memo target or rights family.
-
-#design-table(
-  table.header([*Coordinate*], [*Meaning and rule*]),
-  [`CellObject::Slot`], [Selects the current unique holding through a Task-local Slot. It is not a historical content snapshot.],
-  [`CellObject::Pend`], [Selects through a live Pend whose actual family, scope and operations the Kernel checks. A descriptive ID cannot replace it.],
-  [`CellPosition`], [Adds a relative position and a generation in 32 bytes. Slot and Flat/Share source positions use generation zero; mapping transitions reject stale generations.],
-)
+At the ABI 11 boundary, native `SlotPosition` selects a Flat's unique holding
+using its live Pend, source identity and absolute position. `MemoPosition`
+selects a generation-qualified Nest reservation position. Insert retains a
+logical Flat/Share or prior Memo source; publication captures a physical Page
+only after live authorization and generation checks. A ReservationId describes
+a reservation and never replaces its Pend authority.
 
 A logical ABI coordinate is a fixed 4 KiB unit, *not* a promise that
 physical Cells or translation leaves are all 4 KiB. `CellLevel` chooses
@@ -116,7 +109,7 @@ mapping admits one complete level-0 or level-1 Cell, with 4 KiB IOMMU leaves.
 
 #text(size: 9pt)[
   Implementation: #source("https://github.com/shuyra-arche/kernel/blob/main/server/src/basis/cell/mod.rs", [Cell])
-  · #source("https://github.com/shuyra-arche/kernel/blob/main/api/src/model/cell/object.rs", [CellPosition])
+  · #source("https://github.com/shuyra-arche/kernel/blob/main/api/src/abi/memory/request.rs", [Native memory requests])
   · #source("https://github.com/shuyra-arche/kernel/blob/main/api/src/model/cell/level.rs", [CellLevel])
 ]
 

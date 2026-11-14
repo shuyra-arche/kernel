@@ -1,6 +1,5 @@
 //! Share Views and Pend-authorized CPU mappings.
 use crate::address::VirtAddr;
-use crate::model::cell::SlotId;
 use crate::model::identity::PendId;
 
 pub type ShareResult<T> = Result<T, erra::Error<ShareFail>>;
@@ -19,26 +18,9 @@ pub mod operations {
         /// This source has no qualified CPU activity provider or supported geometry.
         Unsupported = -7,
     }
-    #[operation(slot = 0, output = super::PendId, error = ShareFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Create {
-        pub license: super::PendId,
-        pub reference: super::SlotId,
-        pub modifiable: crate::model::modifiable::Modifiable,
-    }
     #[operation(slot = 1, output = (), error = ShareFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Delete {
-        pub token: super::PendId,
-    }
-    #[operation(slot = 2, output = (super::VirtAddr, usize), error = ShareFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Open {
-        pub token: super::PendId,
-    }
-    #[operation(slot = 3, output = (), error = ShareFail)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Shut {
         pub token: super::PendId,
     }
     /// Native v11 source derivation. `request` points to one AccordRequest;

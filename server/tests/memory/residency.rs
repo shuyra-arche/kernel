@@ -303,16 +303,12 @@ fn vacate_waits_for_software_holders_weak_discovery_and_exact_retirement() {
 }
 
 #[test]
-fn explicit_sources_reject_legacy_transfers_and_unsettled_vacate_keeps_version() {
+fn implicit_sources_reject_native_occupy_and_unsettled_vacate_keeps_version() {
     let mut state = fresh();
     let pool = Pool::new(0);
     let (stamp, _) = state
         .occupy(PageIndex::ZERO, SlotVersion::INITIAL, page(pool))
         .unwrap();
-    assert_eq!(
-        state.source_ready(PageIndex::ZERO),
-        Err(crate::transfer_error::TransferError::NotTransferable)
-    );
     let held = resident(&state);
     let change = held.begin().unwrap();
     assert_eq!(

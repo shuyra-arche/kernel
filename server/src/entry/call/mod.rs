@@ -9,7 +9,6 @@ use crate::basis::unit::task::TaskIdent;
 use crate::metal::switcher::context::Gprs;
 use crate::metal::switcher::context::TrapContext;
 
-pub(in crate::entry) mod cell;
 mod debug;
 mod flat;
 mod nest;
@@ -74,13 +73,10 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
             match envcall {
                 EnvCall::Room(_) => ret_err(frame, abi::room::RoomFail::Denied),
                 EnvCall::Unit(_) => ret_err(frame, abi::unit::UnitFail::Denied),
-                EnvCall::Cell(_) => ret_err(frame, abi::cell::CellFail::Denied),
-                EnvCall::Flat(_) => ret_err(frame, abi::flat::FlatFail::Denied),
                 EnvCall::Clone(_) => ret_err(frame, abi::clone_view::CloneFail::Denied),
                 EnvCall::Share(_) => ret_err(frame, abi::share_view::ShareFail::Denied),
                 EnvCall::Sign(_) => ret_err(frame, abi::sign::SignFail::Denied),
                 EnvCall::Pend(_) => ret_err(frame, abi::pend::PendFail::Denied),
-                EnvCall::Nest(_) => ret_err(frame, abi::nest::NestFail::Denied),
                 EnvCall::Debug(_) => ret_err(frame, abi::debug::DebugFail::Denied),
             }
             return Some(frame as *mut TrapContext);
@@ -89,21 +85,9 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
     let outcome = match envcall {
         EnvCall::Room(call) => room::dispatch(frame, call, ident),
         EnvCall::Unit(call) => unit::dispatch(frame, call, ident),
-        EnvCall::Cell(call) => {
-            cell::dispatch(frame, call, &ident);
-            Outcome::Resume
-        }
         EnvCall::Clone(call) => view::clone::dispatch(frame, call, ident),
         EnvCall::Share(call) => view::share::dispatch(frame, call, ident),
         EnvCall::Sign(call) => sign::dispatch(frame, call, ident),
-        EnvCall::Flat(call) => {
-            flat::dispatch(frame, call, &ident);
-            Outcome::Resume
-        }
-        EnvCall::Nest(call) => {
-            nest::dispatch(frame, call, &ident);
-            Outcome::Resume
-        }
         EnvCall::Pend(call) => {
             pend::dispatch(frame, call, ident);
             Outcome::Resume
