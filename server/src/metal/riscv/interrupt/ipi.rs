@@ -9,7 +9,13 @@ static WAKE: [AtomicBool; crate::metal::layout::MAX_HART_SLOTS] =
 /// Order the local clear before the caller inspects its work queues. A sender
 /// racing that snapshot either publishes visible work or leaves an interrupt.
 pub(crate) fn acknowledge() -> bool {
+    #[cfg(feature = "latency")]
+    let arrived = riscv::register::sip::read().ssoft();
     unsafe { core::arch::asm!("csrci sip, 2", "fence o, rw", options(nostack)) };
+    #[cfg(feature = "latency")]
+    if arrived {
+        crate::metal::measure::ipi_received();
+    }
     // Idle consumes SSIP directly with SIE masked, without entering the trap
     // handler. Service after clearing so a racing request is observed here or
     // leaves the next interrupt pending.

@@ -170,6 +170,31 @@ jobs:
         run: python3 server/tests/guest/flat/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/flat-debug
       - name: Check implicit Flat contracts (release, 1/4 Harts)
         run: python3 server/tests/guest/flat/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/flat-release --profile release
+      - name: Check native UART contracts (debug, 1/4 Harts)
+        run: python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/room-irq-debug --mode irq --events 16 --profile debug --rounds 1
+      - name: Check native UART contracts (release, 1/4 Harts)
+        run: python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/room-irq-release --mode irq --events 16 --profile release --rounds 1
+      - name: Check native scheduling contracts (debug, 4 Harts)
+        run: python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/room-rt-debug --mode realtime --profile debug --rounds 1 --harts 4
+      - name: Check native scheduling contracts (release, 4 Harts)
+        run: python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/room-rt-release --mode realtime --profile release --rounds 1 --harts 4
+      - name: Preserve native Room evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-room
+          include-hidden-files: true
+          path: |
+            .integration/room-*/order.json
+            .integration/room-*/candidate/inputs.json
+            .integration/room-*/candidate/composition.diff
+            .integration/room-*/candidate/build.log
+            .integration/room-*/candidate/harts-*/*.log
+            .integration/room-*/candidate/harts-*/result.json
+            .integration/room-*/candidate/composition/tests/memory/Cargo.lock
+            .integration/room-*/candidate/composition/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-*
+            .integration/room-*/candidate/composition/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-*
+          if-no-files-found: warn
       - name: Preserve implicit Flat evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -193,3 +218,72 @@ jobs:
           name: native-memory
           path: .integration/vanllia/tests/memory/target/evidence/
           if-no-files-found: error
+
+  room-comparison:
+    name: Opt-in Room comparison
+    if: >-
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.body, 'Room comparison: requested')
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 20
+    env:
+      QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
+    steps:
+      - name: Install comparison tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi python3
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+          sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN" --target riscv64gc-unknown-none-elf
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select published control
+        id: control
+        run: python3 server/tests/latency/ci.py --event "$GITHUB_EVENT_PATH" >> "$GITHUB_OUTPUT"
+      - name: Fetch control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.control.outputs.sha }}
+          path: .integration/room-control
+          persist-credentials: false
+      - name: Fetch native composition
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: shuyra-arche/vanllia
+          ref: dd32c35dbb67e2e78edb00ad35f968d16423249e
+          path: .integration/vanllia
+          sparse-checkout: |
+            tests/memory
+            platform/riscv
+          persist-credentials: false
+      - name: Compare fixed Room and UART workloads
+        run: |
+          for mode in room irq; do
+            python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --baseline .integration/room-control --fixture .integration/vanllia --output ".integration/compare-$mode-on" --mode "$mode" --rounds 5
+            python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --baseline .integration/room-control --fixture .integration/vanllia --output ".integration/compare-$mode-off" --mode "$mode" --rounds 5 --no-latency
+          done
+      - name: Fetch original provider for first-use study
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 5ec49757b92e129822a50e543a999fb4ea509036
+          path: .integration/room-first-use
+          persist-credentials: false
+      - name: Separate first timed wake from warmed scheduling
+        run: python3 server/tests/latency/run.py --kernel .integration/room-first-use --fixture .integration/vanllia --output .integration/compare-warmup-on --mode room --harts 1 --rounds 5 --compare-room-warmup
+      - name: Preserve every comparison boot
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: room-comparison
+          include-hidden-files: true
+          path: |
+            .integration/compare-*/order.json
+            .integration/compare-*/*/inputs.json
+            .integration/compare-*/*/composition.diff
+            .integration/compare-*/*/build.log
+            .integration/compare-*/*/harts-*/*.log
+            .integration/compare-*/*/harts-*/result.json
+            .integration/compare-*/*/composition/tests/memory/Cargo.lock
+            .integration/compare-*/*/composition/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-*
+          if-no-files-found: warn

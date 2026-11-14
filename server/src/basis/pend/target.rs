@@ -207,7 +207,7 @@ impl Target {
         Ok(authority)
     }
     pub(crate) fn release_pend(&self, token: PendId) {
-        crate::basis::room::interrupt::withdraw(token);
+        crate::basis::room::interrupt::withdraw(token, self);
         match self {
             Self::None { .. } | Self::Nest { .. } => {}
             Self::Flat(meta) => meta.release_pend(token),
@@ -216,7 +216,7 @@ impl Target {
         }
     }
     pub(crate) fn changed(&self, token: PendId, routing: bool) {
-        crate::basis::room::interrupt::withdraw(token);
+        crate::basis::room::interrupt::withdraw(token, self);
         if let Self::Sign(sign) = self {
             if !routing {
                 endpoint::release_authority(sign, token);
