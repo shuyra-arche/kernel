@@ -112,9 +112,13 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
 }
 
 #[test]
-fn concurrent_observers_cannot_replace_the_initiators_exact_request() {
+fn editing_owner_claims_its_batch_before_concurrent_retry_observers() {
     let pending = Mutex::new(Retirement::new());
-    pending.lock().unwrap().mark_dirty(true);
+    let original = {
+        let mut pending = pending.lock().unwrap();
+        pending.mark_dirty(true);
+        pending.begin(7, 3).unwrap()
+    };
     let barrier = Barrier::new(9);
     let targets = std::thread::scope(|scope| {
         let workers: Vec<_> = (0..8)
@@ -131,19 +135,18 @@ fn concurrent_observers_cannot_replace_the_initiators_exact_request() {
             .map(|worker| worker.join().unwrap())
             .collect::<Vec<_>>()
     });
-    assert_eq!(targets.iter().filter(|target| target.is_ok()).count(), 1);
+    assert!(targets.iter().all(Result::is_err));
     assert_eq!(
         targets
             .iter()
             .filter(|target| matches!(target, Err(NestError::Busy)))
             .count(),
-        7
+        8
     );
-    let target = targets.into_iter().find_map(Result::ok).unwrap();
-    assert_eq!(target.scope, Scope::Global);
+    assert_eq!(original.scope, Scope::Global);
     let mut pending = pending.lock().unwrap();
     pending
-        .complete(scope::invalidate(&Cpu, target).unwrap(), &mut Memos::new())
+        .complete(scope::invalidate(&Cpu, original).unwrap(), &mut Memos::new())
         .unwrap();
     assert_eq!(pending.invalidation(), Invalidation::Clean);
     assert!(matches!(pending.begin(7, 3), Err(NestError::Busy)));

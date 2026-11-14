@@ -20,6 +20,11 @@ finish before the first occupancy or PTE withdrawal; the commit does not allocat
 
 `Retirement::begin` admits only Dirty or Failed. The initiator records its exact
 request under the Nest lock, then owns one synchronous backend invocation.
+Native Publish/Protect and withdrawal claim that request in the same Nest
+critical section as their PTE edits. A retry observer cannot steal initiation
+between an accepted mutation and its fence, making the editor report Busy for
+work that the observer is already completing. The editor releases all commit
+and resource locks before invoking its exact request.
 Concurrent Fencing observers return `NestError::Busy` without polling or
 replacing the request. `ready_state` makes at most one invalidation attempt per
 turn and rechecks open admission; `close` similarly refuses a newly dirty batch
