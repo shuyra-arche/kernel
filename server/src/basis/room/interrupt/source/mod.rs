@@ -26,6 +26,8 @@ use state::{Action, Holder, State};
 pub(crate) struct Source {
     pub(crate) irq: Irq,
     pub(crate) region: usize,
+    /// Immutable, never-reused router registration slot; not the hardware line.
+    pub(super) maintenance_slot: usize,
     pub(crate) endpoint: Arc<Endpoint>,
     view: OnceLock<Arc<Sharing>>,
     state: SpinLock<State<Receiver>>,
@@ -36,17 +38,48 @@ struct Receiver {
     sign: Weak<PendEntry>,
 }
 impl Source {
-    pub(super) fn new(irq: Irq, region: usize) -> Result<Self, PendFail> {
+    pub(super) fn new(irq: Irq, region: usize, maintenance_slot: usize) -> Result<Self, PendFail> {
         Ok(Self {
             irq,
             region,
+            maintenance_slot,
             endpoint: Endpoint::try_new(TaskId::new(0)).map_err(|_| PendFail::OutOfMemory)?,
             view: OnceLock::new(),
             state: SpinLock::new_level(Level::L3, State::new()),
         })
     }
+    pub(super) fn matches(&self, sign: Option<&Endpoint>, view: Option<&Sharing>) -> bool {
+        sign.is_some_and(|known| core::ptr::eq(known, &*self.endpoint))
+            || view.is_some_and(|known| {
+                self.view
+                    .get()
+                    .is_some_and(|view| core::ptr::eq(known, &**view))
+            })
+    }
+    pub(super) fn request(&self) {
+        super::external()
+            .expect("source router")
+            .request(self.maintenance_slot);
+    }
     pub(super) fn associate(&self, view: Arc<Sharing>) -> Result<(), PendFail> {
         self.view.set(view).map_err(|_| PendFail::Denied)
+    }
+    /// A receiver needs the current complete writable View association, not a
+    /// retired Share.Open operation or a copied permission snapshot.
+    fn covers_view(&self, entry: &PendEntry) -> bool {
+        let Some(shared) = self.view.get() else {
+            return false;
+        };
+        entry
+            .target()
+            .share_view()
+            .is_some_and(|view| Arc::ptr_eq(&view, shared))
+            && entry.modifiable() == Modifiable::Yes
+            && entry.allows(pend::Need::Write)
+            && entry.permits(Operations::Share(ShareRights::ASSOCIATE))
+            && entry.authority().window().is_none_or(|(offset, count)| {
+                offset.get() == 0 && count == shared.source().page_count()
+            })
     }
     fn live(&self) -> bool {
         let (task, view, sign) = {
@@ -57,9 +90,7 @@ impl Source {
             (b.task.upgrade(), b.view.upgrade(), b.sign.upgrade())
         };
         task.is_some_and(|t| pend::live(&t))
-            && view.is_some_and(|v| {
-                v.allows(pend::Need::Write) && v.permits(Operations::Share(ShareRights::OPEN))
-            })
+            && view.is_some_and(|v| self.covers_view(&v))
             && sign.is_some_and(|s| {
                 s.permits(Operations::Sign(SignRights::LISTEN | SignRights::CONSUME))
             })
@@ -73,24 +104,12 @@ impl Source {
         {
             return Err(PendFail::Denied);
         }
-        let shared = self.view.get().ok_or(PendFail::Denied)?;
         let view = task
             .pend
             .entries
             .lock()
             .iter()
-            .find(|entry| {
-                entry
-                    .target()
-                    .share_view()
-                    .is_some_and(|v| Arc::ptr_eq(&v, shared))
-                    && entry.modifiable() == Modifiable::Yes
-                    && entry.allows(pend::Need::Write)
-                    && entry.permits(Operations::Share(ShareRights::OPEN))
-                    && entry.authority().window().is_none_or(|(offset, count)| {
-                        offset.get() == 0 && count == shared.source().page_count()
-                    })
-            })
+            .find(|entry| self.covers_view(entry))
             .cloned()
             .ok_or(PendFail::Denied)?;
         if !self.live() {
@@ -116,7 +135,7 @@ impl Source {
                 sequence,
             )
             .expect("preflighted source binding under COMMIT");
-        super::external().expect("source router").request();
+        self.request();
         Ok(())
     }
     pub(super) fn authorize(&self, task: &Task, token: PendId) -> Result<(), SignFail> {
@@ -151,7 +170,7 @@ impl Source {
         }
         self.state.lock().detach();
         endpoint::discard(&self.endpoint);
-        super::external().expect("source router").request();
+        self.request();
     }
     pub(super) fn deliver(&self) -> bool {
         if !self.live() {
@@ -172,6 +191,10 @@ impl Source {
         false
     }
     pub(super) fn maintain(&self) {
+        let commit = crate::basis::commit();
+        #[cfg(feature = "latency")]
+        let measure =
+            crate::metal::measure::scope(crate::metal::measure::Work::IrqMaintenance, &commit);
         if !self.live() {
             self.detach();
         }
@@ -189,9 +212,12 @@ impl Source {
                 .expect("source router")
                 .finish(self.irq, true),
         }
+        #[cfg(feature = "latency")]
+        drop(measure);
+        drop(commit);
         if announce && endpoint::announce(&self.endpoint) {
             self.state.lock().request_notice();
-            super::external().expect("source router").request();
+            self.request();
         }
     }
 }

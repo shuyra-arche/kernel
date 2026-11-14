@@ -349,12 +349,22 @@ pub fn redeem() -> bool {
         deadline::retry();
         return false;
     };
+    #[cfg(feature = "latency")]
+    let _measure = crate::metal::measure::scope(crate::metal::measure::Work::SignRedeem, &_commit);
     const MAX_DUE: usize = 64;
     let mut due = [0u64; MAX_DUE];
-    let n = deadline::drain(clock::now(), &mut due);
+    let n = {
+        #[cfg(feature = "latency")]
+        let _measure =
+            crate::metal::measure::scope(crate::metal::measure::Work::DueDrain, &_commit);
+        deadline::drain(clock::now(), &mut due)
+    };
     let mut tasks: [Option<Arc<Task>>; MAX_DUE] = [const { None }; MAX_DUE];
     let mut woken = 0usize;
     for (slot, &handle) in tasks.iter_mut().zip(&due[..n]) {
+        #[cfg(feature = "latency")]
+        let _measure =
+            crate::metal::measure::scope(crate::metal::measure::Work::WaitDetach, &_commit);
         let Some((key, holder)) = void(Ticket(handle)) else {
             continue;
         };
@@ -369,6 +379,8 @@ pub fn redeem() -> bool {
         woken += 1;
     }
     let _ = woken;
+    #[cfg(feature = "latency")]
+    let _measure = crate::metal::measure::scope(crate::metal::measure::Work::ReadyWake, &_commit);
     rise(
         tasks.iter_mut().filter_map(Option::take),
         crate::basis::room::scheduler::insert,

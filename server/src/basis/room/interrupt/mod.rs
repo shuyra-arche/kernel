@@ -1,8 +1,10 @@
 //! One router owns all sources on the admitted controller: reserved queues and
 //! driver notifications never independently overwrite its enable words.
+mod progress;
 use self::source::Source;
 use crate::basis::sign::endpoint::Endpoint;
 use crate::metal::sync::OnceLock;
+use crate::metal::sync::TrapGuard;
 use crate::metal::{
     generic::interrupt::{Delivery, Irq},
     hart,
@@ -15,6 +17,7 @@ use core::sync::atomic::AtomicU64;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::boot::platform::riscv::devices::Plic as Plan;
+use progress::{BATCH, Claim, Progress};
 static CLAIMED: AtomicUsize = AtomicUsize::new(0);
 
 fn note_external() {
@@ -52,10 +55,18 @@ pub(crate) fn authorize(
     }
     Ok(())
 }
-pub(crate) fn withdraw(token: kernel_api::model::identity::PendId) {
+pub(crate) fn withdraw(
+    token: kernel_api::model::identity::PendId,
+    target: &crate::basis::pend::Target,
+) {
+    let sign = target.sign();
+    let view = target.memory();
+    if sign.is_none() && view.is_none() {
+        return;
+    }
     if let Some(route) = external() {
         let _commit = crate::basis::commit();
-        route.withdraw(token);
+        route.withdraw(token, sign.as_deref(), view.as_deref());
     }
 }
 pub(crate) fn region(sign: &crate::basis::sign::endpoint::Endpoint) -> Option<usize> {
@@ -72,15 +83,15 @@ pub(crate) fn identifies(
 }
 
 pub(crate) fn consumed(endpoint: &crate::basis::sign::endpoint::Endpoint) {
-    if let Some(router) = external()
-        && router.source(endpoint).is_some()
-    {
-        router.request();
+    if let Some(source) = external().and_then(|router| router.source(endpoint)) {
+        source.request();
     }
 }
 
 pub(crate) struct Router {
-    controller: Box<dyn Delivery>,
+    controller: SpinLock<Box<dyn Delivery>>,
+    progress: SpinLock<Progress>,
+    serving: AtomicBool,
     physical: usize,
     limit: usize,
     hart: hart::HartId,
@@ -97,7 +108,9 @@ pub(crate) struct Router {
 pub(crate) fn install(controller: Box<dyn Delivery>, plan: Plan<'_>) -> Result<(), PendFail> {
     EXTERNAL
         .set(Router {
-            controller,
+            controller: SpinLock::new(controller),
+            progress: SpinLock::new(Progress::new()),
+            serving: AtomicBool::new(false),
             physical: plan.base,
             limit: plan.sources,
             hart: hart::hart_id(),
@@ -106,7 +119,7 @@ pub(crate) fn install(controller: Box<dyn Delivery>, plan: Plan<'_>) -> Result<(
                 line,
             }),
             pending: AtomicUsize::new(if plan.queues == [0; 3] { 0 } else { 7 }),
-            deferred: AtomicBool::new(false),
+            deferred: AtomicBool::new(true),
             deferrals: AtomicUsize::new(0),
             #[cfg(feature = "latency")]
             first_entry: AtomicU64::new(0),
@@ -133,149 +146,229 @@ pub(crate) fn register(controller: usize, line: u32, region: usize) -> Result<()
         return Err(PendFail::Denied);
     }
     sources.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
-    let source = Arc::try_new(Source::new(irq, region)?).map_err(|_| PendFail::OutOfMemory)?;
-    route.controller.mask(irq);
-    route.controller.prioritize(irq);
+    let source = Arc::try_new(Source::new(irq, region, sources.len())?)
+        .map_err(|_| PendFail::OutOfMemory)?;
+    let controller = route.controller.lock();
+    controller.mask(irq);
+    controller.prioritize(irq);
+    drop(controller);
     sources.push(source);
     Ok(())
 }
 impl Router {
+    /// Local exclusion prevents reentry; the hardware gate serializes enable
+    /// words against peer-Hart revocation. It is never retained into COMMIT.
+    fn service(&self) -> Option<Service<'_>> {
+        if hart::hart_id() != self.hart {
+            return None;
+        }
+        let trap = unsafe { TrapGuard::save() };
+        if self
+            .serving
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return None;
+        }
+        Some(Service {
+            router: self,
+            _trap: trap,
+        })
+    }
+    fn defer(&self) {
+        self.deferred.store(true, Ordering::Release);
+        self.deferrals.fetch_add(1, Ordering::Relaxed);
+        crate::metal::interrupt::disable_external();
+        super::deadline::retry();
+    }
+    fn claim(&self) {
+        #[cfg(debug_assertions)]
+        crate::basis::assert_unlocked();
+        #[cfg(feature = "latency")]
+        let entered = {
+            let first = self.first_entry.swap(0, Ordering::Relaxed);
+            if first == 0 {
+                crate::metal::measure::stamp()
+            } else {
+                first
+            }
+        };
+        for _ in 0..BATCH {
+            if !self.progress.lock().vacant() {
+                break;
+            }
+            #[cfg(feature = "latency")]
+            let start = crate::metal::measure::stamp();
+            let irq = self.controller.lock().claim_masked();
+            #[cfg(feature = "latency")]
+            crate::metal::measure::elapsed(crate::metal::measure::Metric::ControllerClaim, start);
+            let Some(irq) = irq else {
+                break;
+            };
+            note_external();
+            self.progress.lock().retain(Claim {
+                irq,
+                #[cfg(feature = "latency")]
+                entered,
+            });
+        }
+    }
+    /// Called with one COMMIT admission. Each source accepts responsibility
+    /// before its record leaves the router; unknown/reserved claims leave as
+    /// owned completion work and are completed only after releasing COMMIT.
+    fn publish(&self, _commit: &crate::basis::CommitGuard) -> [Option<Claim>; BATCH] {
+        #[cfg(feature = "latency")]
+        let admitted = crate::metal::measure::stamp();
+        let mut complete = [const { None }; BATCH];
+        let claims = self.progress.lock().take();
+        for (at, claim) in claims.into_iter().enumerate() {
+            let Some(claim) = claim else {
+                continue;
+            };
+            if let Some(index) = self.queues.iter().position(|q| *q == claim.irq) {
+                self.counts[index].fetch_add(1, Ordering::Relaxed);
+                self.pending.fetch_or(1 << index, Ordering::Release);
+                complete[at] = Some(claim);
+                continue;
+            }
+            let source = self
+                .sources
+                .lock()
+                .iter()
+                .find(|e| e.irq == claim.irq)
+                .cloned();
+            if let Some(source) = source {
+                if source.deliver() {
+                    #[cfg(feature = "latency")]
+                    {
+                        use crate::metal::measure::{Metric, record, stamp};
+                        let published = stamp();
+                        record(
+                            Metric::IrqAdmit,
+                            admitted.saturating_sub(claim.entered),
+                            admitted,
+                        );
+                        record(
+                            Metric::IrqPublish,
+                            published.saturating_sub(admitted),
+                            published,
+                        );
+                        record(
+                            Metric::IrqSign,
+                            published.saturating_sub(claim.entered),
+                            published,
+                        );
+                    }
+                }
+                // Source now owns the masked claim, including no live receiver
+                // or a retained pending Sign. No completion is inferred here.
+                self.progress.lock().request(source.maintenance_slot);
+            } else {
+                complete[at] = Some(claim);
+            }
+        }
+        complete
+    }
+    fn complete(&self, batch: [Option<Claim>; BATCH]) {
+        for claim in batch.into_iter().flatten() {
+            self.finish(claim.irq, false);
+        }
+    }
     pub(crate) fn handle(&self) -> bool {
         if hart::hart_id() != self.hart {
             return false;
         }
         #[cfg(feature = "latency")]
-        let irq_entry = {
-            let first = self.first_entry.load(Ordering::Relaxed);
-            if first == 0 {
-                let now = crate::metal::measure::stamp();
-                self.first_entry.store(now, Ordering::Relaxed);
-                now
-            } else {
-                first
-            }
-        };
-        let Some(_commit) = crate::basis::try_commit() else {
-            // Nothing has been claimed or consumed. Mask only this Hart's
-            // delivery; the controller retains the asserted source. A timer
-            // retry must survive ordinary deadline reprogramming.
-            self.deferred.store(true, Ordering::Relaxed);
-            self.deferrals.fetch_add(1, Ordering::Relaxed);
-            crate::metal::interrupt::disable_external();
-            super::deadline::retry();
+        {
+            let _ = self.first_entry.compare_exchange(
+                0,
+                crate::metal::measure::stamp(),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            );
+        }
+        let Some(_service) = self.service() else {
+            self.defer();
             return true;
         };
-        // Keep the first attempt across every deferral: excluding the retry
-        // interval from IRQ→Sign would manufacture a lower latency observation.
-        #[cfg(feature = "latency")]
-        self.first_entry.store(0, Ordering::Relaxed);
-        #[cfg(feature = "latency")]
-        let admitted = crate::metal::measure::stamp();
-        let mut claimed = false;
-        for _ in 0..4 {
-            let Some(irq) = self.controller.claim_masked() else {
-                break;
-            };
-            note_external();
-            claimed = true;
-            if let Some(index) = self.queues.iter().position(|q| *q == irq) {
-                self.finish(irq, false);
-                self.counts[index].fetch_add(1, Ordering::Relaxed);
-                self.pending.fetch_or(1 << index, Ordering::Release);
-            } else {
-                let endpoint = self.sources.lock().iter().find(|e| e.irq == irq).cloned();
-                if let Some(endpoint) = endpoint {
-                    if endpoint.deliver() {
-                        #[cfg(feature = "latency")]
-                        {
-                            use crate::metal::measure::{Metric, record, stamp};
-                            let published = stamp();
-                            record(Metric::IrqAdmit, admitted.saturating_sub(irq_entry));
-                            record(Metric::IrqPublish, published.saturating_sub(admitted));
-                            record(Metric::IrqSign, published.saturating_sub(irq_entry));
-                        }
-                    }
-                } else {
-                    self.finish(irq, false);
-                }
-                // Unknown, revoked or already-pending sources stay masked.
-            }
-        }
-        if claimed {
-            // Notification and IOMMU progress no longer run in this front half.
-            // Even an otherwise idle Hart needs a future maintenance turn.
-            self.deferred.store(true, Ordering::Release);
-            super::deadline::retry();
-        }
+        self.claim();
+        let Some(commit) = crate::basis::try_commit() else {
+            self.defer();
+            return true;
+        };
+        let complete = self.publish(&commit);
+        drop(commit);
+        self.complete(complete);
+        self.deferred.store(true, Ordering::Release);
+        super::deadline::retry();
         true
     }
     pub(crate) fn finish(&self, irq: Irq, rearm: bool) {
-        self.controller.unmask(irq);
-        self.controller.complete(irq);
+        let controller = self.controller.lock();
+        controller.unmask(irq);
+        controller.complete(irq);
         if !rearm {
-            self.controller.mask(irq);
+            controller.mask(irq);
         }
     }
     pub(crate) fn shut(&self, irq: Irq) {
-        self.controller.mask(irq);
+        self.controller.lock().mask(irq);
     }
     pub(crate) fn open(&self, irq: Irq) {
-        self.controller.unmask(irq);
+        self.controller.lock().unmask(irq);
     }
-    pub(crate) fn request(&self) {
-        self.deferred.store(true, Ordering::Release);
-        let _ = crate::metal::interrupt::ipi::send(self.hart);
+    pub(super) fn request(&self, slot: usize) {
+        self.progress.lock().request(slot);
+        self.schedule();
     }
-    /// A scheduler already owns COMMIT here. Continue deferred IRQ work before
-    /// relinquishing that admission; repeated try/release/try races can starve
-    /// notification while peer Harts keep making ordinary scheduling progress.
-    pub(crate) fn retry(&self, _commit: &crate::basis::CommitGuard) {
-        if hart::hart_id() == self.hart && self.deferred.load(Ordering::Acquire) {
-            self.rearm();
+    fn schedule(&self) {
+        // All ways of retaining deferred work already have an IPI, timer retry
+        // or the currently executing service turn. Coalesce repeated notices.
+        if !self.deferred.swap(true, Ordering::AcqRel) {
+            let _ = crate::metal::interrupt::ipi::send(self.hart);
         }
     }
-    /// An outer trap return owns no exclusion guard or partially published
-    /// state. Join the FIFO once here: a stream of peer transactions cannot
-    /// indefinitely reject the front half's nonblocking admission attempts.
-    /// The stackless reception callback never calls this switching boundary.
+    /// Safe trap-return/idle boundary, outside scheduler ownership. FIFO COMMIT
+    /// admission here prevents a stream of peer Yield calls starving a claim.
     pub(crate) fn advance(&self) {
-        if hart::hart_id() == self.hart && self.deferred.load(Ordering::Acquire) {
-            let commit = crate::basis::commit();
-            self.retry(&commit);
-        }
+        self.rearm();
     }
     pub(crate) fn rearm(&self) {
-        if hart::hart_id() != self.hart {
+        if hart::hart_id() != self.hart || !self.deferred.load(Ordering::Acquire) {
             return;
         }
-        // This is maintenance, outside the hardware front half. Join the FIFO
-        // even when there is no retained IRQ: speculative rejection on every
-        // timer/IPI would manufacture another short retry, which can already
-        // be elapsed when the scheduler finally returns a Task under load.
-        // handle() still retains its nonblocking interrupt admission.
-        let _commit = crate::basis::commit();
-        // Consume this request before callbacks: a remaining notification batch
-        // can request another turn without this one clearing that continuation.
-        let deferred = self.deferred.swap(false, Ordering::AcqRel);
+        let Some(_service) = self.service() else {
+            return;
+        };
+        #[cfg(debug_assertions)]
+        crate::basis::assert_unlocked();
+        self.deferred.store(false, Ordering::Release);
+        // A prior failed admission retained the actual claims. A canceled CPU
+        // level is also rechecked, settling its original attempt timestamp.
+        self.claim();
+        let commit = crate::basis::commit();
+        let complete = self.publish(&commit);
+        drop(commit);
+        self.complete(complete);
         let count = self.sources.lock().len();
-        for at in 0..count {
+        for _ in 0..BATCH {
+            let Some(at) = self.progress.lock().next(count) else {
+                break;
+            };
             let source = self.sources.lock()[at].clone();
             source.maintain();
         }
         let pending = self.pending.swap(0, Ordering::AcqRel);
         for (index, irq) in self.queues.iter().enumerate() {
             if pending & (1 << index) != 0 {
-                self.controller.unmask(*irq);
+                self.controller.lock().unmask(*irq);
             }
         }
-        if deferred {
-            crate::metal::interrupt::enable_external();
-            // Recheck the controller even if the CPU pending bit disappeared.
-            // A cancelled assertion must settle the retained first attempt;
-            // otherwise an unrelated later IRQ inherits its old timestamp.
-            // COMMIT remains owned through this bounded claim batch.
-            self.handle();
+        if self.progress.lock().pending() {
+            self.deferred.store(true, Ordering::Release);
+            super::deadline::retry();
         }
+        crate::metal::interrupt::enable_external();
     }
     pub(crate) fn report(&self) {
         crate::putln!(
@@ -330,11 +423,33 @@ impl Router {
             .find(|s| s.endpoint.id == endpoint.id)
             .cloned()
     }
-    fn withdraw(&self, token: kernel_api::model::identity::PendId) {
+    fn withdraw(
+        &self,
+        token: kernel_api::model::identity::PendId,
+        sign: Option<&Endpoint>,
+        view: Option<&crate::basis::flat::sharing::Sharing>,
+    ) {
         let count = self.sources.lock().len();
         for at in 0..count {
             let source = self.sources.lock()[at].clone();
-            source.withdraw(token);
+            if source.matches(sign, view) {
+                source.withdraw(token);
+                // A target match is a routing hint, never live authorization.
+                // It also covers ancestor changes and an expired entry Weak.
+                source.request();
+            }
         }
+    }
+}
+
+/// The controller Hart cannot recursively claim while a batch is being handed
+/// to software or completed. No guard survives a scheduling/context boundary.
+struct Service<'a> {
+    router: &'a Router,
+    _trap: TrapGuard,
+}
+impl Drop for Service<'_> {
+    fn drop(&mut self) {
+        self.router.serving.store(false, Ordering::Release);
     }
 }

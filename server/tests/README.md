@@ -47,6 +47,15 @@ transfer and failure recovery on 1/4 Harts. It does not extend public ABI 11
 or qualify native SMP memory. Its optional timing mode compares state-lock
 ownership intervals with the same test composition on a baseline provider.
 
+## Native Room and interrupt contracts
+
+The [Room suite](latency/README.md) exercises current ABI 11 UART/PLIC/Sign
+retention and revocation on 1/4 Harts, plus fixed-Hart real-time budget and
+preemption on 4 Harts. Its minimal debug/release cases run in the native QEMU
+check, with boot-policy adaptations and limits recorded in that guide.
+Longer paired performance comparisons are explicitly requested and preserve
+all source identities and boot evidence in separate CI artifacts.
+
 ## Historical ABI 10 guest suite
 
 The remaining instructions describe the preserved ABI 10 suite. Run these only
@@ -145,6 +154,11 @@ The report labels frame-chain evidence separately.
 Host tests check actual Flat/Page/Nest state transitions, failure
 injection, authority and result-journal correlation. Host fixtures
 do not execute guest traps or establish hardware quiescence.
+
+The `translation` host target compiles the production RV64 PTE storage,
+decoder and flags. Its atomic hardware participant checks preservation of
+concurrent A/D evidence during permission changes and coherent full-word
+snapshots. It does not enable A/D clearing or qualify a sampling backend.
 
 The current native composition exercises real Task/Team startup, CPU mappings
 and qualified IOMMU/Virtqueue paths using the single ABI 11 contract.

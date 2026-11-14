@@ -138,6 +138,8 @@ pub(crate) fn wait(
 ) -> Result<Handoff<kernel_api::abi::reply::SignReply>, kernel_api::abi::call::sign::SignFail> {
     loop {
         let commit = crate::basis::commit();
+        #[cfg(feature = "latency")]
+        let _measure = crate::metal::measure::scope(crate::metal::measure::Work::SignWait, &commit);
         let reply = match wait.poll() {
             Ok(reply) => reply,
             Err(e) => {
@@ -166,6 +168,8 @@ pub(crate) fn wait(
                 return Err(e);
             }
         };
+        #[cfg(feature = "latency")]
+        drop(_measure);
         drop(commit);
         match finish_block(blocked) {
             Handoff::Resume(()) => continue,

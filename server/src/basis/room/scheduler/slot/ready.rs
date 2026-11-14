@@ -8,13 +8,17 @@ pub(super) struct Ready {
     ordinary: Chain,
     fixed: Chain,
     since: Option<u64>,
+    #[cfg(feature = "latency")]
+    hart: HartId,
 }
 impl Ready {
-    pub(super) const fn new() -> Self {
+    pub(super) const fn new(_hart: HartId) -> Self {
         Self {
             ordinary: Chain::new(),
             fixed: Chain::new(),
             since: None,
+            #[cfg(feature = "latency")]
+            hart: _hart,
         }
     }
     pub(super) fn is_empty(&self) -> bool {
@@ -58,7 +62,12 @@ impl Ready {
     pub(super) fn enqueue(&mut self, task: Arc<Task>, now: u64) {
         assert!(task.ready(), "ready queue requires a Ready Task");
         #[cfg(feature = "latency")]
-        task.observation.enqueue(crate::metal::measure::stamp());
+        task.observation.enqueue(
+            crate::metal::measure::stamp(),
+            self.hart.get(),
+            self.ordinary.len(),
+            self.fixed.len(),
+        );
         let empty = self.is_empty();
         if task.realtime() {
             assert!(self.fixed.len() < MAX_TASKS);
@@ -75,13 +84,29 @@ impl Ready {
         let mut priority = 0;
         self.fixed.visit(MAX_TASKS, |task| {
             if !task.can_run_on(destination) {
+                #[cfg(feature = "latency")]
+                task.observation
+                    .reject(crate::metal::measure::execution::INELIGIBLE);
                 return;
             }
             let mut schedule = task.schedule.lock();
             schedule.advance(now);
             if schedule.available() && schedule.priority() > priority {
+                #[cfg(feature = "latency")]
+                if let Some(previous) = &best {
+                    previous
+                        .observation
+                        .reject(crate::metal::measure::execution::OUTRANKED);
+                }
                 priority = schedule.priority();
                 best = Some(task.clone());
+            } else {
+                #[cfg(feature = "latency")]
+                task.observation.reject(if schedule.available() {
+                    crate::metal::measure::execution::OUTRANKED
+                } else {
+                    crate::metal::measure::execution::BUDGET
+                });
             }
         });
         if let Some(task) = best {
@@ -95,6 +120,9 @@ impl Ready {
                 self.since = (!self.is_empty()).then_some(now);
                 return Some(task);
             }
+            #[cfg(feature = "latency")]
+            task.observation
+                .reject(crate::metal::measure::execution::INELIGIBLE);
             self.ordinary.enqueue(task);
         }
         crate::basis::room::deadline::retry();
