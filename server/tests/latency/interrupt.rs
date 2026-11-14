@@ -403,6 +403,10 @@ extern "C" fn run(at: usize, count: usize) -> ! {
             join(task);
         }
         write(1, 0);
+        // Logical Task exit does not settle its writable View loan. Observe
+        // actual lease restoration before requesting a new receiver; Kernel
+        // still revalidates live authority when that request commits.
+        wait(|| support::pend_info(view).status == kernel_api::model::pend::PendStatus::Active);
         let replacement = consumer(root, AccordTarget::Caller);
         assert!(sign::consume(replacement, OLD.load(Ordering::Acquire) as u64).is_err());
         initial(replacement);

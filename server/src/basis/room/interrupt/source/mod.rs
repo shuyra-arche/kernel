@@ -48,6 +48,23 @@ impl Source {
     pub(super) fn associate(&self, view: Arc<Sharing>) -> Result<(), PendFail> {
         self.view.set(view).map_err(|_| PendFail::Denied)
     }
+    /// A receiver needs the current complete writable View association, not a
+    /// retired Share.Open operation or a copied permission snapshot.
+    fn covers_view(&self, entry: &PendEntry) -> bool {
+        let Some(shared) = self.view.get() else {
+            return false;
+        };
+        entry
+            .target()
+            .share_view()
+            .is_some_and(|view| Arc::ptr_eq(&view, shared))
+            && entry.modifiable() == Modifiable::Yes
+            && entry.allows(pend::Need::Write)
+            && entry.permits(Operations::Share(ShareRights::ASSOCIATE))
+            && entry.authority().window().is_none_or(|(offset, count)| {
+                offset.get() == 0 && count == shared.source().page_count()
+            })
+    }
     fn live(&self) -> bool {
         let (task, view, sign) = {
             let state = self.state.lock();
@@ -57,9 +74,7 @@ impl Source {
             (b.task.upgrade(), b.view.upgrade(), b.sign.upgrade())
         };
         task.is_some_and(|t| pend::live(&t))
-            && view.is_some_and(|v| {
-                v.allows(pend::Need::Write) && v.permits(Operations::Share(ShareRights::ASSOCIATE))
-            })
+            && view.is_some_and(|v| self.covers_view(&v))
             && sign.is_some_and(|s| {
                 s.permits(Operations::Sign(SignRights::LISTEN | SignRights::CONSUME))
             })
@@ -73,24 +88,12 @@ impl Source {
         {
             return Err(PendFail::Denied);
         }
-        let shared = self.view.get().ok_or(PendFail::Denied)?;
         let view = task
             .pend
             .entries
             .lock()
             .iter()
-            .find(|entry| {
-                entry
-                    .target()
-                    .share_view()
-                    .is_some_and(|v| Arc::ptr_eq(&v, shared))
-                    && entry.modifiable() == Modifiable::Yes
-                    && entry.allows(pend::Need::Write)
-                    && entry.permits(Operations::Share(ShareRights::ASSOCIATE))
-                    && entry.authority().window().is_none_or(|(offset, count)| {
-                        offset.get() == 0 && count == shared.source().page_count()
-                    })
-            })
+            .find(|entry| self.covers_view(entry))
             .cloned()
             .ok_or(PendFail::Denied)?;
         if !self.live() {
