@@ -1,4 +1,88 @@
-# Bounded latency: M1 evidence and M2 execution boundaries
+# Current ABI 11 Room exploration
+
+The opt-in `run.py` composes `guest.rs` with Vanllia
+`dd32c35dbb67e2e78edb00ad35f968d16423249e`. It runs eight ordinary Tasks in
+one already-loaded Team, each completing 512 Yield turns and eight timed
+sleeps. Start-up handles the public Busy result with bounded retries; every
+worker must reach the start gate, complete its exact work and exit normally.
+Guest elapsed time covers the start gate through the last worker's completion.
+It excludes creation and subsequent reclamation. A FAIL marker is never a
+successful run even when the emulator exits with status zero.
+
+```sh
+python3 server/tests/latency/run.py --fixture /absolute/path/to/vanllia \
+    --kernel "$PWD" --output /absolute/path/to/new-evidence \
+    --harts 1 4 --rounds 3 --profile release
+```
+
+Use the root README's Rust toolchain and the QEMU/OpenSBI inputs from
+`server/tests/README.md`. The runner preserves production RV64 flags, records
+the compiler, source and fixture revisions, source diff, lockfile/image/firmware
+hashes, CPU quota/affinity, commands, serial/stderr and every run's status.
+Output must be a new directory. `--profile debug` selects checked target code;
+`--no-latency` runs the same work without diagnostic storage and updates.
+Use identical source, workload, firmware, emulator, affinity, quota and threading
+when comparing overhead. MTTCG is the default for concurrent Hart execution;
+`--threads single` is an explicit alternative, not an equivalent sample set.
+
+The copied platform leaves memory qualification **unavailable** on both 1/4
+Hart. Kernel's single-Hart drain gate remains intact. This guest performs no
+native Publish, executable publication, second-Team mapping or DMA. Passing it
+does not establish native memory SMP acceptance, real-time admission, Sign/IRQ
+latency or physical hardware behavior. It is excluded from default CI.
+
+## Attribution and interpretation
+
+All diagnostic state is fixed-capacity and allocated before secondary Harts
+start. The shutdown report prints its actual bytes per Hart. Sampling performs
+no allocation, log I/O, formatting or new global locking. Task observation fields
+exist only with the `latency` feature and never authorize queue ownership.
+
+| Record | Evidence and limits |
+| --- | --- |
+| `latency-outer-parts` | Same-Hart transaction timestamp, outer site, six inclusive durations and call counts: scheduler step, Sign wait, IRQ maintenance, controller claim, nested SpinLock acquisition and scheduling deadline arm. Eight slowest distinct outer sites retain the parts belonging to their own largest hold. Nested durations must not be added into an exclusive partition. Uninstrumented work remains unknown. |
+| `latency-ready` | Largest ready-to-return sample per Hart, with initial/current queue Hart, actual destination, queue occupancy at the last enqueue, queue entries, reselections and observed rejection bits (ineligible Hart, unavailable budget, outranked). Counts describe those boundaries, not continuous runnable competition. Notification arrival and arbitrary host/firmware pauses remain unknown. |
+| `latency-irq` | Largest measured IRQ-off interval per Hart, its entry/guard origin and transaction active at its start. That transaction may end within the interval; the label is not an exclusive cause. Host pauses, firmware and uninstrumented kernel work cannot be separated. |
+| `latency-phase` | Completion-phase histogram: boot, running after the first Hart enters the scheduler, teardown after root-exit observation. Running includes guest setup; it must not be called a steady-state-only histogram. Spans crossing a boundary belong to their completion phase. |
+| `timer-return` | Deferred scheduling deadline merge/programming at the safe return boundary, outside global COMMIT. It remains included in dispatch-to-return, ready-to-return and IRQ-off measurements. |
+
+Reception windows end and restart IRQ-off measurements around the actual
+temporary SIE window. Their assembly handler does not update Rust attribution.
+All Hart-local mutable records are accessed with interrupts masked; stage scopes
+borrow the existing COMMIT guard and cannot outlive that admission. Reported
+sites are compiler-provided static locations, formatted only after the shutdown
+barrier. `probe` remains a calibration floor, not a complete overhead bound.
+
+## Scheduling timer boundary
+
+Slot entry, continuing execution and local waits calculate their scheduling
+deadline under the original COMMIT/slot admission. The Hart-local deadline owner
+retains the newest value and pending programming responsibility. Task return
+flushes it after releasing COMMIT and before restoring execution. Shared heap
+and retained retry deadlines are merged at that point; failed heap acquisition
+keeps pending work and arms the existing retry. Comparator failures retain the
+backend's unknown-setting semantics. A local TrapGuard prevents reception
+callbacks from changing retry state between the merge and hardware programming;
+no global lock is retained across that hardware effect.
+
+Boot, idle/WFI, heap-head changes and IPI refresh retain immediate programming.
+No deadline is silently dropped to reduce a measured hold. Task queue membership,
+unique running Hart/TrapContext, cancellation, affinity, budget and priority
+decisions still commit under the same coordinator. An off-queue Ready Task cannot
+escape between dequeue and seat: pause/removal, stealing and exit currently rely
+on that transaction. Removing it needs a checked handoff protocol, not merely a
+local queue lock or a second queue directory.
+
+IRQ routing still owns claim/mask, retained Source delivery, receipt validation,
+completion and rebind under its existing transaction. This change instruments
+the claim and maintenance paths but does not stage their hardware ownership or
+complete #120's interrupt track. The ordinary Room workload produces no external
+IRQ samples. Native UART/IOMMU/Sign, revocation, burst and source-replacement
+scenarios remain separate required evidence. Phase-specific steady-load tracing
+and complete notification attribution also remain open. Do not close #120 based
+on this exploration or infer WCET from its maxima.
+
+# Historical ABI 10 bounded latency baseline
 
 M2 supplies interrupt reception during foreign-owner waits, local publication
 boundaries and retained cleanup batches for #30. It does not introduce a hard
