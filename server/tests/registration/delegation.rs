@@ -57,7 +57,7 @@ fn unrelated_tasks_delegate_live_authority_without_acquiring_execution_control()
     let received = ledger::locate(&receiver, token).unwrap();
     assert!(received.permits(Operations::None(CreationRights::SIGN)));
     assert!(!received.permits(Operations::None(CreationRights::SHARE)));
-    assert_eq!(ledger::vestor(&receiver, token), Some(sender.ident.id));
+    assert_eq!(ledger::vestor(&received), Some(sender.ident.id));
     assert!(!control::manages(&sender, &receiver));
     assert_eq!(grant(&receiver, &sender, &received), Err(PendFail::Denied));
     source.invalidate();
@@ -195,14 +195,15 @@ fn lender_identity_survives_source_ledger_contention_and_does_not_grant_authorit
         // The source can be constructing/cleaning another object while its
         // live child is inspected. Contention cannot fabricate lender zero.
         let _source_transaction = sender.pend.lock();
-        assert_eq!(ledger::vestor(&receiver, token), Some(identity));
+        assert_eq!(ledger::vestor(&received), Some(identity));
     }
     source.invalidate();
     drop(source);
     drop(sender);
-    assert_eq!(ledger::vestor(&receiver, token), Some(identity));
+    assert_eq!(ledger::vestor(&received), Some(identity));
     assert!(!received.alive());
     assert!(!received.permits(Operations::None(CreationRights::SIGN)));
     ledger::return_(&receiver, token).unwrap();
-    assert_eq!(ledger::vestor(&receiver, token), None);
+    assert_eq!(ledger::vestor(&received), Some(identity));
+    assert!(ledger::locate(&receiver, token).is_none());
 }

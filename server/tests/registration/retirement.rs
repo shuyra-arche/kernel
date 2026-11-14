@@ -101,14 +101,8 @@ fn mapping_owner_is_nest_creator_and_lender_is_the_actual_reserving_parent() {
     let grant = ledger::locate(&worker, kernel_api::model::identity::PendId::mint(token)).unwrap();
     let mapping = reserve(&worker, &nest, &grant, 8, CellLevel::BASE);
     assert_eq!(mapping.target().owner(), creator.ident.id);
-    assert_eq!(
-        ledger::vestor(&worker, mapping.token()),
-        Some(worker.ident.id)
-    );
-    assert_eq!(
-        ledger::vestor(&worker, grant.token()),
-        Some(creator.ident.id)
-    );
+    assert_eq!(ledger::vestor(&mapping), Some(worker.ident.id));
+    assert_eq!(ledger::vestor(&grant), Some(creator.ident.id));
     whole.invalidate();
     assert!(!mapping.alive());
 }

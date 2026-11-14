@@ -89,7 +89,7 @@ fn revoke(frame: &mut TrapContext, dst_id: TaskId, token: PendId) {
     answer(frame, r);
 }
 
-fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendEntry) -> PendInfo {
+fn information(pend: &PendEntry) -> PendInfo {
     let limits = pend.authority().limits();
     let target = pend.target().identity();
     PendInfo {
@@ -98,7 +98,7 @@ fn information(task: &Arc<crate::basis::unit::task::Task>, pend: &PendEntry) -> 
         limits,
         owner: pend.target().owner(),
         lender: if pend.sire().is_some() {
-            pend::vestor(task, pend.token()).unwrap_or(TaskId::new(0))
+            pend::vestor(pend).unwrap_or(TaskId::new(0))
         } else {
             TaskId::new(0)
         },
@@ -126,7 +126,7 @@ fn inspect(frame: &mut TrapContext, ident: &TaskIdent, token: PendId, buf: VirtA
         {
             return Err(PendFail::Denied);
         }
-        write_info(ident, buf.get(), information(&task, &pend))?;
+        write_info(ident, buf.get(), information(&pend))?;
         Ok(0)
     })();
     answer(frame, r);
@@ -176,7 +176,7 @@ fn collect(
             write_info(
                 ident,
                 buf.get() + i * PendInfo::SIZE,
-                information(&task, pend.as_ref().unwrap()),
+                information(pend.as_ref().unwrap()),
             )?;
         }
         Ok(count)

@@ -403,8 +403,8 @@ pub(crate) fn locate(task: &Task, token: PendId) -> Option<Arc<PendEntry>> {
 
 /// Report the actual immediate lender, independently of transaction admission.
 /// Identity is immutable metadata, not proof that its authority is still live.
-pub(crate) fn vestor(task: &Arc<Task>, token: PendId) -> Option<TaskId> {
-    locate(task, token)?.sender.map(|sender| sender.task)
+pub(crate) fn vestor(entry: &PendEntry) -> Option<TaskId> {
+    entry.sender.map(|sender| sender.task)
 }
 
 pub(crate) fn accede(
