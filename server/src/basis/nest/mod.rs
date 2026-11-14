@@ -1771,21 +1771,22 @@ impl Nest {
                 .faults
                 .lock()
                 .publishing(index, expected, memo.generation());
-            state.publish_page(
-                self.geometry(),
-                crate::metal::generic::memory::Endpoint::Cpu {
-                    nest: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
-                    leases: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
-                },
-                mapping,
-                VirtAddr::new(mapping.position(index)?),
-                &page,
-                &change,
-                maintenance.as_ref().map(|usage| usage.permit()),
-            )
-            // Claim the edited batch before exposing it to retry observers.
-            // The accepted publisher owns its exact completion invocation.
-            .and_then(|()| state.retirement.begin(self.id.get(), self.asid()))
+            state
+                .publish_page(
+                    self.geometry(),
+                    crate::metal::generic::memory::Endpoint::Cpu {
+                        nest: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                        leases: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                    },
+                    mapping,
+                    VirtAddr::new(mapping.position(index)?),
+                    &page,
+                    &change,
+                    maintenance.as_ref().map(|usage| usage.permit()),
+                )
+                // Claim the edited batch before exposing it to retry observers.
+                // The accepted publisher owns its exact completion invocation.
+                .and_then(|()| state.retirement.begin(self.id.get(), self.asid()))
         };
         drop(commit);
         // Neither COMMIT nor a Nest/source lock crosses a CPU fence.

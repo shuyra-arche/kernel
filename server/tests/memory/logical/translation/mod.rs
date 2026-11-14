@@ -146,7 +146,10 @@ fn editing_owner_claims_its_batch_before_concurrent_retry_observers() {
     assert_eq!(original.scope, Scope::Global);
     let mut pending = pending.lock().unwrap();
     pending
-        .complete(scope::invalidate(&Cpu, original).unwrap(), &mut Memos::new())
+        .complete(
+            scope::invalidate(&Cpu, original).unwrap(),
+            &mut Memos::new(),
+        )
         .unwrap();
     assert_eq!(pending.invalidation(), Invalidation::Clean);
     assert!(matches!(pending.begin(7, 3), Err(NestError::Busy)));
