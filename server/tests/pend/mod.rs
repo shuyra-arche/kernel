@@ -101,8 +101,8 @@ fn cancellation_and_settlement_require_different_proofs() {
 #[test]
 fn live_permission_restricts_operations_without_changing_borrow_rules() {
     use kernel_api::model::pend::{Distributable, Operations, PendRange, PendScope, ShareRights};
-    let all = Operations::Share(ShareRights::all());
-    let open = Operations::Share(ShareRights::OPEN);
+    let all = Operations::Share(ShareRights::ASSOCIATE | ShareRights::DELETE);
+    let associate = Operations::Share(ShareRights::ASSOCIATE);
     let scope = PendScope::Pages(PendRange::Pages {
         offset: 0,
         count: 8,
@@ -112,12 +112,12 @@ fn live_permission_restricts_operations_without_changing_borrow_rules() {
         .transition(Limit {
             access: Yes,
             scope,
-            operations: open,
+            operations: associate,
             distributable: Distributable::No,
         })
         .unwrap();
-    assert!(limited.permits(open));
-    assert!(!limited.permits(Operations::Share(ShareRights::ASSOCIATE)));
+    assert!(limited.permits(associate));
+    assert!(!limited.permits(Operations::Share(ShareRights::DELETE)));
     assert_eq!(
         limited.transition(Limit {
             access: Yes,
@@ -131,25 +131,25 @@ fn live_permission_restricts_operations_without_changing_borrow_rules() {
         limited.transition(Limit {
             access: Yes,
             scope,
-            operations: open,
+            operations: associate,
             distributable: Distributable::Yes
         }),
         Err(Failure::Denied)
     );
     let lent = limited.transition(Borrow(No)).unwrap();
-    assert!(!lent.permits(open));
+    assert!(!lent.permits(associate));
     assert_eq!(
         lent.transition(Limit {
             access: No,
             scope,
-            operations: open,
+            operations: associate,
             distributable: Distributable::No
         }),
         Err(Failure::Busy)
     );
     let back = lent.transition(Return(No)).unwrap();
-    assert!(back.permits(open));
-    assert!(!back.transition(Retire).unwrap().permits(open));
+    assert!(back.permits(associate));
+    assert!(!back.transition(Retire).unwrap().permits(associate));
 }
 
 #[test]

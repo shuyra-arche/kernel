@@ -6,15 +6,15 @@ runtime, service implementation, TLS registry or ownership manager.
 
 ## Image and transport
 
-| Build | Calls | Selected image |
-| --- | --- | --- |
-| Default | [`call::*`](src/call/) for Cell, Flat, Nest, Pend, Unit, Room, Clone, Share, Sign and Debug | ABI/Ledger 10, Capsule format 2 |
-| `memory-v11` | [`memory::{flat,nest}`](src/memory.rs) for native Flat/Nest, alongside the accepted non-memory ABI | Matching API/Client/Server/boot image with ABI/Ledger 11 |
+API, Client and Server implement ABI/Ledger 11 with Capsule format 2.
+No ABI feature is needed. Use [`memory::{flat,nest}`](src/memory.rs) for memory
+operations and the accepted non-memory [`call::*`](src/call/) interfaces.
+Old Cell and Share Open/Shut operations are rejected by the provider.
 
-Use one complete, pinned image graph. ABI 11 is opt-in, not a
-fallback executed against a default ABI 10 Kernel. The immutable
-[Preview Alpha](https://github.com/shuyra-arche/kernel/releases/tag/26.11.14-preview-Alpha)
-selects ABI/Ledger 10.
+Pin all image components to one matching revision and rebuild Capsule and Ledger.
+When upgrading from an opt-in native build, remove `features = ["memory-v11"]`
+from the dependencies. ABI 10 consumers must retain their old immutable pin
+until they migrate. Existing release tags retain their original behavior.
 
 [`invoke_with`](src/invoke.rs) packs once, invokes a supplied test
 transport once and decodes once. `unsafe invoke` uses the native

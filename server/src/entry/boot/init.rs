@@ -132,8 +132,5 @@ pub unsafe fn grant_interrupt(
 pub fn qualify_memory(
     topology: super::memory::topology::Topology,
 ) -> Result<(), super::memory::Error> {
-    if kernel_api::abi::VERSION as u64 != kernel_api::abi::memory::VERSION {
-        return Err(super::memory::Error::Unsupported);
-    }
     crate::metal::memory::install(topology)
 }

@@ -19,12 +19,12 @@ fn flat() -> memory::flat::Call {
 }
 
 #[test]
-fn next_residency_rights_do_not_widen_the_v10_decoder() {
+fn native_residency_rights_are_known_to_the_permission_decoder() {
     use kernel_api::model::pend::{FlatRights, Operations};
     let rights = memory::rights::OCCUPY | memory::rights::VACATE | memory::rights::RESHAPE;
     assert_eq!(rights.bits(), (1 << 6) | (1 << 7) | (1 << 8));
-    assert!(FlatRights::from_bits(rights.bits()).is_none());
-    assert!(!FlatRights::all().intersects(rights));
+    assert_eq!(FlatRights::from_bits(rights.bits()), Some(rights));
+    assert!(FlatRights::all().contains(rights));
     assert!(Operations::Flat(rights).contains(Operations::Flat(memory::rights::OCCUPY)));
 }
 #[test]

@@ -26,15 +26,18 @@ ABI positions use **4 KiB units**. A physical `CellLevel` has size
 the supported levels. A large Page spans multiple base coordinates.
 CPU/IOMMU hardware leaf sizes are separate from physical holding identity.
 
-## Select ABI 10 or ABI 11
+## ABI 11
 
-| | Default ABI 10 | Coordinated `memory-v11` (ABI 11) |
-| --- | --- | --- |
-| Memory calls | [Cell](src/abi/call/cell.rs), [Flat](src/abi/call/flat.rs), [Nest](src/abi/call/nest.rs) | [Flat/Nest memory calls](src/abi/memory/call.rs) only |
-| Positions | SlotId / CellPosition and scoped Nest/Share Pend | Fixed-origin SlotPosition / MemoPosition with independent versions |
-| Holding | Cell creation, transfer and reshape, Flat Block/Allow | Flat Occupy/Vacate, Push/Pull, Split/Merge, Block/Allow |
-| Association and translation | Cell Insert/Remove/Publish/Retract/Protect with Nest rights | Nest Insert/Remove/Publish/Retract/Protect plus Reservation FaultRoute |
-| Lifecycle and errors | Typed register result domains, Busy and explicit settlement | Versioned RequestId, bounded result journal, Rejected/Pending/Committed/Failed and checked observations |
+The current revision has one ABI. Native Flat/Nest operations use fixed-origin
+SlotPosition / MemoPosition with independent versions. Flat owns Occupy/Vacate,
+Push/Pull, Split/Merge and Block/Allow. Nest owns association, publication and
+Reservation FaultRoute. Versioned RequestIds and a bounded journal report
+Rejected/Pending/Committed/Failed outcomes and checked observations.
+
+No Cargo feature selects the ABI. Calls, memory descriptors, Ledger and Capsule
+ABI derive from `abi::VERSION`; Capsule format remains 2. Remove the former
+`memory-v11` dependency feature and rebuild all components at the same source
+revision. ABI 10 remains available only through old immutable source pins.
 
 Native `Opcode` selects Flat domain 12 or Nest domain 13, slots 16–26.
 [`Action` and `Request`](src/abi/memory/request.rs) define the current

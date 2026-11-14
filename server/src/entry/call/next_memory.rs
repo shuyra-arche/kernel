@@ -1,4 +1,4 @@
-//! Native memory provider; dispatch requires the coherent memory-v11 image feature.
+//! Native Flat/Nest memory provider.
 //! Mutations use the actual Task's bounded result journal; finite event reads
 //! retain a scheduler continuation and revalidate the exact live route on delivery.
 #[path = "next_memory/receipt.rs"]

@@ -37,11 +37,8 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
         frame.gpr.x(Gprs::A4),
         frame.gpr.x(Gprs::A5),
     ];
-    // The image selects one ABI for calls, Capsule and Ledger. Default v10
-    // never dispatches native descriptors; memory-v11 rejects legacy adapters.
-    if kernel_api::abi::VERSION as u64 == kernel_api::abi::memory::VERSION
-        && kernel_api::abi::memory::Opcode::from_call_number(number as u64).is_some()
-    {
+    // Calls, Capsule and Ledger share the single API version.
+    if kernel_api::abi::memory::Opcode::from_call_number(number as u64).is_some() {
         return Some(next_memory::dispatch(frame, ident, number as u64, regs));
     }
     let envcall = match EnvCall::from_wire(number, &regs) {

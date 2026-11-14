@@ -76,21 +76,22 @@ Sv57 are respectively 0–2, 0–3 and 0–4; representability does not imply av
 RAM. Slot/mapping positions must name a Cell head; windows and transfers cover whole
 Cells. ABI coordinates remain 4 KiB units, so a level-1 Cell spans 512 coordinates.
 
-## Version selection
+## ABI version
 
-| Selection | Call ABI / Ledger | Memory interface |
-| --- | --- | --- |
-| Default | 10 / 10 | Existing Cell, Flat, Nest and View/Pend calls |
-| Coordinated `memory-v11` feature | 11 / 11 | Native Flat/Nest memory operations; no Cell call adapter |
+This revision implements ABI 11 unconditionally. Calls, native Flat/Nest
+memory descriptors, Boot Ledger and Capsule ABI use the single version in
+`abi::VERSION`. Capsule format remains 2. Cargo features do not select an ABI.
 
-The `memory-v11` feature must be selected consistently for API, Client,
-Server and the boot image/Capsule producer. It is an **image-wide contract**,
-not per-call negotiation. An ABI 11 image rejects ABI 10 descriptors and calls,
-and vice versa. The default remains ABI 10.
+Pin API, Client, Server and image producers to one matching revision. Remove
+`features = ["memory-v11"]` from existing dependencies when upgrading; no
+replacement feature is required. Rebuild the complete image, including Capsule
+and Ledger. Old Cell and Share Open/Shut calls are rejected.
 
-The [Preview Alpha](https://github.com/shuyra-arche/kernel/releases/tag/26.11.14-preview-Alpha)
-is a fixed **ABI/Ledger 10** source release; an opt-in ABI 11 image can be
-built from the corresponding coordinated source without modifying that tag.
+ABI 10 consumers must stay on their existing immutable source revision or the
+[Preview Alpha](https://github.com/shuyra-arche/kernel/releases/tag/26.11.14-preview-Alpha).
+The [Preview Beta](https://github.com/shuyra-arche/kernel/releases/tag/26.11.14-preview-Beta)
+is also fixed: its source still requires the old opt-in feature. Neither tag
+contains this removal of ABI selection.
 
 Call numbers are `(version << 48) | (domain << 32) | operation`. The RV64
 Kernel-call transport uses `ebreak`; `a7` identifies the operation,
@@ -112,7 +113,6 @@ Capsule and Ledger set; no compatibility fallback is provided.
 | Room: schedule, wait and clock | [Room calls](src/abi/call/room.rs) | [Room](../server/src/basis/room/) |
 | Pend: grant, attenuate and revoke | [Pend calls](src/abi/call/pend.rs), [scope](src/model/pend/scope.rs) | [Pend](../server/src/basis/pend/) |
 | Clone, Share and Sign | [Clone](src/abi/call/view/clone.rs), [Share](src/abi/call/view/share.rs), [Sign](src/abi/call/sign.rs) | [View](../server/src/basis/view/), [Sign](../server/src/basis/sign/) |
-| Default ABI 10 memory | [Cell](src/abi/call/cell.rs), [Flat](src/abi/call/flat.rs), [Nest](src/abi/call/nest.rs) | [Cell](../server/src/basis/cell/), [Flat](../server/src/basis/flat/), [Nest](../server/src/basis/nest/) |
 | Native ABI 11 memory | [Flat/Nest descriptors](src/abi/memory/), [memory guide](memory.md) | The same Flat/Nest/Page owners |
 | Debug | [Debug calls](src/abi/call/debug.rs) | [Entry](../server/src/entry/) |
 

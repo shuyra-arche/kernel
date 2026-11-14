@@ -1,5 +1,5 @@
-//! Next-memory-ABI value contracts. These do not exercise server authorization,
-//! publication, maintenance or retirement, and do not activate a new call ABI.
+//! Native memory value contracts. These do not exercise server authorization,
+//! publication, maintenance or retirement.
 mod call;
 mod fault;
 mod journal;
@@ -209,8 +209,8 @@ fn maintenance_reference_preserves_full_width_record_and_generation() {
 }
 
 #[test]
-fn preparing_value_contracts_does_not_enable_next_version_dispatch() {
-    assert_eq!(abi::VERSION, 10);
+fn legacy_register_adapters_are_not_native_memory_dispatch() {
+    assert_eq!(abi::VERSION, 11);
     for domain in [2usize, 12, 13] {
         for operation in 0..=32 {
             assert!(EnvCall::from_wire((11 << 48) | (domain << 32) | operation, &[0; 6]).is_err());

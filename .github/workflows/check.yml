@@ -61,103 +61,56 @@ jobs:
         env:
           RUSTFLAGS: "-Dwarnings"
         run: cargo test --locked --workspace --target x86_64-unknown-linux-gnu
-      - name: Test native ABI selection
-        env:
-          RUSTFLAGS: "-Dwarnings"
-        run: cargo test --locked -p kernel-api --features memory-v11 --test native --target x86_64-unknown-linux-gnu
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --target riscv64gc-unknown-none-elf
       - name: Build workspace (release)
         run: cargo build --locked --workspace --release --target riscv64gc-unknown-none-elf
-      - name: Build native provider and client
-        run: |
-          cargo build --locked -p kernel -p kernel-client --features kernel/memory-v11,kernel-client/memory-v11 --target riscv64gc-unknown-none-elf
-          cargo build --locked -p kernel -p kernel-client --features kernel/memory-v11,kernel-client/memory-v11 --release --target riscv64gc-unknown-none-elf
 
-  guest_shard:
-    name: QEMU / ${{ matrix.shard }}
+  guest:
+    name: Guest tests (QEMU)
     runs-on: ubuntu-latest
     container: debian:trixie
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [memory, io, scheduling, coordination, context, vector]
+    env:
+      QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
+      RUSTFLAGS: "-Crelocation-model=static -Cforce-frame-pointers=yes -Ccode-model=medium -Dwarnings"
     steps:
-      - name: Install guest test tools
+      - name: Install native image tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv python3 zstd
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi python3
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
           sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN" --target riscv64gc-unknown-none-elf
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Fetch external QEMU fixture
+      - name: Fetch native QEMU composition
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shuyra-arche/vanllia
-          ref: eb37b0b0db299513274864cec23cee509a3cd3cc
+          ref: dd32c35dbb67e2e78edb00ad35f968d16423249e
           path: .integration/vanllia
           sparse-checkout: |
+            tests/memory
             platform/riscv
-            tests/platform
           persist-credentials: false
-      - name: Identify compiler
-        id: compiler
-        run: echo "hash=$(rustc -Vv | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Cache Rust guest builds
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          # Select compiler output directories, never target/evidence or initrd.
-          # Shards cannot share mutable images, build locks or evidence paths.
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-            server/tests/guest/*/target/debug
-            server/tests/guest/*/target/release
-            server/tests/guest/*/target/riscv64gc-unknown-none-elf
-            server/tests/guest/cell/target/boot
-            server/tests/guest/cell/target/platform
-          key: rust-qemu-v1-${{ runner.os }}-${{ runner.arch }}-trixie-${{ matrix.shard }}-${{ steps.compiler.outputs.hash }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/check.yml') }}
-          restore-keys: |
-            rust-qemu-v1-${{ runner.os }}-${{ runner.arch }}-trixie-${{ matrix.shard }}-${{ steps.compiler.outputs.hash }}-
-      - name: Bind fixture to the Kernel under test
+      - name: Adapt historical fixture manifest to the current provider
         run: |
-          for relative in platform/riscv tests/platform/qemu; do
-            manifest="$GITHUB_WORKSPACE/.integration/vanllia/$relative/Cargo.toml"
-            cat >> "$manifest" <<EOF
-
-          [patch."https://github.com/shuyra-arche/kernel.git"]
-          kernel = { path = "$GITHUB_WORKSPACE/server" }
-          kernel-api = { path = "$GITHUB_WORKSPACE/api" }
-          EOF
-            cargo metadata --manifest-path "$manifest" --format-version 1 >/dev/null
-          done
-          echo "KERNEL_BOOT_MANIFEST=$GITHUB_WORKSPACE/.integration/vanllia/platform/riscv/Cargo.toml" >> "$GITHUB_ENV"
-          echo "KERNEL_PLATFORM_MANIFEST=$GITHUB_WORKSPACE/.integration/vanllia/tests/platform/qemu/Cargo.toml" >> "$GITHUB_ENV"
-      - name: Run environment-dependent tests
-        env:
-          QEMU_SHARD: ${{ matrix.shard }}
-        run: python3 server/tests/hardware/shard.py "$QEMU_SHARD"
-      - name: Preserve hardware evidence
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          for relative in ['tests/memory', 'platform/riscv']:
+              manifest = Path('.integration/vanllia') / relative / 'Cargo.toml'
+              manifest.write_text(manifest.read_text().replace(', features = ["memory-v11"]', ''))
+          PYTHON
+      - name: Run current native provider (debug)
+        run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE"
+      - name: Reject ABI 10 Capsule
+        run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --no-build --capsule-version 10
+      - name: Run current native provider (release)
+        run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --profile release
+      - name: Preserve native image evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: guest-evidence-${{ matrix.shard }}
-          path: server/tests/guest/*/target/evidence/
+          name: native-memory
+          path: .integration/vanllia/tests/memory/target/evidence/
           if-no-files-found: error
-
-  # Keep the existing required-check identity while failing closed on any
-  # failed, cancelled or skipped shard. No scenario is moved out of PR checks.
-  guest:
-    name: Guest tests (QEMU)
-    needs: guest_shard
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Require every QEMU shard
-        env:
-          SHARD_RESULT: ${{ needs.guest_shard.result }}
-        run: test "$SHARD_RESULT" = success

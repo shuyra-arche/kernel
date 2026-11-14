@@ -62,7 +62,11 @@ fn reservation_migration_preserves_the_joint_target_scope_operation_contract() {
     let families = [
         (0, 0, Operations::None(CreationRights::all())),
         (1, 0, Operations::Clone(CloneRights::all())),
-        (2, 1, Operations::Share(ShareRights::all())),
+        (
+            2,
+            1,
+            Operations::Share(ShareRights::ASSOCIATE | ShareRights::DELETE),
+        ),
         (3, 1, Operations::Flat(FlatRights::all())),
         (4, 2, Operations::Nest(NestRights::whole())),
         (4, 3, Operations::Nest(NestRights::reservation())),
@@ -114,7 +118,7 @@ fn each_operation_family_requires_its_own_target_and_scope() {
         ),
         (
             Target::View(ViewTarget::Share(ViewId::new(7))),
-            Operations::Share(ShareRights::OPEN),
+            Operations::Share(ShareRights::ASSOCIATE),
         ),
         (
             Target::Flat(FlatId::new(7).unwrap()),
@@ -146,7 +150,7 @@ fn each_operation_family_requires_its_own_target_and_scope() {
 #[test]
 fn distribution_is_independent_of_mutability_and_cannot_be_restored() {
     for read in [
-        grant(Operations::Share(ShareRights::OPEN)),
+        grant(Operations::Share(ShareRights::ASSOCIATE)),
         Limits {
             scope: mapping(7, PendRange::Inherit),
             ..grant(Operations::Nest(NestRights::PUBLISH))
@@ -173,9 +177,9 @@ fn distribution_is_independent_of_mutability_and_cannot_be_restored() {
             ..write
         }));
     }
-    let read = grant(Operations::Share(ShareRights::OPEN));
+    let read = grant(Operations::Share(ShareRights::ASSOCIATE));
     let expanded = Limits {
-        operations: Operations::Share(ShareRights::OPEN | ShareRights::ASSOCIATE),
+        operations: Operations::Share(ShareRights::ASSOCIATE | ShareRights::DELETE),
         ..read
     };
     assert!(!read.permits_child(expanded));
@@ -205,7 +209,7 @@ fn scopes_exclude_incompatible_families_and_invalid_page_geometry() {
             [true, false, false, false, false, false],
         ),
         (
-            Operations::Share(ShareRights::OPEN),
+            Operations::Share(ShareRights::ASSOCIATE),
             [false, true, true, false, false, false],
         ),
         (
@@ -329,7 +333,7 @@ fn whole_and_mapping_rights_have_distinct_masks_and_retired_bits_stay_invalid() 
     assert_eq!(NestRights::whole().bits(), 1 | 2 | 8 | 512);
     assert_eq!(
         NestRights::reservation().bits(),
-        1 | 4 | 64 | 128 | 256 | 1024 | 2048
+        1 | 4 | 64 | 128 | 256 | 1024 | 2048 | 4096
     );
     assert_eq!(
         NestRights::all(),
@@ -339,7 +343,7 @@ fn whole_and_mapping_rights_have_distinct_masks_and_retired_bits_stay_invalid() 
         (PendScope::Nest(NestScope::Whole), NestRights::whole()),
         (mapping(7, PendRange::Inherit), NestRights::reservation()),
     ] {
-        for bit in 0..12 {
+        for bit in 0..13 {
             let bits = 1u32 << bit;
             let rights = NestRights::from_bits_retain(bits);
             let limits = Limits {
@@ -355,7 +359,7 @@ fn whole_and_mapping_rights_have_distinct_masks_and_retired_bits_stay_invalid() 
         assert!(!all.valid());
         assert_eq!(Limits::of(all.words()), None);
     }
-    for bits in [16, 32, 4096, u32::MAX] {
+    for bits in [16, 32, 8192, u32::MAX] {
         assert!(NestRights::from_bits(bits).is_none());
         assert!(Operations::of([4, bits as usize]).is_none());
     }
@@ -450,7 +454,8 @@ fn info_requires_resolved_scope_and_matching_target_family() {
 #[test]
 fn observation_and_access_cannot_supply_mutation_authority() {
     assert!(
-        !Operations::Share(ShareRights::all()).contains(Operations::Flat(FlatRights::TRANSFER))
+        !Operations::Share(ShareRights::ASSOCIATE | ShareRights::DELETE)
+            .contains(Operations::Flat(FlatRights::TRANSFER))
     );
     assert!(!Operations::Flat(FlatRights::ASSOCIATE).contains(Operations::Flat(FlatRights::BLOCK)));
     let inspect = Limits {

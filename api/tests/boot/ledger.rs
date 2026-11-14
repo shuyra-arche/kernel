@@ -37,7 +37,7 @@ fn ledger_keeps_header_entry_offsets_and_reserved_bytes() {
     assert_eq!(bytes, expected);
     assert_eq!(kernel_api::boot::ledger::ENTRY_LEN, 40);
     assert_eq!(Header::LEN, 8);
-    assert_eq!(VERSION, 10);
+    assert_eq!(VERSION, 11);
     let entries = Entries::new(&bytes).unwrap();
     assert_eq!(entries.iter().collect::<Vec<_>>(), vec![entry()]);
     assert_eq!(entries.find(Name::Page(Page::Dtb)), Some(entry()));

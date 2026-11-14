@@ -3,10 +3,7 @@ use kernel_api::{
     abi::{
         call::{
             EnvCall,
-            cell::{
-                CellCall,
-                operations::{Create, Delete},
-            },
+            cell::operations::{Create, Delete},
         },
         operation::{KernelCall, RegisterCall},
     },
@@ -154,13 +151,7 @@ fn create_allocates_only_a_slot_and_delete_takes_that_handle_directly() {
         [17, 4 * 1024 * 1024, 2 * 1024 * 1024, 1, 0, 0]
     );
     assert_eq!(Create::from_registers(&create.pack()), Ok(create));
-    assert_eq!(
-        EnvCall::from_wire(Create::SLOT, &create.pack()),
-        Ok(EnvCall::Cell(CellCall::Create {
-            license: create.license,
-            allocation
-        }))
-    );
+    assert!(EnvCall::from_wire(Create::SLOT, &create.pack()).is_err());
     let made: SlotId = Create::decode_return((23, 99, 0x6000)).unwrap();
     assert_eq!(made, slot(23));
     let delete = Delete { slot: made };
