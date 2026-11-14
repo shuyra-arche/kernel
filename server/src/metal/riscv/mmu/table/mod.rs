@@ -15,7 +15,7 @@ use crate::basis::nest::NestError;
 mod entry;
 mod flags;
 
-use entry::PageTableEntry;
+use entry::{PageTableEntry, Snapshot};
 pub use flags::PteFlags;
 
 mod page;
@@ -58,7 +58,7 @@ impl TableNode {
         visit: &mut impl FnMut(VirtAddr, PhysAddr, Attributes, usize),
     ) {
         for (slot, child) in &self.children {
-            let entry = self.page.entries[*slot];
+            let entry = self.page.entries[*slot].read();
             assert!(entry.is_branch(), "child table lacks a branch PTE");
             assert_eq!(
                 entry.paddr() as usize,
@@ -68,6 +68,7 @@ impl TableNode {
         }
         let span = Self::span(level);
         for (slot, entry) in self.page.entries.iter().enumerate() {
+            let entry = entry.read();
             if !entry.is_valid() {
                 continue;
             }
@@ -137,7 +138,7 @@ impl TableNode {
             if level == target {
                 return Ok(&mut node.page.entries[idx]);
             }
-            let entry = node.page.entries[idx];
+            let entry = node.page.entries[idx].read();
             if entry.is_leaf() && entry.is_valid() {
                 return Err(NestError::AlreadyMapped);
             }
@@ -167,11 +168,11 @@ impl TableNode {
         &self,
         va: VirtAddr,
         geo: mode::Geo,
-    ) -> Result<(PageTableEntry, usize), NestError> {
+    ) -> Result<(Snapshot, usize), NestError> {
         let mut node = self;
         for level in (0..geo.levels as usize).rev() {
             let idx = va.vpn(level as u8);
-            let entry = node.page.entries[idx];
+            let entry = node.page.entries[idx].read();
             if !entry.is_valid() || entry.is_leaf() {
                 return Ok((entry, level));
             }
@@ -195,7 +196,7 @@ impl TableNode {
         let mut node = self;
         for level in (target + 1..geo.levels as usize).rev() {
             let idx = va.vpn(level as u8);
-            let entry = node.page.entries[idx];
+            let entry = node.page.entries[idx].read();
             if !entry.is_valid() {
                 return Ok(());
             }
@@ -274,7 +275,8 @@ impl TableNode {
         }
         for level in (0..levels).rev() {
             let pte = unsafe {
-                *((tbl.as_usize() + page_va.vpn(level as u8) * 8) as *const PageTableEntry)
+                (&*((tbl.as_usize() + page_va.vpn(level as u8) * 8) as *const PageTableEntry))
+                    .read()
             };
             if !pte.is_valid() {
                 return None;
@@ -306,7 +308,7 @@ impl TableNode {
         let first = (start.max(node_va) - node_va) / span;
         let last = (end.min(node_end) - node_va - 1) / span;
         for slot in first..=last {
-            let entry = self.page.entries[slot];
+            let entry = self.page.entries[slot].read();
             if !entry.is_valid() {
                 continue;
             }
@@ -335,7 +337,10 @@ impl TableNode {
                 index += 1;
             }
         }
-        self.page.entries.iter().all(|entry| !entry.is_valid())
+        self.page
+            .entries
+            .iter()
+            .all(|entry| !entry.read().is_valid())
     }
 }
 
@@ -389,11 +394,11 @@ unsafe impl TranslationTable for TableNode {
             }
             loop {
                 let entry = self.entry_at(v, target, true, levels)?;
-                if !entry.is_valid() {
+                if !entry.read().is_valid() {
                     offset += Self::span(target);
                     break;
                 }
-                if target == 0 || entry.is_leaf() {
+                if target == 0 || entry.read().is_leaf() {
                     return Err(NestError::AlreadyMapped);
                 }
                 target -= 1;
@@ -427,7 +432,7 @@ unsafe impl TranslationTable for TableNode {
             let entry = self
                 .entry_at(v, target, false, levels)
                 .expect("prepared range path");
-            debug_assert!(!entry.is_valid());
+            debug_assert!(!entry.read().is_valid());
             entry.set(
                 (p.as_usize() >> PAGE_SHIFT) as u64,
                 PteFlags::from_attributes(attrs) | PteFlags::V,
@@ -466,12 +471,13 @@ unsafe impl TranslationTable for TableNode {
         let leaf = self
             .walk_mut(va, false, geo.levels as usize)
             .expect("preflighted page-table path");
+        let current = leaf.read();
         debug_assert!(
-            leaf.is_valid() && leaf.is_leaf(),
+            current.is_valid() && current.is_leaf(),
             "preflighted leaf mapping"
         );
         leaf.set_flags(
-            (leaf.flags() - (PteFlags::R | PteFlags::W | PteFlags::X))
+            (current.flags() - (PteFlags::R | PteFlags::W | PteFlags::X))
                 | PteFlags::from_attributes(attrs),
         );
     }
