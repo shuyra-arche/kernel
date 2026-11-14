@@ -17,9 +17,66 @@ fn invoke(request: Request) -> Result<Response, Error> {
 
 pub fn call(mut action: Action) -> Result<Response, Error> {
     let deadline = room::clock() + 5_000_000_000;
+    let mut releasing = false;
     loop {
         let request = request(action);
         let response = invoke(request)?;
+        if let (
+            Action::Release {
+                token,
+                nest,
+                reservation,
+                ..
+            },
+            Response::Reply(reply),
+        ) = (action, &response)
+        {
+            let accepted = matches!(
+                reply.outcome(),
+                Outcome::Failed {
+                    failure: Failure::Busy,
+                    retained: Some(Value::ReservationLifecycle { .. })
+                }
+            );
+            if accepted
+                || (releasing
+                    && matches!(
+                        reply.outcome(),
+                        Outcome::Rejected(Failure::Busy | Failure::Stale)
+                    ))
+            {
+                let Response::Reply(replay) = invoke(request)? else {
+                    panic!("replay")
+                };
+                assert_eq!(replay, *reply);
+                assert!(
+                    room::clock() < deadline,
+                    "retained reservation did not release"
+                );
+                let Response::Observation(observation) = invoke(crate::support::request(
+                    Action::Inspect(Query::Reservation {
+                        token,
+                        nest,
+                        reservation,
+                    }),
+                ))?
+                else {
+                    panic!("reservation")
+                };
+                let Snapshot::Reservation(status) = observation.snapshot() else {
+                    panic!("reservation")
+                };
+                action = Action::Release {
+                    token,
+                    nest,
+                    reservation,
+                    expected: status.version,
+                };
+                releasing = true;
+                room::yield_();
+                continue;
+            }
+        }
         if let (Action::Retract { memo, .. }, Response::Reply(reply)) = (action, &response) {
             if let Outcome::Failed {
                 failure: Failure::Busy,

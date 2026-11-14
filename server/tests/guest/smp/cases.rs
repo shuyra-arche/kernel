@@ -95,6 +95,13 @@ pub fn run() {
         // Treat the original delivery as lost. Replaying the same request must
         // return the exact result even though the original generation is stale.
         assert_eq!(invoke(request), original);
+        assert_eq!(
+            invoke(crate::support::request(Action::InspectResult {
+                domain: Domain::Nest,
+                request: request.id().unwrap(),
+            })),
+            original
+        );
         match original.outcome() {
             Outcome::Committed(_) => {}
             Outcome::Failed {
