@@ -131,7 +131,7 @@ mod basis {
     }
     pub(crate) mod room {
         pub(crate) mod interrupt {
-            pub(crate) fn withdraw(_: kernel_api::model::identity::PendId) {}
+            pub(crate) fn withdraw<T>(_: kernel_api::model::identity::PendId, _: &T) {}
             pub(crate) fn dispatch(
                 _: &std::sync::Arc<crate::support::Task>,
                 _: &std::sync::Arc<crate::ledger::PendEntry>,

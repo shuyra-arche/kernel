@@ -5,7 +5,13 @@ use sbi::{Ipi, IpiCall, ecall::SArgs};
 /// Order the local clear before the caller inspects its work queues. A sender
 /// racing that snapshot either publishes visible work or leaves an interrupt.
 pub(crate) fn acknowledge() {
+    #[cfg(feature = "latency")]
+    let arrived = riscv::register::sip::read().ssoft();
     unsafe { core::arch::asm!("csrci sip, 2", "fence o, rw", options(nostack)) };
+    #[cfg(feature = "latency")]
+    if arrived {
+        crate::metal::measure::ipi_received();
+    }
 }
 
 /// Publish shared work before requesting an interrupt on the destination Hart.

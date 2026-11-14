@@ -95,8 +95,15 @@ pub(crate) fn insert(task: Arc<Task>) {
 /// 把一枚就绪任务放到指定核上：接进它那张就绪队列，必要时叫醒它。
 fn place(hart: HartId, task: Arc<Task>) {
     assert!(task.can_run_on(hart), "incompatible Task placement");
+    #[cfg(feature = "latency")]
+    let observation = task.clone();
     let newly_ready = schedulers()[hart.get()].enqueue(task);
     if waiting(hart) || newly_ready {
+        #[cfg(feature = "latency")]
+        {
+            let (generation, sent) = crate::metal::measure::notification(hart.get());
+            observation.observation.notify(generation, sent, hart.get());
+        }
         notify(hart);
         if !waiting(hart)
             && let Some(idle) = schedulers()
@@ -180,13 +187,15 @@ pub(crate) fn run() -> usize {
     // it to competing Yield loops; repeated front-half rejection must not
     // starve a deadline whose owner is already making scheduling progress.
     sign::redeem();
-    if let Some(route) = super::interrupt::external() {
-        route.retry(&commit);
-    }
-    if slot::current()
-        .running_task()
-        .is_some_and(|task| crate::basis::unit::lifecycle::take_doomed(task.ident.id).is_some())
-    {
+    let doomed = {
+        #[cfg(feature = "latency")]
+        let _measure =
+            crate::metal::measure::scope(crate::metal::measure::Work::DoomCheck, &commit);
+        slot::current()
+            .running_task()
+            .is_some_and(|task| crate::basis::unit::lifecycle::take_doomed(task.ident.id).is_some())
+    };
+    if doomed {
         drop(commit);
         return crate::basis::unit::lifecycle::quit();
     }
@@ -202,9 +211,6 @@ fn dispatch(allow_steal: bool) -> Option<usize> {
     // Ready tasks must not escape every scheduler container between commits.
     let _commit = crate::basis::commit();
     let redeemed = sign::redeem();
-    if let Some(route) = super::interrupt::external() {
-        route.retry(&_commit);
-    }
     let s = slot::current();
     s.awaken();
     s.relocate();

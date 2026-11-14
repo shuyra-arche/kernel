@@ -86,6 +86,8 @@ pub fn run() -> ! {
 }
 
 extern "C" fn run_on_stack() -> ! {
+    #[cfg(feature = "latency")]
+    crate::metal::measure::running();
     restore(scheduler::run())
 }
 
