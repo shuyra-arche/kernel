@@ -53,9 +53,71 @@ Retries use a fresh attempt and preserve the required scope. Stale or insufficie
 proofs fail closed. Closing only reaches Closed after the covering proof; elapsed
 time, cancellation, source exit and business completion cannot substitute for it.
 
-The CPU backend performs a finite Hart scan and synchronous SBI RFENCE calls.
-This change removes software waiting on a peer's Fencing state; it does not
-establish a physical time bound for firmware that does not return. A stalled
-firmware invocation retains its resources and initiator. Host scripted proofs
-verify ownership and identity matching; QEMU executes the target shootdown and
-withdrawal paths, and neither establishes physical-hardware timing/quiescence.
+## RV64 multi-Hart completion
+
+The SMP backend uses a conservative global invalidation round. It invalidates
+caches of translations, not peer mappings or authority. `Retirement` still owns
+the exact Nest instance, ASID, attempt, PTE edits, Pages and detached tables.
+There is no second resource ledger. Logical withdrawal closes admission under
+the existing COMMIT/Nest boundary before clearing PTEs; the caller drops those
+guards before starting a round. Kernel direct-memory copies retain
+their software mapping/ownership locks independently of user translations.
+
+The participants are **every Hart ever marked online**, including idle Harts,
+kernel continuations and Harts that previously ran a Task before it migrated.
+ONLINE is sticky. An unresponsive or stopped participant is not removed to make
+a round succeed. An offline Hart has never accessed a user address space. Its
+first online publication is followed by `FENCE RW,RW`, SATP activation and
+`SFENCE.VMA` before scheduling: paired with the initiator's fence before scanning
+ONLINE, a newly admitted Hart either participates or starts from the new PTEs.
+Every later Task return also executes the existing SATP/SFENCE handoff.
+
+After publishing PTE/payload edits, an initiator obtains a non-reusing round
+from one atomic sequence. AcqRel allocation chains earlier initiators' edits
+into later rounds. Each participant's requested round is a monotonic maximum;
+an Acquire observation of a later round therefore covers all earlier edits.
+The responder executes `FENCE RW,RW; SFENCE.VMA; FENCE RW,RW; FENCE.I`, then
+Release-publishes the **observed** round. SFENCE excludes future accesses using
+old translations. The second explicit data fence orders prior loads/stores
+before the acknowledgement; the initiator's Acquire observation orders resource
+reuse after those accesses. Neither an IPI nor an SBI remote SFENCE reply is a
+substitute for this sequence.
+
+All participants must acknowledge this round or a later covering global round.
+Late and duplicate acknowledgements cannot regress a completed round or settle
+a newer one. Sequence exhaustion rejects new work rather than wrapping. These
+hardware rounds are not public IDs: only the successful invocation creates the
+existing exact `Completed<Request<Asid>>`, which Retirement revalidates under
+its own lock before releasing anything.
+
+Responders allocate nothing and take no locks. They run at trap entry/return,
+after SSIP is cleared (including the IRQ-off idle loop), and in existing lock
+wait reception windows. Simultaneous initiators service each other's requests
+while polling; no global owner lock serializes their waits. Caller-only Team
+operation/Pend ledger serialization can remain: responders never acquire those
+locks, and even a peer queued on them services its mailbox in the lock wait.
+COMMIT/Nest/Page locks do not cross initiation. Polling ends after 100 ms of the admitted timebase
+or one million iterations, whichever comes first. IPI submission errors, timeout
+and partial completion return failure with no receipt. These bounds cover Kernel
+polling, not a firmware call that never returns. A late response is harmless;
+a retry receives a fresh round and still owns the original retained resources.
+
+Data visibility relies on the separately supplied complete coherent normal-RAM
+fabric and the publication fence before PTE exposure. Unknown fabrics remain
+unsupported. Native executable SMP Publish/Protect remains **unsupported**:
+`with_local_instructions` is rejected at installation on SMP, and data-only
+qualification cannot admit RX. The responder's conservative FENCE.I does not
+qualify instruction-fetch topology or the executable PTE exposure boundary.
+Page-wide W/X exclusion and External/IOMMU draining conditions remain intact.
+
+ABI, Ledger and Capsule stay 11/11/2. API and Client have no changed descriptor
+or wire result. The existing result journal retains committed or failed-with-
+retained-value results before delivery; replay never repeats an accepted effect.
+A failed retirement result does not authorize reuse: inspect the same logical
+resource and retry its retained cleanup through the owning lifecycle. This
+implementation does not turn failed CPU results into asynchronous success.
+
+The owning [SMP test composition](../server/tests/guest/smp/) records exact source,
+fixture, lock, toolchain, command and image hashes. Host receipt tests exercise
+software ordering and retention only. QEMU execution is separate evidence and
+does not qualify physical hardware, executable SMP or device quiescence.

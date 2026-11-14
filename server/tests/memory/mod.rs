@@ -17,6 +17,9 @@ pub(crate) mod index {
 use error::FlatError;
 use state::slot;
 
+#[path = "../../src/metal/generic/mmu/completion.rs"]
+mod completion;
+mod rendezvous;
 #[path = "../../src/metal/generic/mmu/fence.rs"]
 mod scope;
 mod translation;

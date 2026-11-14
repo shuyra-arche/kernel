@@ -4,9 +4,9 @@ use crate::metal::sync::OnceLock;
 static TOPOLOGY: OnceLock<Topology> = OnceLock::new();
 
 pub(crate) fn install(topology: Topology) -> Result<(), Error> {
-    // The first concrete drain path is local: remote SFENCE acknowledgements
-    // alone do not establish completion of other Harts' prior data accesses.
-    if crate::metal::hart::hart_count() != 1 {
+    // A local instruction-fetch qualification must never be widened to SMP.
+    // Coherent data-only fabrics use the all-Hart CPU completion protocol.
+    if crate::metal::hart::hart_count() != 1 && topology.allows_local_instructions() {
         return Err(Error::Unsupported);
     }
     for region in topology.regions() {
