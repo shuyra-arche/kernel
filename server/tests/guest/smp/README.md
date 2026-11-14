@@ -50,3 +50,19 @@ Physical hardware, executable SMP, and complete System/Vanllia #39 acceptance
 require separate evidence. The System #12 runtime at
 `7e4f9dc19bdaf4a0e95ff3b557fdc8959b8547d7` is an additional consumer scenario,
 not a replacement for these Kernel-owned tests.
+
+Run the unchanged pinned System runtime as a consumer regression with:
+
+```sh
+python3 server/tests/guest/smp/system.py --kernel "$PWD" \
+  --fixture /path/to/system-at-7e4f9dc --output /tmp/system-native-runtime
+```
+
+This archives both exact revisions, substitutes only the Kernel package paths,
+and builds the release guest and platform with the same API/Client/Server.
+It requires all four original runtime markers and clean exit on 1/4 Harts within
+the original 120-second limit. In particular, a retry observer must not steal
+the CPU batch between the heap owner's accepted Publish and its completion.
+The build graph, ELFs, Capsule and serial results are retained; no System source
+or failure policy is adapted. This is the issue's component fixture, not full
+System or Vanllia product acceptance.
