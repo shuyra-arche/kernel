@@ -37,6 +37,15 @@ transfer and failure recovery on 1/4 Harts. It does not extend public ABI 11
 or qualify native SMP memory. Its optional timing mode compares state-lock
 ownership intervals with the same test composition on a baseline provider.
 
+## Native Room and interrupt contracts
+
+The [Room suite](latency/README.md) exercises current ABI 11 UART/PLIC/Sign
+retention and revocation on 1/4 Harts, plus fixed-Hart real-time budget and
+preemption on 4 Harts. Its minimal debug/release cases run in the native QEMU
+check, with boot-policy adaptations and limits recorded in that guide.
+Longer paired performance comparisons are explicitly requested and preserve
+all source identities and boot evidence in separate CI artifacts.
+
 ## Historical ABI 10 guest suite
 
 The remaining instructions describe the preserved ABI 10 suite. Run these only

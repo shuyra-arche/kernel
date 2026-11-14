@@ -1,86 +1,123 @@
-# Current ABI 11 Room exploration
+# Native Room synchronization and latency
 
-The opt-in `run.py` composes `guest.rs` with Vanllia
-`dd32c35dbb67e2e78edb00ad35f968d16423249e`. It runs eight ordinary Tasks in
-one already-loaded Team, each completing 512 Yield turns and eight timed
-sleeps. Start-up handles the public Busy result with bounded retries; every
-worker must reach the start gate, complete its exact work and exit normally.
-Guest elapsed time covers the start gate through the last worker's completion.
-It excludes creation and subsequent reclamation. A FAIL marker is never a
-successful run even when the emulator exits with status zero.
+The current ABI 11 suite composes Kernel with Vanllia at
+`dd32c35dbb67e2e78edb00ad35f968d16423249e`. It tests the Scheduler, retained
+IRQ/Sign delivery and real-time scheduling contract behind #120. Minimal UART
+and real-time correctness cases run in `Guest tests (QEMU)`; repeated performance
+comparisons require an explicit request. The historical ABI 10 notes below
+remain an audit record, not current native acceptance.
+
+## Synchronization ownership
+
+| Owner / transition | Required synchronization and effects |
+| --- | --- |
+| Scheduler run/dispatch/steal/remove; Slot enqueue/enter/leave/handoff/step; Sign wake | COMMIT still coordinates Ready membership, Task identity, one running Hart/TrapContext, cancellation, wait/exit, priority, budget and fixed-Hart eligibility. Dequeue and seat are atomic against removal and stealing. An off-queue Ready Task cannot escape that transaction without a checked handoff protocol. No second queue directory is introduced. |
+| Scheduling timer | The same slot transaction stages the newest local deadline and retains programming responsibility. Safe Task return merges current heap and retry deadlines, then programs the comparator outside COMMIT. Failed heap admission retains staged work and the existing retry. A local TrapGuard excludes reception callbacks during merge/programming; boot, idle, heap-head changes and IPI refresh remain immediate. |
+| Router claim | Only the controller Hart claims, with a local nonrecursive service guard. A controller hardware gate serializes enable-word RMW against peer-Hart revocation. At most four actual masked claims are retained before software publication. This gate is released before acquiring COMMIT. |
+| Router publish / retry | Each retained claim moves under COMMIT to its Source's real claim state, including no receiver, or to an owned completion batch for unknown/reserved IRQs. That batch completes after COMMIT. A failed front-half try retains claims, masks external CPU delivery and arms retry. Safe return/idle maintenance joins FIFO COMMIT admission; Scheduler no longer calls the router while owning COMMIT. |
+| Source maintenance | Four requested Sources per service turn, each with its own short COMMIT. A 64-bit coalesced request bitmap and round-robin cursor use immutable, never-reused registration slots (maximum 64), distinct from hardware line numbers. Requests made during a turn remain pending. Notifications happen after releasing that Source's transaction. |
+| Revoke / Consume / rebind | Live Pend ancestry, full writable View with ASSOCIATE, and unique LISTEN+CONSUME holder remain authoritative. Exact consumption alone completes/rearms; detach keeps physical claim responsibility. Ordinary Source mask and completion remain under COMMIT plus the hardware gate so stale maintenance cannot unmask a revoked/rebound source. PLIC enable-before-complete ordering remains. Pointer/target matches only route maintenance; they never authorize it. |
+
+Source maintenance no longer scans every source on every scheduling turn or
+requests work for unrelated Pend targets. Relevant ancestor changes still request
+live revalidation. The retained hardware gate/COMMIT order has no cycle: no
+hardware gate holder enters COMMIT. No service, queue or hardware guard survives
+a context switch. The minimum atomic Source hardware actions are short, but
+neither their physical duration nor firmware latency is established by QEMU.
+
+## Attribution
+
+Diagnostics are optional (`kernel/latency`), fixed-capacity and initialized
+in place before secondary startup. Reports print actual storage bytes per Hart
+(currently 24,512), plus Task-owned observation atomics. Sampling introduces no
+allocation, formatting, log I/O or new global lock. Observations never authorize
+queue membership or resource access.
+
+| Record | Meaning and limits |
+| --- | --- |
+| `latency-phase` / `latency-window` | Boot/setup, warmed workload and teardown use explicit boundaries. A span belongs to a phase only when its entire interval fits. Crossing spans stay in aggregate metrics and `latency-crossed`, avoiding contamination of steady distributions. Normal production boot uses the lifetime window; only the archived test composition brackets the warmed workload via existing Debug.Put markers. |
+| `latency-phase-outer` / `latency-outer-parts` | Same-transaction timestamp, outer site, inclusive duration and call counts for scheduler step, Sign wait, IRQ maintenance, controller claim, nested SpinLock acquisition and scheduling timer arm. Eight sites per Hart/phase retain their own largest transaction. Nested durations overlap; never sum them as an exclusive partition. Uninstrumented work remains unknown. |
+| `latency-phase-ready` / `latency-ready` | Initial/current queue Hart, destination, enqueue occupancy, queue entries, reselections and rejection bits (ineligible, budget, outranked). Task notification attempt, target and nonwrapping generation are matched to actual SSIP receipt and selection. A receipt can cover coalesced notifications; it does not prove one SBI call caused it. Stealing/uncovered generations report receipt zero (unknown). Queue counts are boundary snapshots, not a continuous runnable competitor census. |
+| `latency-phase-irq` / `latency-irq` | IRQ-off origin and transaction active at entry. That transaction can finish within the interval. Reception windows end/restart the interval around actual SIE enablement; the assembly reception handler does not mutate Rust attribution. Firmware, host descheduling and uninstrumented kernel time cannot be separated. |
+| `controller-claim` / `timer-return` | Hardware claim interval and deferred timer merge/programming. Leaving COMMIT does not remove these costs from IRQ-off or whole response measurements. |
+
+Per-Hart histograms have 32 log2 buckets, with the last bucket saturated.
+Quantiles are bucket upper bounds, not exact order statistics. `probe` is a
+calibration floor, not a full overhead bound. Independent phase quantiles or
+maxima cannot be added; use paired transaction records for attribution. No
+observed maximum is a WCET or deployment response guarantee.
+
+## Workloads and boot policy
+
+- `room`: eight same-Team Tasks each warm up with 64 Yield turns, then execute
+  512 timed Yield turns and eight sleeps. Workers stay alive until the main
+  Task closes the observation window, separating exit/reclamation costs.
+- `irq`: real UART THRE / PLIC line 10; four Yield competitors and six LISTEN-only
+  observers; 16 warmup and 256 timed pulses by default. It checks retained and
+  repeated delivery, 16 masked burst toggles, stale/double Consume rejection,
+  unrelated endpoint isolation, forwarding, driver exit while claimed, Sign,
+  View and ancestor View revocation, and four successful rebindings. Separate
+  kernel IRQ-to-Sign and guest event-to-consumer histograms must not be added.
+- `realtime`: one-Hart admission rejection; on four Harts, genuine User Tasks
+  test fixed Hart, budget exhaustion/replenishment, Freeze without credit reset,
+  higher-priority Sign wake preemption of pure computation, overload rejection
+  and restoration of ordinary scheduling capacity.
+
+These are isolated test compositions. The runner archives the provider and
+fixture, records every edit, removes the historical `memory-v11` dependency
+feature, selects a fixed lockfile and supplies current provider paths. No native
+RAM Publish or DMA is needed; SMP memory qualification stays unavailable.
+
+The IRQ image explicitly gives the initial Team a trusted static UART mapping
+using the existing external/MMIO boot path. PLIC controls stay private. View
+Pend withdrawal tests the IRQ authority association, not withdrawal of that
+lifetime boot mapping. The real-time image loads the ELF into a User Team using
+the real TeamBuilder in the archived provider copy; normal Capsule entry is
+Supervisor and correctly rejects real-time admission. Neither adaptation weakens
+production admission, introduces a permanent test ABI, or proves general native
+SMP memory acceptance. Logical Task exit is distinguished from actual View loan
+restoration before rebind.
+
+## Run and preserve evidence
+
+Use the root README toolchain, QEMU 10.0.x and `QEMU_OPENSBI`. Run from Kernel:
 
 ```sh
-python3 server/tests/latency/run.py --fixture /absolute/path/to/vanllia \
-    --kernel "$PWD" --output /absolute/path/to/new-evidence \
-    --harts 1 4 --rounds 3 --profile release
+python3 server/tests/latency/run.py --kernel "$PWD" --fixture /path/to/vanllia --output /new/evidence --mode irq --events 16 --rounds 1 --profile debug
+python3 server/tests/latency/run.py --kernel "$PWD" --fixture /path/to/vanllia --output /new/rt-evidence --mode realtime --harts 4 --rounds 1
+python3 server/tests/latency/run.py --kernel "$PWD" --baseline /path/to/control --fixture /path/to/vanllia --output /new/comparison --mode room --harts 1 4 --rounds 5
 ```
 
-Use the root README's Rust toolchain and the QEMU/OpenSBI inputs from
-`server/tests/README.md`. The runner preserves production RV64 flags, records
-the compiler, source and fixture revisions, source diff, lockfile/image/firmware
-hashes, CPU quota/affinity, commands, serial/stderr and every run's status.
-Output must be a new directory. `--profile debug` selects checked target code;
-`--no-latency` runs the same work without diagnostic storage and updates.
-Use identical source, workload, firmware, emulator, affinity, quota and threading
-when comparing overhead. MTTCG is the default for concurrent Hart execution;
-`--threads single` is an explicit alternative, not an equivalent sample set.
+Repeat the comparison with `--mode irq`, and both modes with `--no-latency`.
+Both providers build before measured boots; A/B order reverses each round.
+Keep the toolchain, firmware, lockfile, quota and affinity fixed, and avoid
+concurrent builds or tests. Run all failures/outliers through the same reporting
+rules. Diagnostic-on/off elapsed times expose workload perturbation; do not
+subtract an assumed constant instrumentation cost.
 
-The copied platform leaves memory qualification **unavailable** on both 1/4
-Hart. Kernel's single-Hart drain gate remains intact. This guest performs no
-native Publish, executable publication, second-Team mapping or DMA. Passing it
-does not establish native memory SMP acceptance, real-time admission, Sign/IRQ
-latency or physical hardware behavior. It is excluded from default CI.
+A published control for #120 is
+`c45d8bc5aced4000685f605de2d43accb3279f82` (`exp/room-control`). It retains the
+original IRQ and scheduling-timer COMMIT boundaries with the same diagnostics
+and native ASSOCIATE compatibility correction. It is an instrumented control,
+not unmodified main. The final PR records candidate revisions, repeated results,
+setup failures and remaining unknown causes.
 
-## Attribution and interpretation
+Each output retains exact source/fixture/suite identities, composition diff,
+locked build command, compiler/emulator versions, firmware/ELF/image hashes,
+quota/affinity, host load, boot order, serial/stderr, statuses and all histograms.
+CI uploads minimal correctness evidence as `native-room`. To request the
+optional 80-boot comparison in a PR, put these two lines in its body before
+pushing an update:
 
-All diagnostic state is fixed-capacity and allocated before secondary Harts
-start. The shutdown report prints its actual bytes per Hart. Sampling performs
-no allocation, log I/O, formatting or new global locking. Task observation fields
-exist only with the `latency` feature and never authorize queue ownership.
+```text
+Room comparison: requested
+Room baseline: c45d8bc5aced4000685f605de2d43accb3279f82
+```
 
-| Record | Evidence and limits |
-| --- | --- |
-| `latency-outer-parts` | Same-Hart transaction timestamp, outer site, six inclusive durations and call counts: scheduler step, Sign wait, IRQ maintenance, controller claim, nested SpinLock acquisition and scheduling deadline arm. Eight slowest distinct outer sites retain the parts belonging to their own largest hold. Nested durations must not be added into an exclusive partition. Uninstrumented work remains unknown. |
-| `latency-ready` | Largest ready-to-return sample per Hart, with initial/current queue Hart, actual destination, queue occupancy at the last enqueue, queue entries, reselections and observed rejection bits (ineligible Hart, unavailable budget, outranked). Counts describe those boundaries, not continuous runnable competition. Notification arrival and arbitrary host/firmware pauses remain unknown. |
-| `latency-irq` | Largest measured IRQ-off interval per Hart, its entry/guard origin and transaction active at its start. That transaction may end within the interval; the label is not an exclusive cause. Host pauses, firmware and uninstrumented kernel work cannot be separated. |
-| `latency-phase` | Completion-phase histogram: boot, running after the first Hart enters the scheduler, teardown after root-exit observation. Running includes guest setup; it must not be called a steady-state-only histogram. Spans crossing a boundary belong to their completion phase. |
-| `timer-return` | Deferred scheduling deadline merge/programming at the safe return boundary, outside global COMMIT. It remains included in dispatch-to-return, ready-to-return and IRQ-off measurements. |
-
-Reception windows end and restart IRQ-off measurements around the actual
-temporary SIE window. Their assembly handler does not update Rust attribution.
-All Hart-local mutable records are accessed with interrupts masked; stage scopes
-borrow the existing COMMIT guard and cannot outlive that admission. Reported
-sites are compiler-provided static locations, formatted only after the shutdown
-barrier. `probe` remains a calibration floor, not a complete overhead bound.
-
-## Scheduling timer boundary
-
-Slot entry, continuing execution and local waits calculate their scheduling
-deadline under the original COMMIT/slot admission. The Hart-local deadline owner
-retains the newest value and pending programming responsibility. Task return
-flushes it after releasing COMMIT and before restoring execution. Shared heap
-and retained retry deadlines are merged at that point; failed heap acquisition
-keeps pending work and arms the existing retry. Comparator failures retain the
-backend's unknown-setting semantics. A local TrapGuard prevents reception
-callbacks from changing retry state between the merge and hardware programming;
-no global lock is retained across that hardware effect.
-
-Boot, idle/WFI, heap-head changes and IPI refresh retain immediate programming.
-No deadline is silently dropped to reduce a measured hold. Task queue membership,
-unique running Hart/TrapContext, cancellation, affinity, budget and priority
-decisions still commit under the same coordinator. An off-queue Ready Task cannot
-escape between dequeue and seat: pause/removal, stealing and exit currently rely
-on that transaction. Removing it needs a checked handoff protocol, not merely a
-local queue lock or a second queue directory.
-
-IRQ routing still owns claim/mask, retained Source delivery, receipt validation,
-completion and rebind under its existing transaction. This change instruments
-the claim and maintenance paths but does not stage their hardware ownership or
-complete #120's interrupt track. The ordinary Room workload produces no external
-IRQ samples. Native UART/IOMMU/Sign, revocation, burst and source-replacement
-scenarios remain separate required evidence. Phase-specific steady-load tracing
-and complete notification attribution also remain open. Do not close #120 based
-on this exploration or infer WCET from its maxima.
+The opt-in job fetches the validated full control SHA from this repository and
+uploads all rounds as `room-comparison`. Its host is separate from a local
+comparison: report each environment independently. Raw logs belong in artifacts,
+not permanent documentation. No physical hardware timing has been verified.
 
 # Historical ABI 10 bounded latency baseline
 
