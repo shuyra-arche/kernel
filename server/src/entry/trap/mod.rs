@@ -34,6 +34,7 @@ pub(crate) fn service(pending: usize) {
 }
 
 pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapContext {
+    crate::metal::mmu::completion::service();
     #[cfg(feature = "latency")]
     crate::metal::measure::enter();
     asid::occupy(Asid::kernel());
@@ -91,7 +92,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
             }
         }
         TrapEvent::Ipi => {
-            ipi::acknowledge();
+            let schedule = ipi::acknowledge();
             crate::basis::sign::endpoint::delivery::advance();
             if let Some(route) = crate::basis::room::interrupt::external() {
                 route.rearm();
@@ -103,7 +104,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
                 return quit(ident, reason);
             }
             drop(ident);
-            if from_task {
+            if from_task && schedule {
                 run() as *mut TrapContext
             } else {
                 frame as *mut TrapContext
@@ -235,6 +236,7 @@ fn is_task_frame(frame: *const TrapContext) -> bool {
 }
 
 pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
+    crate::metal::mmu::completion::service();
     if let Some(route) = crate::basis::room::interrupt::external() {
         route.advance();
     }

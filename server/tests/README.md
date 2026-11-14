@@ -29,6 +29,16 @@ or native SMP acceptance. The historical scheduling/vector/diagnostics cases
 below have not all been migrated to this native composition; their previous
 results must not be reported as current ABI 11 acceptance.
 
+## Native CPU SMP completion
+
+The [SMP composition](guest/smp/README.md) runs the data-only native contract on
+1/2/4 Harts in debug and release. It requires actual writer migration, concurrent
+retirement, retained failure recovery, request replay/query and executable
+rejection. A test-owned boot probe withholds a Hart and injects old/duplicate
+acknowledgements while retaining a real Page. CI uploads the exact pins, lock
+graphs, composition diff, image hashes and logs as `native-cpu-smp`. This does
+not qualify native executable SMP, devices, physical hardware or complete System.
+
 ## Implicit Flat target probe
 
 The separate [implicit Flat probe](guest/flat/README.md) exercises current

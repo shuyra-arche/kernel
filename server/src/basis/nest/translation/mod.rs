@@ -379,11 +379,8 @@ impl NestState {
         // 过了这里只剩下已经定好的状态转移：PTE、发布记录与承载一起转入退休责任。
         self.withdraw_prepared(address, expected.size(), geometry);
         self.retirement.mappings.push(mapping.clone());
-        let cell = self
-            .memos
-            .take_publication(mapping, page)
-            .expect("published Memo");
-        self.retirement.cells.push(cell.retire());
+        self.memos
+            .withdraw(mapping, page, page, &mut self.retirement.cells);
         drop(inner);
         self.retirement.mark_dirty(false);
         Ok(true)

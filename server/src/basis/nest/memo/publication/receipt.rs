@@ -166,6 +166,12 @@ impl Publication {
         );
         self.phase = Phase::Mapped;
     }
+    /// An in-place CPU PTE permission edit needs a fresh covering fence while
+    /// keeping the existing physical retention published throughout.
+    pub(crate) fn changed(&mut self) {
+        assert!(matches!(self.phase, Phase::Mapped | Phase::Publishing));
+        self.phase = Phase::Publishing;
+    }
     fn begin_retirement(&mut self) {
         if matches!(self.phase, Phase::Publishing | Phase::Mapped) {
             self.retention = self.retention.take().map(Retention::retire);

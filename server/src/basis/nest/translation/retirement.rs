@@ -41,6 +41,11 @@ impl Retirement {
         self.invalidation
     }
 
+    /// Only this batch's retained mappings still depend on its completion.
+    pub(in crate::basis::nest) fn pending_for(&self, mapping: &Arc<Span>) -> bool {
+        self.mappings.iter().any(|held| Arc::ptr_eq(held, mapping))
+    }
+
     pub(in crate::basis::nest) fn mark_dirty(&mut self, global: bool) {
         assert!(
             !self.invalidation.is_fencing(),
@@ -102,15 +107,28 @@ impl Retirement {
             self.fail();
             return Err(super::super::NestError::Shootdown);
         }
+        // Allocate before consuming any obligation. Failure leaves the entire
+        // batch retained and retryable, even though the hardware fence ran.
+        let mut settled = Vec::new();
+        let count = self
+            .mappings
+            .iter()
+            .map(|mapping| memos.awaiting_cpu(mapping))
+            .sum();
+        if settled.try_reserve(count).is_err() {
+            self.fail();
+            return Err(super::super::NestError::OutOfMemory);
+        }
         self.pending = None;
         for mapping in &self.mappings {
-            memos.complete(mapping);
+            memos.complete(mapping, &mut settled);
             mapping.changed();
         }
         self.tickets.settle();
         self.invalidation = self.invalidation.complete();
         self.scope = Scope::AddressSpace;
         Ok(Fenced {
+            settled,
             tables: core::mem::take(&mut self.tables),
             cells: core::mem::take(&mut self.cells),
             mappings: core::mem::take(&mut self.mappings),
@@ -120,6 +138,7 @@ impl Retirement {
 
 /// Resources from a completed fence. Release them outside the Nest lock.
 pub(in crate::basis::nest) struct Fenced {
+    settled: Vec<super::super::memo::Settled>,
     tables: Vec<Table>,
     cells: Vec<Publication>,
     mappings: Vec<Arc<Span>>,
@@ -133,15 +152,10 @@ impl Fenced {
             // covering the removed PTEs completed.
             unsafe { retained.settle() };
         }
+        for settled in self.settled {
+            settled.release();
+        }
         for mapping in &self.mappings {
-            let mut cursor = None;
-            loop {
-                let Some(page) = nest.state.lock().memos.next_page(mapping, cursor) else {
-                    break;
-                };
-                cursor = Some(page);
-                nest.finish_memo(mapping, page);
-            }
             loop {
                 let memo = nest.state.lock().memos.take_deleted(mapping);
                 if memo.is_none() {

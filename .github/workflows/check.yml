@@ -70,7 +70,7 @@ jobs:
     name: Guest tests (QEMU)
     runs-on: ubuntu-latest
     container: debian:trixie
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
       RUSTFLAGS: "-Crelocation-model=static -Cforce-frame-pointers=yes -Ccode-model=medium -Dwarnings"
@@ -93,6 +93,10 @@ jobs:
             tests/memory
             platform/riscv
           persist-credentials: false
+      - name: Trust checked-out compositions in the container
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/vanllia"
       - name: Adapt historical fixture manifest to the current provider
         run: |
           python3 - <<'PYTHON'
@@ -107,6 +111,61 @@ jobs:
         run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --no-build --capsule-version 10
       - name: Run current native provider (release)
         run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --profile release
+      - name: Check native CPU completion (debug, 1/2/4 Harts)
+        run: python3 server/tests/guest/smp/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/smp-debug
+      - name: Check native CPU completion (release, 1/2/4 Harts)
+        run: python3 server/tests/guest/smp/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/smp-release --profile release
+      - name: Fetch pinned System runtime regression
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: shuyra-arche/system
+          ref: 7e4f9dc19bdaf4a0e95ff3b557fdc8959b8547d7
+          path: .integration/system
+          persist-credentials: false
+      - name: Fetch pinned Twine Release recovery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: shuyra-arche/twine
+          ref: 7c75c62d15d173032d99fed54ca7fd00337d787b
+          path: .integration/twine
+          persist-credentials: false
+      - name: Check System native runtime (release, 1/4 Harts)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/system"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/twine"
+          python3 server/tests/guest/smp/system.py --twine .integration/twine --kernel "$GITHUB_WORKSPACE" --fixture .integration/system --output .integration/system-runtime
+      - name: Preserve System runtime evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: system-native-runtime
+          path: |
+            .integration/system-runtime/*.json
+            .integration/system-runtime/*.log
+            .integration/system-runtime/*.lock
+            .integration/system-runtime/*.elf
+            .integration/system-runtime/initrd.bin
+          if-no-files-found: warn
+      - name: Preserve native CPU completion evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-cpu-smp
+          include-hidden-files: true
+          path: |
+            .integration/smp-*/inputs.json
+            .integration/smp-*/composition.diff
+            .integration/smp-*/build.log
+            .integration/smp-*/Cargo.lock
+            .integration/smp-*/provider/Cargo.lock
+            .integration/smp-*/harts-*/*.log
+            .integration/smp-*/harts-*/result.json
+            .integration/smp-*/initrd.bin
+            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-guest
+            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-platform
+            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-guest
+            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-platform
+          if-no-files-found: warn
       - name: Check implicit Flat contracts (debug, 1/4 Harts)
         run: python3 server/tests/guest/flat/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/flat-debug
       - name: Check implicit Flat contracts (release, 1/4 Harts)

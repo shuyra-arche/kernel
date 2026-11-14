@@ -85,7 +85,7 @@ impl Contract for Domain {
     }
 }
 // SAFETY: the unique instance and ASID are checked before the backend covers all
-// active Hart leases. Failed/partial SBI fences produce no completion.
+// ever-online Harts. Failed/partial completion rounds produce no evidence.
 unsafe impl Shootdown for Domain {
     type Target = Request<Asid>;
     type Error = NestError;

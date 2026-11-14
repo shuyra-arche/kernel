@@ -1,3 +1,4 @@
+pub(crate) mod completion;
 pub(crate) mod domain;
 pub(crate) mod identity;
 pub(crate) mod mode;

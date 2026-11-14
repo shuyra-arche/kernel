@@ -40,6 +40,11 @@ pub(crate) fn lease(hart: crate::metal::hart::HartId) -> Option<Asid> {
 
 pub fn shootdown(asid: Asid) -> Result<(), Deaf> {
     crate::metal::allocator::assert_allocation_allowed();
+    if hart::hart_count() > 1 {
+        // All ever-online Harts, including former leases after Task migration.
+        // This completes explicit accesses as well as translations.
+        return super::super::completion::synchronize().map_err(|_| Deaf { asid });
+    }
     // 调用方已经写下的 PTE 排在本地 flush 与下面那次租约扫描之前：漏掉这一序，
     // 远端可能按旧翻译继续用这条 ASID。
     fence_data();
@@ -88,12 +93,15 @@ pub unsafe fn flush(asid: Asid) {
 
 /// 让已写下的指令字节对所有在线地址空间的 hart 可见。
 pub fn sync_instructions() -> Result<(), NestError> {
+    if hart::hart_count() > 1 {
+        super::super::completion::synchronize().map_err(|_| NestError::Shootdown)?;
+    }
     unsafe { core::arch::asm!("fence rw, rw", options(nostack)) };
     hart::request_instruction_sync();
     unsafe { core::arch::asm!("fence rw, rw", "fence.i", options(nostack)) };
     let me = hart::hart_id();
     for slot in (0..hart::hart_count()).map(hart::HartId::new) {
-        if slot != me && lease(slot).is_some() {
+        if slot != me && hart::online(slot) {
             let (mask, base) = hart::firmware(slot).target();
             sbi::RfenceCall::new(sbi::Rfence::RemoteFenceI)
                 .args(SArgs {

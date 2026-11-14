@@ -23,6 +23,9 @@ pub(crate) fn mark_online() {
     crate::metal::switcher::context::extension::hardware::initialize();
     let (word, bit) = hart_id().bit();
     ONLINE[word].fetch_or(bit, Ordering::Release);
+    // A rendezvous that misses this first admission must precede our first
+    // translation use. ONLINE is sticky: stopped/unresponsive peers time out.
+    unsafe { core::arch::asm!("fence rw, rw", options(nostack)) };
 }
 
 pub(crate) fn online(hart: HartId) -> bool {

@@ -44,6 +44,47 @@ fn retract(memo: &mut Memo, page: &Arc<Page>) {
 }
 
 #[test]
+fn a_neighboring_cpu_batch_cannot_finish_retract_before_its_pte_withdrawal() {
+    let (mut memo, _, _) = logical();
+    let pool = Pool::new(0);
+    let data = page(pool);
+    publish(&mut memo, &data);
+    memo.begin_retract(memo.generation(), data.begin().unwrap(), false)
+        .unwrap();
+    assert!(memo.complete_cpu().is_none());
+    assert!(memo.retracting());
+    assert!(!data.allows_return());
+    let retired = memo.withdraw().unwrap();
+    // Host bookkeeping supplies the exact fence; no physical MMU is modeled.
+    let settled = memo.complete_cpu().unwrap();
+    assert!(!memo.in_flight());
+    assert!(!data.allows_return());
+    unsafe {
+        retired.settle();
+    }
+    settled.release();
+    assert!(data.allows_return());
+}
+
+#[test]
+fn in_place_protect_requires_a_fresh_cpu_completion_without_republishing_retention() {
+    let (mut memo, _, _) = logical();
+    let pool = Pool::new(0);
+    let data = page(pool);
+    publish(&mut memo, &data);
+    let freeze = crate::cell::Freeze::new(data.begin().unwrap(), None).unwrap();
+    memo.protect(memo.generation(), Some(freeze));
+    assert!(memo.in_flight());
+    assert_eq!(memo.publication().unwrap().phase(), Phase::Publishing);
+    memo.complete_cpu().unwrap().release();
+    assert!(!memo.in_flight());
+    assert_eq!(memo.publication().unwrap().phase(), Phase::Mapped);
+    assert!(!data.allows_return());
+    retract(&mut memo, &data);
+    assert!(data.allows_return());
+}
+
+#[test]
 fn next_observation_keeps_physical_identity_through_failed_fence_and_retirement() {
     use kernel_api::model::nest::{MemoPhase, NestId, ReservationId};
     let observe = |memo: &Memo, failed| {

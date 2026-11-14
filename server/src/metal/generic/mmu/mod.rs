@@ -1,5 +1,6 @@
 //! CPU translation and shootdown contracts.
 
+pub(crate) mod completion;
 pub(crate) mod fence;
 
 use bitflags::bitflags;

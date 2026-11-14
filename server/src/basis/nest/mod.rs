@@ -608,7 +608,7 @@ impl Nest {
         if mapping.source().is_some() {
             return Err(CellFail::Denied);
         }
-        if !self.is_external() {
+        if !self.is_external() && self.state.lock().retirement.pending_for(&mapping) {
             self.finish_invalidation()?;
         }
         let mut cursor = None;
@@ -677,7 +677,9 @@ impl Nest {
             let _commit = crate::basis::commit();
             let mut layout = self.layout.lock();
             let mut state = self.state.lock();
-            if !state.retirement.invalidation().is_clean() || state.memos.has_resources(&mapping) {
+            // An unrelated Reservation may already own a newer fence. Only
+            // this mapping's retained batch and resources prevent its release.
+            if state.retirement.pending_for(&mapping) || state.memos.has_resources(&mapping) {
                 return Err(CellFail::Busy);
             }
             state.index.remove(&mapping);
@@ -1771,23 +1773,27 @@ impl Nest {
                 .faults
                 .lock()
                 .publishing(index, expected, memo.generation());
-            state.publish_page(
-                self.geometry(),
-                crate::metal::generic::memory::Endpoint::Cpu {
-                    nest: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
-                    leases: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
-                },
-                mapping,
-                VirtAddr::new(mapping.position(index)?),
-                &page,
-                &change,
-                maintenance.as_ref().map(|usage| usage.permit()),
-            )
+            state
+                .publish_page(
+                    self.geometry(),
+                    crate::metal::generic::memory::Endpoint::Cpu {
+                        nest: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                        leases: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                    },
+                    mapping,
+                    VirtAddr::new(mapping.position(index)?),
+                    &page,
+                    &change,
+                    maintenance.as_ref().map(|usage| usage.permit()),
+                )
+                // Claim the edited batch before exposing it to retry observers.
+                // The accepted publisher owns its exact completion invocation.
+                .and_then(|()| state.retirement.begin(self.id.get(), self.asid()))
         };
         drop(commit);
         // Neither COMMIT nor a Nest/source lock crosses a CPU fence.
         let mut result = prepared
-            .and_then(|()| self.finish_invalidation())
+            .and_then(|target| self.invalidate(target))
             .map_err(CellFail::from);
         if result.is_ok() && access.contains(Access::EXECUTE) {
             result = identity::sync_instructions()
@@ -2158,10 +2164,21 @@ impl Nest {
                 .existing_mut(mapping, index)
                 .expect("prepared Memo")
                 .protect(expected, operation_freeze.take());
-            Ok::<(), CellFail>(())
+            if state.retirement.invalidation().is_clean() {
+                Ok::<_, CellFail>(None)
+            } else {
+                state
+                    .retirement
+                    .begin(self.id.get(), self.asid())
+                    .map(Some)
+                    .map_err(CellFail::from)
+            }
         };
         drop(commit);
-        let mut result = result.and_then(|()| self.finish_invalidation().map_err(CellFail::from));
+        let mut result = result.and_then(|target| match target {
+            Some(target) => self.invalidate(target).map_err(CellFail::from),
+            None => Ok(()),
+        });
         if result.is_ok() && access.contains(Access::EXECUTE) {
             result = identity::sync_instructions().map_err(CellFail::from);
         }
@@ -2259,9 +2276,10 @@ impl Nest {
         if !state.unpublish_page(self.geometry(), mapping, address, expected)? {
             return Ok(());
         }
+        let target = state.retirement.begin(self.id.get(), self.asid())?;
         drop(state);
-        // 退休的承载只在这次确认之后才随 `finish_invalidation` 放掉。
-        self.finish_invalidation()?;
+        // Release retained resources only after this exact invocation completes.
+        self.invalidate(target)?;
         self.finish_memo(mapping, mapping.page_index(address));
         Ok(())
     }
@@ -2528,10 +2546,11 @@ impl Nest {
             state.retirement.tickets.retire(ticket);
         }
         state.retirement.mark_dirty(mapping.is_global());
+        let target = state.retirement.begin(self.id.get(), self.asid())?;
         drop(state);
         drop(layout);
         // 三、同步成功之后才结算这一段的票；失败时票、Page、表页与来源都留着。
-        self.finish_invalidation()?;
+        self.invalidate(target)?;
         if !tickets.is_empty() {
             let mut layout = self.layout.lock();
             let mut state = self.state.lock();
