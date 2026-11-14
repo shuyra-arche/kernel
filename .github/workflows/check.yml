@@ -93,6 +93,10 @@ jobs:
             tests/memory
             platform/riscv
           persist-credentials: false
+      - name: Trust checked-out compositions in the container
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/vanllia"
       - name: Adapt historical fixture manifest to the current provider
         run: |
           python3 - <<'PYTHON'
