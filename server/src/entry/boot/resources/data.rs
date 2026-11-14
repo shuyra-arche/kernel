@@ -20,7 +20,10 @@ use kernel_api::{
 /// The physical range is validated immutable boot data, readable through the
 /// Kernel's admitted identity map for the duration of this unpublished copy.
 /// This is not an importer for caller-supplied addresses or MMIO.
-pub(in crate::entry::boot) unsafe fn snapshot(base: usize, len: usize) -> Result<PendEntry, PendFail> {
+pub(in crate::entry::boot) unsafe fn snapshot(
+    base: usize,
+    len: usize,
+) -> Result<PendEntry, PendFail> {
     if base == 0 || len == 0 || len > isize::MAX as usize || base.checked_add(len).is_none() {
         return Err(PendFail::Denied);
     }
