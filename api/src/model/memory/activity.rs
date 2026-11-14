@@ -4,8 +4,6 @@ use crate::abi::layout::{fetch_words, store_words};
 use core::sync::atomic::{AtomicU64, Ordering};
 pub const VERSION: u64 = 1;
 pub const MAX_SUBSCRIPTIONS: usize = 16;
-pub const MIN_PERIOD_NS: u64 = 10_000_000;
-pub const MAX_PERIOD_NS: u64 = 10_000_000_000;
 /// Receiver-local (Sign Pend, Share View Pend). The Sign's descriptive Mark is
 /// the Share Pend's non-reusing ID, not a new subscription authority/handle.
 pub type Pair = (
@@ -13,7 +11,7 @@ pub type Pair = (
     crate::model::identity::PendId,
 );
 /// Initial provider policy. Clients can aggregate intervals in user space.
-pub const PERIOD_NS: u64 = MIN_PERIOD_NS;
+pub const PERIOD_NS: u64 = 10_000_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u64)]
 pub enum Validity {
@@ -215,7 +213,11 @@ pub fn pair(
     view: crate::model::pend::PendInfo,
 ) -> Option<Pair> {
     use crate::model::{modifiable::Modifiable, pend::*, sign::SignRights};
-    if sign.token == view.token
+    if sign.token.get() == 0
+        || view.token.get() == 0
+        || !sign.limits.valid()
+        || !view.limits.valid()
+        || sign.token == view.token
         || sign.owner.get() != 0
         || view.owner.get() != 0
         || sign.lender.get() != 0

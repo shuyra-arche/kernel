@@ -48,7 +48,7 @@ fn aliases() {
     unsafe { (address.get() as *mut u64).write_volatile(7) };
     let hit = a.expect(Evidence::Observed, Evidence::Observed);
     for reader in [&b, &c] {
-        let idle = after(reader, at + sampling::MIN_PERIOD_NS * 2);
+        let idle = after(reader, at + sampling::PERIOD_NS * 2);
         assert_eq!(
             (idle.accessed, idle.dirty),
             (Evidence::NotObserved, Evidence::NotObserved)
@@ -382,10 +382,7 @@ extern "C" fn consumer() -> ! {
         pause();
     }
     let accessed = hot.expect(Evidence::Observed, Evidence::Observed);
-    let idle = after(
-        &cold,
-        CHILD_WRITE.load(Acquire) + 2 * sampling::MIN_PERIOD_NS,
-    );
+    let idle = after(&cold, CHILD_WRITE.load(Acquire) + 2 * sampling::PERIOD_NS);
     assert_eq!(idle.dirty, Evidence::NotObserved);
     let mut candidates = [idle, accessed];
     candidates.sort_unstable_by_key(|s| {
