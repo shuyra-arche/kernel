@@ -69,6 +69,24 @@ def compose(args, kernel, destination):
     }
 ''' + anchor)
         edit(provider / "server/src/entry/call/debug.rs", bracket)
+    if args.mode == "irq":
+        # This paired test image explicitly owns the UART aperture. Move its
+        # descriptor from ordinary boot authority to the existing trusted MMIO
+        # path; do not relax Kernel admission or give the Unit PLIC controls.
+        def uart_owner(s):
+            anchor = '    unsafe {\n        boot::configure(devices.description())?;\n    }'
+            assert s.count(anchor) == 1
+            return s.replace(anchor, '''    let mut description = devices.description();
+    let mut authorities = alloc::vec::Vec::from(description.resources.authorities);
+    let at = authorities.iter().position(|r| r.base == 0x10000000).expect("UART authority");
+    let uart = authorities.remove(at);
+    let mut external = alloc::vec::Vec::from(description.resources.external);
+    external.push(uart);
+    description.resources.authorities = &authorities;
+    description.resources.external = &external;
+    unsafe { boot::configure(description)?; }
+''')
+        edit(fixture / "platform/riscv/src/boot/mod.rs", uart_owner)
     guest = SUITE / ("interrupt.rs" if args.mode == "irq" else "guest.rs")
     edit(root / "guest/main.rs", lambda _: guest.read_text())
     # These workloads use same-Team Tasks and static boot MMIO, not native RAM
@@ -82,6 +100,7 @@ def compose(args, kernel, destination):
             assert s.count(anchor) == 1
             s = s.replace(anchor, anchor + '''
         // Test image owns this UART for its initial Team's entire lifetime.
+        unsafe { boot::grant_mmio(kernel_api::boot::platform::Region::new(0x10000000, 4096)) }.unwrap();
         unsafe { boot::map_entry_mmio(kernel_api::boot::platform::Region::new(0x10000000, 4096), kernel_api::address::VirtAddr::new(0x10000000)) }.unwrap();''')
         return s
     edit(root / "platform/main.rs", platform)
