@@ -55,11 +55,15 @@ def main():
     platform = root / "platform/main.rs"
     # This workload only creates Tasks in the already-loaded Team. It never
     # publishes executable pages, creates a second Team or exercises device DMA.
-    # Remove the native acceptance fixture's explicitly single-Hart FENCE.I
-    # qualification; ordinary RAM remains covered by its declared fabric.
+    # Leave qualified memory unavailable: the provider deliberately rejects
+    # multi-Hart drain qualification. This Room-only guest needs no native
+    # Publish, DMA or executable-memory capability. Do not weaken that check.
     text = platform.read_text()
     assert text.count('.map(|t| t.with_local_instructions())') == 1
-    platform.write_text(text.replace('.map(|t| t.with_local_instructions())', ''))
+    text = text.replace('.map(|t| t.with_local_instructions())', '')
+    assert text.count('boot::qualify_memory(topology).unwrap();') == 1
+    text = text.replace('boot::qualify_memory(topology).unwrap();', 'let _unqualified_topology = topology;')
+    platform.write_text(text)
     env = dict(os.environ, RUSTFLAGS=FLAGS)
     command = ["cargo", "build", "--manifest-path", str(root / "Cargo.toml"), "--target", TARGET]
     if args.profile == "release": command.append("--release")
@@ -85,6 +89,7 @@ def main():
         "sha256": {str(p.relative_to(args.output)) if p.is_relative_to(args.output) else str(p): digest(p)
             for p in [binaries / "memory-guest", binaries / "memory-platform", firmware, root / "Cargo.lock", guest, platform]}}
     (args.output / "inputs.json").write_text(json.dumps(metadata, indent=2))
+    failures = []
     for harts, round_ in itertools.product(args.harts, range(args.rounds)):
         evidence = args.output / f"harts-{harts}-round-{round_}"
         evidence.mkdir()
@@ -106,8 +111,10 @@ def main():
         (evidence / "result.json").write_text(json.dumps({"command": command, "status": status,
             "elapsed_seconds": time.monotonic() - started, "image_sha256": digest(image)}, indent=2))
         log = (evidence / "serial.log").read_text()
-        assert status == 0 and "FAIL" not in log and "PASS room workers=8 turns=512 steps=4096" in log and "task: all tasks exited" in log, evidence
-        print(f"PASS {args.profile} harts={harts} round={round_}: {evidence}", flush=True)
+        passed = status == 0 and "FAIL" not in log and "PASS room workers=8 turns=512 steps=4096" in log and "task: all tasks exited" in log
+        if not passed: failures.append(str(evidence))
+        print(f"{'PASS' if passed else 'FAIL'} {args.profile} harts={harts} round={round_}: {evidence}", flush=True)
+    assert not failures, failures
 
 if __name__ == "__main__":
     main()
