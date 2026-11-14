@@ -10,7 +10,7 @@ in the implementation.
 | Why does the Kernel have this model? | [Design (Typst)](design/main.typ) |
 | Where does the source implement each concern? | [Source map](source-map.md) |
 | What API or ABI exists today? | [Kernel API](../api/README.md) and [API source](../api/src/) |
-| How will Flat/Nest memory migrate after ABI v10? | [Memory contract and migration status](../api/memory.md) |
+| What does the selected Flat/Nest memory ABI provide? | [Current memory contract](../api/memory.md) |
 | How are calls performed? | [Client](../client/README.md) |
 | How do I reproduce verification? | [Kernel verification](../server/tests/README.md) |
 | How do I build or contribute? | [Repository README](../README.md) and [Contributing](../CONTRIBUTING.md) |
