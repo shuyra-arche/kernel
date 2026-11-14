@@ -22,7 +22,7 @@ extern "C" fn writer() -> ! {
     let pointer = ADDRESS.load(Acquire) as *const AtomicU64;
     for _ in 0..16 {
         unsafe { &*pointer }.fetch_add(1, Relaxed);
-        room::sleep_until(room::clock() + 1_000_000).unwrap();
+        room::sleep_until(room::clock() + 10_000_000).unwrap();
     }
     STARTED.store(true, Release);
     // The owner publishes the RW mapping before resuming this Task. Removal
@@ -66,7 +66,9 @@ pub fn run() {
         let deadline = room::clock() + 5_000_000_000;
         while !STARTED.load(Acquire) {
             assert!(room::clock() < deadline);
-            room::yield_();
+            // Leave both ordinary schedulers available for placement; a busy
+            // observer plus one idle Hart can keep stealing the writer back.
+            room::sleep_until(room::clock() + 1_000_000).unwrap();
         }
         let action = if release {
             let Snapshot::Reservation(status) = inspect(Query::Reservation {
