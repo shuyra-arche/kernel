@@ -6,6 +6,7 @@ pub(crate) struct TrapGuard {
 
 impl TrapGuard {
     #[inline(always)]
+    #[cfg_attr(feature = "latency", track_caller)]
     pub(crate) unsafe fn save() -> Self {
         unsafe {
             let was = sstatus::read().sie();

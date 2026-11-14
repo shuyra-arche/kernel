@@ -40,6 +40,7 @@ impl<T> SpinLock<T> {
 
 impl<T: ?Sized> SpinLock<T> {
     #[inline(never)]
+    #[cfg_attr(feature = "latency", track_caller)]
     pub fn lock(&self) -> SpinLockGuard<'_, T> {
         #[cfg(debug_assertions)]
         let caller = crate::metal::sync::depend_enter!(self);
@@ -63,6 +64,7 @@ impl<T: ?Sized> SpinLock<T> {
     /// 只给 `sync` 子树里的 `with_pair` 用：它不对外，所以没人能拿了第二把守卫
     /// 又先放低锁，把闭包里那对守卫的生命周期拆开。
     #[inline(never)]
+    #[cfg_attr(feature = "latency", track_caller)]
     pub(super) fn lock_ordered<U>(&self, _lower: &SpinLock<U>) -> SpinLockGuard<'_, T> {
         #[cfg(debug_assertions)]
         let caller = crate::metal::sync::depend_enter!(self);
@@ -82,6 +84,7 @@ impl<T: ?Sized> SpinLock<T> {
     }
 
     #[inline(never)]
+    #[cfg_attr(feature = "latency", track_caller)]
     pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
         #[cfg(debug_assertions)]
         let caller = crate::metal::sync::depend_enter!(self);

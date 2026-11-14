@@ -85,6 +85,8 @@ pub(crate) fn observe(hart: hart::HartId) {
     if !active() {
         return;
     }
+    #[cfg(feature = "latency")]
+    crate::metal::measure::stopping();
     // Counters, timestamp and the one-shot report decision share one owner.
     let observation = {
         let mut progress = PROGRESS.lock();
