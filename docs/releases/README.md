@@ -22,11 +22,12 @@ consumer input records are in [#165](https://github.com/shuyra-arche/kernel/pull
 Per-page A/D stays Unknown/Unsupported, memory-v11 is optional, and full System
 migration and physical-hardware qualification remain outside this preview.
 
-Active Tag ruleset 27257248 was verified before Tag creation with update/deletion
-restrictions, no bypass, and a matching preview pattern. The complete date-based
-pattern below also covers other channels and stable releases; an administrator
-must apply that wider scope for those future releases. Keep the published Tag
-fixed.
+The preview-matching ruleset 27257248 was verified before Tag creation with
+update/deletion restrictions and no bypass. After publication, the administrator
+replaced it with [ruleset 27258030](https://github.com/shuyra-arche/kernel/rules/27258030),
+which is Active and protects the complete date-based namespace below, including
+all three non-stable channels and stable codenames. Update/deletion restrictions
+and no bypass were verified again. Keep the published Tag fixed.
 
 ## Protection and future publication
 
