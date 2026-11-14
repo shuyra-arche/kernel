@@ -70,7 +70,7 @@ jobs:
     name: Guest tests (QEMU)
     runs-on: ubuntu-latest
     container: debian:trixie
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
       RUSTFLAGS: "-Crelocation-model=static -Cforce-frame-pointers=yes -Ccode-model=medium -Dwarnings"
@@ -107,6 +107,30 @@ jobs:
         run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --no-build --capsule-version 10
       - name: Run current native provider (release)
         run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --profile release
+      - name: Check native CPU completion (debug, 1/2/4 Harts)
+        run: python3 server/tests/guest/smp/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/smp-debug
+      - name: Check native CPU completion (release, 1/2/4 Harts)
+        run: python3 server/tests/guest/smp/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/smp-release --profile release
+      - name: Preserve native CPU completion evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-cpu-smp
+          include-hidden-files: true
+          path: |
+            .integration/smp-*/inputs.json
+            .integration/smp-*/composition.diff
+            .integration/smp-*/build.log
+            .integration/smp-*/Cargo.lock
+            .integration/smp-*/provider/Cargo.lock
+            .integration/smp-*/harts-*/*.log
+            .integration/smp-*/harts-*/result.json
+            .integration/smp-*/initrd.bin
+            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-guest
+            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-platform
+            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-guest
+            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-platform
+          if-no-files-found: warn
       - name: Check implicit Flat contracts (debug, 1/4 Harts)
         run: python3 server/tests/guest/flat/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/flat-debug
       - name: Check implicit Flat contracts (release, 1/4 Harts)
