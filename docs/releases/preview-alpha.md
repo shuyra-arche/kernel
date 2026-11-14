@@ -78,9 +78,10 @@ reclamation. Their immutable consumer revisions and commands are recorded in
 the release preparation PR. This does not establish an assembled System boot;
 its wider native migration remains draft.
 
-Per-page accessed/dirty sampling is **Unknown/Unsupported** (#139). The optional
-native memory-v11 selection and its remaining end-to-end acceptance are tracked
-by #142 and are not the default preview contract. Swap, drivers, filesystems,
+Per-page accessed/dirty sampling is **Unknown/Unsupported** (#139). Native memory-v11 has completed its separately scoped native acceptance
+(#142 is closed). This release selected the default v10 compatibility build;
+it does not activate the v11 configuration. Native acceptance does not imply
+complete legacy System/service migration or physical-hardware qualification. Swap, drivers, filesystems,
 full Toolchain integration and physical-hardware qualification remain outside
 this preview. Preserve source provenance and third-party notices; this release
 does not add a license grant.
