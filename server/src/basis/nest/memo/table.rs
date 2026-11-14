@@ -131,10 +131,10 @@ impl Memos {
             }
         }
     }
-    pub(in crate::basis::nest) fn count(&self, span: &Span) -> usize {
+    pub(in crate::basis::nest) fn awaiting_cpu(&self, span: &Span) -> usize {
         self.entries
             .iter()
-            .filter(|((id, _), _)| *id == span.identity())
+            .filter(|((id, _), memo)| *id == span.identity() && memo.awaiting_cpu())
             .count()
     }
     pub(in crate::basis::nest) fn complete(

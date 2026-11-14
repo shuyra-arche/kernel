@@ -95,6 +95,8 @@ Clean. Its completion callbacks, freezes and physical holdings leave the lock
 in a preallocated release batch. A different invalidation starting before these
 releases cannot strand the first batch's Memo in Retracting. Allocation failure
 before this transition preserves the complete original batch for retry.
+Release capacity counts only hardware states covered by this batch, rather than
+every coordinate of a large Reservation for each single-page publication.
 
 Responders allocate nothing and take no locks. They run at trap entry/return,
 after SSIP is cleared (including the IRQ-off idle loop), and in existing lock

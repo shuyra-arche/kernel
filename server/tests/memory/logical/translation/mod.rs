@@ -65,6 +65,12 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
     .release();
     memo.begin_publish(memo.generation(), neighbor.begin().unwrap(), 6)
         .unwrap();
+    // Sparse, untouched coordinates must not grow the release allocation for
+    // a single edited PTE. Its capacity follows actual hardware obligations.
+    for position in 2..1024 {
+        memos.get_mut(&span, position).unwrap();
+    }
+    assert_eq!(memos.awaiting_cpu(&span), 1);
     let mut pending = Retirement::new();
     pending.mappings.push(span.clone());
     pending.mark_dirty(false);
@@ -74,6 +80,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
         .unwrap();
     assert!(!memos.get(&span, 0).unwrap().in_flight());
     assert!(memos.get(&span, 1).unwrap().in_flight());
+    assert_eq!(memos.awaiting_cpu(&span), 0);
     let nest = Nest {
         state: crate::host_lock::SpinLock::new(RetirementState { memos }),
     };

@@ -515,13 +515,19 @@ impl Memo {
     /// Only hardware edits in the current CPU batch authorize completion.
     /// A neighboring position may have accepted a logical operation without
     /// editing its PTE yet; the batch must not consume that activity.
+    pub(in crate::basis::nest) fn awaiting_cpu(&self) -> bool {
+        match &self.hardware {
+            Hardware::Installed(publication) => publication.phase() == Phase::Publishing,
+            Hardware::Retiring(_) => true,
+            Hardware::Empty => false,
+        }
+    }
     pub(in crate::basis::nest) fn complete_cpu(&mut self) -> Option<Settled> {
-        match &mut self.hardware {
-            Hardware::Installed(publication) if publication.phase() == Phase::Publishing => {
-                publication.complete();
-            }
-            Hardware::Retiring(_) => {}
-            _ => return None,
+        if !self.awaiting_cpu() {
+            return None;
+        }
+        if let Hardware::Installed(publication) = &mut self.hardware {
+            publication.complete();
         }
         Some(self.finish())
     }

@@ -108,7 +108,7 @@ impl Retirement {
         let count = self
             .mappings
             .iter()
-            .map(|mapping| memos.count(mapping))
+            .map(|mapping| memos.awaiting_cpu(mapping))
             .sum();
         if settled.try_reserve(count).is_err() {
             self.fail();
