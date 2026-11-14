@@ -136,7 +136,7 @@ def compose(args, kernel, destination):
     spec.loader.exec_module(native)
     return destination, binaries, native
 
-def boot(args, variant, harts, round_):
+def boot(args, variant, harts, round_, shared_platform=None):
     destination, binaries, native = variant
     evidence = destination / f"harts-{harts}-round-{round_}"
     evidence.mkdir()
@@ -144,13 +144,14 @@ def boot(args, variant, harts, round_):
     image.write_bytes(native.capsule((binaries / "memory-guest").read_bytes(), 11))
     disk = evidence / "disk.raw"
     disk.write_bytes(bytes(1024 * 1024))
-    command = [args.qemu, "-accel", "tcg,thread=multi", "-machine", "virt,iommu-sys=on", "-cpu", "rv64", "-smp", str(harts), "-m", "128M", "-nographic", "-bios", str(args.firmware), "-kernel", str(binaries / "memory-platform"), "-initrd", str(image), "-drive", f"file={disk},format=raw,if=none,id=disk,aio=threads", "-device", "virtio-blk-pci,drive=disk,disable-legacy=on,iommu_platform=on,ats=off,addr=1,ioeventfd=off,vectors=0"]
+    platform = shared_platform or binaries / "memory-platform"
+    command = [args.qemu, "-accel", "tcg,thread=multi", "-machine", "virt,iommu-sys=on", "-cpu", "rv64", "-smp", str(harts), "-m", "128M", "-nographic", "-bios", str(args.firmware), "-kernel", str(platform), "-initrd", str(image), "-drive", f"file={disk},format=raw,if=none,id=disk,aio=threads", "-device", "virtio-blk-pci,drive=disk,disable-legacy=on,iommu_platform=on,ats=off,addr=1,ioeventfd=off,vectors=0"]
     started = time.monotonic()
     load = os.getloadavg()
     with (evidence / "serial.log").open("w") as log, (evidence / "stderr.log").open("w") as errors:
         try: status = subprocess.run(command, stdout=log, stderr=errors, timeout=120).returncode
         except subprocess.TimeoutExpired: status = "timeout"
-    (evidence / "result.json").write_text(json.dumps({"command": command, "status": status, "elapsed_seconds": time.monotonic()-started, "host_load_start": load, "host_load_end": os.getloadavg(), "image_sha256": digest(image)}, indent=2))
+    (evidence / "result.json").write_text(json.dumps({"command": command, "status": status, "elapsed_seconds": time.monotonic()-started, "host_load_start": load, "host_load_end": os.getloadavg(), "image_sha256": digest(image), "platform_sha256": digest(platform)}, indent=2))
     log = (evidence / "serial.log").read_text()
     markers = ["task: all tasks exited", "ROOM:steady", "ROOM:teardown", "iommu: command engine closed"]
     markers += {"irq": [f"PASS irq rounds={args.events}", "observers=6", "revoke-sign=1 revoke-view=1 ancestor-view=1 rebind=4"], "room": ["PASS room workers=8 turns=512 steps=4096"], "realtime": ["PASS realtime harts=" + str(harts), "unsupported=1" if harts == 1 else "budget=1 replenishment=1 freeze=1 no-credit-reset=1 preemption=1 fixed-hart=1 overload=denied ordinary-pool=restored"]}[args.mode]
@@ -195,12 +196,23 @@ def main():
     else:
         if args.baseline: variants.append(compose(args, args.baseline, args.output / "baseline"))
         variants.append(compose(args, args.kernel, args.output / "candidate"))
+    shared_platform = None
+    if args.compare_room_warmup:
+        # Different archive paths can change crate identities/code layout even
+        # at one source revision. Execute the exact same Kernel/platform ELF in
+        # both cases; only the guest's pre-window warmup policy differs.
+        shared_platform = variants[0][1] / "memory-platform"
+        for destination, _, _ in variants:
+            path = destination / "inputs.json"
+            metadata = json.loads(path.read_text())
+            metadata["boot_platform"] = {"path": str(shared_platform), "sha256": digest(shared_platform), "selection": "shared-first-use-control"}
+            path.write_text(json.dumps(metadata, indent=2))
     failures = []
     order = []
     for harts in args.harts:
         for round_ in range(args.rounds):
             for variant in variants[::(-1 if round_ % 2 else 1)]:
-                passed, path = boot(args, variant, harts, round_)
+                passed, path = boot(args, variant, harts, round_, shared_platform)
                 order.append(path)
                 if not passed: failures.append(path)
     (args.output / "order.json").write_text(json.dumps(order, indent=2))
