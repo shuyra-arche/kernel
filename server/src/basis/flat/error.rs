@@ -14,3 +14,16 @@ pub enum FlatError {
     #[error("the page slot is held by another use")]
     Busy,
 }
+
+// Translate only at the logical source boundary; Cell retains its own errors.
+impl From<crate::basis::cell::page::PageError> for FlatError {
+    fn from(error: crate::basis::cell::page::PageError) -> Self {
+        use crate::basis::cell::page::PageError;
+        match error {
+            PageError::InvalidOwner => Self::OutOfRange,
+            PageError::InvalidRange => Self::NotAligned,
+            PageError::IdentityExhausted | PageError::OutOfMemory => Self::OutOfMemory,
+            PageError::Busy => Self::Busy,
+        }
+    }
+}

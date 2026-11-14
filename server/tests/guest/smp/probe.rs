@@ -45,7 +45,7 @@ pub(crate) fn run() {
     until(|| ARRIVED.load(Acquire) == hart::hart_count());
     if me == 0 {
         let page = Arc::new(
-            crate::basis::flat::allocate_cell(crate::basis::cell::page::Owner::Kernel).unwrap(),
+            crate::basis::cell::allocate(crate::basis::cell::page::Owner::Kernel).unwrap(),
         );
         let mut retention = page.prepare_hardware(false).unwrap();
         retention.publish();

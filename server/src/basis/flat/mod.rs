@@ -27,7 +27,6 @@ use kernel_api::address::PageIndex;
 use kernel_api::address::PageOffset;
 use kernel_api::address::PhysAddr;
 
-pub(crate) use crate::basis::cell::allocate as allocate_cell;
 pub use range::{FlatRange, Pages, Residency};
 pub use storage::BorrowedRegion;
 pub(crate) use storage::reshape::Direction;

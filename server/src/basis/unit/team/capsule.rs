@@ -100,7 +100,7 @@ fn image_frames(
         .try_reserve_exact(pages)
         .map_err(|_| NestError::OutOfMemory)?;
     for page in 0..pages {
-        let frame = crate::tag!(Image, crate::basis::flat::allocate_cell(owner.clone())?);
+        let frame = crate::tag!(Image, crate::basis::cell::allocate(owner.clone())?);
         let start = region.payload + page * PAGE;
         unsafe {
             core::ptr::copy_nonoverlapping(
