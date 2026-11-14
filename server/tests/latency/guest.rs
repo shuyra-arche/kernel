@@ -20,6 +20,7 @@ use kernel_client::call::{room, unit};
 use support::Console;
 const WORKERS: usize = 8;
 const TURNS: usize = 512;
+const WARMUP_TIMERS: bool = true;
 static ARRIVED: AtomicUsize = AtomicUsize::new(0);
 static RELEASE: AtomicBool = AtomicBool::new(false);
 static START: AtomicBool = AtomicBool::new(false);
@@ -76,8 +77,11 @@ fn sleep(at: u64) {
     }
 }
 extern "C" fn worker() -> ! {
-    for _ in 0..64 {
+    for turn in 0..64 {
         room::yield_();
+        if WARMUP_TIMERS && turn % 8 == 0 {
+            sleep(room::clock() + 1_000_000);
+        }
     }
     ARRIVED.fetch_add(1, Ordering::Release);
     while !START.load(Ordering::Acquire) {
@@ -109,7 +113,10 @@ extern "C" fn run(at: usize, count: usize) -> ! {
         assert!(room::clock() < deadline, "workers did not reach start");
         room::yield_();
     }
-    let _ = writeln!(Console, "START room workers={WORKERS} turns={TURNS}");
+    let _ = writeln!(
+        Console,
+        "START room workers={WORKERS} turns={TURNS} warmup_timers={WARMUP_TIMERS}"
+    );
     let _ = writeln!(
         Console,
         "room-setup: create_busy={}",

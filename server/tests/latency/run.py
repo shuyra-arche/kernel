@@ -94,7 +94,9 @@ def compose(args, kernel, destination):
         # admission checks and resident preparation stay unchanged.
         edit(provider / "server/src/basis/unit/team/capsule.rs", lambda s: s.replace('TeamBuilder::new(SpaceKind::Supervisor)', 'TeamBuilder::new(SpaceKind::User)'))
     guest = SUITE / ({"irq": "interrupt.rs", "realtime": "realtime.rs", "room": "guest.rs"}[args.mode])
-    edit(root / "guest/main.rs", lambda _: guest.read_text().replace('const ROUNDS: usize = 256;', f'const ROUNDS: usize = {args.events};'))
+    edit(root / "guest/main.rs", lambda _: guest.read_text()
+        .replace('const ROUNDS: usize = 256;', f'const ROUNDS: usize = {args.events};')
+        .replace('const WARMUP_TIMERS: bool = true;', f'const WARMUP_TIMERS: bool = {str(not args.cold_room).lower()};'))
     # These workloads use same-Team Tasks and static boot MMIO, not native RAM
     # Publish or DMA. Leave the provider's SMP qualification gate closed.
     def platform(s):
@@ -117,7 +119,7 @@ def compose(args, kernel, destination):
     for package, folder in [("kernel", "server"), ("kernel-api", "api"), ("kernel-client", "client")]:
         command += ["--config", f'patch."https://github.com/shuyra-arche/kernel.git".{package}.path={json.dumps(str(provider / folder))}']
     metadata = {"source": revision, "fixture": FIXTURE, "profile": args.profile,
-        "mode": args.mode, "latency": not args.no_latency, "flags": FLAGS, "build": command,
+        "mode": args.mode, "latency": not args.no_latency, "cold_room": args.cold_room, "flags": FLAGS, "build": command,
         "rustc": output(["rustc", "-Vv"]), "python": output(["python3", "--version"]),
         "qemu": output([args.qemu, "--version"]).splitlines()[0],
         "cpu_max": Path("/sys/fs/cgroup/cpu.max").read_text(), "affinity": sorted(os.sched_getaffinity(0)),
@@ -170,8 +172,10 @@ def main():
     parser.add_argument("--harts", type=int, choices=[1, 4], nargs="+", default=[1, 4])
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--no-latency", action="store_true")
+    parser.add_argument("--cold-room", action="store_true", help="Room first-use experiment: warm Yield only, leaving timed Sleep paths cold")
     args = parser.parse_args()
     assert 1 <= args.rounds <= 100 and 16 <= args.events <= 4096 and len(args.harts) == len(set(args.harts))
+    assert not args.cold_room or args.mode == "room"
     assert output(git(args.fixture, "rev-parse", "HEAD")) == FIXTURE
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
