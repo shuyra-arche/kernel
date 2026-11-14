@@ -18,8 +18,14 @@ pub(crate) enum Work {
     ControllerClaim,
     SpinWait,
     TimerArm,
+    SignRedeem,
+    DueDrain,
+    WaitDetach,
+    ReadyWake,
+    DoomCheck,
 }
-pub(crate) const WORKS: usize = 6;
+pub(crate) const WORKS: usize = 11;
+pub(super) const ORDER: &str = "scheduler,sign-wait,irq-maintenance,controller-claim,spin-wait,timer-arm,sign-redeem,due-drain,wait-detach,ready-wake,doom-check";
 #[derive(Clone, Copy)]
 pub(crate) struct Parts {
     pub(crate) ticks: [u64; WORKS],

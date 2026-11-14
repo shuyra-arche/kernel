@@ -443,7 +443,7 @@ pub(crate) fn report() {
                 .flatten()
             {
                 crate::putln!(
-                    "latency-phase-outer: hart={} phase={} transaction={} hold={} wait={} site={}:{} ticks={:?} calls={:?} order=scheduler,sign-wait,irq-maintenance,controller-claim,spin-wait,timer-arm inclusive=1",
+                    "latency-phase-outer: hart={} phase={} transaction={} hold={} wait={} site={}:{} ticks={:?} calls={:?} order={} inclusive=1",
                     hart,
                     label,
                     sample.transaction,
@@ -452,7 +452,8 @@ pub(crate) fn report() {
                     sample.site.file(),
                     sample.site.line(),
                     sample.parts.ticks,
-                    sample.parts.calls
+                    sample.parts.calls,
+                    transaction::ORDER
                 );
             }
             if let Some((task, sample)) = unsafe { &*local.phase_ready[phase].get() } {
@@ -488,13 +489,14 @@ pub(crate) fn report() {
                 sample.site.column()
             );
             crate::putln!(
-                "latency-outer-parts: hart={} transaction={} site={}:{} ticks={:?} calls={:?} order=scheduler,sign-wait,irq-maintenance,controller-claim,spin-wait,timer-arm inclusive=1",
+                "latency-outer-parts: hart={} transaction={} site={}:{} ticks={:?} calls={:?} order={} inclusive=1",
                 hart,
                 sample.transaction,
                 sample.site.file(),
                 sample.site.line(),
                 sample.parts.ticks,
-                sample.parts.calls
+                sample.parts.calls,
+                transaction::ORDER
             );
         }
         for (name, metric) in NAMES.iter().zip(&local.metrics) {

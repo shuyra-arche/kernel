@@ -70,6 +70,7 @@ fn execution_preserves_queue_origin_and_partitions_one_return() {
 
 #[test]
 fn attribution_retains_bounded_distinct_sites_and_paired_wait() {
+    assert_eq!(transaction::ORDER.split(',').count(), transaction::WORKS);
     #[track_caller]
     fn sample(hold: u64) -> transaction::Sample {
         let outer = transaction::Transaction {
@@ -112,6 +113,11 @@ fn attribution_retains_bounded_distinct_sites_and_paired_wait() {
         transaction::Work::ControllerClaim,
         transaction::Work::SpinWait,
         transaction::Work::TimerArm,
+        transaction::Work::SignRedeem,
+        transaction::Work::DueDrain,
+        transaction::Work::WaitDetach,
+        transaction::Work::ReadyWake,
+        transaction::Work::DoomCheck,
     ] {
         repeated.parts.record(work, 7);
     }

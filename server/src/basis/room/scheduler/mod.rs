@@ -187,10 +187,15 @@ pub(crate) fn run() -> usize {
     // it to competing Yield loops; repeated front-half rejection must not
     // starve a deadline whose owner is already making scheduling progress.
     sign::redeem();
-    if slot::current()
-        .running_task()
-        .is_some_and(|task| crate::basis::unit::lifecycle::take_doomed(task.ident.id).is_some())
-    {
+    let doomed = {
+        #[cfg(feature = "latency")]
+        let _measure =
+            crate::metal::measure::scope(crate::metal::measure::Work::DoomCheck, &commit);
+        slot::current()
+            .running_task()
+            .is_some_and(|task| crate::basis::unit::lifecycle::take_doomed(task.ident.id).is_some())
+    };
+    if doomed {
         drop(commit);
         return crate::basis::unit::lifecycle::quit();
     }
