@@ -259,7 +259,7 @@ extern "C" fn run(at: usize, count: usize) -> ! {
     assert!(sign::listen(root, Wait::Poll).is_err());
     let loads = core::array::from_fn::<_, LOAD, _>(|_| spawn(load));
     let watchers = core::array::from_fn::<_, 6, _>(|_| spawn(watch));
-    let drivers = core::array::from_fn::<_, 3, _>(|_| spawn(driver));
+    let drivers = core::array::from_fn::<_, 4, _>(|_| spawn(driver));
     for task in loads {
         unit::resume(UnitTarget::Task(task)).unwrap();
     }
@@ -375,7 +375,24 @@ extern "C" fn run(at: usize, count: usize) -> ! {
         DRIVER_READY.store(0, Ordering::Release);
         DRIVER_RELEASE.store(false, Ordering::Release);
         DRIVER_MODE.store(index, Ordering::Release);
-        let (child_view, branch) = pair(view, root, task);
+        let proxy = if index == 3 {
+            let bytes = AccordRequest {
+                src: view,
+                target: AccordTarget::Caller,
+                mark: Mark::NONE,
+                limits: Limits {
+                    operations: Operations::Share(ShareRights::ASSOCIATE),
+                    modifiable: Modifiable::Yes,
+                    distributable: Distributable::Yes,
+                    scope: support::pend_info(view).limits.scope,
+                },
+            }
+            .to_bytes();
+            Some(pend::accord(VirtAddr::new(bytes.as_ptr() as usize)).unwrap())
+        } else {
+            None
+        };
+        let (child_view, branch) = pair(proxy.unwrap_or(view), root, task);
         DRIVER_TOKEN.store(branch.get(), Ordering::Release);
         unit::resume(UnitTarget::Task(task)).unwrap();
         if index == 0 {
@@ -386,16 +403,20 @@ extern "C" fn run(at: usize, count: usize) -> ! {
                 support::task_info(UnitQuery::Target(UnitTarget::Task(task))).state
                     == UnitState::Waiting
             });
-            let token = if index == 1 { branch } else { child_view };
-            let end = until();
-            loop {
-                match pend::revoke(task, token) {
-                    Ok(()) => break,
-                    Err(error) if error.source == PendFail::Busy => {
-                        assert!(room::clock() < end);
-                        room::yield_();
+            if let Some(proxy) = proxy {
+                release(proxy);
+            } else {
+                let token = if index == 1 { branch } else { child_view };
+                let end = until();
+                loop {
+                    match pend::revoke(task, token) {
+                        Ok(()) => break,
+                        Err(error) if error.source == PendFail::Busy => {
+                            assert!(room::clock() < end);
+                            room::yield_();
+                        }
+                        other => panic!("IRQ revoke: {other:?}"),
                     }
-                    other => panic!("IRQ revoke: {other:?}"),
                 }
             }
             wait(|| DRIVER_READY.load(Ordering::Acquire) == 2);
@@ -437,7 +458,7 @@ extern "C" fn run(at: usize, count: usize) -> ! {
     );
     let _ = writeln!(
         Console,
-        "PASS irq rounds={ROUNDS} load=4 observers=6 retained=1 repeated=1 bursts=16 stale=1 death=1 revoke-sign=1 revoke-view=1 rebind=3 pair=1 forward=1 elapsed_ns={elapsed}"
+        "PASS irq rounds={ROUNDS} load=4 observers=6 retained=1 repeated=1 bursts=16 stale=1 death=1 revoke-sign=1 revoke-view=1 ancestor-view=1 rebind=4 pair=1 forward=1 elapsed_ns={elapsed}"
     );
     exit(0)
 }

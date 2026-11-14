@@ -151,7 +151,7 @@ def boot(args, variant, harts, round_):
     (evidence / "result.json").write_text(json.dumps({"command": command, "status": status, "elapsed_seconds": time.monotonic()-started, "host_load_start": load, "host_load_end": os.getloadavg(), "image_sha256": digest(image)}, indent=2))
     log = (evidence / "serial.log").read_text()
     markers = ["task: all tasks exited", "ROOM:steady", "ROOM:teardown", "iommu: command engine closed"]
-    markers += {"irq": [f"PASS irq rounds={args.events}", "observers=6", "revoke-sign=1 revoke-view=1 rebind=3"], "room": ["PASS room workers=8 turns=512 steps=4096"], "realtime": ["PASS realtime harts=" + str(harts), "unsupported=1" if harts == 1 else "budget=1 replenishment=1 freeze=1 no-credit-reset=1 preemption=1 fixed-hart=1 overload=denied ordinary-pool=restored"]}[args.mode]
+    markers += {"irq": [f"PASS irq rounds={args.events}", "observers=6", "revoke-sign=1 revoke-view=1 ancestor-view=1 rebind=4"], "room": ["PASS room workers=8 turns=512 steps=4096"], "realtime": ["PASS realtime harts=" + str(harts), "unsupported=1" if harts == 1 else "budget=1 replenishment=1 freeze=1 no-credit-reset=1 preemption=1 fixed-hart=1 overload=denied ordinary-pool=restored"]}[args.mode]
     passed = status == 0 and "FAIL" not in log and "[kernel] fatal" not in log and all(m in log for m in markers)
     if not args.no_latency:
         passed &= "latency-window:" in log and "boundary=whole-interval" in log and "phase=running" in log

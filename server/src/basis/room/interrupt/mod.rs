@@ -55,10 +55,18 @@ pub(crate) fn authorize(
     }
     Ok(())
 }
-pub(crate) fn withdraw(token: kernel_api::model::identity::PendId) {
+pub(crate) fn withdraw(
+    token: kernel_api::model::identity::PendId,
+    target: &crate::basis::pend::Target,
+) {
+    let sign = target.sign();
+    let view = target.memory();
+    if sign.is_none() && view.is_none() {
+        return;
+    }
     if let Some(route) = external() {
         let _commit = crate::basis::commit();
-        route.withdraw(token);
+        route.withdraw(token, sign.as_deref(), view.as_deref());
     }
 }
 pub(crate) fn region(sign: &crate::basis::sign::endpoint::Endpoint) -> Option<usize> {
@@ -415,16 +423,22 @@ impl Router {
             .find(|s| s.endpoint.id == endpoint.id)
             .cloned()
     }
-    fn withdraw(&self, token: kernel_api::model::identity::PendId) {
+    fn withdraw(
+        &self,
+        token: kernel_api::model::identity::PendId,
+        sign: Option<&Endpoint>,
+        view: Option<&crate::basis::flat::sharing::Sharing>,
+    ) {
         let count = self.sources.lock().len();
         for at in 0..count {
             let source = self.sources.lock()[at].clone();
-            source.withdraw(token);
+            if source.matches(sign, view) {
+                source.withdraw(token);
+                // A target match is a routing hint, never live authorization.
+                // It also covers ancestor changes and an expired entry Weak.
+                source.request();
+            }
         }
-        // The named Pend may be an ancestor of a bound grant. Revalidate all
-        // sources over bounded later turns as well as detaching exact matches.
-        self.progress.lock().refresh(count);
-        self.schedule();
     }
 }
 

@@ -39,14 +39,6 @@ impl Progress {
         assert!(index < 64, "registered Source slot");
         self.requested |= 1u64 << index;
     }
-    pub(super) fn refresh(&mut self, count: usize) {
-        assert!(count <= 64);
-        self.requested |= if count == 64 {
-            u64::MAX
-        } else {
-            (1u64 << count) - 1
-        };
-    }
     pub(super) fn next(&mut self, count: usize) -> Option<usize> {
         if count == 0 {
             self.requested = 0;

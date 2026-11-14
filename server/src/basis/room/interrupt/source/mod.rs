@@ -48,6 +48,14 @@ impl Source {
             state: SpinLock::new_level(Level::L3, State::new()),
         })
     }
+    pub(super) fn matches(&self, sign: Option<&Endpoint>, view: Option<&Sharing>) -> bool {
+        sign.is_some_and(|known| core::ptr::eq(known, &*self.endpoint))
+            || view.is_some_and(|known| {
+                self.view
+                    .get()
+                    .is_some_and(|view| core::ptr::eq(known, &**view))
+            })
+    }
     pub(super) fn request(&self) {
         super::external()
             .expect("source router")

@@ -127,7 +127,9 @@ fn controller_claims_survive_failed_admission_and_move_only_once() {
     );
     // A rejected COMMIT makes no software delivery or completion: the owner
     // keeps all four physical claims while other work requests a scan.
-    work.refresh(64);
+    for slot in 0..64 {
+        work.request(slot);
+    }
     assert!(work.pending());
     let claims = work.take();
     assert_eq!(
@@ -149,7 +151,9 @@ fn repeated_requests_do_not_starve_later_sources_or_expand_one_turn() {
     let mut visited = [0; 64];
     for _ in 0..16 {
         if visited == [0; 64] {
-            work.refresh(64);
+            for slot in 0..64 {
+                work.request(slot);
+            }
         }
         work.request(0); // one busy source cannot restart a full scan
         for _ in 0..BATCH {
@@ -164,7 +168,9 @@ fn repeated_requests_do_not_starve_later_sources_or_expand_one_turn() {
     assert_eq!(left, 1);
     assert!(!work.pending());
     assert_eq!(work.next(0), None);
-    work.refresh(2);
+    for slot in 0..2 {
+        work.request(slot);
+    }
     let mut next = [work.next(2).unwrap(), work.next(2).unwrap()];
     next.sort();
     assert_eq!(next, [0, 1]);
