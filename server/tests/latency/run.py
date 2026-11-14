@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--profile", choices=["debug", "release"], default="release")
     parser.add_argument("--harts", type=int, choices=[1, 4], nargs="+", default=[1, 4])
     parser.add_argument("--rounds", type=int, default=3)
+    parser.add_argument("--threads", choices=["single", "multi"], default="multi")
     parser.add_argument("--no-latency", action="store_true", help="measure diagnostics overhead with the same workload")
     args = parser.parse_args()
     assert 1 <= args.rounds <= 100
@@ -85,7 +86,7 @@ def main():
     metadata = {"source": source, "fixture": FIXTURE, "rustc": output(["rustc", "-Vv"]),
         "qemu": version, "cpu_max": cpu.read_text() if cpu.exists() else None,
         "affinity": sorted(os.sched_getaffinity(0)), "flags": FLAGS, "build": command,
-        "profile": args.profile, "latency": not args.no_latency, "harts": args.harts,
+        "profile": args.profile, "latency": not args.no_latency, "harts": args.harts, "threads": args.threads,
         "sha256": {str(p.relative_to(args.output)) if p.is_relative_to(args.output) else str(p): digest(p)
             for p in [binaries / "memory-guest", binaries / "memory-platform", firmware, root / "Cargo.lock", guest, platform]}}
     (args.output / "inputs.json").write_text(json.dumps(metadata, indent=2))
@@ -97,7 +98,7 @@ def main():
         image.write_bytes(native.capsule((binaries / "memory-guest").read_bytes(), 11))
         disk = evidence / "disk.raw"
         disk.write_bytes(bytes(1024 * 1024))
-        command = [qemu, "-accel", "tcg,thread=single", "-machine", "virt,iommu-sys=on", "-cpu", "rv64",
+        command = [qemu, "-accel", f"tcg,thread={args.threads}", "-machine", "virt,iommu-sys=on", "-cpu", "rv64",
             "-smp", str(harts), "-m", "128M", "-nographic", "-bios", str(firmware), "-kernel", str(binaries / "memory-platform"), "-initrd", str(image),
             "-drive", f"file={disk},format=raw,if=none,id=disk,aio=threads",
             "-device", "virtio-blk-pci,drive=disk,disable-legacy=on,iommu_platform=on,ats=off,addr=1,ioeventfd=off,vectors=0"]
