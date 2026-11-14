@@ -1,4 +1,4 @@
-//! Flat/Nest calls for the next provider. v10 does not accept these calls.
+//! Native ABI 11 Flat/Nest calls. ABI 10 does not accept these descriptors.
 //! Each invocation snapshots once and traps once. There is no automatic retry,
 //! request ID allocation, permission cache or fallback to legacy Cell calls.
 use kernel_api::abi::memory::{Call, Delivery, Failure, Frame, Observation, Reply, Request};

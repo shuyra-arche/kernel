@@ -94,45 +94,19 @@ python3 tools/diagnostics/symbolize.py \
 Match the ELF to its recorded SHA-256. A stack-scan hit is a candidate address.
 The report labels frame-chain evidence separately.
 
-## Staged memory v11 host evidence
+## Current memory ABI verification
 
-The [path integration record](../../api/memory-paths.md) describes Flat closure,
-partial geometry and bounded Reservation recovery. The `fault` host target
-executes the production queue; the `memory` target tests receipt conversion and
-closure, including allocation rollback. Native trap, Sign authority and timeout
-integration still require v11 service/image tests before activation.
+Host tests check actual Flat/Page/Nest state transitions, failure
+injection, authority and result-journal correlation. Host fixtures
+do not execute guest traps or establish hardware quiescence.
 
-The `invocation` target imports the production next-memory descriptor dispatcher
-and result receipt code. Task/user buffers and resource effects are fixtures;
-it checks complete input copying, lost replies, replay, result inspection,
-Pending/Failed retention and release of ledger/journal/COMMIT locks across an
-effect boundary. It is not a native trap, permission or MMU test.
+The default QEMU suite checks the ABI 10 image. Native ABI 11
+requires `memory-v11` on the matching API, Client, Server, boot
+image and Capsule; its [Vanllia memory integration](https://github.com/shuyra-arche/vanllia/tree/main/tests/memory)
+exercises real Task/Team startup, CPU mappings and qualified IOMMU/
+Virtqueue paths. A successful QEMU device scenario is not a
+real-hardware proof.
 
-The `memory` target additionally imports production Flat/Page/Memo state and the
-Page change registry. Its maintenance tests exercise exact Held-reference
-consumption and refusal with strong/weak observers, overlapping blocks, stale
-versions or unfinished hardware obligations. Memo observation tests retain the
-exact Page and access across failed fences and whole-namespace withdrawal.
-Receipt completion is explicitly scripted. See the [M3 evidence matrix](../../api/memory-m3.md#verification-and-limits)
-for the boundary between these tests, ledger/lineage tests and RV64 compilation.
-
-
-The [M4 evidence matrix](../../api/memory-m4.md#verification-and-limits) adds
-physical maintenance admission/overlap races, checked count exhaustion, exact
-CPU/External publication settlement, staging/provenance storage rollback and actual
-Pend ancestry/epoch/carried-restriction tests. It also checks durable provenance
-through later moves and exact Memo retirement, TRANSFER-only capture, independent
-data/distribution/disposal limits, and live Narrow/recovery. Stage/Provenance
-graph metadata in storage/Memo tests and Task lifetimes remain
-fixtures at their documented boundaries; these tests do not establish native
-trap-to-ledger-to-MMU execution or trusted device compatibility.
-
-
-The [M5 evidence matrix](../../api/memory-m5.md#verification-and-limits) adds
-production whole-group admission, competing requester races, unknown-alias
-refusal and membership allocation/capacity rollback. The IOMMU guest adds
-`dma-coherent`: actual DT-resolved EDU DMA while a qualified CPU writer remains,
-then device retirement without releasing the CPU receipt and denied DMA after
-reuse. Run it with the existing `iommu_on_real_qemu_registers` ignored test; that
-entry runs all 11 backend scenarios. This is one-Hart QEMU evidence, not a native
-v11 service, SMP or physical-hardware result.
+Report the exact source/fixture revision, command, ABI selection,
+firmware and emulator versions, output, errors and skipped checks
+when publishing verification evidence.

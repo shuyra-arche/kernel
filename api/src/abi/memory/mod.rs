@@ -1,6 +1,6 @@
-//! Next-memory-ABI contracts and domain calls. These do not implement RegisterCall
-//! themselves select ABI 11. The coordinated `memory-v11` feature selects it; every token
-//! still requires caller-local live authorization at the server commit point.
+//! Native ABI 11 Flat/Nest contracts, selected by a coordinated `memory-v11` image.
+//! No per-call ABI 10 fallback exists. Each token still requires live caller-local
+//! authorization at the Server's commit boundary.
 
 mod call;
 pub mod journal;
@@ -15,11 +15,11 @@ pub use request::{Action, Maintenance, Request, Source};
 
 use core::num::NonZeroU64;
 
-/// Native memory version; default builds remain v10 until consumer migration.
+/// Native memory version, selected for the complete image by `memory-v11`.
 pub const VERSION: u64 = 11;
 
-/// Frozen next-version rights. Keeping them outside the v10 bitflag definition
-/// preserves rejection by the default v10 Pend wire decoder.
+/// ABI 11 rights, selected only by a matching `memory-v11` image.
+/// The default ABI 10 decoder rejects their unknown bits.
 pub mod rights {
     use crate::model::pend::{FlatRights, Limits, Operations};
     pub const OCCUPY: FlatRights = FlatRights::from_bits_retain(1 << 6);
@@ -50,8 +50,8 @@ pub mod rights {
     }
 }
 
-/// Proposed per-Task result window for these requests. Server integration must
-/// reserve capacity before admission and must never evict a Pending operation.
+/// Fixed per-Task result capacity. Server reserves before admission and never
+/// evicts a Pending operation to admit a new request.
 pub const RESULT_CAPACITY: usize = 16;
 
 /// Caller-chosen monotonic sequence, scoped by the actual calling Task. Never
@@ -119,7 +119,7 @@ pub enum Opcode {
 }
 
 impl Opcode {
-    /// Proposed trap number. Merely computing it does not enable dispatch.
+    /// Native trap number, accepted only in the matching ABI 11 image.
     pub const fn call_number(self) -> u64 {
         (VERSION << 48) | ((self.domain() as u64) << 32) | self.slot()
     }
@@ -195,7 +195,7 @@ impl Opcode {
     }
 }
 
-/// Failure causes for the new descriptors, not v10 FlatFail/NestFail codes.
+/// Native descriptor failures, distinct from ABI 10 FlatFail/NestFail codes.
 /// Whether effects were accepted is represented separately by Outcome.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i64)]
