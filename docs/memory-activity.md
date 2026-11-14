@@ -13,7 +13,7 @@ in `server/src/entry/observe/`; its global Share/Sign page has no per-page data.
 The earlier #138 implementation is present, but its historical guest fixture
 is not evidence of current ABI 11 acceptance.
 
-The RV64 backend selects Sv39/Sv48/Sv57 geometry. `Nest::attributes` currently
+The RV64 backend selects Sv39/Sv48/Sv57 geometry. `Nest::attrs` currently
 presets both ACCESSED and DIRTY when publishing CPU PTEs. Those bits therefore
 cannot establish that a guest accessed or wrote a page. `PageTableEntry`
 currently stores ordinary u64 values; `set_flags` performs a load/modify/store.
@@ -149,7 +149,7 @@ Before assigning calls, review the smallest request/result form, new sampling
 right, cancellation/acknowledgement rule, descriptor widths, codec validation,
 protocol negotiation and old-client behavior together across API, Client and
 Server. No Swap-specific call or independent resource domain is needed. Paired
-public names, if any are necessary, must meet the equal-word-count and semantic
+public names, if any are necessary, must meet the equal-length and semantic
 duality convention. The current ABI 11 global statistics contract remains
 explainable; an incompatible wire change requires a coordinated ABI migration.
 
