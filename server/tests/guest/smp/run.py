@@ -110,7 +110,7 @@ def main():
          s.replace("crate::recovery::call(action)", "crate::recovery::block(action)"))
     edit("tests/memory/guest/support.rs", lambda s: s.replace(
         "kernel_client::call::unit::create(VirtAddr::new(bytes.as_ptr() as usize)).unwrap()",
-        "{\n            let deadline = room::clock() + 5_000_000_000;\n"
+        "({\n            let deadline = room::clock() + 5_000_000_000;\n"
         "            loop {\n"
         "                match kernel_client::call::unit::create(VirtAddr::new(bytes.as_ptr() as usize)) {\n"
         "                    Ok(created) => break created,\n"
@@ -118,7 +118,7 @@ def main():
         "                }\n"
         "                assert!(room::clock() < deadline, \"Task admission stayed busy\");\n"
         "                room::yield_();\n"
-        "            }\n        }"))
+        "            }\n        })"))
     edit("tests/memory/guest/acceptance/worker.rs", lambda s: s.replace(
         "        self.begin(action);\n        self.finish()",
         "        let deadline = room::clock() + 5_000_000_000;\n"

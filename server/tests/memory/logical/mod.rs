@@ -19,8 +19,36 @@ mod translation;
 // Inert address owners for the production CPU Retirement contract. The tests
 // exercise real retained Publications and request matching, not an MMU or index.
 type Asid = usize;
-struct Span;
+struct Span {
+    id: usize,
+    state: crate::host_lock::SpinLock<SpanState>,
+}
+struct SpanState {
+    source: Option<()>,
+    active: Vec<ActiveRange>,
+}
+struct ActiveRange;
+impl ActiveRange {
+    fn contains(&self, _: usize) -> bool {
+        true
+    }
+}
 impl Span {
+    fn new(id: usize) -> Self {
+        Self {
+            id,
+            state: crate::host_lock::SpinLock::new(SpanState {
+                source: None,
+                active: Vec::new(),
+            }),
+        }
+    }
+    fn identity(&self) -> usize {
+        self.id
+    }
+    fn initial_start(&self) -> kernel_api::address::VirtAddr {
+        kernel_api::address::VirtAddr::new(0)
+    }
     fn changed(&self) {}
 }
 struct Nest {
@@ -28,11 +56,6 @@ struct Nest {
 }
 struct RetirementState {
     memos: memo::Memos,
-}
-impl Nest {
-    fn finish_memo(&self, _: &alloc::sync::Arc<Span>, _: usize) {
-        panic!("logical completion outside CPU retirement fixture")
-    }
 }
 pub(crate) mod index {
     pub(crate) mod source {
