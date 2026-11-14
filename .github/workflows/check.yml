@@ -122,10 +122,18 @@ jobs:
           ref: 7e4f9dc19bdaf4a0e95ff3b557fdc8959b8547d7
           path: .integration/system
           persist-credentials: false
+      - name: Fetch pinned Twine Release recovery
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: shuyra-arche/twine
+          ref: 7c75c62d15d173032d99fed54ca7fd00337d787b
+          path: .integration/twine
+          persist-credentials: false
       - name: Check System native runtime (release, 1/4 Harts)
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/system"
-          python3 server/tests/guest/smp/system.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/system --output .integration/system-runtime
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/twine"
+          python3 server/tests/guest/smp/system.py --twine .integration/twine --kernel "$GITHUB_WORKSPACE" --fixture .integration/system --output .integration/system-runtime
       - name: Preserve System runtime evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
