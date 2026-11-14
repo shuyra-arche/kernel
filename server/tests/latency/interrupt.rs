@@ -58,7 +58,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     let _ = writeln!(Console, "FAIL irq {info}");
     exit(1)
 }
-fn exit(code: usize) -> ! {
+fn exit(code: u64) -> ! {
     unit::exit(code, 0, VirtAddr::new(0), 0, ExitScope::Task)
 }
 fn marker(bytes: &[u8]) {

@@ -212,6 +212,8 @@ impl Router {
     /// before its record leaves the router; unknown/reserved claims leave as
     /// owned completion work and are completed only after releasing COMMIT.
     fn publish(&self, _commit: &crate::basis::CommitGuard) -> [Option<Claim>; BATCH] {
+        #[cfg(feature = "latency")]
+        let admitted = crate::metal::measure::stamp();
         let mut complete = [const { None }; BATCH];
         let claims = self.progress.lock().take();
         for (at, claim) in claims.into_iter().enumerate() {
@@ -231,8 +233,6 @@ impl Router {
                 .find(|e| e.irq == claim.irq)
                 .cloned();
             if let Some(source) = source {
-                #[cfg(feature = "latency")]
-                let admitted = crate::metal::measure::stamp();
                 if source.deliver() {
                     #[cfg(feature = "latency")]
                     {
