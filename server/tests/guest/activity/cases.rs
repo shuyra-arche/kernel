@@ -121,11 +121,20 @@ fn authority() {
             count: 1,
         },
     });
-    let selected = accord(root.token(), parent, limits);
+    let marker = Mark::new(0x4144);
+    let request = AccordRequest {
+        src: root.token(),
+        target: AccordTarget::Task(parent),
+        limits,
+        mark: marker,
+    }
+    .to_bytes();
+    let selected = pend::accord(VirtAddr::new(request.as_ptr() as usize)).unwrap();
     let outside = MemoPosition::new(selected, root.nest(), root.reservation(), 0).unwrap();
     assert_eq!(observe(outside), Err(ShareFail::Denied));
     let inside = MemoPosition::new(selected, root.nest(), root.reservation(), 1).unwrap();
     let reader = Reader::open(inside);
+    assert_eq!(pend_info(reader.data).mark, marker);
     let sample = reader.expect(Evidence::NotObserved, Evidence::NotObserved);
     assert_eq!(sample.position, 1);
     assert_eq!(

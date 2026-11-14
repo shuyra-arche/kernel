@@ -209,13 +209,8 @@ fn prepare(
     let source_root =
         SourceAuthorization::new(flat.whole(), Access::READ, TaskId::new(0)).map_err(failure)?;
     let view = Sharing::from_source(flat.whole(), size, TaskId::new(0)).map_err(failure)?;
-    let mut output = PendEntry::try_new(
-        View::Share(view.clone()),
-        request.mark,
-        Modifiable::No,
-        None,
-    )
-    .map_err(failure)?;
+    let mut output = PendEntry::try_new(View::Share(view.clone()), mark, Modifiable::No, None)
+        .map_err(failure)?;
     output.requested_by(sender);
     let output = Arc::try_new(output).map_err(|_| Failure::OutOfMemory)?;
     let mut limits = output.authority().limits();
