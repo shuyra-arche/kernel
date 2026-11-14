@@ -121,12 +121,25 @@ a retry receives a fresh round and still owns the original retained resources.
 
 Data visibility relies on the separately supplied complete coherent normal-RAM
 fabric and the publication fence before PTE exposure. Unknown fabrics remain
-unsupported. Native executable SMP Publish/Protect remains **unsupported**:
-`with_local_instructions` is rejected at installation on SMP, and data-only
-qualification cannot admit RX. Internal instruction synchronization first runs
-the data round, then the existing local FENCE.I and SBI remote FENCE.I on every
-online Hart, including former leases. That internal path does not qualify the
-native executable PTE exposure boundary. Data-only rounds do not execute FENCE.I.
+unsupported. Native executable publication additionally requires explicit
+`with_all_hart_instructions` qualification on SMP. `with_local_instructions`
+still rejects multiple Harts, and a data-only fabric still rejects RX.
+
+Instruction rounds use a separate mailbox bank. Each responder acquires the
+requested generation, performs data/translation ordering and FENCE.I, then
+acknowledges that exact generation. A newer data-only acknowledgement cannot
+cover an instruction round. The same bounded waiting and sticky participant
+rules apply; late entrants retain the instruction-sync flag checked before
+user execution. Native Publish and Protect prepare an executable Page membership
+before dropping COMMIT for this round. That membership excludes writable or
+External aliases throughout synchronization. Only after successful instruction
+completion and revalidated authority/source identity may the owner install an
+executable PTE. The prepared guard remains until the installed mapping owns its
+own obligation. A failed instruction round exposes no new executable PTE or
+successful publication receipt. This also corrects the former single-Hart
+ordering, which synchronized instructions after executable PTE installation.
+Data-only rounds do not execute FENCE.I. Internal instruction synchronization
+uses the same bounded instruction protocol rather than synchronous SBI RFENCE.
 Page-wide W/X exclusion and External/IOMMU draining conditions remain intact.
 
 ABI, Ledger and Capsule stay 11/11/2. API and Client have no changed descriptor
@@ -139,4 +152,5 @@ implementation does not turn failed CPU results into asynchronous success.
 The owning [SMP test composition](../server/tests/guest/smp/) records exact source,
 fixture, lock, toolchain, command and image hashes. Host receipt tests exercise
 software ordering and retention only. QEMU execution is separate evidence and
-does not qualify physical hardware, executable SMP or device quiescence.
+does not qualify physical hardware or device quiescence. Executable SMP also
+requires the separate real Loader execution scenario.

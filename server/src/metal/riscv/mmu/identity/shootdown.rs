@@ -94,24 +94,10 @@ pub unsafe fn flush(asid: Asid) {
 /// 让已写下的指令字节对所有在线地址空间的 hart 可见。
 pub fn sync_instructions() -> Result<(), NestError> {
     if hart::hart_count() > 1 {
-        super::super::completion::synchronize().map_err(|_| NestError::Shootdown)?;
+        return super::super::completion::synchronize_instructions()
+            .map_err(|_| NestError::Shootdown);
     }
-    unsafe { core::arch::asm!("fence rw, rw", options(nostack)) };
     hart::request_instruction_sync();
     unsafe { core::arch::asm!("fence rw, rw", "fence.i", options(nostack)) };
-    let me = hart::hart_id();
-    for slot in (0..hart::hart_count()).map(hart::HartId::new) {
-        if slot != me && hart::online(slot) {
-            let (mask, base) = hart::firmware(slot).target();
-            sbi::RfenceCall::new(sbi::Rfence::RemoteFenceI)
-                .args(SArgs {
-                    a0: mask,
-                    a1: base,
-                    ..Default::default()
-                })
-                .call()
-                .map_err(|_| NestError::NoRegion)?;
-        }
-    }
     Ok(())
 }

@@ -39,6 +39,8 @@ requires both writer Task IDs to have executed on distinct Harts in SMP runs.
 injects a duplicated old acknowledgement, checks retained Page responsibility,
 and completes a fresh round. This boot probe tests real fences and bookkeeping;
 the guest writers separately test real translations and accesses.
+`instructions.rs` repeats the withheld/old/duplicate acknowledgement test on
+the independent instruction bank, with real FENCE.I before acknowledgement.
 
 The composition adapts the historical fixture's immediate-success assumptions:
 rejected Busy admissions retry within a deadline; accepted Block/Memo failures

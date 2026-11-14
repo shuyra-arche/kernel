@@ -22,6 +22,7 @@ pub struct Fabric {
 enum Instructions {
     Unsupported,
     LocalHart,
+    AllHarts,
 }
 /// Kept immutable for the boot lifetime. Runtime endpoint epochs still belong
 /// to the actual CPU domain and exclusive IOMMU binding, not these descriptions.
@@ -88,6 +89,21 @@ impl Topology {
         self.instructions = Instructions::LocalHart;
         self
     }
+    /// Qualify instruction fetch on every admitted CPU Hart.
+    ///
+    /// # Safety
+    /// Every admitted Hart implements FENCE.I over the coherent normal RAM
+    /// fabric. No instruction-fetching device, bypass or unmanaged executable
+    /// alias exists. The backend must synchronize all ever-online Harts before
+    /// exposing executable PTEs, and synchronize late entrants before use.
+    /// This does not relax page-wide W/X exclusion.
+    pub unsafe fn with_all_hart_instructions(mut self) -> Self {
+        self.instructions = Instructions::AllHarts;
+        self
+    }
+    pub fn allows_instructions(&self) -> bool {
+        !matches!(self.instructions, Instructions::Unsupported)
+    }
     pub fn allows_local_instructions(&self) -> bool {
         matches!(self.instructions, Instructions::LocalHart)
     }
@@ -101,7 +117,7 @@ impl Topology {
         let executable = request.member.access.executable()
             || group.existing().iter().any(|m| m.access.executable());
         if executable
-            && (!self.allows_local_instructions()
+            && (!self.allows_instructions()
                 || group
                     .existing()
                     .iter()

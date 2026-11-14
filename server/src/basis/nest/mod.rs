@@ -1744,6 +1744,50 @@ impl Nest {
         let lease = range.reside_during(&change)?;
         source.same_page(&page)?;
         principal.check(self, mapping, index, access)?;
+        // A prepared executable membership excludes writers before FENCE.I,
+        // and stays alive until the real PTE publication owns that obligation.
+        let instructions = if access.contains(Access::EXECUTE) {
+            Some(
+                Publication::prepare_cpu(
+                    &page,
+                    false,
+                    &change,
+                    maintenance.as_ref().map(|usage| usage.permit()),
+                    crate::metal::generic::memory::Endpoint::Cpu {
+                        nest: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                        leases: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                    },
+                    crate::metal::generic::memory::Access::new((access.bits() << 1) as u8)
+                        .ok_or(CellFail::Denied)?,
+                )
+                .map_err(NestError::from)?,
+            )
+        } else {
+            None
+        };
+        let commit = if instructions.is_some() {
+            drop(commit);
+            identity::sync_instructions().map_err(CellFail::from)?;
+            let commit = crate::basis::commit();
+            if !self.is_open() || !mapping.is_open() {
+                return Err(CellFail::Denied);
+            }
+            principal.check(self, mapping, index, access)?;
+            source.check(access)?;
+            source.same_page(&page)?;
+            if let Some(usage) = &maintenance {
+                usage.check(&source, access)?;
+            } else {
+                source.admit_provenance(None)?;
+                source
+                    .source()
+                    .check_publish(source.window().0, source.window().1)
+                    .map_err(|_| CellFail::Denied)?;
+            }
+            commit
+        } else {
+            commit
+        };
         let prepared = {
             let mut state = self.state.lock();
             if !state.retirement.invalidation().is_clean() {
@@ -1795,10 +1839,6 @@ impl Nest {
         let mut result = prepared
             .and_then(|target| self.invalidate(target))
             .map_err(CellFail::from);
-        if result.is_ok() && access.contains(Access::EXECUTE) {
-            result = identity::sync_instructions()
-                .map_err(|error| CellFail::from(NestError::from(error)));
-        }
         let valid = {
             let _commit = crate::basis::commit();
             self.is_open()
@@ -1821,6 +1861,7 @@ impl Nest {
             result = Err(CellFail::Denied);
         }
         self.finish_memo(mapping, index);
+        drop(instructions);
         drop(lease);
         drop(flight);
         sign::signal(self.reservation_key(mapping));
@@ -2084,6 +2125,49 @@ impl Nest {
         let change = crate::basis::cell::change::acquire(&page)?;
         let flight = source.begin_cpu(mapping.identity(), access, maintenance_owner.as_deref())?;
         let lease = range.reside_during(&change)?;
+        // A prepared executable membership excludes writers before FENCE.I,
+        // and stays alive until the real PTE publication owns that obligation.
+        let instructions = if access.contains(Access::EXECUTE) {
+            Some(
+                Publication::prepare_cpu(
+                    &page,
+                    false,
+                    &change,
+                    maintenance.as_ref().map(|usage| usage.permit()),
+                    crate::metal::generic::memory::Endpoint::Cpu {
+                        nest: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                        leases: core::num::NonZeroU64::new(self.id.get() as u64).unwrap(),
+                    },
+                    crate::metal::generic::memory::Access::new((access.bits() << 1) as u8)
+                        .ok_or(CellFail::Denied)?,
+                )
+                .map_err(NestError::from)?,
+            )
+        } else {
+            None
+        };
+        let commit = if instructions.is_some() {
+            drop(commit);
+            identity::sync_instructions().map_err(CellFail::from)?;
+            let commit = crate::basis::commit();
+            if !admitted() {
+                return Err(CellFail::Denied);
+            }
+            source.check(access)?;
+            source.same_page(&page)?;
+            if let Some(usage) = &maintenance {
+                usage.check(&source, access)?;
+            } else {
+                source.admit_provenance(None)?;
+                source
+                    .source()
+                    .check_publish(source.window().0, source.window().1)
+                    .map_err(|_| CellFail::Denied)?;
+            }
+            commit
+        } else {
+            commit
+        };
         let writable = access.contains(Access::WRITE);
         let admission;
         let result = {
@@ -2175,13 +2259,10 @@ impl Nest {
             }
         };
         drop(commit);
-        let mut result = result.and_then(|target| match target {
+        let result = result.and_then(|target| match target {
             Some(target) => self.invalidate(target).map_err(CellFail::from),
             None => Ok(()),
         });
-        if result.is_ok() && access.contains(Access::EXECUTE) {
-            result = identity::sync_instructions().map_err(CellFail::from);
-        }
         drop(admission);
         let valid = {
             let _commit = crate::basis::commit();
@@ -2201,6 +2282,7 @@ impl Nest {
         if !valid {
             let _ = self.retract_position(mapping, index, None, change, true);
         }
+        drop(instructions);
         drop(lease);
         drop(flight);
         sign::signal(self.reservation_key(mapping));

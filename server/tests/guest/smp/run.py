@@ -178,12 +178,15 @@ fn publish_held(worker: &Worker, local: MemoPosition, observed: MemoPosition, he
     suite = Path(__file__).resolve().parent
     shutil.copy2(suite / "cases.rs", fixture / "tests/memory/guest/smp.rs")
     shutil.copy2(suite / "recovery.rs", fixture / "tests/memory/guest/recovery.rs")
+    instructions = provider / "server/tests/guest/smp/instructions.rs"
+    edit("server/src/metal/riscv/mmu/completion.rs", lambda s: s +
+         '\n#[path = ' + json.dumps(str(instructions)) + ']\npub(crate) mod instructions_probe;\n', provider)
     probe = provider / "server/tests/guest/smp/probe.rs"
     edit("server/src/metal/riscv/mmu/completion.rs", lambda s: s +
          '\n#[path = ' + json.dumps(str(probe)) + ']\npub(crate) mod probe;\n', provider)
     edit("server/src/entry/boot/mod.rs", lambda s: s.replace(
         'extern "C" fn run_on_stack() -> ! {',
-        'extern "C" fn run_on_stack() -> ! {\n    crate::metal::mmu::completion::probe::run();'), provider)
+        'extern "C" fn run_on_stack() -> ! {\n    crate::metal::mmu::completion::probe::run();\n    crate::metal::mmu::completion::instructions_probe::run();'), provider)
     edit("server/src/entry/trap/mod.rs", lambda s: s.replace(
         '        unsafe { task.capture_extensions(frame.status()) };',
         '        crate::metal::mmu::completion::probe::entered_task(task.ident.id.get());\n'
@@ -254,7 +257,7 @@ fn publish_held(worker: &Worker, local: MemoPosition, observed: MemoPosition, he
         log = (evidence / "serial.log").read_text()
         markers = ["PASS native-memory", "PASS native-fault", "PASS acceptance-unit",
                    "PASS acceptance-scopes", "PASS acceptance-lineage", "PASS acceptance-maintenance",
-                   "PASS smp-completion", "PASS smp-retirement",
+                   "PASS smp-completion", "PASS smp-instructions", "PASS smp-retirement",
                    "PASS smp-executable-rejected", "task: all tasks exited"]
         passed = status == 0 and "FAIL" not in log and "[kernel] fatal" not in log and all(m in log for m in markers)
         writers = re.findall(r"PASS smp-writer task=(\d+)", log)

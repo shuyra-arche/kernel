@@ -63,8 +63,7 @@ pub(in crate::entry::call) fn effect(
             };
             if access.contains(Access::EXECUTE)
                 && (route.nest().is_external()
-                    || !crate::metal::memory::topology()
-                        .is_some_and(|t| t.allows_local_instructions()))
+                    || !crate::metal::memory::topology().is_some_and(|t| t.allows_instructions()))
             {
                 return Err(Failure::Unsupported);
             }
