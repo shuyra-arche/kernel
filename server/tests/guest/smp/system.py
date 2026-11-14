@@ -7,8 +7,10 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 
+sys.dont_write_bytecode = True
 from run import FLAGS, TARGET, digest, extract, output
 
 FIXTURE = "7e4f9dc19bdaf4a0e95ff3b557fdc8959b8547d7"
