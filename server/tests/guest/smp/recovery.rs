@@ -20,6 +20,25 @@ pub fn call(mut action: Action) -> Result<Response, Error> {
     loop {
         let request = request(action);
         let response = invoke(request)?;
+        if let (Action::Retract { memo, .. }, Response::Reply(reply)) = (action, &response) {
+            if let Outcome::Failed {
+                failure: Failure::Busy,
+                retained: Some(Value::Memo { generation }),
+            } = reply.outcome()
+            {
+                let Response::Reply(replay) = invoke(request)? else {
+                    panic!("replay")
+                };
+                assert_eq!(replay, *reply);
+                assert!(room::clock() < deadline, "retained Memo did not retire");
+                action = Action::Retract {
+                    memo,
+                    expected: generation,
+                };
+                room::yield_();
+                continue;
+            }
+        }
         if let (Action::Block { start, count, .. }, Response::Reply(reply)) = (action, &response) {
             if let Outcome::Failed {
                 failure: Failure::Busy,
