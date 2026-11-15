@@ -1,13 +1,13 @@
 //! Withdraw source-qualified uses without destroying independent reservations.
 use crate::basis::{
-    flat::sharing::Sharing,
+    flat::source::Export,
     pend::{RangeBlock, SourceAuthorization},
 };
 use alloc::sync::Arc;
 use kernel_api::{abi::call::pend::PendFail, model::identity::PendId};
 
 pub(crate) fn withdraw_source_branch(
-    meta: &Arc<Sharing>,
+    meta: &Arc<Export>,
     token: PendId,
     clear: bool,
 ) -> Result<(), PendFail> {

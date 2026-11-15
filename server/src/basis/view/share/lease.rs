@@ -103,7 +103,7 @@ pub(crate) fn create_share(
             .checked_bytes()
             .ok_or(PendFail::NotAligned)?;
         let meta =
-            crate::basis::flat::sharing::Sharing::from_source(source.clone(), size, task.ident.id)?;
+            crate::basis::flat::source::Export::from_source(source.clone(), size, task.ident.id)?;
         let modifiable = requested;
         if modifiable == Modifiable::Yes && !hold.ceiling().contains(Access::WRITE) {
             return Err(PendFail::Denied);
@@ -139,7 +139,7 @@ pub(crate) fn open_resource(
     }
     let p = pend.target().share_view().ok_or(PendFail::Denied)?;
     let access = subset_to_access(pend.modifiable())?;
-    crate::basis::flat::sharing::open(&p, token, &ident.team.nest, access)
+    crate::basis::flat::source::open(&p, token, &ident.team.nest, access)
 }
 
 pub(crate) fn shut_resource(token: PendId) -> Result<usize, PendFail> {
@@ -150,5 +150,5 @@ pub(crate) fn shut_resource(token: PendId) -> Result<usize, PendFail> {
     }
     authority::usable(&pend)?;
     let p = pend.target().share_view().ok_or(PendFail::Denied)?;
-    crate::basis::flat::sharing::shut(&p, token).map(|()| 0)
+    crate::basis::flat::source::shut(&p, token).map(|()| 0)
 }

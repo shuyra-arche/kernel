@@ -176,7 +176,7 @@ impl Source {
     }
     pub(crate) fn hold_provenance(
         &self,
-    ) -> Result<alloc::vec::Vec<crate::basis::flat::sharing::SharingOperation>, CellFail> {
+    ) -> Result<alloc::vec::Vec<crate::basis::flat::source::Operation>, CellFail> {
         self.provenance().map_or_else(
             || Ok(alloc::vec::Vec::new()),
             |p| p.operations(self.source()).map_err(failure),
@@ -257,7 +257,7 @@ impl Source {
         let operation = root
             .as_ref()
             .map(|(meta, _, _)| {
-                crate::basis::flat::sharing::SharingOperation::acquire(meta).ok_or(CellFail::Busy)
+                crate::basis::flat::source::Operation::acquire(meta).ok_or(CellFail::Busy)
             })
             .transpose()?;
         let actor = self.actor().ok_or(CellFail::Denied)?;
@@ -537,7 +537,7 @@ impl Source {
 pub(in crate::basis::nest) struct PublicationFlight {
     source: Arc<SourceAuthorization>,
     id: usize,
-    _operation: Option<crate::basis::flat::sharing::SharingOperation>,
+    _operation: Option<crate::basis::flat::source::Operation>,
 }
 
 impl Drop for PublicationFlight {

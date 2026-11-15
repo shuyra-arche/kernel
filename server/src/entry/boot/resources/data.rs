@@ -1,7 +1,7 @@
 //! Immutable boot bytes become managed RAM with a real read-only source root.
 use crate::basis::{
     cell::{self, page::Owner},
-    flat::{Flat, sharing::Sharing},
+    flat::{Flat, source::Export},
     nest::Access,
     pend::{PendEntry, SourceAuthorization},
     view::View,
@@ -54,7 +54,7 @@ pub(in crate::entry::boot) unsafe fn snapshot(
         .whole();
     let owner = TaskId::new(0);
     let source = SourceAuthorization::new(range.clone(), Access::READ, owner)?;
-    let view = Sharing::from_source(range, size, owner)?;
+    let view = Export::from_source(range, size, owner)?;
     let root = PendEntry::try_new(View::Share(view.clone()), Mark::NONE, Modifiable::No, None)?;
     let claim = source.claim()?;
     view.attach_source(&source);

@@ -323,10 +323,10 @@ impl SourceAuthorization {
         unsupported()
     }
 }
-pub(crate) struct Sharing {
+pub(crate) struct Export {
     pub(crate) id: usize,
 }
-impl Sharing {
+impl Export {
     pub(crate) fn owner(&self) -> TaskId {
         unsupported()
     }
@@ -352,9 +352,9 @@ impl Sharing {
         unsupported()
     }
 }
-pub(crate) struct SharingOperation;
-impl SharingOperation {
-    pub(crate) fn acquire(_: &Arc<Sharing>) -> Option<Self> {
+pub(crate) struct Operation;
+impl Operation {
+    pub(crate) fn acquire(_: &Arc<Export>) -> Option<Self> {
         unsupported()
     }
 }
@@ -376,7 +376,7 @@ pub(crate) struct CloneView;
 #[derive(Clone)]
 pub(crate) enum View {
     Clone(Arc<CloneView>),
-    Share(Arc<Sharing>),
+    Share(Arc<Export>),
 }
 impl View {
     pub(crate) fn kind(&self) -> ViewKind {
@@ -400,7 +400,7 @@ impl View {
     pub(crate) fn clone_view(&self) -> Option<Arc<CloneView>> {
         unsupported()
     }
-    pub(crate) fn share_view(&self) -> Option<Arc<Sharing>> {
+    pub(crate) fn share_view(&self) -> Option<Arc<Export>> {
         unsupported()
     }
     pub(crate) fn same(&self, _: &Self) -> bool {
