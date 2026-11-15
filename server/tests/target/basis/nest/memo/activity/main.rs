@@ -4,6 +4,8 @@ mod cases;
 mod reservation;
 #[allow(dead_code)]
 mod support;
+#[allow(dead_code)]
+mod stack;
 use core::fmt::Write;
 use kernel_api::{
     abi::{

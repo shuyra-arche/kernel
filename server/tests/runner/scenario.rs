@@ -109,6 +109,12 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     ] {
         command.env_remove(name);
     }
+    if !matches!(kind, Kind::Flat { .. }) {
+        compose::copy(
+            "target/basis/unit/stack.rs",
+            &fixture.join("tests/memory/guest/stack.rs"),
+        )?;
+    }
     match &kind {
         Kind::Smp => {
             compose::apply("smp-provider", &provider, &patches)?;

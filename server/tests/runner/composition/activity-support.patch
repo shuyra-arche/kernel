@@ -19,7 +19,7 @@
      use kernel_api::boot::{args, ledger::Entries};
      assert_eq!(count, args::LEN);
 -    assert_eq!(kernel_api::abi::VERSION, 11);
-+    assert_eq!(kernel_api::abi::VERSION, 12);
++    assert_eq!(kernel_api::abi::VERSION, 13);
      let a = unsafe { core::slice::from_raw_parts(at as *const usize, count) };
      IMAGE.store(a[args::VIEW], Ordering::Relaxed);
      IMAGE_LEN.store(a[args::VIEW_LEN], Ordering::Relaxed);
@@ -68,7 +68,15 @@
  }
  pub fn insert(target: MemoPosition, slot: SlotPosition) {
      mutate(Action::Insert {
-@@ -261,7 +228,10 @@
+@@ -254,14 +221,14 @@
+     use kernel_api::model::unit::*;
+     let bytes = UnitCreate::Task {
+         team: None,
+-        entry: VirtAddr::new(entry as *const () as usize),
+-        args: VirtAddr::new(0),
+-        count: 0,
+-        stack: VirtAddr::new(0),
++        start: crate::stack::Stack::new(entry as *const () as usize, &[], 65536).start,
      }
      .to_bytes();
      let CreatedUnit::Task(task) =
@@ -80,7 +88,7 @@
      else {
          panic!("Task")
      };
-@@ -280,15 +250,6 @@
+@@ -280,15 +247,6 @@
      }
  }
  

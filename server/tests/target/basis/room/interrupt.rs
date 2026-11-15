@@ -317,7 +317,16 @@ fn startup_contract() {
     assert_eq!(support::task_info(UnitQuery::Target(UnitTarget::Task(task))).exit.unwrap().0, ExitCause::Fault);
     unit::delete(UnitTarget::Task(task)).unwrap();
     guard.retire();
-    marker(b"PASS task-start cross-page=1 independent-sp=1 guard=1 retained-stack=1\n");
+    let withdrawn = stack::Stack::new(guard_entry as *const () as usize, &[], 32768);
+    let task = create(withdrawn.start);
+    // A dormant Task has never touched the backing. An authorized owner may
+    // retract it before first Resume; the saved SP is not a mapping lease.
+    withdrawn.retire();
+    unit::resume(UnitTarget::Task(task)).unwrap();
+    wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).reclaimed);
+    assert_eq!(support::task_info(UnitQuery::Target(UnitTarget::Task(task))).exit.unwrap().0, ExitCause::Fault);
+    unit::delete(UnitTarget::Task(task)).unwrap();
+    marker(b"PASS task-start cross-page=1 independent-sp=1 guard=1 retained-stack=1 withdrawn=1\n");
 }
 #[unsafe(no_mangle)]
 extern "C" fn run(at: usize, count: usize) -> ! {

@@ -45,7 +45,8 @@ impl Stack {
         for (index, word) in args.iter().enumerate() { unsafe { ((at + index * 8) as *mut usize).write(*word); } }
         Self { start: TaskStart { entry: VirtAddr::new(entry), stack_pointer: VirtAddr::new(at & !15), arguments: VirtAddr::new(if args.is_empty() {0} else {at}), argument_count: args.len() }, base, flat, memo }
     }
-    /// Call only after the child is independently observed reclaimed. Release
+    /// Call after the child is independently observed reclaimed, or while it is
+    /// still dormant and has never run. Release
     /// settles its real hardware obligations before the Flat may be deleted.
     pub fn retire(self) {
         change(|| {
