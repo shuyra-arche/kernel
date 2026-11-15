@@ -6,8 +6,8 @@ use alloc::sync::Arc;
 use kernel_api::model::identity::TaskId;
 
 use crate::basis::nest::NestError;
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::team::Team;
-use crate::metal::sync::LegacyLock;
 use kernel_api::address::PhysAddr;
 
 static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, isize::MAX as usize);
@@ -75,7 +75,7 @@ pub(crate) struct TaskIdent {
     pub(crate) controller: TaskId,
     pub(crate) team: Arc<Team>,
     pub(crate) frame_pa: PhysAddr,
-    memory: LegacyLock<crate::metal::sync::order::TaskMemory, Option<TaskMemory>>,
+    memory: LegacyLock<crate::basis::sync::order::TaskMemory, Option<TaskMemory>>,
 }
 
 impl TaskIdent {

@@ -14,6 +14,17 @@ standard is `.github@7967d812c6c9d40fde6a174483073b788af3e3cc`. The change compo
 #184 remains separate. Wire ABI 11 and resource permission,
 Page ownership, publication and retirement authorities are unchanged.
 
+The shared FIFO storage, guards, OnceLock and debug checking mechanism now live
+in [`generic/sync`](../../server/src/metal/generic/sync/mod.rs). Its unsafe
+`Environment` contract statically binds IRQ protection, execution identity and
+safe wait progress; [`riscv/sync`](../../server/src/metal/riscv/sync/mod.rs) is the
+hardware adapter. Resource categories, typed ancestors, policy and the single
+COMMIT instance live in [`basis/sync`](../../server/src/basis/sync/mod.rs).
+Raw storage construction requires an unsafe owner obligation; safe domain
+callers continue through sealed typed constructors. The trusted Task boundary
+is an opaque hardware-provided token, borrowed by Root without an ISA dependency
+in basis. Generic code selects neither a backend nor a resource lock graph.
+
 ## Evidence and navigation
 
 - [Construction migration](constructions.md): all 96 baseline constructor
@@ -26,7 +37,7 @@ Page ownership, publication and retirement authorities are unchanged.
   for each textual lock/try/pair/reentry/with entry. Regenerate both current
   catalogues with `cargo +nightly run --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- inventory --kernel .`. Overloaded methods
   require their source context; this index does not prove transitive safety.
-- [Production order](../../server/src/metal/riscv/sync/order/mod.rs): the **only
+- [Production order](../../server/src/basis/sync/order/mod.rs): the **only
   rule source**. The explicit `relations!` closure generates both sealed
   `Before<Next>` implementations and the Debug matrix. No ordinal comparison,
   unknown class, blanket relation, ordinary self edge or default pass exists.

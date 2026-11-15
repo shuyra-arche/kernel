@@ -1,0 +1,13 @@
+//! Physical controllers remain in Kernel custody from boot through assignment.
+//! Binding an endpoint leases its exclusive engine; data publication is still
+//! performed through the Nest authorization and Memo publication boundary.
+use super::mmio::Mmio;
+mod pool;
+
+use crate::basis::sync::LegacyLock;
+pub(crate) use pool::Controllers;
+
+pub(crate) static CONTROLLERS: LegacyLock<
+    crate::basis::sync::order::Controllers,
+    Option<Controllers<Mmio>>,
+> = LegacyLock::new(None);

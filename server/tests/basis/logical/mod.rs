@@ -21,7 +21,7 @@ mod translation;
 type Asid = usize;
 struct Span {
     id: usize,
-    state: crate::host_lock::SpinLock<SpanState>,
+    state: crate::host_lock::TestLock<SpanState>,
 }
 struct SpanState {
     source: Option<()>,
@@ -37,7 +37,7 @@ impl Span {
     fn new(id: usize) -> Self {
         Self {
             id,
-            state: crate::host_lock::SpinLock::new(SpanState {
+            state: crate::host_lock::TestLock::new(SpanState {
                 source: None,
                 active: Vec::new(),
             }),
@@ -52,7 +52,7 @@ impl Span {
     fn changed(&self) {}
 }
 struct Nest {
-    state: crate::host_lock::SpinLock<RetirementState>,
+    state: crate::host_lock::TestLock<RetirementState>,
 }
 struct RetirementState {
     memos: memo::Memos,

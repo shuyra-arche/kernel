@@ -14,15 +14,15 @@ pub(crate) fn node(id: usize, parent: Option<&Arc<TeamNode>>) -> Arc<TeamNode> {
         id: TeamId::new(id),
         owner: TaskId::new(1),
         parent: parent.cloned(),
-        state: crate::metal::sync::LegacyLock::new(TeamState::new(TeamStage::Ready {
+        state: crate::basis::sync::LegacyLock::new(TeamState::new(TeamStage::Ready {
             default_entry: 0,
         })),
-        tasks: crate::metal::sync::LegacyLock::new(Vec::new()),
-        children: crate::metal::sync::LegacyLock::new(Vec::new()),
+        tasks: crate::basis::sync::LegacyLock::new(Vec::new()),
+        children: crate::basis::sync::LegacyLock::new(Vec::new()),
         life: Arc::new(Anchor),
         exit: exit::ExitPolicy::new(),
         member_exit: false,
-        termination: crate::metal::sync::LegacyLock::new(
+        termination: crate::basis::sync::LegacyLock::new(
             crate::basis::unit::lifecycle::Termination::new(),
         ),
     });
@@ -41,10 +41,10 @@ pub(crate) fn member(node: &Arc<TeamNode>, id: usize, owners: &[usize]) -> Arc<M
         reclaimed: AtomicBool::new(false),
         task: TaskWeak::empty(),
         node: Arc::downgrade(node),
-        state: Arc::new(crate::metal::sync::LegacyLock::new(TaskState)),
+        state: Arc::new(crate::basis::sync::LegacyLock::new(TaskState)),
         life: Arc::new(Anchor),
-        result: crate::metal::sync::LegacyLock::new(Some(83)),
-        receipts: crate::metal::sync::LegacyLock::new(
+        result: crate::basis::sync::LegacyLock::new(Some(83)),
+        receipts: crate::basis::sync::LegacyLock::new(
             owners
                 .iter()
                 .map(|owner| Receipt {

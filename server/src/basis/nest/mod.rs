@@ -20,14 +20,14 @@ use core::mem::ManuallyDrop;
 use crate::basis::cell::page::{Change, Freeze, Page};
 use crate::basis::flat::Pages;
 use crate::basis::sign::{self, WakeKey};
+use crate::basis::sync::LegacyGuard;
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::anchor::Anchor;
-use crate::metal::generic::mmu::{Attributes, Domain, PageTable, fence};
+use crate::metal::generic::mmu::internal::{Attributes, Domain, PageTable, fence};
 use crate::metal::layout::TEAM_FRAME_BASE;
 use crate::metal::layout::TEAM_FRAME_WINDOW_SIZE;
 use crate::metal::layout::TRAP_STACK_BASE;
-use crate::metal::mmu::{self, Geometry, Root, Table, identity};
-use crate::metal::sync::LegacyGuard;
-use crate::metal::sync::LegacyLock;
+use crate::metal::mmu::internal::{self as mmu, Geometry, Root, Table, identity};
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
@@ -97,9 +97,9 @@ pub struct Nest {
     cpu: Option<CpuContext>,
     life: Arc<Anchor>,
     pub(crate) reservations: authority::ReservationRegistry,
-    layout: LegacyLock<crate::metal::sync::order::Address, Layout>,
-    pending_cleanup: LegacyLock<crate::metal::sync::order::Cleanup, Option<Box<CleanupNode>>>,
-    state: ManuallyDrop<LegacyLock<crate::metal::sync::order::Nest, NestState>>,
+    layout: LegacyLock<crate::basis::sync::order::Address, Layout>,
+    pending_cleanup: LegacyLock<crate::basis::sync::order::Cleanup, Option<Box<CleanupNode>>>,
+    state: ManuallyDrop<LegacyLock<crate::basis::sync::order::Nest, NestState>>,
 }
 
 impl Nest {
@@ -946,7 +946,7 @@ impl Nest {
             if self.reservations.competing_reservation(creator) {
                 return Err(NestError::Busy);
             }
-        } else if level.get() >= crate::metal::mmu::mode::levels() {
+        } else if level.get() >= crate::metal::mmu::internal::mode::levels() {
             return Err(NestError::NotAligned);
         }
         if !self.is_open() {
@@ -993,7 +993,7 @@ impl Nest {
             Arc::downgrade(self),
             placement.region(),
             if self.cpu.is_some() {
-                crate::metal::mmu::canonical(start)
+                crate::metal::mmu::internal::canonical(start)
             } else {
                 VirtAddr::new(start)
             },
@@ -2340,7 +2340,10 @@ impl Nest {
             .map_err(|_| NestError::OutOfMemory)?;
         for range in &inner.active {
             if let Some((start, last)) = range.intersection(lo, hi) {
-                spans.push((crate::metal::mmu::canonical(start), last - start + 1));
+                spans.push((
+                    crate::metal::mmu::internal::canonical(start),
+                    last - start + 1,
+                ));
             }
         }
         Ok(spans)
@@ -2438,7 +2441,10 @@ impl Nest {
                 }
                 floor = start;
             }
-            spans.push((crate::metal::mmu::canonical(floor), last - floor + 1));
+            spans.push((
+                crate::metal::mmu::internal::canonical(floor),
+                last - floor + 1,
+            ));
             if last >= hi {
                 covered = true;
                 break;
@@ -2485,7 +2491,7 @@ impl Nest {
         let mut inner = mapping.state.lock();
         let next = ActiveRange::split(&inner.active, start.as_usize(), last, None)?;
         let first_page = mapping.page_index(start);
-        let last_page = mapping.page_index(crate::metal::mmu::canonical(last));
+        let last_page = mapping.page_index(crate::metal::mmu::internal::canonical(last));
         let removed = state
             .memos
             .published(mapping)
@@ -2604,7 +2610,7 @@ impl Nest {
             Reservation::new(
                 nest,
                 region,
-                crate::metal::mmu::canonical(right_start),
+                crate::metal::mmu::internal::canonical(right_start),
                 size - left_size,
                 right_id,
             ),

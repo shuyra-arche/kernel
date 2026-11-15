@@ -7,7 +7,7 @@ use std::time::Duration;
 #[test]
 fn failed_try_returns_while_foreign_owner_is_still_held_and_restores_irqs() {
     metal::hart::set(0);
-    let lock = Arc::new(RelLock::new(Class::Commit, 17));
+    let lock = Arc::new(unsafe { RelLock::new(Class::Commit, 17) });
     let held = lock.lock();
     assert!(!trap::enabled());
     let (sent, received) = mpsc::channel();
@@ -42,7 +42,7 @@ fn failed_try_returns_while_foreign_owner_is_still_held_and_restores_irqs() {
 #[test]
 fn recursive_try_preserves_outer_ownership_and_irq_mask_until_last_guard() {
     metal::hart::set(2);
-    let lock = RelLock::new(Class::Commit, 29);
+    let lock = unsafe { RelLock::new(Class::Commit, 29) };
     let outer = lock.try_lock().unwrap();
     #[cfg(debug_assertions)]
     assert_eq!(depend::count(), 1);
@@ -64,7 +64,7 @@ fn recursive_try_preserves_outer_ownership_and_irq_mask_until_last_guard() {
 #[test]
 fn contended_wait_visits_reception_before_foreign_owner_releases() {
     metal::hart::set(0);
-    let lock = Arc::new(RelLock::new(Class::Commit, 41));
+    let lock = Arc::new(unsafe { RelLock::new(Class::Commit, 41) });
     let owner = lock.lock();
     let (sent, received) = mpsc::channel();
     let other = lock.clone();
@@ -86,7 +86,7 @@ fn contended_wait_visits_reception_before_foreign_owner_releases() {
 #[test]
 fn queued_waiter_cannot_be_bypassed_even_between_owners() {
     metal::hart::set(0);
-    let lock = Arc::new(RelLock::new(Class::Commit, 41));
+    let lock = Arc::new(unsafe { RelLock::new(Class::Commit, 41) });
     let owner = lock.lock();
     let (notice, observed) = mpsc::channel();
     let (resume, paused) = mpsc::channel();
@@ -114,7 +114,7 @@ fn queued_waiter_cannot_be_bypassed_even_between_owners() {
 #[test]
 fn queued_harts_enter_in_arrival_order_and_publish_protected_writes() {
     metal::hart::set(0);
-    let lock = Arc::new(RelLock::new(Class::Commit, std::cell::Cell::new(0)));
+    let lock = Arc::new(unsafe { RelLock::new(Class::Commit, std::cell::Cell::new(0)) });
     let owner = lock.lock();
     let mut workers = Vec::new();
     for id in 1..=4 {
@@ -141,7 +141,7 @@ fn queued_harts_enter_in_arrival_order_and_publish_protected_writes() {
 #[test]
 fn ordinary_lock_waiters_keep_their_turn_and_observe_prior_writes() {
     metal::hart::set(0);
-    let lock = Arc::new(SpinLock::new(Class::LedgerSerial, 0));
+    let lock = Arc::new(unsafe { SpinLock::new(Class::LedgerSerial, 0) });
     let owner = lock.lock();
     let mut workers = Vec::new();
     for id in 1..=4 {
@@ -169,7 +169,7 @@ fn ordinary_lock_waiters_keep_their_turn_and_observe_prior_writes() {
 #[test]
 fn ordinary_try_cannot_steal_a_reserved_turn_or_abandon_one_on_failure() {
     metal::hart::set(0);
-    let lock = Arc::new(SpinLock::new(Class::LedgerSerial, 7));
+    let lock = Arc::new(unsafe { SpinLock::new(Class::LedgerSerial, 7) });
     let owner = lock.lock();
     let (notice, observed) = mpsc::channel();
     let (resume, paused) = mpsc::channel();
@@ -194,8 +194,8 @@ fn ordinary_try_cannot_steal_a_reserved_turn_or_abandon_one_on_failure() {
 #[cfg(debug_assertions)]
 #[test]
 fn reentrant_first_try_checks_inverse_before_reserving_a_turn() {
-    let nest = SpinLock::new(Class::Nest, ());
-    let commit = RelLock::new(Class::Commit, ());
+    let nest = unsafe { SpinLock::new(Class::Nest, ()) };
+    let commit = unsafe { RelLock::new(Class::Commit, ()) };
     {
         let _nest = nest.lock();
         assert!(
@@ -245,7 +245,7 @@ fn actual_ledger_peer_releases_second_first_and_same_owner_uses_one_turn() {
 #[cfg(debug_assertions)]
 #[test]
 fn source_reverse_try_uses_real_commit_and_failed_foreign_admission_records_nothing() {
-    let ledger = Arc::new(SpinLock::new(Class::LedgerSerial, ()));
+    let ledger = Arc::new(unsafe { SpinLock::new(Class::LedgerSerial, ()) });
     let source = ledger.clone();
     let (notice, ready) = mpsc::channel();
     let (release, done) = mpsc::channel();
@@ -259,7 +259,11 @@ fn source_reverse_try_uses_real_commit_and_failed_foreign_admission_records_noth
     crate::provider::boundary(|_| {
         {
             let _commit = unsafe { super::global_commit().legacy_lock() };
-            assert!(ledger.try_source_borrow().is_none());
+            assert!(
+                ledger
+                    .try_admit(crate::provider::generic::Admission::Borrow)
+                    .is_none()
+            );
             assert_eq!(depend::count(), 1);
             assert!(!trap::enabled());
         }
@@ -271,11 +275,31 @@ fn source_reverse_try_uses_real_commit_and_failed_foreign_admission_records_noth
     crate::provider::boundary(|_| {
         let _commit = unsafe { super::global_commit().legacy_lock() };
         {
-            let _source = ledger.try_source_borrow().unwrap();
+            let _source = ledger
+                .try_admit(crate::provider::generic::Admission::Borrow)
+                .unwrap();
             assert_eq!(depend::count(), 2);
         }
         assert_eq!(depend::count(), 1);
     });
+    assert!(trap::enabled());
+    assert_eq!(depend::count(), 0);
+}
+
+#[test]
+fn physical_exclusion_is_released_before_the_saved_environment_is_restored() {
+    let lock = Arc::new(unsafe { SpinLock::new(Class::LedgerSerial, 0) });
+    let mut held = lock.lock();
+    *held = 73;
+    let same = lock.clone();
+    trap::on_restore(move || {
+        assert!(!trap::enabled());
+        let seen = same
+            .try_lock()
+            .expect("IRQ restore preceded physical unlock");
+        assert_eq!(*seen, 73);
+    });
+    drop(held);
     assert!(trap::enabled());
     assert_eq!(depend::count(), 0);
 }

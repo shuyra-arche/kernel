@@ -4,8 +4,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use super::{Invalidation, tickets::Tickets};
-use crate::metal::generic::mmu::fence::{Completed, Request, Scope};
-use crate::metal::mmu::Table;
+use crate::metal::generic::mmu::internal::fence::{Completed, Request, Scope};
+use crate::metal::mmu::internal::Table;
 
 use super::super::{Asid, Span};
 use crate::basis::nest::memo::publication::Publication;
@@ -17,7 +17,7 @@ pub(in crate::basis::nest) struct Retirement {
     scope: Scope,
     sequence: crate::basis::name::Generation,
     pending: Option<Request<Asid>>,
-    deferred: Option<crate::metal::mmu::Deferred>,
+    deferred: Option<crate::metal::mmu::internal::Deferred>,
     pub(in crate::basis::nest) tickets: Tickets,
     pub(in crate::basis::nest) tables: Vec<Table>,
     pub(in crate::basis::nest) cells: Vec<Publication>,
@@ -39,12 +39,14 @@ impl Retirement {
         }
     }
 
-    pub(in crate::basis::nest) fn deferred(&self) -> Option<&crate::metal::mmu::Deferred> {
+    pub(in crate::basis::nest) fn deferred(
+        &self,
+    ) -> Option<&crate::metal::mmu::internal::Deferred> {
         self.deferred.as_ref()
     }
     pub(in crate::basis::nest) fn park(
         &mut self,
-        round: crate::metal::mmu::Deferred,
+        round: crate::metal::mmu::internal::Deferred,
     ) -> Result<(), super::super::NestError> {
         if !self.invalidation.is_fencing()
             || self.deferred.is_some()

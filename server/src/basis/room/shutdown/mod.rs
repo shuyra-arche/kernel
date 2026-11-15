@@ -1,14 +1,12 @@
 //! Normal shutdown: observe progress, collect Harts, then finalize exactly once.
 //! Entry installs reporting effects; this owner supplies coherent observations.
+use crate::basis::sync::LegacyLock;
 mod progress;
 use crate::basis::unit::{
     lifecycle::tally,
     task::{Task, registry},
 };
-use crate::metal::{
-    clock, hart,
-    sync::{LegacyLock, OnceLock},
-};
+use crate::metal::{clock, hart, sync::OnceLock};
 use alloc::sync::Arc;
 use core::{
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -19,7 +17,7 @@ use progress::Progress;
 
 const BARRIER_REPORT_AT: usize = 20_000_000;
 static ROOT_ID: AtomicUsize = AtomicUsize::new(0);
-static PROGRESS: LegacyLock<crate::metal::sync::order::Shutdown, Progress> =
+static PROGRESS: LegacyLock<crate::basis::sync::order::Shutdown, Progress> =
     LegacyLock::new(Progress::Idle);
 static BARRIER: Barrier = Barrier {
     leader: AtomicBool::new(false),
@@ -113,7 +111,7 @@ pub(crate) fn barrier() -> (usize, usize) {
 }
 /// The elected leader waits for every Hart, finalizes and resets. Followers stop.
 pub(super) fn finish() -> ! {
-    crate::metal::mmu::identity::vacate();
+    crate::metal::mmu::internal::identity::vacate();
     if let Arrival::Leader = BARRIER.arrive() {
         super::scheduler::idle::yell();
         let mut spins = 0;

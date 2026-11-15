@@ -7,8 +7,8 @@ use super::{
     slot::{self, Slot},
 };
 use crate::{
+    basis::sync::LegacyLock,
     basis::{cell::page::Page, flat::FlatError},
-    metal::sync::LegacyLock,
 };
 use alloc::{sync::Arc, vec::Vec};
 use kernel_api::{
@@ -29,7 +29,7 @@ pub(in super::super) enum Step<'a> {
 /// outside the lock on every failure. Cancellation restores only this Fresh
 /// position, never a Missing tombstone or another transaction's slot.
 pub(in super::super) struct Reservation<'a> {
-    state: &'a LegacyLock<crate::metal::sync::order::Flat, FlatState>,
+    state: &'a LegacyLock<crate::basis::sync::order::Flat, FlatState>,
     index: PageIndex,
     level: CellLevel,
     initial: CellLevel,
@@ -38,7 +38,7 @@ pub(in super::super) struct Reservation<'a> {
 
 impl<'a> Reservation<'a> {
     pub fn prepare(
-        state: &'a LegacyLock<crate::metal::sync::order::Flat, FlatState>,
+        state: &'a LegacyLock<crate::basis::sync::order::Flat, FlatState>,
         index: PageIndex,
         end: usize,
         initial: CellLevel,

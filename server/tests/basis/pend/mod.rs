@@ -171,3 +171,7 @@ fn selection_of_pure_authority_state_requires_active_exact_scope() {
     assert!(!state.transition(Retire).unwrap().selects(op, scope));
     assert!(!state.transition(Borrow(No)).unwrap().selects(op, scope));
 }
+
+mod basis {
+    pub(crate) use crate::metal::sync;
+}

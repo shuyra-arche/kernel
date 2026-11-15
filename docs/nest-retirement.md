@@ -149,7 +149,7 @@ A failed retirement result does not authorize reuse: inspect the same logical
 resource and retry its retained cleanup through the owning lifecycle. This
 implementation does not turn failed CPU results into asynchronous success.
 
-The owning [SMP test composition](../server/tests/target/metal/riscv/mmu/completion/) records exact source,
+The owning [SMP test composition](../server/tests/target/metal/riscv/mmu/internal/completion/) records exact source,
 fixture, lock, toolchain, command and image hashes. Host receipt tests exercise
 software ordering and retention only. QEMU execution is separate evidence and
 does not qualify physical hardware or device quiescence. Executable SMP also

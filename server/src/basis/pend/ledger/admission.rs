@@ -1,6 +1,6 @@
 //! Registration capacity, independent of Unit topology and Pend authorization.
 //! A charge reserves capacity before publication and survives until cleanup.
-use crate::metal::sync::LegacyLock;
+use crate::basis::sync::LegacyLock;
 use alloc::{sync::Arc, vec::Vec};
 use kernel_api::{
     abi::call::pend::PendFail,
@@ -26,7 +26,7 @@ struct Usage {
 
 pub(super) struct Admission {
     owner: TaskId,
-    usage: LegacyLock<crate::metal::sync::order::LedgerAdmission, Usage>,
+    usage: LegacyLock<crate::basis::sync::order::LedgerAdmission, Usage>,
 }
 
 impl Admission {

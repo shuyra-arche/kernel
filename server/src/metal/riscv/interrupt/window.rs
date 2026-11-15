@@ -87,7 +87,7 @@ unsafe extern "C" {
 /// execute. Saved trap CSRs and the original mask are restored before returning.
 #[inline(never)]
 pub(crate) fn poll() {
-    crate::metal::mmu::completion::service();
+    crate::metal::mmu::internal::completion::service();
     let local = local();
     if !local.ready.load(Ordering::Acquire) {
         return;

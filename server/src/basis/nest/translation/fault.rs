@@ -1,8 +1,8 @@
 use kernel_api::address::{PageOffset, VirtAddr};
 
-use crate::metal::generic::mmu::Attributes;
-use crate::metal::generic::mmu::PageTable;
-use crate::metal::mmu::Geometry;
+use crate::metal::generic::mmu::internal::Attributes;
+use crate::metal::generic::mmu::internal::PageTable;
+use crate::metal::mmu::internal::Geometry;
 
 use super::super::Access;
 use super::NestState;

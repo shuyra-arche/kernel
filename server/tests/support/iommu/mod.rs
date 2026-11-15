@@ -1,5 +1,5 @@
 //! Test-only assembly of production portable modules; no substitute implementation.
-#[path = "../../../src/metal/generic/iommu.rs"]
+#[path = "../../../src/metal/generic/mmu/external/mod.rs"]
 pub(crate) mod contract;
 #[path = "../../../src/basis/nest/memo/publication/error.rs"]
 pub(crate) mod error;

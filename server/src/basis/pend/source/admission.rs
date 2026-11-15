@@ -9,10 +9,10 @@ use crate::basis::unit::task::Task;
 pub(crate) struct RangeBlock {
     authority: Arc<Pend>,
     geometry: Arc<Geometry>,
-    pages: LegacyLock<crate::metal::sync::order::BlockPages, Vec<Block>>,
-    native: LegacyLock<crate::metal::sync::order::BlockEpoch, Option<NativeBlock>>,
-    pub(super) uses: LegacyLock<crate::metal::sync::order::BlockUses, Vec<Weak<MaintenanceUse>>>,
-    pub(super) stages: LegacyLock<crate::metal::sync::order::BlockStages, Vec<Weak<Stage>>>,
+    pages: LegacyLock<crate::basis::sync::order::BlockPages, Vec<Block>>,
+    native: LegacyLock<crate::basis::sync::order::BlockEpoch, Option<NativeBlock>>,
+    pub(super) uses: LegacyLock<crate::basis::sync::order::BlockUses, Vec<Weak<MaintenanceUse>>>,
+    pub(super) stages: LegacyLock<crate::basis::sync::order::BlockStages, Vec<Weak<Stage>>>,
 }
 
 impl RangeBlock {

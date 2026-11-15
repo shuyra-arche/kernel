@@ -1,4 +1,4 @@
-use crate::metal::riscv::sbi;
+use crate::metal::sbi;
 use ::core::fmt;
 use ::core::fmt::Write;
 
@@ -7,7 +7,7 @@ use crate::metal::allocator::InitError;
 use crate::metal::clock::ClockError;
 use crate::metal::console::Sink;
 use crate::metal::hart::HartId;
-use crate::metal::mmu::mode::SatpError;
+use crate::metal::mmu::internal::mode::SatpError;
 
 mod map_operation;
 mod resource_operation;
@@ -27,7 +27,7 @@ pub enum BootError {
     Scheduler(NestError),
     TrapStacks(NestError),
     #[cfg(debug_assertions)]
-    Dependencies(crate::metal::sync::DeadlockInitError),
+    Dependencies(crate::basis::sync::DeadlockInitError),
     InvalidEntryImage {
         base: usize,
         size: usize,
@@ -90,8 +90,8 @@ impl BootError {
                     "reason",
                     "{}",
                     match source {
-                        crate::metal::sync::DeadlockInitError::OutOfMemory => "out of memory",
-                        crate::metal::sync::DeadlockInitError::AlreadyInit => "already initialized",
+                        crate::basis::sync::DeadlockInitError::OutOfMemory => "out of memory",
+                        crate::basis::sync::DeadlockInitError::AlreadyInit => "already initialized",
                     }
                 );
             }

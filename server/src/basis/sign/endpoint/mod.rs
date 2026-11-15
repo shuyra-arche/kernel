@@ -5,9 +5,9 @@ mod state;
 pub(crate) mod wait;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
-use crate::metal::sync::LegacyLock;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
@@ -26,13 +26,13 @@ const MAX: usize = 1024;
 
 pub struct Endpoint {
     consumed: core::sync::atomic::AtomicU64,
-    state: LegacyLock<crate::metal::sync::order::SignState, State>,
+    state: LegacyLock<crate::basis::sync::order::SignState, State>,
     pub(crate) id: usize,
     life: Arc<Anchor>,
-    routing: LegacyLock<crate::metal::sync::order::SignRouting, Routing>,
+    routing: LegacyLock<crate::basis::sync::order::SignRouting, Routing>,
     owner: TaskId,
     cursor: AtomicUsize,
-    delivery: LegacyLock<crate::metal::sync::order::SignDelivery, delivery::Delivery>,
+    delivery: LegacyLock<crate::basis::sync::order::SignDelivery, delivery::Delivery>,
 }
 /// Ordinary sources and a service binding are mutually exclusive modes.
 /// COMMIT spans forwarding effects; this lock owns the mode itself.

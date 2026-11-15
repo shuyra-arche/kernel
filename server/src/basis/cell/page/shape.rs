@@ -52,7 +52,7 @@ impl Page {
                     level,
                     page: None,
                     reclaim: reclaim::Reclaim::new(),
-                    membership: crate::metal::sync::LegacyLock::new(
+                    membership: crate::basis::sync::LegacyLock::new(
                         reclaim::group::Membership::new(),
                     ),
                 })

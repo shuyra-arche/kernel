@@ -2,7 +2,7 @@
 //! This supplies Page's lock surface without importing the Kernel scheduler.
 use core::{cell::RefCell, cell::RefMut};
 #[allow(dead_code)]
-#[path = "../../../../../src/metal/riscv/sync/order/mod.rs"]
+#[path = "../../../../../src/basis/sync/order/mod.rs"]
 pub(crate) mod order;
 pub(crate) struct LegacyLock<P, T>(RefCell<T>, core::marker::PhantomData<fn() -> P>);
 // SAFETY: this guest admits one hart and never enables interrupts.

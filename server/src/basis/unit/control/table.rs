@@ -1,6 +1,6 @@
 use crate::basis::name::{Registry, Serial};
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::task::Task;
-use crate::metal::sync::LegacyLock;
 use alloc::sync::Arc;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
@@ -33,7 +33,7 @@ struct Entry {
     authority: Arc<Authority>,
 }
 pub(crate) struct Table(
-    LegacyLock<crate::metal::sync::order::ControlTable, Registry<ControlId, Entry>>,
+    LegacyLock<crate::basis::sync::order::ControlTable, Registry<ControlId, Entry>>,
 );
 impl Table {
     pub(crate) fn new() -> Self {

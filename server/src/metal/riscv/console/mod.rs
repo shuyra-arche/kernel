@@ -1,4 +1,4 @@
-use crate::metal::mmu::Address;
+use crate::metal::mmu::internal::Address;
 use crate::metal::riscv::sbi;
 use ::core::fmt;
 
@@ -82,15 +82,15 @@ fn physical_buffer(va: usize, len: usize) -> Option<usize> {
 }
 
 fn translate_kernel(va: usize, len: usize) -> Option<usize> {
-    if crate::metal::mmu::canonical(va).is_user() {
+    if crate::metal::mmu::internal::canonical(va).is_user() {
         return None;
     }
     let space = &crate::basis::unit::team::kernel()?.nest;
-    let pa0 = space.physical_at(crate::metal::mmu::canonical(va))?;
+    let pa0 = space.physical_at(crate::metal::mmu::internal::canonical(va))?;
     let mut va_cur = va;
     let end = va + len;
     while va_cur < end {
-        let pa = space.physical_at(crate::metal::mmu::canonical(va_cur))?;
+        let pa = space.physical_at(crate::metal::mmu::internal::canonical(va_cur))?;
         if pa.as_usize() != pa0.as_usize() + (va_cur - va) {
             return None;
         }

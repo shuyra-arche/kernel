@@ -5,10 +5,10 @@ use alloc::vec::Vec;
 
 use hashbrown::HashMap;
 
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::chain::{Chain, Drain};
-use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
 
 use super::key::WakeKey;
@@ -117,7 +117,7 @@ fn site_shard(key: WakeKey) -> usize {
     ((h >> 32) ^ h) as usize & SITE_SHARDS_MASK
 }
 
-type Shard = LegacyLock<crate::metal::sync::order::WaitSites, HashMap<WakeKey, Site>>;
+type Shard = LegacyLock<crate::basis::sync::order::WaitSites, HashMap<WakeKey, Site>>;
 
 static SHARDS: OnceLock<Box<[Shard]>> = OnceLock::new();
 pub(super) fn existing(key: WakeKey) -> Option<&'static Shard> {

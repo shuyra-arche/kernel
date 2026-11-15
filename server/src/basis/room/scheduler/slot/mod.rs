@@ -1,5 +1,6 @@
 //! One Hart's execution slot. All entry/departure paths coordinate Task state,
 //! queue membership and identity publication under COMMIT and this slot's lock.
+use crate::basis::sync::LegacyLock;
 pub(crate) mod identity;
 mod ready;
 mod turn;
@@ -17,7 +18,6 @@ use crate::metal::{
         context::{Gprs, TrapContext},
         stack::trap_stack_edge,
     },
-    sync::LegacyLock,
 };
 use alloc::sync::Arc;
 use identity::Publication;
@@ -33,10 +33,10 @@ struct Inner {
 #[repr(align(64))]
 pub(crate) struct Slot {
     pub(super) hart: HartId,
-    inner: LegacyLock<crate::metal::sync::order::Scheduler, Inner>,
+    inner: LegacyLock<crate::basis::sync::order::Scheduler, Inner>,
     identity: Publication,
     pub(super) admission:
-        LegacyLock<crate::metal::sync::order::SchedulerAdmission, super::contract::Admission>,
+        LegacyLock<crate::basis::sync::order::SchedulerAdmission, super::contract::Admission>,
     pub(super) isolated: core::sync::atomic::AtomicBool,
 }
 /// Required destination state when a current Task leaves this scheduler.

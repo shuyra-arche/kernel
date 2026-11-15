@@ -67,6 +67,7 @@ pub(crate) mod metal {
     }
 }
 pub(crate) mod basis {
+    pub(crate) use crate::metal::sync;
     // These fixtures test membership topology and reference lifetime; COMMIT,
     // interrupt exclusion and hardware effects are exercised by the RV64 guest.
     pub(crate) fn commit() {}
@@ -181,10 +182,10 @@ pub(crate) struct Task {
 }
 impl Task {
     pub(crate) fn new() -> Arc<Self> {
-        let trace = Arc::new(crate::metal::sync::LegacyLock::new(Vec::new()));
+        let trace = Arc::new(crate::basis::sync::LegacyLock::new(Vec::new()));
         Arc::new(Self {
-            retirement: crate::metal::sync::LegacyLock::new(Retirement::new()),
-            heir: crate::metal::sync::LegacyLock::new(Vec::new()),
+            retirement: crate::basis::sync::LegacyLock::new(Retirement::new()),
+            heir: crate::basis::sync::LegacyLock::new(Vec::new()),
             pend_busy: AtomicBool::new(false),
             source_busy: AtomicBool::new(false),
             preparing: AtomicBool::new(false),

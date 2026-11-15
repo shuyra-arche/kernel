@@ -11,8 +11,8 @@ use crate::basis::sign::redeem;
 use crate::basis::unit::task::TaskIdent;
 use crate::metal::generic::trap::TrapEvent;
 use crate::metal::interrupt::{self, ipi};
-use crate::metal::mmu::identity as asid;
-use crate::metal::mmu::identity::Asid;
+use crate::metal::mmu::internal::identity as asid;
+use crate::metal::mmu::internal::identity::Asid;
 use crate::metal::switcher::context::TrapContext;
 use crate::putln;
 use alloc::sync::Arc;
@@ -37,9 +37,9 @@ pub(crate) fn handle(
     frame: &mut TrapContext,
     from_task: bool,
     event: TrapEvent,
-    mut root: Option<crate::metal::sync::Root<'_>>,
+    mut root: Option<crate::basis::sync::Root<'_>>,
 ) -> *mut TrapContext {
-    crate::metal::mmu::completion::service();
+    crate::metal::mmu::internal::completion::service();
     #[cfg(feature = "latency")]
     crate::metal::measure::enter();
     asid::occupy(Asid::kernel());
@@ -240,7 +240,7 @@ fn is_task_frame(frame: *const TrapContext) -> bool {
 }
 
 pub(crate) fn resume(mut next: *mut TrapContext) -> *mut TrapContext {
-    crate::metal::mmu::completion::service();
+    crate::metal::mmu::internal::completion::service();
     if let Some(route) = crate::basis::room::interrupt::external() {
         route.advance();
     }
@@ -335,7 +335,7 @@ fn kill_fault(ident: Option<Identity>) -> *mut TrapContext {
 fn envcall(
     frame: &mut TrapContext,
     ident: Option<Identity>,
-    root: crate::metal::sync::Root<'_>,
+    root: crate::basis::sync::Root<'_>,
 ) -> Option<*mut TrapContext> {
     let Some(Identity::Live(ident)) = ident else {
         panic!("envcall without running task");

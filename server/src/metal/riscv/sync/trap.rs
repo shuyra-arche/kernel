@@ -2,6 +2,7 @@ use riscv::register::sstatus;
 
 pub(crate) struct TrapGuard {
     sie_was_enabled: bool,
+    local: core::marker::PhantomData<*const ()>,
 }
 
 impl TrapGuard {
@@ -20,6 +21,7 @@ impl TrapGuard {
             }
             TrapGuard {
                 sie_was_enabled: was,
+                local: core::marker::PhantomData,
             }
         }
     }

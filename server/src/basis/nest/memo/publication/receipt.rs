@@ -1,7 +1,7 @@
 //! One publication obligation, shared by CPU and external translations.
 use crate::basis::cell::page::{Change, Page, PageId, RetainError, Retention};
 use crate::basis::nest::PublicationError as Error;
-use crate::metal::generic::iommu::{BatchId, BindingId, Hardware, IoAddress, Projection};
+use crate::metal::generic::mmu::external::{BatchId, BindingId, Hardware, IoAddress, Projection};
 use alloc::sync::Arc;
 use core::ops::Deref;
 

@@ -3,10 +3,10 @@ use alloc::sync::Arc;
 use hashbrown::HashMap;
 
 use crate::basis::room::deadline;
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskWeak;
-use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
 
 use super::key::WakeKey;
@@ -27,7 +27,7 @@ impl Ticket {
 }
 
 type HolderTable =
-    LegacyLock<crate::metal::sync::order::WaitHolders, HashMap<Ticket, (WakeKey, TaskWeak)>>;
+    LegacyLock<crate::basis::sync::order::WaitHolders, HashMap<Ticket, (WakeKey, TaskWeak)>>;
 
 pub(in super::super) fn holders() -> &'static HolderTable {
     static HOLDERS: OnceLock<HolderTable> = OnceLock::new();

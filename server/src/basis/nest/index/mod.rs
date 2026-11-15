@@ -2,9 +2,9 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 #[cfg(debug_assertions)]
-use crate::metal::generic::mmu::{Attributes, PageTable};
+use crate::metal::generic::mmu::internal::{Attributes, PageTable};
 #[cfg(debug_assertions)]
-use crate::metal::mmu::{Geometry, Table};
+use crate::metal::mmu::internal::{Geometry, Table};
 #[cfg(debug_assertions)]
 use kernel_api::address::PAGE_SIZE;
 

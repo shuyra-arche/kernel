@@ -26,14 +26,14 @@ struct Blocks {
 pub(crate) struct Change {
     page: Option<Arc<Page>>,
     phase: Phase,
-    blocks: crate::metal::sync::LegacyLock<crate::metal::sync::order::ChangeBlocks, Blocks>,
+    blocks: crate::basis::sync::LegacyLock<crate::basis::sync::order::ChangeBlocks, Blocks>,
 }
 impl Change {
     pub(in super::super) fn begin(page: &Arc<Page>) -> Result<Arc<Self>, RetainError> {
         let mut change = Arc::try_new(Self {
             page: Some(page.clone()),
             phase: Phase::Prepared,
-            blocks: crate::metal::sync::LegacyLock::new(Blocks {
+            blocks: crate::basis::sync::LegacyLock::new(Blocks {
                 count: 0,
                 next: 0,
                 admitted: 0,
@@ -140,7 +140,7 @@ impl Block {
             change: Arc::try_new(Change {
                 page: None,
                 phase: Phase::Prepared,
-                blocks: crate::metal::sync::LegacyLock::new(Blocks {
+                blocks: crate::basis::sync::LegacyLock::new(Blocks {
                     count: 1,
                     next: 1,
                     admitted: 1,

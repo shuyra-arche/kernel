@@ -6,12 +6,12 @@ use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 use queue::Queue;
 
+use crate::basis::sync::LegacyLock;
 use crate::metal::clock;
 use crate::metal::clock::Instant;
 use crate::metal::clock::timer;
 use crate::metal::hart::{self, HartId};
 use crate::metal::layout::MAX_HART_SLOTS;
-use crate::metal::sync::LegacyLock;
 
 // The boot Hart remains online until all Tasks exit. Only it arms and
 // drains the global heap; other comparators serve local scheduling.
@@ -37,8 +37,8 @@ static REMOVES: AtomicU64 = AtomicU64::new(0);
 static TICKS: AtomicU64 = AtomicU64::new(0);
 static REMOTE_REARMS: AtomicU64 = AtomicU64::new(0);
 
-fn timers() -> &'static LegacyLock<crate::metal::sync::order::Deadline, Queue> {
-    static TIMERS: OnceLock<LegacyLock<crate::metal::sync::order::Deadline, Queue>> =
+fn timers() -> &'static LegacyLock<crate::basis::sync::order::Deadline, Queue> {
+    static TIMERS: OnceLock<LegacyLock<crate::basis::sync::order::Deadline, Queue>> =
         OnceLock::new();
     TIMERS.get_or_init(|| LegacyLock::new(Queue::new()))
 }

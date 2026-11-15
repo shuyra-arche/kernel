@@ -22,6 +22,7 @@ use request::Transition;
 use std::sync::atomic::Ordering;
 use support::*;
 pub(crate) mod basis {
+    pub(crate) use crate::metal::sync;
     pub(crate) mod room {
         pub(crate) enum Handoff<T> {
             Resume(T),

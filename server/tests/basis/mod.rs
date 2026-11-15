@@ -20,10 +20,10 @@ pub(crate) mod index {
 use error::FlatError;
 use state::slot;
 
-#[path = "../../src/metal/generic/mmu/completion.rs"]
+#[path = "../../src/metal/generic/mmu/internal/completion.rs"]
 mod completion;
 mod rendezvous;
-#[path = "../../src/metal/generic/mmu/fence.rs"]
+#[path = "../../src/metal/generic/mmu/internal/fence.rs"]
 mod scope;
 mod translation;
 
@@ -68,7 +68,7 @@ mod reshape;
 mod residency;
 
 #[allow(dead_code)]
-#[path = "../../src/metal/generic/iommu.rs"]
+#[path = "../../src/metal/generic/mmu/external/mod.rs"]
 mod contract;
 #[allow(dead_code)]
 #[path = "../../src/basis/nest/memo/publication/error.rs"]
@@ -83,16 +83,18 @@ mod host_lock;
 mod metal {
     pub(crate) use crate::host_lock as sync;
     pub(crate) mod mmu {
-        pub(crate) struct Table;
-        pub(crate) struct Deferred {
-            target: crate::scope::Request<usize>,
-        }
-        impl Deferred {
-            pub(crate) fn new(target: crate::scope::Request<usize>) -> Self {
-                Self { target }
+        pub(crate) mod internal {
+            pub(crate) struct Table;
+            pub(crate) struct Deferred {
+                target: crate::scope::Request<usize>,
             }
-            pub(crate) fn confirms(&self, target: crate::scope::Request<usize>) -> bool {
-                self.target == target
+            impl Deferred {
+                pub(crate) fn new(target: crate::scope::Request<usize>) -> Self {
+                    Self { target }
+                }
+                pub(crate) fn confirms(&self, target: crate::scope::Request<usize>) -> bool {
+                    self.target == target
+                }
             }
         }
     }
@@ -103,10 +105,12 @@ mod metal {
         pub(crate) fn data_visible() {}
     }
     pub(crate) mod generic {
-        pub(crate) use crate::contract as iommu;
         pub(crate) use crate::proof as memory;
         pub(crate) mod mmu {
-            pub(crate) use crate::scope as fence;
+            pub(crate) use crate::contract as external;
+            pub(crate) mod internal {
+                pub(crate) use crate::scope as fence;
+            }
         }
     }
 }

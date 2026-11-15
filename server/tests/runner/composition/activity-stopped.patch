@@ -1,5 +1,5 @@
---- a/server/src/entry/observe/mod.rs
-+++ b/server/src/entry/observe/mod.rs
+--- a/server/src/entry/work/observe/mod.rs
++++ b/server/src/entry/work/observe/mod.rs
 @@ -68,6 +68,9 @@
              next_global = now().saturating_add(100_000_000);
          }

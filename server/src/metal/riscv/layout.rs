@@ -1,7 +1,7 @@
 #[cfg(debug_assertions)]
-use crate::metal::mmu::Address;
+use crate::metal::mmu::internal::Address;
 #[cfg(debug_assertions)]
-use crate::metal::mmu::mode;
+use crate::metal::mmu::internal::mode;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;

@@ -9,16 +9,16 @@ use hashbrown::HashMap;
 
 use kernel_api::model::identity::TaskId;
 
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskWeak;
-use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
 
-static TABLE: OnceLock<LegacyLock<crate::metal::sync::order::Registry, HashMap<TaskId, TaskWeak>>> =
+static TABLE: OnceLock<LegacyLock<crate::basis::sync::order::Registry, HashMap<TaskId, TaskWeak>>> =
     OnceLock::new();
 
-fn table() -> &'static LegacyLock<crate::metal::sync::order::Registry, HashMap<TaskId, TaskWeak>> {
+fn table() -> &'static LegacyLock<crate::basis::sync::order::Registry, HashMap<TaskId, TaskWeak>> {
     TABLE.get_or_init(|| LegacyLock::new(HashMap::new()))
 }
 

@@ -7,11 +7,11 @@ use crate::basis::nest::Access;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
 use crate::basis::unit::team::kernel;
-use crate::metal::iommu::Engine;
-use crate::metal::iommu::Phase;
-use crate::metal::iommu::controllers::CONTROLLERS;
-use crate::metal::iommu::controllers::Controllers;
-use crate::metal::iommu::mmio::Mmio;
+use crate::metal::mmu::external::Engine;
+use crate::metal::mmu::external::Phase;
+use crate::metal::mmu::external::controllers::CONTROLLERS;
+use crate::metal::mmu::external::controllers::Controllers;
+use crate::metal::mmu::external::mmio::Mmio;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PhysAddr;
 
@@ -98,7 +98,7 @@ pub(in super::super) fn init(
     Ok(())
 }
 
-fn start(engine: &mut Engine<Mmio>) -> Result<(), crate::metal::iommu::EngineError> {
+fn start(engine: &mut Engine<Mmio>) -> Result<(), crate::metal::mmu::external::EngineError> {
     let mut ready = false;
     for _ in 0..STEP_BUDGET {
         if engine.step()? == Phase::Ready {
@@ -107,7 +107,7 @@ fn start(engine: &mut Engine<Mmio>) -> Result<(), crate::metal::iommu::EngineErr
         }
     }
     if !ready {
-        return Err(crate::metal::iommu::EngineError::State);
+        return Err(crate::metal::mmu::external::EngineError::State);
     }
     let batch = engine.invalidate()?;
     for _ in 0..STEP_BUDGET {
@@ -115,10 +115,10 @@ fn start(engine: &mut Engine<Mmio>) -> Result<(), crate::metal::iommu::EngineErr
             return Ok(());
         }
     }
-    Err(crate::metal::iommu::EngineError::State)
+    Err(crate::metal::mmu::external::EngineError::State)
 }
 
-fn failure(error: crate::metal::iommu::EngineError) -> PendFail {
+fn failure(error: crate::metal::mmu::external::EngineError) -> PendFail {
     log::error!("iommu: command engine failure: {error:?}; hardware pages retained");
     PendFail::Denied
 }

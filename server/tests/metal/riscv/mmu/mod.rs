@@ -1,17 +1,19 @@
 extern crate alloc;
 
 #[allow(dead_code)]
-#[path = "../../../../src/metal/generic/mmu/mod.rs"]
+#[path = "../../../../src/metal/generic/mmu/internal/mod.rs"]
 mod cpu;
 mod metal {
     pub(crate) mod generic {
-        pub(crate) use crate::cpu as mmu;
+        pub(crate) mod mmu {
+            pub(crate) use crate::cpu as internal;
+        }
     }
 }
-#[path = "../../../../src/metal/riscv/mmu/table/entry.rs"]
+#[path = "../../../../src/metal/riscv/mmu/internal/table/entry.rs"]
 mod entry;
 #[allow(dead_code)]
-#[path = "../../../../src/metal/riscv/mmu/table/flags.rs"]
+#[path = "../../../../src/metal/riscv/mmu/internal/table/flags.rs"]
 mod flags;
 
 mod activity;

@@ -15,11 +15,32 @@ specification. Use the [design](design/main.typ) for reasons and the
 | Where is a call decoded? | [ABI](../api/src/abi/call/), [native Frame](../api/src/abi/memory/call.rs) | [Entry](../server/src/entry/) |
 | Who accepts, replays and records memory requests? | [Memory requests](../api/src/abi/memory/request.rs) | [Task request owner](../server/src/basis/unit/task/request/); Entry copies/routes descriptors and resource owners enforce transitions |
 | What supplies trusted external hardware facts? | [Boot](../api/src/boot/), [memory contract](../api/memory.md) | [Boot](../server/src/entry/boot/), [Metal](../server/src/metal/) |
-| What retains retired resource responsibility? | [Memory](../api/memory.md#coherence-and-retirement) | [Nest translation](../server/src/basis/nest/translation/), [IOMMU](../server/src/metal/riscv/iommu/) |
-| Who supplies global memory observations? | [Snapshot](../api/src/model/memory/mod.rs) | [Observer](../server/src/entry/observe/), [Allocator](../server/src/metal/allocator/) |
+| What retains retired resource responsibility? | [Memory](../api/memory.md#coherence-and-retirement) | [Nest translation](../server/src/basis/nest/translation/), [IOMMU](../server/src/metal/riscv/mmu/external/) |
+| Who supplies global memory observations? | [Snapshot](../api/src/model/memory/mod.rs) | [Observer](../server/src/entry/work/observe/), [Allocator](../server/src/metal/allocator/) |
 | How is behavior checked? | [API tests](../api/tests/) | [Kernel tests](../server/tests/), [Vanllia integration](https://github.com/shuyra-arche/vanllia) |
 
 `basis` owns resource/execution state; `entry` connects boot,
 trap and call dispatch; `metal` owns architecture effects and
 trusted observations. Source ownership, authorization, publication
 and safe reuse are distinct even when one call coordinates them.
+
+Translation contracts are navigable from
+[`generic/mmu`](../server/src/metal/generic/mmu/mod.rs):
+[`internal`](../server/src/metal/generic/mmu/internal/mod.rs) covers CPU accesses
+(including user mode), while
+[`external`](../server/src/metal/generic/mmu/external/mod.rs) covers external
+requesters. The complete RISC-V implementations live under the corresponding
+[`riscv/mmu`](../server/src/metal/riscv/mmu/mod.rs) children. CPU shootdown
+coverage and external controller/platform settlement remain distinct contracts.
+[`generic/memory`](../server/src/metal/generic/memory/mod.rs) retains trusted
+hardware visibility/topology proofs; Page membership and authorization remain
+with basis. Neither is an external-only translation concern.
+
+Synchronization has three owners:
+[`generic/sync`](../server/src/metal/generic/sync/mod.rs) owns FIFO admission,
+ordinary/reentrant storage, RAII guards, OnceLock and bounded debug checking;
+[`riscv/sync`](../server/src/metal/riscv/sync/mod.rs) supplies the statically
+selected IRQ/owner/wait environment;
+[`basis/sync`](../server/src/basis/sync/mod.rs) owns resource categories, typed
+ancestor rules, debug policy and the unique COMMIT storage. Transaction semantics
+remain in [`basis/commit`](../server/src/basis/commit.rs).

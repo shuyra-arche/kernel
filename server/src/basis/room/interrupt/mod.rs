@@ -1,5 +1,6 @@
 //! One router owns all sources on the admitted controller: reserved queues and
 //! driver notifications never independently overwrite its enable words.
+use crate::basis::sync::LegacyLock;
 mod progress;
 use self::source::Source;
 use crate::basis::sign::endpoint::Endpoint;
@@ -8,7 +9,6 @@ use crate::metal::sync::TrapGuard;
 use crate::metal::{
     generic::interrupt::{Delivery, Irq},
     hart,
-    sync::LegacyLock,
 };
 use alloc::sync::Arc;
 use alloc::{boxed::Box, vec::Vec};
@@ -89,8 +89,8 @@ pub(crate) fn consumed(endpoint: &crate::basis::sign::endpoint::Endpoint) {
 }
 
 pub(crate) struct Router {
-    controller: LegacyLock<crate::metal::sync::order::InterruptController, Box<dyn Delivery>>,
-    progress: LegacyLock<crate::metal::sync::order::InterruptProgress, Progress>,
+    controller: LegacyLock<crate::basis::sync::order::InterruptController, Box<dyn Delivery>>,
+    progress: LegacyLock<crate::basis::sync::order::InterruptProgress, Progress>,
     serving: AtomicBool,
     physical: usize,
     limit: usize,
@@ -102,7 +102,7 @@ pub(crate) struct Router {
     #[cfg(feature = "latency")]
     first_entry: AtomicU64,
     counts: [AtomicUsize; 3],
-    sources: LegacyLock<crate::metal::sync::order::InterruptSources, Vec<Arc<Source>>>,
+    sources: LegacyLock<crate::basis::sync::order::InterruptSources, Vec<Arc<Source>>>,
 }
 /// All hardware effects follow complete descriptor validation at boot.
 pub(crate) fn install(controller: Box<dyn Delivery>, plan: Plan<'_>) -> Result<(), PendFail> {

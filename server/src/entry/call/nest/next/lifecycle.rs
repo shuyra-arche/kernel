@@ -41,7 +41,7 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
                 return Err(Failure::Stale);
             }
             expected.next().ok_or(Failure::VersionExhausted)?;
-            if reservation.level.get() >= crate::metal::mmu::mode::levels() {
+            if reservation.level.get() >= crate::metal::mmu::internal::mode::levels() {
                 return Err(Failure::NotAligned);
             }
             let access = Access::from_wire(reservation.access).ok_or(Failure::Invalid)?;

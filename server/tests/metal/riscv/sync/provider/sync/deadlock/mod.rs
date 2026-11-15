@@ -1,9 +1,12 @@
 #![allow(dead_code, unused_imports)]
 #[cfg(debug_assertions)]
-#[path = "../../../../../../../src/metal/riscv/sync/deadlock/held.rs"]
-pub(crate) mod held;
+pub(crate) mod held {
+    pub(crate) use crate::provider::generic::deadlock::{CAPACITY, Kind};
+    pub(crate) type Held = crate::provider::generic::deadlock::Held<super::Class>;
+    pub(crate) type HeldSet = crate::provider::generic::deadlock::HeldSet<super::Class>;
+}
 #[cfg(debug_assertions)]
-#[path = "../../../../../../../src/metal/riscv/sync/deadlock/verdict.rs"]
+#[path = "../../../../../../../src/basis/sync/deadlock/verdict.rs"]
 pub(crate) mod verdict;
 #[cfg(debug_assertions)]
 pub(crate) use held::Kind;

@@ -19,7 +19,7 @@ pub(crate) fn acknowledge() -> bool {
     // Idle consumes SSIP directly with SIE masked, without entering the trap
     // handler. Service after clearing so a racing request is observed here or
     // leaves the next interrupt pending.
-    crate::metal::mmu::completion::service();
+    crate::metal::mmu::internal::completion::service();
     WAKE[hart::hart_id().get()].swap(false, Ordering::AcqRel)
 }
 

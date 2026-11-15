@@ -8,7 +8,7 @@ global_asm!(include_str!("start.S"));
 use riscv::register::satp;
 use sbi::{Hsm, HsmCall, ecall::SArgs};
 
-use crate::metal::mmu::mode;
+use crate::metal::mmu::internal::mode;
 
 use super::{
     hart::{self, HartId},

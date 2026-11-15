@@ -1,6 +1,7 @@
 //! Bounded recipient subscriptions. Pend remains the authorization owner;
 //! Memo remains the PTE/history owner; this registry owns delivery cursors only.
 use crate::{
+    basis::sync::LegacyLock,
     basis::{
         cell::{self, page::Owner},
         flat::{
@@ -16,7 +17,6 @@ use crate::{
         unit::task::Task,
         view::View,
     },
-    metal::sync::LegacyLock,
 };
 use alloc::{
     sync::{Arc, Weak},
@@ -48,7 +48,7 @@ struct Registry {
 }
 static DELIVERY: crate::basis::name::Serial =
     crate::basis::name::Serial::new(1, isize::MAX as usize);
-static REGISTRY: LegacyLock<crate::metal::sync::order::ActivityRegistry, Registry> =
+static REGISTRY: LegacyLock<crate::basis::sync::order::ActivityRegistry, Registry> =
     LegacyLock::new(Registry {
         slots: [const { Slot::Free }; protocol::MAX_SUBSCRIPTIONS],
         cursor: 0,
@@ -101,7 +101,7 @@ struct Subscription {
     address: usize,
     registered: AtomicU64,
     cancelled: AtomicBool,
-    delivery: LegacyLock<crate::metal::sync::order::ActivityDelivery, Delivery>,
+    delivery: LegacyLock<crate::basis::sync::order::ActivityDelivery, Delivery>,
 }
 fn now() -> u64 {
     crate::metal::clock::uptime()

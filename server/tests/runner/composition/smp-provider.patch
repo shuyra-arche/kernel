@@ -1,11 +1,11 @@
 --- a/server/src/entry/boot/mod.rs
 +++ b/server/src/entry/boot/mod.rs
-@@ -87,6 +87,8 @@
+@@ -89,6 +89,8 @@
  }
  
  extern "C" fn run_on_stack() -> ! {
-+    crate::metal::mmu::completion::probe::run();
-+    crate::metal::mmu::completion::instructions_probe::run();
++    crate::metal::mmu::internal::completion::probe::run();
++    crate::metal::mmu::internal::completion::instructions_probe::run();
      #[cfg(feature = "latency")]
      crate::metal::measure::running();
      restore(scheduler::run())
@@ -15,7 +15,7 @@
  }
  
  pub(crate) fn report() {
-+    crate::metal::mmu::completion::probe::report_migrations();
++    crate::metal::mmu::internal::completion::probe::report_migrations();
      putln!("task: all tasks exited, system halted");
      let (late_n, late_max, late_sum) = deadline::late_stats();
      let max_ms = clock::ticks_to_duration(late_max).as_millis();
@@ -25,19 +25,19 @@
              .running_task()
              .expect("task trap without owner");
          assert_eq!(task.ident.frame_pa.as_usize(), frame as *const _ as usize);
-+        crate::metal::mmu::completion::probe::entered_task(task.ident.id.get());
++        crate::metal::mmu::internal::completion::probe::entered_task(task.ident.id.get());
          unsafe { task.capture_extensions(frame.status()) };
      }
      let ident = ident();
---- a/server/src/metal/riscv/mmu/completion.rs
-+++ b/server/src/metal/riscv/mmu/completion.rs
+--- a/server/src/metal/riscv/mmu/internal/completion.rs
++++ b/server/src/metal/riscv/mmu/internal/completion.rs
 @@ -143,3 +143,9 @@
          complete
      }
  }
 +
-+#[path = "../../../../tests/target/metal/riscv/mmu/completion/instructions.rs"]
++#[path = "../../../../../tests/target/metal/riscv/mmu/completion/instructions.rs"]
 +pub(crate) mod instructions_probe;
 +
-+#[path = "../../../../tests/target/metal/riscv/mmu/completion/probe.rs"]
++#[path = "../../../../../tests/target/metal/riscv/mmu/completion/probe.rs"]
 +pub(crate) mod probe;

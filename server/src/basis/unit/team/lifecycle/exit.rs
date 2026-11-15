@@ -1,4 +1,4 @@
-use crate::metal::sync::LegacyLock;
+use crate::basis::sync::LegacyLock;
 use kernel_api::abi::call::unit::UnitFail;
 use kernel_api::model::identity::TaskId;
 
@@ -19,7 +19,7 @@ struct State {
 }
 
 pub(crate) struct ExitPolicy {
-    state: LegacyLock<crate::metal::sync::order::TeamExit, State>,
+    state: LegacyLock<crate::basis::sync::order::TeamExit, State>,
 }
 
 impl ExitPolicy {

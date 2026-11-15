@@ -79,7 +79,7 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
             }
         }
         nest.advance_window(RegionKind::Normal, image_end)?;
-        crate::metal::mmu::identity::sync_instructions()?;
+        crate::metal::mmu::internal::identity::sync_instructions()?;
         team.set_default_entry(capsule.entry);
         Ok(())
     })

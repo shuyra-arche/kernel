@@ -8,15 +8,26 @@ use core::{
     ops::{Deref, DerefMut},
 };
 use std::sync::{Mutex, MutexGuard, ReentrantLock, ReentrantLockGuard};
-#[path = "../../src/metal/riscv/sync/legacy.rs"]
+#[path = "../../src/basis/sync/legacy.rs"]
 mod legacy;
-#[path = "../../src/metal/riscv/sync/lock/mod.rs"]
+#[path = "../../src/basis/sync/lock/mod.rs"]
 pub(crate) mod lock;
-#[path = "../../src/metal/riscv/sync/order/mod.rs"]
+#[path = "../../src/basis/sync/order/mod.rs"]
 pub(crate) mod order;
 pub(crate) use legacy::LegacyLock;
+pub(crate) use reentrant::{RelLock, RelLockGuard};
+pub(crate) use spin::{SpinLock, SpinLockGuard};
+pub(crate) type TestLock<T> = LegacyLock<order::ProbeRegistry, T>;
 pub(crate) use std::sync::OnceLock;
-pub(crate) type SpinLock<T> = LegacyLock<order::ProbeRegistry, T>;
+pub(crate) enum Admission {
+    Borrow,
+}
+pub(crate) mod diagnostics {
+    pub(crate) enum Pair {
+        Flat,
+        Ledger { first: usize, second: usize },
+    }
+}
 pub(crate) type LegacyGuard<'a, T> = HostGuard<'a, T>;
 thread_local! {
  static DEPTH:Cell<usize>=const{Cell::new(0)};
@@ -47,7 +58,7 @@ pub(crate) mod spin {
     pub(crate) type SpinLockGuard<'a, T> = HostGuard<'a, T>;
     pub(crate) struct SpinLock<T>(Mutex<T>);
     impl<T> SpinLock<T> {
-        pub(crate) const fn new(_: order::Class, value: T) -> Self {
+        pub(crate) const unsafe fn new(_: order::Class, value: T) -> Self {
             Self(Mutex::new(value))
         }
         fn before() {
@@ -68,39 +79,36 @@ pub(crate) mod spin {
             DEPTH.set(DEPTH.get() + 1);
             Some(HostGuard { lock: self, guard })
         }
-        pub(crate) fn lock_ordered<U>(&self, first: &HostGuard<'_, U>) -> HostGuard<'_, T> {
+        pub(crate) fn lock_ordered<U>(
+            &self,
+            first: &HostGuard<'_, U>,
+            _: diagnostics::Pair,
+        ) -> HostGuard<'_, T> {
             assert_ne!(self as *const _ as usize, first.lock as *const _ as usize);
             self.lock()
         }
         pub(crate) fn try_lock_ordered<U>(
             &self,
             first: &HostGuard<'_, U>,
+            _: diagnostics::Pair,
         ) -> Option<HostGuard<'_, T>> {
             assert_ne!(self as *const _ as usize, first.lock as *const _ as usize);
             self.try_lock()
         }
     }
-    impl SpinLock<()> {
-        pub(crate) fn try_lock_ledger_peer(
-            &self,
-            first: &HostGuard<'_, ()>,
-            a: usize,
-            b: usize,
-        ) -> Option<HostGuard<'_, ()>> {
-            assert!(a < b);
-            self.try_lock_ordered(first)
-        }
-        pub(crate) fn try_source_borrow(&self) -> Option<HostGuard<'_, ()>> {
+    impl<T> SpinLock<T> {
+        pub(crate) fn try_admit(&self, _: Admission) -> Option<HostGuard<'_, T>> {
             self.try_lock()
         }
     }
 }
+
 pub(crate) mod reentrant {
     use super::*;
     pub(crate) type RelLockGuard<'a, T> = ReentrantLockGuard<'a, T>;
     pub(crate) struct RelLock<T>(ReentrantLock<T>);
     impl<T> RelLock<T> {
-        pub(crate) const fn new(_: order::Class, value: T) -> Self {
+        pub(crate) const unsafe fn new(_: order::Class, value: T) -> Self {
             Self(ReentrantLock::new(value))
         }
         pub(crate) fn lock(&self) -> RelLockGuard<'_, T> {

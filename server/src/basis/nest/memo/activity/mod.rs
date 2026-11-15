@@ -1,15 +1,13 @@
 //! Memo-owned sampling/history. References retain progress, not authorization
 //! or physical Pages. Replacement cannot inherit another generation's facts.
+use crate::basis::sync::LegacyLock;
 mod epoch;
 use crate::{
     basis::{
         nest::{Nest, Span},
         pend::Pend,
     },
-    metal::{
-        mmu::{activity, completion::Pending},
-        sync::LegacyLock,
-    },
+    metal::mmu::internal::{activity, completion::Pending},
 };
 use alloc::sync::Arc;
 pub(crate) use epoch::Snapshot;
@@ -34,7 +32,7 @@ pub(crate) struct Identity {
 }
 pub(crate) struct State {
     identity: Identity,
-    history: LegacyLock<crate::metal::sync::order::ActivityHistory, History<Pending>>,
+    history: LegacyLock<crate::basis::sync::order::ActivityHistory, History<Pending>>,
 }
 fn now() -> u64 {
     crate::metal::clock::uptime()

@@ -20,7 +20,7 @@ use crate::basis::flat::source::Export;
 use crate::basis::nest::Access;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::Pend;
-use crate::metal::sync::{LegacyGuard, LegacyLock};
+use crate::basis::sync::{LegacyGuard, LegacyLock};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
@@ -76,18 +76,18 @@ pub(crate) struct SourceAuthorization {
     /// 带窗口的那一档（移交）还把“这一段已经核过、别的发表不得插进来”一并记下。
     /// 两张域靠键自带的那一位分开，故同号不会互删。
     inflight:
-        LegacyLock<crate::metal::sync::order::SourceFlights, Vec<(usize, Option<Arc<Geometry>>)>>,
+        LegacyLock<crate::basis::sync::order::SourceFlights, Vec<(usize, Option<Arc<Geometry>>)>>,
     /// 发布与撤销的共同闸门。
-    revoked: LegacyLock<crate::metal::sync::order::SourceGate, bool>,
+    revoked: LegacyLock<crate::basis::sync::order::SourceGate, bool>,
     /// 未结 CPU 关系：包含显式 Attach 控制与资源 Open 映射。
     ///
     /// 成员与 Registry 项是同一个 `Arc<RangeBinding>`，所以“还欠着谁”只有这一份
     /// 事实：只有显式结清（`Nest::retire_reservation` / `reap_reservations`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
-    bindings: LegacyLock<crate::metal::sync::order::SourceBindings, Vec<Arc<RangeBinding>>>,
-    blocks: LegacyLock<crate::metal::sync::order::SourceBlocks, Vec<Arc<RangeBlock>>>,
-    origins: LegacyLock<crate::metal::sync::order::SourceOrigins, Vec<Weak<Provenance>>>,
-    phase: LegacyLock<crate::metal::sync::order::SourcePhase, Phase>,
+    bindings: LegacyLock<crate::basis::sync::order::SourceBindings, Vec<Arc<RangeBinding>>>,
+    blocks: LegacyLock<crate::basis::sync::order::SourceBlocks, Vec<Arc<RangeBlock>>>,
+    origins: LegacyLock<crate::basis::sync::order::SourceOrigins, Vec<Weak<Provenance>>>,
+    phase: LegacyLock<crate::basis::sync::order::SourcePhase, Phase>,
 }
 
 /// 私有根在根 Pend 接手前的权限幅面（上限仍由 `ceiling` 收）。

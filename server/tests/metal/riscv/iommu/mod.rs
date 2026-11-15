@@ -28,6 +28,7 @@ pub(crate) mod publication;
 pub(crate) mod target;
 
 mod basis {
+    pub(crate) use crate::metal::sync;
     pub(crate) use crate::name;
     pub(crate) mod nest {
         pub(crate) use crate::iommu::Error as PublicationError;
@@ -59,10 +60,14 @@ mod metal {
         pub(crate) fn data_visible() {}
     }
     pub(crate) mod generic {
-        pub(crate) use crate::iommu::contract as iommu;
+        pub(crate) mod mmu {
+            pub(crate) use crate::iommu::contract as external;
+        }
         pub(crate) use crate::proof as memory;
     }
-    pub(crate) use crate::iommu;
+    pub(crate) mod mmu {
+        pub(crate) use crate::iommu as external;
+    }
 }
 
 #[allow(dead_code)]
