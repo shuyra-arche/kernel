@@ -8,6 +8,7 @@ fn production_typestate_compile_contracts() {
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+        .filter(|p| p.file_name().is_some_and(|x| x != "mod.rs"))
         .collect::<Vec<_>>();
     paths.sort();
     for assertions in ["yes", "no"] {
