@@ -3495,7 +3495,7 @@
     },
     {
       "enclosing_function": "observe",
-      "line": 142,
+      "line": 147,
       "operation": "lock",
       "path": "server/src/basis/room/shutdown/mod.rs",
       "source": "let mut progress = PROGRESS.lock();"
