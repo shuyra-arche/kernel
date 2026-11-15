@@ -7,6 +7,10 @@ autotests = false
 
 [workspace]
 
+[lib]
+path = "lib.rs"
+doctest = false
+
 [[bin]]
 name = "verify"
 path = "main.rs"
@@ -16,7 +20,10 @@ name = "contracts"
 path = "tests/mod.rs"
 
 [dependencies]
-vanllia-verification = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "fba906f74cf56b275603c4370b736cde1b0cea20" }
 clap = { version = "4", features = ["derive"] }
 regex = "1"
 serde_json = "1"
+
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"

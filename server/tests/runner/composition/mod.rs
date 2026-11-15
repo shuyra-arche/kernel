@@ -1,12 +1,12 @@
 //! Reviewed source composition is a fail-closed input, never runtime text rewriting.
 //! Every touched preimage must match its SHA-256 before git apply checks context.
+use kernel_verification::*;
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     process::Command,
 };
-use vanllia_verification::*;
 pub fn suite() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

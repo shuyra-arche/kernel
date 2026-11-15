@@ -58,8 +58,9 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
 with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`. Clone Vanllia at the exact
-revision in [runner/fixture](runner/fixture); the same commit supplies the shared
-execution library. Vanllia owns native memory and System/Twine compositions.
+revision in [runner/fixture](runner/fixture); this is a published fixture input for explicit integration runs. The shared
+host execution library lives in Kernel’s standalone `runner` package. Vanllia
+consumes that library and owns native memory and System/Twine compositions.
 Kernel owns its private completion, A/D, Flat and Room probes.
 
 ```sh
@@ -71,7 +72,7 @@ verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 "$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/irq --mode irq --events 16
 ```
 
-Run both debug and release. SMP defaults to 1/2/4 Harts; A/D and Flat default
+These commands are explicit integration commands, outside Kernel CI. Run both debug and release. SMP defaults to 1/2/4 Harts; A/D and Flat default
 to 1/4. Activity also has separate `--unsupported` and `--stopped` scenarios.
 Room correctness uses `--mode irq --events 16` on 1/4 and `--mode realtime
 --harts 4`. Scheduling comparisons stay opt-in, using `--mode room --baseline
@@ -86,7 +87,7 @@ cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.
 
 The last command is a negative test of the current boot contract, not an ABI 10
 guest. System consumer verification uses Vanllia's `verify system` with the
-pinned System and Twine checkouts in [Check](../../.github/workflows/check.yml).
+pinned System and Twine checkouts in [Vanllia’s integration workflow](https://github.com/shuyra-arche/vanllia/blob/main/.github/workflows/memory.yml).
 Independent IOMMU backend execution remains available with
 `cargo +nightly test --locked -p kernel-memory-tests --test iommu-target
 --target x86_64-unknown-linux-gnu -- --ignored --nocapture`.
@@ -113,11 +114,19 @@ Every boot requires complete scenario assertions and a successful process exit;
 a timeout, signal, nonzero exit or failure marker cannot pass. Evidence survives
 failed builds and boots. Raw results belong in CI artifacts, not source control.
 
-Ordinary Host-only changes run the inexpensive checks. Production/API/runner
-changes select all affected target scenarios conservatively; a specific guest
-change selects that scenario. Main/release runs execute all scenarios. Longer
-comparisons require `Room comparison: requested` and exactly one
-`Room baseline: <40 lowercase hex characters>` line in the PR body.
+Kernel CI checks only this repository: Host contracts and debug/release RV64
+builds run as three parallel jobs. Its host runner depends only on registry
+crates; CI does not check out Vanllia, System or Twine, and does not run a
+cross-repository QEMU composition.
+
+Vanllia owns the explicit integration gate. Its workflow pins the Kernel
+provider, executes 29 QEMU jobs split by scenario/profile/Hart with up to eight
+workers, and uploads a distinct artifact for every job. Native/System cases use
+Vanllia's own runner; private Kernel probes use this repository's runner and the
+published Vanllia fixture. A failing shard does not cancel the other evidence.
+Long paired comparisons remain opt-in in the composition owner's PR with
+`Room comparison: requested` and exactly one
+`Room baseline: <40 lowercase hex characters>` line.
 
 ## Retired historical checks
 

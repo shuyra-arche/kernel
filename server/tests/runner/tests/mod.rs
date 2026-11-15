@@ -135,3 +135,5 @@ fn flat_requires_all_contracts_and_rejects_guest_failure() {
         false
     );
 }
+
+mod execution;

@@ -8,9 +8,9 @@ verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 ```
 
 The current ABI 11 suite composes Kernel with Vanllia at
-`fba906f74cf56b275603c4370b736cde1b0cea20`. It tests the Scheduler, retained
+`f2dfa14f5b1f7bd47ee84841ba5c7112e8475950`. It tests the Scheduler, retained
 IRQ/Sign delivery and real-time scheduling contract behind #120. Minimal UART
-and real-time correctness cases run in `Guest tests (QEMU)`; repeated performance
+and real-time correctness cases run in Vanllia’s `Kernel integration`; repeated performance
 comparisons require an explicit request. The historical ABI 10 notes below
 remain an audit record, not current native acceptance.
 

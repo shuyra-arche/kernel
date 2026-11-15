@@ -6,7 +6,7 @@ publish = false
 [workspace]
 [dependencies]
 kernel = { path = "../../../.." }
-platform-riscv = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "fba906f74cf56b275603c4370b736cde1b0cea20" }
+platform-riscv = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "f2dfa14f5b1f7bd47ee84841ba5c7112e8475950" }
 [patch."https://github.com/shuyra-arche/kernel.git"]
 kernel = { path = "../../../.." }
 kernel-api = { path = "../../../../../api" }

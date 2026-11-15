@@ -1,4 +1,5 @@
 //! Textual navigation index only; production declarations own the lock policy.
+use kernel_verification::*;
 use regex::Regex;
 use serde_json::{Value, json};
 use std::{
@@ -6,7 +7,6 @@ use std::{
     fs,
     path::Path,
 };
-use vanllia_verification::*;
 fn source_files(path: &Path, files: &mut Vec<std::path::PathBuf>) -> Result<()> {
     for entry in fs::read_dir(path)? {
         let path = entry?.path();
