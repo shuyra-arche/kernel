@@ -1,3 +1,2 @@
-/target/
-/guest/*/target/
-/platform/*/target/
+/runner/target/
+/target/**/target/

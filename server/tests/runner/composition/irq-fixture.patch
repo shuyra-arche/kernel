@@ -1,0 +1,47 @@
+--- a/platform/riscv/src/boot/mod.rs
++++ b/platform/riscv/src/boot/mod.rs
+@@ -53,9 +53,16 @@
+             operation: boot::ResourceOperation::Devices,
+             source,
+         })?;
+-    unsafe {
+-        boot::configure(devices.description())?;
+-    }
++    let mut description = devices.description();
++    let mut authorities = alloc::vec::Vec::from(description.resources.authorities);
++    let at = authorities.iter().position(|r| r.base == 0x10000000).expect("UART authority");
++    let uart = authorities.remove(at);
++    let mut external = alloc::vec::Vec::from(description.resources.external);
++    external.push(uart);
++    description.resources.authorities = &authorities;
++    description.resources.external = &external;
++    unsafe { boot::configure(description)?; }
++
+     for (controller, source, region) in devices.driver_interrupts() {
+         unsafe {
+             boot::grant_interrupt(controller, source, region)?;
+--- a/tests/memory/platform/main.rs
++++ b/tests/memory/platform/main.rs
+@@ -18,6 +18,9 @@
+                 .any(|v| matches!(v, "riscv-virtio,qemu" | "riscv-virtio"))
+         );
+         let external = device::prepare(&tree);
++        // Test image owns this UART for its initial Team's entire lifetime.
++        unsafe { boot::grant_mmio(kernel_api::boot::platform::Region::new(0x10000000, 4096)) }.unwrap();
++        unsafe { boot::map_entry_mmio(kernel_api::boot::platform::Region::new(0x10000000, 4096), kernel_api::address::VirtAddr::new(0x10000000)) }.unwrap();
+         let route = kernel::entry::boot::memory::topology::Route {
+             controller: external.controller as u64,
+             requester: external.requester,
+@@ -46,10 +49,10 @@
+                 ram,
+                 routes: alloc::vec![route],
+             }])
+-            .map(|t| t.with_local_instructions())
++            
+         }
+         .unwrap();
+-        boot::qualify_memory(topology).unwrap();
++        let _unqualified_topology = topology;
+         boot::start()
+     });
+     match result {

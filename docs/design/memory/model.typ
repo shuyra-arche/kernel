@@ -356,5 +356,5 @@ permissions and supported geometry.
 #text(size: 9pt)[
   Contracts: #source("https://github.com/shuyra-arche/kernel/blob/main/api/README.md#cell-contracts", [Cell calls])
   · #source("https://github.com/shuyra-arche/kernel/blob/main/api/README.md#global-memory-observations", [Memory observations])
-  · #source("https://github.com/shuyra-arche/kernel/blob/main/server/tests/guest/cell/external/exit.rs", [External-exit regression])
+  · #source("https://github.com/shuyra-arche/kernel/blob/8cec35ff16c0de0aac6a94a9cb0d03ffab4452a3/server/tests/guest/cell/external/exit.rs", [Historical ABI 10 exit regression])
 ]

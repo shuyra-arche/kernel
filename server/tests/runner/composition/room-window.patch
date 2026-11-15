@@ -1,0 +1,26 @@
+--- a/server/src/entry/boot/mod.rs
++++ b/server/src/entry/boot/mod.rs
+@@ -88,7 +88,7 @@
+ 
+ extern "C" fn run_on_stack() -> ! {
+     #[cfg(feature = "latency")]
+-    crate::metal::measure::running();
++    let _fixture_controls_window = ();
+     restore(scheduler::run())
+ }
+ 
+--- a/server/src/entry/call/debug.rs
++++ b/server/src/entry/call/debug.rs
+@@ -22,6 +22,12 @@
+     {
+         ret_err(frame, DebugFail::Denied);
+         return;
++    }
++    #[cfg(feature = "latency")]
++    match &text[..n] {
++        b"ROOM:steady\n" => crate::metal::measure::running(),
++        b"ROOM:teardown\n" => crate::metal::measure::stopping(),
++        _ => {}
+     }
+     match crate::metal::console::write(&text[..n]) {
+         Some(written) => frame.gpr.set_x(Gprs::A0, written),

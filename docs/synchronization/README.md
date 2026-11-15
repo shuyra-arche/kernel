@@ -24,13 +24,13 @@ Page ownership, publication and retirement authorities are unchanged.
   entries, heirs, admission and charge classes.
 - [Acquisition catalogue](acquisitions.json): current source function and line
   for each textual lock/try/pair/reentry/with entry. Regenerate both current
-  catalogues with `python3 server/tests/sync/inventory.py`. Overloaded methods
+  catalogues with `cargo +nightly run --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- inventory --kernel .`. Overloaded methods
   require their source context; this index does not prove transitive safety.
 - [Production order](../../server/src/metal/riscv/sync/order/mod.rs): the **only
   rule source**. The explicit `relations!` closure generates both sealed
   `Before<Next>` implementations and the Debug matrix. No ordinal comparison,
   unknown class, blanket relation, ordinary self edge or default pass exists.
-- [Tests](../../server/tests/sync/mod.rs): real production atomics, policies,
+- [Tests](../../server/tests/metal/riscv/sync/mod.rs): real production atomics, policies,
   typed guards, FIFO turns, predicates and bounded metadata over a host Hart/
   IRQ shell; separate compile tests exercise both debug-assertion settings.
   Namespace tests use host mutexes and do not prove RISC-V IRQ behavior.

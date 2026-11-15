@@ -1,0 +1,6 @@
+{
+  "server/Cargo.toml": "fe7c601549e6324e71160a7a225948de105b72aca56023e84e70e14fb8944d40",
+  "server/src/basis/flat/mod.rs": "6b9c924fa11b54eb591594a4aaa4a04c3f317b30bae9cc1799e3d7adec4fa45b",
+  "server/src/entry/boot/mod.rs": "d6e5d8f9e27972e8ae019971635072bf15c820f200939b67a1aacac4faf6c778",
+  "server/src/metal/riscv/sync/spin/guard.rs": "819ef7e6216a1c68d1a80df34a1209061d40c5fe2406f409df7e6412accc3941"
+}

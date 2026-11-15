@@ -156,7 +156,7 @@ queued. Follow the holding, the mapping, and the work left for the Kernel.
 
 #text(size: 9pt)[
   The
-  #link("https://github.com/shuyra-arche/kernel/blob/main/server/tests/guest/cell/external/exit.rs")[#underline[QEMU exit regression]]
+  #link("https://github.com/shuyra-arche/kernel/blob/8cec35ff16c0de0aac6a94a9cb0d03ffab4452a3/server/tests/guest/cell/external/exit.rs")[#underline[Historical ABI 10 exit regression]]
   checks late-access denial and same-Nest handover. The
   #link("https://github.com/shuyra-arche/kernel/blob/main/api/README.md#cell-contracts")[#underline[Cell contract]]
   specifies the operations and their failure results.

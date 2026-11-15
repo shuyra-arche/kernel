@@ -1,0 +1,63 @@
+--- a/server/Cargo.toml
++++ b/server/Cargo.toml
+@@ -8,7 +8,7 @@
+ autotests = false
+ 
+ [lib]
+-path = "src/lib.rs"
++path = "tests/target/basis/flat/provider.rs"
+ test = false
+ bench = false
+ doctest = false
+@@ -30,4 +30,6 @@
+ kernel-api = { workspace = true }
+ 
+ [features]
++flat-probe-contracts = []
++flat-probe-timing = []
+ latency = []
+--- a/server/src/basis/flat/mod.rs
++++ b/server/src/basis/flat/mod.rs
+@@ -440,3 +440,6 @@
+         self.pages
+     }
+ }
++
++#[path = "../../../tests/target/basis/flat/cases/mod.rs"]
++pub(crate) mod probe;
+--- a/server/src/entry/boot/mod.rs
++++ b/server/src/entry/boot/mod.rs
+@@ -66,6 +66,7 @@
+         crate::entry::observe::start()?;
+     }
+ 
++    crate::basis::flat::probe::start()?;
+     crate::basis::unit::lifecycle::tally::rooted();
+ 
+     boot_harts()?;
+--- a/server/src/metal/riscv/sync/spin/guard.rs
++++ b/server/src/metal/riscv/sync/spin/guard.rs
+@@ -9,6 +9,7 @@
+     pub(super) lock: &'a SpinLock<T>,
+     _not_send: PhantomData<*const ()>,
+     _trap: TrapGuard,
++    probe_start: u64,
+     #[cfg(feature = "latency")]
+     start: u64,
+ }
+@@ -19,6 +20,7 @@
+             lock,
+             _not_send: PhantomData,
+             _trap: trap,
++            probe_start: crate::basis::flat::probe::lock_enter(lock as *const _ as *const () as usize),
+             #[cfg(feature = "latency")]
+             start: crate::metal::measure::stamp(),
+         }
+@@ -41,6 +43,7 @@
+ 
+ impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
+     fn drop(&mut self) {
++        crate::basis::flat::probe::lock_leave(self.probe_start);
+         crate::metal::sync::deadlock_released!(self.lock);
+         #[cfg(feature = "latency")]
+         crate::metal::measure::elapsed(crate::metal::measure::Metric::SpinHold, self.start);

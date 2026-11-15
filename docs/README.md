@@ -11,7 +11,7 @@ in the implementation.
 | Where does the source implement each concern? | [Source map](source-map.md) |
 | What API or ABI exists today? | [Kernel API](../api/README.md) and [API source](../api/src/) |
 | What does the selected Flat/Nest memory ABI provide? | [Current memory contract](../api/memory.md) |
-| How is per-page activity authorized? | [CPU activity](memory-activity.md) and [execution evidence](../server/tests/guest/activity/README.md) |
+| How is per-page activity authorized? | [CPU activity](memory-activity.md) and [execution evidence](../server/tests/target/basis/nest/memo/activity/README.md) |
 | How are calls performed? | [Client](../client/README.md) |
 | What evidence exists for the proposed typed lock order? | [Synchronization ownership and acquisition audit](synchronization/README.md) |
 | How do I reproduce verification? | [Kernel verification](../server/tests/README.md) |

@@ -137,7 +137,7 @@ poll one covering synchronization attempt; it cannot spin waiting for a Hart.
 Cross-source traversal and allocator calls are outside global COMMIT. Full
 subscription capacity returns Busy without evicting a reader. No turn walks all
 page tables or aliases. The executable budget check and timing histograms are in the
-[activity guest](../server/tests/guest/activity/README.md). A count bound does
+[activity guest](../server/tests/target/basis/nest/memo/activity/README.md). A count bound does
 not imply a hard time bound for locks, allocator work or emulator scheduling.
 
 Output Share grants are read-only and scoped to the actual recipient. Sign
@@ -235,7 +235,7 @@ first captured clear, then checks those operations without restarting it.
 
 ## Verification boundary
 
-The [test guide](../server/tests/guest/activity/README.md) records reproducible
+The [test guide](../server/tests/target/basis/nest/memo/activity/README.md) records reproducible
 host, RV64 and QEMU checks, test-only instrumentation and fault injection.
 Evidence records exact source/fixture/toolchain, CPU configuration, firmware,
 composition diff, lockfile and ELF hashes, per-turn counts, timing histograms

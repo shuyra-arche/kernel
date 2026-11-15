@@ -60,7 +60,7 @@ Host tests exercise the production reservation, slot/transfer/residency checks
 and Page destruction with paused concurrent preparation, allocation failure,
 prefix retry, stale-slot fault injection, owner closure and geometry rejection.
 They do not execute interrupt masking or prove target timing. The separate
-[RV64 probe](../server/tests/guest/flat/README.md) runs real implicit allocation
+[RV64 probe](../server/tests/target/basis/flat/README.md) runs real implicit allocation
 and four competing Kernel Tasks on 1/4 Harts. It exercises actual allocator
 exhaustion, prefix retry, Busy during reservation/transfer, unpublished Page
 return, Owner epoch closure and Task exit. Owner closure is not a complete user
