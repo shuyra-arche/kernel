@@ -61,7 +61,9 @@ impl Resident {
         crate::basis::room::deadline::retry();
     }
     pub(crate) fn poll(&self) {
-        // An unexpectedly cancelled service may never execute its loop epilogue.
+        // An unexpectedly terminated service may never execute its loop epilogue.
+        // Doomed is not terminal: it may still enter the trusted wait handler.
+        // Unregister only after Reaped proves no Task continuation can race it.
         // Resolve only its registered identity, with all Hart-tracked weak borrows
         // consumed under COMMIT; fallback must not depend on that Task returning.
         let dead = {
@@ -72,7 +74,7 @@ impl Resident {
                     kernel_api::model::identity::TaskId::new(id),
                 )
                 .and_then(|weak| weak.upgrade())
-                .is_none_or(|task| task.dead())
+                .is_none_or(|task| task.reaped())
         };
         if dead {
             self.close();
