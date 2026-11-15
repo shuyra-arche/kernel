@@ -31,7 +31,7 @@ The Sign operation module owns its success reply and register encoding.
 
 ## Operations and generation
 
-`tools/abi-macros` is a separate proc-macro package. Its `envcall` macro generates
+`api/abi-macros` is a separate proc-macro package. Its `envcall` macro generates
 only Kernel operation declarations, register codecs, dispatch enums and failure
 codes. It is not a service protocol generator. Generated paths refer to
 `crate::abi`; API uses this tool at compile time.
@@ -120,7 +120,7 @@ The source of truth for register layouts and failure codes is the
 [ABI declaration](src/abi/call/) or [native memory request](src/abi/memory/).
 The [operation](src/abi/operation.rs), [register](src/abi/register.rs) and
 [reply](src/abi/reply.rs) modules define checked encoding and decoding.
-`tools/abi-macros` generates typed declarations, not runtime services.
+`api/abi-macros` generates typed declarations, not runtime services.
 The [Client guide](../client/README.md) shows how to invoke them.
 
 ## Authorization and lifecycle

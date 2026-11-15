@@ -95,6 +95,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
     sign::signal(WakeKey::Task { id: task.ident.id });
     task.ident.team.node.notify();
     HUSKS.lock().enqueue(task);
+    super::WORK.notify();
 }
 
 pub fn quit() -> usize {
@@ -118,6 +119,7 @@ pub fn quit() -> usize {
         // No diagnostic copy, extension free, hooks, ledger work or fencing on
         // the reserved Hart. Doomed already closes this Task's live authority.
         PENDING.lock().enqueue(exited);
+        super::WORK.notify();
         crate::basis::room::scheduler::contract::notify();
         crate::basis::room::scheduler::idle::nudge(crate::metal::hart::HartId::new(0));
         return crate::basis::room::scheduler::run();
@@ -180,7 +182,19 @@ fn note_out<'a>(
     }
 }
 
-pub(crate) fn bury() {
+pub(crate) enum Progress {
+    Idle,
+    Ready,
+    Blocked,
+}
+pub(super) fn pending() -> bool {
+    let terminal = !PENDING.lock().is_empty();
+    let husks = !HUSKS.lock().chain.is_empty();
+    terminal || husks || !super::doom::settled()
+}
+pub(crate) fn advance() -> Progress {
+    super::progressed();
+    let mut blocked = false;
     for _ in 0..4 {
         let Some(task) = PENDING.lock().dequeue() else {
             break;
@@ -203,9 +217,17 @@ pub(crate) fn bury() {
             };
             z
         };
-        if z.retire().is_err() {
-            HUSKS.lock().enqueue(z);
-            break;
+        match z.advance_retirement() {
+            Ok(true) => {}
+            Ok(false) => {
+                HUSKS.lock().enqueue(z);
+                continue;
+            }
+            Err(_) => {
+                HUSKS.lock().enqueue(z);
+                blocked = true;
+                break;
+            }
         }
         if let Some(member) = z.ident.team.node.member(z.ident.id) {
             member.reclaim();
@@ -215,11 +237,13 @@ pub(crate) fn bury() {
         drop(z);
         tally::exit();
     }
-    if !HUSKS.lock().chain.is_empty() {
-        // Keep the continuation live even with no competing ready Task to
-        // shorten the ordinary scheduling ceiling. Busy retirement retains all
-        // hardware and Cell ownership until a later attempt actually settles.
-        crate::basis::room::deadline::retry();
+    let pending = pending();
+    if !pending {
+        Progress::Idle
+    } else if blocked {
+        Progress::Blocked
+    } else {
+        Progress::Ready
     }
 }
 

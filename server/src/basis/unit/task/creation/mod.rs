@@ -60,7 +60,7 @@ pub(crate) fn prepare(
 
     let root = team.nest.root();
     let supervisor = team.nest.kind().is_supervisor();
-    let frame = unsafe { &mut *(frame_pa.as_usize() as *mut TrapContext) };
+    let frame = unsafe { &mut *(crate::metal::physical::write::<TrapContext>(frame_pa)) };
     unsafe {
         let ktc = kernel()
             .expect("kernel team not initialized")

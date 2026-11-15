@@ -16,8 +16,10 @@ pub struct Ticket(pub(super) u64);
 
 impl Ticket {
     pub(crate) const LOCAL: Self = Self(0);
+    pub(crate) const RESIDENT: Self = Self(u64::MAX);
     pub(super) fn next_id() -> Option<Ticket> {
-        static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, usize::MAX);
+        static NEXT: crate::basis::name::Serial =
+            crate::basis::name::Serial::new(1, usize::MAX - 1);
         NEXT.allocate().map(|id| Ticket(id as u64))
     }
 
@@ -45,7 +47,7 @@ pub(super) fn hold(ticket: Ticket, key: WakeKey, task: &Arc<Task>) -> Result<(),
 }
 
 pub(in super::super) fn void(ticket: Ticket) -> Option<(WakeKey, Arc<Task>)> {
-    if ticket == Ticket::LOCAL {
+    if ticket == Ticket::LOCAL || ticket == Ticket::RESIDENT {
         return None;
     }
     deadline::remove(ticket.raw());

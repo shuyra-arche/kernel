@@ -4,6 +4,9 @@ use serde_json::{Value, json};
 #[derive(Clone, Debug)]
 pub enum Kind {
     Smp,
+    Lifecycle {
+        cancel: bool,
+    },
     Activity {
         unsupported: bool,
         stopped: bool,
@@ -29,6 +32,19 @@ pub fn check(log: &str, kind: &Kind, harts: u8) -> Result<Value> {
     let mut extra = true;
     let mut evidence = json!({});
     match kind {
+        Kind::Lifecycle { cancel } => {
+            let mut result = check(log, &Kind::Smp, harts)?;
+            let turns = captures(log, r"PASS lifecycle turns=(\d+)")?;
+            let valid = turns.len() == 1
+                && turns[0].parse::<usize>()? >= if *cancel { 8 } else { 2 }
+                && log.contains(&format!(
+                    "cancel={} retained-source=0",
+                    usize::from(*cancel)
+                ));
+            result["passed"] = json!(result["passed"] == true && valid);
+            result["lifecycle"] = json!({ "turns": turns, "cancel": cancel, "passed": valid });
+            return Ok(result);
+        }
         Kind::Smp => {
             markers.extend(
                 [

@@ -24,6 +24,19 @@ fn dag_checks_every_ancestor_and_has_no_numeric_or_self_fallback() {
     assert!(verdict::strict([(1, Class::Commit), (2, Class::Nest)], 3, Class::Flat).is_ok());
     assert!(verdict::strict([(1, Class::Flat), (2, Class::Commit)], 3, Class::Nest).is_err());
     assert!(verdict::strict([(1, Class::Frame)], 2, Class::Scheduler).is_err());
+    // Console address translation must remain outside ledger publication.
+    assert!(
+        verdict::strict(
+            [
+                (1, Class::LedgerSerial),
+                (2, Class::Commit),
+                (3, Class::LedgerEntries)
+            ],
+            4,
+            Class::Nest
+        )
+        .is_err()
+    );
 }
 #[test]
 fn peers_require_actual_predecessor_distinct_instance_and_at_most_two() {

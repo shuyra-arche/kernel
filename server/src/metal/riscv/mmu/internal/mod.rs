@@ -52,6 +52,6 @@ pub(crate) unsafe fn activate(root: crate::metal::mmu::internal::Root) {
 }
 
 pub(crate) use domain::{Deferred, Domain};
-pub(crate) use mode::{Geo as Geometry, lower, upper};
+pub(crate) use mode::{Geo as Geometry, upper};
 pub(crate) use table::TableNode as Table;
 pub(crate) type Root = crate::metal::generic::mmu::internal::Root<identity::Asid>;

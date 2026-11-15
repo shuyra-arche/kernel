@@ -22,16 +22,19 @@ pub enum HartError {
     Identity,
     Boot,
 }
+/// Shared admission and Kernel static-slot limit.
+pub const MAX_HARTS: usize = 256;
+
 #[derive(Debug)]
 pub struct Harts {
-    cpus: [Cpu; 256],
+    cpus: [Cpu; MAX_HARTS],
     count: usize,
     hertz: usize,
     paging: Paging,
 }
 impl Harts {
     pub fn new(cpus: &[Cpu], boot: FirmwareId, hertz: usize) -> Result<Self, HartError> {
-        if cpus.is_empty() || cpus.len() > 256 || hertz == 0 {
+        if cpus.is_empty() || cpus.len() > MAX_HARTS || hertz == 0 {
             return Err(HartError::Capacity);
         }
         if cpus[0].id != boot {
@@ -43,7 +46,7 @@ impl Harts {
             }
         }
         let mut result = Self {
-            cpus: [cpus[0]; 256],
+            cpus: [cpus[0]; MAX_HARTS],
             count: cpus.len(),
             hertz,
             paging: Paging::Sv57,

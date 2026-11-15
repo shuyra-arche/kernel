@@ -11,7 +11,7 @@ doctest = false
 bench = false
 
 [dependencies]
-kernel-api-macros = { path = "../tools/abi-macros" }
+kernel-api-macros = { path = "abi-macros" }
 bitflags.workspace = true
 erra.workspace = true
 

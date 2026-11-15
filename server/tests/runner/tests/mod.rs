@@ -79,6 +79,18 @@ fn smp_requires_each_actual_writer_to_migrate() {
         verify::check(log, &verify::Kind::Smp, 1).unwrap()["passed"],
         true
     );
+    for cancel in [false, true] {
+        let kind = verify::Kind::Lifecycle { cancel };
+        assert_eq!(verify::check(log, &kind, 1).unwrap()["passed"], false);
+        let valid = format!(
+            "{log}PASS lifecycle turns=8 cancel={} retained-source=0\n",
+            usize::from(cancel)
+        );
+        assert_eq!(verify::check(&valid, &kind, 1).unwrap()["passed"], true);
+        let stalled = valid.replace("turns=8", "turns=1");
+        assert_eq!(verify::check(&stalled, &kind, 1).unwrap()["passed"], false);
+    }
+
     assert_eq!(
         verify::check(log, &verify::Kind::Smp, 4).unwrap()["passed"],
         false

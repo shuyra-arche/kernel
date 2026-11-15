@@ -12,7 +12,7 @@ and ABI compatibility review. Merge through a reviewed PR, using squash.
 
 API is one package. Client and Server consume it directly; Server does not depend
 on Client. Keep shared semantic types in `model`, call representation in `abi`,
-and startup contracts in `boot`. Keep compile-time generation under `tools` and
+and startup contracts in `boot`. Keep ABI compile-time generation under `api/abi-macros` and
 language runtime/std support outside Kernel. Update the root lockfile whenever
 the package graph changes. Preserve source attribution and third-party notices.
 

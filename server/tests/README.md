@@ -153,3 +153,14 @@ Symbolization selects Trap/frame evidence and passes literal PCs to
 `llvm-addr2line`, preserving compressed-instruction return addresses. Stack-scan
 hits remain candidate addresses; frame-chain evidence is labelled separately.
 The lock inventory is textual navigation, not execution or lock-safety proof.
+
+## Resident lifecycle progress
+
+`verify lifecycle` composes the real lifecycle Task with the existing SMP memory,
+exit and translation workload on 1/4 Harts. Its probe requires the Task to resume
+its loop and final Task counts to settle with the notification unregistered.
+`verify lifecycle --cancel` intentionally exits that Task without its unregister
+epilogue after eight turns; the source must detect death and scheduler fallback
+must finish retirement. Both use reviewed source/preimage patches; the probe lives
+under `target/basis/unit/lifecycle`. Debug enrollment enforces NoAllocation before
+handoff. These checks do not constitute a system-wide low-memory stress test.

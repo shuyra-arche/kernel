@@ -495,6 +495,10 @@ relations! {
     BootMmio => [BlockPool,BlockPump,Tally,Frame],
     BootRegions => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Commit,Flat,SourceAuthorizationRef,SourceMaps,SourceAuthorities,ActivityRegistry,ActivityDelivery,FaultPolicy,SpanExports,Reservation,Organizations,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Address,Nest,PendState,PendParent,LedgerAdmission,LedgerCharge,LedgerEntries,LedgerHeirs,BlockPages,BlockEpoch,BlockUses,BlockStages,HeldSources,SourceFlights,SourceGate,SourceBindings,SourceBlocks,SourceOrigins,SourcePhase,ProvenanceGrant,ProvenanceUses,Deadline,InterruptController,InterruptProgress,InterruptSources,InterruptSource,Scheduler,SchedulerAdmission,SignQueue,SignState,SignRouting,SignDelivery,WaitHolders,WaitSites,ControlTable,TerminationQueue,Husks,TaskState,TaskReceipts,TaskResult,TaskJournal,TaskHeir,TaskSchedule,TaskExtensions,Registry,TeamState,TeamTasks,TeamChildren,TeamTermination,TeamHeld,TeamExit,CloneQueue,BlockPool,BlockPump,Tally,Frame,Controllers],
     BootNests => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Reservation,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
+    // Queue growth and payload release may allocate/free while CloneQueue is
+    // held; atomic receive also attaches its prepared registration charge.
+    // These leaves never acquire CloneQueue or LedgerSerial.
+    CloneQueue => [LedgerCharge,LedgerAdmission,BlockPool,BlockPump,Tally,Frame],
     BlockPool => [Tally,Frame],
     Controllers => [PageMembership,RetentionStatistics,BlockPool,BlockPump,Tally,Frame],
     Asid => [Frame],

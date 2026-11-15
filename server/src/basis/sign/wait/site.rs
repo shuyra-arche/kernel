@@ -15,6 +15,7 @@ use super::key::WakeKey;
 
 pub(in super::super) struct Site {
     pend: bool,
+    reserved: bool,
     chain: Chain,
     life: Weak<Anchor>,
     pub(super) fwd: Fwd,
@@ -24,6 +25,7 @@ impl Site {
     fn new(life: &Weak<Anchor>) -> Self {
         Self {
             pend: false,
+            reserved: false,
             chain: Chain::new(),
             life: life.clone(),
             fwd: Fwd::empty(),
@@ -44,6 +46,10 @@ impl Site {
             sites.insert(key, Site::new(life));
         }
         sites.get_mut(&key).ok_or(())
+    }
+
+    pub(super) fn reserve(&mut self) {
+        self.reserved = true;
     }
 
     pub(super) fn admit(&self) -> Result<(), ()> {
@@ -150,7 +156,7 @@ pub(super) fn take_beacon(key: WakeKey) -> bool {
 pub(in super::super) fn prune(sites: &mut HashMap<WakeKey, Site>, key: WakeKey) {
     if let Some(site) = sites.get(&key)
         && site.chain.is_empty()
-        && (Anchor::dead(&site.life) || (!site.pend && site.fwd.is_empty()))
+        && (Anchor::dead(&site.life) || (!site.reserved && !site.pend && site.fwd.is_empty()))
     {
         sites.remove(&key);
     }
