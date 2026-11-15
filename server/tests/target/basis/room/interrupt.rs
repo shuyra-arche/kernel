@@ -303,7 +303,8 @@ fn startup_contract() {
     let task = create(start);
     unit::resume(UnitTarget::Task(task)).unwrap();
     wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).reclaimed);
-    assert_eq!(support::task_info(UnitQuery::Target(UnitTarget::Task(task))).exit, Some((ExitCause::Reap,77)));
+    assert_eq!(support::task_info(UnitQuery::Target(UnitTarget::Task(task))).exit, Some((ExitCause::Reap,0)));
+    assert_eq!(support::task_info(UnitQuery::Target(UnitTarget::Task(task))).result, Some(77));
     // Task reclamation must leave the Runtime's stack and arguments accessible.
     assert_eq!(unsafe { (start.arguments.get() as *const usize).read_volatile() }, 0x1234);
     unit::delete(UnitTarget::Task(task)).unwrap();
