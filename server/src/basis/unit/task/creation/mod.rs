@@ -110,6 +110,10 @@ pub(crate) fn user(
     controller: kernel_api::model::identity::TaskId,
     start: kernel_api::model::unit::TaskStart,
 ) -> Result<PreparedTask, NestError> {
+    if team.nest.kind().is_supervisor() {
+        return Err(NestError::WidenDenied);
+    }
+    team.nest.validate_start(start)?;
     let memory = TaskMemory {
         nest: team.nest.clone(),
         frame: None,

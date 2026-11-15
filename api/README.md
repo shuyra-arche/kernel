@@ -78,7 +78,7 @@ Cells. ABI coordinates remain 4 KiB units, so a level-1 Cell spans 512 coordinat
 
 ## ABI version
 
-This revision implements ABI 12 unconditionally. Calls, native Flat/Nest
+This revision implements ABI 13 unconditionally. Calls, native Flat/Nest
 memory descriptors, Boot Ledger and Capsule ABI use the single version in
 `abi::VERSION`. Capsule format remains 2. Cargo features do not select an ABI.
 
@@ -180,3 +180,7 @@ Ledger, not supervisor execution privilege. All external images and Tasks
 execute in User mode; only Kernel-owned resident work executes in Supervisor
 mode. Rebuild System/Toolchain boot images as User-mode consumers before
 selecting ABI 12. There is no privileged Capsule construction interface.
+
+Ordinary Task creation uses [explicit startup registers](task.md) in ABI 13.
+The ABI 12 transport migration above is retained in ABI 13; tag-1 stack
+allocation descriptors and ABI 12 images are now rejected.
