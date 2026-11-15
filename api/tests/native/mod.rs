@@ -15,11 +15,11 @@ mod unit;
 
 #[test]
 fn native_calls_reject_v10_and_removed_adapters() {
-    assert_eq!(abi::VERSION, 11);
+    assert_eq!(abi::VERSION, 12);
     assert_eq!(abi::memory::VERSION, abi::VERSION as u64);
     let call = SleepUntil { at: 123 };
     assert!(EnvCall::from_wire(SleepUntil::SLOT, &call.pack()).is_ok());
-    for version in [0, 10, 12, u16::MAX] {
+    for version in [0, 10, 11, 13, u16::MAX] {
         let slot = (SleepUntil::SLOT & ((1usize << 48) - 1)) | ((version as usize) << 48);
         assert!(EnvCall::from_wire(slot, &call.pack()).is_err());
     }
@@ -68,11 +68,11 @@ fn native_permission_decoder_knows_only_selected_rights() {
 
 #[test]
 fn image_and_ledger_must_both_match_native_version() {
-    assert_eq!(ledger::VERSION, 11);
+    assert_eq!(ledger::VERSION, 12);
     let mut bytes = [0u8; 8];
     ledger::store_entries(&mut bytes, &[]).unwrap();
     assert!(Entries::new(&bytes).is_some());
-    for version in [0u32, 10, 12, u32::MAX] {
+    for version in [0u32, 10, 11, 13, u32::MAX] {
         bytes[..4].copy_from_slice(&version.to_le_bytes());
         assert!(Entries::new(&bytes).is_none());
     }
@@ -80,7 +80,7 @@ fn image_and_ledger_must_both_match_native_version() {
     capsule[..8].copy_from_slice(b"SQBOOT01");
     capsule[8..10].copy_from_slice(&2u16.to_le_bytes());
     capsule[10] = 12;
-    capsule[11] = 11;
+    capsule[11] = 12;
     capsule[12..16].copy_from_slice(&1u32.to_le_bytes());
     for (at, v) in [
         (16, 0x1000u64),
@@ -94,7 +94,7 @@ fn image_and_ledger_must_both_match_native_version() {
         capsule[at..at + 8].copy_from_slice(&v.to_le_bytes());
     }
     assert!(Capsule::parse(&capsule).is_some());
-    for version in [0, 10, 12, 255] {
+    for version in [0, 10, 11, 13, 255] {
         capsule[11] = version;
         assert!(Capsule::parse(&capsule).is_none());
     }

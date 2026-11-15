@@ -97,6 +97,12 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     archive(&args.fixture, &pin, &fixture)?;
     let patches = root.join("patches");
     fs::create_dir(&patches)?;
+    if !matches!(kind, Kind::Flat { .. }) {
+        compose::apply("user-fixture", &fixture, &patches)?;
+    }
+    if matches!(kind, Kind::Room { .. }) {
+        compose::apply("transport-fixture", &fixture, &patches)?;
+    }
     let manifest;
     let mut command = Command::new("cargo");
     command.arg("build");
@@ -202,9 +208,6 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
                 compose::apply("room-window", &provider, &patches)?;
                 command.args(["--features", "kernel/latency"]);
             }
-            if mode == "realtime" {
-                compose::apply("realtime-provider", &provider, &patches)?;
-            }
             let guest = match mode.as_str() {
                 "irq" => "interrupt.rs",
                 "realtime" => "realtime.rs",
@@ -285,7 +288,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         let path = root.join("initrd.bin");
         fs::write(
             &path,
-            capsule::initrd(&fs::read(root.join("guest.elf"))?, 11)?,
+            capsule::initrd(&fs::read(root.join("guest.elf"))?, 12)?,
         )?;
         Some(path)
     };

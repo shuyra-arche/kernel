@@ -10,6 +10,12 @@ use super::stack::{TRAP_STACK_CANARY, trap_stack_base, trap_stack_guard_hart, tr
 
 pub(crate) fn capture() -> TrapEvent {
     let cause = scause::read();
+    if super::call::admitted(
+        cause.bits(),
+        riscv::register::sstatus::read().spp() == riscv::register::sstatus::SPP::Supervisor,
+    ) {
+        return TrapEvent::Call;
+    }
     let trap: Trap<Interrupt, Exception> = cause
         .cause()
         .try_into()
@@ -18,9 +24,6 @@ pub(crate) fn capture() -> TrapEvent {
         Trap::Interrupt(Interrupt::SupervisorTimer) => TrapEvent::Timer,
         Trap::Interrupt(Interrupt::SupervisorSoft) => TrapEvent::Ipi,
         Trap::Interrupt(Interrupt::SupervisorExternal) => TrapEvent::External,
-        Trap::Exception(
-            Exception::Breakpoint | Exception::UserEnvCall | Exception::SupervisorEnvCall,
-        ) => TrapEvent::Call,
         Trap::Exception(exception) => {
             let detail = Fault {
                 cause: cause.bits(),

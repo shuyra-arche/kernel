@@ -5,7 +5,7 @@ use crate::basis::unit::{task::Task, team::kernel};
 use crate::entry::boot::BootError;
 use crate::metal::{clock, hart, layout::MAX_HART_SLOTS};
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use kernel_api::{abi::operation::RegisterCall, address::VirtAddr};
+use kernel_api::{address::VirtAddr};
 
 #[cfg(feature = "flat-probe-contracts")]
 mod contracts;
@@ -46,19 +46,10 @@ fn note(args: core::fmt::Arguments<'_>) {
     out.finish();
 }
 fn yield_now() {
-    use kernel_api::abi::call::room::operations::Yield;
-    unsafe {
-        core::arch::asm!("ebreak", in("a7") Yield::SLOT,
-            lateout("a0") _, lateout("a1") _, lateout("a2") _, options(nostack));
-    }
+    crate::metal::switcher::internal::sleep(0);
 }
 fn exit() -> ! {
-    use kernel_api::abi::call::unit::operations::Exit;
-    unsafe {
-        core::arch::asm!("ebreak", in("a0") 0usize, in("a1") 0usize,
-            in("a2") 0usize, in("a3") 0usize, in("a4") 0usize,
-            in("a7") Exit::SLOT, options(noreturn));
-    }
+    crate::metal::switcher::internal::exit()
 }
 
 // The only interval with scheduling deliberately suppressed is a test barrier

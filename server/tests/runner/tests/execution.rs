@@ -73,7 +73,7 @@ fn large_output_cannot_deadlock_pipes() {
 #[test]
 fn malformed_elf_never_panics_or_builds_an_image() {
     for size in 0..128 {
-        assert!(capsule::initrd(&vec![0; size], 11).is_err());
+        assert!(capsule::initrd(&vec![0; size], 12).is_err());
     }
     let mut elf = vec![0; 120];
     elf[..6].copy_from_slice(b"\x7fELF\x02\x01");
@@ -83,9 +83,9 @@ fn malformed_elf_never_panics_or_builds_an_image() {
     elf[56..58].copy_from_slice(&1u16.to_le_bytes());
     elf[64..68].copy_from_slice(&1u32.to_le_bytes());
     elf[104..112].copy_from_slice(&4096u64.to_le_bytes());
-    let image = capsule::initrd(&elf, 11).unwrap();
+    let image = capsule::initrd(&elf, 12).unwrap();
     assert_eq!(&image[4096..4104], b"SQBOOT01");
-    assert_eq!(image[4107], 11);
+    assert_eq!(image[4107], 12);
     let rejected = capsule::initrd(&elf, 10).unwrap();
     assert_eq!(rejected[4107], 10);
     elf[68..72].copy_from_slice(&6u32.to_le_bytes());
@@ -96,9 +96,9 @@ fn malformed_elf_never_panics_or_builds_an_image() {
     );
     assert_eq!(dense.len(), 12288);
     elf[96..104].copy_from_slice(&4097u64.to_le_bytes());
-    assert!(capsule::initrd(&elf, 11).is_err());
+    assert!(capsule::initrd(&elf, 12).is_err());
     elf[32..40].copy_from_slice(&u64::MAX.to_le_bytes());
-    assert!(capsule::initrd(&elf, 11).is_err());
+    assert!(capsule::initrd(&elf, 12).is_err());
 }
 #[test]
 fn failed_launch_preserves_a_failed_result() {

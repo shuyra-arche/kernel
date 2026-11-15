@@ -123,8 +123,8 @@ pub(crate) fn handle(
             frame as *mut TrapContext
         }
         TrapEvent::Call => {
-            if !from_task {
-                crate::entry::report::halt::trap(frame, 3, 0);
+            if !from_task || !frame.is_user() {
+                crate::entry::report::halt::trap(frame, 8, 0);
             }
             match envcall(frame, ident, root.take().expect("Task call boundary")) {
                 Some(next) => next,
@@ -324,14 +324,9 @@ fn kill_fault(ident: Option<Identity>) -> *mut TrapContext {
     quit(ident, crate::basis::unit::lifecycle::EXIT_FAULT)
 }
 
-/// 环境调用那一支：先结清这张表上待结算的失效、再按真实长度把 `sepc` 推过那条
-/// `ebreak`，最后才派发。
-///
-/// 三件“不知道”都不许往下走——失效结不掉、入口那个字节读不出来、推过之后
-/// 越出地址宽度。那是这份地址空间的真实失败，与缺页那条同一种归责：照实记录，
-/// 把这个任务**显式判死**（`Fault`），交回 `None` 让入口按原样把它换出去。
-/// 绝不猜一个长度推进 `sepc`（错位会让客人跳过它自己写回答案的那一存），
-/// 也绝不在没结清的表上做这一次调用；越界时连原 `sepc` 一并留在原地。
+/// Settle invalidation before committing a U-mode ECALL. Busy preserves the
+/// original PC and performs no dispatch. ECALL is always a 32-bit instruction;
+/// no instruction fetch or compressed-breakpoint decoding belongs here.
 fn envcall(
     frame: &mut TrapContext,
     ident: Option<Identity>,
@@ -374,19 +369,10 @@ fn envcall(
         );
         return None;
     }
-    let Some(length) = instr_len(space, frame.sepc) else {
-        log::error!(
-            "envcall: the instruction at sepc={:#x} is unreadable",
-            frame.sepc.as_usize()
-        );
-        doom(
-            Some(&ident),
-            kernel_api::model::unit::ExitCause::Fault,
-            crate::basis::unit::lifecycle::EXIT_FAULT,
-        );
-        return None;
-    };
-    let Some(next_pc) = frame.sepc.as_usize().checked_add(length) else {
+    let Some(next_pc) = crate::metal::switcher::call::next_pc(
+        frame.sepc.as_usize(),
+        crate::metal::mmu::internal::mode::upper().as_usize(),
+    ) else {
         log::error!(
             "envcall: sepc={:#x} plus an instruction length overflows",
             frame.sepc.as_usize()
@@ -399,27 +385,7 @@ fn envcall(
         return None;
     };
     frame.sepc = KVirt::wrap(next_pc);
-    // Private resident waits use the same validated/advanced continuation as
-    // ordinary calls. Drop all Hart-tracked identity and boundary borrows before
-    // handing ownership to the scheduler stack.
-    if frame.gpr.x(crate::metal::switcher::context::Gprs::A7) == usize::MAX
-        && crate::basis::unit::lifecycle::WORK.identifies(ident.id.get())
-    {
-        let id = ident.id.get();
-        drop(ident);
-        drop(root);
-        return crate::entry::work::park(frame, id);
-    }
     crate::entry::call::dispatch(frame, ident, root)
-}
-
-/// 环境调用那条指令的长度：`c.ebreak` 两字节、`ebreak` 四字节。
-///
-/// 首字节读不出来就是**不知道**，交 `None`，不凭空造一个长度。客人的正文只要
-/// 在跑就读得出来（这条 `ebreak` 刚执行过）；读不出来是这份地址空间的失败。
-fn instr_len(space: &Nest, sepc: KVirt) -> Option<usize> {
-    let byte = space.instruction_byte(sepc)?;
-    Some(if byte & 0b11 == 0b11 { 4 } else { 2 })
 }
 
 /// 把这个身份指到的任务显式判死并留下原因（换出由调用处负责）。

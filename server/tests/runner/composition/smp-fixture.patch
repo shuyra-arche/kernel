@@ -91,7 +91,7 @@
 +        loop {
 +            self.begin(action);
 +            let response = self.finish()?;
-+            if matches!(action, Action::Block { .. }) && matches!(&response, Response::Reply(r) if r.outcome() == Outcome::Rejected(Failure::Busy)) {
++            if matches!(action, Action::Block { .. } | Action::Allow { .. }) && matches!(&response, Response::Reply(r) if r.outcome() == Outcome::Rejected(Failure::Busy)) {
 +                assert!(room::clock() < deadline);
 +                room::yield_();
 +                continue;
@@ -135,7 +135,12 @@
  use core::fmt::Write;
  use kernel_api::{
      abi::memory::*,
-@@ -59,9 +59,8 @@
+@@ -55,13 +55,12 @@
+     mutate(Action::Allow { maintenance });
+     let _ = writeln!(
+         Console,
+-        "PASS native-memory abi=11 ledger=11 occupy=1 publish=1 retract=1 vacate=1"
++        "PASS native-memory abi=12 ledger=12 occupy=1 publish=1 retract=1 vacate=1"
      );
      fault::run();
      acceptance::run();
@@ -146,6 +151,15 @@
      kernel_client::call::unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
  }
  
+@@ -69,7 +68,7 @@
+     use kernel_api::abi::{self, error::DispatchFail};
+     for slot in [
+         (10usize << 48),
+-        (12usize << 48),
++        ((abi::VERSION as usize + 1) << 48),
+         abi::PREFIX | (2usize << 32),
+         abi::PREFIX | (10usize << 32) | 2,
+     ] {
 --- a/tests/memory/guest/support.rs
 +++ b/tests/memory/guest/support.rs
 @@ -43,16 +43,17 @@
@@ -172,6 +186,15 @@
      };
      let Outcome::Committed(v) = r.outcome() else {
          panic!("{action:?}: {:?}", r.outcome())
+@@ -109,7 +110,7 @@
+ pub fn boot(at: usize, count: usize) {
+     use kernel_api::boot::{args, ledger::Entries};
+     assert_eq!(count, args::LEN);
+-    assert_eq!(kernel_api::abi::VERSION, 11);
++    assert_eq!(kernel_api::abi::VERSION, 12);
+     let a = unsafe { core::slice::from_raw_parts(at as *const usize, count) };
+     IMAGE.store(a[args::VIEW], Ordering::Relaxed);
+     IMAGE_LEN.store(a[args::VIEW_LEN], Ordering::Relaxed);
 @@ -206,10 +207,7 @@
      });
  }

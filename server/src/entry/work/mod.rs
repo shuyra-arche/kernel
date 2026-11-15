@@ -5,31 +5,12 @@
 pub(crate) mod observe;
 
 pub(crate) mod lifecycle;
-use crate::metal::switcher::context::{Gprs, TrapContext};
-const PARK: usize = usize::MAX;
-pub(crate) fn park(frame: &mut TrapContext, id: usize) -> Option<*mut TrapContext> {
-    if frame.gpr.x(Gprs::A7) != PARK || !crate::basis::unit::lifecycle::WORK.identifies(id) {
-        return None;
-    }
-    Some(match crate::basis::unit::lifecycle::WORK.wait() {
-        crate::basis::room::Handoff::Resume(()) => frame as *mut _,
-        crate::basis::room::Handoff::Switch(pa) => pa as *mut _,
-    })
-}
 fn wait() {
-    unsafe {
-        core::arch::asm!("ebreak", in("a7") PARK, lateout("a0") _, lateout("a1") _, lateout("a2") _, options(nostack));
-    }
+    crate::metal::switcher::internal::wait();
 }
 fn yield_now() {
-    use kernel_api::abi::{call::room::operations::Yield, operation::RegisterCall};
-    unsafe {
-        core::arch::asm!("ebreak", in("a7") Yield::SLOT, lateout("a0") _, lateout("a1") _, lateout("a2") _, options(nostack));
-    }
+    crate::metal::switcher::internal::sleep(0);
 }
 fn exit() -> ! {
-    use kernel_api::abi::{call::unit::operations::Exit, operation::RegisterCall};
-    unsafe {
-        core::arch::asm!("ebreak", in("a0") 0usize, in("a1") 0usize, in("a2") 0usize, in("a3") 0usize, in("a4") 0usize, in("a7") Exit::SLOT, options(noreturn));
-    }
+    crate::metal::switcher::internal::exit()
 }

@@ -1,14 +1,14 @@
 //! Architecture transport for the typed Client effects.
 
 /// Execute the Kernel ABI: a7 holds the slot, a0..a5 hold arguments, and
-/// a0..a2 return the result. Both user and supervisor tasks use `ebreak`;
-/// supervisor `ecall` is reserved for SBI.
+/// a0..a2 return the result. Only U-mode tasks use this `ecall` transport.
+/// Supervisor `ecall` remains the firmware/SBI interface.
 ///
 /// The out-of-line register boundary preserves the existing production
 /// `#[inline(never)]` invariant.
 ///
 /// # Safety
-/// The caller must run in a Kernel task context and provide the slot and
+/// The caller must run in an unprivileged Kernel task context and provide the slot and
 /// arguments required by that ABI operation.
 #[cfg(target_arch = "riscv64")]
 #[inline(never)]
@@ -16,7 +16,7 @@ pub unsafe fn trap(slot: usize, args: [usize; 6]) -> (usize, usize, usize) {
     let (v0, v1, v2);
     unsafe {
         core::arch::asm!(
-            "ebreak",
+            "ecall",
             inlateout("a0") args[0] => v0,
             inlateout("a1") args[1] => v1,
             inlateout("a7") slot => _,

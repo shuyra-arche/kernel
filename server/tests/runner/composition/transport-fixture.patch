@@ -1,0 +1,11 @@
+--- a/tests/memory/guest/support.rs
++++ b/tests/memory/guest/support.rs
+@@ -109,7 +109,7 @@
+ pub fn boot(at: usize, count: usize) {
+     use kernel_api::boot::{args, ledger::Entries};
+     assert_eq!(count, args::LEN);
+-    assert_eq!(kernel_api::abi::VERSION, 11);
++    assert_eq!(kernel_api::abi::VERSION, 12);
+     let a = unsafe { core::slice::from_raw_parts(at as *const usize, count) };
+     IMAGE.store(a[args::VIEW], Ordering::Relaxed);
+     IMAGE_LEN.store(a[args::VIEW_LEN], Ordering::Relaxed);

@@ -55,7 +55,7 @@ fn reusing_an_address_and_revision_cannot_match_an_old_reservation_observation()
         &bytes[32..64],
         &[2u64, 13, 17, 19].map(u64::to_le_bytes).concat()
     );
-    for version in [10, 12] {
+    for version in [10, 11, 13] {
         let mut mixed = bytes;
         set_word(&mut mixed, 0, version);
         assert!(Request::from_bytes(&mixed).is_none());
