@@ -251,9 +251,35 @@ extern "C" fn driver() -> ! {
     }
     exit(0)
 }
+extern "C" fn breakpoint32() -> ! {
+    use kernel_api::abi::{call::unit::operations::Exit, operation::RegisterCall};
+    unsafe { core::arch::asm!(".option push", ".option norvc", "ebreak", ".option pop", in("a7") Exit::SLOT, in("a0") 73usize, in("a1") 0usize, in("a2") 0usize, in("a3") 0usize, in("a4") 0usize, options(nostack)); }
+    exit(74)
+}
+extern "C" fn breakpoint16() -> ! {
+    use kernel_api::abi::{call::unit::operations::Exit, operation::RegisterCall};
+    unsafe { core::arch::asm!(".2byte 0x9002", in("a7") Exit::SLOT, in("a0") 75usize, in("a1") 0usize, in("a2") 0usize, in("a3") 0usize, in("a4") 0usize, options(nostack)); }
+    exit(76)
+}
+fn transport_contract() {
+    // Unknown slots return once to the instruction immediately after ECALL.
+    let result = unsafe { kernel_client::transport::trap(usize::MAX, [0; 6]) };
+    assert_ne!(result.0, 0);
+    for entry in [breakpoint32 as extern "C" fn() -> !, breakpoint16] {
+        let task = spawn(entry);
+        unit::resume(UnitTarget::Task(task)).unwrap();
+        wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).exit.is_some());
+        let info = support::task_info(UnitQuery::Target(UnitTarget::Task(task)));
+        assert_eq!(info.exit.unwrap().0, kernel_api::model::unit::ExitCause::Fault);
+        wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).reclaimed);
+        unit::delete(UnitTarget::Task(task)).unwrap();
+    }
+    marker(b"PASS user-ecall breakpoints=2 unknown=1\n");
+}
 #[unsafe(no_mangle)]
 extern "C" fn run(at: usize, count: usize) -> ! {
     support::boot(at, count);
+    transport_contract();
     let words = unsafe { core::slice::from_raw_parts(at as *const usize, count) };
     let entries = Entries::new(unsafe {
         core::slice::from_raw_parts(words[args::LEDGER] as *const u8, words[args::LEDGER_LEN])
