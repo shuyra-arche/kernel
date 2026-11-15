@@ -8,6 +8,9 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+#[path = "../../../../src/basis/nest/memo/observation.rs"]
+mod observation;
+pub(crate) use observation::{MemoInfo, MemoState};
 pub(crate) mod source {
     use super::*;
     #[derive(Clone)]

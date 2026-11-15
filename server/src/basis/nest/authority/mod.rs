@@ -4,7 +4,7 @@ pub(crate) mod admission;
 pub(crate) mod binding;
 pub(crate) mod external;
 mod source;
-pub(crate) use source::{withdraw_source, withdraw_source_branch, withdraw_source_window};
+pub(crate) use source::{withdraw_source_branch, withdraw_source_window};
 
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -114,50 +114,6 @@ impl ReservationRegistry {
                 cursor: 0,
             }),
         }
-    }
-
-    pub(crate) fn claim_reservation(
-        &self,
-        id: usize,
-        nest: &Arc<Nest>,
-        source: Arc<SourceAuthorization>,
-    ) -> Result<(), PendFail> {
-        let _commit = crate::basis::commit();
-        let binding = RangeBinding::new(id, nest)?;
-        {
-            let mut ranges = self.ranges.lock();
-            if ranges.entries.iter().any(|entry| entry.binding.id() == id) {
-                return Err(PendFail::Busy);
-            }
-            let capacity = ranges
-                .prepared
-                .checked_add(1)
-                .ok_or(PendFail::OutOfMemory)?;
-            ranges
-                .entries
-                .try_reserve(capacity)
-                .map_err(|_| PendFail::OutOfMemory)?;
-        }
-        source.reserve_binding()?;
-        source.register_binding(binding.clone());
-        self.ranges.lock().entries.push(RangeEntry {
-            binding,
-            reservation: None,
-            source: Some(source),
-            root: None,
-        });
-        Ok(())
-    }
-
-    pub(crate) fn commit(&self, id: usize, reservation: Arc<Span>) {
-        let mut ranges = self.ranges.lock();
-        let entry = ranges
-            .entries
-            .iter_mut()
-            .find(|entry| entry.binding.id() == id)
-            .expect("prepared implicit reservation registration");
-        assert!(entry.root.is_none());
-        entry.reservation = Some(reservation);
     }
 
     pub(in crate::basis::nest) fn prepare(&self) -> Result<(), PendFail> {

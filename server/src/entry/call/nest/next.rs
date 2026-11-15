@@ -182,7 +182,7 @@ pub(in crate::entry::call) fn effect(
                         || pend::locate(actor, position.token())
                             .is_none_or(|held| !Arc::ptr_eq(&held, route.entry()))
                     {
-                        return Err(kernel_api::abi::call::cell::CellFail::Denied);
+                        return Err(crate::basis::nest::memo::AccessError::Denied);
                     }
                     route
                         .position(position)
@@ -213,7 +213,7 @@ pub(in crate::entry::call) fn effect(
         && receipt.started().is_some()
         && matches!(
             result,
-            Ok(()) | Err(kernel_api::abi::call::cell::CellFail::Busy)
+            Ok(()) | Err(crate::basis::nest::memo::AccessError::Busy)
         )
     {
         route
@@ -489,14 +489,14 @@ fn nest_error(error: basis::nest::NestError) -> Failure {
         _ => Failure::Denied,
     }
 }
-fn cell_error(error: kernel_api::abi::call::cell::CellFail) -> Failure {
-    use kernel_api::abi::call::cell::CellFail;
-    match error {
-        CellFail::OutOfMemory => Failure::OutOfMemory,
-        CellFail::Busy => Failure::Busy,
-        CellFail::NotAligned => Failure::NotAligned,
-        CellFail::SourceEmpty => Failure::SourceEmpty,
-        CellFail::NoRegion => Failure::NoRegion,
+fn cell_error(error: impl Into<crate::basis::nest::memo::AccessError>) -> Failure {
+    use crate::basis::nest::memo::AccessError;
+    match error.into() {
+        AccessError::OutOfMemory => Failure::OutOfMemory,
+        AccessError::Busy => Failure::Busy,
+        AccessError::NotAligned => Failure::NotAligned,
+        AccessError::SourceEmpty => Failure::SourceEmpty,
+        AccessError::NoRegion => Failure::NoRegion,
         _ => Failure::Denied,
     }
 }

@@ -67,11 +67,11 @@ fn split_merge_preserve_bytes_and_return_each_receipt_once() {
         page.as_mut_ptr().add(SIZE - 1).write(9);
     }
     let mut original = vec![page];
-    let mut children = Page::reshape(&mut original, CellLevel::BASE).unwrap();
+    let mut children = crate::reshape(&mut original, CellLevel::BASE).unwrap();
     assert!(original.is_empty());
     assert_eq!(children.len(), 512);
     assert_ne!(children[0].id(), id);
-    let merged = Page::reshape(&mut children, CellLevel::new(1).unwrap()).unwrap();
+    let merged = crate::reshape(&mut children, CellLevel::new(1).unwrap()).unwrap();
     assert!(children.is_empty());
     assert_ne!(merged[0].id(), id);
     unsafe {
@@ -96,38 +96,38 @@ fn reshape_rejects_aliases_and_unsettled_external_access() {
     let alias = page.clone();
     let mut pages = vec![page];
     assert_eq!(
-        Page::reshape(&mut pages, CellLevel::BASE).unwrap_err(),
+        crate::reshape(&mut pages, CellLevel::BASE).unwrap_err(),
         PageError::Busy
     );
     drop(alias);
     let mut external = pages[0].prepare_external(true).unwrap();
     external.publish();
     assert_eq!(
-        Page::reshape(&mut pages, CellLevel::BASE).unwrap_err(),
+        crate::reshape(&mut pages, CellLevel::BASE).unwrap_err(),
         PageError::Busy
     );
     unsafe {
         external.retire().settle();
     }
-    drop(Page::reshape(&mut pages, CellLevel::BASE).unwrap());
+    drop(crate::reshape(&mut pages, CellLevel::BASE).unwrap());
     assert_eq!(pool.used(), 0);
 }
 #[test]
 fn incomplete_or_reordered_children_preserve_receipts() {
     let pool = Pool::new();
     let mut pages = vec![pool.page()];
-    let mut children = Page::reshape(&mut pages, CellLevel::BASE).unwrap();
+    let mut children = crate::reshape(&mut pages, CellLevel::BASE).unwrap();
     let last = children.pop().unwrap();
     let id = children[0].id();
     assert_eq!(
-        Page::reshape(&mut children, CellLevel::new(1).unwrap()).unwrap_err(),
+        crate::reshape(&mut children, CellLevel::new(1).unwrap()).unwrap_err(),
         PageError::InvalidRange
     );
     assert_eq!(children[0].id(), id);
     children.push(last);
     children.swap(0, 1);
     assert_eq!(
-        Page::reshape(&mut children, CellLevel::new(1).unwrap()).unwrap_err(),
+        crate::reshape(&mut children, CellLevel::new(1).unwrap()).unwrap_err(),
         PageError::InvalidRange
     );
     assert_eq!(pool.used(), 512);
@@ -144,7 +144,7 @@ fn preparation_failure_keeps_original_identity_and_capacity() {
     }
     for count in [0, 1, 2, 257, 512] {
         let result =
-            crate::allocation::fail_after(count, || Page::reshape(&mut pages, CellLevel::BASE));
+            crate::allocation::fail_after(count, || crate::reshape(&mut pages, CellLevel::BASE));
         assert_eq!(result.unwrap_err(), PageError::OutOfMemory);
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].id(), id);
@@ -153,6 +153,6 @@ fn preparation_failure_keeps_original_identity_and_capacity() {
             assert_eq!(pages[0].as_mut_ptr().add(4096).read(), 53);
         }
     }
-    drop(Page::reshape(&mut pages, CellLevel::BASE).unwrap());
+    drop(crate::reshape(&mut pages, CellLevel::BASE).unwrap());
     assert_eq!(pool.used(), 0);
 }

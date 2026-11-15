@@ -1,7 +1,7 @@
 //! Runtime Flat registration and checked Slot windows. The existing borrowing
 //! owner is shared with Share, so delegation and withdrawal have one ledger.
 use crate::basis::{
-    flat::source::{Export, Operation},
+    flat::source::Export,
     nest::Access,
     pend::{self, SourceAuthorization},
     unit::task::Task,
@@ -11,22 +11,11 @@ use kernel_api::{
     abi::call::pend::PendFail,
     address::{PAGE_SIZE, PageOffset},
     model::{
-        flat::FlatInfo,
         identity::{Mark, PendId},
         modifiable::Modifiable,
         pend::{CreationRights, FlatRights, Operations},
     },
 };
-pub(crate) fn create(
-    task: &Arc<Task>,
-    license: PendId,
-    size: usize,
-    align: usize,
-    level: usize,
-) -> Result<PendId, PendFail> {
-    let _serial = task.pend.lock();
-    create_kind(task, license, size, align, level, false)
-}
 
 /// Caller holds its ledger serial and COMMIT through result recording.
 pub(crate) fn create_explicit(
@@ -98,16 +87,8 @@ fn create_kind(
     Ok(entry.token())
 }
 
-/// One preparation path for Flat creation and the v10 Cell compatibility entry.
-/// Both callers hold the Task ledger serial; the caller that publishes later
-/// rechecks the license under COMMIT. Preparation exposes no Pend or Slot.
-pub(crate) fn allocate(
-    task: &Arc<Task>,
-    license: PendId,
-    allocation: kernel_api::model::cell::Allocation,
-) -> Result<(super::FlatRange, Arc<SourceAuthorization>), PendFail> {
-    allocate_kind(task, license, allocation, false)
-}
+/// Prepare an unpublished native Flat source. Registration rechecks the live
+/// creation license under COMMIT.
 
 fn allocate_kind(
     task: &Arc<Task>,
@@ -133,20 +114,7 @@ fn allocate_kind(
     let source = SourceAuthorization::new(range.clone(), Access::all(), task.ident.id)?;
     Ok((range, source))
 }
-pub(crate) fn inspect(task: &Arc<Task>, token: PendId) -> Result<FlatInfo, PendFail> {
-    let entry = authorized(task, token, FlatRights::INSPECT)?;
-    let meta = entry.target().memory().ok_or(PendFail::Denied)?;
-    let (offset, count) = entry
-        .authority()
-        .window()
-        .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-    Ok(FlatInfo {
-        level: meta.source().level(),
-        id: meta.source().source_id(),
-        offset: offset.get(),
-        count: count.get(),
-    })
-}
+
 fn authorized(
     task: &Arc<Task>,
     token: PendId,
@@ -218,85 +186,7 @@ pub(crate) fn slot(
         )
         .map_err(|_| PendFail::NotAligned)
 }
-pub(crate) fn slice(
-    task: &Arc<Task>,
-    token: PendId,
-    offset: usize,
-    count: usize,
-) -> Result<usize, PendFail> {
-    let _serial = task.pend.lock();
-    let _commit = crate::basis::commit();
-    if !pend::live(task) {
-        return Err(PendFail::Dead);
-    }
-    let entry = authorized(task, token, FlatRights::ASSOCIATE)?;
-    let meta = entry.target().memory().ok_or(PendFail::Denied)?;
-    let parent = entry
-        .authority()
-        .window()
-        .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-    let (offset, count) =
-        pend::Window::Parent(kernel_api::model::pend::PendRange::Pages { offset, count })
-            .resolve(parent)?;
-    meta.source()
-        .range(offset, count)
-        .map_err(|_| PendFail::NotAligned)?;
-    let source = meta.authorization().ok_or(PendFail::Denied)?;
-    source.ensure_internal()?;
-    task.pend.references.insert(
-        source,
-        offset,
-        count,
-        Access::all(),
-        Some((token, entry.authority().clone())),
-    )
-}
-pub(crate) fn delete(task: &Arc<Task>, token: PendId) -> Result<(), PendFail> {
-    let (meta, _operation) = {
-        let _serial = task.pend.lock();
-        let entry = pend::locate(task, token).ok_or(PendFail::Denied)?;
-        if !matches!(entry.target(), pend::Target::Flat(_))
-            || !entry.authority().alive()
-            || !entry
-                .authority()
-                .limits()
-                .operations
-                .contains(Operations::Flat(FlatRights::DELETE))
-        {
-            return Err(PendFail::Denied);
-        }
-        if entry.target().alive() && !entry.permits(Operations::Flat(FlatRights::DELETE)) {
-            return Err(PendFail::Denied);
-        }
-        let meta = entry.target().memory().ok_or(PendFail::Denied)?;
-        let operation = Operation::acquire(&meta).ok_or(PendFail::Busy)?;
-        let _commit = crate::basis::commit();
-        entry.target().seal()?;
-        (meta, operation)
-    };
-    crate::basis::flat::source::close(&meta)
-}
 
-/// First commit admission closure, then withdraw hardware outside COMMIT. Busy
-/// keeps the branch-owned record and all Page gates so a retry cannot reopen it.
-pub(crate) fn block(task: &Arc<Task>, token: PendId) -> Result<(), PendFail> {
-    let _serial = task.pend.lock();
-    let entry = control(task, token)?;
-    let meta = entry.target().memory().ok_or(PendFail::Denied)?;
-    let source = meta.authorization().ok_or(PendFail::Denied)?;
-    let (offset, count) = entry
-        .authority()
-        .window()
-        .unwrap_or((PageOffset::ZERO, meta.source().page_count()));
-    let block = source.block(entry.authority(), offset, count)?;
-    let _operation = Operation::acquire(&meta).ok_or(PendFail::Busy)?;
-    settle_block(&meta, &source, &block)?;
-    if entry.alive() {
-        Ok(())
-    } else {
-        Err(PendFail::Dead)
-    }
-}
 /// A closed branch still owns its block until its original hardware users have
 /// drained. The caller already serializes the Export operation.
 pub(crate) fn retire_block(
@@ -380,42 +270,4 @@ pub(crate) fn settle_block(
     } else {
         Err(PendFail::Busy)
     }
-}
-pub(crate) fn allow(task: &Arc<Task>, token: PendId) -> Result<(), PendFail> {
-    let _serial = task.pend.lock();
-    let _commit = crate::basis::commit();
-    let entry = control(task, token)?;
-    let source = entry
-        .target()
-        .memory()
-        .and_then(|m| m.authorization())
-        .ok_or(PendFail::Denied)?;
-    if source
-        .blocking(entry.authority())
-        .is_some_and(|block| block.native())
-    {
-        return Err(PendFail::Denied);
-    }
-    source.allow(entry.authority());
-    Ok(())
-}
-
-/// Admission control is independent of temporary data-access suspension by an
-/// External borrower. Only the live Flat branch and its BLOCK bit authorize it.
-fn control(task: &Arc<Task>, token: PendId) -> Result<Arc<pend::PendEntry>, PendFail> {
-    if !pend::live(task) {
-        return Err(PendFail::Dead);
-    }
-    let entry = pend::locate(task, token).ok_or(PendFail::Denied)?;
-    if !entry.alive()
-        || !matches!(entry.target(), pend::Target::Flat(_))
-        || !entry
-            .authority()
-            .limits()
-            .operations
-            .contains(Operations::Flat(FlatRights::BLOCK))
-    {
-        return Err(PendFail::Denied);
-    }
-    Ok(entry)
 }

@@ -3,6 +3,7 @@ extern crate alloc;
 
 // Production authority, scopes, ancestry and ledger preparation run on the host.
 // Namespace metadata and hardware notifications are fixtures, not full Kernel enforcement.
+mod access_error;
 #[path = "../name/allocation.rs"]
 mod allocation;
 #[allow(dead_code)]
@@ -78,6 +79,9 @@ mod basis {
         }
     }
     pub(crate) mod nest {
+        pub(crate) mod memo {
+            pub(crate) use crate::access_error::AccessError;
+        }
         pub(crate) mod activity {
             pub(crate) fn withdraw() {}
         }

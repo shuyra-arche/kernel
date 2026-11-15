@@ -1,17 +1,21 @@
 //! External mapping observations use the Nest's authoritative span and Memo state.
 use crate::basis::nest::Nest;
+use crate::basis::nest::memo::AccessError;
+use crate::basis::nest::memo::MemoState;
 use crate::basis::pend::{self, PendEntry};
 use crate::basis::unit::{anchor::Anchor, task::Task};
 use alloc::sync::{Arc, Weak};
-use kernel_api::abi::call::cell::CellFail;
-use kernel_api::model::cell::CellState;
 use kernel_api::model::identity::PendId;
 use kernel_api::model::nest::ReservationId;
 use kernel_api::model::pend::{NestRights, NestScope, Operations, PendScope};
 
-fn authorized(actor: &Task, token: PendId, id: ReservationId) -> Result<Arc<PendEntry>, CellFail> {
-    let entry = pend::locate(actor, token).ok_or(CellFail::Denied)?;
-    let nest = entry.target().nest().ok_or(CellFail::Denied)?;
+fn authorized(
+    actor: &Task,
+    token: PendId,
+    id: ReservationId,
+) -> Result<Arc<PendEntry>, AccessError> {
+    let entry = pend::locate(actor, token).ok_or(AccessError::Denied)?;
+    let nest = entry.target().nest().ok_or(AccessError::Denied)?;
     if !pend::live(actor)
         || !entry
             .authority()
@@ -19,15 +23,15 @@ fn authorized(actor: &Task, token: PendId, id: ReservationId) -> Result<Arc<Pend
         || !matches!(entry.authority().scope(), PendScope::Nest(NestScope::Reservation { id: selected, .. }) if selected == id)
         || !nest.is_external()
     {
-        return Err(CellFail::Denied);
+        return Err(AccessError::Denied);
     }
-    let span = nest.reservation(id).ok_or(CellFail::Denied)?;
-    let count = kernel_api::address::PageCount::new(span.grain()).ok_or(CellFail::Denied)?;
+    let span = nest.reservation(id).ok_or(AccessError::Denied)?;
+    let count = kernel_api::address::PageCount::new(span.grain()).ok_or(AccessError::Denied)?;
     if !entry
         .authority()
         .contains(kernel_api::address::PageOffset::ZERO, count)
     {
-        return Err(CellFail::Denied);
+        return Err(AccessError::Denied);
     }
     Ok(entry)
 }
@@ -43,36 +47,36 @@ pub(crate) fn event(
         Weak<Anchor>,
         Option<Option<kernel_api::abi::call::sign::SignEventFail>>,
     ),
-    CellFail,
+    AccessError,
 > {
     use kernel_api::abi::call::sign::SignEventFail;
     let entry = authorized(actor, token, id)?;
-    let nest = entry.target().nest().ok_or(CellFail::Denied)?;
-    let span = nest.reservation(id).ok_or(CellFail::Denied)?;
+    let nest = entry.target().nest().ok_or(AccessError::Denied)?;
+    let span = nest.reservation(id).ok_or(AccessError::Denied)?;
     let info = span.inspect_memo(0)?;
     if expected == 0 {
-        return Err(CellFail::Denied);
+        return Err(AccessError::Denied);
     }
     let ready = if info.generation > expected {
         Some(Some(SignEventFail::Gone))
     } else if info.generation < expected {
         let next = info.generation.checked_add(1) == Some(expected)
             && if published {
-                info.state == CellState::Ready
+                info.state == MemoState::Ready
             } else {
-                matches!(info.state, CellState::Published | CellState::Publishing)
+                matches!(info.state, MemoState::Published | MemoState::Publishing)
             };
         if next {
             None
         } else {
             Some(Some(SignEventFail::Gone))
         }
-    } else if info.state == CellState::Failed || nest.external_error().is_some() {
+    } else if info.state == MemoState::Failed || nest.external_error().is_some() {
         Some(Some(SignEventFail::Busy))
     } else if if published {
-        info.state == CellState::Published
+        info.state == MemoState::Published
     } else {
-        matches!(info.state, CellState::Ready | CellState::Vacant)
+        matches!(info.state, MemoState::Ready | MemoState::Vacant)
     } {
         Some(None)
     } else {

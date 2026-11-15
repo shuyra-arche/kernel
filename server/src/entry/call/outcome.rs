@@ -37,16 +37,3 @@ pub(super) fn answer<F: kernel_api::abi::error::FailCode>(
         Err(e) => ret_err(frame, e),
     }
 }
-
-pub(super) fn answer_pair<F: kernel_api::abi::error::FailCode>(
-    frame: &mut TrapContext,
-    result: Result<(usize, usize), F>,
-) {
-    match result {
-        Ok((first, second)) => {
-            frame.gpr.set_x(Gprs::A0, first);
-            frame.gpr.set_x(Gprs::A1, second);
-        }
-        Err(e) => ret_err(frame, e),
-    }
-}

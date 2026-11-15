@@ -27,9 +27,6 @@ pub(crate) mod cell {
 }
 pub(crate) mod flat {
     pub(crate) use crate::error::FlatError;
-    pub(crate) mod transfer {
-        pub(crate) use crate::transfer_error::TransferError;
-    }
 }
 #[path = "logical/mod.rs"]
 pub(crate) mod nest;

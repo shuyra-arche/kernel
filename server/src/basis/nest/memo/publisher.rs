@@ -1,9 +1,9 @@
 //! An exact publishing route, retained until its hardware use has settled.
 use super::super::{Access, Nest, Span};
+use crate::basis::nest::memo::AccessError;
 use crate::basis::pend::{self, Pend, PendEntry};
 use crate::basis::unit::task::Task;
 use alloc::sync::{Arc, Weak};
-use kernel_api::abi::call::cell::CellFail;
 use kernel_api::address::{PageCount, PageOffset};
 use kernel_api::model::identity::{PendId, TaskId};
 use kernel_api::model::modifiable::Modifiable;
@@ -32,10 +32,10 @@ impl Principal {
         span: &Span,
         page: usize,
         access: Access,
-    ) -> Result<Arc<Task>, CellFail> {
-        let actor = self.actor().ok_or(CellFail::Denied)?;
-        let entry = pend::locate(&actor, self.token).ok_or(CellFail::Denied)?;
-        let count = PageCount::new(span.grain()).ok_or(CellFail::NotAligned)?;
+    ) -> Result<Arc<Task>, AccessError> {
+        let actor = self.actor().ok_or(AccessError::Denied)?;
+        let entry = pend::locate(&actor, self.token).ok_or(AccessError::Denied)?;
+        let count = PageCount::new(span.grain()).ok_or(AccessError::NotAligned)?;
         if !Arc::ptr_eq(entry.authority(), &self.authority)
             || !entry.permits(Operations::Nest(NestRights::PUBLISH))
             || entry
@@ -47,7 +47,7 @@ impl Principal {
             || !self.authority.contains(PageOffset::new(page), count)
             || access.contains(Access::WRITE) && entry.modifiable() != Modifiable::Yes
         {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         Ok(actor)
     }
@@ -61,7 +61,7 @@ pub(crate) struct Publisher {
 
 impl Publisher {
     /// Caller holds the actor's Pend serial and COMMIT.
-    pub(crate) fn new(actor: &Arc<Task>, entry: &Arc<PendEntry>) -> Result<Self, CellFail> {
+    pub(crate) fn new(actor: &Arc<Task>, entry: &Arc<PendEntry>) -> Result<Self, AccessError> {
         if !pend::live(actor)
             || !entry.permits(Operations::Nest(NestRights::PUBLISH))
             || !matches!(
@@ -71,7 +71,7 @@ impl Publisher {
             || entry.target().nest().is_none()
             || pend::locate(actor, entry.token()).is_none_or(|held| !Arc::ptr_eq(&held, entry))
         {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         entry
             .authority()

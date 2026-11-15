@@ -8,7 +8,6 @@ use crate::{
         slot::Slot,
     },
     support::Pool,
-    transfer_error::TransferError,
 };
 use kernel_api::{
     address::{PageCount, PageIndex},
@@ -47,14 +46,6 @@ fn concurrent_materializer_residency_and_transfer_see_the_same_busy_position() {
         assert!(matches!(reserve(&state, 0), Err(FlatError::Busy)));
         let guard = state.lock();
         assert!(guard.busy(PageIndex::ZERO, PageCount::new(1).unwrap()));
-        assert_eq!(
-            guard.source_ready(PageIndex::ZERO),
-            Err(TransferError::Busy)
-        );
-        assert_eq!(
-            guard.target_ready(PageIndex::ZERO),
-            Err(TransferError::Busy)
-        );
         drop(guard);
         resume.wait();
     });

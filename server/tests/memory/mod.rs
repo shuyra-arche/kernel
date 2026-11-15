@@ -62,10 +62,6 @@ mod state;
 
 mod reshape;
 mod residency;
-mod transaction;
-#[allow(dead_code)]
-#[path = "../../src/basis/flat/transfer/error.rs"]
-mod transfer_error;
 
 #[allow(dead_code)]
 #[path = "../../src/metal/generic/iommu.rs"]
@@ -108,4 +104,20 @@ mod metal {
             pub(crate) use crate::scope as fence;
         }
     }
+}
+
+fn reshape(
+    pages: &mut Vec<std::sync::Arc<cell::Page>>,
+    level: kernel_api::model::cell::CellLevel,
+) -> Result<Vec<std::sync::Arc<cell::Page>>, cell::PageError> {
+    cell::Page::reshape_with(pages, level, |pages| {
+        if pages.iter().any(|page| {
+            std::sync::Arc::strong_count(page) != 1
+                || std::sync::Arc::weak_count(page) != 0
+                || !page.allows_return()
+        }) {
+            return Err(cell::PageError::Busy);
+        }
+        Ok(())
+    })
 }

@@ -5,9 +5,10 @@ use super::{
     reservation::{id, map, setup},
     support::{Nest, Task},
 };
+use crate::basis::nest::memo::AccessError;
 use crate::basis::pend;
 use kernel_api::{
-    abi::call::{cell::CellFail, pend::PendFail},
+    abi::call::pend::PendFail,
     address::PageCount,
     model::{
         cell::CellLevel,
@@ -22,11 +23,11 @@ use std::sync::{Arc, Weak, atomic::Ordering};
 mod lineage;
 use lineage::Lineage;
 
-fn failure(error: PendFail) -> CellFail {
+fn failure(error: PendFail) -> AccessError {
     match error {
-        PendFail::OutOfMemory => CellFail::OutOfMemory,
-        PendFail::Busy => CellFail::Busy,
-        _ => CellFail::Denied,
+        PendFail::OutOfMemory => AccessError::OutOfMemory,
+        PendFail::Busy => AccessError::Busy,
+        _ => AccessError::Denied,
     }
 }
 fn grant(
@@ -55,7 +56,7 @@ fn extend(
     task: &Arc<Task>,
     nest: &Nest,
     entry: &Arc<ledger::PendEntry>,
-) -> Result<Arc<Lineage>, CellFail> {
+) -> Result<Arc<Lineage>, AccessError> {
     let _commit = basis::commit();
     Lineage::extend(
         previous,
@@ -74,11 +75,11 @@ fn multi_hop_readonly_route_cannot_be_upgraded_and_middle_revocation_is_live() {
     let original = extend(None, &one, &first, &reader).unwrap();
     let exported = extend(Some(original.clone()), &two, &second, &writer).unwrap();
     assert_eq!(exported.check(Modifiable::No), Ok(()));
-    assert_eq!(exported.check(Modifiable::Yes), Err(CellFail::Denied));
+    assert_eq!(exported.check(Modifiable::Yes), Err(AccessError::Denied));
     assert!(exported.any(|hop| hop.branch(reader.token())));
     assert!(exported.any(|hop| hop.branch(writer.token())));
     writer.invalidate();
-    assert_eq!(exported.check(Modifiable::No), Err(CellFail::Denied));
+    assert_eq!(exported.check(Modifiable::No), Err(AccessError::Denied));
     assert_eq!(original.check(Modifiable::No), Ok(()));
     assert_eq!(writer.authority().settle(), Err(PendFail::Busy));
     drop(exported);
@@ -91,13 +92,13 @@ fn foreign_ledger_and_nondistributable_middle_do_not_create_dependencies() {
     let (two, second, denied) = grant(Modifiable::Yes, Distributable::No);
     assert_eq!(
         extend(None, &two, &first, &entry).err(),
-        Some(CellFail::Denied)
+        Some(AccessError::Denied)
     );
     assert!(!entry.authority().external_pending());
     let original = extend(None, &one, &first, &entry).unwrap();
     assert_eq!(
         extend(Some(original.clone()), &two, &second, &denied).err(),
-        Some(CellFail::Denied)
+        Some(AccessError::Denied)
     );
     assert!(!denied.authority().external_pending());
     assert_eq!(original.check(Modifiable::Yes), Ok(()));
@@ -119,7 +120,7 @@ fn closing_an_intermediate_reservation_or_task_invalidates_downstream() {
                 .open
                 .store(false, Ordering::Release);
         }
-        assert_eq!(exported.check(Modifiable::No), Err(CellFail::Denied));
+        assert_eq!(exported.check(Modifiable::No), Err(AccessError::Denied));
         assert!(exported.any(Lineage::retiring));
         assert_eq!(origin.check(Modifiable::Yes), Ok(()));
     }
@@ -130,7 +131,7 @@ fn failed_allocation_and_depth_limit_leave_no_unowned_export_guard() {
     let (task, nest, entry) = grant(Modifiable::Yes, Distributable::Yes);
     assert_eq!(
         allocation::fail_after(0, || extend(None, &task, &nest, &entry)).err(),
-        Some(CellFail::OutOfMemory)
+        Some(AccessError::OutOfMemory)
     );
     assert!(!entry.authority().external_pending());
     let mut chain = extend(None, &task, &nest, &entry).unwrap();
@@ -139,7 +140,7 @@ fn failed_allocation_and_depth_limit_leave_no_unowned_export_guard() {
     }
     assert_eq!(
         extend(Some(chain.clone()), &task, &nest, &entry).err(),
-        Some(CellFail::Denied)
+        Some(AccessError::Denied)
     );
     assert_eq!(chain.check(Modifiable::Yes), Ok(()));
     drop(chain);
@@ -157,5 +158,5 @@ fn exported_lineage_does_not_keep_task_or_reservation_alive() {
     drop(task);
     assert!(weak_task.upgrade().is_none());
     assert!(weak_nest.upgrade().is_none());
-    assert_eq!(chain.check(Modifiable::No), Err(CellFail::Denied));
+    assert_eq!(chain.check(Modifiable::No), Err(AccessError::Denied));
 }

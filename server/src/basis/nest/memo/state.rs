@@ -4,11 +4,11 @@ use super::{Publisher, publisher, source::Source};
 use crate::basis::cell::page::{Change, Freeze, Page};
 use crate::basis::nest::NestError;
 use crate::basis::nest::authority::RangeBinding;
+use crate::basis::nest::memo::{MemoInfo, MemoState};
 use crate::basis::pend::{ExternalBorrow, Pend};
 use crate::basis::unit::task::request::Transition;
 use alloc::sync::Arc;
 use kernel_api::address::VirtAddr;
-use kernel_api::model::cell::{CellInfo, CellState};
 
 pub(super) struct Association {
     /// Only the v10 adapter captures a Page. Next associations retain the
@@ -96,10 +96,10 @@ enum MemoFlight {
 }
 
 impl MemoFlight {
-    fn observation(self) -> CellState {
+    fn observation(self) -> MemoState {
         match self {
-            Self::Publishing => CellState::Publishing,
-            Self::Retracting => CellState::Retracting,
+            Self::Publishing => MemoState::Publishing,
+            Self::Retracting => MemoState::Retracting,
         }
     }
 }
@@ -581,26 +581,26 @@ impl Memo {
             .or_else(|| self.activity.freeze().map(|freeze| freeze.page().clone()))
     }
 
-    pub(in crate::basis::nest) fn inspect(&self, address: VirtAddr) -> CellInfo {
+    pub(in crate::basis::nest) fn inspect(&self, address: VirtAddr) -> MemoInfo {
         let page = self.page();
         let state = self
             .publication()
             .and_then(|publication| match publication.phase() {
-                Phase::Failed => Some(CellState::Failed),
+                Phase::Failed => Some(MemoState::Failed),
                 Phase::Waiting(_) | Phase::Withdrawing | Phase::Settled => {
-                    Some(CellState::Retracting)
+                    Some(MemoState::Retracting)
                 }
                 _ => None,
             })
             .or_else(|| self.activity.flight().map(MemoFlight::observation))
             .unwrap_or(if self.publication().is_some() {
-                CellState::Published
+                MemoState::Published
             } else if page.is_some() || self.page.is_some() {
-                CellState::Ready
+                MemoState::Ready
             } else {
-                CellState::Vacant
+                MemoState::Vacant
             });
-        CellInfo {
+        MemoInfo {
             level: page
                 .as_ref()
                 .map_or(kernel_api::model::cell::CellLevel::BASE, |page| {
@@ -621,7 +621,7 @@ impl Memo {
 
     pub(in crate::basis::nest) fn failed(&self, failed_fence: bool) -> bool {
         failed_fence && self.in_flight()
-            || self.inspect(VirtAddr::new(0)).state == CellState::Failed
+            || self.inspect(VirtAddr::new(0)).state == MemoState::Failed
     }
 
     /// Observe the retained physical Page, never re-resolve the logical source.
@@ -643,10 +643,10 @@ impl Memo {
             MemoPhase::Failed
         } else {
             match observed.state {
-                CellState::Publishing => MemoPhase::Publishing,
-                CellState::Published => MemoPhase::Published,
-                CellState::Retracting => MemoPhase::Retiring,
-                CellState::Failed => MemoPhase::Failed,
+                MemoState::Publishing => MemoPhase::Publishing,
+                MemoState::Published => MemoPhase::Published,
+                MemoState::Retracting => MemoPhase::Retiring,
+                MemoState::Failed => MemoPhase::Failed,
                 _ if source.is_some() => MemoPhase::Associated,
                 _ => MemoPhase::Empty,
             }

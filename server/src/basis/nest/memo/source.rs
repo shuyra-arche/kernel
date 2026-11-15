@@ -2,10 +2,11 @@
 use crate::basis::cell::page::{Change, Page};
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::Access;
+use crate::basis::nest::memo::AccessError;
 use crate::basis::pend::{self, ExternalBorrow, Hold, Pend, SourceAuthorization};
 use crate::basis::unit::task::Task;
 use alloc::sync::{Arc, Weak};
-use kernel_api::abi::call::{cell::CellFail, pend::PendFail};
+use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::{PAGE_SIZE, PageCount, PageOffset};
 use kernel_api::model::identity::{PendId, TaskId};
 use kernel_api::model::modifiable::Modifiable;
@@ -36,32 +37,32 @@ impl Source {
         token: PendId,
         offset: PageOffset,
         count: PageCount,
-    ) -> Result<Self, CellFail> {
+    ) -> Result<Self, AccessError> {
         use kernel_api::model::pend::{FlatRights, Operations, PendRange, PendScope, ShareRights};
         if !pend::live(actor) {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
-        let entry = pend::locate(actor, token).ok_or(CellFail::Denied)?;
+        let entry = pend::locate(actor, token).ok_or(AccessError::Denied)?;
         if !entry.associates() {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
-        let meta = entry.target().memory().ok_or(CellFail::Denied)?;
-        let authorization = meta.authorization().ok_or(CellFail::Denied)?;
+        let meta = entry.target().memory().ok_or(AccessError::Denied)?;
+        let authorization = meta.authorization().ok_or(AccessError::Denied)?;
         if matches!(entry.target(), pend::Target::Flat(_)) {
             let page = meta
                 .source()
                 .index()
                 .get()
                 .checked_add(offset.get())
-                .ok_or(CellFail::NotAligned)?;
+                .ok_or(AccessError::NotAligned)?;
             let position =
                 kernel_api::model::flat::SlotPosition::new(token, meta.source().source_id(), page)
-                    .ok_or(CellFail::NotAligned)?;
+                    .ok_or(AccessError::NotAligned)?;
             let selected =
                 crate::basis::flat::authority::slot(actor, position, FlatRights::ASSOCIATE)
                     .map_err(failure)?;
             if selected.page_count() != count {
-                return Err(CellFail::NotAligned);
+                return Err(AccessError::NotAligned);
             }
         } else if !entry.authority().selects(
             Operations::Share(ShareRights::ASSOCIATE),
@@ -70,13 +71,13 @@ impl Source {
                 count: count.get(),
             }),
         ) {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         if authorization
             .full_range()
             .is_none_or(|range| range.range(offset, count).is_err())
         {
-            return Err(CellFail::NoRegion);
+            return Err(AccessError::NoRegion);
         }
         authorization.ensure_internal().map_err(failure)?;
         let ceiling = authorization.ceiling();
@@ -104,35 +105,35 @@ impl Source {
         hold: Arc<Hold>,
         page: PageOffset,
         count: PageCount,
-    ) -> Result<Self, CellFail> {
+    ) -> Result<Self, AccessError> {
         if !pend::live(actor) {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         let (base, size) = hold.window();
         let relative_end = page
             .get()
             .checked_add(count.get())
-            .ok_or(CellFail::NotAligned)?;
+            .ok_or(AccessError::NotAligned)?;
         if relative_end > size.get() {
-            return Err(CellFail::NoRegion);
+            return Err(AccessError::NoRegion);
         }
         let offset = base
             .get()
             .checked_add(page.get())
-            .ok_or(CellFail::NotAligned)?;
+            .ok_or(AccessError::NotAligned)?;
         let end = offset
             .checked_add(count.get())
-            .ok_or(CellFail::NotAligned)?;
+            .ok_or(AccessError::NotAligned)?;
         base.get()
             .checked_add(size.get())
-            .ok_or(CellFail::NotAligned)?;
-        end.checked_mul(PAGE_SIZE).ok_or(CellFail::NotAligned)?;
-        let full = hold.source().full_range().ok_or(CellFail::Denied)?;
+            .ok_or(AccessError::NotAligned)?;
+        end.checked_mul(PAGE_SIZE).ok_or(AccessError::NotAligned)?;
+        let full = hold.source().full_range().ok_or(AccessError::Denied)?;
         let selected = full
             .range(PageOffset::new(offset), count)
-            .map_err(|_| CellFail::NotAligned)?;
+            .map_err(|_| AccessError::NotAligned)?;
         if count.get() != selected.grain() {
-            return Err(CellFail::NotAligned);
+            return Err(AccessError::NotAligned);
         }
         let ceiling = hold.ceiling() & hold.source().ceiling();
         let position = (
@@ -140,7 +141,7 @@ impl Source {
             full.index()
                 .get()
                 .checked_add(offset)
-                .ok_or(CellFail::NotAligned)?,
+                .ok_or(AccessError::NotAligned)?,
         );
         let mut selected = Self {
             hold,
@@ -158,7 +159,7 @@ impl Source {
             Some(authority) => authority.modifiable(),
             None => selected.source().modifiable(),
         }
-        .ok_or(CellFail::Denied)?;
+        .ok_or(AccessError::Denied)?;
         if modifiable == Modifiable::No {
             selected.ceiling.remove(Access::WRITE);
         }
@@ -176,19 +177,19 @@ impl Source {
     }
     pub(crate) fn hold_provenance(
         &self,
-    ) -> Result<alloc::vec::Vec<crate::basis::flat::source::Operation>, CellFail> {
+    ) -> Result<alloc::vec::Vec<crate::basis::flat::source::Operation>, AccessError> {
         self.provenance().map_or_else(
             || Ok(alloc::vec::Vec::new()),
             |p| p.operations(self.source()).map_err(failure),
         )
     }
-    pub(crate) fn admit_provenance(&self, owner: Option<&Pend>) -> Result<(), CellFail> {
+    pub(crate) fn admit_provenance(&self, owner: Option<&Pend>) -> Result<(), AccessError> {
         if let Some(origin) = self.provenance() {
             origin.admit(owner).map_err(failure)?;
         }
         Ok(())
     }
-    fn check_provenance(&self, need: Access, export: bool) -> Result<(), CellFail> {
+    fn check_provenance(&self, need: Access, export: bool) -> Result<(), AccessError> {
         if let Some(origin) = self.provenance() {
             origin
                 .check(
@@ -201,25 +202,25 @@ impl Source {
         }
         Ok(())
     }
-    pub(crate) fn range(&self) -> Result<FlatRange, CellFail> {
+    pub(crate) fn range(&self) -> Result<FlatRange, AccessError> {
         self.check_provenance(Access::READ, false)?;
         if let Some(lineage) = &self.lineage {
             lineage.check(Modifiable::No)?;
         }
-        let actor = self.actor().ok_or(CellFail::Denied)?;
+        let actor = self.actor().ok_or(AccessError::Denied)?;
         self.source().ensure_internal().map_err(failure)?;
         let _authority = self.authority(&actor)?;
         let range = self
             .hold
             .resolve_window(self.offset, self.count)
-            .ok_or(CellFail::Denied)?;
+            .ok_or(AccessError::Denied)?;
         if range.page_count().get() != range.grain() {
-            return Err(CellFail::NotAligned);
+            return Err(AccessError::NotAligned);
         }
         Ok(range)
     }
 
-    pub(crate) fn check(&self, need: Access) -> Result<FlatRange, CellFail> {
+    pub(crate) fn check(&self, need: Access) -> Result<FlatRange, AccessError> {
         self.check_provenance(need, false)?;
         if let Some(lineage) = &self.lineage {
             lineage.check(if need.contains(Access::WRITE) {
@@ -229,20 +230,20 @@ impl Source {
             })?;
         }
         if !self.ceiling.contains(need) {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
-        let actor = self.actor().ok_or(CellFail::Denied)?;
+        let actor = self.actor().ok_or(AccessError::Denied)?;
         self.source().ensure_internal().map_err(failure)?;
         let authority = self.authority(&actor)?;
         if !self.source().branch_check(authority.as_deref(), need) {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         let range = self
             .hold
             .resolve_window(self.offset, self.count)
-            .ok_or(CellFail::Denied)?;
+            .ok_or(AccessError::Denied)?;
         if range.page_count().get() != range.grain() {
-            return Err(CellFail::NotAligned);
+            return Err(AccessError::NotAligned);
         }
         Ok(range)
     }
@@ -252,15 +253,15 @@ impl Source {
         id: usize,
         need: Access,
         maintenance: Option<&Pend>,
-    ) -> Result<PublicationFlight, CellFail> {
+    ) -> Result<PublicationFlight, AccessError> {
         let root = self.source().root();
         let operation = root
             .as_ref()
             .map(|(meta, _, _)| {
-                crate::basis::flat::source::Operation::acquire(meta).ok_or(CellFail::Busy)
+                crate::basis::flat::source::Operation::acquire(meta).ok_or(AccessError::Busy)
             })
             .transpose()?;
-        let actor = self.actor().ok_or(CellFail::Denied)?;
+        let actor = self.actor().ok_or(AccessError::Denied)?;
         self.check(need)?;
         self.admit_provenance(maintenance)?;
         let authority = self.authority(&actor)?;
@@ -284,13 +285,6 @@ impl Source {
         })
     }
 
-    pub(crate) fn limited(&self, ceiling: Access) -> Self {
-        Self {
-            ceiling: self.ceiling & ceiling,
-            ..self.clone()
-        }
-    }
-
     /// Export only through the actual caller's live Reservation PUBLISH grant.
     /// Source, original and intermediate distribution qualifications remain
     /// live dependencies through the destination Memo's hardware retirement.
@@ -299,17 +293,17 @@ impl Source {
         actor: &Arc<Task>,
         route: &pend::access::Reservation,
         index: usize,
-    ) -> Result<Self, CellFail> {
+    ) -> Result<Self, AccessError> {
         use kernel_api::model::pend::{
             FlatRights, NestRights, NestScope, Operations, PendRange, PendScope, ShareRights,
         };
         self.check_provenance(Access::READ, true)?;
         if self.range()?.staged() {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         let span = route.span().map_err(failure)?;
         if span.grain() != self.count.get() {
-            return Err(CellFail::NotAligned);
+            return Err(AccessError::NotAligned);
         }
         let (mut ceiling, _) = span.access(index)?;
         if route.entry().modifiable() != Modifiable::Yes {
@@ -318,20 +312,20 @@ impl Source {
         let previous = if let Some(lineage) = &self.lineage {
             lineage.clone()
         } else {
-            let original = self.actor().ok_or(CellFail::Denied)?;
-            let authority = self.authority(&original)?.ok_or(CellFail::Denied)?;
-            let (_, root, _) = self.source().root().ok_or(CellFail::Denied)?;
+            let original = self.actor().ok_or(AccessError::Denied)?;
+            let authority = self.authority(&original)?.ok_or(AccessError::Denied)?;
+            let (_, root, _) = self.source().root().ok_or(AccessError::Denied)?;
             let token = self.hold.branch().map_or(root, |(token, _)| token);
-            let entry = pend::locate(&original, token).ok_or(CellFail::Denied)?;
+            let entry = pend::locate(&original, token).ok_or(AccessError::Denied)?;
             if !Arc::ptr_eq(entry.authority(), &authority) {
-                return Err(CellFail::Denied);
+                return Err(AccessError::Denied);
             }
             let operations = match entry.target() {
                 pend::Target::Flat(_) => Operations::Flat(FlatRights::ASSOCIATE),
                 pend::Target::View(crate::basis::view::View::Share(_)) => {
                     Operations::Share(ShareRights::ASSOCIATE)
                 }
-                _ => return Err(CellFail::Denied),
+                _ => return Err(AccessError::Denied),
             };
             Lineage::extend(
                 None,
@@ -455,17 +449,17 @@ impl Source {
             || root.is_none() && self.source().own_range().is_none()
     }
 
-    pub(crate) fn same_page(&self, page: &Arc<Page>) -> Result<FlatRange, CellFail> {
+    pub(crate) fn same_page(&self, page: &Arc<Page>) -> Result<FlatRange, AccessError> {
         let range = self.range()?;
         let cells = range.materialized_cells()?;
         if cells.is_empty() {
-            return Err(CellFail::SourceEmpty);
+            return Err(AccessError::SourceEmpty);
         }
         let [(offset, current)] = cells.as_slice() else {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         };
         if *offset != PageOffset::ZERO || !Arc::ptr_eq(current, page) {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         Ok(range)
     }
@@ -478,15 +472,15 @@ impl Source {
         modifiable: bool,
         change: &Change,
         maintenance: Option<&Pend>,
-    ) -> Result<ExternalBorrow, CellFail> {
-        let actor = self.actor().ok_or(CellFail::Denied)?;
+    ) -> Result<ExternalBorrow, AccessError> {
+        let actor = self.actor().ok_or(AccessError::Denied)?;
         let _serial = if Arc::ptr_eq(&actor, publisher) {
             None
         } else {
-            Some(actor.pend.try_lock().ok_or(CellFail::Busy)?)
+            Some(actor.pend.try_lock().ok_or(AccessError::Busy)?)
         };
         if !pend::live(publisher) || !Arc::ptr_eq(change.page(), page) {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         let need = if modifiable {
             Access::READ | Access::WRITE
@@ -508,16 +502,16 @@ impl Source {
         .map_err(failure)
     }
 
-    fn authority(&self, actor: &Task) -> Result<Option<Arc<Pend>>, CellFail> {
+    fn authority(&self, actor: &Task) -> Result<Option<Arc<Pend>>, AccessError> {
         let Some((meta, root, authority)) = self.source().root() else {
             return if self.hold.branch().is_none() && self.source().private_owner(actor.ident.id) {
                 Ok(None)
             } else {
-                Err(CellFail::Denied)
+                Err(AccessError::Denied)
             };
         };
         let (token, authority) = self.hold.branch().unwrap_or((root, &authority));
-        let entry = pend::locate(actor, token).ok_or(CellFail::Denied)?;
+        let entry = pend::locate(actor, token).ok_or(AccessError::Denied)?;
         if !entry.associates()
             || !Arc::ptr_eq(entry.authority(), authority)
             || entry
@@ -528,7 +522,7 @@ impl Source {
                 .authority(token)
                 .is_none_or(|registered| !Arc::ptr_eq(&registered, authority))
         {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         Ok(Some(authority.clone()))
     }
@@ -547,11 +541,11 @@ impl Drop for PublicationFlight {
     }
 }
 
-fn failure(error: PendFail) -> CellFail {
+fn failure(error: PendFail) -> AccessError {
     match error {
-        PendFail::OutOfMemory => CellFail::OutOfMemory,
-        PendFail::Busy => CellFail::Busy,
-        PendFail::NotAligned => CellFail::NotAligned,
-        _ => CellFail::Denied,
+        PendFail::OutOfMemory => AccessError::OutOfMemory,
+        PendFail::Busy => AccessError::Busy,
+        PendFail::NotAligned => AccessError::NotAligned,
+        _ => AccessError::Denied,
     }
 }

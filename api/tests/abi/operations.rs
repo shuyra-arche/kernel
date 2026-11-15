@@ -63,7 +63,7 @@ fn terminal_operations_keep_their_request_abi_without_a_return_decoder() {
 
 #[test]
 fn unknown_failure_codes_remain_abi_violations() {
-    use kernel_api::abi::call::cell::operations::Delete;
+    use kernel_api::abi::call::share_view::operations::Delete;
     assert!(
         std::panic::catch_unwind(|| Delete::decode_return(((-100isize) as usize, 0, 0))).is_err()
     );
@@ -71,12 +71,6 @@ fn unknown_failure_codes_remain_abi_violations() {
 
 #[test]
 fn error_domains_preserve_busy_and_auxiliary_codes() {
-    assert_eq!(kernel_api::abi::call::cell::CellFail::Busy.code(), -7);
-    assert!(
-        kernel_api::abi::call::cell::CellFail::of_code(-7)
-            .unwrap()
-            .is_busy()
-    );
     assert_eq!(kernel_api::abi::call::sign::SignEventFail::Busy.code(), -3);
     assert!(
         kernel_api::abi::call::sign::SignEventFail::of_code(-3)
@@ -90,7 +84,6 @@ fn error_domains_preserve_busy_and_auxiliary_codes() {
 #[test]
 fn out_of_memory_keeps_each_domain_code() {
     use kernel_api::abi::call::{
-        cell::CellFail,
         clone_view::CloneFail,
         pend::PendFail,
         room::RoomFail,
@@ -105,7 +98,6 @@ fn out_of_memory_keeps_each_domain_code() {
 
     assert_eq!(
         [
-            CellFail::OutOfMemory.code(),
             CloneFail::OutOfMemory.code(),
             PendFail::OutOfMemory.code(),
             RoomFail::OutOfMemory.code(),
@@ -114,7 +106,7 @@ fn out_of_memory_keeps_each_domain_code() {
             SignEventFail::OutOfMemory.code(),
             UnitFail::OutOfMemory.code(),
         ],
-        [-2, -4, -3, -2, -4, -4, -4, -3],
+        [-4, -3, -2, -4, -4, -4, -3],
     );
     let reply = SignReply::Source {
         source: SignSource::Inspect {
@@ -141,11 +133,6 @@ fn compound_field_widths_match_their_actual_register_consumption() {
     }
     let token = kernel_api::model::identity::PendId::mint(17);
     let team = kernel_api::model::identity::TeamId::new(19);
-    let reference = kernel_api::model::cell::SlotId::from_bytes(&29u64.to_le_bytes()).unwrap();
-    let range = kernel_api::model::cell::ReferenceRange::new(reference, 3, 5).unwrap();
-    let allocation = kernel_api::model::cell::Allocation::new(4096, 4096).unwrap();
-    check(allocation);
-    check(range);
     check(kernel_api::model::pend::PendRange::Inherit);
     check(kernel_api::model::pend::PendRange::pages(3, 5).unwrap());
     check(kernel_api::model::unit::UnitTarget::Task(
@@ -166,10 +153,9 @@ fn compound_field_widths_match_their_actual_register_consumption() {
 #[test]
 fn mapping_observation_requires_a_pend_and_retired_device_abi_is_rejected() {
     use kernel_api::{
-        abi::call::{EnvCall, cell::operations::Create},
+        abi::call::EnvCall,
         model::{identity::PendId, nest::ReservationId, sign::SignSource},
     };
-    assert_eq!(Create::SLOT, kernel_api::abi::PREFIX | (2usize << 32));
     for slot in [2, 3, 7, 8, 9] {
         assert!(
             EnvCall::from_wire(kernel_api::abi::PREFIX | (13usize << 32) | slot, &[1; 6]).is_err()

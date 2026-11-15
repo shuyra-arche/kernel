@@ -97,14 +97,8 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/vanllia"
-      - name: Adapt historical fixture manifest to the current provider
-        run: |
-          python3 - <<'PYTHON'
-          from pathlib import Path
-          for relative in ['tests/memory', 'platform/riscv']:
-              manifest = Path('.integration/vanllia') / relative / 'Cargo.toml'
-              manifest.write_text(manifest.read_text().replace(', features = ["memory-v11"]', ''))
-          PYTHON
+      - name: Adapt pinned native fixture to the current provider
+        run: python3 server/tests/guest/native/prepare.py --fixture .integration/vanllia
       - name: Run current native provider (debug)
         run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE"
       - name: Reject ABI 10 Capsule
