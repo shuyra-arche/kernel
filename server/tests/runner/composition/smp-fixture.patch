@@ -151,6 +151,15 @@
      kernel_client::call::unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
  }
  
+@@ -69,7 +68,7 @@
+     use kernel_api::abi::{self, error::DispatchFail};
+     for slot in [
+         (10usize << 48),
+-        (12usize << 48),
++        ((abi::VERSION as usize + 1) << 48),
+         abi::PREFIX | (2usize << 32),
+         abi::PREFIX | (10usize << 32) | 2,
+     ] {
 --- a/tests/memory/guest/support.rs
 +++ b/tests/memory/guest/support.rs
 @@ -43,16 +43,17 @@
