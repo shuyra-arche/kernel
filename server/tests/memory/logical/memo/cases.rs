@@ -434,7 +434,7 @@ fn exact_publication_retains_provenance_through_withdrawal_until_settlement() {
 
 #[test]
 fn failed_publication_keeps_its_exact_completion_through_retirement() {
-    use crate::basis::unit::task::memory_result::{Completion, Transition};
+    use crate::basis::unit::task::request::{Completion, Transition};
     let (mut memo, _, _) = logical();
     let pool = Pool::new(0);
     let page = page(pool);
