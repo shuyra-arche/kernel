@@ -51,23 +51,32 @@ same-object branch, and cannot accept a caller-selected `(TaskId, Lock)`.
 ### A reverse nonblocking acquisition exists
 
 [`nest/memo/source.rs::Source::borrow`](../../server/src/basis/nest/memo/source.rs)
-explicitly requires the publisher's serial and COMMIT. If the source actor
-is another Task, it then calls **that actor's** `pend.try_lock()` before
-source/authority/Page admission. Thus current code contains:
+documents a precondition of the publisher's serial and COMMIT. If the source
+actor is another Task, it then calls **that actor's** `pend.try_lock()` before
+source/authority/Page admission. The actual native caller needs separate care:
+[`entry/call/nest/next.rs::effect`](../../server/src/entry/call/nest/next.rs)
+releases its preparation serial/COMMIT scope before calling
+`Nest::publish_memo_report`. That owner takes COMMIT before calling
+`Source::borrow`, without establishing a publisher serial in that method.
+The documented serial precondition is therefore not established by this
+native call chain. The directly confirmed acquisition is:
 
 ```text
-publisher LedgerSerial -> COMMIT -> try(source actor LedgerSerial)
+COMMIT -> try(source actor LedgerSerial), when source actor != publisher
 ```
 
-The `None` Level hides this from the legacy order predicate. This is not
+A caller that separately retained the publisher serial would add another
+ancestor; do not infer it merely from Source::borrow's comment. The `None`
+Level hides this reverse edge from the legacy order predicate. This is not
 ordinary `LedgerSerial -> Commit` and is not a same-instance COMMIT reentry.
 A failed try returns Busy without waiting, but the successful branch performs
 further locking; it cannot be treated as a leaf exception without auditing
 those successors. Do not add `Before<LedgerSerial> for Commit` to make it
 compile. Prefer preparing both actual Task owners and taking their controlled
 TaskId pair **before** COMMIT, then repeat source and publisher validation.
-All callers and the retained hardware admission must be inspected before that
-change; this audit has not proved that rewrite equivalent.
+The observed source and publisher identities must be revalidated after taking
+the pair; all callers and the retained hardware admission need inspection before
+that change; this audit has not proved that rewrite equivalent.
 
 ### Opposite Pend state/parent nesting exists
 
