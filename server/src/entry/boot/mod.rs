@@ -55,19 +55,6 @@ pub fn image_region() -> kernel_api::boot::platform::Region {
 }
 
 pub fn start() -> Result<(), BootError> {
-    start_in(crate::basis::nest::SpaceKind::User)
-}
-
-/// Boot a trusted privileged Capsule instead of the ordinary User manager.
-/// This image cannot use the public Client: S-mode ECALL belongs to SBI.
-/// # Safety
-/// The platform trusts every byte of the Supervisor image and its dependencies.
-/// Its firmware calls and private execution protocol must not use User ABI calls.
-pub unsafe fn start_supervisor() -> Result<(), BootError> {
-    start_in(crate::basis::nest::SpaceKind::Supervisor)
-}
-
-fn start_in(kind: crate::basis::nest::SpaceKind) -> Result<(), BootError> {
     if !devices::ready() {
         return Err(BootError::Description("devices not configured"));
     }
@@ -76,7 +63,7 @@ fn start_in(kind: crate::basis::nest::SpaceKind) -> Result<(), BootError> {
     crate::metal::measure::init().map_err(BootError::Scheduler)?;
     register_runtime_hooks();
 
-    if let Some(entry) = spawn_entry(kind)? {
+    if let Some(entry) = spawn_entry()? {
         crate::basis::room::shutdown::watch(&entry);
         crate::entry::work::observe::start()?;
     }
@@ -130,9 +117,7 @@ pub(crate) fn register_runtime_hooks() {
     );
 }
 
-fn spawn_entry(
-    kind: crate::basis::nest::SpaceKind,
-) -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Task>>, BootError> {
+fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Task>>, BootError> {
     let Some(region) = facts::info().initrd() else {
         return Ok(None);
     };
@@ -143,7 +128,7 @@ fn spawn_entry(
             base: region.base,
             size: region.size,
         })?;
-    let team = crate::basis::unit::team::capsule::assemble(capsule, kind).map_err(|source| {
+    let team = crate::basis::unit::team::capsule::assemble(capsule).map_err(|source| {
         BootError::Mapping {
             operation: MapOperation::AssembleCapsule,
             source,

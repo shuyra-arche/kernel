@@ -175,10 +175,8 @@ work uses a private supervisor function-call scheduling boundary. Pin API,
 Client, Kernel and boot image to one revision; no mixed-transport window exists.
 Capsule format stays 2; its required Kernel ABI byte and Ledger version are 12.
 
-The ordinary `boot::start` Capsule is now a User manager. Its initial grants
-come from the Ledger, not supervisor execution privilege. Platforms needing a
-trusted Supervisor bootstrap must explicitly use unsafe `boot::start_supervisor`;
-that image uses SBI/private interfaces and cannot invoke public Client calls.
-This preserves a distinct privileged boot path without interpreting S-mode
-ECALL or breakpoints as a public syscall. Rebuild System/Toolchain boot images
-as User-mode consumers before selecting ABI 12.
+The `boot::start` Capsule is a User manager. Its initial grants come from the
+Ledger, not supervisor execution privilege. All external images and Tasks
+execute in User mode; only Kernel-owned resident work executes in Supervisor
+mode. Rebuild System/Toolchain boot images as User-mode consumers before
+selecting ABI 12. There is no privileged Capsule construction interface.
