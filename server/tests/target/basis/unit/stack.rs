@@ -13,6 +13,7 @@ pub struct Stack {
     pub base: VirtAddr,
     flat: SlotPosition,
     memo: MemoPosition,
+    guard: Option<MemoPosition>,
 }
 fn change(action: impl Fn() -> Action) -> Value {
     let deadline = room::clock() + 5_000_000_000;
@@ -43,15 +44,37 @@ fn change(action: impl Fn() -> Action) -> Value {
 }
 impl Stack {
     pub fn new(entry: usize, args: &[usize], size: usize) -> Self {
+        Self::prepare(entry, args, size, false)
+    }
+    /// Optional RT admission prepares a fully resident body Reservation, with
+    /// its absent guard retained separately by this Runtime owner.
+    pub fn resident(entry: usize, args: &[usize], size: usize) -> Self {
+        Self::prepare(entry, args, size, true)
+    }
+    fn prepare(entry: usize, args: &[usize], size: usize, resident: bool) -> Self {
         let size = size.max(16384).next_multiple_of(PAGE_SIZE);
         let pages = size / PAGE_SIZE;
         let flat = create(pages);
-        let (memo, base) =
-            reserve_pages(space(), Placement::lowest(PAGE_SIZE).unwrap(), 6, pages + 1);
+        let (memo, base, guard, first) = if resident {
+            let (memo, body) =
+                reserve_pages(space(), Placement::highest(PAGE_SIZE).unwrap(), 6, pages);
+            let (guard, base) = reserve_pages(
+                space(),
+                Placement::exact(body - PAGE_SIZE, PAGE_SIZE).unwrap(),
+                6,
+                1,
+            );
+            (memo, base, Some(guard), 0)
+        } else {
+            let (memo, base) =
+                reserve_pages(space(), Placement::lowest(PAGE_SIZE).unwrap(), 6, pages + 1);
+            (memo, base, None, 1)
+        };
         for page in 0..pages {
             let slot = SlotPosition::new(flat.token(), flat.flat(), page).unwrap();
             let target =
-                MemoPosition::new(memo.token(), memo.nest(), memo.reservation(), page + 1).unwrap();
+                MemoPosition::new(memo.token(), memo.nest(), memo.reservation(), page + first)
+                    .unwrap();
             change(|| Action::Occupy {
                 slot,
                 expected: slot_status(slot).version,
@@ -87,27 +110,30 @@ impl Stack {
             base,
             flat,
             memo,
+            guard,
         }
     }
     /// Call after the child is independently observed reclaimed, or while it is
     /// still dormant and has never run. Release
     /// settles its real hardware obligations before the Flat may be deleted.
     pub fn retire(self) {
-        change(|| {
-            let Snapshot::Reservation(status) = inspect(Query::Reservation {
-                token: self.memo.token(),
-                nest: self.memo.nest(),
-                reservation: self.memo.reservation(),
-            }) else {
-                panic!("reservation")
-            };
-            Action::Release {
-                token: self.memo.token(),
-                nest: self.memo.nest(),
-                reservation: self.memo.reservation(),
-                expected: status.version,
-            }
-        });
+        for memo in [Some(self.memo), self.guard].into_iter().flatten() {
+            change(|| {
+                let Snapshot::Reservation(status) = inspect(Query::Reservation {
+                    token: memo.token(),
+                    nest: memo.nest(),
+                    reservation: memo.reservation(),
+                }) else {
+                    panic!("reservation")
+                };
+                Action::Release {
+                    token: memo.token(),
+                    nest: memo.nest(),
+                    reservation: memo.reservation(),
+                    expected: status.version,
+                }
+            });
+        }
         change(|| {
             let Snapshot::Flat(status) = inspect(Query::Flat {
                 token: self.flat.token(),

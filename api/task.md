@@ -58,3 +58,10 @@ and backtraces; System must publish stack/arguments into the target Nest before
 creating its Task. Each owner must retain partial preparation and clean up only
 after its real memory operation settles. Kernel-only tests do not constitute
 assembled System/Toolchain acceptance.
+
+Optional real-time admission retains its existing restricted-residency policy:
+it resolves the current Reservation containing SP-1, with a 64 KiB maximum,
+before admission. Runtime must prepare that body as fully writable/resident and
+keep any absent guard in a separate Reservation. This is an RT admission
+constraint, not ordinary Task creation policy or Kernel ownership of the stack;
+subsequent authorized memory withdrawal follows the existing RT fault behavior.
