@@ -57,7 +57,7 @@ impl Stack {
         let flat = create(pages);
         let (memo, base, guard, first) = if resident {
             let (memo, body) =
-                reserve_pages(space(), Placement::highest(PAGE_SIZE).unwrap(), 6, pages);
+                reserve_pages(space(), Placement::highest(), 6, pages);
             let (guard, base) = reserve_pages(
                 space(),
                 Placement::exact(body - PAGE_SIZE, PAGE_SIZE).unwrap(),
