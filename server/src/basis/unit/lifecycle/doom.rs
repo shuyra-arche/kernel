@@ -135,6 +135,8 @@ fn request(node: &Arc<TeamNode>, exit: TeamExit) {
             child: 0,
         },
     );
+    drop(pending);
+    super::WORK.notify();
     crate::basis::room::deadline::retry();
 }
 /// Four local member/child steps. The queue itself supplies storage, so failure

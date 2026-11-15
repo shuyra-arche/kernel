@@ -4,6 +4,7 @@ pub(super) mod key;
 pub(super) mod site;
 
 pub(super) mod block;
+pub(crate) mod resident;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;

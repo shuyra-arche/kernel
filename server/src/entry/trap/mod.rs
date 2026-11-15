@@ -126,6 +126,17 @@ pub(crate) fn handle(
             if !from_task {
                 crate::entry::report::halt::trap(frame, 3, 0);
             }
+            let resident = ident.as_ref().map(|i| i.task_id()).unwrap_or(0);
+            if frame.gpr.x(crate::metal::switcher::context::Gprs::A7) == usize::MAX
+                && crate::basis::unit::lifecycle::WORK.identifies(resident)
+            {
+                drop(ident);
+                drop(root.take());
+                if let Some(next) = crate::entry::work::park(frame, resident) {
+                    return resume(next);
+                }
+                return resume(frame as *mut _);
+            }
             match envcall(frame, ident, root.take().expect("Task call boundary")) {
                 Some(next) => next,
                 None => crate::basis::unit::lifecycle::quit() as *mut TrapContext,

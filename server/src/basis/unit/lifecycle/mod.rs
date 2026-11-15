@@ -71,7 +71,32 @@ pub(crate) use doom::exit_team;
 pub(crate) use doom::slay;
 pub(crate) use doom::take_doomed;
 pub(crate) use doom::{Termination, branch_stats};
-pub(crate) use reap::bury;
+pub(crate) use reap::{Progress, advance};
+pub(crate) static WORK: crate::basis::sign::Resident = crate::basis::sign::Resident::new();
+static LAST: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+pub(super) fn progressed() {
+    LAST.store(crate::metal::clock::now().as_ticks(), Ordering::Release);
+}
+/// Scheduler-stack safety path: startup, shutdown/self-reap and a watchdog for
+/// service starvation. Normal retained cleanup executes on the resident Task.
+pub(crate) fn bury() {
+    WORK.poll();
+    let stopping = {
+        let _commit = crate::basis::commit();
+        crate::basis::room::shutdown::active()
+    };
+    if stopping {
+        WORK.notify();
+    }
+    let late = crate::metal::clock::now()
+        .as_ticks()
+        .saturating_sub(LAST.load(Ordering::Acquire))
+        >= crate::metal::clock::duration_to_ticks(core::time::Duration::from_millis(100));
+    if !WORK.bound() || stopping || (late && reap::pending()) {
+        let _ = advance();
+    }
+}
+
 pub(crate) use reap::hook;
 pub(crate) use reap::quit;
 
