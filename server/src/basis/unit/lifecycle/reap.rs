@@ -217,10 +217,17 @@ pub(crate) fn advance() -> Progress {
             };
             z
         };
-        if z.retire().is_err() {
-            HUSKS.lock().enqueue(z);
-            blocked = true;
-            break;
+        match z.advance_retirement() {
+            Ok(true) => {}
+            Ok(false) => {
+                HUSKS.lock().enqueue(z);
+                continue;
+            }
+            Err(_) => {
+                HUSKS.lock().enqueue(z);
+                blocked = true;
+                break;
+            }
         }
         if let Some(member) = z.ident.team.node.member(z.ident.id) {
             member.reclaim();

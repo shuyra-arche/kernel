@@ -21,6 +21,7 @@ impl Resident {
             &task.ident.team,
             &crate::basis::unit::team::kernel().expect("Kernel Team")
         ));
+        assert!(task.held(), "register before Task release");
         assert_eq!(self.id.load(Ordering::Relaxed), 0);
         let key = WakeKey::Alarm {
             task: task.ident.id,
@@ -60,6 +61,23 @@ impl Resident {
         crate::basis::room::deadline::retry();
     }
     pub(crate) fn poll(&self) {
+        // An unexpectedly cancelled service may never execute its loop epilogue.
+        // Resolve only its registered identity, with all Hart-tracked weak borrows
+        // consumed under COMMIT; fallback must not depend on that Task returning.
+        let dead = {
+            let _commit = crate::basis::commit();
+            let id = self.id.load(Ordering::Acquire);
+            id != 0
+                && crate::basis::unit::task::registry::find(
+                    kernel_api::model::identity::TaskId::new(id),
+                )
+                .and_then(|weak| weak.upgrade())
+                .is_none_or(|task| task.dead())
+        };
+        if dead {
+            self.close();
+        }
+
         let due = self.retry.load(Ordering::Acquire);
         if due != u64::MAX {
             if clock::now().as_ticks() >= due {
@@ -81,6 +99,8 @@ impl Resident {
     pub(crate) fn wait(&self) -> Handoff<()> {
         let blocked = {
             let commit = crate::basis::commit();
+            #[cfg(debug_assertions)]
+            let _no_allocation = crate::metal::allocator::NoAllocation::enter();
             let task = current().running_task().expect("resident Task");
             assert!(self.identifies(task.ident.id.get()));
             let key = WakeKey::Alarm {

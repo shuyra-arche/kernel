@@ -3,6 +3,37 @@ use crate::basis::nest::NestError;
 use kernel_api::model::identity::TaskId;
 use std::sync::{Arc, atomic::Ordering};
 
+// Keep the existing retention/receipt harness's completion-only interface;
+// runnable and blocked results are checked directly by the contract below.
+impl Task {
+    fn retire(self: &Arc<Self>) -> Result<(), NestError> {
+        if self.advance_retirement()? {
+            Ok(())
+        } else {
+            Err(NestError::Busy)
+        }
+    }
+}
+#[test]
+fn runnable_retirement_is_distinct_from_a_blocked_obligation() {
+    let task = Task::new();
+    assert_eq!(task.advance_retirement(), Ok(false));
+    task.pend_busy.store(true, Ordering::Release);
+    assert_eq!(task.advance_retirement(), Err(NestError::Busy));
+    assert!(matches!(*task.retirement.lock(), Retirement::Pends));
+    task.pend_busy.store(false, Ordering::Release);
+    assert_eq!(task.advance_retirement(), Ok(false));
+    assert!(matches!(*task.retirement.lock(), Retirement::Memory));
+    task.ident.busy.store(true, Ordering::Release);
+    assert_eq!(task.advance_retirement(), Err(NestError::Busy));
+    assert!(matches!(*task.retirement.lock(), Retirement::Memory));
+    task.ident.busy.store(false, Ordering::Release);
+    assert_eq!(task.advance_retirement(), Ok(false));
+    assert_eq!(task.advance_retirement(), Ok(false));
+    assert_eq!(task.advance_retirement(), Ok(true));
+    assert_eq!(task.advance_retirement(), Ok(true));
+}
+
 #[test]
 fn each_turn_advances_one_stage_without_replaying_completed_effects() {
     let task = Task::new();
