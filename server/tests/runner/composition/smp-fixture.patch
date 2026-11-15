@@ -91,7 +91,7 @@
 +        loop {
 +            self.begin(action);
 +            let response = self.finish()?;
-+            if matches!(action, Action::Block { .. }) && matches!(&response, Response::Reply(r) if r.outcome() == Outcome::Rejected(Failure::Busy)) {
++            if matches!(action, Action::Block { .. } | Action::Allow { .. }) && matches!(&response, Response::Reply(r) if r.outcome() == Outcome::Rejected(Failure::Busy)) {
 +                assert!(room::clock() < deadline);
 +                room::yield_();
 +                continue;
