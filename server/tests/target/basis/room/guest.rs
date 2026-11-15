@@ -4,6 +4,7 @@
 #![no_main]
 #[allow(dead_code)]
 mod support;
+#[allow(dead_code)]
 mod stack;
 use core::{
     fmt::Write,

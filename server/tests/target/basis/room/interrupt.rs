@@ -4,6 +4,7 @@
 #![no_main]
 #[allow(dead_code)]
 mod support;
+#[allow(dead_code)]
 mod stack;
 use core::{
     fmt::Write,
@@ -274,10 +275,54 @@ fn transport_contract() {
     }
     marker(b"PASS user-ecall breakpoints=2 unknown=1\n");
 }
+extern "C" fn explicit_entry(at: *const usize, count: usize) -> ! {
+    assert_eq!(count, 2);
+    assert_eq!(unsafe { at.read() }, 0x1234);
+    assert_eq!(unsafe { at.add(1).read() }, 0x5678);
+    exit(77)
+}
+extern "C" fn guard_entry(at: *const usize, _: usize) -> ! {
+    let guard = unsafe { at.read() };
+    unsafe { (guard as *mut usize).write_volatile(1); }
+    exit(78)
+}
+fn startup_contract() {
+    use kernel_api::model::unit::ExitCause;
+    let memory = stack::Stack::new(explicit_entry as *const () as usize, &[], 65536);
+    let mut start = memory.start;
+    // Deliberately separate arguments from SP and span a page boundary.
+    start.arguments = memory.base + 2 * 4096 - 8;
+    start.argument_count = 2;
+    start.stack_pointer = start.stack_pointer - 32;
+    unsafe { (start.arguments.get() as *mut usize).write(0x1234); ((start.arguments.get() + 8) as *mut usize).write(0x5678); }
+    let create = |start| {
+        let bytes = UnitCreate::Task { team: None, start }.to_bytes();
+        let CreatedUnit::Task(task) = unit::create(VirtAddr::new(bytes.as_ptr() as usize)).unwrap() else { panic!("Task") };
+        task
+    };
+    let task = create(start);
+    unit::resume(UnitTarget::Task(task)).unwrap();
+    wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).reclaimed);
+    assert_eq!(support::task_info(UnitQuery::Target(UnitTarget::Task(task))).exit, Some((ExitCause::Normal,77)));
+    // Task reclamation must leave the Runtime's stack and arguments accessible.
+    assert_eq!(unsafe { (start.arguments.get() as *const usize).read_volatile() }, 0x1234);
+    unit::delete(UnitTarget::Task(task)).unwrap();
+    memory.retire();
+    let guard = stack::Stack::new(guard_entry as *const () as usize, &[0], 32768);
+    unsafe { (guard.start.arguments.get() as *mut usize).write(guard.base.get()); }
+    let task = create(guard.start);
+    unit::resume(UnitTarget::Task(task)).unwrap();
+    wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).reclaimed);
+    assert_eq!(support::task_info(UnitQuery::Target(UnitTarget::Task(task))).exit.unwrap().0, ExitCause::Fault);
+    unit::delete(UnitTarget::Task(task)).unwrap();
+    guard.retire();
+    marker(b"PASS task-start cross-page=1 independent-sp=1 guard=1 retained-stack=1\n");
+}
 #[unsafe(no_mangle)]
 extern "C" fn run(at: usize, count: usize) -> ! {
     support::boot(at, count);
     transport_contract();
+    startup_contract();
     let words = unsafe { core::slice::from_raw_parts(at as *const usize, count) };
     let entries = Entries::new(unsafe {
         core::slice::from_raw_parts(words[args::LEDGER] as *const u8, words[args::LEDGER_LEN])
