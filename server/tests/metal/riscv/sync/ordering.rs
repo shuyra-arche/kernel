@@ -162,3 +162,28 @@ fn execution_boundary_rejects_a_root_under_a_live_legacy_ancestor() {
     drop(guard);
     assert!(trap::enabled());
 }
+
+#[test]
+fn clone_queue_growth_keeps_allocator_leaves_below_both_ancestors() {
+    use provider::sync::legacy::LegacyLock;
+    let serial = LegacyLock::<order::LedgerSerial, _>::new(());
+    let queue = LegacyLock::<order::CloneQueue, _>::new(());
+    let pump = LegacyLock::<order::BlockPump, _>::new(());
+    let pool = LegacyLock::<order::BlockPool, _>::new(());
+    let tally = LegacyLock::<order::Tally, _>::new(());
+    let frame = LegacyLock::<order::Frame, _>::new(());
+    let _serial = serial.lock();
+    let _queue = queue.lock();
+    {
+        let _pump = pump.lock();
+    }
+    {
+        let _pool = pool.lock();
+        {
+            let _tally = tally.lock();
+        }
+        {
+            let _frame = frame.lock();
+        }
+    }
+}
