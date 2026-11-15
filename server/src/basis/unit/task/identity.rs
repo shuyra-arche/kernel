@@ -89,22 +89,31 @@ impl TaskIdent {
         // Scheduler admission owns its existing Preparation lease until this
         // method returns. Task::retire observes preparing() and cannot take the
         // original TaskMemory while these immutable coordinates are resolved.
-        let (start, size) = {
+        let (bootstrap, stack_pointer) = {
             let stored = self.memory.lock();
             let memory = stored.as_ref().ok_or(NestError::Busy)?;
             memory.frame.as_ref().ok_or(NestError::NoRegion)?;
-            if let Some(stack) = &memory.bootstrap {
-                stack
-                    .mapping
-                    .as_ref()
-                    .ok_or(NestError::NoRegion)?
-                    .initial_range()
-            } else {
-                self.team
-                    .nest
-                    .mapping_range(memory.start.stack_pointer - 1)
-                    .ok_or(NestError::NoRegion)?
-            }
+            let bootstrap = match &memory.bootstrap {
+                Some(stack) => Some(
+                    stack
+                        .mapping
+                        .as_ref()
+                        .ok_or(NestError::NoRegion)?
+                        .initial_range(),
+                ),
+                None => None,
+            };
+            (bootstrap, memory.start.stack_pointer)
+        };
+        // The Preparation lease protects these copied coordinates. Do not hold
+        // TaskMemory while entering the target Nest's independent layout owner.
+        let (start, size) = match bootstrap {
+            Some(range) => range,
+            None => self
+                .team
+                .nest
+                .mapping_range(stack_pointer - 1)
+                .ok_or(NestError::NoRegion)?,
         };
         if size > 64 * 1024 {
             return Err(NestError::NoRegion);
