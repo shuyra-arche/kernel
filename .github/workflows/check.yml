@@ -40,6 +40,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check Rust module layout
+        run: |
+          bash tools/tests/layout.sh
+          bash tools/check-layout.sh
       - name: Test QEMU partition contract
         run: python3 server/tests/hardware/tests/shard.py
       - name: Install CI toolchain

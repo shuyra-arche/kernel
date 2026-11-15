@@ -116,7 +116,7 @@ serial held. The raw mechanism requires unsafe owner proof; arbitrary caller
 ID/Lock tuples and Root's generic Flat pair cannot safely instantiate it.
 Its typed entry also borrows the Root, and its COMMIT child borrows the pair.
 
-`nest/memo/source.rs::Source::borrow` has the **sole** reverse try exception:
+`nest/memo/source/mod.rs::Source::borrow` has the **sole** reverse try exception:
 while the real global COMMIT is held, a foreign source actor's serial is tried
 once. Native publication can enter with COMMIT alone; the publisher's serial
 is not assumed to exist. Debug requires exactly that actual COMMIT, at most

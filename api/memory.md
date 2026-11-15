@@ -50,7 +50,7 @@ The actual Task scopes each monotonic `RequestId`. The bounded result
 journal preserves accepted work and independent delivery status; a
 delivery failure does not imply that a mutation was rejected or rolled
 back. Inspect the original request instead of blindly replaying a
-side-effecting call. [Client](../client/src/memory.rs) performs one trap
+side-effecting call. [Client](../client/src/memory/mod.rs) performs one trap
 and no automatic retry or v10 fallback.
 
 Native [Share.Derive](src/abi/call/view/share.rs) can derive a scoped
