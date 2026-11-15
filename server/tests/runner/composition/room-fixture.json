@@ -1,4 +1,3 @@
 {
-  "tests/memory/guest/virtqueue.rs": "3bb43bc93dc21974f28bb5cb1b2e031634f221ea1b6b0f7dacaa7a30642b518b",
   "tests/memory/platform/main.rs": "93bef5d37b6b5aab9cb3cb0b6ea400f1217487fb17eb7645105b06ee1bab8ec5"
 }
