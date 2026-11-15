@@ -17,7 +17,7 @@ git add api/src/memory.rs
 if bash "$checker" 2>errors; then
     echo 'missed staged source conflict' >&2; exit 1
 fi
-rg -q 'api/src/memory.rs' errors
+grep -q 'api/src/memory.rs' errors
 git rm -q --cached api/src/memory.rs
 bash "$checker"
 # Nested guests, spaces and non-Rust directory children are included.
@@ -26,6 +26,6 @@ git add server tools
 if bash "$checker" 2>errors; then
     echo 'missed nested guest conflict' >&2; exit 1
 fi
-rg -q 'server/tests/target/cell/space.rs' errors
-rg -Fq 'tools/with\ space.rs' errors
+grep -q 'server/tests/target/cell/space.rs' errors
+grep -Fq 'tools/with\ space.rs' errors
 echo 'layout checker contracts passed'
