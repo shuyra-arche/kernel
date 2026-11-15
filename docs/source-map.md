@@ -7,11 +7,13 @@ specification. Use the [design](design/main.typ) for reasons and the
 | Question | Public entry | Enforcing owner |
 | --- | --- | --- |
 | Who executes, stops, schedules and waits? | [Unit](../api/src/abi/call/unit.rs), [Room](../api/src/abi/call/room.rs) | [Unit](../server/src/basis/unit/), [Room](../server/src/basis/room/) |
-| What holds and transfers Page storage? | [Memory contract](../api/memory.md), [Cell calls](../api/src/abi/call/cell.rs) | [Flat](../server/src/basis/flat/), [Page](../server/src/basis/cell/page/) |
-| What reserves addresses and publishes access? | [Nest](../api/src/abi/call/nest.rs), [native memory request](../api/src/abi/memory/request.rs) | [Nest](../server/src/basis/nest/) |
+| What holds and transfers Page storage? | [Memory contract](../api/memory.md), [Native Flat requests](../api/src/abi/memory/request.rs) | [Flat](../server/src/basis/flat/), [Page](../server/src/basis/cell/page/) |
+| What reserves addresses and publishes access? | [native memory request](../api/src/abi/memory/request.rs) | [Nest](../server/src/basis/nest/) |
 | Who delegates or revokes resource access? | [Pend](../api/src/abi/call/pend.rs), [scopes](../api/src/model/pend/scope.rs) | [Pend](../server/src/basis/pend/) |
 | How are data and control delivered? | [Clone](../api/src/abi/call/view/clone.rs), [Share](../api/src/abi/call/view/share.rs), [Sign](../api/src/abi/call/sign.rs) | [View](../server/src/basis/view/), [Sign](../server/src/basis/sign/) |
+| Who owns a Flat export shared by Flat Pend and Share? | [Share](../api/src/abi/call/view/share.rs) | [Flat source](../server/src/basis/flat/source/); [Pend source authority](../server/src/basis/pend/source/) owns live permission and [Nest](../server/src/basis/nest/) owns publication/retirement |
 | Where is a call decoded? | [ABI](../api/src/abi/call/), [native Frame](../api/src/abi/memory/call.rs) | [Entry](../server/src/entry/) |
+| Who accepts, replays and records memory requests? | [Memory requests](../api/src/abi/memory/request.rs) | [Task request owner](../server/src/basis/unit/task/request/); Entry copies/routes descriptors and resource owners enforce transitions |
 | What supplies trusted external hardware facts? | [Boot](../api/src/boot/), [memory contract](../api/memory.md) | [Boot](../server/src/entry/boot/), [Metal](../server/src/metal/) |
 | What retains retired resource responsibility? | [Memory](../api/memory.md#coherence-and-retirement) | [Nest translation](../server/src/basis/nest/translation/), [IOMMU](../server/src/metal/riscv/iommu/) |
 | Who supplies global memory observations? | [Snapshot](../api/src/model/memory.rs) | [Observer](../server/src/entry/observe/), [Allocator](../server/src/metal/allocator/) |

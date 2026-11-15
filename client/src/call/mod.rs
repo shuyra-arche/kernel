@@ -27,10 +27,7 @@ macro_rules! typed_calls {
     (@result fallible $result:ident) => { $result };
 }
 
-pub mod cell;
 pub mod debug;
-pub mod flat;
-pub mod nest;
 pub mod pend;
 pub mod room;
 pub mod sign;

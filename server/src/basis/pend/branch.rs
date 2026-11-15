@@ -7,7 +7,7 @@ use kernel_api::model::identity::PendId;
 
 use super::PendEntry;
 use super::ledger::pair;
-use crate::basis::flat::sharing::SharingOperation;
+use crate::basis::flat::source::Operation;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::task::Task;
@@ -84,7 +84,7 @@ pub(crate) fn accord(
     }
     let share_view = observed.target().memory();
     let _operation = if let Some(meta) = &share_view {
-        let operation = SharingOperation::acquire(meta).ok_or(PendFail::Busy)?;
+        let operation = Operation::acquire(meta).ok_or(PendFail::Busy)?;
         Some(operation)
     } else {
         None
@@ -217,7 +217,7 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
         let share = observed.target().memory();
         let _operation = share
             .as_ref()
-            .map(|meta| SharingOperation::acquire(meta).ok_or(PendFail::Busy))
+            .map(|meta| Operation::acquire(meta).ok_or(PendFail::Busy))
             .transpose()?;
         let (observed, limits, authorization) = {
             let _serial = task.pend.lock();

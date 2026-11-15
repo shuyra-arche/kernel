@@ -62,7 +62,7 @@ pub(in super::super) fn init() -> Result<(), NestError> {
     let attrs =
         flags & (Attributes::USER | Attributes::GLOBAL | Attributes::ACCESSED | Attributes::DIRTY);
     for h in 0..segments {
-        let boot = crate::tag!(TrapStack, crate::basis::flat::allocate_cell(Owner::Kernel)?);
+        let boot = crate::tag!(TrapStack, crate::basis::cell::allocate(Owner::Kernel)?);
         boot_stacks.push(boot);
 
         let mut indexed = Vec::new();
@@ -72,7 +72,7 @@ pub(in super::super) fn init() -> Result<(), NestError> {
         for page in 0..body_pages {
             indexed.push((
                 PageIndex::new(page),
-                crate::tag!(TrapStack, crate::basis::flat::allocate_cell(Owner::Kernel)?),
+                crate::tag!(TrapStack, crate::basis::cell::allocate(Owner::Kernel)?),
             ));
         }
         let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;

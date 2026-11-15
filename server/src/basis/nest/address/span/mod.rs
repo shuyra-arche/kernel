@@ -204,21 +204,6 @@ impl Span {
         Some((nest.id(), self.identity()))
     }
 
-    /// 活动库存的快照。
-    pub fn active(&self) -> Result<Vec<ActiveRange>, NestError> {
-        let state = self.state.lock();
-        let mut active = Vec::new();
-        active
-            .try_reserve(state.active.len())
-            .map_err(|_| NestError::OutOfMemory)?;
-        active.extend_from_slice(&state.active);
-        Ok(active)
-    }
-
-    pub fn is_live(&self) -> bool {
-        self.owner().is_some() && !self.state.lock().active.is_empty()
-    }
-
     /// 整段选择：操作时按当前活动与未结算退休解析。
     pub fn whole(self: &Arc<Self>) -> NestRange {
         NestRange::Whole(self.clone())
@@ -344,7 +329,7 @@ impl Span {
     pub(crate) fn inspect_memo(
         &self,
         index: usize,
-    ) -> Result<kernel_api::model::cell::CellInfo, NestError> {
+    ) -> Result<crate::basis::nest::memo::MemoInfo, NestError> {
         self.reservation
             .nest()
             .ok_or(NestError::NoRegion)?
@@ -365,7 +350,6 @@ impl Drop for RangeOperation<'_> {
 #[derive(Clone, Copy)]
 pub(crate) enum Protection {
     SetAccess(Access),
-    Narrow(Access),
 }
 
 pub(crate) struct PermissionUpdate {
@@ -453,7 +437,6 @@ impl SpanState {
                 }
                 ActiveRange::split(&self.active, lo, hi, Some(access))?
             }
-            Protection::Narrow(ceiling) => ActiveRange::narrow(&self.active, lo, hi, ceiling)?,
         };
         let first = (lo - base.as_usize()) / PAGE_SIZE;
         let pages = (hi - lo + 1) / PAGE_SIZE;

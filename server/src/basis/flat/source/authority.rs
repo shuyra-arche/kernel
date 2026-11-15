@@ -6,7 +6,7 @@ use crate::basis::pend::Pend;
 
 /// 一份授权记录：token 与它当前的权限位。
 ///
-/// 记录里不放来源，也不放实际 `Reservation`：来源由 `Sharing` 唯一持有，
+/// 记录里不放来源，也不放实际 `Reservation`：来源由 `Export` 唯一持有，
 /// 该 token 下的活跃关系另存，撤销边由关系自己的 token 承担。
 pub(super) struct Authority {
     token: PendId,
@@ -20,11 +20,6 @@ impl Authority {
 
     pub(super) fn authorizes(&self, token: PendId) -> bool {
         self.token == token
-    }
-
-    /// 授权是否仍然有效（失效后 modifiable 为空）。
-    pub(super) fn permitted(&self) -> bool {
-        self.authority.modifiable().is_some()
     }
 
     pub(super) fn authority(&self) -> Arc<Pend> {

@@ -31,7 +31,7 @@ impl Lineage {
         operations: Operations,
         scope: PendScope,
         reservation: Option<&Arc<Span>>,
-    ) -> Result<Arc<Self>, CellFail> {
+    ) -> Result<Arc<Self>, AccessError> {
         let depth = previous.as_ref().map_or(1, |p| p.depth + 1);
         if depth > 64
             || !pend::live(actor)
@@ -39,7 +39,7 @@ impl Lineage {
             || !entry.permits(operations)
             || reservation.is_some_and(|span| !span.is_open())
         {
-            return Err(CellFail::Denied);
+            return Err(AccessError::Denied);
         }
         let grant = Export::new(entry.authority(), operations, scope).map_err(failure)?;
         Arc::try_new(Self {
@@ -51,18 +51,18 @@ impl Lineage {
             previous,
             depth,
         })
-        .map_err(|_| CellFail::OutOfMemory)
+        .map_err(|_| AccessError::OutOfMemory)
     }
 
-    pub(super) fn check(&self, access: Modifiable) -> Result<(), CellFail> {
+    pub(super) fn check(&self, access: Modifiable) -> Result<(), AccessError> {
         let mut next = Some(self);
         while let Some(route) = next {
             let actor = route
                 .actor
                 .upgrade()
                 .filter(|actor| pend::live(actor))
-                .ok_or(CellFail::Denied)?;
-            let entry = pend::locate(&actor, route.token).ok_or(CellFail::Denied)?;
+                .ok_or(AccessError::Denied)?;
+            let entry = pend::locate(&actor, route.token).ok_or(AccessError::Denied)?;
             if !entry.alive()
                 || !Arc::ptr_eq(entry.authority(), route.grant.authority())
                 || !route.grant.permits(access)
@@ -71,7 +71,7 @@ impl Lineage {
                     .as_ref()
                     .is_some_and(|span| span.upgrade().is_none_or(|span| !span.is_open()))
             {
-                return Err(CellFail::Denied);
+                return Err(AccessError::Denied);
             }
             next = route.previous.as_deref();
         }

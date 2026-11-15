@@ -10,7 +10,7 @@ use kernel_api::model::identity::PendId;
 use kernel_api::model::pend::{CloneRights, Operations, ShareRights};
 use kernel_api::model::view::ViewKind;
 
-use crate::basis::flat::sharing::SharingOperation;
+use crate::basis::flat::source::Operation;
 use crate::basis::pend;
 use crate::basis::pend::Need;
 use crate::basis::pend::PendEntry;
@@ -67,12 +67,12 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         if !pend.alive()
             && !share_view
                 .as_ref()
-                .is_some_and(|meta| crate::basis::flat::sharing::pending_close(meta))
+                .is_some_and(|meta| crate::basis::flat::source::pending_close(meta))
         {
             return Err(PendFail::Dead);
         }
         let operation = if let Some(p) = &share_view {
-            Some(SharingOperation::acquire(p).ok_or(PendFail::Busy)?)
+            Some(Operation::acquire(p).ok_or(PendFail::Busy)?)
         } else {
             None
         };
@@ -105,7 +105,7 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
         (share_view, operation)
     };
     if let Some(share_view) = share_view {
-        crate::basis::flat::sharing::close(&share_view)?;
+        crate::basis::flat::source::close(&share_view)?;
     }
     Ok(0)
 }
@@ -177,30 +177,6 @@ impl Reservation {
 
     pub(crate) fn span(&self) -> Result<alloc::sync::Arc<crate::basis::nest::Span>, PendFail> {
         self.nest().reservation(self.id()).ok_or(PendFail::Dead)
-    }
-
-    pub(crate) fn page(&self, relative: usize) -> Result<usize, PendFail> {
-        let grain = self.span()?.grain();
-        let (offset, count) = self.entry.authority().window().ok_or(PendFail::Denied)?;
-        if !relative.is_multiple_of(grain)
-            || relative
-                .checked_add(grain)
-                .is_none_or(|end| end > count.get())
-        {
-            return Err(PendFail::NotAligned);
-        }
-        let page = offset
-            .get()
-            .checked_add(relative)
-            .ok_or(PendFail::NotAligned)?;
-        let position = kernel_api::model::nest::MemoPosition::new(
-            self.entry.token(),
-            self.nest().id(),
-            self.id(),
-            page,
-        )
-        .ok_or(PendFail::NotAligned)?;
-        self.position(position)
     }
 
     /// The v10 adapter above normalizes once. The common resolver never adds

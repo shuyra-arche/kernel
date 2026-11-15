@@ -427,7 +427,7 @@ impl Router {
         &self,
         token: kernel_api::model::identity::PendId,
         sign: Option<&Endpoint>,
-        view: Option<&crate::basis::flat::sharing::Sharing>,
+        view: Option<&crate::basis::flat::source::Export>,
     ) {
         let count = self.sources.lock().len();
         for at in 0..count {

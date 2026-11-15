@@ -7,12 +7,9 @@ pub(crate) mod authority;
 mod error;
 mod range;
 pub(crate) mod residency;
-mod shape;
 use kernel_api::model::cell::CellLevel;
-pub(crate) mod sharing;
+pub(crate) mod source;
 mod storage;
-pub(crate) mod transaction;
-pub(crate) mod transfer;
 
 use crate::basis::cell::page::Owner;
 use alloc::sync::Arc;
@@ -33,7 +30,6 @@ use kernel_api::address::PageIndex;
 use kernel_api::address::PageOffset;
 use kernel_api::address::PhysAddr;
 
-pub(crate) use crate::basis::cell::allocate as allocate_cell;
 pub use range::{FlatRange, Pages, Residency};
 pub use storage::BorrowedRegion;
 pub(crate) use storage::reshape::Direction;
@@ -172,9 +168,6 @@ impl Flat {
         self.page_count
     }
 
-    pub fn grain(&self) -> usize {
-        self.level.pages().unwrap()
-    }
     pub(crate) fn level_at(&self, index: PageIndex) -> CellLevel {
         self.state_storage()
             .lock()
@@ -405,9 +398,7 @@ impl Flat {
                     // 承载已移出：这是页槽自己的状态，不抹成“越界”。
                     Slot::Missing => Err(FlatError::Missing),
                     // 在途事务持有/预留的页没有可交出去的物理坐标。
-                    Slot::Moving { .. } | Slot::Reserved { .. } | Slot::Allocating { .. } => {
-                        Err(FlatError::Busy)
-                    }
+                    Slot::Allocating { .. } => Err(FlatError::Busy),
                 }
             }
         }

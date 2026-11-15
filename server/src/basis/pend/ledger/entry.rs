@@ -285,29 +285,11 @@ impl PendEntry {
     }
 }
 
-/// Caller holds the Task's Pend serial through preparation and final COMMIT.
 pub(crate) fn prepare_reservation<'a>(
     task: &'a Arc<Task>,
     parent: &Arc<PendEntry>,
     id: ReservationId,
     count: PageCount,
-) -> Result<PreparedReservationGrant<'a>, PendFail> {
-    prepare_reservation_kind(task, parent, id, count, false)
-}
-pub(crate) fn prepare_native_reservation<'a>(
-    task: &'a Arc<Task>,
-    parent: &Arc<PendEntry>,
-    id: ReservationId,
-    count: PageCount,
-) -> Result<PreparedReservationGrant<'a>, PendFail> {
-    prepare_reservation_kind(task, parent, id, count, true)
-}
-fn prepare_reservation_kind<'a>(
-    task: &'a Arc<Task>,
-    parent: &Arc<PendEntry>,
-    id: ReservationId,
-    count: PageCount,
-    native: bool,
 ) -> Result<PreparedReservationGrant<'a>, PendFail> {
     if !super::live(task) || !parent.alive() {
         return Err(PendFail::Dead);
@@ -340,19 +322,15 @@ fn prepare_reservation_kind<'a>(
         Some(parent.token()),
         Some(scope),
     )?;
-    if native {
-        // Only the freshly issued native Reservation root has this additional
-        // control right. It is never inherited from a Whole Nest grant and does
-        // not open the active v10 Limits/delegation decoder.
-        entry.authority = Pend::try_new_scope(
-            limits.modifiable,
-            scope,
-            Operations::Nest(NestRights::reservation() | kernel_api::abi::memory::rights::FAULT),
-            limits.distributable,
-        )?;
-    } else {
-        entry.authority.narrow(limits)?;
-    }
+    // Only the freshly issued native Reservation root has this additional
+    // control right. It is never inherited from a Whole Nest grant and does
+    // not open the active v10 Limits/delegation decoder.
+    entry.authority = Pend::try_new_scope(
+        limits.modifiable,
+        scope,
+        Operations::Nest(NestRights::reservation() | kernel_api::abi::memory::rights::FAULT),
+        limits.distributable,
+    )?;
     entry.authority.inherit(parent.authority())?;
     entry.parent(parent.token(), Arc::downgrade(task));
     let entry = Arc::try_new(entry).map_err(|_| PendFail::OutOfMemory)?;

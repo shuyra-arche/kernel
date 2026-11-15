@@ -28,14 +28,6 @@ fn every_operation_keeps_its_published_slot() {
         <kernel_api::abi::call::clone_view::operations::Peek as kernel_api::abi::operation::RegisterCall>::SLOT,
         (kernel_api::abi::PREFIX | 21474836484u64 as usize)
     );
-    assert_eq!(<kernel_api::abi::call::cell::operations::Create as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 0);
-    assert_eq!(<kernel_api::abi::call::cell::operations::Delete as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 1);
-    assert_eq!(<kernel_api::abi::call::cell::operations::Push as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 2);
-    assert_eq!(<kernel_api::abi::call::cell::operations::Pull as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 3);
-    assert_eq!(<kernel_api::abi::call::cell::operations::Publish as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 4);
-    assert_eq!(<kernel_api::abi::call::cell::operations::Retract as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 5);
-    assert_eq!(<kernel_api::abi::call::cell::operations::Protect as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 6);
-    assert_eq!(<kernel_api::abi::call::cell::operations::Inspect as kernel_api::abi::operation::RegisterCall>::SLOT, kernel_api::abi::PREFIX | (2usize << 32) | 7);
     assert_eq!(
         <kernel_api::abi::call::pend::operations::Accord as kernel_api::abi::operation::RegisterCall>::SLOT,
         (kernel_api::abi::PREFIX | 30064771086u64 as usize)
@@ -61,20 +53,8 @@ fn every_operation_keeps_its_published_slot() {
         (kernel_api::abi::PREFIX | 30064771090u64 as usize)
     );
     assert_eq!(
-        <kernel_api::abi::call::share_view::operations::Create as kernel_api::abi::operation::RegisterCall>::SLOT,
-        (kernel_api::abi::PREFIX | 42949672960u64 as usize)
-    );
-    assert_eq!(
         <kernel_api::abi::call::share_view::operations::Delete as kernel_api::abi::operation::RegisterCall>::SLOT,
         (kernel_api::abi::PREFIX | 42949672961u64 as usize)
-    );
-    assert_eq!(
-        <kernel_api::abi::call::share_view::operations::Open as kernel_api::abi::operation::RegisterCall>::SLOT,
-        (kernel_api::abi::PREFIX | 42949672962u64 as usize)
-    );
-    assert_eq!(
-        <kernel_api::abi::call::share_view::operations::Shut as kernel_api::abi::operation::RegisterCall>::SLOT,
-        (kernel_api::abi::PREFIX | 42949672963u64 as usize)
     );
     assert_eq!(
         <kernel_api::abi::call::room::operations::Yield as kernel_api::abi::operation::RegisterCall>::SLOT,

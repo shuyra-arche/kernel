@@ -45,8 +45,8 @@ The checked-in standalone lockfile and production target flags are preserved.
   identity. The counted allocator forwards real frame receipts and asserts that
   its allocation and return execute with local interrupts enabled.
 - Race four materializers for eight rounds. Check one published Page identity,
-  transfer claim/rollback and commit, preserved identity/data, and sticky Missing
-  after transfer and reverse-claim cancellation.
+  versioned transfer with stale-destination rejection, preserved identity/data,
+  and sticky Missing after transfer and a rejected stale reverse move.
 
 The Owner closure case uses the production shared epoch, not a complete user
 Team destruction scenario. Cancellation drops the in-flight operation before

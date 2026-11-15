@@ -1,7 +1,7 @@
 #[path = "../../../../src/entry/call/next_memory.rs"]
 mod next_memory;
 use crate::support::*;
-use kernel_api::abi::memory::{Action, Failure, Observation, Outcome, Query, Value};
+use kernel_api::abi::memory::{Action, Failure, Observation, Query, Value};
 use std::sync::{Arc, atomic::Ordering};
 pub(crate) fn invoke(
     frame: &mut TrapContext,
@@ -77,7 +77,6 @@ mod nest {
                 // must release admission locks before entering this boundary.
                 assert_eq!(commit_depth(), 0);
                 assert!(actor.pend.0.try_lock().is_ok());
-                assert!(actor.memory_results.0.try_lock().is_ok());
                 actor.effects.fetch_add(1, Ordering::SeqCst);
                 let value = Value::CreatedNest {
                     token: kernel_api::model::identity::PendId::mint(7),
@@ -98,18 +97,31 @@ mod nest {
             // Stand in for an effect boundary/fence. All three locks must be free.
             assert_eq!(commit_depth(), 0);
             assert!(actor.pend.0.try_lock().is_ok());
-            let window = actor.memory_results.0.try_lock().unwrap();
-            let journal = window.as_ref().unwrap();
-            let id = kernel_api::abi::memory::RequestId::new(journal.high_water()).unwrap();
+            assert_eq!(receipt.started(), Some(value));
+            // Read the actual copied descriptor and query through the Task
+            // owner while the hardware effect is outside every commit guard.
+            let bytes = actor.ident.team.nest.bytes.lock().unwrap();
+            let request = kernel_api::abi::memory::Request::from_bytes(
+                &bytes[..kernel_api::abi::memory::Request::WIDTH],
+            )
+            .unwrap();
+            drop(bytes);
+            let query = kernel_api::abi::memory::Request::new(
+                None,
+                Action::InspectResult {
+                    domain: kernel_api::abi::memory::Domain::Nest,
+                    request: request.id().unwrap(),
+                },
+            )
+            .unwrap();
+            let crate::request::Admission::Replay(reply) = actor.admit_memory(query).unwrap()
+            else {
+                panic!("query cannot admit another execution");
+            };
             assert_eq!(
-                journal
-                    .inspect(actor.ident.id, kernel_api::abi::memory::Domain::Nest, id)
-                    .unwrap()
-                    .unwrap()
-                    .outcome(),
-                Outcome::Pending(value)
+                reply.outcome(),
+                kernel_api::abi::memory::Outcome::Pending(value)
             );
-            drop(window);
             actor.effects.fetch_add(1, Ordering::SeqCst);
             if actor.mode.load(Ordering::SeqCst) == 3 {
                 *actor.completion.lock() = Some(receipt.defer());

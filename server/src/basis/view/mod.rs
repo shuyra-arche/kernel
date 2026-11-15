@@ -1,5 +1,4 @@
 pub mod clone;
-pub mod share;
 
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -14,19 +13,13 @@ use kernel_api::model::view::ViewKind;
 use crate::basis::pend::Pend;
 use crate::basis::unit::anchor::Anchor;
 
-use crate::basis::flat::sharing::{self, Sharing};
+use crate::basis::flat::source::{self, Export};
 pub(crate) use clone::CloneView;
-
-pub(crate) fn next_id() -> Result<usize, PendFail> {
-    static NEXT: crate::basis::name::Serial =
-        crate::basis::name::Serial::new(1, isize::MAX as usize);
-    NEXT.allocate().ok_or(PendFail::OutOfMemory)
-}
 
 #[derive(Clone)]
 pub(crate) enum View {
     Clone(Arc<CloneView>),
-    Share(Arc<Sharing>),
+    Share(Arc<Export>),
 }
 
 impl View {
@@ -68,7 +61,7 @@ impl View {
     pub(crate) fn seal(&self) {
         match self {
             View::Clone(meta) => clone::seal(meta),
-            View::Share(meta) => sharing::seal(meta),
+            View::Share(meta) => source::seal(meta),
         }
     }
 
@@ -79,7 +72,7 @@ impl View {
         }
     }
 
-    pub(crate) fn share_view(&self) -> Option<Arc<Sharing>> {
+    pub(crate) fn share_view(&self) -> Option<Arc<Export>> {
         match self {
             View::Share(meta) => Some(meta.clone()),
             _ => None,

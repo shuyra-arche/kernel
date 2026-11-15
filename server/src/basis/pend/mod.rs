@@ -18,12 +18,10 @@ use crate::basis::unit::task::Task;
 
 pub(crate) use branch::{accord, reduce};
 pub(crate) use ledger::{
-    PendEntry, PreparedReservationGrant, Table, accede, available, doom, insert, locate, notify,
-    pair, prepare_native_reservation, prepare_reservation, retire, return_, revoke, vestor,
+    PendEntry, Table, accede, available, doom, insert, locate, notify, pair, prepare_reservation,
+    retire, return_, revoke, vestor,
 };
-pub(crate) use source::{
-    ExternalBorrow, Geometry, Hold, HoldTable, RangeBlock, SourceAuthorization,
-};
+pub(crate) use source::{ExternalBorrow, Hold, HoldTable, RangeBlock, SourceAuthorization};
 pub(crate) use window::Window;
 
 pub(crate) fn live(task: &Task) -> bool {

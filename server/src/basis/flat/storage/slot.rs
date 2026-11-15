@@ -38,10 +38,6 @@ pub(in super::super) fn admit(
 ///
 /// `Resident` 是可供正常物化/发布的驻留态；`Missing` 是承载已移走的墓碑，
 /// 不得再自动补齐（只有移交能把新承载交进它）。
-/// `Moving` 保留本次移交的 Page 与事务身份，同时封闭正常物化/发布，
-/// 于是即使中途 abort，这一页也不会失去它的承载（fail-closed）。
-/// `Reserved` 是“一次移交给这一页留了空位”，尚未交给承载。
-/// 两者都不算空闲态：物化、PA 出口与发布都与它们互斥。
 pub(in super::super) enum Slot {
     Resident(Arc<Page>),
     Missing,
@@ -49,16 +45,6 @@ pub(in super::super) enum Slot {
     /// its reservation can publish or restore Fresh; transfers see Busy.
     Allocating {
         reservation: usize,
-    },
-    Moving {
-        cell: Arc<Page>,
-        transaction: usize,
-    },
-    /// 一次移交给这一页留的空位；记着它原本是 Fresh 还是 `Missing`，
-    /// 于是事务中途回滚能把这一页原样还回去。
-    Reserved {
-        transaction: usize,
-        was_missing: bool,
     },
 }
 

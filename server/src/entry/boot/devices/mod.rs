@@ -70,7 +70,7 @@ fn grant_region(
     region: kernel_api::boot::platform::Region,
 ) -> Result<(), PendFail> {
     let (base, size) = (region.base, region.size);
-    let meta = crate::basis::flat::sharing::region(base, size, TaskId::new(0))?;
+    let meta = crate::basis::flat::source::region(base, size, TaskId::new(0))?;
     let source = meta.source();
     let root =
         pend::PendEntry::try_new(View::Share(meta.clone()), Mark::NONE, Modifiable::Yes, None)?;

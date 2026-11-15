@@ -5,7 +5,7 @@ use crate::{
         cell::{self, page::Owner},
         flat::{
             Flat,
-            sharing::{self, Sharing},
+            source::{self, Export},
         },
         nest::{
             Access, Nest, Span,
@@ -94,7 +94,7 @@ struct Subscription {
     period: u64,
     identity: Identity,
     sampling: Arc<State>,
-    view: Arc<Sharing>,
+    view: Arc<Export>,
     output: Arc<PendEntry>,
     event: Arc<PendEntry>,
     sign: Arc<Endpoint>,
@@ -208,7 +208,7 @@ fn prepare(
         .explicit();
     let source_root =
         SourceAuthorization::new(flat.whole(), Access::READ, TaskId::new(0)).map_err(failure)?;
-    let view = Sharing::from_source(flat.whole(), size, TaskId::new(0)).map_err(failure)?;
+    let view = Export::from_source(flat.whole(), size, TaskId::new(0)).map_err(failure)?;
     let mut output = PendEntry::try_new(View::Share(view.clone()), mark, Modifiable::No, None)
         .map_err(failure)?;
     output.requested_by(sender);
@@ -307,7 +307,7 @@ impl Subscription {
         if !self.cancelled.swap(true, Ordering::AcqRel) {
             self.output.invalidate();
             self.event.invalidate();
-            sharing::seal(&self.view);
+            source::seal(&self.view);
             let source = self.view.source();
             let _ = source.flat().begin_close(source.flat().revision());
         }
@@ -320,7 +320,7 @@ impl Subscription {
             }
         }
         if self.cancelled.load(Ordering::Acquire) {
-            return sharing::poll_close(&self.view).is_ok() && self.sampling.settle();
+            return source::poll_close(&self.view).is_ok() && self.sampling.settle();
         }
         let sampled = self.nest.step_activity(
             &self.span,

@@ -142,8 +142,7 @@ pub fn init() -> NestResult<()> {
 
             let n = hart::hart_count();
             for h in 0..n {
-                let frame =
-                    crate::tag!(HartFrame, crate::basis::flat::allocate_cell(Owner::Kernel)?);
+                let frame = crate::tag!(HartFrame, crate::basis::cell::allocate(Owner::Kernel)?);
                 let mut indexed = Vec::new();
                 indexed
                     .try_reserve_exact(1)

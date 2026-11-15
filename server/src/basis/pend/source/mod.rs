@@ -16,7 +16,7 @@ use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
 use crate::basis::flat::FlatRange;
-use crate::basis::flat::sharing::Sharing;
+use crate::basis::flat::source::Export;
 use crate::basis::nest::Access;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::Pend;
@@ -56,7 +56,7 @@ enum Phase {
     Private(FlatRange),
     /// 已由根 Pend 接手：撤销依赖那枚 Pend，后续关系交给 Share 管。
     Root {
-        meta: Weak<Sharing>,
+        meta: Weak<Export>,
         token: PendId,
         authority: Arc<Pend>,
     },
@@ -167,19 +167,6 @@ impl SourceAuthorization {
             && matches!(&*self.phase.lock(), Phase::Private(_))
     }
 
-    /// Called under the owner's Pend and the shared commit boundary.
-    pub(crate) fn reshape_ready(&self, task: TaskId) -> Result<(), PendFail> {
-        if !self.private_owner(task) || self.revoked() {
-            return Err(PendFail::Denied);
-        }
-        if self.holds.load(Ordering::Acquire) != 1
-            || !self.bindings.lock().is_empty()
-            || !self.inflight.lock().is_empty()
-        {
-            return Err(PendFail::Busy);
-        }
-        Ok(())
-    }
     /// 相对整段来源的页窗口解析成可用范围。
     ///
     /// 私有阶段用自己的强持范围；已接管就向 Share 要，且要求那枚 Pend 仍活——
@@ -275,36 +262,6 @@ impl SourceAuthorization {
         let mut inflight = self.inflight.lock();
         inflight.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
         inflight.push((id, None));
-        Ok(())
-    }
-
-    /// 同一条在途登记，但这次发表**占住了**这一段窗口：
-    ///
-    /// 别的发表（派生 / Open / Accord / Attach）在这笔在途结束前不得插进这一段
-    /// （见 `check_publish`）；撤销方与不带窗口的那一档一样看待它。
-    pub(crate) fn enter_publish_range(
-        &self,
-        id: usize,
-        window: Arc<Geometry>,
-        branch: Option<&Pend>,
-    ) -> Result<(), PendFail> {
-        self.enter_flight(id, Some(window), branch, Access::READ)
-    }
-
-    fn enter_flight(
-        &self,
-        id: usize,
-        window: Option<Arc<Geometry>>,
-        branch: Option<&Pend>,
-        access: Access,
-    ) -> Result<(), PendFail> {
-        let gate = self.revoked.lock();
-        if *gate || !self.branch_permits(branch, access) {
-            return Err(PendFail::Denied);
-        }
-        let mut inflight = self.inflight.lock();
-        inflight.try_reserve(1).map_err(|_| PendFail::OutOfMemory)?;
-        inflight.push((id, window));
         Ok(())
     }
 
@@ -436,40 +393,9 @@ impl SourceAuthorization {
         *self.revoked.lock()
     }
 
-    /// 这份来源当前的**管理者**是不是 `task`：它当场能不能替这份来源作主。
-    ///
-    /// 私有阶段只有真正的属主；交给根 Pend 之后，调用者表里那枚 **root token**
-    /// （`sire` 为空的原始一枚）必须与相位记的是同一枚，pend_entry、Share 与根 Pend 都还活，
-    /// 且借用状态允许当前访问；不以 `Arc` 强引用计数代替授权。
-    ///
-    /// 相位里的 Share 只按弱身份比对；活与同一枚都由表里那一枚 `pend_entry` 自己给出，
-    /// 所以调用方须在同 Task 的 pend 之下调它：表不变，才有“临时强引用不会是
-    /// 最后一份”这条持有链。
-    pub(crate) fn manages(&self, task: &crate::basis::unit::task::Task) -> bool {
-        if self.revoked() {
-            return false;
-        }
-        // 短锁里克隆相位再判：放锁之后才取 pend_entry 表与 Pend 各自的锁，不与
-        // “先 Pend 后相位”的读法（`Hold::resolve`）撞成逆序。
-        let Some((meta, token, authority)) = self.root() else {
-            return self.private_owner(task.ident.id);
-        };
-        let Some(entry) = super::locate(task, token) else {
-            return false;
-        };
-        entry.sire().is_none()
-            && entry.alive()
-            && entry.associates()
-            && Arc::ptr_eq(entry.authority(), &authority)
-            && entry
-                .target()
-                .memory()
-                .is_some_and(|view| Arc::ptr_eq(&view, &meta))
-    }
-
     /// 已接手的根 Pend、它的 token 与**根 Pend 自己的**那枚 `Pend`。
     /// 还没接手就是 `None`。三段来自同一份相位，调用方不再各自去表里另找一遍。
-    pub(crate) fn root(&self) -> Option<(Arc<Sharing>, PendId, Arc<Pend>)> {
+    pub(crate) fn root(&self) -> Option<(Arc<Export>, PendId, Arc<Pend>)> {
         match &*self.phase.lock() {
             Phase::Root {
                 meta,
@@ -478,11 +404,6 @@ impl SourceAuthorization {
             } => Some((meta.upgrade()?, *token, authority.clone())),
             Phase::Private(_) => None,
         }
-    }
-
-    /// 登记一份普通引用。
-    pub(crate) fn claim_hold(&self) {
-        self.holds.fetch_add(1, Ordering::AcqRel);
     }
 
     /// 解除一份普通引用。最后一份普通引用消失时，**未消费的一次性资格显式结束**。
@@ -524,7 +445,7 @@ impl Withdrawal<'_> {
 
     pub(crate) fn adopt(
         &self,
-        meta: &Arc<Sharing>,
+        meta: &Arc<Export>,
         token: PendId,
         authority: Arc<Pend>,
     ) -> Result<(), PendFail> {

@@ -9,13 +9,9 @@
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
-use alloc::vec::Vec;
 
 use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
-
-use kernel_api::address::PageIndex;
-use kernel_api::address::VirtAddr;
 
 use super::super::Span;
 use crate::basis::flat::FlatRange;
@@ -125,111 +121,6 @@ pub(crate) fn register(
         *head = Some(record);
     }
     Ok(())
-}
-
-/// 两端候选关系的一份弱快照：两份来源窗口上登记过的全部关系。
-///
-/// 与 `mappings_over` / `pressings_over` 的强快照不同，这里**只收 `Weak`**：它要在
-/// `Flat` 锁内调用，不能在那里升级强引用（`Flat → Span` 是反向锁阶），也拿不到
-/// 关系自己的锁。于是它交出的是一份**完整上界**——谁真的压着本次两端的那一页，
-/// 留给占槽后的 `affected_over` 按关系自己的不可变窗口筛。
-///
-/// 两份来源键各收一次，两端同 Flat 时同一份登记会被收两次；去重不在这里做
-/// （占槽前的时间越短越好），留给 `affected_over` 在原地收回。
-/// 先按数出的上界一次性备容量，再只 clone `Weak`：链上不留半条、也不在锁内分配多次。
-pub(crate) fn candidates_over(
-    source: &FlatRange,
-    target: &FlatRange,
-) -> Result<Vec<Weak<Span>>, NestError> {
-    let source_id = source.source_id();
-    let target_id = target.source_id();
-    let mut head = registry().head.lock();
-    // 第一遍：清死项、重建链，数出完整上界（两端各计一次）。
-    let mut bound = 0usize;
-    rebuild(&mut head, |known| {
-        if known.source_id == source_id {
-            bound += 1;
-        }
-        if known.source_id == target_id {
-            bound += 1;
-        }
-    });
-    // 链已经归位：之后的可失败步骤不会弄丢任何登记。
-    let mut candidates = Vec::new();
-    candidates
-        .try_reserve(bound)
-        .map_err(|_| NestError::OutOfMemory)?;
-    let mut cursor = head.as_deref();
-    while let Some(node) = cursor {
-        if node.source_id == source_id {
-            candidates.push(node.reservation.clone());
-        }
-        if node.source_id == target_id {
-            candidates.push(node.reservation.clone());
-        }
-        cursor = node.next.as_deref();
-    }
-    Ok(candidates)
-}
-
-/// 从两端候选里收回这次移交真正动过的关系：压着源页或目标页的那些。
-///
-/// 在无 core 锁的区域里跑：按每个关系自己（不可变）的来源窗口过滤——窗口之外
-/// 的候选是上界里多收的，不是这次动过的；两端同 Flat 时同一份登记会被收两次，
-/// 按 `Weak` 身份去掉重复的那条。过滤与去重全在原地做，不分配。
-pub(crate) fn affected_over(
-    candidates: Vec<Weak<Span>>,
-    source: &FlatRange,
-    source_page: PageIndex,
-    target: &FlatRange,
-    target_page: PageIndex,
-) -> Vec<Weak<Span>> {
-    let mut affected = candidates;
-    affected.retain(|candidate| {
-        let Some(reservation) = candidate.upgrade() else {
-            return false;
-        };
-        pressing_page(&reservation, source, source_page).is_some()
-            || pressing_page(&reservation, target, target_page).is_some()
-    });
-    distinct(&mut affected);
-    affected
-}
-
-/// 同一个关系在清单里只留一条；原地压缩，不分配。
-fn distinct(mappings: &mut Vec<Weak<Span>>) {
-    let mut kept = 0usize;
-    let mut read = 0usize;
-    while read < mappings.len() {
-        let seen = (0..kept).any(|at| Weak::ptr_eq(&mappings[at], &mappings[read]));
-        if seen {
-            mappings.swap_remove(read);
-        } else {
-            kept += 1;
-            read += 1;
-        }
-    }
-}
-
-/// 这段关系把来源 `source` 上的 `page` 放在哪个虚拟页上；不是它的窗口就没有。
-fn pressing_page(reservation: &Span, source: &FlatRange, page: PageIndex) -> Option<VirtAddr> {
-    let Some(selected) = reservation.source() else {
-        // Manual positions are independent; the weak snapshot is an upper bound
-        // for wakeups only. A waiter rechecks its actual position and authority.
-        return Some(reservation.initial_start());
-    };
-    if selected.source_id() != source.source_id() {
-        return None;
-    }
-    let offset = page.get().checked_sub(selected.index().get())?;
-    if offset >= selected.page_count().get() {
-        return None;
-    }
-    let address = reservation
-        .initial_start()
-        .as_usize()
-        .checked_add(offset.checked_mul(kernel_api::address::PAGE_SIZE)?)?;
-    Some(crate::metal::mmu::canonical(address))
 }
 
 /// Allocation-free wake after Page admission reopens. Pointer order is used only

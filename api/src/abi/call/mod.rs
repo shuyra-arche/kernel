@@ -1,8 +1,5 @@
 //! Operation domains and aggregate Server dispatch.
-pub mod cell;
 pub mod debug;
-pub mod flat;
-pub mod nest;
 pub mod pend;
 pub mod room;
 pub mod sign;
@@ -16,13 +13,10 @@ pub use view::{clone as clone_view, share as share_view};
 pub enum EnvCall {
     Room(self::room::RoomCall),
     Unit(self::unit::UnitCall),
-    Cell(self::cell::CellCall),
-    Flat(self::flat::FlatCall),
     Clone(self::clone_view::CloneCall),
     Share(self::share_view::ShareCall),
     Sign(self::sign::SignCall),
     Pend(self::pend::PendCall),
-    Nest(self::nest::NestCall),
     /// 调试面（见 [`self::debug::DebugCall`]）。
     Debug(self::debug::DebugCall),
 }
@@ -42,7 +36,6 @@ impl EnvCall {
         match class {
             0 => Ok(EnvCall::Room(self::room::RoomCall::from_wire(slot, regs)?)),
             1 => Ok(EnvCall::Unit(self::unit::UnitCall::from_wire(slot, regs)?)),
-            2 => Ok(EnvCall::Cell(self::cell::CellCall::from_wire(slot, regs)?)),
             5 => Ok(EnvCall::Clone(self::clone_view::CloneCall::from_wire(
                 slot, regs,
             )?)),
@@ -54,8 +47,6 @@ impl EnvCall {
                 slot, regs,
             )?)),
             11 => Ok(EnvCall::Sign(self::sign::SignCall::from_wire(slot, regs)?)),
-            12 => Ok(EnvCall::Flat(self::flat::FlatCall::from_wire(slot, regs)?)),
-            13 => Ok(EnvCall::Nest(self::nest::NestCall::from_wire(slot, regs)?)),
             // Domain 14 was Port. Never reinterpret an old source capability.
             _ => Err(crate::abi::register::Decode::BadSlot),
         }

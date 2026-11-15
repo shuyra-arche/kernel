@@ -1,13 +1,13 @@
 //! Withdraw source-qualified uses without destroying independent reservations.
 use crate::basis::{
-    flat::sharing::Sharing,
+    flat::source::Export,
     pend::{RangeBlock, SourceAuthorization},
 };
 use alloc::sync::Arc;
 use kernel_api::{abi::call::pend::PendFail, model::identity::PendId};
 
 pub(crate) fn withdraw_source_branch(
-    meta: &Arc<Sharing>,
+    meta: &Arc<Export>,
     token: PendId,
     clear: bool,
 ) -> Result<(), PendFail> {
@@ -23,18 +23,6 @@ pub(crate) fn withdraw_source_branch(
         }
         let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
         nest.withdraw_source(&binding, &source, Some(token), None, clear)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn withdraw_source(
-    source: &Arc<SourceAuthorization>,
-    clear: bool,
-) -> Result<(), PendFail> {
-    source.retire_origins(None, None)?;
-    for binding in source.bindings()? {
-        let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
-        nest.withdraw_source(&binding, source, None, None, clear)?;
     }
     Ok(())
 }

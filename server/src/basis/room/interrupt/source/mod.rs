@@ -2,7 +2,7 @@
 //! ordinary events; only this owner interprets a successful consumption receipt.
 mod state;
 use crate::basis::{
-    flat::sharing::Sharing,
+    flat::source::Export,
     pend::{self, PendEntry},
     sign::endpoint::{self, Endpoint},
     unit::task::Task,
@@ -29,7 +29,7 @@ pub(crate) struct Source {
     /// Immutable, never-reused router registration slot; not the hardware line.
     pub(super) maintenance_slot: usize,
     pub(crate) endpoint: Arc<Endpoint>,
-    view: OnceLock<Arc<Sharing>>,
+    view: OnceLock<Arc<Export>>,
     state: LegacyLock<crate::metal::sync::order::InterruptSource, State<Receiver>>,
 }
 struct Receiver {
@@ -48,7 +48,7 @@ impl Source {
             state: LegacyLock::new(State::new()),
         })
     }
-    pub(super) fn matches(&self, sign: Option<&Endpoint>, view: Option<&Sharing>) -> bool {
+    pub(super) fn matches(&self, sign: Option<&Endpoint>, view: Option<&Export>) -> bool {
         sign.is_some_and(|known| core::ptr::eq(known, &*self.endpoint))
             || view.is_some_and(|known| {
                 self.view
@@ -61,7 +61,7 @@ impl Source {
             .expect("source router")
             .request(self.maintenance_slot);
     }
-    pub(super) fn associate(&self, view: Arc<Sharing>) -> Result<(), PendFail> {
+    pub(super) fn associate(&self, view: Arc<Export>) -> Result<(), PendFail> {
         self.view.set(view).map_err(|_| PendFail::Denied)
     }
     /// A receiver needs the current complete writable View association, not a

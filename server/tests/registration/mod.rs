@@ -9,6 +9,7 @@ extern crate alloc;
 
 // Production authority, scopes, ancestry and ledger preparation run on the host.
 // Namespace metadata and hardware notifications are fixtures, not full Kernel enforcement.
+mod access_error;
 #[path = "../name/allocation.rs"]
 mod allocation;
 #[allow(dead_code)]
@@ -84,13 +85,16 @@ mod basis {
         }
     }
     pub(crate) mod nest {
+        pub(crate) mod memo {
+            pub(crate) use crate::access_error::AccessError;
+        }
         pub(crate) mod activity {
             pub(crate) fn withdraw() {}
         }
         pub(crate) use crate::support::{Nest, Span};
         pub(crate) mod authority {
             pub(crate) fn withdraw_source_branch(
-                _: &std::sync::Arc<crate::support::Sharing>,
+                _: &std::sync::Arc<crate::support::Export>,
                 _: kernel_api::model::identity::PendId,
                 _: bool,
             ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
@@ -102,15 +106,15 @@ mod basis {
         pub(crate) use crate::support::{CloneView, View};
     }
     pub(crate) mod flat {
-        pub(crate) mod sharing {
-            pub(crate) use crate::support::{Sharing, SharingOperation};
-            pub(crate) fn seal(_: &Sharing) {
+        pub(crate) mod source {
+            pub(crate) use crate::support::{Export, Operation};
+            pub(crate) fn seal(_: &Export) {
                 panic!("outside registration fixture")
             }
         }
         pub(crate) mod authority {
             pub(crate) fn retire_block(
-                _: &std::sync::Arc<crate::support::Sharing>,
+                _: &std::sync::Arc<crate::support::Export>,
                 _: &std::sync::Arc<crate::authority::Pend>,
             ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
                 panic!("Flat retirement is outside the registration fixture")

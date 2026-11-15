@@ -115,7 +115,7 @@ impl PreparedTask {
                     life: self.life.clone(),
                     state: self.state.clone(),
                     pend,
-                    memory_results: LegacyLock::new(None),
+                    requests: super::super::request::Requests::new(),
                     administration: crate::basis::unit::control::Table::new(),
                     heir: LegacyLock::new(Vec::new()),
                     retirement: LegacyLock::new(super::super::retirement::Retirement::new()),

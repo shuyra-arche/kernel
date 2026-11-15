@@ -32,7 +32,7 @@ impl Nest {
         span: &Arc<Span>,
         index: usize,
         generation: u64,
-        completion: crate::basis::unit::task::memory_result::Completion,
+        completion: crate::basis::unit::task::request::Completion,
     ) {
         let mut state = self.state.lock();
         let memo = state
@@ -192,7 +192,7 @@ impl Nest {
             let completion = memo.take_completion();
             drop(state);
             if let Some(completion) = completion {
-                completion.finish(crate::basis::unit::task::memory_result::Transition::Failed(
+                completion.finish(crate::basis::unit::task::request::Transition::Failed(
                     kernel_api::abi::memory::Failure::Hardware,
                 ));
             }

@@ -2,7 +2,7 @@
 use crate::basis::cell::page::Owner;
 use crate::basis::flat::Flat;
 use crate::basis::flat::FlatRange;
-use crate::basis::flat::sharing::Sharing;
+use crate::basis::flat::source::Export;
 use crate::basis::nest::Access;
 use crate::basis::nest::Nest;
 use crate::basis::pend::PendEntry;
@@ -70,7 +70,7 @@ impl Payload {
             .checked_bytes()
             .ok_or(PendFail::Denied)?;
         let source = SourceAuthorization::new(self.source.clone(), Access::READ, receiver)?;
-        let view = Sharing::from_source(self.source.clone(), size, receiver)?;
+        let view = Export::from_source(self.source.clone(), size, receiver)?;
         let pend = PendEntry::try_new(View::Share(view.clone()), Mark::NONE, Modifiable::No, None)?;
         let claim = source.claim()?;
         view.attach_source(&source);

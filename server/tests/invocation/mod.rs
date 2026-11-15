@@ -1,10 +1,12 @@
+#![feature(reentrant_lock, std_internals)]
+#![allow(internal_features)]
 #![feature(allocator_ext)]
 extern crate alloc;
 // Production descriptor-copy, dispatch and result transaction. Resource/Task
 // scheduling and user buffers are fixtures; this is not a trap/MMU guest test.
 mod entry;
-#[path = "../../src/basis/unit/task/memory_result.rs"]
-pub(crate) mod memory_result;
+#[path = "../../src/basis/unit/task/request/mod.rs"]
+pub(crate) mod request;
 mod support;
 use kernel_api::{
     abi::memory::{
@@ -16,7 +18,7 @@ use kernel_api::{
         nest::{MemoGeneration, MemoPosition, NestId, ReservationId},
     },
 };
-use memory_result::Transition;
+use request::Transition;
 use std::sync::atomic::Ordering;
 use support::*;
 pub(crate) mod basis {
@@ -52,7 +54,7 @@ pub(crate) mod basis {
     pub(crate) use crate::support::commit;
     pub(crate) mod unit {
         pub(crate) mod task {
-            pub(crate) use crate::memory_result;
+            pub(crate) use crate::request;
             pub(crate) use crate::support::{Task, TaskIdent};
         }
     }
@@ -64,10 +66,13 @@ pub(crate) mod basis {
         }
     }
 }
+#[path = "../support/lock.rs"]
+mod host_lock;
 pub(crate) mod metal {
     // This dispatch fixture has no Hart/IRQ boundary. Production Root lifetime
     // and anti-forgery properties are compiled and exercised in tests/sync.
     pub(crate) mod sync {
+        pub(crate) use crate::host_lock::{LegacyLock, order};
         pub(crate) struct Root<'a>(core::marker::PhantomData<&'a mut ()>);
         pub(crate) fn boundary<R>(body: impl for<'a> FnOnce(Root<'a>) -> R) -> R {
             body(Root(core::marker::PhantomData))
@@ -292,6 +297,5 @@ fn descriptor_opcode_mismatch_rejects_before_admission_or_effects() {
         Delivery::from_registers(frame.gpr.0.map(|n| n as u64)),
         Some(Delivery::Failed(Failure::Invalid))
     );
-    assert!(task.memory_results.lock().is_none());
     assert_eq!(task.effects.load(Ordering::SeqCst), 0);
 }

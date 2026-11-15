@@ -4,7 +4,7 @@ pub(crate) use crate::name;
 pub(crate) fn commit() {}
 pub(crate) mod unit {
     pub(crate) mod task {
-        pub(crate) mod memory_result {
+        pub(crate) mod request {
             #[derive(Debug, PartialEq, Eq)]
             pub(crate) enum Transition {
                 Published,
@@ -27,9 +27,6 @@ pub(crate) mod cell {
 }
 pub(crate) mod flat {
     pub(crate) use crate::error::FlatError;
-    pub(crate) mod transfer {
-        pub(crate) use crate::transfer_error::TransferError;
-    }
 }
 #[path = "logical/mod.rs"]
 pub(crate) mod nest;
