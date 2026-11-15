@@ -28,7 +28,7 @@
 --- a/server/src/entry/boot/mod.rs
 +++ b/server/src/entry/boot/mod.rs
 @@ -68,6 +68,7 @@
-         crate::entry::work::observe::start()?;
+         crate::entry::work::lifecycle::start()?;
      }
  
 +    crate::basis::flat::probe::start()?;

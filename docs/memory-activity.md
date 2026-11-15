@@ -259,14 +259,17 @@ in `work/observe`, with the same snapshot Page, read-only Share and update Sign.
 It uses the existing trusted breakpoint continuation path, not S-mode `ecall`.
 No borrowed resource guard survives its wait.
 
-The current maintenance paths are not separate resident Tasks:
+Lifecycle now also has an independent resident Task; retirement remains separately owned:
 
-- Unit's `lifecycle/reap::bury` services up to four pending terminal Tasks and
+- Unit's `lifecycle/reap::advance` services up to four pending terminal Tasks and
   four retained husks per turn, retains Busy retirement and arms deadline retry.
-  Scheduler and non-isolated idle paths supply progress even without runnable
-  Tasks. Moving that continuation into a new Task would require independent
-  notification admission and a shutdown lifetime that does not count its own
-  cleanup service in `tally::done()`. Keep this owner-controlled fallback.
+  `entry/work/lifecycle` runs that budget on its own Task, with an independently
+  reserved Sign Site. Runnable local stages yield; retained Busy obligations arm
+  a 1 ms retry and sleep. Ordinary scheduler/idle paths poll due notifications.
+  They retain cleanup during startup, shutdown or a 100 ms service watchdog.
+  The Task closes its registration before Exit; scheduler-stack fallback then
+  reaps that Task too. An unexpectedly dead service is unregistered by its owner.
+  No task is excluded from `tally::done()` accounting.
 - Nest's `authority/external::maintain` combines Cell changes, retained binding
   progression and interrupt-router rearming. The latter has controller-Hart
   locality. There is no separately registered retirement notification/Task
@@ -274,9 +277,23 @@ The current maintenance paths are not separate resident Tasks:
   locality boundary. Retained translation obligations stay with Nest, and
   synchronous work remains synchronous.
 
-Consequently only the existing observer is instantiated under `work` today.
-Lifecycle, retirement, memory and interrupt directories are absent. A future
+Observer and lifecycle are instantiated under `work` today. Retirement, memory
+and interrupt directories remain absent. Nest retirement still requires a bounded
+owner step and event admission before an independent Task is justified: binding
+maintenance currently scans organization records, and Page completion wakeup
+traverses the source index. Moving those loops alone would hide the existing
+bounds/notification gap behind a Task. Controller rearming remains on its existing
+valid Hart paths.
+
+A future
 independent Task must first supply an owner-controlled bounded step, distinguish
 runnable remainder from hardware-blocked obligations, register its own wake
 source before sleeping, and preserve scheduler-stack shutdown/failure progress.
 The observer is not a dispatcher for those responsibilities.
+
+The lifecycle wait uses a private selector authenticated against its registered
+Kernel Task identity, after the same instruction validation and saved-PC advance
+as ordinary calls. It is not a public ABI operation or S-mode ecall. The reserved
+Site retains early/coalesced wakes under COMMIT. Enrollment uses a reserved ticket
+with no timer/holder allocation and debug enforces its allocation-free section.
+All identity borrows and guards end before scheduler-stack handoff.

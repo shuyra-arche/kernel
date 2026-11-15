@@ -399,6 +399,17 @@ fn envcall(
         return None;
     };
     frame.sepc = KVirt::wrap(next_pc);
+    // Private resident waits use the same validated/advanced continuation as
+    // ordinary calls. Drop all Hart-tracked identity and boundary borrows before
+    // handing ownership to the scheduler stack.
+    if frame.gpr.x(crate::metal::switcher::context::Gprs::A7) == usize::MAX
+        && crate::basis::unit::lifecycle::WORK.identifies(ident.id.get())
+    {
+        let id = ident.id.get();
+        drop(ident);
+        drop(root);
+        return crate::entry::work::park(frame, id);
+    }
     crate::entry::call::dispatch(frame, ident, root)
 }
 

@@ -42,3 +42,5 @@ pub(crate) fn clear_timers() {
 pub(crate) fn timed_wait_count() -> usize {
     holders().lock().len()
 }
+
+pub(crate) use wait::resident::Resident;
