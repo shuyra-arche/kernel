@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
   "api",
-  "tools/abi-macros",
+  "api/abi-macros",
   "client",
   "server",
   "server/tests",
