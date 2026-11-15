@@ -7,19 +7,11 @@ mod authority;
 mod carried;
 mod creation;
 mod exports;
+mod storage;
 mod metal {
     pub(crate) mod sync {
+        pub(crate) use crate::storage::{SpinLock, SpinLockGuard};
         pub(crate) use std::sync::OnceLock;
-        pub(crate) type SpinLockGuard<'a, T> = std::sync::MutexGuard<'a, T>;
-        pub(crate) struct SpinLock<T>(std::sync::Mutex<T>);
-        impl<T> SpinLock<T> {
-            pub(crate) fn new(value: T) -> Self {
-                Self(std::sync::Mutex::new(value))
-            }
-            pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, T> {
-                self.0.lock().unwrap()
-            }
-        }
     }
 }
 mod ranges;

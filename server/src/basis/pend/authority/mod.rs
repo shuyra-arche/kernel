@@ -188,13 +188,18 @@ impl Pend {
         }
         child.inherit(self)?;
         let access = child.configured();
-        let mut state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) != 0 {
-            return Err(PendFail::Busy);
-        }
-        *state = state.transition(Event::Borrow(access)).map_err(fail)?;
-        if matches!(device, DeviceBorrow::External) {
-            self.external.fetch_add(1, Ordering::Release);
+        // The caller serializes publication with COMMIT. Commit the lender's
+        // state first, then install the unpublished child's return obligation;
+        // the two storage guards do not need to coexist.
+        {
+            let mut state = self.state.lock();
+            if self.routing.load(Ordering::Acquire) != 0 {
+                return Err(PendFail::Busy);
+            }
+            *state = state.transition(Event::Borrow(access)).map_err(fail)?;
+            if matches!(device, DeviceBorrow::External) {
+                self.external.fetch_add(1, Ordering::Release);
+            }
         }
         *child.parent.lock() = Some(ParentBorrow {
             parent: self.clone(),
@@ -331,17 +336,22 @@ impl Pend {
         self.finish(Event::Cancel)
     }
     fn finish(&self, event: Event) -> Result<(), PendFail> {
-        let mut state = self.state.lock();
-        if self.external_pending() {
-            return Err(PendFail::Busy);
+        {
+            let mut state = self.state.lock();
+            if self.external_pending() {
+                return Err(PendFail::Busy);
+            }
+            *state = state.transition(event).map_err(fail)?;
         }
-        *state = state.transition(event).map_err(fail)?;
-        drop(state);
+        // Own the exact return obligation after releasing the child storage
+        // lock. An if-let scrutinee guard would otherwise remain held while
+        // taking the lender's state, opposite to borrow_device's old nesting.
+        let obligation = { self.parent.lock().take() };
         if let Some(ParentBorrow {
             parent,
             access,
             device,
-        }) = self.parent.lock().take()
+        }) = obligation
         {
             let mut state = parent.state.lock();
             if matches!(device, DeviceBorrow::External) {
