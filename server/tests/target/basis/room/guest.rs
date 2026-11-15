@@ -3,9 +3,9 @@
 #![no_std]
 #![no_main]
 #[allow(dead_code)]
-mod support;
-#[allow(dead_code)]
 mod stack;
+#[allow(dead_code)]
+mod support;
 use core::{
     fmt::Write,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
