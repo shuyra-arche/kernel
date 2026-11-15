@@ -20,6 +20,9 @@ pub unsafe fn init(platform: crate::metal::platform::Platform) -> Result<(), Boo
         crate::metal::hart::firmware_id().get(),
         crate::metal::mmu::internal::mode::mode(),
     ));
+    crate::metal::layout::init().map_err(|source| {
+        BootError::KernelSpace(erra::Error::new("freezing Kernel layout", source))
+    })?;
     crate::metal::allocator::init().map_err(BootError::Allocator)?;
     // 锁序检测要在任何被验证的调用之前启用：分配器就绪即可建池，
     // 之后的空间 / 时钟 / 栈初始化都在它的看护下跑。

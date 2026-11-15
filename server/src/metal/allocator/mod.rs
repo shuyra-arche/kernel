@@ -9,6 +9,7 @@ pub mod statistics;
 
 mod error;
 mod link;
+pub(crate) mod pages;
 mod region;
 pub(crate) use error::InitError;
 pub(crate) use error::InitResult;

@@ -107,3 +107,7 @@ path = "basis/nest/memo/activity/mod.rs"
 # Imported production synchronization code retains its provider feature gates.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("latency"))'] }
+
+[[test]]
+name = "layout"
+path = "metal/riscv/layout/mod.rs"

@@ -6,4 +6,4 @@ mod occupancy;
 #[path = "../../../../src/basis/nest/address/placement.rs"]
 mod placement;
 pub(crate) use layout::{AddressError, Layout, RegionKind};
-pub(crate) use placement::Placement;
+pub(crate) use placement::{Placement, PlacementAt};

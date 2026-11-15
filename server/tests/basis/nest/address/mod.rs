@@ -160,3 +160,53 @@ fn top_page_and_fixed_overlap_use_the_same_occupancy_fact() {
         0x9000
     );
 }
+
+#[test]
+fn gap_selection_uses_no_scratch_allocation_and_keeps_retired_ranges() {
+    let mut layout = Layout::new();
+    layout
+        .register_window(RegionKind::Normal, 0x1000, 0x9fff)
+        .unwrap();
+    let (_, id) = layout
+        .reserve(Placement::fixed(VirtAddr::new(0x3000), 8192).unwrap())
+        .unwrap();
+    let retired = layout
+        .occupancy
+        .prepare_retirement(0x3000, 0x4fff, id)
+        .unwrap();
+    layout.occupancy.retire(retired);
+    // Occupancy already has spare insertion capacity. A Vec of gaps would fail.
+    let low = allocation::fail_after(0, || {
+        layout.reserve(Placement::lowest(RegionKind::Normal, 4096, 8192).unwrap())
+    })
+    .unwrap();
+    assert_eq!(low.0, 0x2000);
+    assert!(layout.occupancy.release(low.0, low.0 + 4095, low.1));
+    let high = allocation::fail_after(0, || {
+        layout.reserve(
+            Placement::new(
+                RegionKind::Normal,
+                4096,
+                8192,
+                address::PlacementAt::Highest,
+            )
+            .unwrap(),
+        )
+    })
+    .unwrap();
+    assert_eq!(high.0, 0x8000);
+    let mut full = Layout::new();
+    full.register_window(RegionKind::Normal, 0x1000, 0x1fff)
+        .unwrap();
+    assert_eq!(
+        allocation::fail_after(0, || full
+            .reserve(Placement::highest(RegionKind::Normal, 4096).unwrap())),
+        Err(address::AddressError::OutOfMemory)
+    );
+    assert_eq!(
+        full.reserve(Placement::highest(RegionKind::Normal, 4096).unwrap())
+            .unwrap()
+            .0,
+        0x1000
+    );
+}

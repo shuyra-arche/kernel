@@ -120,7 +120,9 @@ impl Slot {
         task.transform_checked(TaskState::running(self.hart, QUANTUM_TICKS));
         let pa = task.ident.frame_pa.as_usize();
         unsafe {
-            let frame = &mut *(pa as *mut TrapContext);
+            let frame = &mut *(crate::metal::physical::write::<TrapContext>(
+                kernel_api::address::PhysAddr::from_raw(pa),
+            ));
             frame.kernel_sp = trap_stack_edge(self.hart);
             if task.ident.team.nest.asid().is_kernel() {
                 frame

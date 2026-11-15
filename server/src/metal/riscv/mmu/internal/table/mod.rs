@@ -320,7 +320,9 @@ impl TableNode {
         }
         for level in (0..levels).rev() {
             let pte = unsafe {
-                (&*((tbl.as_usize() + page_va.vpn(level as u8) * 8) as *const PageTableEntry))
+                (&*crate::metal::physical::read::<PageTableEntry>(PhysAddr::from_raw(
+                    tbl.as_usize() + page_va.vpn(level as u8) * 8,
+                )))
                     .read()
             };
             if !pte.is_valid() {

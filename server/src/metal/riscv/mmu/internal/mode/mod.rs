@@ -33,10 +33,6 @@ pub fn levels() -> usize {
     geometry(mode()).levels as usize
 }
 
-pub fn lower() -> VirtAddr {
-    crate::metal::mmu::internal::canonical(1usize << geometry(mode()).split_bit())
-}
-
 pub fn upper() -> VirtAddr {
     VirtAddr::wrap(1usize << geometry(mode()).split_bit())
 }

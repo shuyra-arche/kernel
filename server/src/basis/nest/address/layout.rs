@@ -88,8 +88,7 @@ impl Layout {
                 let window = self.window(region.ok_or(AddressError::NoRegion)?)?;
                 let align = placement.align();
                 self.occupancy
-                    .free_spans(window.base, window.last)?
-                    .into_iter()
+                    .free_spans(window.base, window.last)
                     .find_map(|(lo, hi)| {
                         let at = lo.checked_next_multiple_of(align)?;
                         hi.checked_sub(at)
@@ -101,11 +100,10 @@ impl Layout {
             PlacementAt::Highest => {
                 let window = self.window(region.ok_or(AddressError::NoRegion)?)?;
                 self.occupancy
-                    .free_spans(window.base, window.last)?
-                    .into_iter()
+                    .free_spans(window.base, window.last)
                     .rev()
                     .find_map(|(lo, hi)| {
-                        let at = hi.checked_sub(size - 1)?;
+                        let at = hi.checked_sub(size - 1)? & !(placement.align() - 1);
                         (at >= lo).then_some(at)
                     })
                     .ok_or(AddressError::OutOfMemory)?

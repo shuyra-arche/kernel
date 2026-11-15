@@ -39,36 +39,26 @@ impl Occupancy {
         Self { spans: Vec::new() }
     }
 
-    /// 窗口内未被占用的区间（含端点），按地址升序。
+    /// Scan the sole occupancy ledger without allocating under its lock.
+    /// Inclusive endpoints also represent the final page ending at usize::MAX.
     pub(super) fn free_spans(
         &self,
         base: usize,
         last: usize,
-    ) -> Result<Vec<(usize, usize)>, AddressError> {
-        let mut spans = Vec::new();
-        spans
-            .try_reserve(self.spans.len().saturating_add(1))
-            .map_err(|_| AddressError::OutOfMemory)?;
-        let mut at = base;
-        for slot in &self.spans {
-            if slot.last < at {
-                continue;
-            }
-            if slot.start > last {
-                break;
-            }
-            if slot.start > at {
-                spans.push((at, (slot.start - 1).min(last)));
-            }
-            match slot.last.checked_add(1) {
-                Some(next) => at = at.max(next),
-                None => return Ok(spans),
-            }
-        }
-        if at <= last {
-            spans.push((at, last));
-        }
-        Ok(spans)
+    ) -> impl DoubleEndedIterator<Item = (usize, usize)> + '_ {
+        (0..=self.spans.len()).filter_map(move |i| {
+            let lo = if i == 0 {
+                base
+            } else {
+                self.spans[i - 1].last.checked_add(1)?.max(base)
+            };
+            let hi = if i == self.spans.len() {
+                last
+            } else {
+                self.spans[i].start.checked_sub(1)?.min(last)
+            };
+            (lo <= hi).then_some((lo, hi))
+        })
     }
 
     pub(super) fn insert(&mut self, start: usize, last: usize) -> Result<usize, AddressError> {

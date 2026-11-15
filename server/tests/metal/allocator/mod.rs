@@ -1,4 +1,6 @@
 extern crate alloc;
+#[path = "../../../src/metal/allocator/pages.rs"]
+pub(crate) mod pages;
 
 use kernel_api::boot::platform::{Memory, Region};
 #[allow(dead_code)]
@@ -9,6 +11,16 @@ mod frame;
 #[path = "../../../src/metal/allocator/link.rs"]
 mod link;
 mod metal {
+    pub mod physical {
+        pub unsafe fn write<T>(pa: kernel_api::address::PhysAddr) -> *mut T {
+            assert!(
+                super::board::info()
+                    .memory
+                    .contains_identity(crate::Region::new(pa.as_usize(), size_of::<T>()))
+            );
+            pa.as_usize() as *mut T
+        }
+    }
     pub mod board {
         pub struct Machine {
             pub memory: crate::Memory,
@@ -19,6 +31,7 @@ mod metal {
         }
     }
     pub mod allocator {
+        pub(crate) use crate::pages;
         pub(crate) use crate::{error::InitError, link::Link};
         pub mod bump {
             pub fn frontier() -> usize {
@@ -84,6 +97,7 @@ fn frame_split_and_merge_never_publish_reserved_pages_or_bank_holes() {
     let mut indices = Vec::new();
     while let Some(index) = unsafe { allocator.split_block(0) } {
         assert!(usable(allocator.frame_addr(index)));
+        assert_eq!(allocator.frame_index(allocator.frame_addr(index)), index);
         indices.push(index);
         assert!(indices.len() <= expected);
     }
@@ -133,4 +147,23 @@ mod entry {
     pub(crate) mod boot {
         pub(crate) use crate::metal::board as facts;
     }
+}
+
+#[test]
+fn compact_metadata_ignores_a_terabyte_hole() {
+    let regions = [
+        Region::new(0x100000, 8192),
+        Region::new(1usize << 40, 12288),
+    ];
+    let map = pages::Pages::new(&regions);
+    assert_eq!(map.len(), 5);
+    for index in 0..5 {
+        let address = map.address(index).unwrap();
+        assert_eq!(map.index(address), Some(index));
+        assert_eq!(map.index(address + 4095), Some(index));
+    }
+    for address in [0, 0x102000, 0x8000000000, (1usize << 40) + 12288] {
+        assert_eq!(map.index(address), None);
+    }
+    assert_eq!(map.address(5), None);
 }

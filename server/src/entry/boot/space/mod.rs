@@ -20,7 +20,6 @@ use crate::metal::image::kernel_edge;
 use crate::metal::layout::HART_FRAME_BASE;
 use crate::metal::layout::TRAMPOLINE;
 use crate::metal::layout::trampoline_pa;
-use crate::metal::mmu::internal::mode;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -45,11 +44,7 @@ pub fn init() -> NestResult<()> {
     (|| -> Result<(), NestError> {
         unsafe {
             let m = facts::info();
-            let dram = m.memory.envelope();
-
-            if crate::metal::mmu::internal::canonical(dram.range().end) > mode::upper() {
-                return Err(NestError::DramOverlap);
-            }
+            let plan = crate::metal::layout::plan();
 
             let kernel_space = Nest::kernel()?;
             let nest = &kernel_space;
@@ -111,7 +106,7 @@ pub fn init() -> NestResult<()> {
                         access,
                     )?;
                     let lower = ActiveRange::new(
-                        VirtAddr::wrap(mode::lower().as_usize() + start),
+                        VirtAddr::wrap(plan.direct.base + start),
                         size,
                         access,
                         access,
