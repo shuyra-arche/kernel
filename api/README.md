@@ -78,7 +78,7 @@ Cells. ABI coordinates remain 4 KiB units, so a level-1 Cell spans 512 coordinat
 
 ## ABI version
 
-This revision implements ABI 11 unconditionally. Calls, native Flat/Nest
+This revision implements ABI 12 unconditionally. Calls, native Flat/Nest
 memory descriptors, Boot Ledger and Capsule ABI use the single version in
 `abi::VERSION`. Capsule format remains 2. Cargo features do not select an ABI.
 
@@ -94,7 +94,7 @@ is also fixed: its source still requires the old opt-in feature. Neither tag
 contains this removal of ABI selection.
 
 Call numbers are `(version << 48) | (domain << 32) | operation`. The RV64
-Kernel-call transport uses `ebreak`; `a7` identifies the operation,
+Kernel-call transport uses U-mode `ecall`; `a7` identifies the operation,
 `a0..a5` carry arguments and `a0..a2` carry results. Supervisor-mode
 `ecall` goes to SBI, not this Kernel dispatcher. Invalid call numbers,
 encodings, memory references or expired authorizations are rejected; a
@@ -166,3 +166,11 @@ guest traps and selected hardware paths. Neither replaces physical evidence.
 Retired Cell/Flat/Nest register calls and Share Create/Open/Shut declarations
 were removed from the source API. Use native bounded memory requests; see the
 [source migration](../docs/memory-migration.md). Retired numbers remain rejected.
+
+ABI 12 rejects ABI 11 calls, Ledger entries and Capsules. Its only public
+transport is U-mode ECALL (cause 8), advancing the PC by four bytes after
+invalidation settles. User EBREAK and C.EBREAK terminate the Task with Fault;
+they never dispatch a call. Supervisor ECALL remains SBI. Kernel resident
+work uses a private supervisor function-call scheduling boundary. Pin API,
+Client, Kernel and boot image to one revision; no mixed-transport window exists.
+Capsule format stays 2; its required Kernel ABI byte and Ledger version are 12.

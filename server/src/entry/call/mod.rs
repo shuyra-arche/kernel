@@ -24,7 +24,7 @@ use outcome::ret_err;
 
 /// 把这一次调用做掉，交回要接着跑的那一帧。
 ///
-/// **不碰 `sepc`**：客人那条 `ebreak` 有多宽、之后从哪里续跑，是入口那一手的事
+/// **不碰 `sepc`**：客人那条 `ecall` 之后从哪里续跑，是入口那一手的事
 /// （`entry::trap::envcall`）——这里只管把这一格调用服务完，并把答案写进这一帧。
 pub(crate) fn dispatch(
     frame: &mut TrapContext,

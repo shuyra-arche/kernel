@@ -198,3 +198,18 @@ fn reservation_prepares_declared_images_and_cannot_omit_existing_state() {
         vector: None
     }));
 }
+
+#[path = "../../../../../src/metal/riscv/switcher/call.rs"]
+mod call;
+#[test]
+fn only_user_ecall_can_dispatch_and_pc_is_fixed_width() {
+    for supervisor in [false, true] {
+        for cause in [0, 2, 3, 8, 9, 12, (1usize << 63) | 8] {
+            assert_eq!(call::admitted(cause, supervisor), cause == 8 && !supervisor);
+        }
+    }
+    assert_eq!(call::next_pc(0x1002, 1 << 38), Some(0x1006));
+    for pc in [usize::MAX, (1 << 38) - 4, (1 << 38) - 2, 1 << 38, 0x1001] {
+        assert_eq!(call::next_pc(pc, 1 << 38), None);
+    }
+}

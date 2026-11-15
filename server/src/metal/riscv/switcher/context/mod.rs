@@ -24,6 +24,9 @@ pub struct TrapContext {
 }
 
 impl TrapContext {
+    pub(crate) fn is_user(&self) -> bool {
+        self.sstatus.spp() == sstatus::SPP::User
+    }
     pub(crate) fn status(&self) -> usize {
         self.sstatus.bits()
     }

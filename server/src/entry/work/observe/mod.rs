@@ -79,16 +79,9 @@ extern "C" fn run() -> ! {
     exit()
 }
 fn sleep(at: u64) {
-    use kernel_api::abi::{call::room::operations::SleepUntil, operation::RegisterCall};
-    let mut result = at as usize;
-    unsafe {
-        core::arch::asm!("ebreak", inlateout("a0") result, in("a7") SleepUntil::SLOT, lateout("a1") _, lateout("a2") _, options(nostack));
-    }
-    let _ = result;
+    // No guards or resource references survive this scheduling boundary.
+    crate::metal::switcher::internal::sleep(at);
 }
 fn exit() -> ! {
-    use kernel_api::abi::{call::unit::operations::Exit, operation::RegisterCall};
-    unsafe {
-        core::arch::asm!("ebreak", in("a0") 0usize, in("a1") 0usize, in("a2") 0usize, in("a3") 0usize, in("a4") 0usize, in("a7") Exit::SLOT, options(noreturn));
-    }
+    crate::metal::switcher::internal::exit()
 }

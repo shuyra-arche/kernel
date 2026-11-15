@@ -18,7 +18,7 @@ until they migrate. Existing release tags retain their original behavior.
 
 [`invoke_with`](src/invoke.rs) packs once, invokes a supplied test
 transport once and decodes once. `unsafe invoke` uses the native
-[RV64 transport](src/transport.rs): `ebreak` with `a7` as the
+[RV64 transport](src/transport.rs): `ecall` with `a7` as the
 operation number, `a0..a5` as inputs and `a0..a2` as outputs.
 S-mode `ecall` belongs to SBI, not this dispatcher. A terminal
 `Unit.Exit` does not return normally.

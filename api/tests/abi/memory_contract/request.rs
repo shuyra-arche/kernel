@@ -142,7 +142,7 @@ fn settled_operations_have_distinct_domain_and_slot_contracts() {
     ] {
         assert_eq!((opcode.domain() as u64, opcode.slot()), (domain, slot));
         assert_eq!(Opcode::of(domain, slot), Some(opcode));
-        let number = (11 << 48) | (domain << 32) | slot;
+        let number = (12 << 48) | (domain << 32) | slot;
         assert_eq!(opcode.call_number(), number);
         assert_eq!(Opcode::from_call_number(number), Some(opcode));
     }
@@ -171,7 +171,7 @@ fn request_vectors_keep_fixed_positions_versions_and_full_width_identity() {
     )
     .unwrap();
     let mut expected = [0u8; 256];
-    for (index, word) in [11, 12, 19, u64::MAX, 7, 11, 512, 1 << 63]
+    for (index, word) in [12, 12, 19, u64::MAX, 7, 11, 512, 1 << 63]
         .into_iter()
         .enumerate()
     {
@@ -198,7 +198,7 @@ fn request_vectors_keep_fixed_positions_versions_and_full_width_identity() {
         assert!(Request::new(Some(id()), action).is_none());
         let query = Request::new(None, action).unwrap();
         let mut expected = [0u8; 256];
-        for (index, word) in [11, domain as u64, 18, 0, 3, u64::MAX]
+        for (index, word) in [12, domain as u64, 18, 0, 3, u64::MAX]
             .into_iter()
             .enumerate()
         {
@@ -221,7 +221,7 @@ fn malformed_headers_payloads_and_reserved_tails_reject() {
     .unwrap();
     for (word, invalid) in [
         (0, 10),
-        (0, 12),
+        (0, 11),
         (1, 2),
         (1, 13),
         (2, 0),

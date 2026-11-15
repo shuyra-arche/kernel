@@ -273,7 +273,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         let path = root.join("initrd.bin");
         fs::write(
             &path,
-            capsule::initrd(&fs::read(root.join("guest.elf"))?, 11)?,
+            capsule::initrd(&fs::read(root.join("guest.elf"))?, 12)?,
         )?;
         Some(path)
     };
