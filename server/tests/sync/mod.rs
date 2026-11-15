@@ -151,3 +151,12 @@ fn queued_harts_enter_in_arrival_order_and_publish_protected_writes() {
     }
     assert_eq!(lock.lock().get(), 4);
 }
+
+#[path = "../../src/metal/riscv/sync/depend/level.rs"]
+mod level;
+#[path = "../../src/metal/riscv/sync/pair.rs"]
+mod pair;
+#[path = "../../src/metal/riscv/sync/depend/verdict.rs"]
+mod verdict;
+pub(crate) use spin::SpinLock;
+mod ordering;

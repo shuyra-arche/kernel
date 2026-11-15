@@ -81,7 +81,13 @@ pub(crate) mod metal {
         }
         macro_rules! depend_check_peer {
             ($lock:expr, $lower:expr, $caller:expr) => {
-                crate::metal::sync::depend_check!($lock, $caller);
+                #[cfg(debug_assertions)]
+                crate::metal::sync::depend::check_peer(
+                    $lock as *const _ as *const () as usize,
+                    $lower as *const _ as *const () as usize,
+                    $lock.level,
+                    $caller,
+                );
             };
         }
         macro_rules! depend_release {
@@ -94,27 +100,32 @@ pub(crate) mod metal {
         pub(crate) use depend_enter;
         pub(crate) use {depend_acquire, depend_check, depend_check_peer, depend_release};
         pub(crate) mod depend {
+            pub(crate) use crate::level::Level;
             use std::cell::RefCell;
-            std::thread_local! { static HELD: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) }; }
-            #[derive(Debug, Clone, Copy)]
-            pub(crate) enum Level {
-                Unit,
+            std::thread_local! { static HELD: RefCell<Vec<(usize,Option<Level>)>> = const { RefCell::new(Vec::new()) }; }
+            #[cfg(debug_assertions)]
+            pub(crate) fn check(address: usize, level: Option<Level>, _: usize) {
+                HELD.with_borrow(|held| {
+                    crate::verdict::strict(held.iter().copied(), address, level).unwrap()
+                });
             }
             #[cfg(debug_assertions)]
-            pub(crate) fn check(address: usize, _: Option<Level>, _: usize) {
-                HELD.with_borrow(|held| assert!(!held.contains(&address)));
+            pub(crate) fn check_peer(address: usize, lower: usize, level: Option<Level>, _: usize) {
+                HELD.with_borrow(|held| {
+                    crate::verdict::peer(held.iter().copied(), address, lower, level).unwrap()
+                });
             }
             #[cfg(debug_assertions)]
-            pub(crate) fn acquire(address: usize, _: Option<Level>, _: usize) {
+            pub(crate) fn acquire(address: usize, level: Option<Level>, _: usize) {
                 HELD.with_borrow_mut(|held| {
-                    assert!(!held.contains(&address));
-                    held.push(address);
+                    assert!(!held.iter().any(|(at, _)| *at == address));
+                    held.push((address, level));
                 });
             }
             #[cfg(debug_assertions)]
             pub(crate) fn release(address: usize) {
                 HELD.with_borrow_mut(|held| {
-                    let at = held.iter().position(|known| *known == address).unwrap();
+                    let at = held.iter().position(|(at, _)| *at == address).unwrap();
                     held.remove(at);
                 });
             }

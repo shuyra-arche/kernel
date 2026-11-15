@@ -67,10 +67,10 @@ impl<T: ?Sized> RelLock<T> {
             // Acquire observes the previous outer release. Reserve only an
             // empty queue: a failed try creates no abandoned ticket, and a
             // free owner between turns does not let this caller barge.
+            crate::metal::sync::depend_check!(self, caller);
             if !self.turns.try_enter() {
                 return None;
             }
-            crate::metal::sync::depend_check!(self, caller);
             self.owner.store(me.word(), Ordering::Relaxed);
             unsafe { *self.count.get() = 1 };
             #[cfg(feature = "latency")]
