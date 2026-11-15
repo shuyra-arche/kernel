@@ -3,7 +3,7 @@
   "server/src/basis/nest/translation/retirement.rs": "f0c537364b0a7c8de92233864066f477071c742c32fae134814db541e07ff777",
   "server/src/entry/boot/mod.rs": "86be32774f846bd9e98781c236c77b71f3376c1ac988647b59c9f63afd91b0f8",
   "server/src/entry/report/shutdown.rs": "6e7b3899751611073ddbccc2164c61108ae61c9dbd62d1dca45d854c6cfea598",
-  "server/src/entry/trap/mod.rs": "d7498d51418342d5fa1a2e471190be9da607b460cea9c71c9a436e7127e6e69f",
+  "server/src/entry/trap/mod.rs": "01cc390bdf821f63af5b2e1f71008281ee5cdac64ae6c44c037cf2f9d9e28202",
   "server/src/metal/riscv/mmu/internal/completion.rs": "4dfb9106a6d99a08e589e76e92ca16de7e61b637a6b5bbb49d2845e04a52e610",
   "server/src/metal/riscv/mmu/internal/table/mod.rs": "8fc92b057708d9fc18426dfff7f36fc87a76f2b3a0447de127f55cdf96320284"
 }

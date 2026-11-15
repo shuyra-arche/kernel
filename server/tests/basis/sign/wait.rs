@@ -88,3 +88,41 @@ fn dead_source_rejects_enrollment_and_requeue_consumes_its_previous_hint() {
     assert!(!site.register(task.clone()));
     assert!(task.state.lock().link().detached());
 }
+
+#[test]
+fn reserved_resident_site_survives_delivery_without_reallocation_and_dies_with_its_source() {
+    let life = Arc::new(Anchor);
+    let key = WakeKey::Alarm {
+        task: kernel_api::model::identity::TaskId::new(17),
+    };
+    let mut table = hashbrown::HashMap::new();
+    Site::ensure(&mut table, key, &Arc::downgrade(&life))
+        .unwrap()
+        .reserve();
+    let capacity = table.capacity();
+    for _ in 0..100 {
+        let site = table.get_mut(&key).unwrap();
+        // A producer racing ahead of enrollment must leave a retained wake.
+        assert!(site.notify(true).is_none());
+        assert!(site.notify(true).is_none());
+        assert!(!site.register(Task::new()));
+        site::prune(&mut table, key);
+        let task = Task::new();
+        assert!(table.get_mut(&key).unwrap().register(task.clone()));
+        let delivered = table
+            .get_mut(&key)
+            .unwrap()
+            .notify(true)
+            .unwrap()
+            .collect::<Vec<_>>();
+        assert_eq!(delivered.len(), 1);
+        assert!(Arc::ptr_eq(&delivered[0], &task));
+        drop(delivered);
+        site::prune(&mut table, key);
+        assert_eq!(table.len(), 1);
+        assert_eq!(table.capacity(), capacity);
+    }
+    drop(life);
+    site::prune(&mut table, key);
+    assert!(!table.contains_key(&key));
+}

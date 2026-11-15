@@ -126,17 +126,6 @@ pub(crate) fn handle(
             if !from_task {
                 crate::entry::report::halt::trap(frame, 3, 0);
             }
-            let resident = ident.as_ref().map(|i| i.task_id()).unwrap_or(0);
-            if frame.gpr.x(crate::metal::switcher::context::Gprs::A7) == usize::MAX
-                && crate::basis::unit::lifecycle::WORK.identifies(resident)
-            {
-                drop(ident);
-                drop(root.take());
-                if let Some(next) = crate::entry::work::park(frame, resident) {
-                    return resume(next);
-                }
-                return resume(frame as *mut _);
-            }
             match envcall(frame, ident, root.take().expect("Task call boundary")) {
                 Some(next) => next,
                 None => crate::basis::unit::lifecycle::quit() as *mut TrapContext,
@@ -410,6 +399,17 @@ fn envcall(
         return None;
     };
     frame.sepc = KVirt::wrap(next_pc);
+    // Private resident waits use the same validated/advanced continuation as
+    // ordinary calls. Drop all Hart-tracked identity and boundary borrows before
+    // handing ownership to the scheduler stack.
+    if frame.gpr.x(crate::metal::switcher::context::Gprs::A7) == usize::MAX
+        && crate::basis::unit::lifecycle::WORK.identifies(ident.id.get())
+    {
+        let id = ident.id.get();
+        drop(ident);
+        drop(root);
+        return crate::entry::work::park(frame, id);
+    }
     crate::entry::call::dispatch(frame, ident, root)
 }
 
