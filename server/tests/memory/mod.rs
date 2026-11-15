@@ -1,3 +1,6 @@
+#![allow(internal_features)]
+#![feature(std_internals)]
+#![feature(reentrant_lock)]
 #![feature(allocator_ext)]
 
 extern crate alloc;
@@ -73,6 +76,7 @@ mod external_error;
 #[path = "../../src/basis/nest/memo/publication/identity.rs"]
 mod external_identity;
 use external_error::Error;
+#[allow(dead_code, unused_imports)]
 #[path = "../support/lock.rs"]
 mod host_lock;
 mod metal {

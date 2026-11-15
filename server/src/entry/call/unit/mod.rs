@@ -365,7 +365,6 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
             nest,
             member_exit,
         } => {
-            let serial = me.pend.lock();
             let guarded = guard != ControlId::NONE;
             let check = || {
                 if !crate::basis::pend::live(me) || !me.administration.allows(ControlKind::Build) {
@@ -380,6 +379,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
                 Ok(())
             };
             {
+                let _serial = me.pend.lock();
                 let _commit = crate::basis::commit();
                 check()?;
             }
@@ -391,87 +391,93 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
             } else {
                 None
             };
-            let _commit = crate::basis::commit();
-            check()?;
-            let sire = TaskWeak::stored(Arc::downgrade(me), Origin::Sire);
-            let builder = TeamBuilder::new(kind)
-                .sire(sire)
-                .creator(me.ident.id)
-                .constructing()
-                .member_exit(member_exit)
-                .guarded(guarded);
-            let (team, token) = if let Some(token) = nest {
-                let entry = pend::locate(me, token).ok_or(UnitFail::Denied)?;
-                if entry.sire().is_some()
-                    || entry.target().owner() != me.ident.id
-                    || entry.authority().scope() != PendScope::Nest(NestScope::Whole)
-                    || !entry.permits(Operations::Nest(NestRights::ATTACH))
-                    || entry.modifiable() != Modifiable::Yes
-                    || me
-                        .pend
-                        .heirs
-                        .lock()
-                        .iter()
-                        .any(|(parent, _, _)| *parent == token)
-                    || entry.authority().external_pending()
-                {
-                    return Err(UnitFail::Denied);
-                }
-                let selected = entry.target().nest().ok_or(UnitFail::Denied)?;
-                if selected.is_external()
-                    || !selected.is_open()
-                    || selected.is_adopted()
-                    || selected.kind().is_supervisor() != kind.is_supervisor()
-                {
-                    return Err(UnitFail::Denied);
-                }
-                let mut limits = entry.authority().limits();
-                let Operations::Nest(rights) = limits.operations else {
-                    return Err(UnitFail::Denied);
+            let (team, token) = {
+                let _serial = me.pend.lock();
+                let _commit = crate::basis::commit();
+                check()?;
+                let sire = TaskWeak::stored(Arc::downgrade(me), Origin::Sire);
+                let builder = TeamBuilder::new(kind)
+                    .sire(sire)
+                    .creator(me.ident.id)
+                    .constructing()
+                    .member_exit(member_exit)
+                    .guarded(guarded);
+                let (team, token) = if let Some(token) = nest {
+                    let entry = pend::locate(me, token).ok_or(UnitFail::Denied)?;
+                    if entry.sire().is_some()
+                        || entry.target().owner() != me.ident.id
+                        || entry.authority().scope() != PendScope::Nest(NestScope::Whole)
+                        || !entry.permits(Operations::Nest(NestRights::ATTACH))
+                        || entry.modifiable() != Modifiable::Yes
+                        || me
+                            .pend
+                            .heirs
+                            .lock()
+                            .iter()
+                            .any(|(parent, _, _)| *parent == token)
+                        || entry.authority().external_pending()
+                    {
+                        return Err(UnitFail::Denied);
+                    }
+                    let selected = entry.target().nest().ok_or(UnitFail::Denied)?;
+                    if selected.is_external()
+                        || !selected.is_open()
+                        || selected.is_adopted()
+                        || selected.kind().is_supervisor() != kind.is_supervisor()
+                    {
+                        return Err(UnitFail::Denied);
+                    }
+                    let mut limits = entry.authority().limits();
+                    let Operations::Nest(rights) = limits.operations else {
+                        return Err(UnitFail::Denied);
+                    };
+                    limits.operations =
+                        Operations::Nest(rights & (NestRights::INSPECT | NestRights::RESERVE));
+                    entry.authority().can_narrow(limits).map_err(map_pend_err)?;
+                    // COMMIT and the caller's serial exclude authority mutation.
+                    // spawn_in stages topology and adopts the selected Nest; it
+                    // neither borrows nor exports this authority. Retained-route
+                    // Drops can only discharge blockers. Keep the Pend storage
+                    // guard out of Nest/topology work, and publish the checked
+                    // limit only after the fallible construction succeeds.
+                    let team = builder.spawn_in(selected).map_err(map_err)?;
+                    entry
+                        .authority()
+                        .narrow(limits)
+                        .expect("COMMIT retains the checked adoption limit");
+                    (team, token)
+                } else {
+                    let selected = prepared
+                        .as_ref()
+                        .cloned()
+                        .expect("prepared fresh Team Nest");
+                    let entry = PendEntry::try_new(
+                        Target::Nest {
+                            owner: me.ident.id,
+                            nest: selected.clone(),
+                        },
+                        Mark::NONE,
+                        Modifiable::Yes,
+                        None,
+                    )
+                    .map_err(map_pend_err)?;
+                    entry
+                        .narrow(Limits {
+                            operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
+                            modifiable: Modifiable::Yes,
+                            distributable: Distributable::Yes,
+                            scope: PendScope::Nest(NestScope::Whole),
+                        })
+                        .map_err(map_pend_err)?;
+                    let token = entry.token();
+                    let entry = Arc::try_new(entry).map_err(|_| UnitFail::OutOfMemory)?;
+                    let registration = me.pend.prepare(entry).map_err(map_pend_err)?;
+                    let team = builder.spawn_in(selected).map_err(map_err)?;
+                    registration.publish();
+                    (team, token)
                 };
-                limits.operations =
-                    Operations::Nest(rights & (NestRights::INSPECT | NestRights::RESERVE));
-                let limited: pend::PreparedLimit<'_> = entry
-                    .authority()
-                    .prepare_limit(limits)
-                    .map_err(map_pend_err)?;
-                // spawn_in only stages metadata and binds the Nest; no hardware fence
-                // or Pend access can run while the prepared State lock is held.
-                let team = builder.spawn_in(selected).map_err(map_err)?;
-                limited.commit();
-                (team, token)
-            } else {
-                let selected = prepared
-                    .as_ref()
-                    .cloned()
-                    .expect("prepared fresh Team Nest");
-                let entry = PendEntry::try_new(
-                    Target::Nest {
-                        owner: me.ident.id,
-                        nest: selected.clone(),
-                    },
-                    Mark::NONE,
-                    Modifiable::Yes,
-                    None,
-                )
-                .map_err(map_pend_err)?;
-                entry
-                    .narrow(Limits {
-                        operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
-                        modifiable: Modifiable::Yes,
-                        distributable: Distributable::Yes,
-                        scope: PendScope::Nest(NestScope::Whole),
-                    })
-                    .map_err(map_pend_err)?;
-                let token = entry.token();
-                let entry = Arc::try_new(entry).map_err(|_| UnitFail::OutOfMemory)?;
-                let registration = me.pend.prepare(entry).map_err(map_pend_err)?;
-                let team = builder.spawn_in(selected).map_err(map_err)?;
-                registration.publish();
                 (team, token)
             };
-            drop(_commit);
-            drop(serial);
             pend::notify(me.ident.id, token);
             Ok(CreatedUnit::Team {
                 team: team.id,

@@ -58,7 +58,10 @@ pub(crate) struct Page {
     page: Option<Region>,
     level: CellLevel,
     reclaim: reclaim::Reclaim,
-    membership: crate::metal::sync::SpinLock<reclaim::group::Membership>,
+    membership: crate::metal::sync::LegacyLock<
+        crate::metal::sync::order::PageMembership,
+        reclaim::group::Membership,
+    >,
 }
 
 impl Page {
@@ -92,7 +95,7 @@ impl Page {
             page: Some(region),
             level,
             reclaim: reclaim::Reclaim::new(),
-            membership: crate::metal::sync::SpinLock::new(reclaim::group::Membership::new()),
+            membership: crate::metal::sync::LegacyLock::new(reclaim::group::Membership::new()),
         })
     }
 

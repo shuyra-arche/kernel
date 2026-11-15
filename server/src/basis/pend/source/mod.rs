@@ -20,7 +20,7 @@ use crate::basis::flat::source::Export;
 use crate::basis::nest::Access;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::Pend;
-use crate::metal::sync::{SpinLock, SpinLockGuard};
+use crate::metal::sync::{LegacyGuard, LegacyLock};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
@@ -75,18 +75,19 @@ pub(crate) struct SourceAuthorization {
     /// 键来自两个分配器（关系号那一域与移交那一域），各自只保证**域内**唯一；
     /// 带窗口的那一档（移交）还把“这一段已经核过、别的发表不得插进来”一并记下。
     /// 两张域靠键自带的那一位分开，故同号不会互删。
-    inflight: SpinLock<Vec<(usize, Option<Arc<Geometry>>)>>,
+    inflight:
+        LegacyLock<crate::metal::sync::order::SourceFlights, Vec<(usize, Option<Arc<Geometry>>)>>,
     /// 发布与撤销的共同闸门。
-    revoked: SpinLock<bool>,
+    revoked: LegacyLock<crate::metal::sync::order::SourceGate, bool>,
     /// 未结 CPU 关系：包含显式 Attach 控制与资源 Open 映射。
     ///
     /// 成员与 Registry 项是同一个 `Arc<RangeBinding>`，所以“还欠着谁”只有这一份
     /// 事实：只有显式结清（`Nest::retire_reservation` / `reap_reservations`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
-    bindings: SpinLock<Vec<Arc<RangeBinding>>>,
-    blocks: SpinLock<Vec<Arc<RangeBlock>>>,
-    origins: SpinLock<Vec<Weak<Provenance>>>,
-    phase: SpinLock<Phase>,
+    bindings: LegacyLock<crate::metal::sync::order::SourceBindings, Vec<Arc<RangeBinding>>>,
+    blocks: LegacyLock<crate::metal::sync::order::SourceBlocks, Vec<Arc<RangeBlock>>>,
+    origins: LegacyLock<crate::metal::sync::order::SourceOrigins, Vec<Weak<Provenance>>>,
+    phase: LegacyLock<crate::metal::sync::order::SourcePhase, Phase>,
 }
 
 /// 私有根在根 Pend 接手前的权限幅面（上限仍由 `ceiling` 收）。
@@ -112,12 +113,12 @@ impl SourceAuthorization {
             qualification: Creation::new(),
             external: AtomicBool::new(false),
             holds: AtomicUsize::new(0),
-            inflight: SpinLock::new(Vec::new()),
-            revoked: SpinLock::new(false),
-            bindings: SpinLock::new(Vec::new()),
-            blocks: SpinLock::new(Vec::new()),
-            origins: SpinLock::new(Vec::new()),
-            phase: SpinLock::new(Phase::Private(range)),
+            inflight: LegacyLock::new(Vec::new()),
+            revoked: LegacyLock::new(false),
+            bindings: LegacyLock::new(Vec::new()),
+            blocks: LegacyLock::new(Vec::new()),
+            origins: LegacyLock::new(Vec::new()),
+            phase: LegacyLock::new(Phase::Private(range)),
         })
         .map_err(|_| PendFail::OutOfMemory)
     }
@@ -425,7 +426,7 @@ impl SourceAuthorization {
 /// the source changes hands. A revoked source can still be drained.
 pub(crate) struct Withdrawal<'a> {
     source: &'a SourceAuthorization,
-    gate: SpinLockGuard<'a, bool>,
+    gate: LegacyGuard<'a, bool>,
 }
 
 impl Withdrawal<'_> {

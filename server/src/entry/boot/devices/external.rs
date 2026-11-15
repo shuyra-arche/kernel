@@ -4,16 +4,18 @@ use crate::basis::flat::{BorrowedRegion, Flat};
 use crate::basis::nest::{Access, Nest, Placement, RegionKind};
 use crate::basis::unit::team::kernel;
 use crate::metal::generic::iommu::Quiescence;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
 use kernel_api::boot::{ledger::Name, platform::Region};
 
-pub(super) static REGIONS: SpinLock<Vec<Region>> = SpinLock::new(Vec::new());
+pub(super) static REGIONS: LegacyLock<crate::metal::sync::order::BootRegions, Vec<Region>> =
+    LegacyLock::new(Vec::new());
 // Boot staging only. After Ledger handoff, Nest/Pend own lifetime; there is no
 // persistent basis-level source registry or second authorization tree.
-pub(super) static NESTS: SpinLock<Vec<(Name, Arc<Nest>)>> = SpinLock::new(Vec::new());
+pub(super) static NESTS: LegacyLock<crate::metal::sync::order::BootNests, Vec<(Name, Arc<Nest>)>> =
+    LegacyLock::new(Vec::new());
 
 /// An exclusively owned resource and normalized controller/source identity.
 /// Firmware and bus identities are resolved by the trusted integration owner.

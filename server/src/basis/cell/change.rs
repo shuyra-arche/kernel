@@ -3,10 +3,11 @@
 //! objects own the gate; the registry holds only Weak references across Task death.
 use super::page::RetainError;
 use super::page::{Change, Page};
-use crate::metal::sync::{Level, SpinLock};
+use crate::metal::sync::LegacyLock;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-static LIVE: SpinLock<Vec<Weak<Change>>> = SpinLock::new_level(Level::L3, Vec::new());
+static LIVE: LegacyLock<crate::metal::sync::order::LiveChanges, Vec<Weak<Change>>> =
+    LegacyLock::new(Vec::new());
 
 /// All old and new physical gates commit with one exclusive receipt conversion.
 /// Caller holds COMMIT, the maintenance record and the Flat holdings lock.

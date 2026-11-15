@@ -1,6 +1,9 @@
 //! Result delivery only. The Memo retains all physical cleanup authority.
 use super::Task;
-use crate::{basis, metal::sync::SpinLock};
+use crate::{
+    basis,
+    metal::sync::{LegacyLock, order},
+};
 use alloc::boxed::Box;
 mod transition;
 use alloc::sync::{Arc, Weak};
@@ -13,10 +16,10 @@ pub(crate) use receipt::Receipt;
 
 /// One bounded result owner per actual Task. Resource and hardware state stay
 /// with Flat/Nest/Memo; this window only owns admission and response history.
-pub(super) struct Requests(SpinLock<Option<Box<Journal>>>);
+pub(super) struct Requests(LegacyLock<order::TaskJournal, Option<Box<Journal>>>);
 impl Requests {
     pub(super) const fn new() -> Self {
-        Self(SpinLock::new(None))
+        Self(LegacyLock::new(None))
     }
 }
 

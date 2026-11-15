@@ -33,13 +33,19 @@ pub(in super::super) fn init(
     if regions.is_empty() {
         return Ok(());
     }
-    let mut storage = CONTROLLERS.lock();
-    if storage.is_some() {
-        return Err(PendFail::Denied);
+    {
+        let mut storage = CONTROLLERS.lock();
+        if storage.is_some() {
+            return Err(PendFail::Denied);
+        }
+        *storage = Some(
+            Controllers::new(regions.iter().map(|r| r.base)).map_err(|_| PendFail::OutOfMemory)?,
+        );
     }
-    *storage =
-        Some(Controllers::new(regions.iter().map(|r| r.base)).map_err(|_| PendFail::OutOfMemory)?);
-    let controllers = storage.as_mut().expect("installed controller registry");
+    // Boot admission runs before runtime binding. Mapping MMIO can enter Nest;
+    // runtime completion takes Controllers under Nest, so preparation must not
+    // retain the pool guard. Previously installed engines remain in the pool
+    // on every later failure, including a failed queue start or fence.
     let nest = &kernel().ok_or(PendFail::Denied)?.nest;
     for region in regions {
         // MMIO remains a borrowed physical range, not an allocator-owned Page.
@@ -72,37 +78,44 @@ pub(in super::super) fn init(
         let registers = unsafe { Mmio::new(mapping.initial_start().as_usize(), region.base) };
         let mut engine = Engine::new(registers, cells).map_err(|_| PendFail::OutOfMemory)?;
         engine.enable_interrupts().map_err(failure)?;
-        controllers.install(engine).map_err(|_| PendFail::Denied)?;
-        let engine = controllers
-            .engine(region.base)
-            .map_err(|_| PendFail::Denied)?;
-        let mut ready = false;
-        for _ in 0..STEP_BUDGET {
-            if engine.step().map_err(failure)? == Phase::Ready {
-                ready = true;
-                break;
-            }
-        }
-        if !ready {
-            return Err(PendFail::Denied);
-        }
-        let batch = engine.invalidate().map_err(failure)?;
-        let mut completed = false;
-        for _ in 0..STEP_BUDGET {
-            if engine.observe(batch).map_err(failure)? {
-                completed = true;
-                break;
-            }
-        }
-        if !completed {
-            return Err(PendFail::Denied);
-        }
+        let started = {
+            let mut storage = CONTROLLERS.lock();
+            let controllers = storage.as_mut().expect("installed controller registry");
+            controllers.install(engine).map_err(|_| PendFail::Denied)?;
+            let engine = controllers
+                .engine(region.base)
+                .map_err(|_| PendFail::Denied)?;
+            start(engine)
+        };
+        // The regular console translates its stack buffer through Kernel Nest.
+        // Neither success nor error reporting may retain Controllers.
+        started.map_err(failure)?;
         crate::metal::console::_write(format_args!(
             "iommu: command engine ready at {:#x}; device DMA remains Off\n",
             region.base
         ));
     }
     Ok(())
+}
+
+fn start(engine: &mut Engine<Mmio>) -> Result<(), crate::metal::iommu::EngineError> {
+    let mut ready = false;
+    for _ in 0..STEP_BUDGET {
+        if engine.step()? == Phase::Ready {
+            ready = true;
+            break;
+        }
+    }
+    if !ready {
+        return Err(crate::metal::iommu::EngineError::State);
+    }
+    let batch = engine.invalidate()?;
+    for _ in 0..STEP_BUDGET {
+        if engine.observe(batch)? {
+            return Ok(());
+        }
+    }
+    Err(crate::metal::iommu::EngineError::State)
 }
 
 fn failure(error: crate::metal::iommu::EngineError) -> PendFail {
@@ -114,27 +127,37 @@ pub(in super::super) fn shutdown() {
     if let Some(route) = crate::basis::room::interrupt::external() {
         route.report();
     }
-    let mut storage = CONTROLLERS.lock();
-    let Some(controllers) = storage.as_mut() else {
-        return;
-    };
-    for engine in controllers.unassigned() {
-        if engine.phase() == Phase::Closed {
-            continue;
-        }
-        if engine.stop().is_err() {
-            continue;
-        }
-        for _ in 0..STEP_BUDGET {
-            match engine.step() {
-                Ok(Phase::Closed) | Err(_) => break,
-                _ => {}
+    let (closed, unsettled) = {
+        let mut storage = CONTROLLERS.lock();
+        let Some(controllers) = storage.as_mut() else {
+            return;
+        };
+        let (mut closed, mut unsettled) = (0, 0);
+        for engine in controllers.unassigned() {
+            if engine.phase() == Phase::Closed {
+                continue;
+            }
+            if engine.stop().is_err() {
+                continue;
+            }
+            for _ in 0..STEP_BUDGET {
+                match engine.step() {
+                    Ok(Phase::Closed) | Err(_) => break,
+                    _ => {}
+                }
+            }
+            if engine.phase() == Phase::Closed {
+                closed += 1;
+            } else {
+                unsettled += 1;
             }
         }
-        if engine.phase() != Phase::Closed {
-            log::error!("iommu: shutdown unsettled; hardware pages retained");
-        } else {
-            crate::metal::console::_write(format_args!("iommu: command engine closed\n"));
-        }
+        (closed, unsettled)
+    };
+    for _ in 0..unsettled {
+        log::error!("iommu: shutdown unsettled; hardware pages retained");
+    }
+    for _ in 0..closed {
+        crate::metal::console::_write(format_args!("iommu: command engine closed\n"));
     }
 }

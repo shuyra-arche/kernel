@@ -5,7 +5,11 @@ use crate::basis::{
     name::{Key, Registry},
     unit::task::Task,
 };
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::{
+    LegacyLock, Root,
+    lock::{LedgerSerialPairGuard, Lock, LockGuard, reentry::Reject},
+    order,
+};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -18,22 +22,23 @@ use kernel_api::{
 /// borrow edges and source references; closure invalidates every hosted authority before asynchronous retirement.
 /// Public PendIds index generational slots holding the single shared record.
 pub(crate) struct Table {
-    serial: SpinLock<()>,
+    serial: Lock<order::LedgerSerial, Reject, ()>,
     closed: Arc<AtomicBool>,
     admission: Arc<Admission>,
-    pub(crate) entries: SpinLock<Registry<PendId, Arc<PendEntry>>>,
-    pub(crate) heirs: SpinLock<Heirs>,
+    pub(crate) entries:
+        LegacyLock<crate::metal::sync::order::LedgerEntries, Registry<PendId, Arc<PendEntry>>>,
+    pub(crate) heirs: LegacyLock<crate::metal::sync::order::LedgerHeirs, Heirs>,
     pub(crate) references: HoldTable,
 }
 
 impl Table {
     pub(crate) fn new(owner: TaskId) -> Result<Self, PendFail> {
         Ok(Self {
-            serial: SpinLock::new(()),
+            serial: Lock::<order::LedgerSerial, Reject, ()>::new(()),
             closed: Arc::try_new(AtomicBool::new(false)).map_err(|_| PendFail::OutOfMemory)?,
             admission: Arc::try_new(Admission::new(owner)).map_err(|_| PendFail::OutOfMemory)?,
-            entries: SpinLock::new(Registry::default()),
-            heirs: SpinLock::new(Heirs {
+            entries: LegacyLock::new(Registry::default()),
+            heirs: LegacyLock::new(Heirs {
                 entries: Vec::new(),
                 reserved: 0,
             }),
@@ -41,15 +46,31 @@ impl Table {
         })
     }
 
+    pub(crate) fn after<'a>(
+        &'a self,
+        root: &'a mut Root<'_>,
+    ) -> LockGuard<'a, order::LedgerSerial, Reject, ()> {
+        root.lock(&self.serial)
+    }
+
     pub(crate) fn close(&self) {
         self.closed.store(true, Ordering::Release);
     }
 
-    pub(crate) fn lock(&self) -> crate::metal::sync::spin::SpinLockGuard<'_, ()> {
-        self.serial.lock()
+    pub(crate) fn lock(&self) -> crate::metal::sync::LegacyGuard<'_, ()> {
+        // SAFETY: audited legacy ledger transaction entry.
+        unsafe { self.serial.legacy_lock() }
     }
-    pub(crate) fn try_lock(&self) -> Option<crate::metal::sync::spin::SpinLockGuard<'_, ()>> {
-        self.serial.try_lock()
+    pub(crate) fn try_lock(&self) -> Option<crate::metal::sync::LegacyGuard<'_, ()>> {
+        // SAFETY: nonblocking form of the audited ledger transaction entry.
+        unsafe { self.serial.legacy_try_lock() }
+    }
+
+    /// The sole audited reverse-try path; never used by ordinary admission.
+    pub(crate) unsafe fn try_source_borrow(
+        &self,
+    ) -> Option<crate::metal::sync::LegacyGuard<'_, ()>> {
+        unsafe { self.serial.try_source_borrow() }
     }
 
     pub(crate) fn prepare_heir(
@@ -191,32 +212,35 @@ impl Drop for Registration<'_> {
     }
 }
 
-pub(in super::super) fn with_pair<T>(
-    a: &Task,
-    b: &Task,
-    run: impl FnOnce() -> T,
-) -> Result<T, PendFail> {
-    with_pair_uncommitted(a, b, || {
-        let _commit = crate::basis::commit();
-        Ok(run())
-    })?
+/// Acquire the real Task owners by stable, non-reused TaskId. Matching IDs
+/// require the same actual Task; an accidental reused/fabricated identity fails
+/// before any turn is reserved. The same Task follows the single-lock branch.
+pub(crate) fn pair<'a>(a: &'a Task, b: &'a Task) -> Result<LedgerSerialPairGuard<'a>, PendFail> {
+    if (a.ident.id == b.ident.id) != core::ptr::eq(a, b) {
+        return Err(PendFail::Denied);
+    }
+    // SAFETY: each immutable key and serial reference comes from that exact
+    // Task. These are enumerated legacy transaction roots; Debug cross-checks
+    // every live ancestor. No arbitrary key/lock tuple is a safe caller input.
+    unsafe {
+        LedgerSerialPairGuard::legacy(
+            &a.pend.serial,
+            a.ident.id.get(),
+            &b.pend.serial,
+            b.ident.id.get(),
+        )
+    }
+    .ok_or(PendFail::Busy)
 }
-
-pub(crate) fn with_pair_uncommitted<T>(
-    a: &Task,
-    b: &Task,
-    run: impl FnOnce() -> T,
-) -> Result<T, PendFail> {
-    let (first, second) = if a.ident.id.get() <= b.ident.id.get() {
-        (a, b)
-    } else {
-        (b, a)
-    };
-    let _first = first.pend.try_lock().ok_or(PendFail::Busy)?;
-    let _second = if first.ident.id == second.ident.id {
-        None
-    } else {
-        Some(second.pend.try_lock().ok_or(PendFail::Busy)?)
-    };
-    Ok(run())
+/// The typed entry also borrows the actual execution-boundary Root.
+#[allow(
+    dead_code,
+    reason = "typed Task-pair entry verified by the owner and UI suites"
+)]
+pub(crate) fn pair_after<'a>(
+    _root: &'a mut Root<'_>,
+    a: &'a Task,
+    b: &'a Task,
+) -> Result<LedgerSerialPairGuard<'a>, PendFail> {
+    pair(a, b)
 }

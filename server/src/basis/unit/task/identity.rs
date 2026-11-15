@@ -7,7 +7,7 @@ use kernel_api::model::identity::TaskId;
 
 use crate::basis::nest::NestError;
 use crate::basis::unit::team::Team;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use kernel_api::address::PhysAddr;
 
 static NEXT: crate::basis::name::Serial = crate::basis::name::Serial::new(1, isize::MAX as usize);
@@ -75,7 +75,7 @@ pub(crate) struct TaskIdent {
     pub(crate) controller: TaskId,
     pub(crate) team: Arc<Team>,
     pub(crate) frame_pa: PhysAddr,
-    memory: SpinLock<TaskMemory>,
+    memory: LegacyLock<crate::metal::sync::order::TaskMemory, Option<TaskMemory>>,
 }
 
 impl TaskIdent {
@@ -91,7 +91,7 @@ impl TaskIdent {
             controller,
             team,
             frame_pa,
-            memory: SpinLock::new(memory),
+            memory: LegacyLock::new(Some(memory)),
         }
     }
 
@@ -101,13 +101,19 @@ impl TaskIdent {
     pub(crate) fn prepare_resident(&self) -> Result<(), NestError> {
         use crate::basis::nest::FaultOutcome;
         use crate::metal::generic::trap::FaultKind;
-        let memory = self.memory.lock();
-        memory.frame.as_ref().ok_or(NestError::NoRegion)?;
-        let (start, size) = memory
-            .stack
-            .as_ref()
-            .ok_or(NestError::NoRegion)?
-            .initial_range();
+        // Scheduler admission owns its existing Preparation lease until this
+        // method returns. Task::retire observes preparing() and cannot take the
+        // original TaskMemory while these immutable coordinates are resolved.
+        let (start, size) = {
+            let stored = self.memory.lock();
+            let memory = stored.as_ref().ok_or(NestError::Busy)?;
+            memory.frame.as_ref().ok_or(NestError::NoRegion)?;
+            memory
+                .stack
+                .as_ref()
+                .ok_or(NestError::NoRegion)?
+                .initial_range()
+        };
         if size > 64 * 1024 {
             return Err(NestError::NoRegion);
         }
@@ -135,6 +141,36 @@ impl TaskIdent {
     }
 
     pub(crate) fn retire(&self) -> Result<(), NestError> {
-        self.memory.lock().retire()
+        let memory = {
+            self.memory
+                .try_lock()
+                .ok_or(NestError::Busy)?
+                .take()
+                .ok_or(NestError::Busy)?
+        };
+        let mut progress = MemoryRetirement {
+            owner: self,
+            memory: Some(memory),
+        };
+        progress
+            .memory
+            .as_mut()
+            .expect("owned memory continuation")
+            .retire()
+    }
+}
+
+// None in storage means the original TaskMemory is owned by this synchronous
+// retirement lease. Busy/partial failure restores it with completed stages
+// retained; no duplicate Page/Span ownership or new resource authority exists.
+struct MemoryRetirement<'a> {
+    owner: &'a TaskIdent,
+    memory: Option<TaskMemory>,
+}
+impl Drop for MemoryRetirement<'_> {
+    fn drop(&mut self) {
+        let mut stored = self.owner.memory.lock();
+        assert!(stored.is_none());
+        *stored = self.memory.take();
     }
 }

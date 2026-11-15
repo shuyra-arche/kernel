@@ -12,14 +12,14 @@ use kernel_api::model::identity::TaskId;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskWeak;
-use crate::metal::sync::Level;
+use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
-use crate::metal::sync::SpinLock;
 
-static TABLE: OnceLock<SpinLock<HashMap<TaskId, TaskWeak>>> = OnceLock::new();
+static TABLE: OnceLock<LegacyLock<crate::metal::sync::order::Registry, HashMap<TaskId, TaskWeak>>> =
+    OnceLock::new();
 
-fn table() -> &'static SpinLock<HashMap<TaskId, TaskWeak>> {
-    TABLE.get_or_init(|| SpinLock::new_level(Level::Registry, HashMap::new()))
+fn table() -> &'static LegacyLock<crate::metal::sync::order::Registry, HashMap<TaskId, TaskWeak>> {
+    TABLE.get_or_init(|| LegacyLock::new(HashMap::new()))
 }
 
 /// 先给这一枚任务留个位子：留不下就别往下构造了。

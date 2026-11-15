@@ -16,8 +16,14 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::basis::cell::page::Page;
-use crate::metal::sync::Level;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::{
+    LegacyLock,
+    lock::{
+        Lock, LockGuard, LockPairGuard,
+        reentry::{Accept, Reject},
+    },
+    order,
+};
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -45,7 +51,7 @@ pub struct Flat {
     allocation_owner: Owner,
     page_count: PageCount,
     level: CellLevel,
-    state: SpinLock<FlatState>,
+    state: Lock<order::Flat, Reject, FlatState>,
 }
 
 impl Flat {
@@ -115,9 +121,33 @@ impl Flat {
             allocation_owner,
             level,
             page_count,
-            state: SpinLock::new_level(Level::Flat, FlatState::new(source, transferable)),
+            state: Lock::<order::Flat, Reject, FlatState>::new(FlatState::new(
+                source,
+                transferable,
+            )),
         })
         .map_err(|_| FlatError::OutOfMemory)
+    }
+
+    fn state_storage(&self) -> &LegacyLock<crate::metal::sync::order::Flat, FlatState> {
+        // SAFETY: only Flat's enumerated legacy owner methods use this bridge.
+        // Debug checks this same instance against all actual ancestor classes.
+        unsafe { LegacyLock::from_lock(&self.state) }
+    }
+    fn pair_state<'a>(
+        &'a self,
+        other: &'a Self,
+    ) -> LockPairGuard<'a, order::Flat, FlatState, FlatState> {
+        // SAFETY: Flat's legacy entry has the audited ancestors; the pair API
+        // enforces distinct stable instances and address order in all builds.
+        unsafe { LockPairGuard::legacy(&self.state, &other.state) }
+    }
+    pub(crate) fn revision_after(
+        &self,
+        commit: &mut LockGuard<'_, order::Commit, Accept, ()>,
+    ) -> kernel_api::model::flat::FlatVersion {
+        let state = commit.lock(&self.state);
+        state.revision.current()
     }
 
     /// 这份来源永久失去迁移资格：已经有一处内核或全局映射压在它上面。
@@ -125,7 +155,7 @@ impl Flat {
     /// 不可恢复，而且与读取它的那次资格检查共用同一把状态锁：
     /// “检查过资格”与“之后才发布全局映射”不会交错成半个结论。
     pub(super) fn mark_untransferable(&self) {
-        self.state.lock().transferable = false;
+        self.state_storage().lock().transferable = false;
     }
 
     /// Stable identity, independent of references, ranges and storage addresses.
@@ -139,7 +169,11 @@ impl Flat {
     }
 
     pub(crate) fn level_at(&self, index: PageIndex) -> CellLevel {
-        self.state.lock().geometry.head(index.get(), self.level).1
+        self.state_storage()
+            .lock()
+            .geometry
+            .head(index.get(), self.level)
+            .1
     }
 
     /// 整段来源。
@@ -154,7 +188,7 @@ impl Flat {
         count: PageCount,
     ) -> Result<FlatRange, FlatError> {
         if !self
-            .state
+            .state_storage()
             .lock()
             .geometry
             .covers(index.get(), count.get(), self.level)
@@ -172,7 +206,7 @@ impl Flat {
     }
 
     pub(super) fn is_borrowed(&self) -> bool {
-        matches!(&self.state.lock().source, FlatSource::Borrowed(_))
+        matches!(&self.state_storage().lock().source, FlatSource::Borrowed(_))
     }
 
     pub(super) fn reside(
@@ -180,7 +214,7 @@ impl Flat {
         range: FlatRange,
         change: Option<&crate::basis::cell::page::Change>,
     ) -> Result<Residency, FlatError> {
-        let mut state = self.state.lock();
+        let mut state = self.state_storage().lock();
         if !state
             .geometry
             .covers(range.index().get(), range.page_count().get(), self.level)
@@ -223,7 +257,7 @@ impl Flat {
     }
 
     pub(super) fn release_residency(&self, id: usize) {
-        let mut state = self.state.lock();
+        let mut state = self.state_storage().lock();
         let at = state
             .residencies
             .iter()
@@ -249,7 +283,7 @@ impl Flat {
             return Err(FlatError::OutOfRange);
         }
         if !self
-            .state
+            .state_storage()
             .lock()
             .geometry
             .covers(index.get(), count.get(), self.level)
@@ -259,7 +293,8 @@ impl Flat {
         let mut page = index.get();
         while page < end {
             use storage::materialize::{Reservation, Step};
-            match Reservation::prepare(&self.state, PageIndex::new(page), end, self.level)? {
+            match Reservation::prepare(self.state_storage(), PageIndex::new(page), end, self.level)?
+            {
                 Step::Ready(pages) => page += pages,
                 Step::Allocate(reservation) => {
                     let level = reservation.level();
@@ -289,7 +324,7 @@ impl Flat {
         if end > self.page_count.get() {
             return Err(FlatError::OutOfRange);
         }
-        let guard = self.state.lock();
+        let guard = self.state_storage().lock();
         if !guard.geometry.covers(index.get(), count.get(), self.level) {
             return Err(FlatError::NotAligned);
         }
@@ -317,7 +352,7 @@ impl Flat {
         if page.get() >= self.page_count.get() {
             return Err(FlatError::OutOfRange);
         }
-        let guard = self.state.lock();
+        let guard = self.state_storage().lock();
         let page = PageIndex::new(guard.geometry.head(page.get(), self.level).0);
         match &guard.source {
             FlatSource::Borrowed(_) => Ok(true),
@@ -336,7 +371,7 @@ impl Flat {
         if page.get() >= self.page_count.get() {
             return Err(FlatError::OutOfRange);
         }
-        let guard = self.state.lock();
+        let guard = self.state_storage().lock();
         match &guard.source {
             FlatSource::Borrowed(region) => {
                 let offset = page

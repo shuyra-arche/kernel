@@ -1,6 +1,6 @@
 use crate::basis::name::{Registry, Serial};
 use crate::basis::unit::task::Task;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use alloc::sync::Arc;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
@@ -32,10 +32,12 @@ struct Entry {
     delegable: bool,
     authority: Arc<Authority>,
 }
-pub(crate) struct Table(SpinLock<Registry<ControlId, Entry>>);
+pub(crate) struct Table(
+    LegacyLock<crate::metal::sync::order::ControlTable, Registry<ControlId, Entry>>,
+);
 impl Table {
     pub(crate) fn new() -> Self {
-        Self(SpinLock::new(Registry::default()))
+        Self(LegacyLock::new(Registry::default()))
     }
     /// Only boot minting or checked delegation installs an entry.
     pub(crate) fn install(

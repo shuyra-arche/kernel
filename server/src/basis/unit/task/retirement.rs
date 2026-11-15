@@ -5,6 +5,7 @@ use crate::basis::nest::NestError;
 use alloc::sync::Arc;
 
 pub(super) enum Retirement {
+    Active,
     Heirs { after: usize },
     Pends,
     Memory,
@@ -20,7 +21,15 @@ impl Task {
     /// Advance one child or one local stage, without recursive Task retirement.
     /// Busy retains the husk. The phase guard is tried, never waited on.
     pub(crate) fn retire(self: &Arc<Self>) -> Result<(), NestError> {
-        let mut phase = self.retirement.try_lock().ok_or(NestError::Busy)?;
+        let phase = {
+            let mut stored = self.retirement.try_lock().ok_or(NestError::Busy)?;
+            if matches!(*stored, Retirement::Active) {
+                return Err(NestError::Busy);
+            }
+            core::mem::replace(&mut *stored, Retirement::Active)
+        };
+        let mut progress = Progress { task: self, phase };
+        let phase = &mut progress.phase;
         // Stop closes live authority while admission prepares outside COMMIT.
         // Keep the original resources until that lease finishes reading them.
         // Only reaped Tasks reach retirement, so a new live admission cannot
@@ -28,7 +37,7 @@ impl Task {
         if self.preparing() {
             return Err(NestError::Busy);
         }
-        match &mut *phase {
+        match phase {
             Retirement::Heirs { after } => {
                 // Team identities never repeat. Concurrent Oust may remove an
                 // earlier child, so a vector index cannot be the continuation.
@@ -61,7 +70,23 @@ impl Task {
                 }
             }
             Retirement::Settled => return Ok(()),
+            Retirement::Active => unreachable!("only the owned continuation advances retirement"),
         }
         Err(NestError::Busy)
+    }
+}
+
+// Move the existing continuation out of storage, leaving one busy marker.
+// Hardware work retains its exact resources and stage through this owned lease,
+// never an IRQ-masking mutex. Every exit restores the latest completed stage.
+struct Progress<'a> {
+    task: &'a Task,
+    phase: Retirement,
+}
+impl Drop for Progress<'_> {
+    fn drop(&mut self) {
+        let mut stored = self.task.retirement.lock();
+        assert!(matches!(*stored, Retirement::Active));
+        *stored = core::mem::replace(&mut self.phase, Retirement::Active);
     }
 }

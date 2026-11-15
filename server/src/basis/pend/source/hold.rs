@@ -2,7 +2,7 @@
 //! independent Retain privilege. After a Share adopts its source, every resolution
 //! revalidates the exact Pend branch and window; hardware residency is separate.
 
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use kernel_api::abi::call::pend::PendFail;
@@ -128,15 +128,15 @@ unsafe impl Sync for Hold {}
 // 号到符号上界就到了：那是运行时守住的条件，不用 debug 断言代替。
 
 pub(crate) struct HoldTable {
-    holds: SpinLock<Vec<(usize, Arc<Hold>)>>,
-    sources: SpinLock<Tracking<SourceAuthorization>>,
+    holds: LegacyLock<crate::metal::sync::order::Holds, Vec<(usize, Arc<Hold>)>>,
+    sources: LegacyLock<crate::metal::sync::order::HeldSources, Tracking<SourceAuthorization>>,
 }
 
 impl HoldTable {
     pub(crate) const fn new() -> Self {
         Self {
-            holds: SpinLock::new(Vec::new()),
-            sources: SpinLock::new(Tracking::new()),
+            holds: LegacyLock::new(Vec::new()),
+            sources: LegacyLock::new(Tracking::new()),
         }
     }
 

@@ -21,11 +21,12 @@ pub(in crate::entry::call) fn effect(
 }
 
 pub(in crate::entry::call) fn inspect(
+    root: &mut crate::metal::sync::Root<'_>,
     actor: &Arc<Task>,
     query: Query,
 ) -> Result<Observation, Failure> {
-    let _serial = actor.pend.lock();
-    let _commit = basis::commit();
+    let mut serial = actor.pend.after(root);
+    let mut commit = basis::after_ledger(&mut serial);
     if !pend::live(actor) {
         return Err(Failure::Dead);
     }
@@ -69,7 +70,7 @@ pub(in crate::entry::call) fn inspect(
             let (offset, count) = entry.authority().window().ok_or(Failure::Denied)?;
             Snapshot::Flat(kernel_api::model::flat::FlatStatus {
                 id,
-                version: meta.source().flat().revision(),
+                version: meta.source().flat().revision_after(&mut commit),
                 offset: offset.get(),
                 count: count.get(),
                 phase: if meta.source().flat().is_explicit() {

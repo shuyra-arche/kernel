@@ -25,15 +25,9 @@ impl<T> Lock<T> {
     pub(crate) fn new(value: T) -> Self {
         Self(Mutex::new(value))
     }
-    pub(crate) fn new_level(_: Level, value: T) -> Self {
-        Self::new(value)
-    }
     pub(crate) fn lock(&self) -> MutexGuard<'_, T> {
         self.0.lock().unwrap()
     }
-}
-pub(crate) enum Level {
-    L3,
 }
 pub(crate) struct Anchor;
 impl Anchor {
@@ -43,7 +37,7 @@ impl Anchor {
 }
 pub(crate) mod metal {
     pub(crate) mod sync {
-        pub(crate) use super::super::{Level, Lock as SpinLock};
+        pub(crate) use crate::host_lock::{LegacyLock, order};
         pub(crate) use std::sync::OnceLock;
     }
 }

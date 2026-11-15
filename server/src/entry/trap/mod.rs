@@ -33,7 +33,12 @@ pub(crate) fn service(pending: usize) {
     }
 }
 
-pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapContext {
+pub(crate) fn handle(
+    frame: &mut TrapContext,
+    from_task: bool,
+    event: TrapEvent,
+    mut root: Option<crate::metal::sync::Root<'_>>,
+) -> *mut TrapContext {
     crate::metal::mmu::completion::service();
     #[cfg(feature = "latency")]
     crate::metal::measure::enter();
@@ -50,7 +55,6 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
 
     crate::metal::stop::hush();
 
-    let event = trap::capture();
     trap::check_stack();
     assert_eq!(
         frame.trap_stack_corrupt, TRAP_STACK_CANARY,
@@ -122,7 +126,7 @@ pub(crate) fn handle(frame: &mut TrapContext, from_task: bool) -> *mut TrapConte
             if !from_task {
                 crate::entry::report::halt::trap(frame, 3, 0);
             }
-            match envcall(frame, ident) {
+            match envcall(frame, ident, root.take().expect("Task call boundary")) {
                 Some(next) => next,
                 None => crate::basis::unit::lifecycle::quit() as *mut TrapContext,
             }
@@ -328,9 +332,10 @@ fn kill_fault(ident: Option<Identity>) -> *mut TrapContext {
 /// 把这个任务**显式判死**（`Fault`），交回 `None` 让入口按原样把它换出去。
 /// 绝不猜一个长度推进 `sepc`（错位会让客人跳过它自己写回答案的那一存），
 /// 也绝不在没结清的表上做这一次调用；越界时连原 `sepc` 一并留在原地。
-pub(crate) fn envcall(
+fn envcall(
     frame: &mut TrapContext,
     ident: Option<Identity>,
+    root: crate::metal::sync::Root<'_>,
 ) -> Option<*mut TrapContext> {
     let Some(Identity::Live(ident)) = ident else {
         panic!("envcall without running task");
@@ -394,7 +399,7 @@ pub(crate) fn envcall(
         return None;
     };
     frame.sepc = KVirt::wrap(next_pc);
-    crate::entry::call::dispatch(frame, ident)
+    crate::entry::call::dispatch(frame, ident, root)
 }
 
 /// 环境调用那条指令的长度：`c.ebreak` 两字节、`ebreak` 四字节。

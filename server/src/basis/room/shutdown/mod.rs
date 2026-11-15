@@ -7,7 +7,7 @@ use crate::basis::unit::{
 };
 use crate::metal::{
     clock, hart,
-    sync::{OnceLock, SpinLock},
+    sync::{LegacyLock, OnceLock},
 };
 use alloc::sync::Arc;
 use core::{
@@ -19,7 +19,8 @@ use progress::Progress;
 
 const BARRIER_REPORT_AT: usize = 20_000_000;
 static ROOT_ID: AtomicUsize = AtomicUsize::new(0);
-static PROGRESS: SpinLock<Progress> = SpinLock::new(Progress::Idle);
+static PROGRESS: LegacyLock<crate::metal::sync::order::Shutdown, Progress> =
+    LegacyLock::new(Progress::Idle);
 static BARRIER: Barrier = Barrier {
     leader: AtomicBool::new(false),
     arrived: AtomicUsize::new(0),

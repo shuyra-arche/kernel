@@ -3,13 +3,14 @@
 use kernel_api::model::exit::Reason;
 use kernel_api::model::identity::TaskId;
 
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 
 mod ring;
 pub(crate) use ring::Entry;
 use ring::Ring;
 
-static LEDGER: SpinLock<Ring> = SpinLock::new(Ring::new());
+static LEDGER: LegacyLock<crate::metal::sync::order::LifecycleDiagnostics, Ring> =
+    LegacyLock::new(Ring::new());
 
 pub(super) fn note(task: TaskId, reason: Reason, note: &str, owner: Option<TaskId>) {
     if reason == 0 || owner.is_some() {

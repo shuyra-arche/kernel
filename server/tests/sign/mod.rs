@@ -1,3 +1,9 @@
+#![allow(internal_features)]
+#![feature(std_internals)]
+#![feature(reentrant_lock)]
+#[allow(dead_code, unused_imports)]
+#[path = "../support/lock.rs"]
+mod host_lock;
 extern crate alloc;
 mod support;
 pub(crate) use support::{Task, basis, metal};

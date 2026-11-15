@@ -27,7 +27,7 @@ pub enum BootError {
     Scheduler(NestError),
     TrapStacks(NestError),
     #[cfg(debug_assertions)]
-    Dependencies(crate::metal::sync::DepInitError),
+    Dependencies(crate::metal::sync::DeadlockInitError),
     InvalidEntryImage {
         base: usize,
         size: usize,
@@ -90,8 +90,8 @@ impl BootError {
                     "reason",
                     "{}",
                     match source {
-                        crate::metal::sync::DepInitError::OutOfMemory => "out of memory",
-                        crate::metal::sync::DepInitError::AlreadyInit => "already initialized",
+                        crate::metal::sync::DeadlockInitError::OutOfMemory => "out of memory",
+                        crate::metal::sync::DeadlockInitError::AlreadyInit => "already initialized",
                     }
                 );
             }

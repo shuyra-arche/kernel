@@ -16,8 +16,7 @@ use crate::metal::layout::HART_FRAME_BASE;
 use crate::metal::layout::IMAGE_BASE;
 use crate::metal::layout::TASK_STACK_SIZE;
 use crate::metal::switcher::context::TrapContext;
-use crate::metal::sync::Level;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -211,8 +210,8 @@ impl TaskBuilder {
             Arc::from_raw(ptr)
         };
         let life = Anchor::try_new().map_err(|_| NestError::OutOfMemory)?;
-        let state = Arc::try_new(SpinLock::new_level(Level::UnitState, TaskState::held()))
-            .map_err(|_| NestError::OutOfMemory)?;
+        let state =
+            Arc::try_new(LegacyLock::new(TaskState::held())).map_err(|_| NestError::OutOfMemory)?;
         let slot: Arc<MaybeUninit<Task>> = unsafe {
             let slot = crate::tag!(Task, Arc::<Task, _>::try_new_uninit_in(alloc))
                 .map_err(|_| NestError::OutOfMemory)?;

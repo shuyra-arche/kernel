@@ -8,7 +8,7 @@ use crate::metal::sync::TrapGuard;
 use crate::metal::{
     generic::interrupt::{Delivery, Irq},
     hart,
-    sync::SpinLock,
+    sync::LegacyLock,
 };
 use alloc::sync::Arc;
 use alloc::{boxed::Box, vec::Vec};
@@ -89,8 +89,8 @@ pub(crate) fn consumed(endpoint: &crate::basis::sign::endpoint::Endpoint) {
 }
 
 pub(crate) struct Router {
-    controller: SpinLock<Box<dyn Delivery>>,
-    progress: SpinLock<Progress>,
+    controller: LegacyLock<crate::metal::sync::order::InterruptController, Box<dyn Delivery>>,
+    progress: LegacyLock<crate::metal::sync::order::InterruptProgress, Progress>,
     serving: AtomicBool,
     physical: usize,
     limit: usize,
@@ -102,14 +102,14 @@ pub(crate) struct Router {
     #[cfg(feature = "latency")]
     first_entry: AtomicU64,
     counts: [AtomicUsize; 3],
-    sources: SpinLock<Vec<Arc<Source>>>,
+    sources: LegacyLock<crate::metal::sync::order::InterruptSources, Vec<Arc<Source>>>,
 }
 /// All hardware effects follow complete descriptor validation at boot.
 pub(crate) fn install(controller: Box<dyn Delivery>, plan: Plan<'_>) -> Result<(), PendFail> {
     EXTERNAL
         .set(Router {
-            controller: SpinLock::new(controller),
-            progress: SpinLock::new(Progress::new()),
+            controller: LegacyLock::new(controller),
+            progress: LegacyLock::new(Progress::new()),
             serving: AtomicBool::new(false),
             physical: plan.base,
             limit: plan.sources,
@@ -124,7 +124,7 @@ pub(crate) fn install(controller: Box<dyn Delivery>, plan: Plan<'_>) -> Result<(
             #[cfg(feature = "latency")]
             first_entry: AtomicU64::new(0),
             counts: core::array::from_fn(|_| AtomicUsize::new(0)),
-            sources: SpinLock::new(Vec::new()),
+            sources: LegacyLock::new(Vec::new()),
         })
         .map_err(|_| PendFail::Denied)?;
     EXTERNAL.get().ok_or(PendFail::Denied)?.rearm();

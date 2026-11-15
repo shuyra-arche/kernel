@@ -4,7 +4,6 @@ use crate::{
     basis::unit::anchor::Anchor,
     lifecycle::{TeamNode, TeamStage, TeamState, exit},
     membership::{Member, Receipt},
-    metal::sync::SpinLock,
     registration::{TaskState, TaskWeak},
 };
 use kernel_api::model::identity::{TaskId, TeamId};
@@ -15,13 +14,17 @@ pub(crate) fn node(id: usize, parent: Option<&Arc<TeamNode>>) -> Arc<TeamNode> {
         id: TeamId::new(id),
         owner: TaskId::new(1),
         parent: parent.cloned(),
-        state: SpinLock::new(TeamState::new(TeamStage::Ready { default_entry: 0 })),
-        tasks: SpinLock::new(Vec::new()),
-        children: SpinLock::new(Vec::new()),
+        state: crate::metal::sync::LegacyLock::new(TeamState::new(TeamStage::Ready {
+            default_entry: 0,
+        })),
+        tasks: crate::metal::sync::LegacyLock::new(Vec::new()),
+        children: crate::metal::sync::LegacyLock::new(Vec::new()),
         life: Arc::new(Anchor),
         exit: exit::ExitPolicy::new(),
         member_exit: false,
-        termination: SpinLock::new(crate::basis::unit::lifecycle::Termination::new()),
+        termination: crate::metal::sync::LegacyLock::new(
+            crate::basis::unit::lifecycle::Termination::new(),
+        ),
     });
     if let Some(parent) = parent {
         parent.children.lock().push(node.clone());
@@ -38,10 +41,10 @@ pub(crate) fn member(node: &Arc<TeamNode>, id: usize, owners: &[usize]) -> Arc<M
         reclaimed: AtomicBool::new(false),
         task: TaskWeak::empty(),
         node: Arc::downgrade(node),
-        state: Arc::new(SpinLock::new(TaskState)),
+        state: Arc::new(crate::metal::sync::LegacyLock::new(TaskState)),
         life: Arc::new(Anchor),
-        result: SpinLock::new(Some(83)),
-        receipts: SpinLock::new(
+        result: crate::metal::sync::LegacyLock::new(Some(83)),
+        receipts: crate::metal::sync::LegacyLock::new(
             owners
                 .iter()
                 .map(|owner| Receipt {

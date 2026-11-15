@@ -14,7 +14,7 @@ use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::team::Team;
 use crate::metal::hart::HartId;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 
 use crate::basis::unit::control::Request;
 use execution::Effect;
@@ -47,18 +47,21 @@ pub struct Task {
     pub(crate) observation: crate::metal::measure::execution::Execution,
     pub(crate) ident: Arc<TaskIdent>,
     pub(crate) life: Arc<Anchor>,
-    pub(crate) state: Arc<SpinLock<TaskState>>,
+    pub(crate) state: Arc<LegacyLock<crate::metal::sync::order::TaskState, TaskState>>,
     pub(crate) pend: Table,
     /// One lazy, bounded next-memory result window for this actual Task.
     requests: request::Requests,
     pub(crate) administration: crate::basis::unit::control::Table,
-    pub(crate) heir: SpinLock<Vec<Arc<Team>>>,
-    extensions: SpinLock<crate::metal::switcher::context::extension::ExtendedContext>,
-    retirement: SpinLock<retirement::Retirement>,
-    pub(crate) schedule: SpinLock<schedule::Schedule>,
+    pub(crate) heir: LegacyLock<crate::metal::sync::order::TaskHeir, Vec<Arc<Team>>>,
+    extensions: LegacyLock<
+        crate::metal::sync::order::TaskExtensions,
+        crate::metal::switcher::context::extension::ExtendedContext,
+    >,
+    retirement: LegacyLock<crate::metal::sync::order::TaskRetirement, retirement::Retirement>,
+    pub(crate) schedule: LegacyLock<crate::metal::sync::order::TaskSchedule, schedule::Schedule>,
 }
 
-// Kernel Tasks may migrate between harts. Mutable state is behind SpinLock or
+// Kernel Tasks may migrate between harts. Mutable state is behind LegacyLock or
 // atomics; trap-frame access is serialized by execution ownership and COMMIT.
 // API PendId's !Send marker in the ledger describes user-thread ownership, not
 // kernel storage. No guard or unsynchronized mutable reference leaves a Task.

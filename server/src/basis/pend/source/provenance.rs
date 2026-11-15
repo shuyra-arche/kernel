@@ -8,13 +8,13 @@ use crate::basis::{
 use kernel_api::model::pend::FlatRights;
 
 pub(crate) struct Provenance {
-    grant: SpinLock<Carried>,
+    grant: LegacyLock<crate::metal::sync::order::ProvenanceGrant, Carried>,
     source: Weak<SourceAuthorization>,
     geometry: Arc<Geometry>,
     ceiling: Access,
     previous: Option<Arc<Self>>,
     depth: usize,
-    uses: SpinLock<Vec<Weak<RangeBinding>>>,
+    uses: LegacyLock<crate::metal::sync::order::ProvenanceUses, Vec<Weak<RangeBinding>>>,
     introduced: Option<Weak<RangeBlock>>,
 }
 impl Provenance {
@@ -104,7 +104,7 @@ impl Provenance {
             return Err(PendFail::Denied);
         }
         let origin = Arc::try_new(Self {
-            grant: SpinLock::new(Carried::new(
+            grant: LegacyLock::new(Carried::new(
                 entry.authority(),
                 actor.ident.id,
                 offset,
@@ -115,7 +115,7 @@ impl Provenance {
             ceiling: source.ceiling(),
             previous,
             depth,
-            uses: SpinLock::new(Vec::new()),
+            uses: LegacyLock::new(Vec::new()),
             introduced: introduced.map(Arc::downgrade),
         })
         .map_err(|_| PendFail::OutOfMemory)?;

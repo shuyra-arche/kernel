@@ -13,8 +13,7 @@ use crate::basis::flat::FlatRange;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Reservation;
 use crate::metal::generic::mmu::Attributes;
-use crate::metal::sync::Level;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
@@ -28,18 +27,21 @@ use kernel_api::model::cell::CellLevel;
 /// position's Page or freeze alive. The ABI ReservationId denotes this reservation.
 /// Architectural U/G/A/D policy is fixed for the span; logical permissions may narrow.
 pub struct Span {
-    pub(crate) faults: SpinLock<super::super::fault::State>,
+    pub(crate) faults:
+        LegacyLock<crate::metal::sync::order::FaultPolicy, super::super::fault::State>,
     pub(crate) reservation: Reservation,
     pub(crate) attrs: Attributes,
     level: CellLevel,
     initial_access: Access,
-    pub(crate) state: SpinLock<SpanState>,
+    pub(crate) state: LegacyLock<crate::metal::sync::order::Reservation, SpanState>,
     operation: core::sync::atomic::AtomicBool,
     revision: core::sync::atomic::AtomicU64,
     /// Weak discovery of sources exported through this reservation. Live
     /// permission remains in each Source's original Pend lineage.
-    pub(crate) exports:
-        SpinLock<crate::basis::pend::Tracking<crate::basis::pend::SourceAuthorization>>,
+    pub(crate) exports: LegacyLock<
+        crate::metal::sync::order::SpanExports,
+        crate::basis::pend::Tracking<crate::basis::pend::SourceAuthorization>,
+    >,
 }
 
 impl core::fmt::Debug for Span {
@@ -134,17 +136,17 @@ impl Span {
         let nest = reservation.nest();
         let identity = reservation.id();
         match Arc::try_new(Self {
-            faults: SpinLock::new(super::super::fault::State::new()),
+            faults: LegacyLock::new(super::super::fault::State::new()),
             reservation,
             operation: core::sync::atomic::AtomicBool::new(false),
             revision: core::sync::atomic::AtomicU64::new(1),
-            exports: SpinLock::new(crate::basis::pend::Tracking::new()),
+            exports: LegacyLock::new(crate::basis::pend::Tracking::new()),
             attrs,
             level,
             initial_access: active
                 .iter()
                 .fold(Access::all(), |access, range| access & range.ceiling),
-            state: SpinLock::new_level(Level::Reservation, SpanState::new(active, source)),
+            state: LegacyLock::new(SpanState::new(active, source)),
         }) {
             Ok(mapping) => Ok(mapping),
             Err(_) => {

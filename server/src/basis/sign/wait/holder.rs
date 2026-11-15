@@ -6,9 +6,8 @@ use crate::basis::room::deadline;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskWeak;
-use crate::metal::sync::Level;
+use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
-use crate::metal::sync::SpinLock;
 
 use super::key::WakeKey;
 
@@ -27,11 +26,12 @@ impl Ticket {
     }
 }
 
-type HolderTable = SpinLock<HashMap<Ticket, (WakeKey, TaskWeak)>>;
+type HolderTable =
+    LegacyLock<crate::metal::sync::order::WaitHolders, HashMap<Ticket, (WakeKey, TaskWeak)>>;
 
 pub(in super::super) fn holders() -> &'static HolderTable {
     static HOLDERS: OnceLock<HolderTable> = OnceLock::new();
-    HOLDERS.get_or_init(|| SpinLock::new_level(Level::L3, HashMap::new()))
+    HOLDERS.get_or_init(|| LegacyLock::new(HashMap::new()))
 }
 
 pub(super) fn hold(ticket: Ticket, key: WakeKey, task: &Arc<Task>) -> Result<(), ()> {

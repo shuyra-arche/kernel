@@ -10,7 +10,7 @@ use crate::basis::{
     },
     unit::task::registry,
 };
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use alloc::{sync::Arc, vec::Vec};
 use core::{
     alloc::{AllocError, Allocator, Layout},
@@ -44,13 +44,13 @@ fn wait(mut predicate: impl FnMut() -> bool) {
     }
 }
 fn reserve(flat: &Flat) -> Reservation<'_> {
-    match Reservation::prepare(&flat.state, PageIndex::ZERO, GRAIN, level()).unwrap() {
+    match Reservation::prepare(flat.state_storage(), PageIndex::ZERO, GRAIN, level()).unwrap() {
         Step::Allocate(reservation) => reservation,
         Step::Ready(_) => panic!("expected Fresh"),
     }
 }
 fn resident(flat: &Flat, index: usize) -> (usize, usize) {
-    let guard = flat.state.lock();
+    let guard = flat.state_storage().lock();
     let FlatSource::Managed(slots) = &guard.source else {
         unreachable!()
     };
@@ -139,8 +139,8 @@ impl Case {
         .unwrap()
     }
 }
-static CURRENT: SpinLock<Option<Arc<Case>>> = SpinLock::new(None);
-static WORKERS: [SpinLock<Option<Arc<Task>>>; 35] = [const { SpinLock::new(None) }; 35];
+static CURRENT: LegacyLock<crate::metal::sync::order::ProbeRegistry,Option<Arc<Case>>> = LegacyLock::new(None);
+static WORKERS: [LegacyLock<crate::metal::sync::order::ProbeRegistry,Option<Arc<Task>>>; 35] = [const { LegacyLock::new(None) }; 35];
 static NEXT: [AtomicUsize; 7] = [const { AtomicUsize::new(0) }; 7];
 
 pub(super) fn prepare() -> Result<(), BootError> {
@@ -305,8 +305,8 @@ fn transfer(case: &Case) {
     unsafe { (before.1 as *mut u64).write_volatile(COOKIE) };
     // Test-owned promotion after all implicit materializers have exited. Real
     // user Flats enter explicit residency before registration, not this way.
-    case.source.state.lock().explicit = true;
-    case.target.state.lock().explicit = true;
+    case.source.state_storage().lock().explicit = true;
+    case.target.state_storage().lock().explicit = true;
     let from = case.source.whole();
     let to = case.target.whole();
     let initial = SlotVersion::INITIAL;
@@ -326,7 +326,7 @@ fn allocation_failure() {
     let _pin = Pin::new();
     let source = flat(Owner::Kernel, 2);
     {
-        let mut state = source.state.lock();
+        let mut state = source.state_storage().lock();
         state.residencies.try_reserve(2).unwrap();
         let FlatSource::Managed(slots) = &mut state.source else {
             unreachable!()
@@ -360,7 +360,7 @@ fn allocation_failure() {
     ));
     let prefix = resident(&source, 0);
     {
-        let state = source.state.lock();
+        let state = source.state_storage().lock();
         let FlatSource::Managed(slots) = &state.source else {
             unreachable!()
         };

@@ -7,7 +7,7 @@ pub(super) struct Tally {
     base: usize,
     cells: *mut BlockMeta,
     len: usize,
-    guard: crate::metal::sync::SpinLock<()>,
+    guard: crate::metal::sync::LegacyLock<crate::metal::sync::order::Tally, ()>,
 }
 
 // SAFETY: `cells` 指向 tally 自己的簿记表，所有读写都经过 `guard` 的原生锁。
@@ -19,7 +19,7 @@ impl Tally {
             base,
             cells,
             len,
-            guard: crate::metal::sync::SpinLock::new_level(crate::metal::sync::Level::Tally, ()),
+            guard: crate::metal::sync::LegacyLock::new(()),
         }
     }
 

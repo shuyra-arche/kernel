@@ -7,8 +7,7 @@ use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
-use crate::metal::sync::Level;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
@@ -27,13 +26,13 @@ const MAX: usize = 1024;
 
 pub struct Endpoint {
     consumed: core::sync::atomic::AtomicU64,
-    state: SpinLock<State>,
+    state: LegacyLock<crate::metal::sync::order::SignState, State>,
     pub(crate) id: usize,
     life: Arc<Anchor>,
-    routing: SpinLock<Routing>,
+    routing: LegacyLock<crate::metal::sync::order::SignRouting, Routing>,
     owner: TaskId,
     cursor: AtomicUsize,
-    delivery: SpinLock<delivery::Delivery>,
+    delivery: LegacyLock<crate::metal::sync::order::SignDelivery, delivery::Delivery>,
 }
 /// Ordinary sources and a service binding are mutually exclusive modes.
 /// COMMIT spans forwarding effects; this lock owns the mode itself.
@@ -89,7 +88,7 @@ impl Endpoint {
     pub(crate) fn try_new(owner: TaskId) -> Result<Arc<Self>, crate::basis::nest::NestError> {
         Arc::try_new(Self {
             consumed: core::sync::atomic::AtomicU64::new(0),
-            state: SpinLock::new_level(Level::L3, State::new()),
+            state: LegacyLock::new(State::new()),
             id: {
                 static NEXT: crate::basis::name::Serial =
                     crate::basis::name::Serial::new(1, isize::MAX as usize);
@@ -97,10 +96,10 @@ impl Endpoint {
                     .ok_or(crate::basis::nest::NestError::OutOfMemory)?
             },
             life: Anchor::try_new()?,
-            routing: SpinLock::new_level(Level::L3, Routing::Sources(Vec::new())),
+            routing: LegacyLock::new(Routing::Sources(Vec::new())),
             owner,
             cursor: AtomicUsize::new(0),
-            delivery: SpinLock::new(delivery::Delivery::Idle),
+            delivery: LegacyLock::new(delivery::Delivery::Idle),
         })
         .map_err(|_| crate::basis::nest::NestError::OutOfMemory)
     }

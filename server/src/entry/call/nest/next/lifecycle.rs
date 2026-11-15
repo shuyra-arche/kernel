@@ -134,13 +134,13 @@ pub(super) fn effect(
 ) -> Result<Value, Failure> {
     match action {
         Action::CreateNest { license } => {
-            let _serial = actor.pend.lock();
             {
+                let _serial = actor.pend.lock();
                 let _commit = basis::commit();
                 pend::access::license(actor, license, CreationRights::NEST).map_err(pend_error)?;
             }
             // A private Nest installs trampoline PTEs and completes their fence.
-            // Keep both preparation and failed cleanup outside COMMIT.
+            // Keep private preparation and failed cleanup outside all ledger/COMMIT guards.
             let nest = basis::unit::team::TeamBuilder::prepare_nest(SpaceKind::User)
                 .map_err(nest_error)?;
             let root = Arc::try_new(
@@ -161,6 +161,7 @@ pub(super) fn effect(
                 nest: nest.id(),
                 version: nest.version(),
             };
+            let _serial = actor.pend.lock();
             let _commit = basis::commit();
             // The preparation is not authority: recheck live creation rights
             // at publication, and commit the journal before releasing COMMIT.

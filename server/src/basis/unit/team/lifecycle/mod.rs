@@ -4,7 +4,7 @@ use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
 
 use crate::basis::unit::anchor::Anchor;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 
 mod clearance;
 pub(crate) mod exit;
@@ -21,13 +21,16 @@ pub(crate) struct TeamNode {
     pub id: TeamId,
     pub owner: TaskId,
     pub parent: Option<Arc<TeamNode>>,
-    pub state: SpinLock<TeamState>,
-    pub tasks: SpinLock<Vec<Arc<Member>>>,
-    pub children: SpinLock<Vec<Arc<TeamNode>>>,
+    pub state: LegacyLock<crate::metal::sync::order::TeamState, TeamState>,
+    pub tasks: LegacyLock<crate::metal::sync::order::TeamTasks, Vec<Arc<Member>>>,
+    pub children: LegacyLock<crate::metal::sync::order::TeamChildren, Vec<Arc<TeamNode>>>,
     pub life: Arc<Anchor>,
     pub(crate) exit: ExitPolicy,
     pub(crate) member_exit: bool,
-    pub(crate) termination: SpinLock<crate::basis::unit::lifecycle::Termination>,
+    pub(crate) termination: LegacyLock<
+        crate::metal::sync::order::TeamTermination,
+        crate::basis::unit::lifecycle::Termination,
+    >,
 }
 
 impl TeamNode {

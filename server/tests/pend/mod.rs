@@ -1,4 +1,10 @@
+#![allow(internal_features)]
+#![feature(std_internals)]
+#![feature(reentrant_lock)]
 #![feature(allocator_ext)]
+#[allow(dead_code, unused_imports)]
+#[path = "../support/lock.rs"]
+mod host_lock;
 extern crate alloc;
 mod ancestry;
 #[allow(dead_code)]
@@ -10,7 +16,7 @@ mod exports;
 mod storage;
 mod metal {
     pub(crate) mod sync {
-        pub(crate) use crate::storage::{SpinLock, SpinLockGuard};
+        pub(crate) use crate::host_lock::{LegacyGuard, LegacyLock, order};
         pub(crate) use std::sync::OnceLock;
     }
 }

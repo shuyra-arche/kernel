@@ -52,106 +52,14 @@ pub(crate) mod metal {
     pub(crate) mod stop {
         pub(crate) fn hush() {}
     }
+    pub(crate) mod riscv {
+        pub(crate) mod switcher {
+            pub(crate) mod trap {
+                pub(crate) use crate::provider::Boundary;
+            }
+        }
+    }
     pub(crate) mod sync {
-        #[cfg(debug_assertions)]
-        macro_rules! depend_enter {
-            ($lock:expr) => {
-                0usize
-            };
-        }
-        macro_rules! depend_check {
-            ($lock:expr, $caller:expr) => {
-                #[cfg(debug_assertions)]
-                crate::metal::sync::depend::check(
-                    $lock as *const _ as *const () as usize,
-                    $lock.level,
-                    $caller,
-                );
-            };
-        }
-        macro_rules! depend_acquire {
-            ($lock:expr, $caller:expr) => {
-                #[cfg(debug_assertions)]
-                crate::metal::sync::depend::acquire(
-                    $lock as *const _ as *const () as usize,
-                    $lock.level,
-                    $caller,
-                );
-            };
-        }
-        macro_rules! depend_check_peer {
-            ($lock:expr, $lower:expr, $caller:expr) => {
-                #[cfg(debug_assertions)]
-                crate::metal::sync::depend::check_peer(
-                    $lock as *const _ as *const () as usize,
-                    $lower as *const _ as *const () as usize,
-                    $lock.level,
-                    $caller,
-                );
-            };
-        }
-        macro_rules! depend_release {
-            ($lock:expr) => {
-                #[cfg(debug_assertions)]
-                crate::metal::sync::depend::release($lock as *const _ as *const () as usize);
-            };
-        }
-        #[cfg(debug_assertions)]
-        pub(crate) use depend_enter;
-        pub(crate) use {depend_acquire, depend_check, depend_check_peer, depend_release};
-        pub(crate) mod depend {
-            pub(crate) use crate::level::Level;
-            use std::cell::RefCell;
-            std::thread_local! { static HELD: RefCell<Vec<(usize,Option<Level>)>> = const { RefCell::new(Vec::new()) }; }
-            #[cfg(debug_assertions)]
-            pub(crate) fn check(address: usize, level: Option<Level>, _: usize) {
-                HELD.with_borrow(|held| {
-                    crate::verdict::strict(held.iter().copied(), address, level).unwrap()
-                });
-            }
-            #[cfg(debug_assertions)]
-            pub(crate) fn check_peer(address: usize, lower: usize, level: Option<Level>, _: usize) {
-                HELD.with_borrow(|held| {
-                    crate::verdict::peer(held.iter().copied(), address, lower, level).unwrap()
-                });
-            }
-            #[cfg(debug_assertions)]
-            pub(crate) fn acquire(address: usize, level: Option<Level>, _: usize) {
-                HELD.with_borrow_mut(|held| {
-                    assert!(!held.iter().any(|(at, _)| *at == address));
-                    held.push((address, level));
-                });
-            }
-            #[cfg(debug_assertions)]
-            pub(crate) fn release(address: usize) {
-                HELD.with_borrow_mut(|held| {
-                    let at = held.iter().position(|(at, _)| *at == address).unwrap();
-                    held.remove(at);
-                });
-            }
-            pub(crate) fn count() -> usize {
-                HELD.with_borrow(Vec::len)
-            }
-        }
-        pub(crate) mod trap {
-            use std::cell::Cell;
-            std::thread_local! { static ENABLED: Cell<bool> = const { Cell::new(true) }; }
-            pub(crate) fn enabled() -> bool {
-                ENABLED.get()
-            }
-            pub(crate) struct TrapGuard(bool);
-            impl TrapGuard {
-                pub(crate) unsafe fn save() -> Self {
-                    Self(ENABLED.replace(false))
-                }
-            }
-            impl Drop for TrapGuard {
-                fn drop(&mut self) {
-                    if self.0 {
-                        ENABLED.set(true);
-                    }
-                }
-            }
-        }
+        pub(crate) use crate::provider::sync::*;
     }
 }

@@ -1,3 +1,6 @@
+#![allow(internal_features)]
+#![feature(std_internals)]
+#![feature(reentrant_lock)]
 #![feature(allocator_ext)]
 extern crate alloc;
 // Production queue and event lifetime; Task authority, scheduling and MMU

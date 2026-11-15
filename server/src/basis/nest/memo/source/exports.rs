@@ -1,12 +1,12 @@
 //! Discovery-only reverse cleanup for logical exports. Callers close admission
 //! first; the exact Memo binding and current Source remain the authority.
 use super::*;
-use crate::{basis::pend::Tracking, metal::sync::SpinLock};
+use crate::{basis::pend::Tracking, metal::sync::LegacyLock};
 
 /// Task and Reservation indexes refer to the same SourceAuthorization. No index
 /// lock, Task ledger serial or COMMIT guard crosses a hardware retirement.
 pub(crate) fn withdraw(
-    sources: &SpinLock<Tracking<SourceAuthorization>>,
+    sources: &LegacyLock<impl crate::metal::sync::order::Order, Tracking<SourceAuthorization>>,
     selected: impl Fn(&Source) -> bool,
 ) -> Result<(), PendFail> {
     let mut cursor = 0;

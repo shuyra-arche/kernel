@@ -36,18 +36,18 @@ pub(crate) mod metal {
         }
     }
     pub(crate) mod sync {
+        pub(crate) use crate::host_lock::order;
+        pub(crate) type SpinLock<T> = LegacyLock<order::ProbeRegistry, T>;
         pub(crate) use std::sync::OnceLock;
-        pub(crate) enum Level {
-            Registry,
-            L3,
-        }
-        pub(crate) struct SpinLock<T> {
+        pub(crate) struct LegacyLock<O, T> {
+            class: core::marker::PhantomData<O>,
             inner: std::sync::Mutex<T>,
             locks: core::sync::atomic::AtomicUsize,
         }
-        impl<T> SpinLock<T> {
+        impl<O, T> LegacyLock<O, T> {
             pub(crate) const fn new(value: T) -> Self {
                 Self {
+                    class: core::marker::PhantomData,
                     inner: std::sync::Mutex::new(value),
                     locks: core::sync::atomic::AtomicUsize::new(0),
                 }
@@ -56,9 +56,6 @@ pub(crate) mod metal {
                 self.locks
                     .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 self.inner.lock().unwrap()
-            }
-            pub(crate) const fn new_level(_: Level, value: T) -> Self {
-                Self::new(value)
             }
             pub(crate) fn locks(&self) -> usize {
                 self.locks.load(core::sync::atomic::Ordering::Relaxed)
@@ -110,6 +107,13 @@ pub(crate) mod basis {
     }
     pub(crate) mod pend {
         pub(crate) fn retire(task: &crate::Task) -> Result<(), ()> {
+            {
+                let phase = task
+                    .retirement
+                    .try_lock()
+                    .expect("retirement retained a software guard over an effect");
+                assert!(matches!(*phase, crate::retirement::Retirement::Active));
+            }
             task.trace.lock().push("pends");
             // Pend retirement includes original-source withdrawal even after
             // the last Pend entry is gone. Only the fixture backend settles it.
@@ -177,10 +181,10 @@ pub(crate) struct Task {
 }
 impl Task {
     pub(crate) fn new() -> Arc<Self> {
-        let trace = Arc::new(SpinLock::new(Vec::new()));
+        let trace = Arc::new(crate::metal::sync::LegacyLock::new(Vec::new()));
         Arc::new(Self {
-            retirement: SpinLock::new(Retirement::new()),
-            heir: SpinLock::new(Vec::new()),
+            retirement: crate::metal::sync::LegacyLock::new(Retirement::new()),
+            heir: crate::metal::sync::LegacyLock::new(Vec::new()),
             pend_busy: AtomicBool::new(false),
             source_busy: AtomicBool::new(false),
             preparing: AtomicBool::new(false),

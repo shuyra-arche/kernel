@@ -477,7 +477,11 @@ impl Source {
         let _serial = if Arc::ptr_eq(&actor, publisher) {
             None
         } else {
-            Some(actor.pend.try_lock().ok_or(AccessError::Busy)?)
+            // SAFETY: publish_memo_report holds the actual global Commit,
+            // with no Nest/source storage guard. This single try never waits;
+            // all successors are higher DAG classes and the guard ends when
+            // ExternalBorrow preparation returns, before backend submission.
+            Some(unsafe { actor.pend.try_source_borrow() }.ok_or(AccessError::Busy)?)
         };
         if !pend::live(publisher) || !Arc::ptr_eq(change.page(), page) {
             return Err(AccessError::Denied);

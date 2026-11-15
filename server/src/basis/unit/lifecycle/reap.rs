@@ -11,9 +11,8 @@ use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskExitCause;
 use crate::basis::unit::task::TaskState;
 use crate::basis::unit::task::chain::Chain;
-use crate::metal::sync::Level;
+use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
-use crate::metal::sync::SpinLock;
 use kernel_api::address::VirtAddr;
 
 use crate::basis::sign;
@@ -22,8 +21,10 @@ use crate::basis::sign::wipe;
 
 // Off-Hart terminal Tasks retain their existing intrusive membership while
 // housekeeping performs logical hooks and physical retirement.
-static PENDING: SpinLock<Chain> = SpinLock::new(Chain::new());
-pub(super) static HUSKS: SpinLock<Husks> = SpinLock::new_level(Level::L3, Husks::new());
+static PENDING: LegacyLock<crate::metal::sync::order::ReapQueue, Chain> =
+    LegacyLock::new(Chain::new());
+pub(super) static HUSKS: LegacyLock<crate::metal::sync::order::Husks, Husks> =
+    LegacyLock::new(Husks::new());
 
 pub(super) struct Husks {
     chain: Chain,

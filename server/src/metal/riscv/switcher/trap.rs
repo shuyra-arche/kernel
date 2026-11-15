@@ -49,10 +49,24 @@ pub(crate) fn capture() -> TrapEvent {
     }
 }
 
+// Private construction is confined to the real trampoline entry below.
+pub(in crate::metal::riscv) struct Boundary {
+    _private: (),
+}
+
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapContext {
     let from_task = enter(frame);
-    crate::entry::trap::handle(frame, from_task)
+    let event = capture();
+    let mut boundary = Boundary { _private: () };
+    let root = if from_task && matches!(event, TrapEvent::Call) {
+        // SAFETY: this is the user-Task trampoline entry, with no ancestor
+        // guard. Kernel IRQ/reception continuations never manufacture a Root.
+        Some(unsafe { crate::metal::sync::Root::enter(&mut boundary) })
+    } else {
+        None
+    };
+    crate::entry::trap::handle(frame, from_task, event, root)
 }
 
 /// Restore hart-local addressing before any Rust code uses it. This runs with

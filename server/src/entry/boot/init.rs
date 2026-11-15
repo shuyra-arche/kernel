@@ -25,8 +25,8 @@ pub unsafe fn init(platform: crate::metal::platform::Platform) -> Result<(), Boo
     // 之后的空间 / 时钟 / 栈初始化都在它的看护下跑。
     // 池按机器建一次：测试台架会重复走公共 init，重复就是“已经启用”。
     #[cfg(debug_assertions)]
-    match crate::metal::sync::init_depend(crate::metal::hart::hart_count()) {
-        Ok(()) | Err(crate::metal::sync::DepInitError::AlreadyInit) => {}
+    match crate::metal::sync::init_deadlock(crate::metal::hart::hart_count()) {
+        Ok(()) | Err(crate::metal::sync::DeadlockInitError::AlreadyInit) => {}
         Err(error) => return Err(BootError::Dependencies(error)),
     }
     super::space::init().map_err(BootError::KernelSpace)?;

@@ -14,7 +14,7 @@ mod inner;
 use inner::FrameInner;
 
 pub struct FrameAllocator {
-    inner: crate::metal::sync::SpinLock<FrameInner>,
+    inner: crate::metal::sync::LegacyLock<crate::metal::sync::order::Frame, FrameInner>,
 }
 
 impl FrameAllocator {
@@ -22,7 +22,7 @@ impl FrameAllocator {
         let mut inner = FrameInner::new();
         inner.init()?;
         Ok(Self {
-            inner: crate::metal::sync::SpinLock::new_level(crate::metal::sync::Level::Frame, inner),
+            inner: crate::metal::sync::LegacyLock::new(inner),
         })
     }
 }

@@ -1,6 +1,6 @@
 //! Reservation-owned bounded history. A Task retains its event when terminal
 //! history is evicted; neither reads nor duplicate faults renew its deadline.
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use alloc::{sync::Arc, vec::Vec};
 use kernel_api::{
     abi::memory::Failure,
@@ -10,7 +10,7 @@ use kernel_api::{
 pub(super) struct Event {
     pub wire: FaultEvent,
     pub deadline: u64,
-    progress: SpinLock<Progress>,
+    progress: LegacyLock<crate::metal::sync::order::FaultProgress, Progress>,
 }
 #[derive(Clone, Copy)]
 pub(super) enum Progress {
@@ -78,7 +78,7 @@ impl Queue {
         let event = Arc::try_new(Event {
             wire,
             deadline,
-            progress: SpinLock::new(Progress::Pending { publication: None }),
+            progress: LegacyLock::new(Progress::Pending { publication: None }),
         })
         .map_err(|_| Failure::OutOfMemory)?;
         if let Some(at) = evict {

@@ -21,8 +21,9 @@ pub(super) fn dispatch(
     ident: Arc<TaskIdent>,
     number: u64,
     registers: [usize; 6],
+    root: crate::metal::sync::Root<'_>,
 ) -> *mut TrapContext {
-    let delivery = match run(ident, number, registers) {
+    let delivery = match run(ident, number, registers, root) {
         Ok(crate::basis::room::Handoff::Switch(pa)) => return pa as *mut TrapContext,
         Ok(crate::basis::room::Handoff::Resume(true)) => return frame as *mut TrapContext,
         Ok(crate::basis::room::Handoff::Resume(false)) => Delivery::Written,
@@ -41,6 +42,7 @@ fn run(
     ident: Arc<TaskIdent>,
     number: u64,
     registers: [usize; 6],
+    mut root: crate::metal::sync::Root<'_>,
 ) -> Result<crate::basis::room::Handoff<bool>, Failure> {
     let frame = Frame::decode(number, registers).ok_or(Failure::Invalid)?;
     let mut bytes = [0; Request::WIDTH];
@@ -56,6 +58,20 @@ fn run(
     if actor.realtime() {
         return Err(Failure::Denied);
     }
+    if let Action::Inspect(query) = request.action()
+        && query.domain() == memory::Domain::Flat
+    {
+        let output = super::flat::next::inspect(&mut root, &actor, query)?.to_bytes();
+        if !ident
+            .team
+            .nest
+            .copy_out(&output, VirtAddr::new(frame.output()))
+        {
+            return Err(Failure::ReplyFault);
+        }
+        return Ok(basis::room::Handoff::Resume(false));
+    }
+    drop(root);
     if let Action::Inspect(query @ memory::Query::FaultEvent { .. }) = request.action() {
         let wait =
             basis::nest::fault::read::Read::new(&actor, query, VirtAddr::new(frame.output()))?;
@@ -83,7 +99,7 @@ fn run(
 fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Failure> {
     if let Action::Inspect(query) = request.action() {
         return match query.domain() {
-            memory::Domain::Flat => super::flat::next::inspect(actor, query),
+            memory::Domain::Flat => return Err(Failure::Unsupported),
             memory::Domain::Nest => super::nest::next::inspect(actor, query),
         }
         .map(|value| value.to_bytes());

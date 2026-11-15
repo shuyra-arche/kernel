@@ -8,9 +8,8 @@ use hashbrown::HashMap;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::chain::{Chain, Drain};
-use crate::metal::sync::Level;
+use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
-use crate::metal::sync::SpinLock;
 
 use super::key::WakeKey;
 
@@ -118,7 +117,7 @@ fn site_shard(key: WakeKey) -> usize {
     ((h >> 32) ^ h) as usize & SITE_SHARDS_MASK
 }
 
-type Shard = SpinLock<HashMap<WakeKey, Site>>;
+type Shard = LegacyLock<crate::metal::sync::order::WaitSites, HashMap<WakeKey, Site>>;
 
 static SHARDS: OnceLock<Box<[Shard]>> = OnceLock::new();
 pub(super) fn existing(key: WakeKey) -> Option<&'static Shard> {
@@ -128,7 +127,7 @@ pub(in super::super) fn shard_at(shard: usize) -> &'static Shard {
     let arr: &'static [Shard] = SHARDS.get_or_init(|| {
         let mut v: Vec<Shard> = Vec::with_capacity(SITE_SHARDS);
         for _ in 0..SITE_SHARDS {
-            v.push(SpinLock::new_level(Level::L3, HashMap::new()));
+            v.push(LegacyLock::new(HashMap::new()));
         }
         v.into_boxed_slice()
     });

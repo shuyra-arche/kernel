@@ -80,10 +80,11 @@ static OUTSTANDING: AtomicUsize = AtomicUsize::new(0);
 pub(super) fn settled() -> bool {
     OUTSTANDING.load(Ordering::Acquire) == 0
 }
-static PENDING: crate::metal::sync::SpinLock<Queue> = crate::metal::sync::SpinLock::new(Queue {
-    first: None,
-    last: None,
-});
+static PENDING: crate::metal::sync::LegacyLock<crate::metal::sync::order::TerminationQueue, Queue> =
+    crate::metal::sync::LegacyLock::new(Queue {
+        first: None,
+        last: None,
+    });
 impl Queue {
     fn push(&mut self, node: Arc<TeamNode>, work: Sweep) {
         *node.termination.lock() = Termination::Queued { work, next: None };

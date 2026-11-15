@@ -4,13 +4,19 @@
 //! This prevents a releasing Hart or try_commit caller from overtaking waiters.
 //! It bounds predecessor count, not the time spent in each transaction.
 
-static COMMIT: crate::metal::sync::RelLock<()> =
-    crate::metal::sync::RelLock::new_level(crate::metal::sync::Level::Unit, ());
+use crate::metal::sync::{
+    global_commit,
+    lock::{
+        LockGuard,
+        reentry::{Accept, Reject},
+    },
+    order,
+};
 
 #[cfg(debug_assertions)]
 pub(crate) fn assert_unlocked() {
     assert!(
-        !COMMIT.held_by_current(),
+        !crate::metal::sync::global_held_by_current(),
         "idle wait while holding Unit commit lock"
     );
 }
@@ -22,22 +28,31 @@ pub(crate) fn assert_unlocked() {
 #[cfg(debug_assertions)]
 pub(crate) fn assert_held() {
     assert!(
-        COMMIT.held_by_current(),
+        crate::metal::sync::global_held_by_current(),
         "this step belongs inside the Unit commit section"
     );
 }
 
 /// A borrowed witness that the global transaction lock remains held.
 /// Scheduler handoffs pass this guard between dequeue and seating.
-pub(crate) type CommitGuard = crate::metal::sync::reentrant::RelLockGuard<'static, ()>;
+pub(crate) type CommitGuard = crate::metal::sync::LegacyCommitGuard<'static, ()>;
 
 #[cfg_attr(feature = "latency", track_caller)]
 pub(crate) fn commit() -> CommitGuard {
-    COMMIT.lock()
+    // SAFETY: audited staged commit entry; the physical global is unique.
+    unsafe { global_commit().legacy_lock() }
 }
 
 /// Interrupt work may retain its event and retry instead of waiting IRQ-off.
 #[cfg_attr(feature = "latency", track_caller)]
 pub(crate) fn try_commit() -> Option<CommitGuard> {
-    COMMIT.try_lock()
+    // SAFETY: nonblocking form of the same staged commit entry.
+    unsafe { global_commit().legacy_try_lock() }
+}
+
+/// The typed commit guard is tied to this actual ledger ancestor.
+pub(crate) fn after_ledger<'a>(
+    ledger: &'a mut LockGuard<'_, order::LedgerSerial, Reject, ()>,
+) -> LockGuard<'a, order::Commit, Accept, ()> {
+    ledger.lock(global_commit())
 }

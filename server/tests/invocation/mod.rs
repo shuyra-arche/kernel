@@ -1,3 +1,5 @@
+#![feature(reentrant_lock, std_internals)]
+#![allow(internal_features)]
 #![feature(allocator_ext)]
 extern crate alloc;
 // Production descriptor-copy, dispatch and result transaction. Resource/Task
@@ -67,7 +69,15 @@ pub(crate) mod basis {
 #[path = "../support/lock.rs"]
 mod host_lock;
 pub(crate) mod metal {
-    pub(crate) use crate::host_lock as sync;
+    // This dispatch fixture has no Hart/IRQ boundary. Production Root lifetime
+    // and anti-forgery properties are compiled and exercised in tests/sync.
+    pub(crate) mod sync {
+        pub(crate) use crate::host_lock::{LegacyLock, order};
+        pub(crate) struct Root<'a>(core::marker::PhantomData<&'a mut ()>);
+        pub(crate) fn boundary<R>(body: impl for<'a> FnOnce(Root<'a>) -> R) -> R {
+            body(Root(core::marker::PhantomData))
+        }
+    }
     pub(crate) mod switcher {
         pub(crate) mod context {
             pub(crate) use crate::support::{Gprs, TrapContext};

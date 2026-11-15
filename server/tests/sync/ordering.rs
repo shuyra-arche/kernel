@@ -1,140 +1,164 @@
-//! Production lock-order predicates with real atomics/guards and host IRQs.
-#[cfg(debug_assertions)]
-use super::{depend, reentrant::RelLock};
-use super::{level::Level, metal, pair, spin::SpinLock, trap, verdict};
-#[cfg(debug_assertions)]
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use super::provider;
+use provider::sync::{
+    deadlock,
+    lock::{
+        Lock,
+        reentry::{Accept, Reject},
+    },
+    order, trap,
+};
+use std::{
+    sync::{Arc, mpsc},
+    time::Duration,
+};
 
-#[cfg(debug_assertions)]
 #[test]
-fn forbidden_try_checks_before_reserving_a_turn_and_restores_the_original_irqs() {
-    metal::hart::set(0);
-    for (parent, child) in [
-        (Level::Flat, Level::Nest),
-        (Level::Nest, Level::Unit),
-        (Level::Scheduler, Level::Unit),
-        (Level::Flat, Level::Flat),
-    ] {
-        let higher = SpinLock::new_level(parent, ());
-        let lower = SpinLock::new_level(child, ());
+fn typed_ledger_commit_flat_borrows_actual_ancestors_and_restores_irqs() {
+    let serial = Lock::<order::LedgerSerial, Reject, _>::new(());
+    let state = Lock::<order::Flat, Reject, _>::new(3);
+    provider::boundary(|mut root| {
+        let mut ledger = root.lock(&serial);
+        assert!(!trap::enabled());
         {
-            let _held = higher.lock();
-            assert!(catch_unwind(AssertUnwindSafe(|| lower.try_lock())).is_err());
+            let mut commit = ledger.lock(provider::sync::global_commit());
+            {
+                let mut flat = commit.lock(&state);
+                *flat += 4;
+            }
             assert!(!trap::enabled());
-            assert_eq!(depend::count(), 1);
+            {
+                let nested = commit.reenter();
+                assert_eq!(*nested, ());
+            }
+            assert!(!trap::enabled());
         }
-        assert!(trap::enabled());
-        // A precheck panic must not reserve a ticket or acquire a phantom lock.
-        assert!(lower.try_lock().is_some());
-        assert_eq!(depend::count(), 0);
-    }
-}
-
-#[cfg(debug_assertions)]
-#[test]
-fn nonrecursive_try_rejects_same_instance_before_ticket_or_irq_changes_escape() {
-    metal::hart::set(0);
-    let lock = SpinLock::new(0);
-    {
-        let _held = lock.lock();
-        assert!(catch_unwind(AssertUnwindSafe(|| lock.try_lock())).is_err());
         assert!(!trap::enabled());
-        assert_eq!(depend::count(), 1);
-    }
-    assert!(lock.try_lock().is_some());
-    assert!(trap::enabled());
-}
-
-#[cfg(debug_assertions)]
-#[test]
-fn recursive_try_cannot_claim_a_new_commit_turn_before_diagnosing_inverse_order() {
-    metal::hart::set(0);
-    let state = SpinLock::new_level(Level::Nest, ());
-    let commit = RelLock::new_level(Level::Unit, ());
-    {
-        let _state = state.lock();
-        assert!(catch_unwind(AssertUnwindSafe(|| commit.try_lock())).is_err());
-        assert_eq!(depend::count(), 1);
-    }
-    assert!(trap::enabled());
-    // Previously RelLock's check occurred after try_enter, so a diagnostic
-    // panic could strand the next ticket even though no Guard existed.
-    assert!(commit.try_lock().is_some());
-}
-
-#[test]
-fn production_predicates_require_exact_flat_pair_predecessor_and_only_one_pair() {
-    let held = [(10, Some(Level::Unit)), (20, Some(Level::Flat))];
-    assert!(verdict::peer(held, 30, 20, Some(Level::Flat)).is_ok());
-    for (address, lower, level) in [
-        (20, 20, Level::Flat),
-        (15, 20, Level::Flat),
-        (30, 19, Level::Flat),
-        (30, 20, Level::Nest),
-    ] {
-        assert!(verdict::peer(held, address, lower, Some(level)).is_err());
-    }
-    assert!(
-        verdict::peer(
-            [(20, Some(Level::Flat)), (30, Some(Level::Flat))],
-            40,
-            30,
-            Some(Level::Flat)
-        )
-        .is_err()
-    );
-    assert!(
-        verdict::peer(
-            [(20, Some(Level::Flat)), (30, Some(Level::UnitState))],
-            40,
-            20,
-            Some(Level::Flat)
-        )
-        .is_err()
-    );
-    assert!(verdict::strict(held, 30, Some(Level::Flat)).is_err());
-}
-
-#[test]
-fn ordered_pair_uses_real_distinct_instances_and_releases_before_restoring_irqs() {
-    metal::hart::set(0);
-    let a = SpinLock::new_level(Level::Flat, 11);
-    let b = SpinLock::new_level(Level::Flat, 17);
-    pair::with_pair(&b, &a, |b, a| {
-        assert!(!trap::enabled());
-        *a += 1;
-        *b += 1;
     });
     assert!(trap::enabled());
-    assert_eq!(*a.lock(), 12);
-    assert_eq!(*b.lock(), 18);
-    // Same-level guards above must not overlap merely for observation.
+    provider::boundary(|mut root| assert_eq!(*root.lock(&state), 7));
+    assert_eq!(deadlock::count(), 0);
 }
 
 #[test]
-fn legacy_total_order_uses_the_production_categories_without_claiming_a_dag() {
-    let levels = [
-        Level::Unit,
-        Level::Scheduler,
-        Level::Address,
-        Level::Nest,
-        Level::Reservation,
-        Level::Flat,
-        Level::TeamTasks,
-        Level::L3,
-        Level::Registry,
-        Level::Asid,
-        Level::Frame,
-        Level::Tally,
-        Level::Spare,
-        Level::UnitState,
-    ];
-    for (i, parent) in levels.into_iter().enumerate() {
-        for (j, child) in levels.into_iter().enumerate() {
-            assert_eq!(
-                verdict::strict([(1, Some(parent))], 2, Some(child)).is_ok(),
-                j > i
-            );
+fn accept_reentry_is_the_same_instance_with_shared_access() {
+    let lock = Lock::<order::Nest, Accept, _>::new(std::cell::Cell::new(1));
+    provider::boundary(|mut root| {
+        let mut outer = root.lock(&lock);
+        let original = &*outer as *const _;
+        {
+            let inner = outer.reenter();
+            assert_eq!(&*inner as *const _, original);
+            inner.set(2);
         }
+        assert_eq!(outer.get(), 2);
+        #[cfg(debug_assertions)]
+        assert_eq!(deadlock::count(), 1);
+    });
+    assert!(trap::enabled());
+}
+
+#[test]
+fn flat_pair_preserves_argument_identity_in_both_orders_and_masks_until_both_release() {
+    let a = Lock::<order::Flat, Reject, _>::new(11);
+    let b = Lock::<order::Flat, Reject, _>::new(17);
+    provider::boundary(|mut root| {
+        {
+            let mut pair = root.pair(&b, &a);
+            let (b, a) = pair.values();
+            *a += 1;
+            *b += 2;
+            assert!(!trap::enabled());
+        }
+        assert!(trap::enabled());
+        {
+            let mut pair = root.try_pair(&a, &b).unwrap();
+            let (a, b) = pair.values();
+            assert_eq!((*a, *b), (12, 19));
+        }
+    });
+    assert!(trap::enabled());
+}
+
+#[test]
+fn failed_second_pair_try_releases_first_without_abandoning_a_turn() {
+    let locks = Arc::new([
+        Lock::<order::Flat, Reject, _>::new(1),
+        Lock::<order::Flat, Reject, _>::new(2),
+    ]);
+    let other = locks.clone();
+    let (held, ready) = mpsc::channel();
+    let (release, done) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        provider::boundary(|mut root| {
+            let _guard = root.lock(&other[1]);
+            held.send(()).unwrap();
+            done.recv_timeout(Duration::from_secs(5)).unwrap();
+        })
+    });
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    provider::boundary(|mut root| {
+        assert!(root.try_pair(&locks[0], &locks[1]).is_none());
+        assert!(trap::enabled());
+        assert_eq!(deadlock::count(), 0);
+        assert!(root.try_lock(&locks[0]).is_some());
+    });
+    release.send(()).unwrap();
+    worker.join().unwrap();
+    provider::boundary(|mut root| assert!(root.try_pair(&locks[1], &locks[0]).is_some()));
+}
+
+#[test]
+fn aliased_flat_pair_rejects_before_admission_in_both_profiles() {
+    let a = Lock::<order::Flat, Reject, _>::new(0);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        provider::boundary(|mut root| {
+            let _pair = root.pair(&a, &a);
+        })
+    }));
+    assert!(result.is_err());
+    assert!(trap::enabled());
+    assert_eq!(deadlock::count(), 0);
+    provider::boundary(|mut root| assert!(root.try_lock(&a).is_some()));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn inverse_try_panics_before_ticket_and_preserves_existing_irq_state() {
+    use provider::sync::legacy::LegacyLock;
+    for inherited_mask in [false, true] {
+        let irq = if inherited_mask {
+            Some(unsafe { trap::TrapGuard::save() })
+        } else {
+            None
+        };
+        let flat = LegacyLock::<order::Flat, _>::new(());
+        let nest = LegacyLock::<order::Nest, _>::new(());
+        {
+            let _flat = flat.lock();
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| nest.try_lock())).is_err()
+            );
+            assert_eq!(deadlock::count(), 1);
+            assert!(!trap::enabled());
+        }
+        assert_eq!(trap::enabled(), !inherited_mask);
+        assert!(nest.try_lock().is_some());
+        assert_eq!(deadlock::count(), 0);
+        drop(irq);
+        assert!(trap::enabled());
     }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn execution_boundary_rejects_a_root_under_a_live_legacy_ancestor() {
+    let flat = provider::sync::legacy::LegacyLock::<order::Flat, _>::new(());
+    let guard = flat.lock();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| provider::boundary(|_| ())))
+            .is_err()
+    );
+    assert_eq!(deadlock::count(), 1);
+    drop(guard);
+    assert!(trap::enabled());
 }
