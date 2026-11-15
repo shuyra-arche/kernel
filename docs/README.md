@@ -13,6 +13,7 @@ in the implementation.
 | What does the selected Flat/Nest memory ABI provide? | [Current memory contract](../api/memory.md) |
 | How is per-page activity authorized? | [CPU activity](memory-activity.md) and [execution evidence](../server/tests/guest/activity/README.md) |
 | How are calls performed? | [Client](../client/README.md) |
+| What evidence exists for the proposed typed lock order? | [Synchronization audit (S0 incomplete)](synchronization/README.md) |
 | How do I reproduce verification? | [Kernel verification](../server/tests/README.md) |
 | How do I build or contribute? | [Repository README](../README.md) and [Contributing](../CONTRIBUTING.md) |
 
