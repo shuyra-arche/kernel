@@ -54,7 +54,7 @@ pub(crate) fn validate() {
     let geo = mode::geometry(mode::mode());
     let split = geo.split_bit() as usize;
     let top = 1usize << split;
-    let lower = mode::lower();
+    let lower = VirtAddr::wrap(plan().direct.base);
     let upper = mode::upper();
     assert!(
         (3..=5).contains(&geo.levels) && geo.va_bits as usize == 12 + 9 * geo.levels as usize,
