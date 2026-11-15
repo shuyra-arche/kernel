@@ -91,6 +91,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     archive(&args.fixture, &pin, &fixture)?;
     let patches = root.join("patches");
     fs::create_dir(&patches)?;
+    compose::apply("transport-fixture", &fixture, &patches)?;
     let manifest;
     let mut command = Command::new("cargo");
     command.arg("build");

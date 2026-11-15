@@ -16,10 +16,7 @@ pub fn system_initrd(elf: &[u8]) -> Result<Vec<u8>> {
     encode(elf, 12, true)
 }
 fn encode(elf: &[u8], version: u8, dense: bool) -> Result<Vec<u8>> {
-    require(
-        matches!(version, 10 | 11 | 12),
-        "unsupported capsule version",
-    )?;
+    require(matches!(version, 10..=12), "unsupported capsule version")?;
     require(
         elf.get(..6) == Some(b"\x7fELF\x02\x01"),
         "expected ELF64 little endian",
