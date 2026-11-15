@@ -24,7 +24,7 @@ use kernel_api::address::PageIndex;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
 
-pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
+pub(crate) fn assemble(bytes: &'static [u8], kind: SpaceKind) -> Result<Arc<Team>, NestError> {
     let capsule = Capsule::parse(bytes).ok_or(NestError::NoRegion)?;
     if !(bytes.as_ptr() as usize).is_multiple_of(PAGE) {
         return Err(NestError::NotAligned);
@@ -38,7 +38,7 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
         }
         image_end = image_end.max(region.va.checked_add(size).ok_or(NestError::NoRegion)?);
     }
-    TeamBuilder::new(SpaceKind::Supervisor).spawn(|team| {
+    TeamBuilder::new(kind).spawn(|team| {
         let nest = &team.nest;
         for i in 0..capsule.count {
             let region = capsule.region(i).ok_or(NestError::NoRegion)?;
