@@ -187,3 +187,21 @@ fn clone_queue_growth_keeps_allocator_leaves_below_both_ancestors() {
         }
     }
 }
+
+#[test]
+fn clone_receive_publishes_prepared_ledger_charge_under_the_actual_queue_owner() {
+    use provider::sync::legacy::LegacyLock;
+    let serial = Lock::<order::LedgerSerial, Reject, _>::new(());
+    let entries = LegacyLock::<order::LedgerEntries, _>::new(());
+    let queue = LegacyLock::<order::CloneQueue, _>::new(());
+    let charge = LegacyLock::<order::LedgerCharge, _>::new(());
+    let admission = LegacyLock::<order::LedgerAdmission, _>::new(());
+    provider::boundary(|mut root| {
+        let mut serial = root.lock(&serial);
+        let _commit = serial.lock(provider::sync::global_commit());
+        let _entries = entries.lock();
+        let _queue = queue.lock();
+        let _charge = charge.lock();
+        let _admission = admission.lock();
+    });
+}
