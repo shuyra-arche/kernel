@@ -3,11 +3,19 @@ pub(crate) mod mechanism;
 use super::{Arc, FlatId, FlatRange, RangeBinding, Span, allocation, basis::sign};
 use std::sync::atomic::{AtomicBool, Ordering};
 pub(super) static AGAIN: AtomicBool = AtomicBool::new(false);
+pub(super) static SCANNING: AtomicBool = AtomicBool::new(false);
+
+fn advance() -> bool {
+    assert!(!SCANNING.swap(true, Ordering::Relaxed));
+    let more = allocation::fail_after(0, || super::host_lock::single(mechanism::advance));
+    SCANNING.store(false, Ordering::Relaxed);
+    more
+}
 
 fn drain() -> usize {
     let mut turns = 0;
     while mechanism::pending() {
-        allocation::fail_after(0, || super::host_lock::single(mechanism::advance));
+        advance();
         turns += 1;
         assert!(turns < 4096, "pass did not settle");
     }
@@ -26,7 +34,7 @@ fn bounded_pass_retains_late_completion_and_never_needs_allocation() {
     mechanism::register(&flat, &spans[0], Some(&binding)).unwrap();
     sign::prepare();
     mechanism::request();
-    assert!(allocation::fail_after(0, mechanism::advance));
+    assert!(advance());
     let initial = sign::take();
     assert_eq!(initial.len(), 4);
     sign::prepare();
@@ -46,7 +54,7 @@ fn bounded_pass_retains_late_completion_and_never_needs_allocation() {
     // A later prune request cannot downgrade a wake queued behind a prune pass.
     sign::prepare();
     mechanism::forget();
-    mechanism::advance();
+    advance();
     mechanism::request();
     mechanism::forget();
     drain();
@@ -71,13 +79,13 @@ fn bounded_pass_retains_late_completion_and_never_needs_allocation() {
     }
     sign::prepare();
     mechanism::request();
-    allocation::fail_after(0, mechanism::advance);
+    advance();
     let mut newer = Vec::new();
     for id in 200..208 {
         let span = Arc::new(Span(id));
         mechanism::register(&flat, &span, None).unwrap();
         newer.push(span);
-        if !mechanism::advance() {
+        if !advance() {
             break;
         }
     }

@@ -1,11 +1,12 @@
 //! Normal shutdown: observe progress, collect Harts, then finalize exactly once.
 //! Entry installs reporting effects; this owner supplies coherent observations.
-use crate::basis::sync::LegacyLock;
+use crate::basis::sync::{LegacyLock, order};
 mod preparation;
 mod progress;
+mod root;
 use crate::basis::unit::{
     lifecycle::tally,
-    task::{Task, registry},
+    task::{Task, TaskState},
 };
 use crate::metal::{clock, hart, sync::OnceLock};
 use alloc::sync::Arc;
@@ -13,13 +14,12 @@ use core::{
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     time::Duration,
 };
-use kernel_api::model::identity::TaskId;
 pub(crate) use preparation::Unsettled;
 use preparation::{Claim, Preparation};
 use progress::Progress;
 
 const BARRIER_REPORT_AT: usize = 20_000_000;
-static ROOT_ID: AtomicUsize = AtomicUsize::new(0);
+static ROOT: root::Root = root::Root::new();
 static PROGRESS: LegacyLock<crate::basis::sync::order::Shutdown, Progress> =
     LegacyLock::new(Progress::Idle);
 static BARRIER: Barrier = Barrier {
@@ -104,7 +104,7 @@ pub(crate) fn ready() -> bool {
             let ready = PREPARATION.complete(result);
             if result == Err(Unsettled::Busy) {
                 // Even an image without an initial Task must retain a retry:
-                // ROOT_ID/active() may be empty while queue shutdown is pending.
+                // No root may be watched while queue shutdown is pending.
                 crate::basis::room::deadline::retry();
             }
             if let Err(reason) = result {
@@ -130,14 +130,11 @@ pub(crate) fn ready() -> bool {
     }
 }
 pub(crate) fn watch(root: &Arc<Task>) {
-    ROOT_ID.store(root.ident.id.get(), Ordering::Relaxed);
+    ROOT.watch(&root.state)
+        .expect("shutdown root registered once");
 }
 pub(crate) fn active() -> bool {
-    let id = ROOT_ID.load(Ordering::Relaxed);
-    id != 0
-        && registry::find(TaskId::new(id))
-            .and_then(|w| w.upgrade())
-            .is_none_or(|t| t.dead())
+    ROOT.active()
 }
 pub(crate) fn observe(hart: hart::HartId) {
     if !active() {

@@ -15,7 +15,7 @@ use crate::metal::sync::OnceLock;
 
 use super::super::Span;
 use crate::basis::flat::FlatRange;
-use crate::basis::nest::{NestError, authority::RangeBinding};
+use crate::basis::nest::{NestError, NestId, authority::RangeBinding};
 
 // 关联里的一条：这段来源窗口被这个关系压着。
 //
@@ -25,6 +25,7 @@ struct Record {
     source_id: kernel_api::model::flat::FlatId,
     reservation: Weak<Span>,
     binding: Option<Weak<RangeBinding>>,
+    wake: (NestId, usize),
     next: Option<alloc::boxed::Box<Record>>,
 }
 
@@ -83,7 +84,7 @@ impl Pass {
 
 enum Step {
     Idle,
-    Visited(Option<Weak<Span>>),
+    Visited(Option<(NestId, usize)>),
 }
 impl Records {
     const fn new() -> Self {
@@ -107,7 +108,7 @@ impl Records {
                         ..
                     }
                 )
-                .then(|| record.reservation.clone());
+                .then_some(record.wake);
                 record.next = self.visited.take();
                 self.visited = Some(record);
                 candidate
@@ -189,11 +190,16 @@ pub(crate) fn register(
     binding: Option<&Arc<RangeBinding>>,
 ) -> Result<(), NestError> {
     let source_id = source.source_id();
+    // Registration still holds the actual mapping/Nest owners. Preserve only
+    // immutable software identities for later notification, never a permission
+    // or retirement snapshot. A scan must not become a final owner/destructor.
+    let wake = reservation.wake_key().ok_or(NestError::NoRegion)?;
     // 先备好节点：锁内不分配也不升级任何强引用。
     let record = Box::try_new(Record {
         source_id,
         reservation: Arc::downgrade(reservation),
         binding: binding.map(Arc::downgrade),
+        wake,
         next: None,
     })
     .map_err(|_| NestError::OutOfMemory)?;
@@ -245,19 +251,16 @@ pub(crate) fn pending() -> bool {
 /// search, pointer ordering, allocation or cursor reconstruction occurs here.
 /// Caller excludes Task cancellation across this synchronous, infallible turn;
 /// every claimed candidate is signalled before that exclusion ends. Sign already
-/// limits a queue to 64 listeners and forwarding to eight destinations. Upgrades,
-/// Span destruction and Sign effects run outside the index lock; this is not a
-/// hard bound on lock/firmware latency.
+/// limits a queue to 64 listeners and forwarding to eight destinations. The pass
+/// upgrades no Span/Nest and cannot trigger their final destructors. Sign effects
+/// run outside the index lock; this is not a hard bound on lock/firmware latency.
 pub(crate) fn advance() -> bool {
     for _ in 0..4 {
         let candidate = match registry().records.lock().step() {
             Step::Idle => break,
             Step::Visited(candidate) => candidate,
         };
-        if let Some((space, reservation)) = candidate
-            .and_then(|candidate| candidate.upgrade())
-            .and_then(|reservation| reservation.wake_key())
-        {
+        if let Some((space, reservation)) = candidate {
             crate::basis::sign::signal(crate::basis::sign::WakeKey::Reservation {
                 space,
                 reservation,

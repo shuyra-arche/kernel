@@ -67,10 +67,7 @@ pub(crate) fn maintain() {
     }
     collect();
     WORK.poll();
-    let stopping = {
-        let _commit = crate::basis::commit();
-        crate::basis::room::shutdown::active()
-    };
+    let stopping = crate::basis::room::shutdown::active();
     if stopping {
         WORK.notify();
     }

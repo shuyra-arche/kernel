@@ -982,35 +982,35 @@
     },
     {
       "enclosing_function": "forget",
-      "line": 178,
+      "line": 179,
       "operation": "lock",
       "path": "server/src/basis/nest/index/source.rs",
       "source": "let mut records = registry().records.lock();"
     },
     {
       "enclosing_function": "register",
-      "line": 201,
+      "line": 207,
       "operation": "lock",
       "path": "server/src/basis/nest/index/source.rs",
       "source": "let mut records = registry().records.lock();"
     },
     {
       "enclosing_function": "request",
-      "line": 236,
+      "line": 242,
       "operation": "lock",
       "path": "server/src/basis/nest/index/source.rs",
       "source": "let mut records = registry().records.lock();"
     },
     {
       "enclosing_function": "pending",
-      "line": 241,
+      "line": 247,
       "operation": "lock",
       "path": "server/src/basis/nest/index/source.rs",
       "source": "registry().records.lock().pass != Pass::Idle"
     },
     {
       "enclosing_function": "advance",
-      "line": 253,
+      "line": 259,
       "operation": "lock",
       "path": "server/src/basis/nest/index/source.rs",
       "source": "let candidate = match registry().records.lock().step() {"
@@ -3523,10 +3523,17 @@
     },
     {
       "enclosing_function": "observe",
-      "line": 150,
+      "line": 147,
       "operation": "lock",
       "path": "server/src/basis/room/shutdown/mod.rs",
       "source": "let mut progress = PROGRESS.lock();"
+    },
+    {
+      "enclosing_function": "active",
+      "line": 27,
+      "operation": "lock",
+      "path": "server/src/basis/room/shutdown/root.rs",
+      "source": "let guard = state.lock();"
     },
     {
       "enclosing_function": "enqueue",
@@ -4167,14 +4174,14 @@
     },
     {
       "enclosing_function": "rip",
-      "line": 113,
+      "line": 110,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/mod.rs",
       "source": "let retired = HUSKS.lock().take();"
     },
     {
       "enclosing_function": "retained_count",
-      "line": 119,
+      "line": 116,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/mod.rs",
       "source": "HUSKS.lock().len()"
@@ -5960,7 +5967,7 @@
       "typed_declarations": [
         {
           "declaration": "records: LegacyLock<crate::basis::sync::order::SourceIndex, Records>,",
-          "line": 33,
+          "line": 34,
           "path": "server/src/basis/nest/index/source.rs"
         }
       ]
@@ -6718,6 +6725,11 @@
       ],
       "minimal_declared_successors": [],
       "typed_declarations": [
+        {
+          "declaration": "type State = LegacyLock<order::TaskState, TaskState>;",
+          "line": 7,
+          "path": "server/src/basis/room/shutdown/root.rs"
+        },
         {
           "declaration": "state: Arc<LegacyLock<crate::basis::sync::order::TaskState, TaskState>>,",
           "line": 23,

@@ -21,10 +21,7 @@ pub(crate) fn start() -> Result<(), BootError> {
 
 extern "C" fn run() -> ! {
     loop {
-        let stopping = {
-            let _commit = crate::basis::commit();
-            crate::basis::room::shutdown::active()
-        };
+        let stopping = crate::basis::room::shutdown::active();
         if stopping {
             break;
         }

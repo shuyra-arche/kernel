@@ -1,6 +1,6 @@
 --- a/server/src/entry/work/retirement/mod.rs
 +++ b/server/src/entry/work/retirement/mod.rs
-@@ -28,7 +28,9 @@
+@@ -25,7 +25,9 @@
          if stopping {
              break;
          }
@@ -13,7 +13,7 @@
              Progress::Blocked => {
 --- a/server/src/basis/nest/retirement.rs
 +++ b/server/src/basis/nest/retirement.rs
-@@ -106,3 +106,6 @@
+@@ -103,3 +103,6 @@
      }
      settled
  }
@@ -22,14 +22,14 @@
 +pub(crate) mod probe;
 --- a/server/src/basis/nest/index/source.rs
 +++ b/server/src/basis/nest/index/source.rs
-@@ -254,6 +254,7 @@
+@@ -260,6 +260,7 @@
              Step::Idle => break,
              Step::Visited(candidate) => candidate,
          };
 +        crate::basis::nest::retirement::probe::visited();
-         if let Some((space, reservation)) = candidate
-             .and_then(|candidate| candidate.upgrade())
-             .and_then(|reservation| reservation.wake_key())
+         if let Some((space, reservation)) = candidate {
+             crate::basis::sign::signal(crate::basis::sign::WakeKey::Reservation {
+                 space,
 --- a/server/src/entry/report/shutdown.rs
 +++ b/server/src/entry/report/shutdown.rs
 @@ -16,6 +16,7 @@

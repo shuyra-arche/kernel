@@ -302,6 +302,12 @@ preparation and the Hart barrier. A last husk can request this pass after normal
 scheduler maintenance; shutdown never depends on the departed worker finishing
 its own cleanup.
 
+Root-stop observation upgrades only a weak reference to the authoritative Task
+state, never the entire Task. Dropping an observational reference must not become
+the final Task/Nest destructor inside COMMIT; actual resource retirement stays
+with its owners. Reading the state therefore needs no caller COMMIT or tracked
+TaskWeak lifetime, and no reference survives the returned stop decision.
+
 A future
 independent Task must first supply an owner-controlled bounded step, distinguish
 runnable remainder from hardware-blocked obligations, register its own wake

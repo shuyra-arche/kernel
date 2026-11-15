@@ -17,6 +17,10 @@ use std::sync::Arc;
 pub(crate) struct Span(usize);
 impl Span {
     fn wake_key(&self) -> Option<(NestId, usize)> {
+        assert!(
+            !source::SCANNING.load(std::sync::atomic::Ordering::Relaxed),
+            "scan upgraded a resource owner"
+        );
         Some((NestId::new(1).unwrap(), self.0))
     }
 }
@@ -29,6 +33,7 @@ pub(crate) struct RangeBinding;
 #[derive(Debug)]
 pub(crate) enum NestError {
     OutOfMemory,
+    NoRegion,
 }
 pub(crate) struct FlatRange(FlatId);
 impl FlatRange {
@@ -47,7 +52,7 @@ mod basis {
         pub(crate) use crate::FlatRange;
     }
     pub(crate) mod nest {
-        pub(crate) use crate::NestError;
+        pub(crate) use crate::{NestError, NestId};
         pub(crate) mod authority {
             pub(crate) use crate::RangeBinding;
         }
