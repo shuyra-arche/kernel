@@ -1,0 +1,42 @@
+--- a/tests/memory/platform/main.rs
++++ b/tests/memory/platform/main.rs
+@@ -1,8 +1,6 @@
+ #![no_std]
+ #![no_main]
+ extern crate alloc;
+-mod device;
+-mod window;
+ use kernel::entry::boot::{
+     self,
+     memory::topology::{Fabric, Ram, Topology},
+@@ -17,12 +15,6 @@
+                 .all()
+                 .any(|v| matches!(v, "riscv-virtio,qemu" | "riscv-virtio"))
+         );
+-        let external = device::prepare(&tree);
+-        let route = kernel::entry::boot::memory::topology::Route {
+-            controller: external.controller as u64,
+-            requester: external.requester,
+-        };
+-        unsafe { boot::bind_external(external) }.unwrap();
+         let regions: alloc::vec::Vec<_> = tree.memory().regions().collect();
+         assert_eq!(regions.len(), 1);
+         assert_eq!(regions[0].starting_address as usize, 0x80000000);
+@@ -44,12 +36,15 @@
+         let topology = unsafe {
+             Topology::new(alloc::vec![Fabric {
+                 ram,
+-                routes: alloc::vec![route],
++                routes: alloc::vec![],
+             }])
+-            .map(|t| t.with_local_instructions())
+         }
+         .unwrap();
+         boot::qualify_memory(topology).unwrap();
++        // SAFETY: paired QEMU disables Svade/Svadu: legacy hardware
++        // A/D updates, coherent atomic PTE RAM, all admitted Harts.
++        // No hotplug, device writes or unknown ADUE policy.
++        unsafe { boot::qualify_activity() }.unwrap();
+         boot::start()
+     });
+     match result {

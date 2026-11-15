@@ -11,5 +11,5 @@ pub(crate) use engine::Command;
 pub(crate) use engine::{Engine, EngineError, Phase, fence_complete, registers};
 
 #[cfg(test)]
-#[path = "../../iommu/domain.rs"]
+#[path = "../../metal/riscv/iommu/domain.rs"]
 mod transitions;

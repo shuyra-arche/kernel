@@ -34,18 +34,41 @@ env:
   RUSTUP_TOOLCHAIN: nightly
 
 jobs:
+  changes:
+    name: Select affected verification
+    runs-on: ubuntu-latest
+    outputs:
+      guest: ${{ steps.scope.outputs.guest }}
+      native: ${{ steps.scope.outputs.native }}
+      smp: ${{ steps.scope.outputs.smp }}
+      activity: ${{ steps.scope.outputs.activity }}
+      flat: ${{ steps.scope.outputs.flat }}
+      room: ${{ steps.scope.outputs.room }}
+      system: ${{ steps.scope.outputs.system }}
+      iommu: ${{ steps.scope.outputs.iommu }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: bash tools/verification-scope.sh
+
   build:
-    name: RV64 build
+    name: Host and RV64 checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Check Rust module layout
+      - name: Check layout and native tooling contracts
         run: |
           bash tools/tests/layout.sh
+          bash tools/tests/release.sh
           bash tools/check-layout.sh
-      - name: Test QEMU partition contract
-        run: python3 server/tests/hardware/tests/shard.py
+          bash tools/check-tooling.sh
       - name: Install CI toolchain
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rust-src,rustfmt,clippy --target riscv64gc-unknown-none-elf
       - name: Identify compiler
@@ -58,189 +81,141 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: rust-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.hash }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/check.yml') }}
+            server/tests/runner/target
+          key: rust-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.hash }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', '.github/workflows/check.yml') }}
           restore-keys: |
-            rust-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.hash }}-
-      - name: Test workspace on host
+            rust-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.compiler.outputs.hash }}-
+      - name: Check formatting
+        run: |
+          cargo fmt --all -- --check
+          cargo fmt --manifest-path server/tests/runner/Cargo.toml -- --check
+      - name: Test host contracts
         env:
           RUSTFLAGS: "-Dwarnings"
-        run: cargo test --locked --workspace --target x86_64-unknown-linux-gnu
-      - name: Build workspace (debug)
-        run: cargo build --locked --workspace --target riscv64gc-unknown-none-elf
-      - name: Build workspace (release)
-        run: cargo build --locked --workspace --release --target riscv64gc-unknown-none-elf
+        run: |
+          cargo test --locked --workspace --target x86_64-unknown-linux-gnu
+          cargo test --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+      - name: Build RV64 workspace (debug and release)
+        run: |
+          cargo build --locked --workspace --target riscv64gc-unknown-none-elf
+          cargo build --locked --workspace --release --target riscv64gc-unknown-none-elf
 
   guest:
-    name: Guest tests (QEMU)
+    name: Affected RV64 scenarios (QEMU)
+    needs: changes
+    if: needs.changes.outputs.guest == 'true'
     runs-on: ubuntu-latest
     container: debian:trixie
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
-      RUSTFLAGS: "-Crelocation-model=static -Cforce-frame-pointers=yes -Ccode-model=medium -Dwarnings"
     steps:
       - name: Install native image tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi python3
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
           sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN" --target riscv64gc-unknown-none-elf
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Fetch native QEMU composition
+      - name: Fetch native composition and execution library
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shuyra-arche/vanllia
-          ref: dd32c35dbb67e2e78edb00ad35f968d16423249e
+          ref: 50ebf0feaae16374ba431f83a515fe6ce273c8b7
           path: .integration/vanllia
-          sparse-checkout: |
-            tests/memory
-            platform/riscv
           persist-credentials: false
-      - name: Trust checked-out compositions in the container
+      - name: Build host runners
+        env:
+          RUSTFLAGS: "-Dwarnings"
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/vanllia"
-      - name: Adapt pinned native fixture to the current provider
-        run: python3 server/tests/guest/native/prepare.py --fixture .integration/vanllia
-      - name: Run current native provider (debug)
-        run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE"
-      - name: Reject ABI 10 Capsule
-        run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --no-build --capsule-version 10
-      - name: Run current native provider (release)
-        run: python3 .integration/vanllia/tests/memory/run.py --kernel "$GITHUB_WORKSPACE" --profile release
-      - name: Check native CPU completion (debug, 1/2/4 Harts)
-        run: python3 server/tests/guest/smp/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/smp-debug
-      - name: Check native CPU completion (release, 1/2/4 Harts)
-        run: python3 server/tests/guest/smp/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/smp-release --profile release
-      - name: Fetch pinned System runtime regression
+          cargo build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+          cargo build --locked --manifest-path .integration/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+          echo "$GITHUB_WORKSPACE/server/tests/runner/target/x86_64-unknown-linux-gnu/debug" >> "$GITHUB_PATH"
+          cp .integration/vanllia/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify /tmp/native-verify
+      - name: Check current native ABI 11 memory and reject ABI 10 Capsule
+        if: needs.changes.outputs.native == 'true'
+        run: |
+          for profile in debug release; do
+            /tmp/native-verify native --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output ".integration/native-$profile" --profile "$profile"
+          done
+          /tmp/native-verify native --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/native-reject --capsule-version 10
+      - name: Check CPU completion (debug/release, 1/2/4 Harts)
+        if: needs.changes.outputs.smp == 'true'
+        run: |
+          for profile in debug release; do
+            verify smp --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output ".integration/smp-$profile" --profile "$profile"
+          done
+      - name: Check activity (debug/release, qualified/unqualified, stopped observer, 1/4 Harts)
+        if: needs.changes.outputs.activity == 'true'
+        run: |
+          for profile in debug release; do
+            verify activity --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output ".integration/activity-$profile" --profile "$profile"
+          done
+          verify activity --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-unsupported --profile release --unsupported
+          verify activity --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-stopped --profile release --stopped
+      - name: Check implicit Flat (debug/release, 1/4 Harts)
+        if: needs.changes.outputs.flat == 'true'
+        run: |
+          for profile in debug release; do
+            verify flat --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output ".integration/flat-$profile" --profile "$profile"
+          done
+      - name: Check Room/IRQ correctness (debug/release)
+        if: needs.changes.outputs.room == 'true'
+        run: |
+          for profile in debug release; do
+            verify room --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output ".integration/irq-$profile" --mode irq --events 16 --profile "$profile"
+            verify room --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output ".integration/realtime-$profile" --mode realtime --profile "$profile" --harts 4
+          done
+      - name: Check standalone IOMMU backend
+        if: needs.changes.outputs.iommu == 'true'
+        run: cargo test --locked -p kernel-memory-tests --test iommu-target --target x86_64-unknown-linux-gnu -- --ignored --nocapture
+      - name: Fetch System regression
+        if: needs.changes.outputs.system == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shuyra-arche/system
           ref: 7e4f9dc19bdaf4a0e95ff3b557fdc8959b8547d7
           path: .integration/system
           persist-credentials: false
-      - name: Fetch pinned Twine Release recovery
+      - name: Fetch Twine Release recovery
+        if: needs.changes.outputs.system == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shuyra-arche/twine
           ref: 7c75c62d15d173032d99fed54ca7fd00337d787b
           path: .integration/twine
           persist-credentials: false
-      - name: Check System native runtime (release, 1/4 Harts)
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/system"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE/.integration/twine"
-          python3 server/tests/guest/smp/system.py --twine .integration/twine --kernel "$GITHUB_WORKSPACE" --fixture .integration/system --output .integration/system-runtime
-      - name: Preserve System runtime evidence
+      - name: Check System consumer (release, 1/4 Harts)
+        if: needs.changes.outputs.system == 'true'
+        run: /tmp/native-verify system --kernel "$GITHUB_WORKSPACE" --fixture .integration/system --twine .integration/twine --output .integration/system-runtime
+      - name: Preserve every execution and build result
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: system-native-runtime
-          path: |
-            .integration/system-runtime/*.json
-            .integration/system-runtime/*.log
-            .integration/system-runtime/*.lock
-            .integration/system-runtime/*.elf
-            .integration/system-runtime/initrd.bin
-          if-no-files-found: warn
-      - name: Preserve native CPU completion evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: native-cpu-smp
+          name: rv64-evidence
           include-hidden-files: true
           path: |
-            .integration/smp-*/inputs.json
-            .integration/smp-*/composition.diff
-            .integration/smp-*/build.log
-            .integration/smp-*/Cargo.lock
-            .integration/smp-*/provider/Cargo.lock
-            .integration/smp-*/harts-*/*.log
-            .integration/smp-*/harts-*/result.json
-            .integration/smp-*/initrd.bin
-            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-guest
-            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-platform
-            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-guest
-            .integration/smp-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-platform
-          if-no-files-found: warn
-      - name: Check CPU activity (debug, 1/4 Harts)
-        run: python3 server/tests/guest/activity/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-debug --profile debug
-      - name: Check CPU activity (release, 1/4 Harts)
-        run: python3 server/tests/guest/activity/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-release
-      - name: Reject unqualified Svade activity (1/4 Harts)
-        run: python3 server/tests/guest/activity/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-unsupported --unsupported
-      - name: Check stopped observation Task (1/4 Harts)
-        run: python3 server/tests/guest/activity/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/activity-stopped --stopped
-      - name: Preserve CPU activity evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: cpu-activity
-          include-hidden-files: true
-          path: |
-            .integration/activity-*/inputs.json
-            .integration/activity-*/composition.diff
-            .integration/activity-*/build.log
-            .integration/activity-*/harts-*/*.log
-            .integration/activity-*/harts-*/result.json
-            .integration/activity-*/fixture/tests/memory/Cargo.lock
-            .integration/activity-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-guest
-            .integration/activity-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-platform
-            .integration/activity-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-guest
-            .integration/activity-*/fixture/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-platform
-          if-no-files-found: warn
-      - name: Check implicit Flat contracts (debug, 1/4 Harts)
-        run: python3 server/tests/guest/flat/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/flat-debug
-      - name: Check implicit Flat contracts (release, 1/4 Harts)
-        run: python3 server/tests/guest/flat/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/flat-release --profile release
-      - name: Check native UART contracts (debug, 1/4 Harts)
-        run: python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/room-irq-debug --mode irq --events 16 --profile debug --rounds 1
-      - name: Check native UART contracts (release, 1/4 Harts)
-        run: python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/room-irq-release --mode irq --events 16 --profile release --rounds 1
-      - name: Check native scheduling contracts (debug, 4 Harts)
-        run: python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/room-rt-debug --mode realtime --profile debug --rounds 1 --harts 4
-      - name: Check native scheduling contracts (release, 4 Harts)
-        run: python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/room-rt-release --mode realtime --profile release --rounds 1 --harts 4
-      - name: Preserve native Room evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: native-room
-          include-hidden-files: true
-          path: |
-            .integration/room-*/order.json
-            .integration/room-*/candidate/inputs.json
-            .integration/room-*/candidate/composition.diff
-            .integration/room-*/candidate/build.log
-            .integration/room-*/candidate/harts-*/*.log
-            .integration/room-*/candidate/harts-*/result.json
-            .integration/room-*/candidate/composition/tests/memory/Cargo.lock
-            .integration/room-*/candidate/composition/tests/memory/target/riscv64gc-unknown-none-elf/debug/memory-*
-            .integration/room-*/candidate/composition/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-*
-          if-no-files-found: warn
-      - name: Preserve implicit Flat evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: implicit-flat
-          include-hidden-files: true
-          path: |
-            .integration/flat-*/inputs.json
-            .integration/flat-*/composition.diff
-            .integration/flat-*/build.log
-            .integration/flat-*/harts-*/*.log
-            .integration/flat-*/harts-*/result.json
-            .integration/flat-*/provider/server/tests/guest/flat/Cargo.lock
-            .integration/flat-*/provider/server/tests/guest/flat/target/riscv64gc-unknown-none-elf/debug/flat-guest
-            .integration/flat-*/provider/server/tests/guest/flat/target/riscv64gc-unknown-none-elf/release/flat-guest
-          if-no-files-found: warn
-      - name: Preserve native image evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: native-memory
-          path: .integration/vanllia/tests/memory/target/evidence/
+            .integration/*/order.json
+            .integration/*/inputs.json
+            .integration/*/*.elf
+            .integration/*/*.bin
+            .integration/*/*.lock
+            .integration/*/boot/*
+            .integration/*/build/*
+            .integration/*/resolve/*
+            .integration/*/harts-*/*.json
+            .integration/*/harts-*/*.log
+            .integration/*/*/inputs.json
+            .integration/*/*/*.elf
+            .integration/*/*/*.bin
+            .integration/*/*/*.lock
+            .integration/*/*/patches/*
+            .integration/*/*/harts-*/*.json
+            .integration/*/*/harts-*/*.log
+            .integration/*/*/locked/*
+            .integration/*/*/resolve/*
+            server/tests/target/metal/riscv/iommu/target/evidence/*
           if-no-files-found: error
 
   room-comparison:
@@ -250,52 +225,46 @@ jobs:
       contains(github.event.pull_request.body, 'Room comparison: requested')
     runs-on: ubuntu-latest
     container: debian:trixie
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
     steps:
       - name: Install comparison tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi python3
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
           sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN" --target riscv64gc-unknown-none-elf
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build comparison runner
+        run: |
+          cargo build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+          echo "$GITHUB_WORKSPACE/server/tests/runner/target/x86_64-unknown-linux-gnu/debug" >> "$GITHUB_PATH"
       - name: Select published control
         id: control
-        run: python3 server/tests/latency/ci.py --event "$GITHUB_EVENT_PATH" >> "$GITHUB_OUTPUT"
+        run: verify baseline --event "$GITHUB_EVENT_PATH" >> "$GITHUB_OUTPUT"
       - name: Fetch control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.control.outputs.sha }}
           path: .integration/room-control
           persist-credentials: false
-      - name: Fetch native composition
+      - name: Fetch composition
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shuyra-arche/vanllia
-          ref: dd32c35dbb67e2e78edb00ad35f968d16423249e
+          ref: 50ebf0feaae16374ba431f83a515fe6ce273c8b7
           path: .integration/vanllia
-          sparse-checkout: |
-            tests/memory
-            platform/riscv
           persist-credentials: false
-      - name: Compare fixed Room and UART workloads
+      - name: Compare fixed workloads
         run: |
           for mode in room irq; do
-            python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --baseline .integration/room-control --fixture .integration/vanllia --output ".integration/compare-$mode-on" --mode "$mode" --rounds 5
-            python3 server/tests/latency/run.py --kernel "$GITHUB_WORKSPACE" --baseline .integration/room-control --fixture .integration/vanllia --output ".integration/compare-$mode-off" --mode "$mode" --rounds 5 --no-latency
+            verify room --kernel "$GITHUB_WORKSPACE" --baseline .integration/room-control --fixture .integration/vanllia --output ".integration/compare-$mode-on" --mode "$mode" --profile release --rounds 5
+            verify room --kernel "$GITHUB_WORKSPACE" --baseline .integration/room-control --fixture .integration/vanllia --output ".integration/compare-$mode-off" --mode "$mode" --profile release --rounds 5 --no-latency
           done
-      - name: Fetch original provider for first-use study
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: 5ec49757b92e129822a50e543a999fb4ea509036
-          path: .integration/room-first-use
-          persist-credentials: false
-      - name: Separate first timed wake from warmed scheduling
-        run: python3 server/tests/latency/run.py --kernel .integration/room-first-use --fixture .integration/vanllia --output .integration/compare-warmup-on --mode room --harts 1 --rounds 5 --compare-room-warmup
-      - name: Preserve every comparison boot
+          verify room --kernel "$GITHUB_WORKSPACE" --fixture .integration/vanllia --output .integration/compare-warmup --mode room --profile release --harts 1 --rounds 5 --compare-room-warmup
+      - name: Preserve comparisons
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -304,10 +273,12 @@ jobs:
           path: |
             .integration/compare-*/order.json
             .integration/compare-*/*/inputs.json
-            .integration/compare-*/*/composition.diff
-            .integration/compare-*/*/build.log
+            .integration/compare-*/*/*.elf
+            .integration/compare-*/*/*.bin
+            .integration/compare-*/*/*.lock
+            .integration/compare-*/*/patches/*
             .integration/compare-*/*/harts-*/*.log
             .integration/compare-*/*/harts-*/result.json
-            .integration/compare-*/*/composition/tests/memory/Cargo.lock
-            .integration/compare-*/*/composition/tests/memory/target/riscv64gc-unknown-none-elf/release/memory-*
+            .integration/compare-*/*/locked/*
+            .integration/compare-*/*/resolve/*
           if-no-files-found: warn

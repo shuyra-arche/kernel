@@ -70,12 +70,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fdt"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "784a4df722dc6267a04af36895398f59d21d07dce47232adf31ec0ff2fa45e67"
-
-[[package]]
 name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -158,15 +152,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kernel-hardware-fixture"
-version = "0.0.0"
-source = "git+https://github.com/shuyra-arche/vanllia.git?rev=eb37b0b0db299513274864cec23cee509a3cd3cc#eb37b0b0db299513274864cec23cee509a3cd3cc"
-dependencies = [
- "fdt",
- "platform-riscv",
-]
-
-[[package]]
 name = "kernel-memory-tests"
 version = "0.0.1"
 dependencies = [
@@ -175,7 +160,6 @@ dependencies = [
  "fack",
  "hashbrown",
  "kernel-api",
- "kernel-hardware-fixture",
 ]
 
 [[package]]
@@ -195,16 +179,6 @@ name = "pastey"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
-
-[[package]]
-name = "platform-riscv"
-version = "0.0.1"
-source = "git+https://github.com/shuyra-arche/vanllia.git?rev=eb37b0b0db299513274864cec23cee509a3cd3cc#eb37b0b0db299513274864cec23cee509a3cd3cc"
-dependencies = [
- "fack",
- "fdt",
- "kernel-api",
-]
 
 [[package]]
 name = "proc-macro2"

@@ -1,0 +1,335 @@
+--- a/tests/memory/guest/acceptance/maintenance.rs
++++ b/tests/memory/guest/acceptance/maintenance.rs
+@@ -60,9 +60,7 @@
+             expected: memo_status(foreign_memo).generation,
+             maintenance: Some(held),
+         }));
+-        assert!(
+-            matches!(worker.call(Action::Publish {memo:local,expected:memo_status(memo).generation,maintenance:Some(held)}),Ok(Response::Reply(r)) if matches!(r.outcome(),Outcome::Committed(_)))
+-        );
++        publish_held(&worker, local, memo, held);
+         assert_eq!(slot_status(slot).obligations, 1);
+         // A credential for this Flat cannot admit an unrelated source.
+         let other = create(1);
+@@ -100,11 +98,17 @@
+         mutate(Action::Allow {
+             maintenance: overlap,
+         });
+-        assert!(
+-            matches!(worker.call(Action::Publish {memo:local,expected:memo_status(memo).generation,maintenance:Some(held)}),Ok(Response::Reply(r)) if matches!(r.outcome(),Outcome::Committed(_)))
+-        );
++        publish_held(&worker, local, memo, held);
+         if revoked {
+-            pend::revoke(worker.0, token).unwrap();
++            let deadline = kernel_client::call::room::clock() + 5_000_000_000;
++            loop {
++                match pend::revoke(worker.0, token) {
++                    Ok(()) => break,
++                    Err(error) => assert_eq!(error.into_source(), kernel_api::abi::call::pend::PendFail::Busy),
++                }
++                assert!(kernel_client::call::room::clock() < deadline);
++                kernel_client::call::room::yield_();
++            }
+             rejected(worker.call(Action::Allow { maintenance: held }));
+         }
+         worker.stop();
+@@ -220,3 +224,19 @@
+         manager.stop();
+     }
+ }
++
++fn publish_held(worker: &Worker, local: MemoPosition, observed: MemoPosition, held: Maintenance) {
++    let deadline = kernel_client::call::room::clock() + 5_000_000_000;
++    loop {
++        let Response::Reply(reply) = worker.call(Action::Publish {
++            memo: local, expected: memo_status(observed).generation, maintenance: Some(held),
++        }).unwrap() else { panic!("Publish") };
++        match reply.outcome() {
++            Outcome::Committed(_) => return,
++            Outcome::Rejected(Failure::Busy | Failure::Stale) => {},
++            other => panic!("maintenance Publish: {other:?}"),
++        }
++        assert!(kernel_client::call::room::clock() < deadline);
++        kernel_client::call::room::yield_();
++    }
++}
+--- a/tests/memory/guest/acceptance/mod.rs
++++ b/tests/memory/guest/acceptance/mod.rs
+@@ -1,5 +1,4 @@
+ //! Public ABI acceptance: each worker has its own real Task ledger.
+-mod authority;
+ mod lineage;
+ mod maintenance;
+ mod scopes;
+@@ -17,7 +16,6 @@
+     unit::run();
+     scopes::run();
+     lineage::run();
+-    authority::run();
+     maintenance::run();
+ }
+ 
+@@ -80,8 +78,5 @@
+ }
+ 
+ fn try_call(action: Action) -> Result<Response, kernel_client::memory::Error> {
+-    match Call::from_request(request(action)) {
+-        Call::Flat(c) => kernel_client::memory::flat::invoke(c),
+-        Call::Nest(c) => kernel_client::memory::nest::invoke(c),
+-    }
++    crate::recovery::call(action)
+ }
+--- a/tests/memory/guest/acceptance/worker.rs
++++ b/tests/memory/guest/acceptance/worker.rs
+@@ -43,8 +43,17 @@
+         Self(task, index)
+     }
+     pub fn call(&self, action: Action) -> Result<Response, kernel_client::memory::Error> {
+-        self.begin(action);
+-        self.finish()
++        let deadline = room::clock() + 5_000_000_000;
++        loop {
++            self.begin(action);
++            let response = self.finish()?;
++            if matches!(action, Action::Block { .. }) && matches!(&response, Response::Reply(r) if r.outcome() == Outcome::Rejected(Failure::Busy)) {
++                assert!(room::clock() < deadline);
++                room::yield_();
++                continue;
++            }
++            return Ok(response);
++        }
+     }
+     pub fn begin(&self, action: Action) {
+         let channel = &CHANNELS[self.1];
+@@ -144,7 +153,17 @@
+                 let bytes = core::array::from_fn::<_, { AccordRequest::WIDTH }, _>(|i| {
+                     channel.bytes[i].load(Ordering::Relaxed)
+                 });
+-                let token = pend::accord(VirtAddr::new(bytes.as_ptr() as usize)).unwrap();
++                let token = {
++ let deadline = kernel_client::call::room::clock() + 5_000_000_000;
++ loop {
++ match pend::accord(VirtAddr::new(bytes.as_ptr() as usize)) {
++ Ok(token) => break token,
++ Err(error) => assert_eq!(error.into_source(), kernel_api::abi::call::pend::PendFail::Busy),
++ }
++ assert!(kernel_client::call::room::clock() < deadline);
++ kernel_client::call::room::yield_();
++ }
++ };
+                 for (out, byte) in channel.bytes.iter().zip(token.get().to_le_bytes()) {
+                     out.store(byte, Ordering::Relaxed);
+                 }
+--- a/tests/memory/guest/main.rs
++++ b/tests/memory/guest/main.rs
+@@ -2,10 +2,10 @@
+ #![no_main]
+ mod acceptance;
+ mod fault;
+-mod ipc;
+ mod support;
+ mod swap;
+-mod virtqueue;
++mod smp;
++mod recovery;
+ use core::fmt::Write;
+ use kernel_api::{
+     abi::memory::*,
+@@ -59,9 +59,8 @@
+     );
+     fault::run();
+     acceptance::run();
+-    ipc::run();
+     swap::run();
+-    virtqueue::run();
++    smp::run();
+     kernel_client::call::unit::exit(0, 0, VirtAddr::new(0), 0, ExitScope::Task)
+ }
+ 
+--- a/tests/memory/guest/support.rs
++++ b/tests/memory/guest/support.rs
+@@ -43,16 +43,17 @@
+     Request::new(id, action).expect("canonical request")
+ }
+ pub fn call(action: Action) -> Response {
+-    match Call::from_request(request(action)) {
+-        Call::Flat(c) => kernel_client::memory::flat::invoke(c),
+-        Call::Nest(c) => kernel_client::memory::nest::invoke(c),
+-    }
++    crate::recovery::block(action)
+     .unwrap_or_else(|e| panic!("{action:?}: {e:?}"))
+ }
+ #[track_caller]
+ pub fn mutate(action: Action) -> Value {
+-    let Response::Reply(r) = call(action) else {
+-        panic!("mutation reply")
++    let deadline = room::clock() + 5_000_000_000;
++    let r = loop {
++        let Response::Reply(r) = call(action) else { panic!("mutation reply") };
++        if r.outcome() != Outcome::Rejected(Failure::Busy) { break r; }
++        assert!(room::clock() < deadline, "rejected Busy did not progress");
++        room::yield_();
+     };
+     let Outcome::Committed(v) = r.outcome() else {
+         panic!("{action:?}: {:?}", r.outcome())
+@@ -206,10 +207,7 @@
+     });
+ }
+ pub fn retract(memo: MemoPosition) {
+-    mutate(Action::Retract {
+-        memo,
+-        expected: memo_status(memo).generation,
+-    });
++    crate::recovery::retract(memo);
+ }
+ pub fn block(start: SlotPosition) -> Maintenance {
+     let Response::Reply(r) = call(Action::Block {
+@@ -261,7 +259,17 @@
+     }
+     .to_bytes();
+     let CreatedUnit::Task(task) =
+-        kernel_client::call::unit::create(VirtAddr::new(bytes.as_ptr() as usize)).unwrap()
++        ({
++            let deadline = room::clock() + 5_000_000_000;
++            loop {
++                match kernel_client::call::unit::create(VirtAddr::new(bytes.as_ptr() as usize)) {
++                    Ok(created) => break created,
++                    Err(error) => assert_eq!(error.into_source(), kernel_api::abi::call::unit::UnitFail::Busy),
++                }
++                assert!(room::clock() < deadline, "Task admission stayed busy");
++                room::yield_();
++            }
++        })
+     else {
+         panic!("Task")
+     };
+@@ -280,15 +288,6 @@
+     }
+ }
+ 
+-pub fn image() -> &'static [u8] {
+-    let blob = unsafe {
+-        core::slice::from_raw_parts(
+-            IMAGE.load(Ordering::Relaxed) as *const u8,
+-            IMAGE_LEN.load(Ordering::Relaxed),
+-        )
+-    };
+-    kernel_api::boot::initrd::entry_image(blob).unwrap()
+-}
+ pub fn accord(src: PendId, target: TaskId, limits: Limits) -> PendId {
+     let bytes = AccordRequest {
+         src,
+@@ -297,5 +296,15 @@
+         mark: Mark::NONE,
+     }
+     .to_bytes();
+-    pend::accord(VirtAddr::new(bytes.as_ptr() as usize)).unwrap()
+-}
++    {
++ let deadline = kernel_client::call::room::clock() + 5_000_000_000;
++ loop {
++ match pend::accord(VirtAddr::new(bytes.as_ptr() as usize)) {
++ Ok(token) => break token,
++ Err(error) => assert_eq!(error.into_source(), kernel_api::abi::call::pend::PendFail::Busy),
++ }
++ assert!(kernel_client::call::room::clock() < deadline);
++ kernel_client::call::room::yield_();
++ }
++ }
++}
+--- a/tests/memory/guest/virtqueue.rs
++++ b/tests/memory/guest/virtqueue.rs
+@@ -277,34 +277,20 @@
+ }
+ 
+ fn release(memo: MemoPosition) {
+-    let deadline = room::clock() + 3_000_000_000;
+-    loop {
+-        let Snapshot::Reservation(s) = inspect(Query::Reservation {
+-            token: memo.token(),
+-            nest: memo.nest(),
+-            reservation: memo.reservation(),
+-        }) else {
+-            panic!("Reservation")
+-        };
+-        let Response::Reply(reply) = call(Action::Release {
+-            token: memo.token(),
+-            nest: memo.nest(),
+-            reservation: memo.reservation(),
+-            expected: s.version,
+-        }) else {
+-            panic!("Release reply")
+-        };
+-        match reply.outcome() {
+-            Outcome::Committed(_) => return,
+-            Outcome::Rejected(Failure::Stale) => {
+-                assert!(room::clock() < deadline, "Release version did not settle");
+-                room::yield_();
+-            }
+-            other => panic!("Release: {other:?}"),
+-        }
+-    }
+-}
+-
++    let Snapshot::Reservation(s) = inspect(Query::Reservation {
++        token: memo.token(),
++        nest: memo.nest(),
++        reservation: memo.reservation(),
++    }) else {
++        panic!("Reservation")
++    };
++    mutate(Action::Release {
++        token: memo.token(),
++        nest: memo.nest(),
++        reservation: memo.reservation(),
++        expected: s.version,
++    });
++}
+ #[derive(Clone, Copy, Debug)]
+ enum Close {
+     Revoke,
+--- a/tests/memory/platform/main.rs
++++ b/tests/memory/platform/main.rs
+@@ -1,8 +1,6 @@
+ #![no_std]
+ #![no_main]
+ extern crate alloc;
+-mod device;
+-mod window;
+ use kernel::entry::boot::{
+     self,
+     memory::topology::{Fabric, Ram, Topology},
+@@ -17,12 +15,6 @@
+                 .all()
+                 .any(|v| matches!(v, "riscv-virtio,qemu" | "riscv-virtio"))
+         );
+-        let external = device::prepare(&tree);
+-        let route = kernel::entry::boot::memory::topology::Route {
+-            controller: external.controller as u64,
+-            requester: external.requester,
+-        };
+-        unsafe { boot::bind_external(external) }.unwrap();
+         let regions: alloc::vec::Vec<_> = tree.memory().regions().collect();
+         assert_eq!(regions.len(), 1);
+         assert_eq!(regions[0].starting_address as usize, 0x80000000);
+@@ -37,16 +29,14 @@
+                 bytes: r.size as u64,
+             })
+             .collect();
+-        // SAFETY: this test image runs only under the paired QEMU invocation:
+-        // one emulated Hart, ordinary RAM, one fixed virtio-blk, no passthrough or hotplug.
+-        // The sole Hart executes the Kernel's FENCE.I on executable Publish/Protect.
+-        // Kernel independently rejects SMP and intervals outside admitted RAM.
++        // SAFETY: paired QEMU virt 1/2/4 Hart CPU-only test, 128 MiB
++        // coherent RAM, no executable Publish, device route or hotplug.
++        assert!(matches!(tree.cpus().count(), 1 | 2 | 4));
+         let topology = unsafe {
+             Topology::new(alloc::vec![Fabric {
+                 ram,
+-                routes: alloc::vec![route],
++                routes: alloc::vec![],
+             }])
+-            .map(|t| t.with_local_instructions())
+         }
+         .unwrap();
+         boot::qualify_memory(topology).unwrap();

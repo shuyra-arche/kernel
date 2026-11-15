@@ -1,0 +1,129 @@
+--- a/server/src/basis/nest/activity.rs
++++ b/server/src/basis/nest/activity.rs
+@@ -448,6 +448,7 @@
+     }
+ }
+ pub(crate) fn advance() {
++    let at=probe::stamp();let mut steps=0;
+     for _ in 0..8 {
+         let next = {
+             let mut r = REGISTRY.lock();
+@@ -460,12 +461,14 @@
+             value.map(|s| (at, s))
+         };
+         if let Some((at, s)) = next {
+-            if s.step() {
++            steps+=1;let started=probe::stamp();let done=s.step();probe::step(started);
++            if done { probe::closed(s.view.source().flat().phase());
+                 let old = core::mem::replace(&mut REGISTRY.lock().slots[at], Slot::Free);
+                 drop(old);
+             }
+         }
+     }
++    probe::turn(at,steps);
+ }
+ /// Bounded lifecycle hook; callers already serialize authority changes under
+ /// COMMIT. Physical withdrawal is advanced outside that lock by the Kernel Task.
+@@ -492,3 +495,6 @@
+         .iter()
+         .any(|s| matches!(s, Slot::Live(_)))
+ }
++
++#[path = "../../../tests/target/basis/nest/memo/activity/probe.rs"]
++pub(crate) mod probe;
+--- a/server/src/basis/nest/translation/retirement.rs
++++ b/server/src/basis/nest/translation/retirement.rs
+@@ -106,6 +106,7 @@
+ 
+     /// Keep all obligations available for the retry.
+     pub(in crate::basis::nest) fn fail(&mut self) {
++        crate::basis::nest::activity::probe::failed();
+         self.deferred = None;
+         if self.invalidation != Invalidation::Failed {
+             for mapping in &self.mappings {
+--- a/server/src/entry/boot/mod.rs
++++ b/server/src/entry/boot/mod.rs
+@@ -87,6 +87,7 @@
+ }
+ 
+ extern "C" fn run_on_stack() -> ! {
++    crate::metal::mmu::completion::activity_fences::run();
+     #[cfg(feature = "latency")]
+     crate::metal::measure::running();
+     restore(scheduler::run())
+--- a/server/src/entry/report/shutdown.rs
++++ b/server/src/entry/report/shutdown.rs
+@@ -16,6 +16,7 @@
+ }
+ 
+ pub(crate) fn report() {
++    crate::basis::nest::activity::probe::report();
+     putln!("task: all tasks exited, system halted");
+     let (late_n, late_max, late_sum) = deadline::late_stats();
+     let max_ms = clock::ticks_to_duration(late_max).as_millis();
+--- a/server/src/entry/trap/mod.rs
++++ b/server/src/entry/trap/mod.rs
+@@ -49,6 +49,7 @@
+             .running_task()
+             .expect("task trap without owner");
+         assert_eq!(task.ident.frame_pa.as_usize(), frame as *const _ as usize);
++        crate::basis::nest::activity::probe::task(task.ident.id.get());
+         unsafe { task.capture_extensions(frame.status()) };
+     }
+     let ident = ident();
+--- a/server/src/metal/riscv/mmu/completion.rs
++++ b/server/src/metal/riscv/mmu/completion.rs
+@@ -67,7 +67,7 @@
+             participants[word] |= bit;
+             mailboxes[slot.get()].request(round);
+             if slot != me {
+-                interrupt::ipi::send_completion(slot).map_err(|_| Error::Fault)?;
++                interrupt::ipi::send_completion(slot).map_err(|_| { crate::basis::nest::activity::probe::notify_failed(); Error::Fault })?;
+             }
+         }
+     }
+@@ -88,6 +88,8 @@
+         }
+         core::hint::spin_loop();
+     }
++    let mut missing=0usize; for id in 0..hart::hart_count() {let slot=hart::HartId::new(id);let (word,bit)=slot.bit();if participants[word]&bit!=0 && !mailboxes[id].covers(round) {missing|=1<<id;}}
++    crate::basis::nest::activity::probe::timeout(missing,crate::metal::clock::now().as_ticks().wrapping_sub(start));
+     Err(Error::TimedOut)
+ }
+ 
+@@ -99,6 +101,7 @@
+ }
+ impl Pending {
+     pub(crate) fn begin() -> Result<Self, Error> {
++        crate::basis::nest::activity::probe::round();
+         let _local = unsafe { crate::metal::sync::TrapGuard::save() };
+         Self::begin_on(&MAILBOXES)
+     }
+@@ -125,6 +128,7 @@
+         })
+     }
+     pub(crate) fn poll(&self) -> bool {
++        crate::basis::nest::activity::probe::poll();
+         let _local = unsafe { crate::metal::sync::TrapGuard::save() };
+         self.poll_on(&MAILBOXES)
+     }
+@@ -143,3 +147,6 @@
+         complete
+     }
+ }
++
++#[path = "../../../../tests/target/basis/nest/memo/activity/fences.rs"]
++pub(crate) mod activity_fences;
+--- a/server/src/metal/riscv/mmu/table/mod.rs
++++ b/server/src/metal/riscv/mmu/table/mod.rs
+@@ -68,7 +68,9 @@
+                 if level != 0 || snapshot.paddr() as usize != physical.as_usize() {
+                     return Err(NestError::NotAligned);
+                 }
+-                return entry.capture_activity(snapshot).ok_or(NestError::Busy);
++                let bits=entry.capture_activity(snapshot).ok_or(NestError::Busy)?;
++                crate::basis::nest::activity::probe::capture();
++                return Ok(bits);
+             }
+             if !snapshot.is_valid() {
+                 return Err(NestError::NotMapped);

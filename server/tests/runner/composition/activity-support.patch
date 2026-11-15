@@ -1,0 +1,140 @@
+--- a/tests/memory/guest/support.rs
++++ b/tests/memory/guest/support.rs
+@@ -51,9 +51,10 @@
+ }
+ #[track_caller]
+ pub fn mutate(action: Action) -> Value {
+-    let Response::Reply(r) = call(action) else {
+-        panic!("mutation reply")
+-    };
++    let deadline = room::clock()+8_000_000_000;
++    let r=loop { let Response::Reply(r)=call(action) else {panic!("mutation reply")};
++        if r.outcome()!=Outcome::Rejected(Failure::Busy){break r;}
++        assert!(room::clock()<deadline);room::yield_(); };
+     let Outcome::Committed(v) = r.outcome() else {
+         panic!("{action:?}: {:?}", r.outcome())
+     };
+@@ -151,42 +152,8 @@
+ pub fn reserve_at(token: PendId, placement: Placement, access: u64) -> (MemoPosition, VirtAddr) {
+     reserve_pages(token, placement, access, 1)
+ }
+-pub fn reserve_pages(
+-    token: PendId,
+-    placement: Placement,
+-    access: u64,
+-    count: usize,
+-) -> (MemoPosition, VirtAddr) {
+-    let Target::Nest(nest) = pend_info(token).target else {
+-        panic!("Nest")
+-    };
+-    let Snapshot::Nest(s) = inspect(Query::Nest { token, nest }) else {
+-        panic!("Nest")
+-    };
+-    let Value::Reservation {
+-        token,
+-        nest,
+-        reservation,
+-        address,
+-        ..
+-    } = mutate(Action::Reserve {
+-        token,
+-        nest,
+-        expected: s.version,
+-        reservation: ReserveRequest {
+-            placement,
+-            count: PageCount::new(count).unwrap(),
+-            level: CellLevel::new(0).unwrap(),
+-            access,
+-        },
+-    })
+-    else {
+-        panic!("Reservation")
+-    };
+-    (
+-        MemoPosition::new(token, nest, reservation, 0).unwrap(),
+-        address,
+-    )
++pub fn reserve_pages(token:PendId,placement:Placement,access:u64,count:usize)->(MemoPosition,VirtAddr) {
++    crate::reservation::reserve(token,ReserveRequest {placement,access,count:PageCount::new(count).unwrap(),level:CellLevel::new(0).unwrap()})
+ }
+ pub fn insert(target: MemoPosition, slot: SlotPosition) {
+     mutate(Action::Insert {
+@@ -261,7 +228,10 @@
+     }
+     .to_bytes();
+     let CreatedUnit::Task(task) =
+-        kernel_client::call::unit::create(VirtAddr::new(bytes.as_ptr() as usize)).unwrap()
++        ({ let deadline=room::clock()+8_000_000_000; loop {
++ match kernel_client::call::unit::create(VirtAddr::new(bytes.as_ptr() as usize)) {
++ Ok(task)=>break task, Err(e)=>assert_eq!(e.source,kernel_api::abi::call::unit::UnitFail::Busy),
++ } assert!(room::clock()<deadline);room::yield_(); } })
+     else {
+         panic!("Task")
+     };
+@@ -280,15 +250,6 @@
+     }
+ }
+ 
+-pub fn image() -> &'static [u8] {
+-    let blob = unsafe {
+-        core::slice::from_raw_parts(
+-            IMAGE.load(Ordering::Relaxed) as *const u8,
+-            IMAGE_LEN.load(Ordering::Relaxed),
+-        )
+-    };
+-    kernel_api::boot::initrd::entry_image(blob).unwrap()
+-}
+ pub fn accord(src: PendId, target: TaskId, limits: Limits) -> PendId {
+     let bytes = AccordRequest {
+         src,
+--- a/tests/memory/guest/virtqueue.rs
++++ b/tests/memory/guest/virtqueue.rs
+@@ -277,34 +277,20 @@
+ }
+ 
+ fn release(memo: MemoPosition) {
+-    let deadline = room::clock() + 3_000_000_000;
+-    loop {
+-        let Snapshot::Reservation(s) = inspect(Query::Reservation {
+-            token: memo.token(),
+-            nest: memo.nest(),
+-            reservation: memo.reservation(),
+-        }) else {
+-            panic!("Reservation")
+-        };
+-        let Response::Reply(reply) = call(Action::Release {
+-            token: memo.token(),
+-            nest: memo.nest(),
+-            reservation: memo.reservation(),
+-            expected: s.version,
+-        }) else {
+-            panic!("Release reply")
+-        };
+-        match reply.outcome() {
+-            Outcome::Committed(_) => return,
+-            Outcome::Rejected(Failure::Stale) => {
+-                assert!(room::clock() < deadline, "Release version did not settle");
+-                room::yield_();
+-            }
+-            other => panic!("Release: {other:?}"),
+-        }
+-    }
+-}
+-
++    let Snapshot::Reservation(s) = inspect(Query::Reservation {
++        token: memo.token(),
++        nest: memo.nest(),
++        reservation: memo.reservation(),
++    }) else {
++        panic!("Reservation")
++    };
++    mutate(Action::Release {
++        token: memo.token(),
++        nest: memo.nest(),
++        reservation: memo.reservation(),
++        expected: s.version,
++    });
++}
+ #[derive(Clone, Copy, Debug)]
+ enum Close {
+     Revoke,

@@ -1,0 +1,4 @@
+{
+  "tests/memory/guest/support.rs": "5c8e6f283dcd1c6ca1d37be51e31106f1c92a919cc4afb86b28ba514d36cb438",
+  "tests/memory/guest/virtqueue.rs": "3bb43bc93dc21974f28bb5cb1b2e031634f221ea1b6b0f7dacaa7a30642b518b"
+}

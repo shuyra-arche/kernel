@@ -1,0 +1,6 @@
+{
+  "server/src/entry/boot/mod.rs": "d6e5d8f9e27972e8ae019971635072bf15c820f200939b67a1aacac4faf6c778",
+  "server/src/entry/report/shutdown.rs": "6e7b3899751611073ddbccc2164c61108ae61c9dbd62d1dca45d854c6cfea598",
+  "server/src/entry/trap/mod.rs": "6857b40802ff9192b561ba527e935bab7d3e7cb85caa0a8d98dce318fc49d4e0",
+  "server/src/metal/riscv/mmu/completion.rs": "f4c7296aed659d0e74c2d4aa77d7d2d961689c579f6dc4f102b06db5106683f7"
+}

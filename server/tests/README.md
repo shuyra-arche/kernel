@@ -1,177 +1,146 @@
 # Kernel verification
 
-Use the [root README](../../README.md#build-and-test) for host tests and RV64
-compilation. Host tests cover ABI, state transitions and scripted failure
-paths. The QEMU suite executes real RV64 traps, boot, scheduling, and CPU and
-device translation on emulated hardware. Physical controller behavior needs
-separate hardware evidence.
+Host tests mirror their source owners under `basis/`, `entry/`, and `metal/`.
+`Cargo.toml` declares independent nested `mod.rs` entries: mocks, imported private
+source and target assumptions remain isolated. The original 20 harness boundaries
+are preserved; the activity epoch contract is additionally split from RV64 PTE
+storage into its actual `basis/nest/memo/activity` owner. A contract crossing
+Cell, Flat and Nest stays at their nearest source parent, `basis/mod.rs`.
 
-## Current native ABI 11 composition
-
-The `Guest tests (QEMU)` check uses the pinned Vanllia native composition in
-[Check](../../.github/workflows/check.yml). It patches API, Client and Server
-to the current checkout, without an ABI feature. The [preparation step](guest/native/prepare.py) removes the historical fixture's
-`memory-v11` dependency entries and adapts Release to reobserve a version only
-after `Rejected(Stale)`. Hardware settlement may advance that version between
-observation and admission. Accepted Pending/Failed operations are never retried
-as fresh requests. The source diff is preserved with native-memory evidence.
-
-Prepare a fresh fixture with `python3 server/tests/guest/native/prepare.py --fixture /absolute/path/to/vanllia`, then run from the Kernel root:
-
-```sh
-python3 /absolute/path/to/vanllia/tests/memory/run.py --kernel "$PWD"
-python3 /absolute/path/to/vanllia/tests/memory/run.py --kernel "$PWD" --no-build --capsule-version 10
-python3 /absolute/path/to/vanllia/tests/memory/run.py --kernel "$PWD" --profile release
-```
-
-Supply `QEMU_OPENSBI` and the reviewed QEMU 10.0.x executable. The native guest
-covers Task/Team isolation, authority, faults, shared memory, maintenance,
-withdrawal, lifecycle and virtio-blk/IOMMU shutdown. Evidence is uploaded as
-`native-memory`. QEMU evidence does not establish physical hardware behavior
-or native SMP acceptance. The historical scheduling/vector/diagnostics cases
-below have not all been migrated to this native composition; their previous
-results must not be reported as current ABI 11 acceptance.
-
-## Native CPU SMP completion
-
-The [SMP composition](guest/smp/README.md) runs the data-only native contract on
-1/2/4 Harts in debug and release. It requires actual writer migration, concurrent
-retirement, retained failure recovery, request replay/query and executable
-rejection. A test-owned boot probe withholds a Hart and injects old/duplicate
-acknowledgements while retaining a real Page. CI uploads the exact pins, lock
-graphs, composition diff, image hashes and logs as `native-cpu-smp`. This does
-not qualify native executable SMP, devices, physical hardware or complete System.
-
-## Implicit Flat target probe
-
-The separate [implicit Flat probe](guest/flat/README.md) exercises current
-production internals with real RV64 allocation, concurrent Kernel Tasks,
-transfer and failure recovery on 1/4 Harts. It does not extend public ABI 11
-or qualify native SMP memory. Its optional timing mode compares state-lock
-ownership intervals with the same test composition on a baseline provider.
-
-## Native Room and interrupt contracts
-
-The [Room suite](latency/README.md) exercises current ABI 11 UART/PLIC/Sign
-retention and revocation on 1/4 Harts, plus fixed-Hart real-time budget and
-preemption on 4 Harts. Its minimal debug/release cases run in the native QEMU
-check, with boot-policy adaptations and limits recorded in that guide.
-Longer paired performance comparisons are explicitly requested and preserve
-all source identities and boot evidence in separate CI artifacts.
-
-## Historical ABI 10 guest suite
-
-The remaining instructions describe the preserved ABI 10 suite. Run these only
-from an ABI 10 Kernel checkout (for example Preview Alpha), with Vanllia fixture
-`eb37b0b0db299513274864cec23cee509a3cd3cc`. They are not current ABI 11 CI commands.
-
-## Set up the QEMU fixture
-
-Start with the root README's Rust toolchain. Install Python 3, GNU `nm` and
-`sha256sum`, and an RV64 QEMU with `virt,iommu-sys` and EDU support. The IOMMU
-harness records QEMU 10.0.13 as a validated version. Kernel boot tests use
-OpenSBI, and the diagnostics test needs SBI DBCN. Set `QEMU_RISCV64` to select
-a binary other than `qemu-system-riscv64`, or `QEMU_OPENSBI` to select a firmware
-image instead of QEMU's default.
-
-Check out Vanllia in a dedicated fixture checkout at the revision listed in
-the historical fixture pin above. The setup below patches
-the two fixture manifests to use the Kernel checkout under test and refreshes
-their lockfiles. Run it once from the Kernel repository root with the fixture's
-absolute path:
-
-```sh
-vanllia_fixture=/absolute/path/to/vanllia
-kernel_dir=$(pwd -P)
-export RUSTUP_TOOLCHAIN=nightly
-export KERNEL_BOOT_MANIFEST="$vanllia_fixture/platform/riscv/Cargo.toml"
-export KERNEL_PLATFORM_MANIFEST="$vanllia_fixture/tests/platform/qemu/Cargo.toml"
-
-for manifest in "$KERNEL_BOOT_MANIFEST" "$KERNEL_PLATFORM_MANIFEST"; do
-    cat >> "$manifest" <<EOF_PATCH
-
-[patch."https://github.com/shuyra-arche/kernel.git"]
-kernel = { path = "$kernel_dir/server" }
-kernel-api = { path = "$kernel_dir/api" }
-EOF_PATCH
-    cargo metadata --manifest-path "$manifest" --format-version 1 >/dev/null
-done
-```
-
-## Run the guest tests
-
-The Cell guest consumes ABI v10. Its bootstrap CPU authority comes from the
-ledger's `Name::Space` entry; `Name::Nest` entries describe external topology.
-Ordinary Tasks start with no grants. Fixtures explicitly delegate creation,
-Whole-Nest reservation or mapping-scoped authority before resuming a worker.
-Reservations use `Nest.Reserve` without a source, then `Cell.Insert` and
-`Cell.Publish`. A `MappingId` is read from `PendInfo.limits.scope`, never used as
-a capability. `Nest.Release` closes a complete mapping reservation; returning a
-child grant withdraws only that branch's publications.
-
-Run the full ignored hardware suite in the same shell:
-
-```sh
-cargo +nightly test --locked -p kernel-memory-tests --test hardware \
-    --target x86_64-unknown-linux-gnu -- --ignored --nocapture
-```
-
-To reproduce one CI group, use the [shard runner](hardware/shard.py). For
-example, run the I/O group with `python3 server/tests/hardware/shard.py io`.
-The runner's `--help` lists the groups. The large-Cell case in the memory group
-requires 3 GiB of contiguous guest RAM.
-
-## Read the evidence
-
-Generated evidence lives under each guest's `target/evidence/` directory:
-
-| Guest | What it exercises |
+| Cargo host target | Entry / protected responsibility |
 | --- | --- |
-| [Cell](guest/cell/) | Kernel calls, scoped Nest authority, source-free reservations, unrelated per-position sources, sticky read-only copies, original-source Task retirement, CPU and IOMMU mappings, interrupts, scheduling, and task state. Includes a separate-Team, window-limited mapping delegate; Flat Block/Allow and holder transfer; read-only memory snapshot/Sign with real level-1 allocation. |
-| [IOMMU](guest/iommu/) | The hardware backend directly, including queue completion and denied DMA after reuse. |
-| [Diagnostics](guest/diagnostics/) | Panic, illegal instruction, pre-allocator failure and recursive reporting. |
+| memory | `basis/mod.rs`: Page/Flat/Nest ownership, retention, recovery and topology |
+| translation | `metal/riscv/mmu/mod.rs`: real PTE storage, atomic A/D capture, decoding |
+| activity | `basis/nest/memo/activity/mod.rs`: retained capture epochs and exhaustion |
+| fault | `basis/nest/fault/mod.rs`: bounded nonconsuming event queues |
+| iommu | `metal/riscv/iommu/mod.rs`: completion, failure, source and lifetime models |
+| iommu-target (formerly hardware) | `metal/riscv/iommu/execution/mod.rs`: real QEMU MMIO/DMA runner; ignored by default |
+| sign | `basis/sign/mod.rs`: endpoint state and wait admission |
+| pend | `basis/pend/mod.rs`: authority, narrowing, creation and tracking |
+| address | `basis/nest/address/mod.rs`: occupancy, placement, overflow and generations |
+| name | `basis/name/mod.rs`: identity allocation, arenas, registries and exhaustion |
+| unit | `basis/unit/mod.rs`: execution, membership and retirement |
+| room | `basis/room/mod.rs`: deadlines, scheduling, timers, shutdown and reservations |
+| sync | `metal/riscv/sync/mod.rs`: production admission, FIFO, diagnostics and UI lifetimes |
+| allocator | `metal/allocator/mod.rs`: frame allocation and failure |
+| registration | `basis/pend/registration/mod.rs`: ledger, branch and export lifetimes |
+| invocation | `entry/call/mod.rs`: production request delivery and replay |
+| context | `metal/riscv/switcher/context/mod.rs`: extension context policy |
+| console | `metal/riscv/console/mod.rs`: output admission |
+| interrupt | `basis/room/interrupt/mod.rs`: receiver state and progress |
+| latency | `metal/measure/mod.rs`: bounded distributions and whole-interval accounting |
+| diagnostics | `entry/report/mod.rs`: frame evidence, emergency output and lifecycle ring |
 
-The Cell cases require real read/write-fault probes after source withdrawal or
-read-only delegation, and retain delayed-DMA and exact-fence checks. The
-write-to-execute update case checks new instruction results without a guest
-`FENCE.I`; QEMU execution is not proof of physical instruction-cache coherence.
+Shared fixtures remain under `support/`. Each suite's synthetic crate root is
+local to that harness. The opt-in `ticket-storage` bench remains under
+`basis/name/cost.rs`; it is exploration, not a default test.
 
-CI uploads each group's evidence as a `guest-evidence-*` artifact. The
-[latency](latency/README.md) and [real-time](realtime/README.md) notes describe
-their focused scenarios and how to interpret their measurements.
+## Host and target compilation
 
-To symbolize a diagnostic serial log, use the exact ELF recorded by the run.
-From the repository root:
+Use the root [build commands](../../README.md#build-and-test). The runner is a
+separate host-only workspace and is excluded from the RV64 workspace build:
 
 ```sh
-python3 tools/diagnostics/symbolize.py \
-    server/tests/guest/diagnostics/target/evidence/panic-debug.elf \
-    server/tests/guest/diagnostics/target/evidence/panic-debug-smp1-serial.log
+cargo +nightly test --locked --workspace --target x86_64-unknown-linux-gnu
+cargo +nightly test --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+bash tools/tests/layout.sh
+bash tools/tests/release.sh
+bash tools/check-layout.sh
+bash tools/check-tooling.sh
 ```
 
-Match the ELF to its recorded SHA-256. A stack-scan hit is a candidate address.
-The report labels frame-chain evidence separately.
+Host assertions do not execute RV64 traps or prove hardware quiescence.
+`tools/check-layout.sh` scans all Git-tracked paths, including nested guests;
+directory entries use `mod.rs`, with no same-stem file/directory pairs. This is
+the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 
-## Current memory ABI verification
+## Native execution
 
-Host tests check actual Flat/Page/Nest state transitions, failure
-injection, authority and result-journal correlation. Host fixtures
-do not execute guest traps or establish hardware quiescence.
+Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
+with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`. Clone Vanllia at the exact
+revision in [runner/fixture](runner/fixture); the same commit supplies the shared
+execution library. Vanllia owns native memory and System/Twine compositions.
+Kernel owns its private completion, A/D, Flat and Room probes.
 
-The `translation` host target compiles the production RV64 PTE storage,
-decoder and flags. Its atomic hardware participant checks preservation of
-concurrent A/D evidence during permission changes and coherent full-word
-snapshots, capture/clear races and rejected replacement identities. Host
-threads do not qualify a hardware sampling backend. The
-[activity guest](guest/activity/README.md) executes qualified/unqualified CPU
-configurations, real reads/writes, restricted consumers, multiple readers,
-aliases, replacement, revocation, output faults, stopped observation and
-withheld real-Hart completion. Its measurements are emulator evidence.
+```sh
+cargo +nightly build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
+"$verify" smp --kernel "$PWD" --fixture /path/to/vanllia --output /new/smp --profile release
+"$verify" activity --kernel "$PWD" --fixture /path/to/vanllia --output /new/activity --profile release
+"$verify" flat --kernel "$PWD" --fixture /path/to/vanllia --output /new/flat
+"$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/irq --mode irq --events 16
+```
 
-The current native composition exercises real Task/Team startup, CPU mappings
-and qualified IOMMU/Virtqueue paths using the single ABI 11 contract.
-A successful QEMU device scenario is not a real-hardware proof.
+Run both debug and release. SMP defaults to 1/2/4 Harts; A/D and Flat default
+to 1/4. Activity also has separate `--unsupported` and `--stopped` scenarios.
+Room correctness uses `--mode irq --events 16` on 1/4 and `--mode realtime
+--harts 4`. Scheduling comparisons stay opt-in, using `--mode room --baseline
+/path/to/control --rounds 5`; cold/warm study uses `--compare-room-warmup`.
+Invalid counts, duplicate Harts and malformed baseline SHAs fail admission.
 
-Report the exact source/fixture revision, command, ABI selection,
-firmware and emulator versions, output, errors and skipped checks
-when publishing verification evidence.
+```sh
+cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-debug
+cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-release --profile release
+cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/reject --capsule-version 10
+```
+
+The last command is a negative test of the current boot contract, not an ABI 10
+guest. System consumer verification uses Vanllia's `verify system` with the
+pinned System and Twine checkouts in [Check](../../.github/workflows/check.yml).
+Independent IOMMU backend execution remains available with
+`cargo +nightly test --locked -p kernel-memory-tests --test iommu-target
+--target x86_64-unknown-linux-gnu -- --ignored --nocapture`.
+
+## Composition and evidence
+
+[runner/](runner/) contains typed scenario selection and assertions. Its
+[composition patches](runner/composition/) are reviewed test inputs. Each touched
+production or fixture file must match its recorded preimage SHA-256 before
+`git apply --check` and application in a disposable archive. Changed production
+preimages require review; a baseline with incompatible source fails explicitly.
+No runtime string replacement, production test feature, compatibility ABI,
+permanent topology manifest or universal orchestration language is added.
+Guest constants use typed Cargo environment inputs; guest/probe bodies stay
+under `target/basis` or `target/metal`, never in production `src/`.
+
+Outputs must be new directories. Each run records committed provider/fixture
+revisions, exact compiler/Cargo/emulator/firmware identities, runner/suite/patch
+hashes, original and resolved locks, both build commands, ELF/Capsule hashes,
+logs and per-boot results. Provider substitutions resolve once, then build again
+with `--locked`; neither input checkout is edited. Comparisons build both images
+before alternating their boot order. Cold/warm boots share one platform ELF.
+Every boot requires complete scenario assertions and a successful process exit;
+a timeout, signal, nonzero exit or failure marker cannot pass. Evidence survives
+failed builds and boots. Raw results belong in CI artifacts, not source control.
+
+Ordinary Host-only changes run the inexpensive checks. Production/API/runner
+changes select all affected target scenarios conservatively; a specific guest
+change selects that scenario. Main/release runs execute all scenarios. Longer
+comparisons require `Room comparison: requested` and exactly one
+`Room baseline: <40 lowercase hex characters>` line in the PR body.
+
+## Retired historical checks
+
+At the user's explicit request, the ABI 10 Cell and diagnostics guests, their
+legacy Kernel/platform harness, routing/shard tests and old real-time guide
+are deleted. This also removes the pinned legacy hardware-fixture dependency.
+The removed Cell cases covered scoped Nest grants, read/write faults, source
+withdrawal, instruction updates, vectors/migration, delayed DMA, large Cells and
+legacy scheduling. They are not claimed as equivalent current ABI 11 coverage.
+Their source and past results remain in Git history. The native cases above
+retain their own current contract; physical controller, vector/context hardware
+and complete System acceptance remain separate evidence boundaries.
+
+## Diagnostics
+
+Use the exact ELF identified by an execution's SHA-256:
+
+```sh
+"$verify" symbolize /path/to/platform.elf /path/to/serial.log
+"$verify" inventory --kernel "$PWD"
+```
+
+Symbolization selects Trap/frame evidence and passes literal PCs to
+`llvm-addr2line`, preserving compressed-instruction return addresses. Stack-scan
+hits remain candidate addresses; frame-chain evidence is labelled separately.
+The lock inventory is textual navigation, not execution or lock-safety proof.

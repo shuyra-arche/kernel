@@ -1,0 +1,9 @@
+{
+  "tests/memory/guest/acceptance/maintenance.rs": "eb5fd5f85749edea6a51cdd4afa0305851af751a7ad4d0231c3e9eed7d76ec6c",
+  "tests/memory/guest/acceptance/mod.rs": "0d1eea309b8a65c7bbc67462d59c9d9f5d66a50b878bc79299897181acdf8cc3",
+  "tests/memory/guest/acceptance/worker.rs": "b97e678416feabba88a0497869f0b5e19f742d52070a81277b7d7957db73bb47",
+  "tests/memory/guest/main.rs": "df270add5ee7e8e1747232e3c18c32407c44ed2187d0c7574d8e579bfdee2354",
+  "tests/memory/guest/support.rs": "5c8e6f283dcd1c6ca1d37be51e31106f1c92a919cc4afb86b28ba514d36cb438",
+  "tests/memory/guest/virtqueue.rs": "3bb43bc93dc21974f28bb5cb1b2e031634f221ea1b6b0f7dacaa7a30642b518b",
+  "tests/memory/platform/main.rs": "93bef5d37b6b5aab9cb3cb0b6ea400f1217487fb17eb7645105b06ee1bab8ec5"
+}

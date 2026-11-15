@@ -13,93 +13,96 @@ erra.workspace = true
 hashbrown = { version = "0.17.1", default-features = false, features = ["alloc", "default-hasher"] }
 kernel-api = { path = "../../api" }
 fack = { version = "0.2.0", default-features = false }
-kernel-hardware-fixture = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "eb37b0b0db299513274864cec23cee509a3cd3cc" }
 
 [[test]]
 name = "memory"
-path = "memory/mod.rs"
+path = "basis/mod.rs"
 
 [[test]]
 name = "translation"
-path = "translation/mod.rs"
+path = "metal/riscv/mmu/mod.rs"
 
 [[test]]
 name = "fault"
-path = "fault/mod.rs"
+path = "basis/nest/fault/mod.rs"
 
 [[test]]
 name = "iommu"
-path = "iommu/mod.rs"
+path = "metal/riscv/iommu/mod.rs"
 
 [[test]]
-name = "hardware"
-path = "hardware/mod.rs"
+name = "iommu-target"
+path = "metal/riscv/iommu/execution/mod.rs"
 
 [[test]]
 name = "sign"
-path = "sign/mod.rs"
+path = "basis/sign/mod.rs"
 
 [[test]]
 name = "pend"
-path = "pend/mod.rs"
+path = "basis/pend/mod.rs"
 
 [[test]]
 name = "address"
-path = "address/mod.rs"
+path = "basis/nest/address/mod.rs"
 
 [[test]]
 name = "name"
-path = "name/mod.rs"
+path = "basis/name/mod.rs"
 
 [[test]]
 name = "unit"
-path = "unit/mod.rs"
+path = "basis/unit/mod.rs"
 
 [[test]]
 name = "room"
-path = "room/mod.rs"
+path = "basis/room/mod.rs"
 
 [[test]]
 name = "sync"
-path = "sync/mod.rs"
+path = "metal/riscv/sync/mod.rs"
 
 [[test]]
 name = "allocator"
-path = "allocator/mod.rs"
+path = "metal/allocator/mod.rs"
 
 [[test]]
 name = "registration"
-path = "registration/mod.rs"
+path = "basis/pend/registration/mod.rs"
 
 [[test]]
 name = "invocation"
-path = "invocation/mod.rs"
+path = "entry/call/mod.rs"
 
 # Opt-in exploration; excluded from both the normal and ignored test runs.
 [[bench]]
 name = "ticket-storage"
-path = "name/cost.rs"
+path = "basis/name/cost.rs"
 harness = false
 
 [[test]]
 name = "context"
-path = "context/mod.rs"
+path = "metal/riscv/switcher/context/mod.rs"
 
 [[test]]
 name = "console"
-path = "console/mod.rs"
+path = "metal/riscv/console/mod.rs"
 
 [[test]]
 name = "interrupt"
-path = "interrupt/mod.rs"
+path = "basis/room/interrupt/mod.rs"
 
 [[test]]
 name = "latency"
-path = "latency/mod.rs"
+path = "metal/measure/mod.rs"
 
 [[test]]
 name = "diagnostics"
-path = "diagnostics/mod.rs"
+path = "entry/report/mod.rs"
+
+[[test]]
+name = "activity"
+path = "basis/nest/memo/activity/mod.rs"
 
 # Imported production synchronization code retains its provider feature gates.
 [lints.rust]

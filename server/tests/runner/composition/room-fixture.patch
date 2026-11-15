@@ -1,0 +1,66 @@
+--- a/tests/memory/guest/virtqueue.rs
++++ b/tests/memory/guest/virtqueue.rs
+@@ -277,34 +277,20 @@
+ }
+ 
+ fn release(memo: MemoPosition) {
+-    let deadline = room::clock() + 3_000_000_000;
+-    loop {
+-        let Snapshot::Reservation(s) = inspect(Query::Reservation {
+-            token: memo.token(),
+-            nest: memo.nest(),
+-            reservation: memo.reservation(),
+-        }) else {
+-            panic!("Reservation")
+-        };
+-        let Response::Reply(reply) = call(Action::Release {
+-            token: memo.token(),
+-            nest: memo.nest(),
+-            reservation: memo.reservation(),
+-            expected: s.version,
+-        }) else {
+-            panic!("Release reply")
+-        };
+-        match reply.outcome() {
+-            Outcome::Committed(_) => return,
+-            Outcome::Rejected(Failure::Stale) => {
+-                assert!(room::clock() < deadline, "Release version did not settle");
+-                room::yield_();
+-            }
+-            other => panic!("Release: {other:?}"),
+-        }
+-    }
+-}
+-
++    let Snapshot::Reservation(s) = inspect(Query::Reservation {
++        token: memo.token(),
++        nest: memo.nest(),
++        reservation: memo.reservation(),
++    }) else {
++        panic!("Reservation")
++    };
++    mutate(Action::Release {
++        token: memo.token(),
++        nest: memo.nest(),
++        reservation: memo.reservation(),
++        expected: s.version,
++    });
++}
+ #[derive(Clone, Copy, Debug)]
+ enum Close {
+     Revoke,
+--- a/tests/memory/platform/main.rs
++++ b/tests/memory/platform/main.rs
+@@ -46,10 +46,10 @@
+                 ram,
+                 routes: alloc::vec![route],
+             }])
+-            .map(|t| t.with_local_instructions())
++            
+         }
+         .unwrap();
+-        boot::qualify_memory(topology).unwrap();
++        let _unqualified_topology = topology;
+         boot::start()
+     });
+     match result {
