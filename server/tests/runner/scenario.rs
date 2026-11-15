@@ -202,13 +202,6 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
                 compose::apply("room-window", &provider, &patches)?;
                 command.args(["--features", "kernel/latency"]);
             }
-            if mode == "realtime" {
-                compose::apply("realtime-provider", &provider, &patches)?;
-            }
-            compose::copy(
-                "target/basis/unit/stack.rs",
-                &fixture.join("tests/memory/guest/stack.rs"),
-            )?;
             let guest = match mode.as_str() {
                 "irq" => "interrupt.rs",
                 "realtime" => "realtime.rs",
