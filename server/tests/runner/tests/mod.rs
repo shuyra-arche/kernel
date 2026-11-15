@@ -79,6 +79,31 @@ fn smp_requires_each_actual_writer_to_migrate() {
         verify::check(log, &verify::Kind::Smp, 1).unwrap()["passed"],
         true
     );
+    for quiet in [false, true] {
+        let kind = verify::Kind::Shutdown { quiet };
+        let required = "PASS shutdown required=1 prepared=1 converged=1\n";
+        let log = if quiet {
+            log.replace("task: all tasks exited\n", "")
+        } else {
+            log.to_owned()
+        };
+        assert_eq!(verify::check(&log, &kind, 1).unwrap()["passed"], false);
+        assert_eq!(
+            verify::check(&format!("{log}{required}"), &kind, 1).unwrap()["passed"],
+            true
+        );
+        if quiet {
+            assert_eq!(
+                verify::check(
+                    &format!("{log}{required}task: all tasks exited\n"),
+                    &kind,
+                    1
+                )
+                .unwrap()["passed"],
+                false
+            );
+        }
+    }
     for cancel in [false, true] {
         let kind = verify::Kind::Lifecycle { cancel };
         assert_eq!(verify::check(log, &kind, 1).unwrap()["passed"], false);

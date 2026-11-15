@@ -176,8 +176,6 @@ pub(super) fn finish() -> ! {
             }
             core::hint::spin_loop();
         }
-        #[cfg(feature = "latency")]
-        crate::metal::measure::report();
         let (pushed, reaped) = tally::counts();
         let snapshot = Observation {
             hart: hart::hart_id(),
@@ -188,6 +186,8 @@ pub(super) fn finish() -> ! {
             .get()
             .expect("required shutdown binding")
             .finish)(Converged { _private: () });
+        #[cfg(feature = "latency")]
+        crate::metal::measure::report();
         if let Some(hooks) = OBSERVERS.get() {
             (hooks.finished)(snapshot);
         }

@@ -16,3 +16,13 @@
      Ok(())
  }
  
+--- a/server/tests/target/basis/room/shutdown/probe.rs
++++ b/server/tests/target/basis/room/shutdown/probe.rs
+@@ -1,6 +1,6 @@
+ //! Real finalization composition: required effects remain when observers are absent.
+ use core::sync::atomic::{AtomicUsize, Ordering};
+-const QUIET: bool = false;
++const QUIET: bool = true;
+ static PREPARED: AtomicUsize = AtomicUsize::new(0);
+ pub(crate) fn prepared() {
+     assert_eq!(crate::basis::room::shutdown::barrier().0, 0, "barrier preceded hardware preparation");
