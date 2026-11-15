@@ -12,6 +12,7 @@ Cell, Flat and Nest stays at their nearest source parent, `basis/mod.rs`.
 | memory | `basis/mod.rs`: Page/Flat/Nest ownership, retention, recovery and topology |
 | translation | `metal/riscv/mmu/internal/mod.rs`: real PTE storage, atomic A/D capture, decoding |
 | activity | `basis/nest/memo/activity/mod.rs`: retained capture epochs and exhaustion |
+| retirement | `basis/nest/index/mod.rs`: bounded discovery, late completion, registration fairness and allocation refusal |
 | fault | `basis/nest/fault/mod.rs`: bounded nonconsuming event queues |
 | iommu | `metal/riscv/mmu/external/mod.rs`: completion, failure, source and lifetime models |
 | iommu-target (formerly hardware) | `metal/riscv/mmu/external/execution/mod.rs`: real QEMU MMIO/DMA runner; ignored by default |
@@ -179,3 +180,21 @@ Host Room tests exercise pure preparation decisions, rejected/duplicate completi
 states, Busy retry, terminal failure and exclusive preparation under concurrency.
 Interrupt tests exercise missing and duplicate service binding. Controller tests
 keep assigned/context obligations distinct from payload settlement.
+
+## Resident Page-completion retirement
+
+`verify retirement` composes the independent retirement Task with the existing
+SMP memory/exit/retirement workload on 1/4 Harts. The probe counts real source
+records advanced by that registered Task, rather than just entry-loop turns.
+`verify retirement --cancel` exits after eight turns without unregistering;
+Reaped detection and fallback must advance further real records, and final Task
+accounting, both pending registries and the notification registration must settle.
+Run debug and release. Ordinary source visits are bounded to four records per
+turn, including expired records; Sign retains its existing admitted queue bounds.
+
+Host discovery tests refuse allocations for every scan, inject a new completion
+after earlier nodes were visited, request another pass during delivery, and add
+new registrations while old work remains. These protect the actual source-pass
+implementation over inert namespace keys; they do not model authorization, CPU
+fences, device retirement or the RV64 scheduler. Controller-Hart external binding
+progress stays on its existing path; no hardware completion is synthesized.

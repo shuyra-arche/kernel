@@ -43,6 +43,12 @@ pub enum Commands {
         #[arg(long)]
         cancel: bool,
     },
+    Retirement {
+        #[command(flatten)]
+        inputs: Inputs,
+        #[arg(long)]
+        cancel: bool,
+    },
     Activity {
         #[command(flatten)]
         inputs: Inputs,
@@ -131,8 +137,14 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         )?;
     }
     match &kind {
-        Kind::Smp | Kind::Lifecycle { .. } | Kind::Shutdown { .. } => {
+        Kind::Smp | Kind::Lifecycle { .. } | Kind::Retirement { .. } | Kind::Shutdown { .. } => {
             compose::apply("smp-provider", &provider, &patches)?;
+            if let Kind::Retirement { cancel } = &kind {
+                compose::apply("retirement-provider", &provider, &patches)?;
+                if *cancel {
+                    compose::apply("retirement-cancel", &provider, &patches)?;
+                }
+            }
             if let Kind::Lifecycle { cancel } = &kind {
                 compose::apply("lifecycle-provider", &provider, &patches)?;
                 if *cancel {
@@ -413,6 +425,9 @@ pub fn run(command: Commands) -> Result<()> {
         Commands::Smp { inputs } => (inputs, Kind::Smp, None, false),
         Commands::Shutdown { inputs, quiet } => (inputs, Kind::Shutdown { quiet }, None, false),
         Commands::Lifecycle { inputs, cancel } => (inputs, Kind::Lifecycle { cancel }, None, false),
+        Commands::Retirement { inputs, cancel } => {
+            (inputs, Kind::Retirement { cancel }, None, false)
+        }
         Commands::Activity {
             inputs,
             unsupported,

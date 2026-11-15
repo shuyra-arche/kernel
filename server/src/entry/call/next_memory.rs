@@ -85,7 +85,7 @@ fn run(
     let output = execute(&actor, request)?;
     // A completed holding change reopens its Page gate. Wake source observers
     // only after the ledger, journal and COMMIT guards have been released.
-    crate::basis::cell::change::maintain();
+    crate::basis::nest::retirement::maintain();
     if !ident
         .team
         .nest

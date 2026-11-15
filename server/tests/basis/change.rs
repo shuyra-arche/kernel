@@ -6,6 +6,32 @@ use super::{
 use std::sync::{Arc, Barrier};
 
 #[test]
+fn completed_gate_metadata_prunes_without_allocating_or_delaying_page_return() {
+    let pools: Vec<_> = (0..41).map(|_| Pool::new(0)).collect();
+    let pages: Vec<_> = pools
+        .iter()
+        .map(|pool| Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap()))
+        .collect();
+    let gates: Vec<_> = pages
+        .iter()
+        .map(|page| super::changes::acquire(page).unwrap())
+        .collect();
+    drop(gates);
+    // Another concurrent fixture may already have admitted the coalesced bit;
+    // either way the real registry retains its pruning work under its lock.
+    super::changes::completed();
+    let mut turns = 0;
+    while super::changes::pending() {
+        super::allocation::fail_after(0, super::changes::prune);
+        turns += 1;
+        assert!(turns < 4096);
+    }
+    assert!(pages.iter().all(|page| page.allows_return()));
+    drop(pages);
+    assert!(pools.iter().all(|pool| pool.gives() == 1));
+}
+
+#[test]
 fn receipt_closes_admission_until_the_last_inflight_holder_finishes() {
     let pool = Pool::new(0);
     let page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());

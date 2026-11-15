@@ -92,6 +92,9 @@ pub(crate) fn ready() -> bool {
     if !tally::done() {
         return false;
     }
+    if !crate::basis::nest::retirement::settle() {
+        return false;
+    }
     let binding = FINALIZATION
         .get()
         .expect("required shutdown binding before operation");

@@ -256,10 +256,10 @@ scheduled Kernel Team Tasks. Each child keeps its Task construction/start,
 entry loop, wake source and budget together; boot explicitly orders startup.
 The observer's `start`, `run`, deadline sleep and resource notification remain
 in `work/observe`, with the same snapshot Page, read-only Share and update Sign.
-It uses the existing trusted breakpoint continuation path, not S-mode `ecall`.
+It uses the trusted supervisor function-call continuation path.
 No borrowed resource guard survives its wait.
 
-Lifecycle now also has an independent resident Task; retirement remains separately owned:
+Lifecycle and Page-completion discovery also have independent resident Tasks:
 
 - Unit's `lifecycle/reap::advance` services up to four pending terminal Tasks and
   four retained husks per turn, retains Busy retirement and arms deadline retry.
@@ -270,20 +270,37 @@ Lifecycle now also has an independent resident Task; retirement remains separate
   The Task closes its registration before Exit; scheduler-stack fallback then
   reaps that Task too. An unexpectedly dead service is unregistered by its owner.
   No task is excluded from `tally::done()` accounting.
-- Nest's `authority/external::maintain` combines Cell changes, retained binding
-  progression and interrupt-router rearming. The latter has controller-Hart
-  locality. There is no separately registered retirement notification/Task
-  lifetime here; moving this whole call to a migratable Task would violate the
-  locality boundary. Retained translation obligations stay with Nest, and
-  synchronous work remains synchronous.
+- `entry/work/retirement` advances Nest's retained Page-completion discovery.
+  Each turn prunes at most four Cell weak gates and visits at most four source
+  records. Nest partitions its existing discovery list into pending/visited
+  nodes; pure pass transitions coalesce later prune/wake requests while retaining
+  another pass for records already visited. New registrations cannot continually
+  prepend work ahead of an old pass. Span destruction requests pruning rather
+  than recursively scanning from a temporary Arc drop. Pruning does not wake
+  live listeners. Sign already limits each queue to 64 listeners and forwarding
+  to eight routes; no new broadcast or worker framework is introduced.
+- Retirement has its own pre-reserved Sign Site, stack and registered Task
+  identity. An exclusive, interrupt-excluded owner turn finishes notification
+  effects before returning; no reference or guard crosses wait/migration.
+  Runnable remainder yields; concurrent owner execution defers for 1 ms.
+  Ordinary scheduler/call/idle boundaries admit retained completion bits and
+  retain startup, cancellation, shutdown and 100 ms watchdog fallback. They run
+  after Unit/binding progression can release a Page or Span. The Task closes its
+  registration before Exit; Reaped detection handles an unexpected exit. No
+  resident Task is excluded from ordinary tally accounting.
+- Controller-Hart router rearming and retained external-binding progression stay
+  on their existing valid paths. Nested reservation/Memo scans do not yet have
+  an independently bounded Task contract. Internal CPU retirement remains part
+  of Unit's retained Task/Team continuation. Neither receives a second retirement
+  ledger or transfers completion authority to the worker.
 
-Observer and lifecycle are instantiated under `work` today. Retirement, memory
-and interrupt directories remain absent. Nest retirement still requires a bounded
-owner step and event admission before an independent Task is justified: binding
-maintenance currently scans organization records, and Page completion wakeup
-traverses the source index. Moving those loops alone would hide the existing
-bounds/notification gap behind a Task. Controller rearming remains on its existing
-valid Hart paths.
+Observer, lifecycle and Page-completion retirement are instantiated under `work`.
+Memory and interrupt directories remain absent: no other independently deferred
+responsibility currently justifies them. Once all Tasks are reaped, fixed
+scheduler-stack infrastructure drains any final discovery pass before hardware
+preparation and the Hart barrier. A last husk can request this pass after normal
+scheduler maintenance; shutdown never depends on the departed worker finishing
+its own cleanup.
 
 A future
 independent Task must first supply an owner-controlled bounded step, distinguish
@@ -291,9 +308,9 @@ runnable remainder from hardware-blocked obligations, register its own wake
 source before sleeping, and preserve scheduler-stack shutdown/failure progress.
 The observer is not a dispatcher for those responsibilities.
 
-The lifecycle wait uses a private selector authenticated against its registered
-Kernel Task identity, after the same instruction validation and saved-PC advance
-as ordinary calls. It is not a public ABI operation or S-mode ecall. The reserved
+Maintenance wait selects the independently registered lifecycle or retirement
+identity through the trusted Kernel supervisor call, with its saved Rust return
+continuation and scheduler-stack handoff. It is not a public ABI operation. The reserved
 Site retains early/coalesced wakes under COMMIT. Enrollment uses a reserved ticket
 with no timer/holder allocation and debug enforces its allocation-free section.
 All identity borrows and guards end before scheduler-stack handoff.

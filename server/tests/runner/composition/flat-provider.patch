@@ -27,8 +27,9 @@
 +pub(crate) mod probe;
 --- a/server/src/entry/boot/mod.rs
 +++ b/server/src/entry/boot/mod.rs
-@@ -68,6 +68,7 @@
+@@ -68,7 +68,8 @@
          crate::entry::work::lifecycle::start()?;
+         crate::entry::work::retirement::start()?;
      }
  
 +    crate::basis::flat::probe::start()?;

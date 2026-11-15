@@ -64,8 +64,13 @@ extern "C" fn schedule(frame: &mut TrapContext) -> ! {
         crate::basis::unit::lifecycle::set_exit_reason(0);
         crate::basis::unit::lifecycle::quit()
     } else if action == 2 {
-        let work = &crate::basis::unit::lifecycle::WORK;
-        assert!(work.identifies(id), "resident wait owner");
+        let work = if crate::basis::unit::lifecycle::WORK.identifies(id) {
+            &crate::basis::unit::lifecycle::WORK
+        } else {
+            let retirement = &crate::basis::nest::retirement::WORK;
+            assert!(retirement.identifies(id), "resident wait owner");
+            retirement
+        };
         match work.wait() {
             crate::basis::room::Handoff::Resume(()) => frame as *mut _ as usize,
             crate::basis::room::Handoff::Switch(pa) => pa,
@@ -88,7 +93,7 @@ pub(crate) fn sleep(at: u64) {
     unsafe { suspend(at, 0) }
 }
 
-/// Park the registered cleanup Task on its allocation-free retained wake Site.
+/// Park a registered maintenance Task on its allocation-free retained wake Site.
 /// The saved ordinary-call continuation resumes after this boundary.
 pub(crate) fn wait() {
     unsafe { suspend(0, 2) }

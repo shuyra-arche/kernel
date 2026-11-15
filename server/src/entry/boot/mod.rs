@@ -67,6 +67,7 @@ pub fn start() -> Result<(), BootError> {
         crate::basis::room::shutdown::watch(&entry);
         crate::entry::work::observe::start()?;
         crate::entry::work::lifecycle::start()?;
+        crate::entry::work::retirement::start()?;
     }
 
     crate::basis::unit::lifecycle::tally::rooted();

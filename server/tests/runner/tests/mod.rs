@@ -105,6 +105,31 @@ fn smp_requires_each_actual_writer_to_migrate() {
         }
     }
     for cancel in [false, true] {
+        let kind = verify::Kind::Retirement { cancel };
+        let valid = format!(
+            "{log}PASS retirement turns=8 task-records=4 fallback-records=3 cancel={} pending=0 retained-source=0\n",
+            usize::from(cancel)
+        );
+        assert_eq!(verify::check(log, &kind, 1).unwrap()["passed"], false);
+        assert_eq!(verify::check(&valid, &kind, 1).unwrap()["passed"], true);
+        for bad in [
+            valid.replace("task-records=4", "task-records=0"),
+            valid.replace("pending=0", "pending=1"),
+            valid.replace("retained-source=0", "retained-source=1"),
+        ] {
+            assert_eq!(verify::check(&bad, &kind, 1).unwrap()["passed"], false);
+        }
+        if cancel {
+            assert_eq!(
+                verify::check(
+                    &valid.replace("fallback-records=3", "fallback-records=0"),
+                    &kind,
+                    1
+                )
+                .unwrap()["passed"],
+                false
+            );
+        }
         let kind = verify::Kind::Lifecycle { cancel };
         assert_eq!(verify::check(log, &kind, 1).unwrap()["passed"], false);
         let valid = format!(

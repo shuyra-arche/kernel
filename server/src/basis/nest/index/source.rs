@@ -2,7 +2,7 @@
 //!
 //! 与关系索引分工不同：索引按 VA 找关系、只服务本地址空间；这份关联按**来源**
 //! 找关系、跨地址空间，专门给“把这些来源页撤下来”的枚举用；它只负责发现，
-//! 不是第二份权威。条目是**一条一次分配**的 Box 链：关系退场就把自己那一条摘掉释放，
+//! 不是第二份权威。条目是**一条一次分配**的 Box 链：关系退场请求有界清理自己的弱条目，
 //! 所以没有“全局 Vec 容量高水位”这种账。
 //! 自身锁内不取关系锁、地址空间锁，也不升级任何临时强引用（死项的 strong_count 仅为清死索引）。
 
@@ -30,13 +30,114 @@ struct Record {
 
 /// 全核唯一的一份关联：单链头，每条一个关系。
 struct SourceReservations {
-    head: LegacyLock<crate::basis::sync::order::SourceIndex, Option<Box<Record>>>,
+    records: LegacyLock<crate::basis::sync::order::SourceIndex, Records>,
+}
+
+/// One discovery list, partitioned by the current notification pass. Registering
+/// during a pass cannot continually prepend work ahead of its remaining nodes.
+/// Neither list owns publication or retirement authority.
+struct Records {
+    pending: Option<Box<Record>>,
+    visited: Option<Box<Record>>,
+    pass: Pass,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pass {
+    Idle,
+    Current {
+        notice: Notice,
+        next: Option<Notice>,
+    },
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Notice {
+    Prune,
+    Wake,
+}
+impl Pass {
+    const fn request(self, requested: Notice) -> Self {
+        match self {
+            Self::Idle => Self::Current {
+                notice: requested,
+                next: None,
+            },
+            Self::Current { notice, next } => Self::Current {
+                notice,
+                next: Some(match (next, requested) {
+                    (Some(Notice::Wake), _) | (_, Notice::Wake) => Notice::Wake,
+                    _ => Notice::Prune,
+                }),
+            },
+        }
+    }
+    const fn finish(self) -> Self {
+        match self {
+            Self::Current {
+                next: Some(notice), ..
+            } => Self::Current { notice, next: None },
+            _ => Self::Idle,
+        }
+    }
+}
+
+enum Step {
+    Idle,
+    Visited(Option<Weak<Span>>),
+}
+impl Records {
+    const fn new() -> Self {
+        Self {
+            pending: None,
+            visited: None,
+            pass: Pass::Idle,
+        }
+    }
+    fn step(&mut self) -> Step {
+        if self.pass == Pass::Idle {
+            return Step::Idle;
+        }
+        let candidate = if let Some(mut record) = self.pending.take() {
+            self.pending = record.next.take();
+            if record.live() {
+                let candidate = matches!(
+                    self.pass,
+                    Pass::Current {
+                        notice: Notice::Wake,
+                        ..
+                    }
+                )
+                .then(|| record.reservation.clone());
+                record.next = self.visited.take();
+                self.visited = Some(record);
+                candidate
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if self.pending.is_none() {
+            self.pending = self.visited.take();
+            self.pass = self.pass.finish();
+        }
+        Step::Visited(candidate)
+    }
+}
+impl Record {
+    fn live(&self) -> bool {
+        self.reservation.strong_count() != 0
+            && self
+                .binding
+                .as_ref()
+                .is_none_or(|binding| binding.strong_count() != 0)
+    }
 }
 
 fn registry() -> &'static SourceReservations {
     static REGISTRY: OnceLock<SourceReservations> = OnceLock::new();
     REGISTRY.get_or_init(|| SourceReservations {
-        head: LegacyLock::new(None),
+        records: LegacyLock::new(Records::new()),
     })
 }
 
@@ -49,12 +150,7 @@ fn rebuild(head: &mut Option<Box<Record>>, mut keep: impl FnMut(&Record)) {
     let mut cursor = head.take();
     while let Some(mut node) = cursor {
         cursor = node.next.take();
-        if node.reservation.strong_count() == 0
-            || node
-                .binding
-                .as_ref()
-                .is_some_and(|binding| binding.strong_count() == 0)
-        {
+        if !node.live() {
             continue;
         }
         keep(&node);
@@ -75,11 +171,12 @@ fn reverse(mut chain: Option<Box<Record>>) -> Option<Box<Record>> {
     out
 }
 
-/// 关系退场：它那一条从链上摘下并释放。在 `Span::drop` 里调用：
-/// 那时它的强计数已经归零，重建就会把这一条摘掉。
+/// Span destruction retains a pruning obligation instead of recursively
+/// scanning the whole registry from a last temporary strong-reference drop.
+/// Pruning does not wake unrelated waiters or infer any retirement completion.
 pub(crate) fn forget() {
-    let mut head = registry().head.lock();
-    rebuild(&mut head, |_| {});
+    let mut records = registry().records.lock();
+    records.pass = records.pass.request(Notice::Prune);
 }
 
 /// 登记一段来源窗口与一个关系的关联：同一关系在同一份来源上只留一条。
@@ -101,9 +198,9 @@ pub(crate) fn register(
     })
     .map_err(|_| NestError::OutOfMemory)?;
     let identity = Arc::as_ptr(reservation);
-    let mut head = registry().head.lock();
+    let mut records = registry().records.lock();
     let mut duplicate = false;
-    rebuild(&mut head, |known| {
+    let mut inspect = |known: &Record| {
         if known.source_id == source_id
             && known.reservation.as_ptr() == identity
             && match (&known.binding, binding) {
@@ -114,47 +211,58 @@ pub(crate) fn register(
         {
             duplicate = true;
         }
-    });
+    };
+    rebuild(&mut records.pending, &mut inspect);
+    rebuild(&mut records.visited, &mut inspect);
     if !duplicate {
         let mut record = record;
+        // Admission waiters register against the current open predicate. A new
+        // record need not delay an older completion pass; any later completion
+        // requests a further pass that includes it.
+        let head = if records.pass == Pass::Idle {
+            &mut records.pending
+        } else {
+            &mut records.visited
+        };
         record.next = head.take();
         *head = Some(record);
     }
     Ok(())
 }
 
-/// Allocation-free wake after Page admission reopens. Pointer order is used only
-/// for this bounded traversal, never as identity or authority. Removed mappings
-/// have no live waiter; newly added waiters recheck the already-open predicate.
-pub(crate) fn wake_all() {
-    forget();
-    let mut cursor = 0;
-    loop {
-        let candidate = {
-            let head = registry().head.lock();
-            let mut node = head.as_deref();
-            let mut next: Option<(usize, Weak<Span>)> = None;
-            while let Some(record) = node {
-                let key = record.reservation.as_ptr() as usize;
-                if key > cursor && next.as_ref().is_none_or(|(known, _)| key < *known) {
-                    next = Some((key, record.reservation.clone()));
-                }
-                node = record.next.as_deref();
-            }
-            next
+/// Coalesce a completion without losing events that arrive after some nodes
+/// have already been visited. The next pass rechecks those earlier nodes too.
+pub(crate) fn request() {
+    let mut records = registry().records.lock();
+    records.pass = records.pass.request(Notice::Wake);
+}
+
+pub(crate) fn pending() -> bool {
+    registry().records.lock().pass != Pass::Idle
+}
+
+/// Inspect at most four discovery records, including expired ones. No whole-list
+/// search, pointer ordering, allocation or cursor reconstruction occurs here.
+/// Caller excludes Task cancellation across this synchronous, infallible turn;
+/// every claimed candidate is signalled before that exclusion ends. Sign already
+/// limits a queue to 64 listeners and forwarding to eight destinations. Upgrades,
+/// Span destruction and Sign effects run outside the index lock; this is not a
+/// hard bound on lock/firmware latency.
+pub(crate) fn advance() -> bool {
+    for _ in 0..4 {
+        let candidate = match registry().records.lock().step() {
+            Step::Idle => break,
+            Step::Visited(candidate) => candidate,
         };
-        let Some((key, candidate)) = candidate else {
-            break;
-        };
-        cursor = key;
-        let route = candidate
-            .upgrade()
-            .and_then(|reservation| reservation.wake_key());
-        if let Some((space, reservation)) = route {
+        if let Some((space, reservation)) = candidate
+            .and_then(|candidate| candidate.upgrade())
+            .and_then(|reservation| reservation.wake_key())
+        {
             crate::basis::sign::signal(crate::basis::sign::WakeKey::Reservation {
                 space,
-                reservation: reservation,
+                reservation,
             });
         }
     }
+    pending()
 }

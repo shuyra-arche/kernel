@@ -72,6 +72,19 @@ pub(crate) fn ordinary_capacity() -> usize {
         .count()
 }
 
+/// Wake available ordinary schedulers for retained mechanism work. A reserved
+/// Hart can request progress without running cleanup itself; this is a hint,
+/// not authority to execute on a Hart whose isolation subsequently changes.
+pub(crate) fn nudge_ordinary() {
+    if let Some(all) = SCHEDULERS.get() {
+        for slot in *all {
+            if hart::online(slot.hart) && !slot.isolated.load(Ordering::Acquire) {
+                nudge(slot.hart);
+            }
+        }
+    }
+}
+
 pub(crate) fn detach_local(task: &Arc<Task>) -> bool {
     let Some(contract) = task.schedule.lock().contract() else {
         return false;
@@ -180,6 +193,7 @@ pub(crate) fn run() -> usize {
     crate::basis::sign::endpoint::delivery::advance();
     if !isolated(hart::hart_id()) {
         crate::basis::unit::lifecycle::bury();
+        crate::basis::nest::retirement::maintain();
     }
     let commit = crate::basis::commit();
     // The timer front half may have retained due tickets when try_commit was

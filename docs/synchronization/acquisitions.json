@@ -2,31 +2,45 @@
   "acquisition_sites": [
     {
       "enclosing_function": "reshape",
-      "line": 20,
+      "line": 29,
       "operation": "lock",
       "path": "server/src/basis/cell/change.rs",
-      "source": "let mut live = LIVE.lock();"
+      "source": "let mut registry = LIVE.lock();"
     },
     {
       "enclosing_function": "release_block",
-      "line": 78,
+      "line": 88,
       "operation": "lock",
       "path": "server/src/basis/cell/change.rs",
-      "source": "let mut live = LIVE.lock();"
+      "source": "let mut registry = LIVE.lock();"
     },
     {
       "enclosing_function": "acquire",
-      "line": 96,
+      "line": 107,
       "operation": "lock",
       "path": "server/src/basis/cell/change.rs",
-      "source": "let mut live = LIVE.lock();"
+      "source": "let mut registry = LIVE.lock();"
     },
     {
-      "enclosing_function": "maintain",
-      "line": 114,
+      "enclosing_function": "completed",
+      "line": 127,
       "operation": "lock",
       "path": "server/src/basis/cell/change.rs",
-      "source": "LIVE.lock().retain(|change| change.strong_count() != 0);"
+      "source": "let mut registry = LIVE.lock();"
+    },
+    {
+      "enclosing_function": "prune",
+      "line": 139,
+      "operation": "lock",
+      "path": "server/src/basis/cell/change.rs",
+      "source": "let mut registry = LIVE.lock();"
+    },
+    {
+      "enclosing_function": "pending",
+      "line": 160,
+      "operation": "lock",
+      "path": "server/src/basis/cell/change.rs",
+      "source": "LIVE.lock().remaining != 0"
     },
     {
       "enclosing_function": "compatible",
@@ -968,24 +982,38 @@
     },
     {
       "enclosing_function": "forget",
-      "line": 81,
+      "line": 178,
       "operation": "lock",
       "path": "server/src/basis/nest/index/source.rs",
-      "source": "let mut head = registry().head.lock();"
+      "source": "let mut records = registry().records.lock();"
     },
     {
       "enclosing_function": "register",
-      "line": 104,
+      "line": 201,
       "operation": "lock",
       "path": "server/src/basis/nest/index/source.rs",
-      "source": "let mut head = registry().head.lock();"
+      "source": "let mut records = registry().records.lock();"
     },
     {
-      "enclosing_function": "wake_all",
-      "line": 134,
+      "enclosing_function": "request",
+      "line": 236,
       "operation": "lock",
       "path": "server/src/basis/nest/index/source.rs",
-      "source": "let head = registry().head.lock();"
+      "source": "let mut records = registry().records.lock();"
+    },
+    {
+      "enclosing_function": "pending",
+      "line": 241,
+      "operation": "lock",
+      "path": "server/src/basis/nest/index/source.rs",
+      "source": "registry().records.lock().pass != Pass::Idle"
+    },
+    {
+      "enclosing_function": "advance",
+      "line": 253,
+      "operation": "lock",
+      "path": "server/src/basis/nest/index/source.rs",
+      "source": "let candidate = match registry().records.lock().step() {"
     },
     {
       "enclosing_function": "settle",
@@ -1066,644 +1094,644 @@
     },
     {
       "enclosing_function": "maintenance_failed",
-      "line": 109,
+      "line": 110,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "retire_maintenance",
-      "line": 127,
+      "line": 128,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "begin_delete",
-      "line": 145,
+      "line": 146,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "begin_release",
-      "line": 167,
+      "line": 168,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let _state = self.state.lock();"
     },
     {
       "enclosing_function": "ready_state",
-      "line": 241,
+      "line": 242,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "is_open",
-      "line": 272,
+      "line": 273,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "self.state.lock().is_open()"
     },
     {
       "enclosing_function": "is_adopted",
-      "line": 276,
+      "line": 277,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "self.state.lock().team.is_some()"
     },
     {
       "enclosing_function": "attach_team",
-      "line": 287,
+      "line": 288,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "reservation_status",
-      "line": 321,
+      "line": 322,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".map(|mapping| mapping.state.lock().phase)"
     },
     {
       "enclosing_function": "reservation_snapshot",
-      "line": 340,
+      "line": 341,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "reservation_snapshot",
-      "line": 341,
+      "line": 342,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let inner = span.state.lock();"
     },
     {
       "enclosing_function": "root",
-      "line": 412,
+      "line": 413,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "overlaps",
-      "line": 430,
+      "line": 431,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "has_pending_invalidation",
-      "line": 435,
+      "line": 436,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "!self.state.lock().retirement.invalidation().is_clean()"
     },
     {
       "enclosing_function": "contains_reservation",
-      "line": 439,
+      "line": 440,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "self.layout.lock().occupancy.has_id(id)"
     },
     {
       "enclosing_function": "withdraw_provenance",
-      "line": 468,
+      "line": 469,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "binding_source",
-      "line": 495,
+      "line": 496,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "binding_failed",
-      "line": 513,
+      "line": 514,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "provenance_failed",
-      "line": 534,
+      "line": 535,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "binding_pending",
-      "line": 548,
+      "line": 549,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "binding_pending",
-      "line": 556,
+      "line": 557,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let inner = mapping.state.lock();"
     },
     {
       "enclosing_function": "release_reservation",
-      "line": 589,
+      "line": 590,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "if mapping.state.lock().phase == ReservationPhase::Gone {"
     },
     {
       "enclosing_function": "release_reservation",
-      "line": 595,
+      "line": 596,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "if !self.is_external() && self.state.lock().retirement.pending_for(&mapping) {"
     },
     {
       "enclosing_function": "release_reservation",
-      "line": 601,
+      "line": 602,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let index = self.state.lock().memos.next_page(&mapping, cursor);"
     },
     {
       "enclosing_function": "release_reservation",
-      "line": 607,
+      "line": 608,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "release_reservation",
-      "line": 634,
+      "line": 635,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".lock()"
-    },
-    {
-      "enclosing_function": "release_reservation",
-      "line": 662,
-      "operation": "lock",
-      "path": "server/src/basis/nest/mod.rs",
-      "source": "let mut layout = self.layout.lock();"
     },
     {
       "enclosing_function": "release_reservation",
       "line": 663,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
+      "source": "let mut layout = self.layout.lock();"
+    },
+    {
+      "enclosing_function": "release_reservation",
+      "line": 664,
+      "operation": "lock",
+      "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "release_reservation",
-      "line": 671,
+      "line": 672,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut inner = mapping.state.lock();"
     },
     {
       "enclosing_function": "withdraw_reservation",
-      "line": 713,
+      "line": 714,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let Some(index) = self.state.lock().memos.next_page(&mapping, cursor) else {"
     },
     {
       "enclosing_function": "withdraw_source_with",
-      "line": 810,
+      "line": 811,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let Some(index) = self.state.lock().memos.next_page(mapping, cursor) else {"
     },
     {
       "enclosing_function": "withdraw_source_with",
-      "line": 834,
+      "line": 835,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "withdraw_source_with",
-      "line": 858,
+      "line": 859,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "withdraw_source_with",
-      "line": 881,
+      "line": 882,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "advance_window",
-      "line": 957,
+      "line": 958,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "Ok(self.layout.lock().advance_window(region, base)?)"
     },
     {
       "enclosing_function": "window_contains",
-      "line": 966,
+      "line": 967,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "reserve",
-      "line": 975,
+      "line": 976,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let (start, id) = self.layout.lock().reserve(placement)?;"
     },
     {
       "enclosing_function": "settle_failed_install",
-      "line": 1066,
+      "line": 1067,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "commit",
-      "line": 1094,
+      "line": 1095,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let layout = self.layout.lock();"
     },
     {
       "enclosing_function": "commit",
-      "line": 1109,
+      "line": 1110,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let inner = mapping.state.lock();"
     },
     {
       "enclosing_function": "commit",
-      "line": 1157,
+      "line": 1158,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "for run in mapping.state.lock().runs(start, &published) {"
     },
     {
       "enclosing_function": "commit",
-      "line": 1188,
+      "line": 1189,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "for run in mapping.state.lock().runs(start, &published) {"
     },
     {
       "enclosing_function": "publish_span",
-      "line": 1253,
+      "line": 1254,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let inner = mapping.state.lock();"
     },
     {
       "enclosing_function": "memo_page",
-      "line": 1343,
+      "line": 1344,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "associate_kind",
-      "line": 1404,
+      "line": 1405,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "associate_kind",
-      "line": 1429,
+      "line": 1430,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "associate_kind",
-      "line": 1444,
+      "line": 1445,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "logical_source",
-      "line": 1462,
+      "line": 1463,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "inspect_logical",
-      "line": 1489,
+      "line": 1490,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "remove_logical",
-      "line": 1522,
+      "line": 1523,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "remove_logical",
-      "line": 1538,
+      "line": 1539,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "memo_published_by",
-      "line": 1551,
+      "line": 1552,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "finish_memo",
-      "line": 1559,
+      "line": 1560,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "publish_memo_report",
-      "line": 1603,
+      "line": 1604,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "publish_memo_report",
-      "line": 1727,
+      "line": 1728,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "publish_memo_report",
-      "line": 1753,
+      "line": 1754,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "retract_position_report",
-      "line": 1878,
+      "line": 1879,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "retract_position_report",
-      "line": 1923,
+      "line": 1924,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "protect_memo_report",
-      "line": 1972,
+      "line": 1973,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "protect_memo_report",
-      "line": 2006,
+      "line": 2007,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "protect_memo_report",
-      "line": 2017,
+      "line": 2018,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut inner = mapping.state.lock();"
     },
     {
       "enclosing_function": "protect_memo_report",
-      "line": 2081,
+      "line": 2082,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
-    },
-    {
-      "enclosing_function": "inspect_memo",
-      "line": 2208,
-      "operation": "lock",
-      "path": "server/src/basis/nest/mod.rs",
-      "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "inspect_memo",
       "line": 2209,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
+      "source": "let state = self.state.lock();"
+    },
+    {
+      "enclosing_function": "inspect_memo",
+      "line": 2210,
+      "operation": "lock",
+      "path": "server/src/basis/nest/mod.rs",
       "source": "if mapping.state.lock().phase == address::span::ReservationPhase::Gone {"
     },
     {
       "enclosing_function": "unpublish_page_with",
-      "line": 2275,
+      "line": 2276,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "active_spans",
-      "line": 2315,
+      "line": 2316,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let inner = mapping.state.lock();"
     },
     {
       "enclosing_function": "owed_spans",
-      "line": 2391,
+      "line": 2392,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let inner = mapping.state.lock();"
     },
     {
       "enclosing_function": "owed_spans",
-      "line": 2402,
+      "line": 2403,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let layout = self.layout.lock();"
     },
     {
       "enclosing_function": "withdraw",
-      "line": 2461,
+      "line": 2462,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut layout = self.layout.lock();"
     },
     {
       "enclosing_function": "withdraw",
-      "line": 2467,
+      "line": 2468,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "withdraw",
-      "line": 2475,
+      "line": 2476,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut inner = mapping.state.lock();"
     },
     {
       "enclosing_function": "withdraw",
-      "line": 2535,
+      "line": 2536,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut layout = self.layout.lock();"
     },
     {
       "enclosing_function": "withdraw",
-      "line": 2536,
+      "line": 2537,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "split_reservation",
-      "line": 2575,
+      "line": 2576,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let split = self.layout.lock().occupancy.split("
     },
     {
       "enclosing_function": "give_back_span",
-      "line": 2627,
+      "line": 2628,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "self.layout.lock().occupancy.release("
     },
     {
       "enclosing_function": "retry_invalidation",
-      "line": 2644,
+      "line": 2645,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "if self.state.lock().retirement.tickets.has_settled() {"
     },
     {
       "enclosing_function": "retry_invalidation",
-      "line": 2645,
+      "line": 2646,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut layout = self.layout.lock();"
     },
     {
       "enclosing_function": "retry_invalidation",
-      "line": 2646,
+      "line": 2647,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
-    },
-    {
-      "enclosing_function": "retry_invalidation",
-      "line": 2668,
-      "operation": "lock",
-      "path": "server/src/basis/nest/mod.rs",
-      "source": "if self.pending_cleanup.lock().is_some()"
     },
     {
       "enclosing_function": "retry_invalidation",
       "line": 2669,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
+      "source": "if self.pending_cleanup.lock().is_some()"
+    },
+    {
+      "enclosing_function": "retry_invalidation",
+      "line": 2670,
+      "operation": "lock",
+      "path": "server/src/basis/nest/mod.rs",
       "source": "|| self.state.lock().retirement.tickets.has_settled()"
     },
     {
       "enclosing_function": "finish_invalidation_with",
-      "line": 2681,
+      "line": 2682,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "start_invalidation",
-      "line": 2717,
+      "line": 2718,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "invalidate",
-      "line": 2738,
+      "line": 2739,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut state = self.state.lock();"
     },
     {
       "enclosing_function": "close",
-      "line": 2770,
+      "line": 2771,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "retire",
-      "line": 2804,
+      "line": 2805,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "if self.pending_cleanup.lock().is_some() {"
     },
     {
       "enclosing_function": "enqueue_cleanup",
-      "line": 2831,
+      "line": 2832,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut pending = self.pending_cleanup.lock();"
     },
     {
       "enclosing_function": "take_cleanup",
-      "line": 2856,
+      "line": 2857,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let mut pending = self.pending_cleanup.lock();"
     },
     {
       "enclosing_function": "check_reservation",
-      "line": 2896,
+      "line": 2897,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "if !self.layout.lock().occupancy.has_id(reservation.id()) {"
     },
     {
       "enclosing_function": "is_closed",
-      "line": 2903,
+      "line": 2904,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "self.state.lock().phase.is_closed()"
     },
     {
       "enclosing_function": "probe_fault",
-      "line": 2933,
+      "line": 2934,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "FaultOutcome::probe(&self.state.lock(), self.geometry(), address, kind)"
     },
     {
       "enclosing_function": "materialize_page",
-      "line": 2966,
+      "line": 2967,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "let state = self.state.lock();"
     },
     {
       "enclosing_function": "audit",
-      "line": 2981,
+      "line": 2982,
       "operation": "lock",
       "path": "server/src/basis/nest/mod.rs",
       "source": "self.state.lock().audit(self, self.geometry());"
@@ -3278,14 +3306,14 @@
     },
     {
       "enclosing_function": "detach_local",
-      "line": 76,
+      "line": 89,
       "operation": "lock",
       "path": "server/src/basis/room/scheduler/mod.rs",
       "source": "let Some(contract) = task.schedule.lock().contract() else {"
     },
     {
       "enclosing_function": "insert",
-      "line": 88,
+      "line": 101,
       "operation": "lock",
       "path": "server/src/basis/room/scheduler/mod.rs",
       "source": ".wrapping_add(task.schedule.lock().placement());"
@@ -3495,7 +3523,7 @@
     },
     {
       "enclosing_function": "observe",
-      "line": 147,
+      "line": 150,
       "operation": "lock",
       "path": "server/src/basis/room/shutdown/mod.rs",
       "source": "let mut progress = PROGRESS.lock();"
@@ -5611,8 +5639,8 @@
       ],
       "typed_declarations": [
         {
-          "declaration": "static LIVE: LegacyLock<crate::basis::sync::order::LiveChanges, Vec<Weak<Change>>> =",
-          "line": 9,
+          "declaration": "static LIVE: LegacyLock<crate::basis::sync::order::LiveChanges, Changes> =",
+          "line": 14,
           "path": "server/src/basis/cell/change.rs"
         }
       ]
@@ -5931,7 +5959,7 @@
       ],
       "typed_declarations": [
         {
-          "declaration": "head: LegacyLock<crate::basis::sync::order::SourceIndex, Option<Box<Record>>>,",
+          "declaration": "records: LegacyLock<crate::basis::sync::order::SourceIndex, Records>,",
           "line": 33,
           "path": "server/src/basis/nest/index/source.rs"
         }
@@ -5962,7 +5990,7 @@
       "typed_declarations": [
         {
           "declaration": "layout: LegacyLock<crate::basis::sync::order::Address, Layout>,",
-          "line": 97,
+          "line": 98,
           "path": "server/src/basis/nest/mod.rs"
         }
       ]
@@ -5976,7 +6004,7 @@
       "typed_declarations": [
         {
           "declaration": "pending_cleanup: LegacyLock<crate::basis::sync::order::Cleanup, Option<Box<CleanupNode>>>,",
-          "line": 98,
+          "line": 99,
           "path": "server/src/basis/nest/mod.rs"
         }
       ]
@@ -6000,7 +6028,7 @@
       "typed_declarations": [
         {
           "declaration": "state: ManuallyDrop<LegacyLock<crate::basis::sync::order::Nest, NestState>>,",
-          "line": 99,
+          "line": 100,
           "path": "server/src/basis/nest/mod.rs"
         }
       ]

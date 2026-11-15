@@ -7,7 +7,7 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | Class | Current typed storage/navigation | Minimal declared predecessors | Minimal declared successors |
 | --- | --- | --- | --- |
 | `ProbeRegistry` | injected guest probe only |  |  |
-| `LiveChanges` | [basis/cell/change.rs:9](../../server/src/basis/cell/change.rs#L9) | `Flat` | `ChangeBlocks` |
+| `LiveChanges` | [basis/cell/change.rs:14](../../server/src/basis/cell/change.rs#L14) | `Flat` | `ChangeBlocks` |
 | `PageMembership` | [basis/cell/page/mod.rs:61](../../server/src/basis/cell/page/mod.rs#L61) | `ChangeBlocks`, `Controllers` | `BlockPool`, `BlockPump`, `RetentionStatistics` |
 | `ChangeBlocks` | [basis/cell/page/reclaim/change.rs:29](../../server/src/basis/cell/page/reclaim/change.rs#L29) | `LiveChanges` | `PageMembership` |
 | `RetentionStatistics` | [basis/cell/page/reclaim/statistics.rs:11](../../server/src/basis/cell/page/reclaim/statistics.rs#L11) | `PageMembership` |  |
@@ -26,9 +26,9 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `FaultProgress` | [basis/nest/fault/queue.rs:13](../../server/src/basis/nest/fault/queue.rs#L13) | `FaultPolicy` |  |
 | `SourceIndex` | [basis/nest/index/source.rs:33](../../server/src/basis/nest/index/source.rs#L33) | `Flat` | `BlockPool`, `BlockPump` |
 | `ActivityHistory` | [basis/nest/memo/activity/mod.rs:35](../../server/src/basis/nest/memo/activity/mod.rs#L35) | `Nest` |  |
-| `Address` | [basis/nest/mod.rs:97](../../server/src/basis/nest/mod.rs#L97) | `Commit` | `Nest` |
-| `Cleanup` | [basis/nest/mod.rs:98](../../server/src/basis/nest/mod.rs#L98) |  | `Nest` |
-| `Nest` | [basis/nest/mod.rs:99](../../server/src/basis/nest/mod.rs#L99) | `Organizations`, `Address`, `Cleanup`, `BootNests` | `ActivityHistory`, `Controllers`, `NestAuthority`, `Reservation`, `SourcePhase`, `TaskJournal` |
+| `Address` | [basis/nest/mod.rs:98](../../server/src/basis/nest/mod.rs#L98) | `Commit` | `Nest` |
+| `Cleanup` | [basis/nest/mod.rs:99](../../server/src/basis/nest/mod.rs#L99) |  | `Nest` |
+| `Nest` | [basis/nest/mod.rs:100](../../server/src/basis/nest/mod.rs#L100) | `Organizations`, `Address`, `Cleanup`, `BootNests` | `ActivityHistory`, `Controllers`, `NestAuthority`, `Reservation`, `SourcePhase`, `TaskJournal` |
 | `PendState` | [basis/pend/authority/mod.rs:33](../../server/src/basis/pend/authority/mod.rs#L33) | `LedgerEntries`, `SourcePhase`, `ProvenanceGrant` |  |
 | `PendParent` | [basis/pend/authority/mod.rs:34](../../server/src/basis/pend/authority/mod.rs#L34) | `Commit` |  |
 | `LedgerAdmission` | [basis/pend/ledger/admission.rs:29](../../server/src/basis/pend/ledger/admission.rs#L29) | `LedgerCharge` | `BlockPool`, `BlockPump` |

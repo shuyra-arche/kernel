@@ -6,8 +6,17 @@ use super::page::{Change, Page};
 use crate::basis::sync::LegacyLock;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-static LIVE: LegacyLock<crate::basis::sync::order::LiveChanges, Vec<Weak<Change>>> =
-    LegacyLock::new(Vec::new());
+struct Changes {
+    entries: Vec<Weak<Change>>,
+    next: usize,
+    remaining: usize,
+}
+static LIVE: LegacyLock<crate::basis::sync::order::LiveChanges, Changes> =
+    LegacyLock::new(Changes {
+        entries: Vec::new(),
+        next: 0,
+        remaining: 0,
+    });
 
 /// All old and new physical gates commit with one exclusive receipt conversion.
 /// Caller holds COMMIT, the maintenance record and the Flat holdings lock.
@@ -17,7 +26,8 @@ pub(crate) fn reshape(
     level: kernel_api::model::cell::CellLevel,
 ) -> Result<Vec<Arc<Page>>, super::page::PageError> {
     use super::page::{Block, PageError};
-    let mut live = LIVE.lock();
+    let mut registry = LIVE.lock();
+    let live = &mut registry.entries;
     for page in pages.iter() {
         let block = blocks
             .iter()
@@ -75,7 +85,8 @@ pub(crate) fn release_block(
     mut block: super::page::Block,
     page: &mut Arc<Page>,
 ) -> Result<(), super::page::Block> {
-    let mut live = LIVE.lock();
+    let mut registry = LIVE.lock();
+    let live = &mut registry.entries;
     let at = live
         .iter()
         .position(|known| known.as_ptr() == Arc::as_ptr(block.change()));
@@ -93,7 +104,8 @@ pub(crate) fn release_block(
     }
 }
 pub(crate) fn acquire(page: &Arc<Page>) -> Result<Arc<Change>, RetainError> {
-    let mut live = LIVE.lock();
+    let mut registry = LIVE.lock();
+    let live = &mut registry.entries;
     live.retain(|change| change.strong_count() != 0);
     if let Some(change) = live
         .iter()
@@ -108,10 +120,42 @@ pub(crate) fn acquire(page: &Arc<Page>) -> Result<Arc<Change>, RetainError> {
     Ok(change)
 }
 
-/// Completion notification runs outside Task/Flat/Reservation locks, including death cleanup.
-pub(crate) fn maintain() {
+/// Collect the level-triggered completion after caller resource guards end.
+/// The weak registry owns no Page authority; pruning has its own bounded cursor.
+pub(crate) fn completed() -> bool {
     if super::page::reclaim::change::take_completion() {
-        LIVE.lock().retain(|change| change.strong_count() != 0);
-        crate::basis::nest::index::source::wake_all();
+        let mut registry = LIVE.lock();
+        registry.remaining = registry.entries.len();
+        true
+    } else {
+        false
     }
+}
+
+/// Inspect at most four weak gates. Concurrent acquire/release may shrink or
+/// reorder discovery entries, so the cursor is normalized on every step. An
+/// acquire already prunes every expired entry before admitting a new gate.
+pub(crate) fn prune() -> bool {
+    let mut registry = LIVE.lock();
+    for _ in 0..4 {
+        if registry.entries.is_empty() {
+            registry.remaining = 0;
+        }
+        if registry.remaining == 0 {
+            break;
+        }
+        let at = registry.next % registry.entries.len();
+        if registry.entries[at].strong_count() == 0 {
+            registry.entries.swap_remove(at);
+            registry.next = at;
+        } else {
+            registry.next = at + 1;
+        }
+        registry.remaining -= 1;
+    }
+    registry.remaining != 0
+}
+
+pub(crate) fn pending() -> bool {
+    LIVE.lock().remaining != 0
 }

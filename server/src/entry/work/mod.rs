@@ -5,6 +5,7 @@
 pub(crate) mod observe;
 
 pub(crate) mod lifecycle;
+pub(crate) mod retirement;
 fn wait() {
     crate::metal::switcher::internal::wait();
 }
