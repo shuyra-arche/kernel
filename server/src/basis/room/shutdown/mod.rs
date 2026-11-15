@@ -99,6 +99,11 @@ pub(crate) fn ready() -> bool {
         Claim::Prepare => {
             let result = (binding.prepare)();
             let ready = PREPARATION.complete(result);
+            if result == Err(Unsettled::Busy) {
+                // Even an image without an initial Task must retain a retry:
+                // ROOT_ID/active() may be empty while queue shutdown is pending.
+                crate::basis::room::deadline::retry();
+            }
             if let Err(reason) = result {
                 let bit = if reason == Unsettled::Busy { 1 } else { 2 };
                 if REPORTED.fetch_or(bit, Ordering::Relaxed) & bit == 0
