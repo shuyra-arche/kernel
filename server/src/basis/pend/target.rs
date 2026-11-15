@@ -2,7 +2,7 @@
 //! limits and revocation live only in the Pend ledger.
 use super::Pend;
 use crate::basis::{
-    flat::sharing::Sharing,
+    flat::source::Export,
     sign::{
         WakeKey,
         endpoint::{self, Endpoint},
@@ -32,7 +32,7 @@ pub(crate) enum Target {
         owner: TaskId,
     },
     View(View),
-    Flat(Arc<Sharing>),
+    Flat(Arc<Export>),
     Sign(Arc<Endpoint>),
     Nest {
         owner: TaskId,
@@ -83,7 +83,7 @@ impl Target {
     pub(crate) fn seal(&self) -> Result<(), PendFail> {
         match self {
             Self::None { .. } | Self::Nest { .. } => {}
-            Self::Flat(meta) => crate::basis::flat::sharing::seal(meta),
+            Self::Flat(meta) => crate::basis::flat::source::seal(meta),
             Self::View(view) => view.seal(),
             Self::Sign(sign) => endpoint::seal(sign),
         }
@@ -104,14 +104,14 @@ impl Target {
             _ => None,
         }
     }
-    pub(crate) fn share_view(&self) -> Option<Arc<Sharing>> {
+    pub(crate) fn share_view(&self) -> Option<Arc<Export>> {
         match self {
             Self::View(view) => view.share_view(),
             _ => None,
         }
     }
     /// One borrowing owner coordinates Flat management and Share access.
-    pub(crate) fn memory(&self) -> Option<Arc<Sharing>> {
+    pub(crate) fn memory(&self) -> Option<Arc<Export>> {
         match self {
             Self::Flat(meta) => Some(meta.clone()),
             _ => self.share_view(),

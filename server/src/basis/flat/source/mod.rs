@@ -38,7 +38,7 @@ pub(crate) use close::{close, poll_close};
 /// 不为持有内存另建 kernel VA，也没有 keeper / canonical 来源视图。
 /// 授权记录（token → 权限位）与实际 `Span` 分开保存；
 /// 该 token 下的关系自带 token，所以撤销边不丢。
-pub struct Sharing {
+pub struct Export {
     source: FlatRange,
     /// 这份来源的授权记录：从已有来源创建时就是那一份（根 Pend 接手），
     /// 否则为 `None`。撤销时由它收回名下关系。
@@ -52,10 +52,10 @@ pub struct Sharing {
     life: Arc<Anchor>,
 }
 
-unsafe impl Send for Sharing {}
-unsafe impl Sync for Sharing {}
+unsafe impl Send for Export {}
+unsafe impl Sync for Export {}
 
-impl Sharing {
+impl Export {
     fn new(source: FlatRange, size: usize, owner: TaskId) -> Result<Arc<Self>, PendFail> {
         if source.page_count().checked_bytes() != Some(size) {
             return Err(PendFail::Denied);
@@ -75,7 +75,7 @@ impl Sharing {
             live: AtomicBool::new(true),
             operating: AtomicBool::new(false),
             owner,
-            id: crate::basis::view::next_id()?,
+            id: crate::basis::name::view().ok_or(PendFail::OutOfMemory)?,
             life: Anchor::try_new().map_err(|_| PendFail::OutOfMemory)?,
         })
         .map_err(|_| PendFail::OutOfMemory)
@@ -224,10 +224,10 @@ fn pend_source_error(error: FlatError) -> PendFail {
     pend_map_error(NestError::from(error))
 }
 
-pub(crate) struct SharingOperation(Arc<Sharing>);
+pub(crate) struct Operation(Arc<Export>);
 
-impl SharingOperation {
-    pub(crate) fn acquire(meta: &Arc<Sharing>) -> Option<Self> {
+impl Operation {
+    pub(crate) fn acquire(meta: &Arc<Export>) -> Option<Self> {
         meta.operating
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .ok()?;
@@ -235,13 +235,13 @@ impl SharingOperation {
     }
 }
 
-impl Drop for SharingOperation {
+impl Drop for Operation {
     fn drop(&mut self) {
         self.0.operating.store(false, Ordering::Release);
     }
 }
 
-impl Drop for Sharing {
+impl Drop for Export {
     fn drop(&mut self) {
         seal(self);
         let maps = core::mem::take(&mut *self.maps.lock());
@@ -259,7 +259,7 @@ impl Drop for Sharing {
 /// 设备区域：借用的物理区间代替存储保留。
 ///
 /// 既不清零、不按 RAM 回收，也不占内核 VA；实际 CPU 访问另建普通 `Span`。
-pub(crate) fn region(base: usize, reg: usize, owner: TaskId) -> Result<Arc<Sharing>, PendFail> {
+pub(crate) fn region(base: usize, reg: usize, owner: TaskId) -> Result<Arc<Export>, PendFail> {
     let end = base
         .checked_add(reg)
         .filter(|_| reg != 0)
@@ -274,10 +274,10 @@ pub(crate) fn region(base: usize, reg: usize, owner: TaskId) -> Result<Arc<Shari
     let source = Flat::from_region(region)
         .map_err(pend_source_error)?
         .whole();
-    Sharing::new(source, size, owner)
+    Export::new(source, size, owner)
 }
 
-pub(crate) fn seal(meta: &Sharing) {
+pub(crate) fn seal(meta: &Export) {
     meta.live.store(false, Ordering::Release);
     sign::wipe(WakeKey::seal(
         kernel_api::model::view::ViewKind::Share,

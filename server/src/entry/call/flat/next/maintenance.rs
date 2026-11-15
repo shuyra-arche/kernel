@@ -47,8 +47,7 @@ pub(in crate::entry::call) fn effect(
                     .range(PageOffset::new(offset), count)
                     .map_err(|_| Failure::NotAligned)?;
                 let source = meta.authorization().ok_or(Failure::Denied)?;
-                let operation =
-                    flat::sharing::SharingOperation::acquire(&meta).ok_or(Failure::Busy)?;
+                let operation = flat::source::Operation::acquire(&meta).ok_or(Failure::Busy)?;
                 let (block, progress) = if let Some(reference) = recover {
                     let block = source.block_ref(reference).ok_or(Failure::Stale)?;
                     if block.window() != (PageOffset::new(offset), count) {
@@ -147,8 +146,7 @@ pub(in crate::entry::call) fn effect(
                 let _commit = basis::commit();
                 let selected = resolve(actor, maintenance, false)?;
                 let meta = selected.0.target().memory().ok_or(Failure::Denied)?;
-                let operation =
-                    flat::sharing::SharingOperation::acquire(&meta).ok_or(Failure::Busy)?;
+                let operation = flat::source::Operation::acquire(&meta).ok_or(Failure::Busy)?;
                 selected.2.release().map_err(pend_error)?;
                 receipt.start(Value::Maintenance {
                     block: maintenance.block,

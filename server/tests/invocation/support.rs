@@ -1,4 +1,4 @@
-use kernel_api::{abi::memory::journal::Journal, address::VirtAddr, model::identity::TaskId};
+use kernel_api::{address::VirtAddr, model::identity::TaskId};
 use std::{
     cell::Cell,
     sync::{
@@ -33,10 +33,10 @@ impl<T> Lock<T> {
 pub(crate) struct Task {
     pub ident: Arc<TaskIdent>,
     pub pend: Lock<()>,
-    pub memory_results: Lock<Option<Box<Journal>>>,
+    pub requests: crate::request::Requests,
     pub effects: AtomicUsize,
     pub mode: AtomicUsize,
-    pub completion: Lock<Option<crate::memory_result::Completion>>,
+    pub completion: Lock<Option<crate::request::Completion>>,
 }
 impl Task {
     pub fn new() -> Arc<Self> {
@@ -52,7 +52,7 @@ impl Task {
                 },
             }),
             pend: Lock(Mutex::new(())),
-            memory_results: Lock(Mutex::new(None)),
+            requests: crate::request::Requests::new(),
             effects: AtomicUsize::new(0),
             mode: AtomicUsize::new(0),
             completion: Lock(Mutex::new(None)),

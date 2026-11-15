@@ -16,7 +16,7 @@ use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
 use crate::basis::flat::FlatRange;
-use crate::basis::flat::sharing::Sharing;
+use crate::basis::flat::source::Export;
 use crate::basis::nest::Access;
 use crate::basis::nest::authority::RangeBinding;
 use crate::basis::pend::Pend;
@@ -56,7 +56,7 @@ enum Phase {
     Private(FlatRange),
     /// 已由根 Pend 接手：撤销依赖那枚 Pend，后续关系交给 Share 管。
     Root {
-        meta: Weak<Sharing>,
+        meta: Weak<Export>,
         token: PendId,
         authority: Arc<Pend>,
     },
@@ -394,7 +394,7 @@ impl SourceAuthorization {
 
     /// 已接手的根 Pend、它的 token 与**根 Pend 自己的**那枚 `Pend`。
     /// 还没接手就是 `None`。三段来自同一份相位，调用方不再各自去表里另找一遍。
-    pub(crate) fn root(&self) -> Option<(Arc<Sharing>, PendId, Arc<Pend>)> {
+    pub(crate) fn root(&self) -> Option<(Arc<Export>, PendId, Arc<Pend>)> {
         match &*self.phase.lock() {
             Phase::Root {
                 meta,
@@ -444,7 +444,7 @@ impl Withdrawal<'_> {
 
     pub(crate) fn adopt(
         &self,
-        meta: &Arc<Sharing>,
+        meta: &Arc<Export>,
         token: PendId,
         authority: Arc<Pend>,
     ) -> Result<(), PendFail> {

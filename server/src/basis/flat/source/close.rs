@@ -1,8 +1,8 @@
-use super::{Sharing, seal};
+use super::{Export, seal};
 use alloc::sync::Arc;
 use kernel_api::abi::call::pend::PendFail;
 
-pub(crate) fn pending_close(meta: &Sharing) -> bool {
+pub(crate) fn pending_close(meta: &Export) -> bool {
     meta.source().flat().phase() == kernel_api::model::flat::FlatPhase::Closing
         || meta.has_maps()
         || meta
@@ -11,7 +11,7 @@ pub(crate) fn pending_close(meta: &Sharing) -> bool {
 }
 
 /// Hardware withdrawal runs outside COMMIT and source locks.
-pub(crate) fn close(root: &Arc<Sharing>) -> Result<(), PendFail> {
+pub(crate) fn close(root: &Arc<Export>) -> Result<(), PendFail> {
     let Some(source) = root.authorization() else {
         return root.close_maps(None);
     };
@@ -45,7 +45,7 @@ pub(crate) fn close(root: &Arc<Sharing>) -> Result<(), PendFail> {
 
 /// Native CPU source retirement, one binding and one nonblocking fence poll.
 /// Storage and the registry slot stay retained until every real mapping settles.
-pub(crate) fn poll_close(root: &Arc<Sharing>) -> Result<(), PendFail> {
+pub(crate) fn poll_close(root: &Arc<Export>) -> Result<(), PendFail> {
     if root.has_maps() {
         return Err(PendFail::Busy);
     }

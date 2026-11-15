@@ -68,3 +68,17 @@ impl From<super::address::AddressError> for NestError {
         }
     }
 }
+
+// Boot and Task preparation allocate private Pages directly, before a Flat
+// exists. Preserve their former error contract without routing through Flat.
+impl From<crate::basis::cell::page::PageError> for NestError {
+    fn from(error: crate::basis::cell::page::PageError) -> Self {
+        use crate::basis::cell::page::PageError;
+        match error {
+            PageError::InvalidOwner => Self::NoRegion,
+            PageError::InvalidRange => Self::NotAligned,
+            PageError::IdentityExhausted | PageError::OutOfMemory => Self::OutOfMemory,
+            PageError::Busy => Self::Busy,
+        }
+    }
+}

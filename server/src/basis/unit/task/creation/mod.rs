@@ -131,7 +131,7 @@ impl TaskBuilder {
         for page in 0..stack_size / PAGE_SIZE {
             indexed.push((
                 PageIndex::new(page),
-                crate::basis::flat::allocate_cell(self.team.cells.clone())?,
+                crate::basis::cell::allocate(self.team.cells.clone())?,
             ));
         }
         let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;
@@ -146,7 +146,7 @@ impl TaskBuilder {
         let rw = Access::READ | Access::WRITE;
         memory.stack = Some(nest.attach(body, source, rw, rw)?);
 
-        let frame = crate::basis::flat::allocate_cell(Owner::Kernel)?;
+        let frame = crate::basis::cell::allocate(Owner::Kernel)?;
         let frame_pa = PhysAddr::from_raw(frame.physical_address());
         let mut indexed = Vec::new();
         indexed

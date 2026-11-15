@@ -200,6 +200,7 @@ impl FlatRange {
     /// owned value, complete geometry and the still-current version.
     pub(crate) fn prepare_occupy(&self) -> Result<Page, super::FlatError> {
         crate::basis::cell::allocate_level(self.flat().allocation_owner.clone(), self.level())
+            .map_err(super::FlatError::from)
     }
     pub(crate) fn occupy(
         &self,

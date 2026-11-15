@@ -51,14 +51,14 @@ pub(super) fn delete(
         if range.flat().phase() == FlatPhase::Open {
             expected.next().ok_or(Failure::VersionExhausted)?;
         }
-        let operation = flat::sharing::SharingOperation::acquire(&meta).ok_or(Failure::Busy)?;
+        let operation = flat::source::Operation::acquire(&meta).ok_or(Failure::Busy)?;
         let source = meta.authorization().ok_or(Failure::Denied)?;
         source.revoke().map_err(pend_error)?;
         let version = range
             .flat()
             .begin_close(expected)
             .map_err(residency_error)?;
-        flat::sharing::seal(&meta);
+        flat::source::seal(&meta);
         receipt.start(Value::FlatLifecycle {
             flat: id,
             version,
@@ -66,7 +66,7 @@ pub(super) fn delete(
         });
         (meta.clone(), version, operation)
     };
-    flat::sharing::close(&meta).map_err(pend_error)?;
+    flat::source::close(&meta).map_err(pend_error)?;
     let _commit = basis::commit();
     let value = Value::FlatLifecycle {
         flat: id,

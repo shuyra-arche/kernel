@@ -46,7 +46,7 @@ pub(super) fn run(
     source
         .check_move(PageOffset::new(offset), count, Some(entry.authority()))
         .map_err(pend_error)?;
-    let _operation = flat::sharing::SharingOperation::acquire(&meta).ok_or(Failure::Busy)?;
+    let _operation = flat::source::Operation::acquire(&meta).ok_or(Failure::Busy)?;
     let (old, _) = direction.levels(geometry);
     for head in (0..geometry.count()).step_by(old.pages().unwrap()) {
         let cell = selected

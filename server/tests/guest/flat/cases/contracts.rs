@@ -349,7 +349,7 @@ fn allocation_failure() {
                 assert!(held.len() < 64, "fixture RAM exceeds bound");
                 held.push(page);
             }
-            Err(FlatError::OutOfMemory) => break,
+            Err(cell::page::PageError::OutOfMemory) => break,
             Err(error) => panic!("exhaustion setup: {error:?}"),
         }
     }

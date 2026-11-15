@@ -1,7 +1,7 @@
 //! Runtime Flat registration and checked Slot windows. The existing borrowing
 //! owner is shared with Share, so delegation and withdrawal have one ledger.
 use crate::basis::{
-    flat::sharing::Sharing,
+    flat::source::Export,
     nest::Access,
     pend::{self, SourceAuthorization},
     unit::task::Task,
@@ -62,7 +62,7 @@ fn create_kind(
     let allocation = kernel_api::model::cell::Allocation { size, align, level };
     let size = allocation.bytes().ok_or(PendFail::NotAligned)?;
     let (range, source) = allocate_kind(task, license, allocation, explicit)?;
-    let meta = Sharing::from_source(range, size, task.ident.id)?;
+    let meta = Export::from_source(range, size, task.ident.id)?;
     let entry = Arc::try_new(pend::PendEntry::try_new(
         pend::Target::Flat(meta.clone()),
         Mark::NONE,
@@ -188,9 +188,9 @@ pub(crate) fn slot(
 }
 
 /// A closed branch still owns its block until its original hardware users have
-/// drained. The caller already serializes the Sharing operation.
+/// drained. The caller already serializes the Export operation.
 pub(crate) fn retire_block(
-    meta: &Arc<Sharing>,
+    meta: &Arc<Export>,
     authority: &Arc<pend::Pend>,
 ) -> Result<(), PendFail> {
     let Some(source) = meta.authorization() else {
@@ -208,7 +208,7 @@ pub(crate) fn retire_block(
     Ok(())
 }
 pub(crate) fn settle_block(
-    meta: &Arc<Sharing>,
+    meta: &Arc<Export>,
     source: &Arc<SourceAuthorization>,
     block: &Arc<pend::RangeBlock>,
 ) -> Result<(), PendFail> {

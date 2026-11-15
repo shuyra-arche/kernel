@@ -193,7 +193,7 @@ impl Provenance {
     pub(crate) fn operations(
         &self,
         direct: &SourceAuthorization,
-    ) -> Result<Vec<crate::basis::flat::sharing::SharingOperation>, PendFail> {
+    ) -> Result<Vec<crate::basis::flat::source::Operation>, PendFail> {
         let mut owners = Vec::new();
         let mut operations = Vec::new();
         owners
@@ -210,10 +210,8 @@ impl Provenance {
                 return Ok(());
             }
             let (meta, _, _) = source.root().ok_or(PendFail::Denied)?;
-            operations.push(
-                crate::basis::flat::sharing::SharingOperation::acquire(&meta)
-                    .ok_or(PendFail::Busy)?,
-            );
+            operations
+                .push(crate::basis::flat::source::Operation::acquire(&meta).ok_or(PendFail::Busy)?);
             owners.push(source);
             Ok(())
         })?;

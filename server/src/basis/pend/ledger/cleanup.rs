@@ -2,7 +2,7 @@
 //! The root stays registered on Busy until all descendant obligations settle.
 use super::entry::PendEntry;
 use crate::basis::nest::memo::AccessError;
-use crate::basis::{flat::sharing::SharingOperation, unit::task::Task};
+use crate::basis::{flat::source::Operation, unit::task::Task};
 use alloc::sync::{Arc, Weak};
 use kernel_api::{
     abi::call::pend::PendFail,
@@ -134,7 +134,7 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
     let memory = observed.target().memory();
     let _operation = memory
         .as_ref()
-        .map(|meta| SharingOperation::acquire(meta).ok_or(PendFail::Busy))
+        .map(|meta| Operation::acquire(meta).ok_or(PendFail::Busy))
         .transpose()?;
     let root = close(task, token, caller)?;
     for _ in 0..8 {
