@@ -4,6 +4,7 @@ use crate::basis::sync::LegacyLock;
 mod progress;
 use self::source::Source;
 use crate::basis::sign::endpoint::Endpoint;
+use crate::metal::platform::devices::Plic as Plan;
 use crate::metal::sync::OnceLock;
 use crate::metal::sync::TrapGuard;
 use crate::metal::{
@@ -16,7 +17,6 @@ use alloc::{boxed::Box, vec::Vec};
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::abi::call::pend::PendFail;
-use kernel_api::boot::platform::riscv::devices::Plic as Plan;
 use progress::{BATCH, Claim, Progress};
 static CLAIMED: AtomicUsize = AtomicUsize::new(0);
 
