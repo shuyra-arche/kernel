@@ -1,6 +1,6 @@
 --- a/server/src/entry/boot/mod.rs
 +++ b/server/src/entry/boot/mod.rs
-@@ -88,7 +88,7 @@
+@@ -90,7 +90,7 @@
  
  extern "C" fn run_on_stack() -> ! {
      #[cfg(feature = "latency")]

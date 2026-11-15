@@ -2,7 +2,7 @@
 use super::Task;
 use crate::{
     basis,
-    metal::sync::{LegacyLock, order},
+    basis::sync::{LegacyLock, order},
 };
 use alloc::boxed::Box;
 mod transition;

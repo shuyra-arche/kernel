@@ -80,8 +80,8 @@ static OUTSTANDING: AtomicUsize = AtomicUsize::new(0);
 pub(super) fn settled() -> bool {
     OUTSTANDING.load(Ordering::Acquire) == 0
 }
-static PENDING: crate::metal::sync::LegacyLock<crate::metal::sync::order::TerminationQueue, Queue> =
-    crate::metal::sync::LegacyLock::new(Queue {
+static PENDING: crate::basis::sync::LegacyLock<crate::basis::sync::order::TerminationQueue, Queue> =
+    crate::basis::sync::LegacyLock::new(Queue {
         first: None,
         last: None,
     });

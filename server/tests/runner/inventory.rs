@@ -19,7 +19,7 @@ fn source_files(path: &Path, files: &mut Vec<std::path::PathBuf>) -> Result<()> 
     Ok(())
 }
 pub fn run(root: &Path) -> Result<()> {
-    let order = fs::read_to_string(root.join("server/src/metal/riscv/sync/order/mod.rs"))?;
+    let order = fs::read_to_string(root.join("server/src/basis/sync/order/mod.rs"))?;
     let classes: Vec<_> = Regex::new(r"(?m)^    (\w+),$")?
         .captures_iter(
             order
@@ -66,7 +66,7 @@ pub fn run(root: &Path) -> Result<()> {
     source_files(&root.join("server/src"), &mut files)?;
     files.sort();
     let declaration =
-        Regex::new(r"(?:LegacyLock|Lock)\s*<\s*(?:crate::metal::sync::)?order::(\w+)")?;
+        Regex::new(r"(?:LegacyLock|Lock)\s*<\s*(?:crate::basis::sync::)?order::(\w+)")?;
     let functions = Regex::new(r"\bfn\s+(\w+)")?;
     let operations = Regex::new(
         r"\.(lock|try_lock|with|pair|try_pair|reenter|legacy_lock|legacy_try_lock|try_source_borrow)\s*\(",

@@ -97,7 +97,7 @@ fn allocate_kind(
     explicit: bool,
 ) -> Result<(super::FlatRange, Arc<SourceAuthorization>), PendFail> {
     pend::access::license(task, license, CreationRights::FLAT)?;
-    if allocation.level.get() >= crate::metal::mmu::mode::levels()
+    if allocation.level.get() >= crate::metal::mmu::internal::mode::levels()
         || allocation.align != allocation.level.bytes().ok_or(PendFail::NotAligned)?
     {
         return Err(PendFail::NotAligned);

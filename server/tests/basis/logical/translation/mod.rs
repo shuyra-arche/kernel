@@ -84,7 +84,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
     assert_eq!(memos.awaiting_cpu(&span), 0);
     assert!(!pending.pending_for(&span));
     let nest = Nest {
-        state: crate::host_lock::SpinLock::new(RetirementState { memos }),
+        state: crate::host_lock::TestLock::new(RetirementState { memos }),
     };
     fenced.release(&nest);
     assert!(nest.state.lock().memos.get(&span, 1).unwrap().in_flight());
@@ -205,7 +205,7 @@ fn failed_or_unrelated_proofs_keep_page_and_address_responsibility_until_exact_r
         assert!(pending.tickets.claim(11));
         assert_eq!(pool.gives(), 0); // Release happens outside the Nest lock.
         let nest = Nest {
-            state: crate::host_lock::SpinLock::new(RetirementState {
+            state: crate::host_lock::TestLock::new(RetirementState {
                 memos: Memos::new(),
             }),
         };
@@ -224,12 +224,12 @@ fn retained_nonblocking_retirement_rejects_another_request_and_preserves_one_ini
         ..exact
     };
     assert_eq!(
-        retirement.park(crate::metal::mmu::Deferred::new(wrong)),
+        retirement.park(crate::metal::mmu::internal::Deferred::new(wrong)),
         Err(NestError::Shootdown)
     );
     assert!(retirement.deferred().is_none());
     retirement
-        .park(crate::metal::mmu::Deferred::new(exact))
+        .park(crate::metal::mmu::internal::Deferred::new(exact))
         .unwrap();
     assert!(retirement.deferred().unwrap().confirms(exact));
     assert_eq!(retirement.begin(7, 3), Err(NestError::Busy));

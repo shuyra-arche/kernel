@@ -15,7 +15,7 @@ pub(crate) fn hush() {
 }
 
 fn hunker() -> ! {
-    crate::metal::mmu::identity::vacate();
+    crate::metal::mmu::internal::identity::vacate();
     unsafe { ::core::arch::asm!("csrci sstatus, 2") };
     // This path never returns: each peer acknowledges once after vacating its lease.
     QUIET.fetch_add(1, Ordering::Release);

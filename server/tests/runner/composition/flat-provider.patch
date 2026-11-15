@@ -27,20 +27,20 @@
 +pub(crate) mod probe;
 --- a/server/src/entry/boot/mod.rs
 +++ b/server/src/entry/boot/mod.rs
-@@ -66,6 +66,7 @@
-         crate::entry::observe::start()?;
+@@ -68,6 +68,7 @@
+         crate::entry::work::observe::start()?;
      }
  
 +    crate::basis::flat::probe::start()?;
      crate::basis::unit::lifecycle::tally::rooted();
  
      boot_harts()?;
---- a/server/src/metal/riscv/sync/spin/guard.rs
-+++ b/server/src/metal/riscv/sync/spin/guard.rs
+--- a/server/src/metal/generic/sync/spin/guard.rs
++++ b/server/src/metal/generic/sync/spin/guard.rs
 @@ -9,6 +9,7 @@
-     pub(super) lock: &'a SpinLock<T>,
+     pub(super) lock: &'a SpinLock<T, E, D>,
      _not_send: PhantomData<*const ()>,
-     _trap: TrapGuard,
+     _trap: E::Guard,
 +    probe_start: u64,
      #[cfg(feature = "latency")]
      start: u64,
@@ -55,9 +55,9 @@
          }
 @@ -41,6 +43,7 @@
  
- impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
+ impl<T: ?Sized, E: Environment, D: Diagnostics> Drop for SpinLockGuard<'_, T, E, D> {
      fn drop(&mut self) {
 +        crate::basis::flat::probe::lock_leave(self.probe_start);
-         crate::metal::sync::deadlock_released!(self.lock);
+         #[cfg(debug_assertions)]
+         D::released(self.lock as *const _ as *const () as usize);
          #[cfg(feature = "latency")]
-         crate::metal::measure::elapsed(crate::metal::measure::Metric::SpinHold, self.start);

@@ -1,10 +1,10 @@
 //! Explicit static device mappings for the initial image. These are boot layout,
 //! not RAM Publications or dynamically revocable Share grants.
+use crate::basis::sync::LegacyLock;
 use crate::basis::{
     flat::{BorrowedRegion, Flat},
     nest::{Access, Nest, NestError, Placement, RegionKind},
 };
-use crate::metal::sync::LegacyLock;
 use alloc::{sync::Arc, vec::Vec};
 use kernel_api::{
     abi::call::pend::PendFail,
@@ -20,7 +20,7 @@ struct Mapping {
     physical: Region,
     address: VirtAddr,
 }
-static STAGED: LegacyLock<crate::metal::sync::order::BootMmio, Layout> =
+static STAGED: LegacyLock<crate::basis::sync::order::BootMmio, Layout> =
     LegacyLock::new(Layout::Open(Vec::new()));
 
 pub(in crate::entry::boot) fn stage(region: Region, address: VirtAddr) -> Result<(), PendFail> {

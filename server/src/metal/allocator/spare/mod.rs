@@ -24,7 +24,7 @@ const MAX_ALIGN: usize = 16;
 pub const DUMP_BUDGET: usize = 1024 * 1024;
 
 pub struct SpareAllocator {
-    inner: crate::metal::sync::LegacyLock<crate::metal::sync::order::Spare, SpareInner>,
+    inner: crate::basis::sync::LegacyLock<crate::basis::sync::order::Spare, SpareInner>,
 }
 
 impl SpareAllocator {
@@ -39,7 +39,7 @@ impl SpareAllocator {
         let base = chunk.as_ptr() as *mut u8 as usize;
         let edge = base + chunk.len();
         Ok(Self {
-            inner: crate::metal::sync::LegacyLock::new(SpareInner::new(base, edge)),
+            inner: crate::basis::sync::LegacyLock::new(SpareInner::new(base, edge)),
         })
     }
 

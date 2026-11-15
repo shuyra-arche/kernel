@@ -25,7 +25,7 @@ mod flat {
     pub(super) mod next {
         use super::super::*;
         pub(crate) fn inspect(
-            _: &mut crate::metal::sync::Root<'_>,
+            _: &mut crate::basis::sync::Root<'_>,
             _: &Arc<Task>,
             _: Query,
         ) -> Result<Observation, Failure> {

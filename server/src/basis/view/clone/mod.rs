@@ -8,8 +8,8 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
+use crate::basis::sync::LegacyLock;
 use crate::metal::clock;
-use crate::metal::sync::LegacyLock;
 
 use kernel_api::model::clone_view::CloneCondition;
 use kernel_api::model::clone_view::CloneLimits;
@@ -30,7 +30,7 @@ pub struct CloneView {
     pub(crate) id: usize,
     life: Arc<Anchor>,
     owner: TaskId,
-    pending: LegacyLock<crate::metal::sync::order::CloneQueue, Pending>,
+    pending: LegacyLock<crate::basis::sync::order::CloneQueue, Pending>,
     limits: CloneLimits,
     alarmed: AtomicBool,
 }

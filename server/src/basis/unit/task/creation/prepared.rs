@@ -4,12 +4,12 @@ use core::mem::MaybeUninit;
 
 use crate::basis::nest::NestError;
 use crate::basis::pend::Table;
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::team::MAX_MEMBERS;
 use crate::basis::unit::team::Member;
-use crate::metal::sync::LegacyLock;
 
 use super::super::Task;
 use super::super::TaskIdent;
@@ -20,7 +20,7 @@ use super::super::TaskWeak;
 pub(crate) struct PreparedTask {
     ident: Arc<TaskIdent>,
     life: Arc<Anchor>,
-    state: Arc<LegacyLock<crate::metal::sync::order::TaskState, TaskState>>,
+    state: Arc<LegacyLock<crate::basis::sync::order::TaskState, TaskState>>,
     slot: Option<Arc<MaybeUninit<Task>>>,
 }
 
@@ -28,7 +28,7 @@ impl PreparedTask {
     pub(crate) fn new(
         ident: Arc<TaskIdent>,
         life: Arc<Anchor>,
-        state: Arc<LegacyLock<crate::metal::sync::order::TaskState, TaskState>>,
+        state: Arc<LegacyLock<crate::basis::sync::order::TaskState, TaskState>>,
         slot: Arc<MaybeUninit<Task>>,
     ) -> PreparedTask {
         PreparedTask {

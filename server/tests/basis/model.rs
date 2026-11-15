@@ -1,5 +1,6 @@
 //! Resource owners unrelated to the Memo state machine are explicit fixtures.
 //! They do not model authorization, Task scheduling, COMMIT or hardware fences.
+pub(crate) use crate::metal::sync;
 pub(crate) use crate::name;
 pub(crate) fn commit() {}
 pub(crate) mod unit {

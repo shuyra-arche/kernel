@@ -21,7 +21,7 @@ pub(super) fn dispatch(
     ident: Arc<TaskIdent>,
     number: u64,
     registers: [usize; 6],
-    root: crate::metal::sync::Root<'_>,
+    root: crate::basis::sync::Root<'_>,
 ) -> *mut TrapContext {
     let delivery = match run(ident, number, registers, root) {
         Ok(crate::basis::room::Handoff::Switch(pa)) => return pa as *mut TrapContext,
@@ -42,7 +42,7 @@ fn run(
     ident: Arc<TaskIdent>,
     number: u64,
     registers: [usize; 6],
-    mut root: crate::metal::sync::Root<'_>,
+    mut root: crate::basis::sync::Root<'_>,
 ) -> Result<crate::basis::room::Handoff<bool>, Failure> {
     let frame = Frame::decode(number, registers).ok_or(Failure::Invalid)?;
     let mut bytes = [0; Request::WIDTH];

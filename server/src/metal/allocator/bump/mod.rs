@@ -12,13 +12,13 @@ mod inner;
 use inner::BumpInner;
 
 pub struct BumpAllocator {
-    inner: crate::metal::sync::LegacyLock<crate::metal::sync::order::Bump, Option<BumpInner>>,
+    inner: crate::basis::sync::LegacyLock<crate::basis::sync::order::Bump, Option<BumpInner>>,
 }
 
 impl BumpAllocator {
     pub const fn new() -> Self {
         Self {
-            inner: crate::metal::sync::LegacyLock::new(None),
+            inner: crate::basis::sync::LegacyLock::new(None),
         }
     }
 

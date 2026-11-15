@@ -1,5 +1,5 @@
-use crate::metal::mmu::table::PteFlags;
-use crate::metal::mmu::table::TableNode;
+use crate::metal::mmu::internal::table::PteFlags;
+use crate::metal::mmu::internal::table::TableNode;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
 
@@ -23,10 +23,11 @@ impl StackReader {
         {
             return Some(base);
         }
-        let (base, flags) =
-            TableNode::walk_raw(self.root, crate::metal::mmu::canonical(page), |pa| {
-                crate::entry::boot::facts::contains_identity(pa.as_usize(), PAGE_SIZE)
-            })?;
+        let (base, flags) = TableNode::walk_raw(
+            self.root,
+            crate::metal::mmu::internal::canonical(page),
+            |pa| crate::entry::boot::facts::contains_identity(pa.as_usize(), PAGE_SIZE),
+        )?;
         if !flags.contains(PteFlags::R)
             || !crate::entry::boot::facts::contains_identity(base.as_usize(), PAGE_SIZE)
         {

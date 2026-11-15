@@ -21,7 +21,7 @@ pub(in crate::entry::call) fn effect(
 }
 
 pub(in crate::entry::call) fn inspect(
-    root: &mut crate::metal::sync::Root<'_>,
+    root: &mut crate::basis::sync::Root<'_>,
     actor: &Arc<Task>,
     query: Query,
 ) -> Result<Observation, Failure> {

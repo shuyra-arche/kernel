@@ -1,7 +1,7 @@
 //! Hardware storage selected for a Nest. External storage contains no Page ownership.
 use super::external::External;
-use crate::metal::iommu::Backend;
-use crate::metal::mmu::Table;
+use crate::metal::mmu::external::Backend;
+use crate::metal::mmu::internal::Table;
 
 pub(in crate::basis::nest) enum Storage {
     Cpu(Table),

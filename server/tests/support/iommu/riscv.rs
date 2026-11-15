@@ -1,10 +1,10 @@
-#[path = "../../../src/metal/riscv/iommu/adapter.rs"]
+#[path = "../../../src/metal/riscv/mmu/external/adapter.rs"]
 pub(crate) mod adapter;
 #[path = "controllers.rs"]
 pub(crate) mod controllers;
-#[path = "../../../src/metal/riscv/iommu/domain/mod.rs"]
+#[path = "../../../src/metal/riscv/mmu/external/domain/mod.rs"]
 pub(crate) mod domain;
-#[path = "../../../src/metal/riscv/iommu/engine/mod.rs"]
+#[path = "../../../src/metal/riscv/mmu/external/engine/mod.rs"]
 pub(crate) mod engine;
 #[cfg(test)]
 pub(crate) use engine::Command;

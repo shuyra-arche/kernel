@@ -3,8 +3,8 @@ use alloc::vec::Vec;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::identity::TeamId;
 
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::anchor::Anchor;
-use crate::metal::sync::LegacyLock;
 
 mod clearance;
 pub(crate) mod exit;
@@ -21,14 +21,14 @@ pub(crate) struct TeamNode {
     pub id: TeamId,
     pub owner: TaskId,
     pub parent: Option<Arc<TeamNode>>,
-    pub state: LegacyLock<crate::metal::sync::order::TeamState, TeamState>,
-    pub tasks: LegacyLock<crate::metal::sync::order::TeamTasks, Vec<Arc<Member>>>,
-    pub children: LegacyLock<crate::metal::sync::order::TeamChildren, Vec<Arc<TeamNode>>>,
+    pub state: LegacyLock<crate::basis::sync::order::TeamState, TeamState>,
+    pub tasks: LegacyLock<crate::basis::sync::order::TeamTasks, Vec<Arc<Member>>>,
+    pub children: LegacyLock<crate::basis::sync::order::TeamChildren, Vec<Arc<TeamNode>>>,
     pub life: Arc<Anchor>,
     pub(crate) exit: ExitPolicy,
     pub(crate) member_exit: bool,
     pub(crate) termination: LegacyLock<
-        crate::metal::sync::order::TeamTermination,
+        crate::basis::sync::order::TeamTermination,
         crate::basis::unit::lifecycle::Termination,
     >,
 }

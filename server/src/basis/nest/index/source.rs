@@ -10,7 +10,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 
-use crate::metal::sync::LegacyLock;
+use crate::basis::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
 
 use super::super::Span;
@@ -30,7 +30,7 @@ struct Record {
 
 /// 全核唯一的一份关联：单链头，每条一个关系。
 struct SourceReservations {
-    head: LegacyLock<crate::metal::sync::order::SourceIndex, Option<Box<Record>>>,
+    head: LegacyLock<crate::basis::sync::order::SourceIndex, Option<Box<Record>>>,
 }
 
 fn registry() -> &'static SourceReservations {

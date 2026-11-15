@@ -1,4 +1,7 @@
 pub(crate) mod metal {
+    pub(crate) mod generic {
+        pub(crate) use crate::provider::generic as sync;
+    }
     pub(crate) mod interrupt {
         pub(crate) mod window {
             std::thread_local! {
@@ -49,17 +52,11 @@ pub(crate) mod metal {
             ID.set(id);
         }
     }
-    pub(crate) mod stop {
-        pub(crate) fn hush() {}
-    }
-    pub(crate) mod riscv {
-        pub(crate) mod switcher {
-            pub(crate) mod trap {
-                pub(crate) use crate::provider::Boundary;
-            }
-        }
-    }
     pub(crate) mod sync {
         pub(crate) use crate::provider::sync::*;
     }
+}
+
+pub(crate) mod basis {
+    pub(crate) use crate::provider::sync;
 }

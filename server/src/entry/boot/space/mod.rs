@@ -14,13 +14,13 @@ use crate::basis::nest::RegionKind;
 use crate::basis::nest::{Nest, NestError};
 use crate::basis::unit::team;
 use crate::entry::boot::facts;
-use crate::metal::generic::mmu::Attributes;
+use crate::metal::generic::mmu::internal::Attributes;
 use crate::metal::hart;
 use crate::metal::image::kernel_edge;
 use crate::metal::layout::HART_FRAME_BASE;
 use crate::metal::layout::TRAMPOLINE;
 use crate::metal::layout::trampoline_pa;
-use crate::metal::mmu::mode;
+use crate::metal::mmu::internal::mode;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -47,7 +47,7 @@ pub fn init() -> NestResult<()> {
             let m = facts::info();
             let dram = m.memory.envelope();
 
-            if crate::metal::mmu::canonical(dram.range().end) > mode::upper() {
+            if crate::metal::mmu::internal::canonical(dram.range().end) > mode::upper() {
                 return Err(NestError::DramOverlap);
             }
 
@@ -105,7 +105,7 @@ pub fn init() -> NestResult<()> {
                         Flat::from_region(BorrowedRegion::new(PhysAddr::from_raw(start), size)?)?
                             .whole();
                     let grid = ActiveRange::new(
-                        crate::metal::mmu::canonical(start),
+                        crate::metal::mmu::internal::canonical(start),
                         size,
                         access,
                         access,
@@ -167,7 +167,7 @@ pub fn init() -> NestResult<()> {
 
             team::init_kernel(kernel_space.clone())?;
             hart::mark_online();
-            crate::metal::mmu::activate(kernel_space.root());
+            crate::metal::mmu::internal::activate(kernel_space.root());
             #[cfg(debug_assertions)]
             crate::metal::layout::validate();
 

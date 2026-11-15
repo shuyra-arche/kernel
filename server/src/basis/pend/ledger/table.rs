@@ -1,14 +1,14 @@
 //! Ledger storage, transaction exclusion and unpublished registration rollback.
 use super::admission::{Admission, Charge};
 use super::{HoldTable, PendEntry};
-use crate::basis::{
-    name::{Key, Registry},
-    unit::task::Task,
-};
-use crate::metal::sync::{
+use crate::basis::sync::{
     LegacyLock, Root,
     lock::{LedgerSerialPairGuard, Lock, LockGuard, reentry::Reject},
     order,
+};
+use crate::basis::{
+    name::{Key, Registry},
+    unit::task::Task,
 };
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -26,8 +26,8 @@ pub(crate) struct Table {
     closed: Arc<AtomicBool>,
     admission: Arc<Admission>,
     pub(crate) entries:
-        LegacyLock<crate::metal::sync::order::LedgerEntries, Registry<PendId, Arc<PendEntry>>>,
-    pub(crate) heirs: LegacyLock<crate::metal::sync::order::LedgerHeirs, Heirs>,
+        LegacyLock<crate::basis::sync::order::LedgerEntries, Registry<PendId, Arc<PendEntry>>>,
+    pub(crate) heirs: LegacyLock<crate::basis::sync::order::LedgerHeirs, Heirs>,
     pub(crate) references: HoldTable,
 }
 
@@ -57,11 +57,11 @@ impl Table {
         self.closed.store(true, Ordering::Release);
     }
 
-    pub(crate) fn lock(&self) -> crate::metal::sync::LegacyGuard<'_, ()> {
+    pub(crate) fn lock(&self) -> crate::basis::sync::LegacyGuard<'_, ()> {
         // SAFETY: audited legacy ledger transaction entry.
         unsafe { self.serial.legacy_lock() }
     }
-    pub(crate) fn try_lock(&self) -> Option<crate::metal::sync::LegacyGuard<'_, ()>> {
+    pub(crate) fn try_lock(&self) -> Option<crate::basis::sync::LegacyGuard<'_, ()>> {
         // SAFETY: nonblocking form of the audited ledger transaction entry.
         unsafe { self.serial.legacy_try_lock() }
     }
@@ -69,7 +69,7 @@ impl Table {
     /// The sole audited reverse-try path; never used by ordinary admission.
     pub(crate) unsafe fn try_source_borrow(
         &self,
-    ) -> Option<crate::metal::sync::LegacyGuard<'_, ()>> {
+    ) -> Option<crate::basis::sync::LegacyGuard<'_, ()>> {
         unsafe { self.serial.try_source_borrow() }
     }
 

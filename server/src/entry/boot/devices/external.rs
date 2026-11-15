@@ -2,19 +2,19 @@
 //! preparation stay in the trusted boot image; Unit calls never supply a requester.
 use crate::basis::flat::{BorrowedRegion, Flat};
 use crate::basis::nest::{Access, Nest, Placement, RegionKind};
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::team::kernel;
-use crate::metal::generic::iommu::Quiescence;
-use crate::metal::sync::LegacyLock;
+use crate::metal::generic::mmu::external::Quiescence;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
 use kernel_api::boot::{ledger::Name, platform::Region};
 
-pub(super) static REGIONS: LegacyLock<crate::metal::sync::order::BootRegions, Vec<Region>> =
+pub(super) static REGIONS: LegacyLock<crate::basis::sync::order::BootRegions, Vec<Region>> =
     LegacyLock::new(Vec::new());
 // Boot staging only. After Ledger handoff, Nest/Pend own lifetime; there is no
 // persistent basis-level source registry or second authorization tree.
-pub(super) static NESTS: LegacyLock<crate::metal::sync::order::BootNests, Vec<(Name, Arc<Nest>)>> =
+pub(super) static NESTS: LegacyLock<crate::basis::sync::order::BootNests, Vec<(Name, Arc<Nest>)>> =
     LegacyLock::new(Vec::new());
 
 /// An exclusively owned resource and normalized controller/source identity.
@@ -69,9 +69,10 @@ pub(in super::super) fn init(route: ExternalRoute) -> Result<(), PendFail> {
     let nest = Nest::external_empty().map_err(|_| PendFail::OutOfMemory)?;
     // SAFETY: bind_external's trusted caller authenticated the actual source
     // and full isolation group. Controllers additionally enforces exclusivity.
-    let hardware =
-        unsafe { crate::metal::iommu::bind(route.controller, route.requester, route.proof) }
-            .map_err(|_| PendFail::Denied)?;
+    let hardware = unsafe {
+        crate::metal::mmu::external::bind(route.controller, route.requester, route.proof)
+    }
+    .map_err(|_| PendFail::Denied)?;
     if let Err((_, hardware)) = nest.bind_external(hardware) {
         // Failure cannot discharge an already installed hardware obligation.
         drop(hardware);

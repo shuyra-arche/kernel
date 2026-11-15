@@ -56,6 +56,7 @@ use window::Window;
 
 #[allow(dead_code)]
 mod basis {
+    pub(crate) use crate::metal::sync;
     pub(crate) use crate::name;
     pub(crate) mod unit {
         pub(crate) mod task {

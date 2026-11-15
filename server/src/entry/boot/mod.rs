@@ -5,10 +5,12 @@ mod init;
 pub(crate) mod resources;
 mod space;
 
-pub use crate::metal::generic::iommu::{HardwareError, Quiescence, Retirement, RetirementScope};
+pub use crate::metal::generic::mmu::external::{
+    HardwareError, Quiescence, Retirement, RetirementScope,
+};
 // Next-memory proof interface; exposing its types installs no backend.
 pub use crate::metal::generic::memory;
-pub use crate::metal::riscv::mmu::activity::qualify as qualify_activity;
+pub use crate::metal::mmu::internal::activity::qualify as qualify_activity;
 pub use devices::{ExternalRoute, MapMmio};
 pub use error::BootError;
 pub use error::MapOperation;
@@ -34,7 +36,7 @@ use crate::metal::hart;
 use crate::metal::hart::HartId;
 use crate::metal::image::ROOT_STACK_CANARY;
 use crate::metal::image::root_stack_base;
-use crate::metal::mmu::identity;
+use crate::metal::mmu::internal::identity;
 use crate::metal::switcher::context::TrapContext;
 use crate::metal::switcher::stack::arm_hart;
 use crate::metal::switcher::stack::boot_stack;
@@ -63,7 +65,7 @@ pub fn start() -> Result<(), BootError> {
 
     if let Some(entry) = spawn_entry()? {
         crate::basis::room::shutdown::watch(&entry);
-        crate::entry::observe::start()?;
+        crate::entry::work::observe::start()?;
     }
 
     crate::basis::unit::lifecycle::tally::rooted();
@@ -83,7 +85,7 @@ pub fn run() -> ! {
     // scheduling can retire I/O before that hart ever runs a Task, so it must
     // already use the full guarded stack rather than waiting for its first trap.
     let top = crate::metal::switcher::stack::trap_stack_edge(hart::hart_id()).get();
-    unsafe { crate::metal::riscv::boot::enter_idle(top, run_on_stack) }
+    unsafe { crate::metal::boot::enter_idle(top, run_on_stack) }
 }
 
 extern "C" fn run_on_stack() -> ! {
@@ -162,9 +164,11 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
             source,
         }
     })?;
-    crate::entry::observe::register(&mut registry).map_err(|source| BootError::Resources {
-        operation: ResourceOperation::Traps,
-        source,
+    crate::entry::work::observe::register(&mut registry).map_err(|source| {
+        BootError::Resources {
+            operation: ResourceOperation::Traps,
+            source,
+        }
     })?;
     let resources = registry.freeze().map_err(|e| BootError::Resources {
         operation: ResourceOperation::Freeze,
@@ -275,7 +279,7 @@ pub(crate) fn boot_harts() -> Result<(), BootError> {
         }
         let slot = HartId::new(hart);
         let opaque = hart::prepare_boot(slot, boot_stack(hart));
-        let r = crate::metal::riscv::boot::start_hart(slot, opaque);
+        let r = crate::metal::boot::start_hart(slot, opaque);
         r.map_err(|source| BootError::HartStart {
             hart: HartId::new(hart),
             source,
@@ -292,7 +296,7 @@ pub(crate) extern "C" fn boot_main() -> ! {
         .physical_at(hart::hart_frame())
         .expect("kernel frame not mapped");
     let frame = unsafe { &*(ktc.as_usize() as *const TrapContext) };
-    unsafe { crate::metal::riscv::boot::activate_secondary(frame) };
+    unsafe { crate::metal::boot::activate_secondary(frame) };
     arm_hart();
     identity::occupy(crate::basis::nest::Asid::kernel());
     run()

@@ -33,7 +33,7 @@ pub(in crate::entry::boot) unsafe fn snapshot(
     cells
         .try_reserve_exact(count.get())
         .map_err(|_| PendFail::OutOfMemory)?;
-    let address = crate::metal::mmu::canonical(base).as_usize();
+    let address = crate::metal::mmu::internal::canonical(base).as_usize();
     for index in 0..count.get() {
         let cell = cell::allocate(Owner::Kernel).map_err(|_| PendFail::OutOfMemory)?;
         let offset = index * PAGE_SIZE;

@@ -14,9 +14,9 @@ use super::tally::Tally;
 pub(super) struct BlockInner {
     id: usize,
     tally: &'static Tally,
-    pool: crate::metal::sync::LegacyLock<crate::metal::sync::order::BlockPool, Pool>,
+    pool: crate::basis::sync::LegacyLock<crate::basis::sync::order::BlockPool, Pool>,
     pump:
-        [crate::metal::sync::LegacyLock<crate::metal::sync::order::BlockPump, Pump>; MAX_POWER + 1],
+        [crate::basis::sync::LegacyLock<crate::basis::sync::order::BlockPump, Pump>; MAX_POWER + 1],
 }
 
 impl BlockInner {
@@ -24,8 +24,8 @@ impl BlockInner {
         BlockInner {
             id,
             tally,
-            pool: crate::metal::sync::LegacyLock::new(pool),
-            pump: core::array::from_fn(|_| crate::metal::sync::LegacyLock::new(Pump::new())),
+            pool: crate::basis::sync::LegacyLock::new(pool),
+            pump: core::array::from_fn(|_| crate::basis::sync::LegacyLock::new(Pump::new())),
         }
     }
 

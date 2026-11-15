@@ -3,7 +3,7 @@ use riscv::register::{scause, sepc, stval};
 
 use crate::metal::generic::trap::{Fault, FaultKind, PageFault, TrapEvent};
 use crate::metal::hart::{self, HartId};
-use crate::metal::mmu::canonical;
+use crate::metal::mmu::internal::canonical;
 
 use super::context::TrapContext;
 use super::stack::{TRAP_STACK_CANARY, trap_stack_base, trap_stack_guard_hart, trap_stack_hart};
@@ -50,6 +50,8 @@ pub(crate) fn capture() -> TrapEvent {
 }
 
 // Private construction is confined to the real trampoline entry below.
+// SAFETY: only Task-call entry creates this private token on the trap stack.
+unsafe impl crate::metal::generic::sync::Boundary for Boundary {}
 pub(in crate::metal::riscv) struct Boundary {
     _private: (),
 }
@@ -62,7 +64,7 @@ pub(crate) extern "C" fn trap_handler(frame: &mut TrapContext) -> *mut TrapConte
     let root = if from_task && matches!(event, TrapEvent::Call) {
         // SAFETY: this is the user-Task trampoline entry, with no ancestor
         // guard. Kernel IRQ/reception continuations never manufacture a Root.
-        Some(unsafe { crate::metal::sync::Root::enter(&mut boundary) })
+        Some(unsafe { crate::basis::sync::enter(&mut boundary) })
     } else {
         None
     };

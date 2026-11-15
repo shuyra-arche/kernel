@@ -10,7 +10,7 @@ struct Queue {
     first: Option<Arc<Endpoint>>,
     last: Option<Arc<Endpoint>>,
 }
-static PENDING: LegacyLock<crate::metal::sync::order::SignQueue, Queue> = LegacyLock::new(Queue {
+static PENDING: LegacyLock<crate::basis::sync::order::SignQueue, Queue> = LegacyLock::new(Queue {
     first: None,
     last: None,
 });

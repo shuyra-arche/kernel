@@ -1,5 +1,6 @@
 //! Live authorization, immutable ancestry and unsettled device access.
-use crate::metal::sync::{LegacyGuard, LegacyLock, OnceLock};
+use crate::basis::sync::{LegacyGuard, LegacyLock};
+use crate::metal::sync::OnceLock;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::{
@@ -29,8 +30,8 @@ struct ParentBorrow {
 }
 
 pub(crate) struct Pend {
-    state: LegacyLock<crate::metal::sync::order::PendState, State>,
-    parent: LegacyLock<crate::metal::sync::order::PendParent, Option<ParentBorrow>>,
+    state: LegacyLock<crate::basis::sync::order::PendState, State>,
+    parent: LegacyLock<crate::basis::sync::order::PendParent, Option<ParentBorrow>>,
     // Immutable authority ancestry applies to every target. ParentBorrow is
     // separately the data-access obligation returned only after settlement.
     ancestor: OnceLock<Arc<Pend>>,

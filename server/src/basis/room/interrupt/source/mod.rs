@@ -1,5 +1,6 @@
 //! An interrupt producer owns the (Share View, Sign) association. Sign retains
 //! ordinary events; only this owner interprets a successful consumption receipt.
+use crate::basis::sync::LegacyLock;
 mod state;
 use crate::basis::{
     flat::source::Export,
@@ -7,10 +8,7 @@ use crate::basis::{
     sign::endpoint::{self, Endpoint},
     unit::task::Task,
 };
-use crate::metal::{
-    generic::interrupt::Irq,
-    sync::{LegacyLock, OnceLock},
-};
+use crate::metal::{generic::interrupt::Irq, sync::OnceLock};
 use alloc::sync::{Arc, Weak};
 use kernel_api::{
     abi::call::{pend::PendFail, sign::SignFail},
@@ -30,7 +28,7 @@ pub(crate) struct Source {
     pub(super) maintenance_slot: usize,
     pub(crate) endpoint: Arc<Endpoint>,
     view: OnceLock<Arc<Export>>,
-    state: LegacyLock<crate::metal::sync::order::InterruptSource, State<Receiver>>,
+    state: LegacyLock<crate::basis::sync::order::InterruptSource, State<Receiver>>,
 }
 struct Receiver {
     task: Weak<Task>,

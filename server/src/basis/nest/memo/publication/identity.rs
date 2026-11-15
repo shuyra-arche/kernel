@@ -2,7 +2,7 @@ use core::num::NonZeroU32;
 use core::num::NonZeroUsize;
 
 use super::Error;
-use crate::metal::generic::iommu::{BatchId, BindingId};
+use crate::metal::generic::mmu::external::{BatchId, BindingId};
 
 static NEXT_BINDING: crate::basis::name::Serial = crate::basis::name::Serial::new(1, usize::MAX);
 static NEXT_BATCH: crate::basis::name::Serial =

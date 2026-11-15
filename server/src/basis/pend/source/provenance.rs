@@ -8,13 +8,13 @@ use crate::basis::{
 use kernel_api::model::pend::FlatRights;
 
 pub(crate) struct Provenance {
-    grant: LegacyLock<crate::metal::sync::order::ProvenanceGrant, Carried>,
+    grant: LegacyLock<crate::basis::sync::order::ProvenanceGrant, Carried>,
     source: Weak<SourceAuthorization>,
     geometry: Arc<Geometry>,
     ceiling: Access,
     previous: Option<Arc<Self>>,
     depth: usize,
-    uses: LegacyLock<crate::metal::sync::order::ProvenanceUses, Vec<Weak<RangeBinding>>>,
+    uses: LegacyLock<crate::basis::sync::order::ProvenanceUses, Vec<Weak<RangeBinding>>>,
     introduced: Option<Weak<RangeBlock>>,
 }
 impl Provenance {

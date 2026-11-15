@@ -11,7 +11,7 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `PageMembership` | [basis/cell/page/mod.rs:61](../../server/src/basis/cell/page/mod.rs#L61) | `ChangeBlocks`, `Controllers` | `BlockPool`, `BlockPump`, `RetentionStatistics` |
 | `ChangeBlocks` | [basis/cell/page/reclaim/change.rs:29](../../server/src/basis/cell/page/reclaim/change.rs#L29) | `LiveChanges` | `PageMembership` |
 | `RetentionStatistics` | [basis/cell/page/reclaim/statistics.rs:11](../../server/src/basis/cell/page/reclaim/statistics.rs#L11) | `PageMembership` |  |
-| `Commit` | [metal/riscv/sync/lock/mod.rs:45](../../server/src/metal/riscv/sync/lock/mod.rs#L45) | `LedgerSerial`, `BootRegions` | `ActivityDelivery`, `Address`, `BlockStages`, `BlockUses`, `ControlTable`, `Deadline`, `HeldSources`, `Husks`, `LedgerHeirs`, `Organizations`, `PendParent`, `ProvenanceGrant`, `ProvenanceUses`, `Scheduler`, `SchedulerAdmission`, `SourceAuthorities`, `SourceAuthorizationRef`, `SourceBindings`, `SourceGate`, `SourceMaps`, `SourceOrigins`, `SpanExports`, `TaskResult`, `TeamChildren`, `TeamExit`, `TeamTasks`, `TerminationQueue`, `WaitHolders` |
+| `Commit` | [basis/sync/lock/mod.rs:47](../../server/src/basis/sync/lock/mod.rs#L47) | `LedgerSerial`, `BootRegions` | `ActivityDelivery`, `Address`, `BlockStages`, `BlockUses`, `ControlTable`, `Deadline`, `HeldSources`, `Husks`, `LedgerHeirs`, `Organizations`, `PendParent`, `ProvenanceGrant`, `ProvenanceUses`, `Scheduler`, `SchedulerAdmission`, `SourceAuthorities`, `SourceAuthorizationRef`, `SourceBindings`, `SourceGate`, `SourceMaps`, `SourceOrigins`, `SpanExports`, `TaskResult`, `TeamChildren`, `TeamExit`, `TeamTasks`, `TerminationQueue`, `WaitHolders` |
 | `Flat` | [basis/flat/mod.rs:54](../../server/src/basis/flat/mod.rs#L54), [basis/flat/mod.rs:132](../../server/src/basis/flat/mod.rs#L132), [basis/flat/storage/materialize.rs:32](../../server/src/basis/flat/storage/materialize.rs#L32), [basis/flat/storage/materialize.rs:41](../../server/src/basis/flat/storage/materialize.rs#L41) | `Reservation`, `BlockPages` | `LiveChanges`, `SourceIndex` |
 | `SourceAuthorizationRef` | [basis/flat/source/mod.rs:44](../../server/src/basis/flat/source/mod.rs#L44) | `Commit` |  |
 | `SourceMaps` | [basis/flat/source/mod.rs:45](../../server/src/basis/flat/source/mod.rs#L45) | `Commit` |  |
@@ -21,19 +21,19 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `FaultPolicy` | [basis/nest/address/span/mod.rs:31](../../server/src/basis/nest/address/span/mod.rs#L31) | `Reservation` | `BlockPool`, `BlockPump`, `FaultProgress`, `SignQueue`, `SignState` |
 | `SpanExports` | [basis/nest/address/span/mod.rs:41](../../server/src/basis/nest/address/span/mod.rs#L41) | `Commit` | `BlockPool`, `BlockPump` |
 | `Reservation` | [basis/nest/address/span/mod.rs:36](../../server/src/basis/nest/address/span/mod.rs#L36) | `Nest` | `FaultPolicy`, `Flat` |
-| `Organizations` | [basis/nest/authority/binding.rs:35](../../server/src/basis/nest/authority/binding.rs#L35) | `Commit` | `Nest` |
+| `Organizations` | [basis/nest/authority/binding.rs:36](../../server/src/basis/nest/authority/binding.rs#L36) | `Commit` | `Nest` |
 | `NestAuthority` | [basis/nest/authority/mod.rs:105](../../server/src/basis/nest/authority/mod.rs#L105) | `Nest` | `BlockPool`, `BlockPump` |
 | `FaultProgress` | [basis/nest/fault/queue.rs:13](../../server/src/basis/nest/fault/queue.rs#L13) | `FaultPolicy` |  |
 | `SourceIndex` | [basis/nest/index/source.rs:33](../../server/src/basis/nest/index/source.rs#L33) | `Flat` | `BlockPool`, `BlockPump` |
-| `ActivityHistory` | [basis/nest/memo/activity/mod.rs:37](../../server/src/basis/nest/memo/activity/mod.rs#L37) | `Nest` |  |
+| `ActivityHistory` | [basis/nest/memo/activity/mod.rs:35](../../server/src/basis/nest/memo/activity/mod.rs#L35) | `Nest` |  |
 | `Address` | [basis/nest/mod.rs:100](../../server/src/basis/nest/mod.rs#L100) | `Commit` | `Nest` |
 | `Cleanup` | [basis/nest/mod.rs:101](../../server/src/basis/nest/mod.rs#L101) |  | `Nest` |
 | `Nest` | [basis/nest/mod.rs:102](../../server/src/basis/nest/mod.rs#L102) | `Organizations`, `Address`, `Cleanup`, `BootNests` | `ActivityHistory`, `Controllers`, `NestAuthority`, `Reservation`, `SourcePhase`, `TaskJournal` |
-| `PendState` | [basis/pend/authority/mod.rs:32](../../server/src/basis/pend/authority/mod.rs#L32) | `LedgerEntries`, `SourcePhase`, `ProvenanceGrant` |  |
-| `PendParent` | [basis/pend/authority/mod.rs:33](../../server/src/basis/pend/authority/mod.rs#L33) | `Commit` |  |
+| `PendState` | [basis/pend/authority/mod.rs:33](../../server/src/basis/pend/authority/mod.rs#L33) | `LedgerEntries`, `SourcePhase`, `ProvenanceGrant` |  |
+| `PendParent` | [basis/pend/authority/mod.rs:34](../../server/src/basis/pend/authority/mod.rs#L34) | `Commit` |  |
 | `LedgerAdmission` | [basis/pend/ledger/admission.rs:29](../../server/src/basis/pend/ledger/admission.rs#L29) | `LedgerCharge` | `BlockPool`, `BlockPump` |
 | `LedgerCharge` | [basis/pend/ledger/entry.rs:31](../../server/src/basis/pend/ledger/entry.rs#L31) | `LedgerEntries` | `LedgerAdmission` |
-| `LedgerSerial` | [basis/pend/ledger/table.rs:25](../../server/src/basis/pend/ledger/table.rs#L25), [metal/riscv/sync/lock/ledger.rs:21](../../server/src/metal/riscv/sync/lock/ledger.rs#L21), [metal/riscv/sync/lock/ledger.rs:23](../../server/src/metal/riscv/sync/lock/ledger.rs#L23), [metal/riscv/sync/lock/ledger.rs:63](../../server/src/metal/riscv/sync/lock/ledger.rs#L63) |  | `Asid`, `Commit` |
+| `LedgerSerial` | [basis/pend/ledger/table.rs:25](../../server/src/basis/pend/ledger/table.rs#L25), [basis/sync/lock/ledger.rs:21](../../server/src/basis/sync/lock/ledger.rs#L21), [basis/sync/lock/ledger.rs:23](../../server/src/basis/sync/lock/ledger.rs#L23), [basis/sync/lock/ledger.rs:65](../../server/src/basis/sync/lock/ledger.rs#L65) |  | `Asid`, `Commit` |
 | `LedgerEntries` | [basis/pend/ledger/table.rs:29](../../server/src/basis/pend/ledger/table.rs#L29) | `BlockEpoch` | `CloneQueue`, `LedgerCharge`, `PendState` |
 | `LedgerHeirs` | [basis/pend/ledger/table.rs:30](../../server/src/basis/pend/ledger/table.rs#L30) | `Commit` | `BlockPool`, `BlockPump` |
 | `BlockPages` | [basis/pend/source/admission.rs:12](../../server/src/basis/pend/source/admission.rs#L12) | `BlockEpoch`, `BlockStages` | `Flat` |
@@ -54,10 +54,10 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `InterruptController` | [basis/room/interrupt/mod.rs:92](../../server/src/basis/room/interrupt/mod.rs#L92) | `InterruptSources` |  |
 | `InterruptProgress` | [basis/room/interrupt/mod.rs:93](../../server/src/basis/room/interrupt/mod.rs#L93) | `SourceGate` |  |
 | `InterruptSources` | [basis/room/interrupt/mod.rs:105](../../server/src/basis/room/interrupt/mod.rs#L105) | `SourceGate` | `BlockPool`, `BlockPump`, `InterruptController` |
-| `InterruptSource` | [basis/room/interrupt/source/mod.rs:33](../../server/src/basis/room/interrupt/source/mod.rs#L33) | `SourceGate` |  |
+| `InterruptSource` | [basis/room/interrupt/source/mod.rs:31](../../server/src/basis/room/interrupt/source/mod.rs#L31) | `SourceGate` |  |
 | `Scheduler` | [basis/room/scheduler/slot/mod.rs:36](../../server/src/basis/room/scheduler/slot/mod.rs#L36) | `Commit` | `TaskExtensions`, `TaskSchedule`, `TaskState`, `TeamState` |
 | `SchedulerAdmission` | [basis/room/scheduler/slot/mod.rs:39](../../server/src/basis/room/scheduler/slot/mod.rs#L39) | `Commit` | `TaskSchedule`, `TaskState` |
-| `Shutdown` | [basis/room/shutdown/mod.rs:22](../../server/src/basis/room/shutdown/mod.rs#L22) |  |  |
+| `Shutdown` | [basis/room/shutdown/mod.rs:20](../../server/src/basis/room/shutdown/mod.rs#L20) |  |  |
 | `SignQueue` | [basis/sign/endpoint/delivery.rs:13](../../server/src/basis/sign/endpoint/delivery.rs#L13) | `FaultPolicy` | `SignDelivery` |
 | `SignState` | [basis/sign/endpoint/mod.rs:29](../../server/src/basis/sign/endpoint/mod.rs#L29) | `ActivityDelivery`, `FaultPolicy`, `SourceGate` |  |
 | `SignRouting` | [basis/sign/endpoint/mod.rs:32](../../server/src/basis/sign/endpoint/mod.rs#L32) | `SourceGate` | `BlockPool`, `BlockPump` |
@@ -95,5 +95,5 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `Bump` | [metal/allocator/bump/mod.rs:15](../../server/src/metal/allocator/bump/mod.rs#L15) |  |  |
 | `Frame` | [metal/allocator/frame/mod.rs:17](../../server/src/metal/allocator/frame/mod.rs#L17) | `TaskJournal`, `BlockPool`, `Asid` |  |
 | `Spare` | [metal/allocator/spare/mod.rs:27](../../server/src/metal/allocator/spare/mod.rs#L27) |  |  |
-| `Controllers` | [metal/riscv/iommu/controllers/mod.rs:10](../../server/src/metal/riscv/iommu/controllers/mod.rs#L10) | `Nest` | `PageMembership` |
-| `Asid` | [metal/riscv/mmu/identity/asid.rs:13](../../server/src/metal/riscv/mmu/identity/asid.rs#L13) | `LedgerSerial` | `Frame` |
+| `Controllers` | [metal/riscv/mmu/external/controllers/mod.rs:10](../../server/src/metal/riscv/mmu/external/controllers/mod.rs#L10) | `Nest` | `PageMembership` |
+| `Asid` | [metal/riscv/mmu/internal/identity/asid.rs:13](../../server/src/metal/riscv/mmu/internal/identity/asid.rs#L13) | `LedgerSerial` | `Frame` |

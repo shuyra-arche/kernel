@@ -3,13 +3,13 @@
 use kernel_api::model::exit::Reason;
 use kernel_api::model::identity::TaskId;
 
-use crate::metal::sync::LegacyLock;
+use crate::basis::sync::LegacyLock;
 
 mod ring;
 pub(crate) use ring::Entry;
 use ring::Ring;
 
-static LEDGER: LegacyLock<crate::metal::sync::order::LifecycleDiagnostics, Ring> =
+static LEDGER: LegacyLock<crate::basis::sync::order::LifecycleDiagnostics, Ring> =
     LegacyLock::new(Ring::new());
 
 pub(super) fn note(task: TaskId, reason: Reason, note: &str, owner: Option<TaskId>) {

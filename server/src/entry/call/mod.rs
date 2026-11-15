@@ -29,7 +29,7 @@ use outcome::ret_err;
 pub(crate) fn dispatch(
     frame: &mut TrapContext,
     ident: Arc<TaskIdent>,
-    root: crate::metal::sync::Root<'_>,
+    root: crate::basis::sync::Root<'_>,
 ) -> Option<*mut TrapContext> {
     let number = frame.gpr.x(Gprs::A7);
     let regs = [

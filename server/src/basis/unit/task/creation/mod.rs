@@ -9,6 +9,7 @@ use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
+use crate::basis::sync::LegacyLock;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::team::Team;
 use crate::basis::unit::team::kernel;
@@ -16,7 +17,6 @@ use crate::metal::layout::HART_FRAME_BASE;
 use crate::metal::layout::IMAGE_BASE;
 use crate::metal::layout::TASK_STACK_SIZE;
 use crate::metal::switcher::context::TrapContext;
-use crate::metal::sync::LegacyLock;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -64,7 +64,7 @@ impl TaskBuilder {
     pub fn new(team: Arc<Team>) -> TaskBuilder {
         let entry = match team.default_entry() {
             0 => IMAGE_BASE,
-            e => crate::metal::mmu::canonical(e),
+            e => crate::metal::mmu::internal::canonical(e),
         };
         TaskBuilder {
             controller: team.creator,
@@ -168,7 +168,7 @@ impl TaskBuilder {
         if count > 0 {
             write_args(
                 &self.team.nest,
-                crate::metal::mmu::canonical(args_at),
+                crate::metal::mmu::internal::canonical(args_at),
                 &self.args,
             );
         }

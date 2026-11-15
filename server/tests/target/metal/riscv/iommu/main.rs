@@ -13,7 +13,7 @@ use kernel_hardware_fixture::{Edu, Uart, finish};
 #[allow(dead_code)]
 #[path = "../../../../support/iommu/mod.rs"]
 pub(crate) mod iommu;
-#[path = "../../../../../src/metal/riscv/iommu/mmio.rs"]
+#[path = "../../../../../src/metal/riscv/mmu/external/mmio.rs"]
 mod mmio;
 mod pool;
 
@@ -35,6 +35,7 @@ pub(crate) mod publication;
 pub(crate) mod target;
 
 mod basis {
+    pub(crate) use crate::metal::sync;
     pub(crate) use crate::name;
     pub(crate) mod nest {
         pub(crate) use crate::iommu::Error as PublicationError;
@@ -194,10 +195,10 @@ mod metal {
         }
     }
     pub(crate) mod generic {
-        pub(crate) use crate::iommu::contract as iommu;
+        pub(crate) mod mmu { pub(crate) use crate::iommu::contract as external; }
         pub(crate) use crate::proof as memory;
     }
-    pub(crate) use crate::iommu;
+    pub(crate) mod mmu { pub(crate) use crate::iommu as external; }
 }
 
 #[allow(dead_code)]

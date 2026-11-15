@@ -1,13 +1,14 @@
 //! A trusted external Nest retains one root authorization and hardware binding.
 //! Child Pends govern their own Memo publications; losing a child never closes
 //! this address space. The boot root and backend govern full retirement.
+use crate::basis::sync::LegacyLock;
 use crate::{
     basis::{
         nest::Nest,
         pend::{self, Pend, PendEntry},
         unit::task::Task,
     },
-    metal::{iommu::Fault, sync::LegacyLock},
+    metal::mmu::external::Fault,
 };
 use alloc::{
     sync::{Arc, Weak},
@@ -32,7 +33,7 @@ struct Organization {
     fault: Option<Fault>,
     fault_sequence: u64,
 }
-static ORGANIZATIONS: LegacyLock<crate::metal::sync::order::Organizations, Vec<Organization>> =
+static ORGANIZATIONS: LegacyLock<crate::basis::sync::order::Organizations, Vec<Organization>> =
     LegacyLock::new(Vec::new());
 
 pub(crate) fn authorized(

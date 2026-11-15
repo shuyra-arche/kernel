@@ -12,8 +12,8 @@ use alloc::vec::Vec;
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Reservation;
-use crate::metal::generic::mmu::Attributes;
-use crate::metal::sync::LegacyLock;
+use crate::basis::sync::LegacyLock;
+use crate::metal::generic::mmu::internal::Attributes;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
@@ -28,18 +28,18 @@ use kernel_api::model::cell::CellLevel;
 /// Architectural U/G/A/D policy is fixed for the span; logical permissions may narrow.
 pub struct Span {
     pub(crate) faults:
-        LegacyLock<crate::metal::sync::order::FaultPolicy, super::super::fault::State>,
+        LegacyLock<crate::basis::sync::order::FaultPolicy, super::super::fault::State>,
     pub(crate) reservation: Reservation,
     pub(crate) attrs: Attributes,
     level: CellLevel,
     initial_access: Access,
-    pub(crate) state: LegacyLock<crate::metal::sync::order::Reservation, SpanState>,
+    pub(crate) state: LegacyLock<crate::basis::sync::order::Reservation, SpanState>,
     operation: core::sync::atomic::AtomicBool,
     revision: core::sync::atomic::AtomicU64,
     /// Weak discovery of sources exported through this reservation. Live
     /// permission remains in each Source's original Pend lineage.
     pub(crate) exports: LegacyLock<
-        crate::metal::sync::order::SpanExports,
+        crate::basis::sync::order::SpanExports,
         crate::basis::pend::Tracking<crate::basis::pend::SourceAuthorization>,
     >,
 }

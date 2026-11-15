@@ -4,7 +4,7 @@
 //! This prevents a releasing Hart or try_commit caller from overtaking waiters.
 //! It bounds predecessor count, not the time spent in each transaction.
 
-use crate::metal::sync::{
+use crate::basis::sync::{
     global_commit,
     lock::{
         LockGuard,
@@ -16,7 +16,7 @@ use crate::metal::sync::{
 #[cfg(debug_assertions)]
 pub(crate) fn assert_unlocked() {
     assert!(
-        !crate::metal::sync::global_held_by_current(),
+        !crate::basis::sync::global_held_by_current(),
         "idle wait while holding Unit commit lock"
     );
 }
@@ -28,14 +28,14 @@ pub(crate) fn assert_unlocked() {
 #[cfg(debug_assertions)]
 pub(crate) fn assert_held() {
     assert!(
-        crate::metal::sync::global_held_by_current(),
+        crate::basis::sync::global_held_by_current(),
         "this step belongs inside the Unit commit section"
     );
 }
 
 /// A borrowed witness that the global transaction lock remains held.
 /// Scheduler handoffs pass this guard between dequeue and seating.
-pub(crate) type CommitGuard = crate::metal::sync::LegacyCommitGuard<'static, ()>;
+pub(crate) type CommitGuard = crate::basis::sync::LegacyCommitGuard<'static, ()>;
 
 #[cfg_attr(feature = "latency", track_caller)]
 pub(crate) fn commit() -> CommitGuard {

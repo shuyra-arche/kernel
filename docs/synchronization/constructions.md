@@ -98,5 +98,5 @@ Baseline `852b396d20a1ae2954503a4dee9d970658c43558` had 96 textual constructors:
 | 92 | `server/src/metal/allocator/bump/mod.rs:21` / `new` | `None` | `LegacyLock<order::Bump, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
 | 93 | `server/src/metal/allocator/frame/mod.rs:25` / `new_level` | `Frame` | `LegacyLock<order::Frame, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
 | 94 | `server/src/metal/allocator/spare/mod.rs:42` / `new_level` | `Spare` | `LegacyLock<order::Spare, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
-| 95 | `server/src/metal/riscv/iommu/controllers/mod.rs:10` / `new` | `None` | `LegacyLock<order::Controllers, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
-| 96 | `server/src/metal/riscv/mmu/identity/asid.rs:14` / `new_level` | `Asid` | `LegacyLock<order::Asid, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
+| 95 | `server/src/metal/riscv/mmu/external/controllers/mod.rs:10` / `new` | `None` | `LegacyLock<order::Controllers, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
+| 96 | `server/src/metal/riscv/mmu/internal/identity/asid.rs:14` / `new_level` | `Asid` | `LegacyLock<order::Asid, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |

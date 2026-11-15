@@ -11,7 +11,7 @@ mod allocation;
 mod lock;
 #[path = "../../../../src/basis/nest/fault/queue.rs"]
 mod queue;
-mod metal {
+mod basis {
     pub(crate) use crate::lock as sync;
 }
 use kernel_api::{

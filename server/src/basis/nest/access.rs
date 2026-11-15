@@ -1,12 +1,12 @@
 use super::{Access, Attributes, Nest, NestError};
-use crate::metal::generic::mmu::PageTable;
+use crate::metal::generic::mmu::internal::PageTable;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
 
 impl Nest {
     /// 一段字节窗口是否整段落在用户可达的半边之内。
     pub(crate) fn user_range(at: VirtAddr, size: usize) -> bool {
-        let ceiling = crate::metal::mmu::upper().as_usize();
+        let ceiling = crate::metal::mmu::internal::upper().as_usize();
         at.as_usize() < ceiling
             && at
                 .as_usize()
@@ -121,7 +121,7 @@ impl Nest {
             let Some(range) = inner.range_at(at) else {
                 return false;
             };
-            let page = crate::metal::mmu::canonical(at & !(PAGE_SIZE - 1));
+            let page = crate::metal::mmu::internal::canonical(at & !(PAGE_SIZE - 1));
             let Ok((_, hardware)) = root.walk_ref_geometry(page, self.geometry()) else {
                 return false;
             };
@@ -147,7 +147,7 @@ impl Nest {
                 unreachable!("Nest held across access validation and copy")
             };
             let _inner = mapping.state.lock();
-            let page = crate::metal::mmu::canonical(at & !(PAGE_SIZE - 1));
+            let page = crate::metal::mmu::internal::canonical(at & !(PAGE_SIZE - 1));
             let (physical, _) = root
                 .walk_ref_geometry(page, self.geometry())
                 .expect("validated page table leaf");

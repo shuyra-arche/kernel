@@ -8,7 +8,7 @@ use crate::basis::nest::NestError;
 use crate::basis::room::deadline;
 use crate::basis::unit::team::kernel;
 use crate::entry::boot::facts;
-use crate::metal::generic::mmu::Attributes;
+use crate::metal::generic::mmu::internal::Attributes;
 use crate::metal::hart;
 use crate::metal::hart::HartId;
 use crate::metal::layout::HART_FRAME_BASE;
@@ -101,7 +101,7 @@ pub(in super::super) fn init() -> Result<(), NestError> {
         let frame = unsafe { &mut *(pa.as_usize() as *mut TrapContext) };
         frame.kernel_satp = ksatp;
         frame.kernel_sp = trap_stack_edge(h);
-        frame.trap_handler = crate::metal::mmu::canonical(
+        frame.trap_handler = crate::metal::mmu::internal::canonical(
             crate::metal::switcher::trap::trap_handler as *const () as usize,
         );
         frame.trap_stack_corrupt = TRAP_STACK_CANARY;

@@ -10,18 +10,18 @@ Cell, Flat and Nest stays at their nearest source parent, `basis/mod.rs`.
 | Cargo host target | Entry / protected responsibility |
 | --- | --- |
 | memory | `basis/mod.rs`: Page/Flat/Nest ownership, retention, recovery and topology |
-| translation | `metal/riscv/mmu/mod.rs`: real PTE storage, atomic A/D capture, decoding |
+| translation | `metal/riscv/mmu/internal/mod.rs`: real PTE storage, atomic A/D capture, decoding |
 | activity | `basis/nest/memo/activity/mod.rs`: retained capture epochs and exhaustion |
 | fault | `basis/nest/fault/mod.rs`: bounded nonconsuming event queues |
-| iommu | `metal/riscv/iommu/mod.rs`: completion, failure, source and lifetime models |
-| iommu-target (formerly hardware) | `metal/riscv/iommu/execution/mod.rs`: real QEMU MMIO/DMA runner; ignored by default |
+| iommu | `metal/riscv/mmu/external/mod.rs`: completion, failure, source and lifetime models |
+| iommu-target (formerly hardware) | `metal/riscv/mmu/external/execution/mod.rs`: real QEMU MMIO/DMA runner; ignored by default |
 | sign | `basis/sign/mod.rs`: endpoint state and wait admission |
 | pend | `basis/pend/mod.rs`: authority, narrowing, creation and tracking |
 | address | `basis/nest/address/mod.rs`: occupancy, placement, overflow and generations |
 | name | `basis/name/mod.rs`: identity allocation, arenas, registries and exhaustion |
 | unit | `basis/unit/mod.rs`: execution, membership and retirement |
 | room | `basis/room/mod.rs`: deadlines, scheduling, timers, shutdown and reservations |
-| sync | `metal/riscv/sync/mod.rs`: production admission, FIFO, diagnostics and UI lifetimes |
+| sync | `metal/generic/sync/mod.rs` and `basis/sync/mod.rs`: production admission, FIFO, diagnostics and UI lifetimes |
 | allocator | `metal/allocator/mod.rs`: frame allocation and failure |
 | registration | `basis/pend/ledger/mod.rs`: ledger, branch and export lifetimes |
 | invocation | `entry/call/mod.rs`: production request delivery and replay |

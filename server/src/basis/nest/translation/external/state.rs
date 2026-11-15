@@ -2,7 +2,7 @@
 use crate::basis::cell::page::{Change, Page, PageId};
 use crate::basis::nest::PublicationError as Error;
 use crate::basis::nest::memo::publication::{Phase, Publication};
-use crate::metal::generic::iommu::{Fault, Hardware};
+use crate::metal::generic::mmu::external::{Fault, Hardware};
 use alloc::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq)]

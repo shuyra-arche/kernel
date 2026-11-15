@@ -16,7 +16,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::basis::cell::page::Page;
-use crate::metal::sync::{
+use crate::basis::sync::{
     LegacyLock,
     lock::{
         Lock, LockGuard, LockPairGuard,
@@ -129,7 +129,7 @@ impl Flat {
         .map_err(|_| FlatError::OutOfMemory)
     }
 
-    fn state_storage(&self) -> &LegacyLock<crate::metal::sync::order::Flat, FlatState> {
+    fn state_storage(&self) -> &LegacyLock<crate::basis::sync::order::Flat, FlatState> {
         // SAFETY: only Flat's enumerated legacy owner methods use this bridge.
         // Debug checks this same instance against all actual ancestor classes.
         unsafe { LegacyLock::from_lock(&self.state) }

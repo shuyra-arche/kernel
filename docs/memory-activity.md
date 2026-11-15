@@ -248,3 +248,35 @@ negative case. Sv39/Sv48, ADUE-enabled Svadu firmware, physical hardware,
 hotplug and External activity have no sampling execution evidence here.
 Neither QEMU maxima nor CPU D bits establish real-hardware WCET, device-write
 absence, persistence, or permission to reclaim a Page.
+
+## Resident work entry convention
+
+[`entry/work`](../server/src/entry/work/mod.rs) groups real independently
+scheduled Kernel Team Tasks. Each child keeps its Task construction/start,
+entry loop, wake source and budget together; boot explicitly orders startup.
+The observer's `start`, `run`, deadline sleep and resource notification remain
+in `work/observe`, with the same snapshot Page, read-only Share and update Sign.
+It uses the existing trusted breakpoint continuation path, not S-mode `ecall`.
+No borrowed resource guard survives its wait.
+
+The current maintenance paths are not separate resident Tasks:
+
+- Unit's `lifecycle/reap::bury` services up to four pending terminal Tasks and
+  four retained husks per turn, retains Busy retirement and arms deadline retry.
+  Scheduler and non-isolated idle paths supply progress even without runnable
+  Tasks. Moving that continuation into a new Task would require independent
+  notification admission and a shutdown lifetime that does not count its own
+  cleanup service in `tally::done()`. Keep this owner-controlled fallback.
+- Nest's `authority/external::maintain` combines Cell changes, retained binding
+  progression and interrupt-router rearming. The latter has controller-Hart
+  locality. There is no separately registered retirement notification/Task
+  lifetime here; moving this whole call to a migratable Task would violate the
+  locality boundary. Retained translation obligations stay with Nest, and
+  synchronous work remains synchronous.
+
+Consequently only the existing observer is instantiated under `work` today.
+Lifecycle, retirement, memory and interrupt directories are absent. A future
+independent Task must first supply an owner-controlled bounded step, distinguish
+runnable remainder from hardware-blocked obligations, register its own wake
+source before sleeping, and preserve scheduler-stack shutdown/failure progress.
+The observer is not a dispatcher for those responsibilities.

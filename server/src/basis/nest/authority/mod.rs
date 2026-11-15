@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 
 use super::{Nest, Span};
 use crate::basis::pend::{Pend, SourceAuthorization};
-use crate::metal::sync::LegacyLock;
+use crate::basis::sync::LegacyLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::pend::PendStatus;
@@ -102,7 +102,7 @@ struct Ranges {
 }
 
 pub(crate) struct ReservationRegistry {
-    ranges: LegacyLock<crate::metal::sync::order::NestAuthority, Ranges>,
+    ranges: LegacyLock<crate::basis::sync::order::NestAuthority, Ranges>,
 }
 
 impl ReservationRegistry {

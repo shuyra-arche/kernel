@@ -42,6 +42,7 @@ pub(crate) mod metal {
     }
 }
 pub(crate) mod basis {
+    pub(crate) use crate::metal::sync;
     pub(crate) mod nest {
         pub(crate) use kernel_api::model::identity::TeamId as NestId;
     }

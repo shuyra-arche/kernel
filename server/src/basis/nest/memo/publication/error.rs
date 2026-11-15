@@ -1,6 +1,6 @@
 use crate::basis::cell::page::RetainError;
 
-use crate::metal::generic::iommu::HardwareError;
+use crate::metal::generic::mmu::external::HardwareError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Error {

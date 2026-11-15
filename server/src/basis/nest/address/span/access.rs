@@ -5,7 +5,7 @@ use core::num::NonZeroUsize;
 use crate::basis::nest::NestError;
 use kernel_api::address::VirtAddr;
 
-use crate::metal::generic::mmu::Attributes;
+use crate::metal::generic::mmu::internal::Attributes;
 
 bitflags! {
     /// 映射权限的逻辑三位：只讲读写执行。
@@ -158,7 +158,7 @@ impl ActiveRange {
                 let part_lo = rlo.max(lo);
                 let part_hi = rhi.min(hi);
                 out.push(Self {
-                    start: crate::metal::mmu::canonical(part_lo),
+                    start: crate::metal::mmu::internal::canonical(part_lo),
                     size: NonZeroUsize::new(part_hi - part_lo + 1).unwrap(),
                     current: access,
                     ..*range
@@ -167,7 +167,7 @@ impl ActiveRange {
             if rhi > hi {
                 let part_lo = hi + 1;
                 out.push(Self {
-                    start: crate::metal::mmu::canonical(part_lo),
+                    start: crate::metal::mmu::internal::canonical(part_lo),
                     size: NonZeroUsize::new(rhi - part_lo + 1).unwrap(),
                     ..*range
                 });

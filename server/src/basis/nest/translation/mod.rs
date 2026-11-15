@@ -19,16 +19,18 @@ use super::memo::publication::Publication;
 use super::{Access, Span};
 use super::{Asid, NestError};
 use crate::basis::cell::page::{Change, Page};
-use crate::metal::generic::mmu::PageTable;
-use crate::metal::mmu::Geometry;
+use crate::metal::generic::mmu::internal::PageTable;
+use crate::metal::mmu::internal::Geometry;
 use kernel_api::address::VirtAddr;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
 #[cfg(debug_assertions)]
-use {super::Nest, crate::metal::generic::mmu::Attributes, kernel_api::address::PageOffset};
+use {
+    super::Nest, crate::metal::generic::mmu::internal::Attributes, kernel_api::address::PageOffset,
+};
 
-use crate::metal::generic::mmu::fence::Completed;
-use crate::metal::generic::mmu::fence::Request;
-use crate::metal::mmu::Table;
+use crate::metal::generic::mmu::internal::fence::Completed;
+use crate::metal::generic::mmu::internal::fence::Request;
+use crate::metal::mmu::internal::Table;
 use phase::ClosePhase;
 
 use self::retirement::{Fenced, Retirement};

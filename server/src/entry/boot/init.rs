@@ -13,20 +13,20 @@ use kernel_api::abi::call::pend::PendFail;
 pub unsafe fn init(platform: crate::metal::platform::Platform) -> Result<(), BootError> {
     console::init();
     facts::init(platform)?;
-    crate::metal::mmu::mode::init().map_err(BootError::PagingMode)?;
+    crate::metal::mmu::internal::mode::init().map_err(BootError::PagingMode)?;
     console::_write(format_args!(
         "cpu: admitted={} boot={} paging={:?}\n",
         facts::info().hart.count(),
         crate::metal::hart::firmware_id().get(),
-        crate::metal::mmu::mode::mode(),
+        crate::metal::mmu::internal::mode::mode(),
     ));
     crate::metal::allocator::init().map_err(BootError::Allocator)?;
     // 锁序检测要在任何被验证的调用之前启用：分配器就绪即可建池，
     // 之后的空间 / 时钟 / 栈初始化都在它的看护下跑。
     // 池按机器建一次：测试台架会重复走公共 init，重复就是“已经启用”。
     #[cfg(debug_assertions)]
-    match crate::metal::sync::init_deadlock(crate::metal::hart::hart_count()) {
-        Ok(()) | Err(crate::metal::sync::DeadlockInitError::AlreadyInit) => {}
+    match crate::basis::sync::init_deadlock(crate::metal::hart::hart_count()) {
+        Ok(()) | Err(crate::basis::sync::DeadlockInitError::AlreadyInit) => {}
         Err(error) => return Err(BootError::Dependencies(error)),
     }
     super::space::init().map_err(BootError::KernelSpace)?;

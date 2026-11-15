@@ -33,7 +33,7 @@
 +pub(crate) mod probe;
 --- a/server/src/basis/nest/translation/retirement.rs
 +++ b/server/src/basis/nest/translation/retirement.rs
-@@ -106,6 +106,7 @@
+@@ -108,6 +108,7 @@
  
      /// Keep all obligations available for the retry.
      pub(in crate::basis::nest) fn fail(&mut self) {
@@ -43,11 +43,11 @@
              for mapping in &self.mappings {
 --- a/server/src/entry/boot/mod.rs
 +++ b/server/src/entry/boot/mod.rs
-@@ -87,6 +87,7 @@
+@@ -89,6 +89,7 @@
  }
  
  extern "C" fn run_on_stack() -> ! {
-+    crate::metal::mmu::completion::activity_fences::run();
++    crate::metal::mmu::internal::completion::activity_fences::run();
      #[cfg(feature = "latency")]
      crate::metal::measure::running();
      restore(scheduler::run())
@@ -71,8 +71,8 @@
          unsafe { task.capture_extensions(frame.status()) };
      }
      let ident = ident();
---- a/server/src/metal/riscv/mmu/completion.rs
-+++ b/server/src/metal/riscv/mmu/completion.rs
+--- a/server/src/metal/riscv/mmu/internal/completion.rs
++++ b/server/src/metal/riscv/mmu/internal/completion.rs
 @@ -67,7 +67,7 @@
              participants[word] |= bit;
              mailboxes[slot.get()].request(round);
@@ -112,10 +112,10 @@
      }
  }
 +
-+#[path = "../../../../tests/target/basis/nest/memo/activity/fences.rs"]
++#[path = "../../../../../tests/target/basis/nest/memo/activity/fences.rs"]
 +pub(crate) mod activity_fences;
---- a/server/src/metal/riscv/mmu/table/mod.rs
-+++ b/server/src/metal/riscv/mmu/table/mod.rs
+--- a/server/src/metal/riscv/mmu/internal/table/mod.rs
++++ b/server/src/metal/riscv/mmu/internal/table/mod.rs
 @@ -68,7 +68,9 @@
                  if level != 0 || snapshot.paddr() as usize != physical.as_usize() {
                      return Err(NestError::NotAligned);
