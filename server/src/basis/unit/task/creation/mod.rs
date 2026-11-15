@@ -176,7 +176,7 @@ impl TaskBuilder {
 
         let root = self.team.nest.root();
         let supervisor = self.team.nest.kind().is_supervisor();
-        let frame = unsafe { &mut *(frame_pa.as_usize() as *mut TrapContext) };
+        let frame = unsafe { &mut *(crate::metal::physical::write::<TrapContext>(frame_pa)) };
         unsafe {
             let ktc = kernel()
                 .expect("kernel team not initialized")

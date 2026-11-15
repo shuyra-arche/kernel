@@ -1,10 +1,9 @@
 use kernel_api::model::cell::PAGE_SIZE;
 
-use super::PAGE_SHIFT;
 use super::metadata::BlockMeta;
 
 pub(super) struct Tally {
-    base: usize,
+    pages: crate::metal::allocator::pages::Pages<'static>,
     cells: *mut BlockMeta,
     len: usize,
     guard: crate::basis::sync::LegacyLock<crate::basis::sync::order::Tally, ()>,
@@ -14,9 +13,13 @@ pub(super) struct Tally {
 unsafe impl Sync for Tally {}
 
 impl Tally {
-    pub(super) fn new(base: usize, cells: *mut BlockMeta, len: usize) -> Self {
+    pub(super) fn new(
+        pages: crate::metal::allocator::pages::Pages<'static>,
+        cells: *mut BlockMeta,
+        len: usize,
+    ) -> Self {
         Self {
-            base,
+            pages,
             cells,
             len,
             guard: crate::basis::sync::LegacyLock::new(()),
@@ -29,12 +32,12 @@ impl Tally {
 
     fn idx(&self, pa: usize) -> Option<usize> {
         let page = pa & !(PAGE_SIZE - 1);
-        let idx = page.checked_sub(self.base)? >> PAGE_SHIFT;
+        let idx = self.pages.index(page)?;
         (idx < self.len).then_some(idx)
     }
 
     pub(super) fn frame_of(&self, idx: usize) -> usize {
-        self.base + (idx << PAGE_SHIFT)
+        self.pages.address(idx).expect("valid compact Tally index")
     }
 
     pub(super) fn len(&self) -> usize {

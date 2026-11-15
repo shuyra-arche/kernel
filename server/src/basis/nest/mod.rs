@@ -24,9 +24,6 @@ use crate::basis::sync::LegacyGuard;
 use crate::basis::sync::LegacyLock;
 use crate::basis::unit::anchor::Anchor;
 use crate::metal::generic::mmu::internal::{Attributes, Domain, PageTable, fence};
-use crate::metal::layout::TEAM_FRAME_BASE;
-use crate::metal::layout::TEAM_FRAME_WINDOW_SIZE;
-use crate::metal::layout::TRAP_STACK_BASE;
 use crate::metal::mmu::internal::{self as mmu, Geometry, Root, Table, identity};
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
@@ -208,24 +205,11 @@ impl Nest {
     fn build(kind: SpaceKind, kernel: bool) -> Result<Arc<Self>, NestError> {
         let root = Table::root()?;
         let mut layout = Layout::new();
-        layout.register_window(
-            RegionKind::Normal,
-            crate::metal::layout::IMAGE_BASE.as_usize(),
-            mmu::upper().as_usize() - 1,
-        )?;
-        layout.register_window(
-            RegionKind::Kernel,
-            TEAM_FRAME_BASE.as_usize(),
-            TEAM_FRAME_BASE.as_usize() + TEAM_FRAME_WINDOW_SIZE - 1,
-        )?;
+        let plan = crate::metal::layout::plan();
+        layout.register_window(RegionKind::Normal, plan.normal.base, plan.normal.last)?;
+        layout.register_window(RegionKind::Kernel, plan.team.base, plan.team.last)?;
         if kernel {
-            let dram = crate::entry::boot::facts::info().memory.envelope();
-            let base = mmu::lower()
-                .as_usize()
-                .checked_add(dram.base)
-                .and_then(|base| base.checked_add(dram.size))
-                .ok_or(NestError::DramOverlap)?;
-            layout.register_window(RegionKind::Resource, base, TRAP_STACK_BASE.as_usize() - 1)?;
+            layout.register_window(RegionKind::Resource, plan.resource.base, plan.resource.last)?;
         }
         let life = Anchor::try_new()?;
         let id = next_id()?;

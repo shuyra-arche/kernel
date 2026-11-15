@@ -31,7 +31,7 @@ pub(crate) fn install_frame_kinds(_frames: usize) -> Result<(), super::InitError
 }
 
 #[cfg(not(debug_assertions))]
-pub(crate) fn install_block_kinds(_base: usize, _len: usize) -> Result<(), super::InitError> {
+pub(crate) fn install_block_kinds() -> Result<(), super::InitError> {
     Ok(())
 }
 

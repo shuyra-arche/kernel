@@ -6,18 +6,21 @@ use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
 
-pub const IMAGE_BASE: VirtAddr = VirtAddr::wrap(0x1_0000);
-
+pub const IMAGE_BASE: VirtAddr = VirtAddr::wrap(plan::IMAGE_BASE);
 pub(crate) const TASK_STACK_SIZE: usize = 64 * 1024;
 pub(crate) const TASK_STACK_GUARD: usize = PAGE_SIZE;
-
-pub const MAX_HART_SLOTS: usize = 4096;
-
-pub(crate) const TRAMPOLINE: VirtAddr = VirtAddr::wrap(0xFFFF_FFFF_FFFF_F000);
-
-pub(crate) const KERNEL_TOP: VirtAddr =
-    VirtAddr::wrap(TRAMPOLINE.as_usize() - (2 * 1024 * 1024 - PAGE_SIZE));
-
+pub const MAX_HART_SLOTS: usize = plan::MAX_HART_SLOTS;
+pub(crate) const TRAMPOLINE: VirtAddr = VirtAddr::wrap(plan::TRAMPOLINE);
+pub(crate) const KERNEL_TOP: VirtAddr = VirtAddr::wrap(plan::KERNEL_TOP);
+pub(crate) const HART_FRAME_SLOTS: usize = MAX_HART_SLOTS;
+pub(crate) const HART_FRAME_WINDOW_SIZE: usize = plan::HART_FRAME_WINDOW_SIZE;
+pub(crate) const HART_FRAME_BASE: VirtAddr = VirtAddr::wrap(plan::HART_FRAME_BASE);
+pub(crate) const TEAM_FRAME_WINDOW_SIZE: usize = plan::TEAM_FRAME_WINDOW_SIZE;
+pub(crate) const TEAM_FRAME_BASE: VirtAddr = VirtAddr::wrap(plan::TEAM_FRAME_BASE);
+pub(crate) const TRAP_STACK_SLOT_SIZE: usize = plan::TRAP_STACK_SLOT_SIZE;
+pub(crate) const TRAP_STACK_SLOT_SHIFT: usize = 16;
+pub(crate) const TRAP_STACK_GUARD: usize = PAGE_SIZE;
+pub(crate) const TRAP_STACK_BASE: VirtAddr = VirtAddr::wrap(plan::TRAP_STACK_BASE);
 pub(crate) fn trampoline_pa() -> PhysAddr {
     unsafe extern "C" {
         static __trampoline_start: u8;
@@ -25,25 +28,13 @@ pub(crate) fn trampoline_pa() -> PhysAddr {
     PhysAddr::from_raw(::core::ptr::addr_of!(__trampoline_start) as usize)
 }
 
-pub(crate) const HART_FRAME_SLOTS: usize = MAX_HART_SLOTS;
-pub(crate) const HART_FRAME_BASE: VirtAddr =
-    VirtAddr::wrap(KERNEL_TOP.as_usize() - HART_FRAME_SLOTS * PAGE_SIZE);
-pub(crate) const TEAM_FRAME_WINDOW_SIZE: usize = 64 * 1024 * 1024;
-pub(crate) const TEAM_FRAME_BASE: VirtAddr =
-    VirtAddr::wrap(HART_FRAME_BASE.as_usize() - TEAM_FRAME_WINDOW_SIZE);
-
-pub(crate) const TRAP_STACK_SLOT_SIZE: usize = 64 * 1024;
-pub(crate) const TRAP_STACK_SLOT_SHIFT: usize = 16;
-pub(crate) const TRAP_STACK_GUARD: usize = PAGE_SIZE;
-pub(crate) const TRAP_STACK_BASE: VirtAddr =
-    VirtAddr::wrap(TEAM_FRAME_BASE.as_usize() - (MAX_HART_SLOTS << TRAP_STACK_SLOT_SHIFT));
-
 const _: () = {
+    assert!(HART_FRAME_SLOTS * PAGE_SIZE <= HART_FRAME_WINDOW_SIZE);
     assert!(TRAMPOLINE.as_usize().is_multiple_of(PAGE_SIZE));
     assert!(HART_FRAME_BASE.as_usize().is_multiple_of(PAGE_SIZE));
     assert!(KERNEL_TOP.as_usize().is_multiple_of(2 * 1024 * 1024));
     assert!(TRAMPOLINE.as_usize() - KERNEL_TOP.as_usize() == 2 * 1024 * 1024 - PAGE_SIZE);
-    assert!(HART_FRAME_BASE.as_usize() + HART_FRAME_SLOTS * PAGE_SIZE == KERNEL_TOP.as_usize());
+    assert!(HART_FRAME_BASE.as_usize() + HART_FRAME_WINDOW_SIZE == KERNEL_TOP.as_usize());
     assert!(HART_FRAME_BASE.as_usize().is_multiple_of(2 * 1024 * 1024));
     assert!(TEAM_FRAME_WINDOW_SIZE.is_multiple_of(2 * 1024 * 1024));
     assert!(TEAM_FRAME_BASE.as_usize().is_multiple_of(2 * 1024 * 1024));
@@ -86,4 +77,25 @@ pub(crate) fn validate() {
         TRAP_STACK_BASE.as_usize() + (MAX_HART_SLOTS << TRAP_STACK_SLOT_SHIFT)
             == TEAM_FRAME_BASE.as_usize()
     );
+}
+
+mod plan;
+pub(crate) use plan::KernelLayout;
+static PLAN: crate::metal::sync::OnceLock<KernelLayout> = crate::metal::sync::OnceLock::new();
+
+pub(crate) fn init() -> Result<(), crate::basis::nest::NestError> {
+    let facts = crate::entry::boot::facts::info();
+    let geo =
+        crate::metal::mmu::internal::mode::geometry(crate::metal::mmu::internal::mode::mode());
+    let plan = KernelLayout::new(
+        geo.va_bits as usize,
+        facts.hart.count(),
+        facts.memory.envelope().range().end,
+    )
+    .ok_or(crate::basis::nest::NestError::DramOverlap)?;
+    PLAN.set(plan)
+        .map_err(|_| crate::basis::nest::NestError::NoRegion)
+}
+pub(crate) fn plan() -> &'static KernelLayout {
+    PLAN.get().expect("Kernel layout not frozen")
 }

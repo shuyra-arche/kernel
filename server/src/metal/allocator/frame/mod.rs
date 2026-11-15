@@ -43,17 +43,11 @@ unsafe impl Allocator for FrameAllocator {
             let power = block_power(size.max(layout.align()));
             let index = unsafe { frame.split_block(power) }.ok_or(AllocError)?;
             frame.allocated += PAGE_SIZE << power;
-            let addr = frame.frame_addr(index) as *mut u8;
-            #[cfg(debug_assertions)]
-            {
-                let a = addr as usize;
-                assert!(
-                    (a >= frame.base) && (a < frame.edge),
-                    "frame alloc out of range: {a:#x} not in [{:#x}, {:#x})",
-                    frame.base,
-                    frame.edge
-                );
-            }
+            let addr = unsafe {
+                crate::metal::physical::write::<u8>(kernel_api::address::PhysAddr::from_raw(
+                    frame.frame_addr(index),
+                ))
+            };
             crate::metal::allocator::statistics::record_frame_take(index, power);
             Ok(NonNull::slice_from_raw_parts(
                 NonNull::new(addr).ok_or(AllocError)?,
@@ -87,16 +81,6 @@ unsafe impl Allocator for FrameAllocator {
                 let size = layout.size().max(PAGE_SIZE);
                 let power = block_power(size.max(layout.align()));
                 let addr = ptr.addr().get();
-                #[cfg(debug_assertions)]
-                {
-                    let a = addr;
-                    assert!(
-                        (a >= frame.base) && (a < frame.edge),
-                        "frame dealloc out of range: {a:#x} not in [{:#x}, {:#x})",
-                        frame.base,
-                        frame.edge
-                    );
-                }
                 let index = frame.frame_index(addr);
                 crate::metal::allocator::statistics::record_frame_give(index);
                 frame.merge_block(index, power);
