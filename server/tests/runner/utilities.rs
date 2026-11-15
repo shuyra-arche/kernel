@@ -30,7 +30,8 @@ pub fn baseline(path: &Path) -> Result<()> {
 }
 pub fn symbolize(elf: &Path, serial: &Path, addr2line: &str) -> Result<()> {
     let pc = Regex::new(r"\bpc=(0x[0-9a-fA-F]+)")?;
-    for line in fs::read_to_string(serial)?.lines() {
+    let bytes = fs::read(serial)?;
+    for line in String::from_utf8_lossy(&bytes).lines() {
         if (line.contains("source=Trap") || line.starts_with("frame source="))
             && let Some(m) = pc.captures(line)
         {

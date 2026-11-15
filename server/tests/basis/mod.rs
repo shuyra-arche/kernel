@@ -39,6 +39,7 @@ pub mod proof;
 mod name;
 
 #[allow(dead_code)]
+#[path = "model.rs"]
 mod basis;
 
 mod admission;

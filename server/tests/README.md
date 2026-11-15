@@ -23,7 +23,7 @@ Cell, Flat and Nest stays at their nearest source parent, `basis/mod.rs`.
 | room | `basis/room/mod.rs`: deadlines, scheduling, timers, shutdown and reservations |
 | sync | `metal/riscv/sync/mod.rs`: production admission, FIFO, diagnostics and UI lifetimes |
 | allocator | `metal/allocator/mod.rs`: frame allocation and failure |
-| registration | `basis/pend/registration/mod.rs`: ledger, branch and export lifetimes |
+| registration | `basis/pend/ledger/mod.rs`: ledger, branch and export lifetimes |
 | invocation | `entry/call/mod.rs`: production request delivery and replay |
 | context | `metal/riscv/switcher/context/mod.rs`: extension context policy |
 | console | `metal/riscv/console/mod.rs`: output admission |

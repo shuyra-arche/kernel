@@ -6,6 +6,9 @@ if [[ ${EVENT:-} != pull_request ]]; then
     all
 else
     : "${BASE:?PR base required}" "${HEAD:?PR head required}"
+    paths=$(mktemp)
+    trap 'rm -f "$paths"' EXIT
+    git diff --name-only -z "$BASE" "$HEAD" > "$paths"
     while IFS= read -r -d '' path; do
         case $path in
             api/*|client/*|server/src/*|server/Cargo.toml|server/build.rs|Cargo.*|.cargo/*|.github/workflows/check.yml|server/tests/runner/*|tools/verification-scope.sh) all ;;
@@ -15,7 +18,7 @@ else
             server/tests/target/metal/riscv/mmu/completion/*) run[smp]=true ;;
             server/tests/target/metal/riscv/iommu/*|server/tests/metal/riscv/iommu/*|server/tests/support/iommu/*) run[iommu]=true ;;
         esac
-    done < <(git diff --name-only -z "$BASE" "$HEAD")
+    done < "$paths"
 fi
 guest=false
 for key in native smp activity flat room system iommu; do

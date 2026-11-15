@@ -163,7 +163,11 @@ fn iommu_on_real_qemu_registers() {
         .unwrap();
         let output = run(command, &evidence, name, Duration::from_secs(60));
         let serial = String::from_utf8_lossy(&output.stdout);
-        assert_eq!(output.status.success(), pass, "{name}: {serial}");
+        assert_eq!(
+            output.status.code(),
+            Some(if pass { 0 } else { 1 }),
+            "{name}: {serial}"
+        );
         assert!(
             serial.lines().any(|line| line.contains(expected)),
             "{name}: {serial}"

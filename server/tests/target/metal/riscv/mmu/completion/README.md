@@ -8,7 +8,7 @@ verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 ```
 
 This provider-owned composition selects the CPU cases of Vanllia's native ABI 11
-fixture at `50ebf0feaae16374ba431f83a515fe6ce273c8b7`. It archives an exact Kernel
+fixture at `fba906f74cf56b275603c4370b736cde1b0cea20`. It archives an exact Kernel
 HEAD and the fixture, patches API/Client/Server to that one provider, verifies reviewed composition preimages and retains each applied patch. The paired
 platform qualifies only 128 MiB coherent QEMU virt RAM, with no External route,
 executable Publish, passthrough or hotplug.

@@ -24,6 +24,7 @@ mod delegation;
 #[path = "../../../../src/basis/pend/source/epoch.rs"]
 mod epoch;
 mod exports;
+mod heirs;
 #[allow(dead_code, unused_imports)]
 #[path = "../../../../src/basis/pend/ledger/mod.rs"]
 mod ledger;
@@ -32,8 +33,6 @@ mod maintenance;
 #[path = "../../../../src/basis/name/mod.rs"]
 mod name;
 mod reservation;
-#[path = "ledger.rs"]
-mod reservations;
 mod retirement;
 #[allow(dead_code)]
 mod support;

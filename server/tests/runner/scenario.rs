@@ -95,6 +95,17 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     let mut command = Command::new("cargo");
     command.arg("build");
     command.env("RUSTFLAGS", FLAGS).current_dir(&provider);
+    for name in [
+        "CARGO_TARGET_DIR",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "ACTIVITY_STOPPED",
+        "ACTIVITY_UNSUPPORTED",
+        "IRQ_EVENTS",
+        "ROOM_COLD",
+        "FLAT_PROBE_PROVIDER",
+    ] {
+        command.env_remove(name);
+    }
     match &kind {
         Kind::Smp => {
             compose::apply("smp-provider", &provider, &patches)?;

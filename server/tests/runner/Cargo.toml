@@ -16,7 +16,7 @@ name = "contracts"
 path = "tests/mod.rs"
 
 [dependencies]
-vanllia-verification = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "50ebf0feaae16374ba431f83a515fe6ce273c8b7" }
+vanllia-verification = { git = "https://github.com/shuyra-arche/vanllia.git", rev = "fba906f74cf56b275603c4370b736cde1b0cea20" }
 clap = { version = "4", features = ["derive"] }
 regex = "1"
 serde_json = "1"

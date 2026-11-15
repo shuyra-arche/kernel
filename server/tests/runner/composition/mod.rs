@@ -32,6 +32,11 @@ pub fn apply(name: &str, root: &Path, evidence: &Path) -> Result<()> {
     for check in [true, false] {
         let mut command = Command::new("git");
         command
+            .current_dir(root)
+            .env("GIT_CEILING_DIRECTORIES", root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE");
+        command
             .args(["apply", "--unsafe-paths"])
             .arg(format!("--directory={}", root.display()));
         if check {

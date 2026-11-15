@@ -67,6 +67,7 @@ jobs:
         run: |
           bash tools/tests/layout.sh
           bash tools/tests/release.sh
+          bash tools/tests/scope.sh
           bash tools/check-layout.sh
           bash tools/check-tooling.sh
       - name: Install CI toolchain
@@ -122,7 +123,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shuyra-arche/vanllia
-          ref: 50ebf0feaae16374ba431f83a515fe6ce273c8b7
+          ref: fba906f74cf56b275603c4370b736cde1b0cea20
           path: .integration/vanllia
           persist-credentials: false
       - name: Build host runners
@@ -204,6 +205,8 @@ jobs:
             .integration/*/boot/*
             .integration/*/build/*
             .integration/*/resolve/*
+            .integration/system-runtime/*-resolve/*
+            .integration/system-runtime/*-locked/*
             .integration/*/harts-*/*.json
             .integration/*/harts-*/*.log
             .integration/*/*/inputs.json
@@ -254,7 +257,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shuyra-arche/vanllia
-          ref: 50ebf0feaae16374ba431f83a515fe6ce273c8b7
+          ref: fba906f74cf56b275603c4370b736cde1b0cea20
           path: .integration/vanllia
           persist-credentials: false
       - name: Compare fixed workloads

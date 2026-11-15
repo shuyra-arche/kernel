@@ -32,7 +32,9 @@ cargo +nightly fmt --all -- --check
 cargo +nightly build --locked --workspace --target riscv64gc-unknown-none-elf
 cargo +nightly build --locked --workspace --release --target riscv64gc-unknown-none-elf
 cargo +nightly test --locked --workspace --target x86_64-unknown-linux-gnu
+cargo +nightly test --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
 bash tools/check-layout.sh
+bash tools/check-tooling.sh
 ```
 
 For guest execution, use the [QEMU test guide](server/tests/README.md). Build

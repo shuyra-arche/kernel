@@ -33,10 +33,11 @@ pub fn run(root: &Path) -> Result<()> {
         .map(|c| c[1].to_owned())
         .collect();
     let mut reach = BTreeMap::<String, BTreeSet<String>>::new();
+    let words = Regex::new(r"\w+")?;
     for c in Regex::new(r"(?m)^    (\w+) => \[([^\n]*)\],")?.captures_iter(&order) {
         reach.insert(
             c[1].into(),
-            Regex::new(r"\w+")?
+            words
                 .find_iter(&c[2])
                 .map(|m| m.as_str().to_owned())
                 .collect(),

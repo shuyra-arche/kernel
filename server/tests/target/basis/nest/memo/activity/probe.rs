@@ -1,6 +1,8 @@
 //! Test-owned timing/visit counters. Never compiled into the production provider.
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::*};
 static STOPPED: AtomicBool = AtomicBool::new(false);
+// Used only by the separately selected stopped-observer composition.
+#[allow(dead_code)]
 pub(crate) fn stop() {
     STOPPED.store(true, Relaxed);
 }

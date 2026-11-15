@@ -8,7 +8,7 @@ verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 ```
 
 the Rust `activity` runner archives the exact Kernel HEAD and pinned Vanllia fixture
-`50ebf0feaae16374ba431f83a515fe6ce273c8b7`. It builds matching API/Client/Server,
+`fba906f74cf56b275603c4370b736cde1b0cea20`. It builds matching API/Client/Server,
 Capsule 11 and Ledger 11 with the production target flags and the checked-in
 `tests/latency/Cargo.lock`. It removes only the fixture's historical ABI
 feature and device workload, retaining the CPU memory qualification. No device

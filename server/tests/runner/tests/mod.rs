@@ -1,8 +1,59 @@
 #![allow(dead_code)]
+#[path = "../composition/mod.rs"]
+mod composition;
 #[path = "../utilities.rs"]
 mod utilities;
 #[path = "../verify.rs"]
 mod verify;
+#[cfg(unix)]
+#[test]
+fn symbolizer_keeps_literal_compressed_call_pcs_and_rejects_tool_failure() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("kernel-symbolize-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).unwrap();
+    let capture = root.join("addresses");
+    let tool = root.join("addr2line");
+    let serial = root.join("serial.log");
+    std::fs::write(
+        &tool,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$5\" >> '{}'\n",
+            capture.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(&serial,b"\xff\ntrap source=Trap pc=0x102\nframe source=Chain pc=0x206\nstack source=Scan pc=0x300\n").unwrap();
+    utilities::symbolize(&root.join("kernel.elf"), &serial, tool.to_str().unwrap()).unwrap();
+    assert_eq!(std::fs::read_to_string(capture).unwrap(), "0x102\n0x206\n");
+    assert!(utilities::symbolize(&root.join("kernel.elf"), &serial, "/bin/false").is_err());
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn composition_rejects_changed_preimages_before_any_edit() {
+    let root = std::env::temp_dir().join(format!("kernel-preimage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let evidence = root.join("evidence");
+    std::fs::create_dir_all(&evidence).unwrap();
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let paths = [
+        "server/src/entry/boot/mod.rs",
+        "server/src/entry/call/debug.rs",
+    ];
+    for path in paths {
+        std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+        std::fs::copy(source.join(path), root.join(path)).unwrap();
+    }
+    let original = std::fs::read(root.join(paths[0])).unwrap();
+    std::fs::write(root.join(paths[1]), "unreviewed source").unwrap();
+    assert!(composition::apply("room-window", &root, &evidence).is_err());
+    assert_eq!(std::fs::read(root.join(paths[0])).unwrap(), original);
+    std::fs::copy(source.join(paths[1]), root.join(paths[1])).unwrap();
+    composition::apply("room-window", &root, &evidence).unwrap();
+    assert_ne!(std::fs::read(root.join(paths[0])).unwrap(), original);
+    std::fs::remove_dir_all(root).unwrap();
+}
 #[test]
 fn comparison_control_rejects_missing_duplicate_and_malformed_inputs() {
     let pin = "0123456789abcdef0123456789abcdef01234567";

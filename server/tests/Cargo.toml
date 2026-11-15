@@ -68,7 +68,7 @@ path = "metal/allocator/mod.rs"
 
 [[test]]
 name = "registration"
-path = "basis/pend/registration/mod.rs"
+path = "basis/pend/ledger/mod.rs"
 
 [[test]]
 name = "invocation"
