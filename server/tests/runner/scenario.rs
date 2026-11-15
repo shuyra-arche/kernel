@@ -42,6 +42,8 @@ pub enum Commands {
         inputs: Inputs,
         #[arg(long)]
         cancel: bool,
+        #[arg(long)]
+        pressure: bool,
     },
     Retirement {
         #[command(flatten)]
@@ -145,8 +147,11 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
                     compose::apply("retirement-cancel", &provider, &patches)?;
                 }
             }
-            if let Kind::Lifecycle { cancel } = &kind {
+            if let Kind::Lifecycle { cancel, pressure } = &kind {
                 compose::apply("lifecycle-provider", &provider, &patches)?;
+                if *pressure {
+                    compose::apply("lifecycle-pressure", &provider, &patches)?;
+                }
                 if *cancel {
                     compose::apply("lifecycle-cancel", &provider, &patches)?;
                 }
@@ -424,7 +429,11 @@ pub fn run(command: Commands) -> Result<()> {
     let (mut args, kind, baseline, warmup) = match command {
         Commands::Smp { inputs } => (inputs, Kind::Smp, None, false),
         Commands::Shutdown { inputs, quiet } => (inputs, Kind::Shutdown { quiet }, None, false),
-        Commands::Lifecycle { inputs, cancel } => (inputs, Kind::Lifecycle { cancel }, None, false),
+        Commands::Lifecycle {
+            inputs,
+            cancel,
+            pressure,
+        } => (inputs, Kind::Lifecycle { cancel, pressure }, None, false),
         Commands::Retirement { inputs, cancel } => {
             (inputs, Kind::Retirement { cancel }, None, false)
         }

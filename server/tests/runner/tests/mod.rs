@@ -130,15 +130,29 @@ fn smp_requires_each_actual_writer_to_migrate() {
                 false
             );
         }
-        let kind = verify::Kind::Lifecycle { cancel };
-        assert_eq!(verify::check(log, &kind, 1).unwrap()["passed"], false);
-        let valid = format!(
-            "{log}PASS lifecycle turns=8 cancel={} retained-source=0\n",
-            usize::from(cancel)
-        );
-        assert_eq!(verify::check(&valid, &kind, 1).unwrap()["passed"], true);
-        let stalled = valid.replace("turns=8", "turns=1");
-        assert_eq!(verify::check(&stalled, &kind, 1).unwrap()["passed"], false);
+        for pressure in [false, true] {
+            let kind = verify::Kind::Lifecycle { cancel, pressure };
+            assert_eq!(verify::check(log, &kind, 1).unwrap()["passed"], false);
+            let mut valid = format!(
+                "{log}PASS lifecycle turns=8 cancel={} retained-source=0\n",
+                usize::from(cancel)
+            );
+            if pressure {
+                assert_eq!(verify::check(&valid, &kind, 1).unwrap()["passed"], false);
+                valid.push_str("PASS lifecycle-pressure checks=4 denied=4 blocked=2 live=0\n");
+                for invalid in [
+                    valid.replace("checks=4", "checks=0"),
+                    valid.replace("denied=4", "denied=5"),
+                    valid.replace("live=0", "live=1"),
+                    valid.replace("blocked=2", "blocked=0"),
+                ] {
+                    assert_eq!(verify::check(&invalid, &kind, 1).unwrap()["passed"], false);
+                }
+            }
+            assert_eq!(verify::check(&valid, &kind, 1).unwrap()["passed"], true);
+            let stalled = valid.replace("turns=8", "turns=1");
+            assert_eq!(verify::check(&stalled, &kind, 1).unwrap()["passed"], false);
+        }
     }
 
     assert_eq!(
