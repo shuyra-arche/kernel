@@ -166,6 +166,21 @@ must finish retirement. Both use reviewed source/preimage patches; the probe liv
 under `target/basis/unit/lifecycle`. Debug enrollment enforces NoAllocation before
 handoff. These checks do not constitute a system-wide low-memory stress test.
 
+`verify lifecycle --pressure` refuses allocation and growth on the current Hart
+throughout the COMMIT-protected wait enrollment, in both debug and release. A
+real failed allocation proves refusal is active; the attempt count must show no
+other allocations, and at least one wait must actually enroll. Refusal ends on
+the trap stack before handoff. Peer Harts retain normal allocation behavior.
+Combine `--pressure --cancel` to exercise unexpected service exit and fallback,
+and use `--harts 1 4 --rounds 3` for repeated boots. Every boot still requires the
+memory, exit, CPU retirement and actual multi-Hart migration checks. This is
+focused allocation-failure injection, not exhaustion of all system memory.
+
+```sh
+"$verify" lifecycle --kernel "$PWD" --fixture /path/to/vanllia --output /new/lifecycle-pressure --pressure --harts 1 4 --rounds 3
+"$verify" lifecycle --kernel "$PWD" --fixture /path/to/vanllia --output /new/lifecycle-cancel-pressure --pressure --cancel --harts 1 4 --rounds 3 --profile release
+```
+
 ## Explicit finalization
 
 `verify shutdown` runs the SMP workload with required prepare/finalize probes.
