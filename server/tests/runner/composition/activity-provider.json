@@ -5,5 +5,5 @@
   "server/src/entry/report/shutdown.rs": "6e7b3899751611073ddbccc2164c61108ae61c9dbd62d1dca45d854c6cfea598",
   "server/src/entry/trap/mod.rs": "b1b398d6d32b8c298890def38f258f67a9828e01692c588ab8d06c34608376b8",
   "server/src/metal/riscv/mmu/internal/completion.rs": "4dfb9106a6d99a08e589e76e92ca16de7e61b637a6b5bbb49d2845e04a52e610",
-  "server/src/metal/riscv/mmu/internal/table/mod.rs": "8fc92b057708d9fc18426dfff7f36fc87a76f2b3a0447de127f55cdf96320284"
+  "server/src/metal/riscv/mmu/internal/table/mod.rs": "6c6d240d794ac54d86de50670ee5d567792f97702d133141297750cd29ac4a86"
 }

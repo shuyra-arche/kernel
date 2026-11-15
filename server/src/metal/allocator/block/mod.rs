@@ -28,7 +28,6 @@ use tally::Tally;
 const MIN_POWER: usize = 3;
 const MAX_POWER: usize = (PAGE_SIZE / 2).ilog2() as usize;
 pub(crate) const MAX_SIZE: usize = 1 << MAX_POWER;
-const PAGE_SHIFT: usize = PAGE_SIZE.ilog2() as usize;
 
 fn power_of(size: usize) -> usize {
     size.max(1usize << MIN_POWER).next_power_of_two().ilog2() as usize
@@ -43,10 +42,12 @@ impl BlockAllocator {
     pub fn new() -> Result<Self, InitError> {
         let nodes = crate::metal::hart::hart_count();
         assert!(nodes > 0, "block init: no harts");
-        let m = crate::entry::boot::facts::info().memory.allocation_bounds();
+        let pages = crate::metal::allocator::pages::Pages::new(
+            crate::entry::boot::facts::info().memory.free(),
+        );
 
         let tally = {
-            let meta_len = m.size.div_ceil(PAGE_SIZE);
+            let meta_len = pages.len();
             let meta = crate::metal::allocator::bump::allocator()
                 .allocate(Layout::array::<BlockMeta>(meta_len).map_err(|_| InitError::OutOfMemory)?)
                 .map_err(|_| InitError::OutOfMemory)?;
@@ -57,11 +58,11 @@ impl BlockAllocator {
                 }
             }
             Box::leak(
-                Box::try_new(Tally::new(m.base, cells, meta_len))
+                Box::try_new(Tally::new(pages, cells, meta_len))
                     .map_err(|_| InitError::OutOfMemory)?,
             )
         };
-        crate::metal::allocator::statistics::install_block_kinds(m.base, m.size)?;
+        crate::metal::allocator::statistics::install_block_kinds()?;
 
         let mut pools = Vec::new();
         pools

@@ -19,6 +19,7 @@ pub(crate) struct Reading<'a> {
     pub(crate) from: TaskId,
     pub(crate) bytes: Arc<Payload>,
     finished: bool,
+    at: u64,
 }
 
 impl Reading<'_> {
@@ -26,7 +27,7 @@ impl Reading<'_> {
     /// identity, publish prepared authority and consume under one queue guard.
     /// The callback must be infallible, allocation-free, and never inspect this queue.
     pub(crate) fn commit(&mut self, publish: impl FnOnce()) -> Result<(), CloneFail> {
-        let hand = {
+        {
             let mut pending = self.meta.pending.lock();
             let Pending::Queue(q) = &mut *pending else {
                 return Err(CloneFail::Dead);
@@ -45,10 +46,9 @@ impl Reading<'_> {
             };
             q.bytes -= hand.buf.len();
             self.finished = true;
-            hand
-        };
+            drop(hand);
+        }
         HANDS_LIVE.fetch_sub(1, Ordering::Relaxed);
-        note_hand_off(self.meta, hand.from, hand.buf.len(), hand.at);
         Ok(())
     }
 }
@@ -56,6 +56,9 @@ impl Drop for Reading<'_> {
     fn drop(&mut self) {
         // The caller drops its Task/table/commit guards before this reservation.
         if self.finished {
+            // Logging can translate its buffer through Kernel Nest. Defer it
+            // until the caller has released ledger/commit publication guards.
+            note_hand_off(self.meta, self.from, self.bytes.len(), self.at);
             let _ = sign::wake(key(self.meta, CloneCondition::Empty), &self.meta.life());
             let _ = sign::wake(key(self.meta, CloneCondition::Push), &self.meta.life());
             let _ = sign::wake(key(self.meta, CloneCondition::Pull), &self.meta.life());
@@ -92,6 +95,7 @@ pub(crate) fn read(meta: &CloneView) -> Result<Reading<'_>, CloneFail> {
         from: hand.from,
         bytes: hand.buf.clone(),
         finished: false,
+        at: hand.at,
     };
     queue.hands.push_front(Slot::Reading(hand));
     Ok(reading)
