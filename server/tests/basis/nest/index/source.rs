@@ -43,6 +43,16 @@ fn bounded_pass_retains_late_completion_and_never_needs_allocation() {
         assert!(rest.contains(&id));
     }
 
+    // A later prune request cannot downgrade a wake queued behind a prune pass.
+    sign::prepare();
+    mechanism::forget();
+    mechanism::advance();
+    mechanism::request();
+    mechanism::forget();
+    drain();
+    let notified = sign::take();
+    assert!(spans.iter().all(|span| notified.contains(&span.0)));
+
     // Pruning does not signal live waiters, and an expired binding does not
     // keep the Span or any authoritative resource alive.
     sign::prepare();
