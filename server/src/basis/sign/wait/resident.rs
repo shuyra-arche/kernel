@@ -106,8 +106,11 @@ impl Resident {
             let key = WakeKey::Alarm {
                 task: task.ident.id,
             };
+            let doomed = crate::basis::unit::lifecycle::take_doomed(task.ident.id);
             drop(task);
-            if take_beacon(key) {
+            if let Some(reason) = doomed {
+                block::Blocked::Quit(reason)
+            } else if take_beacon(key) {
                 block::Blocked::Resume
             } else {
                 let (task, next) = current().handoff(
