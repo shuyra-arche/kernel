@@ -196,6 +196,10 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
             if mode == "realtime" {
                 compose::apply("realtime-provider", &provider, &patches)?;
             }
+            compose::copy(
+                "target/basis/unit/stack.rs",
+                &fixture.join("tests/memory/guest/stack.rs"),
+            )?;
             let guest = match mode.as_str() {
                 "irq" => "interrupt.rs",
                 "realtime" => "realtime.rs",
@@ -276,7 +280,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         let path = root.join("initrd.bin");
         fs::write(
             &path,
-            capsule::initrd(&fs::read(root.join("guest.elf"))?, 12)?,
+            capsule::initrd(&fs::read(root.join("guest.elf"))?, 13)?,
         )?;
         Some(path)
     };

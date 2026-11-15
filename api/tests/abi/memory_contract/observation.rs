@@ -120,12 +120,12 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
 #[test]
 fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id() {
     let expected: &[&[u64]] = &[
-        &[12, 12, 18, 0, 0, 7, 11],
-        &[12, 12, 18, 0, 1, 7, 11, 512],
-        &[12, 12, 18, 0, 2, 23, 11, 29, 31],
-        &[12, 13, 18, 0, 0, 13, 17],
-        &[12, 13, 18, 0, 1, 13, 17, 19, 512],
-        &[12, 13, 18, 0, 2, 13, 17, 19],
+        &[13, 12, 18, 0, 0, 7, 11],
+        &[13, 12, 18, 0, 1, 7, 11, 512],
+        &[13, 12, 18, 0, 2, 23, 11, 29, 31],
+        &[13, 13, 18, 0, 0, 13, 17],
+        &[13, 13, 18, 0, 1, 13, 17, 19, 512],
+        &[13, 13, 18, 0, 2, 13, 17, 19],
     ];
     for ((query, _), words) in fixtures().into_iter().zip(expected) {
         let request = Request::new(None, Action::Inspect(query)).unwrap();
@@ -175,11 +175,11 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
 #[test]
 fn observation_vectors_preserve_source_publication_and_full_width_faults() {
     let expected: &[&[u64]] = &[
-        &[12, 12, 18, 0, 0, 0, 11, 2, 512, 1024, 0],
-        &[12, 12, 18, 0, 1, 0, 11, 512, 3, 1, 1, 53, 7, 1],
-        &[12, 12, 18, 0, 2, 0, 11, 29, 31, 1, 512, 512, 59, 0, 2, 0],
+        &[13, 12, 18, 0, 0, 0, 11, 2, 512, 1024, 0],
+        &[13, 12, 18, 0, 1, 0, 11, 512, 3, 1, 1, 53, 7, 1],
+        &[13, 12, 18, 0, 2, 0, 11, 29, 31, 1, 512, 512, 59, 0, 2, 0],
         &[
-            12,
+            13,
             13,
             18,
             0,
@@ -194,8 +194,8 @@ fn observation_vectors_preserve_source_publication_and_full_width_faults() {
             u64::MAX - 1,
             u64::MAX,
         ],
-        &[12, 13, 18, 0, 1, 0, 17, 19, 512, 6, 3, 11, 1024, 53, 6, 1],
-        &[12, 13, 18, 0, 2, 0, 17, 19, 7, 512, 512, 0x8000, 1, 6, 0],
+        &[13, 13, 18, 0, 1, 0, 17, 19, 512, 6, 3, 11, 1024, 53, 6, 1],
+        &[13, 13, 18, 0, 2, 0, 17, 19, 7, 512, 512, 0x8000, 1, 6, 0],
     ];
     for ((query, snapshot), words) in fixtures().into_iter().zip(expected) {
         let observation = Observation::new(snapshot).unwrap();

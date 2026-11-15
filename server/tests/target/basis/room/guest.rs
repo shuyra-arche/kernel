@@ -4,6 +4,7 @@
 #![no_main]
 #[allow(dead_code)]
 mod support;
+mod stack;
 use core::{
     fmt::Write,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -44,10 +45,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 fn spawn(deadline: u64) -> TaskId {
     let bytes = UnitCreate::Task {
         team: None,
-        entry: VirtAddr::new(worker as *const () as usize),
-        args: VirtAddr::new(0),
-        count: 0,
-        stack: VirtAddr::new(0),
+        start: stack::Stack::new(worker as *const () as usize, &[], 65536).start,
     }
     .to_bytes();
     loop {

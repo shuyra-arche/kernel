@@ -4,6 +4,33 @@ use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::VirtAddr;
 
 impl Nest {
+    /// Called before preparation and again under COMMIT before publication.
+    /// Only the initial top stack byte must be resident; no entire-stack policy
+    /// or reservation ownership is inferred from the supplied SP.
+    pub(crate) fn validate_start(
+        &self,
+        start: kernel_api::model::unit::TaskStart,
+    ) -> Result<(), NestError> {
+        if !start.valid(crate::metal::mmu::internal::upper().as_usize())
+            || !self.validate_access(start.entry, 2, Access::EXECUTE)
+            || !self.validate_access(start.stack_pointer - 1, 1, Access::WRITE)
+            || (start.argument_count != 0
+                && !self.validate_access(start.arguments, start.argument_count * 8, Access::READ))
+        {
+            return Err(NestError::NoRegion);
+        }
+        Ok(())
+    }
+
+    /// An observation for resident admission, never a retained mapping owner.
+    pub(crate) fn mapping_range(&self, at: VirtAddr) -> Option<(VirtAddr, usize)> {
+        self.state
+            .lock()
+            .index
+            .find(at.as_usize())
+            .map(|span| span.initial_range())
+    }
+
     /// 一段字节窗口是否整段落在用户可达的半边之内。
     pub(crate) fn user_range(at: VirtAddr, size: usize) -> bool {
         let ceiling = crate::metal::mmu::internal::upper().as_usize();

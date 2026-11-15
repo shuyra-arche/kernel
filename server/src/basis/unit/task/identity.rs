@@ -1,5 +1,4 @@
 use crate::basis::nest::Nest;
-use crate::basis::nest::Reservation;
 use crate::basis::nest::Span;
 use alloc::sync::Arc;
 
@@ -18,13 +17,13 @@ pub(crate) fn next_id() -> Result<TaskId, NestError> {
     Ok(TaskId::new(id))
 }
 
-/// 任务自己的内存段：空间、栈（含守卫的保留格）与外壳页。字段由
-/// `TaskBuilder::prepare` 按申请—映射—回滚的次序装配。
+/// Kernel-owned execution storage. Ordinary User Tasks retain no stack owner;
+/// bootstrap transitions alone carry an explicitly private stack receipt.
 pub(crate) struct TaskMemory {
     pub(crate) nest: Arc<Nest>,
-    pub(crate) stack: Option<Arc<Span>>,
+    pub(crate) bootstrap: Option<super::creation::BootstrapStack>,
+    pub(crate) start: kernel_api::model::unit::TaskStart,
     pub(crate) frame: Option<Arc<Span>>,
-    pub(crate) guard: Option<Reservation>,
 }
 
 impl TaskMemory {
@@ -37,17 +36,9 @@ impl TaskMemory {
             }
             self.frame = None;
         }
-        if let Some(mapping) = &self.stack {
-            if !self.nest.settled(mapping.identity()) {
-                self.nest.detach(mapping.whole())?;
-            }
-            self.stack = None;
-        }
-        if let Some(guard) = &self.guard {
-            if !self.nest.settled(guard.id()) {
-                self.nest.release_reserved(guard)?;
-            }
-            self.guard = None;
+        if let Some(stack) = &mut self.bootstrap {
+            stack.retire()?;
+            self.bootstrap = None;
         }
         self.nest.reap_reservations();
         Ok(())
@@ -58,12 +49,6 @@ impl Drop for TaskMemory {
     fn drop(&mut self) {
         if let Some(mapping) = self.frame.take() {
             let _ = self.nest.dispose(mapping);
-        }
-        if let Some(mapping) = self.stack.take() {
-            let _ = self.nest.dispose(mapping);
-        }
-        if let Some(guard) = self.guard.take() {
-            let _ = self.nest.cancel_reservation(guard);
         }
     }
 }
@@ -108,11 +93,18 @@ impl TaskIdent {
             let stored = self.memory.lock();
             let memory = stored.as_ref().ok_or(NestError::Busy)?;
             memory.frame.as_ref().ok_or(NestError::NoRegion)?;
-            memory
-                .stack
-                .as_ref()
-                .ok_or(NestError::NoRegion)?
-                .initial_range()
+            if let Some(stack) = &memory.bootstrap {
+                stack
+                    .mapping
+                    .as_ref()
+                    .ok_or(NestError::NoRegion)?
+                    .initial_range()
+            } else {
+                self.team
+                    .nest
+                    .mapping_range(memory.start.stack_pointer - 1)
+                    .ok_or(NestError::NoRegion)?
+            }
         };
         if size > 64 * 1024 {
             return Err(NestError::NoRegion);

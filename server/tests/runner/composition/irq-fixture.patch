@@ -32,7 +32,7 @@
          let route = kernel::entry::boot::memory::topology::Route {
              controller: external.controller as u64,
              requester: external.requester,
-@@ -46,10 +49,10 @@
+@@ -46,7 +49,7 @@
                  ram,
                  routes: alloc::vec![route],
              }])
@@ -40,8 +40,4 @@
 +            
          }
          .unwrap();
--        boot::qualify_memory(topology).unwrap();
-+        let _unqualified_topology = topology;
-         boot::start()
-     });
-     match result {
+         boot::qualify_memory(topology).unwrap();

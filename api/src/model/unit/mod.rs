@@ -5,7 +5,7 @@ mod info;
 mod schedule;
 
 pub use control::{ControlId, ControlKind};
-pub use creation::{CreatedUnit, UnitCreate};
+pub use creation::{CreatedUnit, TaskStart, UnitCreate};
 pub use info::{UnitInfo, UnitQuery, UnitState};
 pub use schedule::{Schedule, ScheduleInfo};
 

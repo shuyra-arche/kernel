@@ -118,7 +118,7 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
     assert_eq!(NestRights::from_bits(1 << 12), Some(NestRights::FAULT));
     for (index, (action, reply)) in mutations().into_iter().zip(results()).enumerate() {
         let request = Request::new(Some(id()), action).unwrap();
-        let mut expected = bytes::<256>(&[12, 13, 26, u64::MAX, 13, 17, 19, 7, 3, index as u64]);
+        let mut expected = bytes::<256>(&[13, 13, 26, u64::MAX, 13, 17, 19, 7, 3, index as u64]);
         if index == 1 {
             set_word(&mut expected, 10, 23);
             set_word(&mut expected, 11, MAX_FAULT_NS);
@@ -129,7 +129,7 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
             Some(request)
         );
         assert!(Request::new(None, action).is_none());
-        let expected = bytes::<128>(&[12, 13, 26, u64::MAX, 2, 0, 12, 17, 19, 8, 4, index as u64]);
+        let expected = bytes::<128>(&[13, 13, 26, u64::MAX, 2, 0, 12, 17, 19, 8, 4, index as u64]);
         assert_eq!(reply.to_bytes(), expected);
         assert_eq!(Reply::from_bytes(&expected), Some(reply));
         assert!(reply.matches(request));
@@ -142,8 +142,8 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
 #[test]
 fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
     let expected_queries = [
-        bytes::<256>(&[12, 13, 18, 0, 4, 13, 17, 19]),
-        bytes::<256>(&[12, 13, 18, 0, 5, 13, 17, 19, 4, u64::MAX - 1, 1, 1 << 63]),
+        bytes::<256>(&[13, 13, 18, 0, 4, 13, 17, 19]),
+        bytes::<256>(&[13, 13, 18, 0, 5, 13, 17, 19, 4, u64::MAX - 1, 1, 1 << 63]),
     ];
     let snapshots = [
         Snapshot::FaultRoute(status()),
@@ -151,7 +151,7 @@ fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
     ];
     let expected_snapshots = [
         bytes::<128>(&[
-            12,
+            13,
             13,
             18,
             0,
@@ -166,7 +166,7 @@ fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
             u64::MAX,
         ]),
         bytes::<128>(&[
-            12,
+            13,
             13,
             18,
             0,

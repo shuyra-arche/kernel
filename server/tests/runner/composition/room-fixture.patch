@@ -1,6 +1,6 @@
 --- a/tests/memory/platform/main.rs
 +++ b/tests/memory/platform/main.rs
-@@ -46,10 +46,10 @@
+@@ -46,7 +46,7 @@
                  ram,
                  routes: alloc::vec![route],
              }])
@@ -8,8 +8,4 @@
 +            
          }
          .unwrap();
--        boot::qualify_memory(topology).unwrap();
-+        let _unqualified_topology = topology;
-         boot::start()
-     });
-     match result {
+         boot::qualify_memory(topology).unwrap();

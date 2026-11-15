@@ -49,19 +49,11 @@ pub enum UnitCreate {
         member_exit: bool,
     },
     /// None selects the caller's Team; other Teams require management authority.
-    ///
-    /// On RV64, `a0` points to the copied argument words and `a1` holds their
-    /// count. The words occupy the end of the writable stack, so its exclusive
-    /// upper bound is `a0 + a1 * 8`, including when `a1` is zero. The initial
-    /// `sp` is `a0` rounded down to a 16-byte boundary.
+    /// Memory is already prepared in the target Nest. No words are copied from
+    /// the creator and the Task acquires no ownership of the user stack.
     Task {
         team: Option<TeamId>,
-        entry: VirtAddr,
-        args: VirtAddr,
-        count: u64,
-        /// Stack size in bytes, rounded up to a base page. Zero selects the
-        /// default size. The writable stack has an unmapped guard below it.
-        stack: VirtAddr,
+        start: TaskStart,
     },
 }
 
@@ -81,19 +73,13 @@ impl UnitCreate {
                 member_exit as usize,
                 0,
             ],
-            Self::Task {
-                team,
-                entry,
-                args,
-                count,
-                stack,
-            } => [
-                1,
+            Self::Task { team, start } => [
+                2, // Tag 1 was the retired Kernel-allocated stack descriptor.
                 team.map_or(0, TeamId::get),
-                entry.get(),
-                args.get(),
-                count as usize,
-                stack.get(),
+                start.entry.get(),
+                start.stack_pointer.get(),
+                start.arguments.get(),
+                start.argument_count,
             ],
         };
         let mut bytes = [0; Self::WIDTH];
@@ -108,14 +94,51 @@ impl UnitCreate {
                 nest: (c != 0).then(|| crate::model::identity::PendId::new(c)),
                 member_exit: d == 1,
             }),
-            1 if a <= isize::MAX as usize => Some(Self::Task {
+            2 if a <= isize::MAX as usize => Some(Self::Task {
                 team: (a != 0).then(|| TeamId::new(a)),
-                entry: VirtAddr::new(b),
-                args: VirtAddr::new(c),
-                count: d as u64,
-                stack: VirtAddr::new(e),
+                start: TaskStart {
+                    entry: VirtAddr::new(b),
+                    stack_pointer: VirtAddr::new(c),
+                    arguments: VirtAddr::new(d),
+                    argument_count: e,
+                },
             }),
             _ => None,
         }
+    }
+}
+
+/// RV64 initial user registers, versioned by the enclosing ABI and descriptor
+/// tag. The Kernel owns all privilege, address-space and trap-context state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TaskStart {
+    pub entry: VirtAddr,
+    pub stack_pointer: VirtAddr,
+    pub arguments: VirtAddr,
+    pub argument_count: usize,
+}
+impl TaskStart {
+    pub const MAX_ARGUMENTS: usize = 64;
+    /// Pure geometry validation. Authorization and current target-Nest mappings
+    /// are checked separately by the Kernel at publication. SP is an exclusive
+    /// boundary, so the user ceiling is allowed; the first store is below it.
+    pub fn valid(self, user_end: usize) -> bool {
+        let pc = self.entry.get();
+        let sp = self.stack_pointer.get();
+        let args = self.arguments.get();
+        self.argument_count <= Self::MAX_ARGUMENTS
+            && pc != 0
+            && pc.is_multiple_of(2)
+            && pc.checked_add(2).is_some_and(|end| end <= user_end)
+            && sp != 0
+            && sp <= user_end
+            && sp.is_multiple_of(16)
+            && args <= user_end
+            && (self.argument_count == 0 || (args != 0 && args.is_multiple_of(8)))
+            && self
+                .argument_count
+                .checked_mul(8)
+                .and_then(|len| args.checked_add(len))
+                .is_some_and(|end| end <= user_end)
     }
 }
