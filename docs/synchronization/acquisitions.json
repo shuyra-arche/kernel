@@ -2613,14 +2613,14 @@
       "source": "let source = sources.lock().after(cursor);"
     },
     {
-      "path": "server/src/basis/nest/memo/source.rs",
+      "path": "server/src/basis/nest/memo/source/mod.rs",
       "line": 362,
       "enclosing_function": "export",
       "operation": "lock",
       "source": ".lock()"
     },
     {
-      "path": "server/src/basis/nest/memo/source.rs",
+      "path": "server/src/basis/nest/memo/source/mod.rs",
       "line": 484,
       "enclosing_function": "borrow",
       "operation": "try_source_borrow",
@@ -6715,14 +6715,14 @@
       "source": "let _serial = actor.pend.lock();"
     },
     {
-      "path": "server/src/entry/call/nest/next.rs",
+      "path": "server/src/entry/call/nest/next/mod.rs",
       "line": 41,
       "enclosing_function": "effect",
       "operation": "lock",
       "source": "let _serial = actor.pend.lock();"
     },
     {
-      "path": "server/src/entry/call/nest/next.rs",
+      "path": "server/src/entry/call/nest/next/mod.rs",
       "line": 336,
       "enclosing_function": "inspect",
       "operation": "lock",
