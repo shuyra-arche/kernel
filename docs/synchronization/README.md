@@ -98,7 +98,10 @@ that accounts for those preconditions. A candidate repair is to delimit the
 first state update with `{}` and take the parent record into a local before
 locking its lender. Its atomicity and rollback still need owner-level review.
 The host ancestry/selection/maintenance cases must retain their actual borrow
-and settlement assertions.
+and settlement assertions. [PR #198](https://github.com/shuyra-arche/kernel/pull/198)
+implements this local scope separation independently, with three storage-overlap
+regressions that fail against the snapshot implementation. It is not part of
+this documentation snapshot and does not establish the rest of the DAG.
 
 ### Leaving COMMIT does not release Ledger or restore IRQs
 
@@ -154,6 +157,36 @@ locks. The bump allocator has a distinct early-bootstrap lifetime. The typed
 resource chain alone cannot certify those implicit paths. The future graph
 needs explicit allocator directions and an audit of allocation/prohibited
 contexts; `None` is not an acceptable fallback class.
+
+### Specific bootstrap, shutdown and implicit-allocator observations
+
+[`entry/boot/devices/entry_mmio.rs::install`](../../server/src/entry/boot/devices/entry_mmio.rs)
+extracts and seals its staging vector under STAGED, then releases that guard
+before Flat/Nest installation. In contrast, external-device `init` keeps NESTS
+while creating an external Nest and binding its trusted controller. `stage`
+and `grant` can grow their vectors under their own storage locks. Bootstrap
+ownership is not proof that these are allocation-free bottom classes.
+
+[`mmu/identity/asid.rs`](../../server/src/metal/riscv/mmu/identity/asid.rs)
+locks its Recycle for allocation/release. Recycle's **first** allocation grows
+its bit vector while that guard is live; release only clears an existing bit.
+No fence occurs in those methods. The ASID class therefore still needs the
+allocator successor, even though steady-state ID allocation is just a scan.
+
+[`nest/index/source.rs`](../../server/src/basis/nest/index/source.rs)
+preallocates new records and snapshots before upgrading strong references.
+Its rebuild can nevertheless dispose of dead Box records while the head is
+locked, so deallocation must be included in the implicit allocator audit.
+[`unit/task/chain.rs`](../../server/src/basis/unit/task/chain.rs) uses TaskState
+locks one at a time to update predecessor/successor links, but `Chain::drop`
+also dequeues through those locks. Reap/husk/ready-queue owners that embed a
+Chain have those same hidden successors.
+
+[`room/shutdown/mod.rs::observe`](../../server/src/basis/room/shutdown/mod.rs)
+limits PROGRESS to its local counter/time decision. The stalled callback runs
+after that guard's block ends. The later non-returning Hart barrier and finish
+hooks do not retain that guard. This only establishes this method's local
+boundary, not callback safety for every possible caller.
 
 ### Pairing and actual instances
 
