@@ -57,18 +57,18 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `InterruptSource` | [basis/room/interrupt/source/mod.rs:31](../../server/src/basis/room/interrupt/source/mod.rs#L31) | `SourceGate` |  |
 | `Scheduler` | [basis/room/scheduler/slot/mod.rs:36](../../server/src/basis/room/scheduler/slot/mod.rs#L36) | `Commit` | `TaskExtensions`, `TaskSchedule`, `TaskState`, `TeamState` |
 | `SchedulerAdmission` | [basis/room/scheduler/slot/mod.rs:39](../../server/src/basis/room/scheduler/slot/mod.rs#L39) | `Commit` | `TaskSchedule`, `TaskState` |
-| `Shutdown` | [basis/room/shutdown/mod.rs:20](../../server/src/basis/room/shutdown/mod.rs#L20) |  |  |
+| `Shutdown` | [basis/room/shutdown/mod.rs:23](../../server/src/basis/room/shutdown/mod.rs#L23) |  |  |
 | `SignQueue` | [basis/sign/endpoint/delivery.rs:13](../../server/src/basis/sign/endpoint/delivery.rs#L13) | `FaultPolicy` | `SignDelivery` |
 | `SignState` | [basis/sign/endpoint/mod.rs:29](../../server/src/basis/sign/endpoint/mod.rs#L29) | `ActivityDelivery`, `FaultPolicy`, `SourceGate` |  |
 | `SignRouting` | [basis/sign/endpoint/mod.rs:32](../../server/src/basis/sign/endpoint/mod.rs#L32) | `SourceGate` | `BlockPool`, `BlockPump` |
 | `SignDelivery` | [basis/sign/endpoint/mod.rs:35](../../server/src/basis/sign/endpoint/mod.rs#L35) | `SignQueue` |  |
-| `WaitHolders` | [basis/sign/wait/holder.rs:30](../../server/src/basis/sign/wait/holder.rs#L30) | `Commit` | `BlockPool`, `BlockPump` |
-| `WaitSites` | [basis/sign/wait/site.rs:120](../../server/src/basis/sign/wait/site.rs#L120) | `ActivityDelivery`, `SourceGate` | `BlockPool`, `BlockPump`, `TaskState` |
+| `WaitHolders` | [basis/sign/wait/holder.rs:32](../../server/src/basis/sign/wait/holder.rs#L32) | `Commit` | `BlockPool`, `BlockPump` |
+| `WaitSites` | [basis/sign/wait/site.rs:126](../../server/src/basis/sign/wait/site.rs#L126) | `ActivityDelivery`, `SourceGate` | `BlockPool`, `BlockPump`, `TaskState` |
 | `ControlTable` | [basis/unit/control/table.rs:36](../../server/src/basis/unit/control/table.rs#L36) | `Commit` | `BlockPool`, `BlockPump` |
 | `LifecycleDiagnostics` | [basis/unit/lifecycle/diagnostics/mod.rs:12](../../server/src/basis/unit/lifecycle/diagnostics/mod.rs#L12) |  |  |
 | `TerminationQueue` | [basis/unit/lifecycle/doom.rs:83](../../server/src/basis/unit/lifecycle/doom.rs#L83) | `Commit` | `TeamState`, `TeamTermination` |
-| `ReapQueue` | [basis/unit/lifecycle/reap.rs:24](../../server/src/basis/unit/lifecycle/reap.rs#L24) |  | `TaskState` |
-| `Husks` | [basis/unit/lifecycle/reap.rs:26](../../server/src/basis/unit/lifecycle/reap.rs#L26) | `Commit` | `TaskState` |
+| `ReapQueue` | [basis/unit/lifecycle/reap.rs:23](../../server/src/basis/unit/lifecycle/reap.rs#L23) |  | `TaskState` |
+| `Husks` | [basis/unit/lifecycle/reap.rs:25](../../server/src/basis/unit/lifecycle/reap.rs#L25) | `Commit` | `TaskState` |
 | `TaskState` | [basis/unit/task/creation/prepared.rs:23](../../server/src/basis/unit/task/creation/prepared.rs#L23), [basis/unit/task/creation/prepared.rs:31](../../server/src/basis/unit/task/creation/prepared.rs#L31), [basis/unit/task/mod.rs:50](../../server/src/basis/unit/task/mod.rs#L50), [basis/unit/team/membership.rs:60](../../server/src/basis/unit/team/membership.rs#L60) | `BlockEpoch`, `Scheduler`, `SchedulerAdmission`, `WaitSites`, `ReapQueue`, `Husks`, `TeamTasks` |  |
 | `TaskReceipts` | [basis/unit/team/membership.rs:62](../../server/src/basis/unit/team/membership.rs#L62) | `TeamTasks` | `BlockPool`, `BlockPump` |
 | `TaskResult` | [basis/unit/team/membership.rs:64](../../server/src/basis/unit/team/membership.rs#L64) | `Commit` |  |

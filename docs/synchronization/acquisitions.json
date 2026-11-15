@@ -3488,7 +3488,7 @@
     },
     {
       "enclosing_function": "observe",
-      "line": 91,
+      "line": 142,
       "operation": "lock",
       "path": "server/src/basis/room/shutdown/mod.rs",
       "source": "let mut progress = PROGRESS.lock();"
@@ -3719,140 +3719,161 @@
     },
     {
       "enclosing_function": "hold",
-      "line": 38,
+      "line": 40,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/holder.rs",
       "source": "let mut table = holders().lock();"
     },
     {
       "enclosing_function": "void",
-      "line": 53,
+      "line": 55,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/holder.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "wipe",
-      "line": 132,
+      "line": 133,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = sites(key).lock();"
     },
     {
       "enclosing_function": "knock",
-      "line": 150,
+      "line": 151,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = sites(key).lock();"
     },
     {
       "enclosing_function": "forward",
-      "line": 178,
+      "line": 179,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = sites(key).lock();"
     },
     {
       "enclosing_function": "unforward",
-      "line": 186,
+      "line": 187,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = sites(key).lock();"
     },
     {
       "enclosing_function": "signal",
-      "line": 201,
+      "line": 202,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = shard.lock();"
     },
     {
       "enclosing_function": "signal_batch",
-      "line": 222,
+      "line": 223,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let fwd = site::existing(key).and_then(|shard| shard.lock().get(&key).map(|s| s.fwd.clone()));"
     },
     {
       "enclosing_function": "listeners_batch",
-      "line": 239,
+      "line": 240,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = shard.lock();"
     },
     {
       "enclosing_function": "wipe_space",
-      "line": 264,
+      "line": 265,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = shard_at(shard).lock();"
     },
     {
       "enclosing_function": "wake_counted",
-      "line": 293,
+      "line": 294,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut table = sites(key).lock();"
     },
     {
       "enclosing_function": "wake",
-      "line": 313,
+      "line": 314,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = sites(key).lock();"
     },
     {
       "enclosing_function": "redeem",
-      "line": 372,
+      "line": 373,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = sites(key).lock();"
     },
     {
       "enclosing_function": "prepare_wait",
-      "line": 403,
+      "line": 404,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut table = sites(key).lock();"
     },
     {
       "enclosing_function": "enroll",
-      "line": 442,
+      "line": 443,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut table = sites(self.key).lock();"
     },
     {
       "enclosing_function": "requeue",
-      "line": 457,
+      "line": 458,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "detach",
-      "line": 492,
+      "line": 493,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let Some((key, ticket)) = task.state.lock().waiting_on() else {"
     },
     {
       "enclosing_function": "detach",
-      "line": 502,
+      "line": 503,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "let mut sites = shard.lock();"
     },
     {
       "enclosing_function": "prune_empty",
-      "line": 515,
+      "line": 516,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/mod.rs",
       "source": "prune(&mut sites(key).lock(), key);"
     },
     {
+      "enclosing_function": "bind",
+      "line": 29,
+      "operation": "lock",
+      "path": "server/src/basis/sign/wait/resident.rs",
+      "source": "Site::ensure(&mut sites(key).lock(), key, &task.life())"
+    },
+    {
+      "enclosing_function": "notify",
+      "line": 51,
+      "operation": "lock",
+      "path": "server/src/basis/sign/wait/resident.rs",
+      "source": ".lock()"
+    },
+    {
+      "enclosing_function": "wait",
+      "line": 128,
+      "operation": "lock",
+      "path": "server/src/basis/sign/wait/resident.rs",
+      "source": ".lock()"
+    },
+    {
       "enclosing_function": "take_beacon",
-      "line": 142,
+      "line": 148,
       "operation": "lock",
       "path": "server/src/basis/sign/wait/site.rs",
       "source": "let mut sites = sites(key).lock();"
@@ -4069,84 +4090,84 @@
     },
     {
       "enclosing_function": "advance",
-      "line": 144,
+      "line": 146,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/doom.rs",
       "source": "let Some((node, mut work)) = PENDING.lock().pop() else {"
     },
     {
       "enclosing_function": "advance",
-      "line": 148,
+      "line": 150,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/doom.rs",
       "source": "let members = node.tasks.lock();"
     },
     {
       "enclosing_function": "advance",
-      "line": 163,
+      "line": 165,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/doom.rs",
       "source": "let children = node.children.lock();"
     },
     {
       "enclosing_function": "advance",
-      "line": 184,
+      "line": 186,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/doom.rs",
       "source": "PENDING.lock().push(node, work);"
     },
     {
       "enclosing_function": "advance",
-      "line": 186,
+      "line": 188,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/doom.rs",
       "source": "*node.termination.lock() = Termination::Settled;"
     },
     {
       "enclosing_function": "advance",
-      "line": 190,
+      "line": 192,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/doom.rs",
       "source": "if PENDING.lock().first.is_some() {"
     },
     {
       "enclosing_function": "rip",
-      "line": 89,
+      "line": 113,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/mod.rs",
       "source": "let retired = HUSKS.lock().take();"
     },
     {
       "enclosing_function": "retained_count",
-      "line": 95,
+      "line": 119,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/mod.rs",
       "source": "HUSKS.lock().len()"
     },
     {
       "enclosing_function": "reap",
-      "line": 65,
+      "line": 64,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": "let mut state = task.state.lock();"
     },
     {
       "enclosing_function": "reap",
-      "line": 79,
+      "line": 78,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": ".lock()"
     },
     {
       "enclosing_function": "reap",
-      "line": 81,
+      "line": 80,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": ".all(|member| member.state.lock().is_dead())"
     },
     {
       "enclosing_function": "reap",
-      "line": 97,
+      "line": 96,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": "HUSKS.lock().enqueue(task);"
@@ -4167,52 +4188,66 @@
     },
     {
       "enclosing_function": "quit",
-      "line": 142,
+      "line": 143,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": ".and_then(|m| m.receipts.lock().first().map(|r| r.owner))"
     },
     {
-      "enclosing_function": "bury",
-      "line": 185,
+      "enclosing_function": "pending",
+      "line": 190,
+      "operation": "lock",
+      "path": "server/src/basis/unit/lifecycle/reap.rs",
+      "source": "let terminal = !PENDING.lock().is_empty();"
+    },
+    {
+      "enclosing_function": "pending",
+      "line": 191,
+      "operation": "lock",
+      "path": "server/src/basis/unit/lifecycle/reap.rs",
+      "source": "let husks = !HUSKS.lock().chain.is_empty();"
+    },
+    {
+      "enclosing_function": "advance",
+      "line": 198,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": "let Some(task) = PENDING.lock().dequeue() else {"
     },
     {
-      "enclosing_function": "bury",
-      "line": 188,
+      "enclosing_function": "advance",
+      "line": 201,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": "let (cause, reason) = task.state.lock().dying().expect(\"terminal queue\");"
     },
     {
-      "enclosing_function": "bury",
-      "line": 191,
+      "enclosing_function": "advance",
+      "line": 204,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": "if !PENDING.lock().is_empty() {"
     },
     {
-      "enclosing_function": "bury",
-      "line": 200,
+      "enclosing_function": "advance",
+      "line": 213,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": "let mut husks = HUSKS.lock();"
     },
     {
-      "enclosing_function": "bury",
-      "line": 207,
+      "enclosing_function": "advance",
+      "line": 222,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
       "source": "HUSKS.lock().enqueue(z);"
     },
     {
-      "enclosing_function": "bury",
-      "line": 218,
+      "enclosing_function": "advance",
+      "line": 226,
       "operation": "lock",
       "path": "server/src/basis/unit/lifecycle/reap.rs",
-      "source": "if !HUSKS.lock().chain.is_empty() {"
+      "source": "HUSKS.lock().enqueue(z);"
     },
     {
       "enclosing_function": "enqueue",
@@ -4663,14 +4698,14 @@
       "source": "let mut window = self.requests.0.lock();"
     },
     {
-      "enclosing_function": "retire",
+      "enclosing_function": "advance_retirement",
       "line": 25,
       "operation": "try_lock",
       "path": "server/src/basis/unit/task/retirement.rs",
       "source": "let mut stored = self.retirement.try_lock().ok_or(NestError::Busy)?;"
     },
     {
-      "enclosing_function": "retire",
+      "enclosing_function": "advance_retirement",
       "line": 46,
       "operation": "lock",
       "path": "server/src/basis/unit/task/retirement.rs",
@@ -5125,22 +5160,29 @@
       "source": "let mut storage = CONTROLLERS.lock();"
     },
     {
-      "enclosing_function": "shutdown",
-      "line": 131,
+      "enclosing_function": "prepare_shutdown",
+      "line": 128,
+      "operation": "lock",
+      "path": "server/src/entry/boot/devices/iommu.rs",
+      "source": "let mut storage = CONTROLLERS.lock();"
+    },
+    {
+      "enclosing_function": "report_shutdown",
+      "line": 165,
       "operation": "lock",
       "path": "server/src/entry/boot/devices/iommu.rs",
       "source": "let mut storage = CONTROLLERS.lock();"
     },
     {
       "enclosing_function": "register",
-      "line": 29,
+      "line": 32,
       "operation": "lock",
       "path": "server/src/entry/boot/devices/mod.rs",
       "source": "for region in external::REGIONS.lock().iter() {"
     },
     {
       "enclosing_function": "register",
-      "line": 35,
+      "line": 38,
       "operation": "lock",
       "path": "server/src/entry/boot/devices/mod.rs",
       "source": "let nests = core::mem::take(&mut *external::NESTS.lock());"
@@ -5343,7 +5385,7 @@
     },
     {
       "enclosing_function": "doom",
-      "line": 431,
+      "line": 442,
       "operation": "lock",
       "path": "server/src/entry/trap/mod.rs",
       "source": ".lock()"
@@ -6449,7 +6491,7 @@
       "typed_declarations": [
         {
           "declaration": "static PROGRESS: LegacyLock<crate::basis::sync::order::Shutdown, Progress> =",
-          "line": 20,
+          "line": 23,
           "path": "server/src/basis/room/shutdown/mod.rs"
         }
       ]
@@ -6529,7 +6571,7 @@
       "typed_declarations": [
         {
           "declaration": "LegacyLock<crate::basis::sync::order::WaitHolders, HashMap<Ticket, (WakeKey, TaskWeak)>>;",
-          "line": 30,
+          "line": 32,
           "path": "server/src/basis/sign/wait/holder.rs"
         }
       ]
@@ -6548,7 +6590,7 @@
       "typed_declarations": [
         {
           "declaration": "type Shard = LegacyLock<crate::basis::sync::order::WaitSites, HashMap<WakeKey, Site>>;",
-          "line": 120,
+          "line": 126,
           "path": "server/src/basis/sign/wait/site.rs"
         }
       ]
@@ -6608,7 +6650,7 @@
       "typed_declarations": [
         {
           "declaration": "static PENDING: LegacyLock<crate::basis::sync::order::ReapQueue, Chain> =",
-          "line": 24,
+          "line": 23,
           "path": "server/src/basis/unit/lifecycle/reap.rs"
         }
       ]
@@ -6624,7 +6666,7 @@
       "typed_declarations": [
         {
           "declaration": "pub(super) static HUSKS: LegacyLock<crate::basis::sync::order::Husks, Husks> =",
-          "line": 26,
+          "line": 25,
           "path": "server/src/basis/unit/lifecycle/reap.rs"
         }
       ]

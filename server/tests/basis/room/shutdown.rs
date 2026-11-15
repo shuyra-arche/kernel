@@ -80,3 +80,44 @@ fn only_one_hart_can_prepare_and_publish_finalization_readiness() {
     thread.join().unwrap();
     assert_eq!(gate.claim(), Claim::Ready);
 }
+
+#[test]
+fn preparation_decisions_reject_completion_outside_the_owned_running_state() {
+    use preparation::{Event, InvalidCompletion, State, Transition, decide};
+    assert_eq!(
+        decide(State::Idle, Event::Request),
+        Ok(Transition {
+            next: State::Preparing,
+            decision: Claim::Prepare,
+        })
+    );
+    for state in [State::Idle, State::Ready, State::Failed] {
+        for result in [Ok(()), Err(Unsettled::Busy), Err(Unsettled::Failed)] {
+            assert_eq!(
+                decide(state, Event::Completed(result)),
+                Err(InvalidCompletion)
+            );
+        }
+    }
+    assert_eq!(
+        decide(State::Preparing, Event::Completed(Err(Unsettled::Busy))),
+        Ok(Transition {
+            next: State::Idle,
+            decision: Claim::Wait,
+        })
+    );
+    assert_eq!(
+        decide(State::Preparing, Event::Completed(Err(Unsettled::Failed))),
+        Ok(Transition {
+            next: State::Failed,
+            decision: Claim::Failed,
+        })
+    );
+    assert_eq!(
+        decide(State::Preparing, Event::Completed(Ok(()))),
+        Ok(Transition {
+            next: State::Ready,
+            decision: Claim::Ready,
+        })
+    );
+}
