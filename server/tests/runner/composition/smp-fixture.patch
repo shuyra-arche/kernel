@@ -135,7 +135,12 @@
  use core::fmt::Write;
  use kernel_api::{
      abi::memory::*,
-@@ -59,9 +59,8 @@
+@@ -55,13 +55,12 @@
+     mutate(Action::Allow { maintenance });
+     let _ = writeln!(
+         Console,
+-        "PASS native-memory abi=11 ledger=11 occupy=1 publish=1 retract=1 vacate=1"
++        "PASS native-memory abi=12 ledger=12 occupy=1 publish=1 retract=1 vacate=1"
      );
      fault::run();
      acceptance::run();
@@ -172,6 +177,15 @@
      };
      let Outcome::Committed(v) = r.outcome() else {
          panic!("{action:?}: {:?}", r.outcome())
+@@ -109,7 +110,7 @@
+ pub fn boot(at: usize, count: usize) {
+     use kernel_api::boot::{args, ledger::Entries};
+     assert_eq!(count, args::LEN);
+-    assert_eq!(kernel_api::abi::VERSION, 11);
++    assert_eq!(kernel_api::abi::VERSION, 12);
+     let a = unsafe { core::slice::from_raw_parts(at as *const usize, count) };
+     IMAGE.store(a[args::VIEW], Ordering::Relaxed);
+     IMAGE_LEN.store(a[args::VIEW_LEN], Ordering::Relaxed);
 @@ -206,10 +207,7 @@
      });
  }
