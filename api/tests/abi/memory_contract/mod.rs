@@ -210,10 +210,10 @@ fn maintenance_reference_preserves_full_width_record_and_generation() {
 
 #[test]
 fn legacy_register_adapters_are_not_native_memory_dispatch() {
-    assert_eq!(abi::VERSION, 12);
+    assert_eq!(abi::VERSION, 13);
     for domain in [2usize, 12, 13] {
         for operation in 0..=32 {
-            assert!(EnvCall::from_wire((12 << 48) | (domain << 32) | operation, &[0; 6]).is_err());
+            assert!(EnvCall::from_wire((13 << 48) | (domain << 32) | operation, &[0; 6]).is_err());
         }
     }
 }

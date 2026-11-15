@@ -157,12 +157,12 @@ pub(super) fn results() -> Vec<Reply> {
 #[test]
 fn object_mutations_use_expected_object_versions_and_exact_wire_layouts() {
     let payloads: &[&[u64]] = &[
-        &[12, 12, 16, u64::MAX, 7, 1024, 1],
-        &[12, 12, 17, u64::MAX, 7, 11, u64::MAX],
-        &[12, 13, 16, u64::MAX, 7],
-        &[12, 13, 17, u64::MAX, 7, 17, u64::MAX],
+        &[13, 12, 16, u64::MAX, 7, 1024, 1],
+        &[13, 12, 17, u64::MAX, 7, 11, u64::MAX],
+        &[13, 13, 16, u64::MAX, 7],
+        &[13, 13, 17, u64::MAX, 7, 17, u64::MAX],
         &[
-            12,
+            13,
             13,
             19,
             u64::MAX,
@@ -176,7 +176,7 @@ fn object_mutations_use_expected_object_versions_and_exact_wire_layouts() {
             1,
             6,
         ],
-        &[12, 13, 20, u64::MAX, 7, 17, 19, u64::MAX],
+        &[13, 13, 20, u64::MAX, 7, 17, 19, u64::MAX],
     ];
     for (action, words) in mutations().into_iter().zip(payloads) {
         let request = Request::new(Some(id()), action).unwrap();
@@ -377,7 +377,7 @@ fn reservation_result_carries_the_new_grant_and_both_structural_versions() {
     let result = results()[2];
     let mut expected = [0; Reply::WIDTH];
     for (index, word) in [
-        12,
+        13,
         13,
         19,
         u64::MAX,

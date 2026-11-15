@@ -122,12 +122,14 @@
                  }
 --- a/tests/memory/guest/main.rs
 +++ b/tests/memory/guest/main.rs
-@@ -2,10 +2,10 @@
+@@ -2,10 +2,12 @@
  #![no_main]
  mod acceptance;
  mod fault;
 -mod ipc;
  mod support;
++#[allow(dead_code)]
++mod stack;
  mod swap;
 -mod virtqueue;
 +mod smp;
@@ -135,12 +137,12 @@
  use core::fmt::Write;
  use kernel_api::{
      abi::memory::*,
-@@ -55,13 +55,12 @@
+@@ -55,13 +57,12 @@
      mutate(Action::Allow { maintenance });
      let _ = writeln!(
          Console,
 -        "PASS native-memory abi=11 ledger=11 occupy=1 publish=1 retract=1 vacate=1"
-+        "PASS native-memory abi=12 ledger=12 occupy=1 publish=1 retract=1 vacate=1"
++        "PASS native-memory abi=13 ledger=13 occupy=1 publish=1 retract=1 vacate=1"
      );
      fault::run();
      acceptance::run();
@@ -191,7 +193,7 @@
      use kernel_api::boot::{args, ledger::Entries};
      assert_eq!(count, args::LEN);
 -    assert_eq!(kernel_api::abi::VERSION, 11);
-+    assert_eq!(kernel_api::abi::VERSION, 12);
++    assert_eq!(kernel_api::abi::VERSION, 13);
      let a = unsafe { core::slice::from_raw_parts(at as *const usize, count) };
      IMAGE.store(a[args::VIEW], Ordering::Relaxed);
      IMAGE_LEN.store(a[args::VIEW_LEN], Ordering::Relaxed);
@@ -207,7 +209,15 @@
  }
  pub fn block(start: SlotPosition) -> Maintenance {
      let Response::Reply(r) = call(Action::Block {
-@@ -261,7 +259,17 @@
+@@ -254,14 +252,21 @@
+     use kernel_api::model::unit::*;
+     let bytes = UnitCreate::Task {
+         team: None,
+-        entry: VirtAddr::new(entry as *const () as usize),
+-        args: VirtAddr::new(0),
+-        count: 0,
+-        stack: VirtAddr::new(0),
++        start: crate::stack::Stack::new(entry as *const () as usize, &[], 65536).start,
      }
      .to_bytes();
      let CreatedUnit::Task(task) =
@@ -226,7 +236,7 @@
      else {
          panic!("Task")
      };
-@@ -280,15 +288,6 @@
+@@ -280,15 +285,6 @@
      }
  }
  
@@ -242,7 +252,7 @@
  pub fn accord(src: PendId, target: TaskId, limits: Limits) -> PendId {
      let bytes = AccordRequest {
          src,
-@@ -297,5 +296,15 @@
+@@ -297,5 +293,15 @@
          mark: Mark::NONE,
      }
      .to_bytes();

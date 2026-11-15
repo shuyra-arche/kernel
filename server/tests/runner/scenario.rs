@@ -118,6 +118,12 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     ] {
         command.env_remove(name);
     }
+    if !matches!(kind, Kind::Flat { .. }) {
+        compose::copy(
+            "target/basis/unit/stack.rs",
+            &fixture.join("tests/memory/guest/stack.rs"),
+        )?;
+    }
     match &kind {
         Kind::Smp | Kind::Lifecycle { .. } => {
             compose::apply("smp-provider", &provider, &patches)?;
@@ -288,7 +294,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         let path = root.join("initrd.bin");
         fs::write(
             &path,
-            capsule::initrd(&fs::read(root.join("guest.elf"))?, 12)?,
+            capsule::initrd(&fs::read(root.join("guest.elf"))?, 13)?,
         )?;
         Some(path)
     };

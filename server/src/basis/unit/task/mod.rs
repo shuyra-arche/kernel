@@ -29,7 +29,8 @@ mod retirement;
 pub(crate) mod schedule;
 mod weak;
 
-pub(crate) use creation::TaskBuilder;
+pub(crate) use creation::Bootstrap;
+pub(crate) use creation::user as prepare_user;
 pub(crate) use execution::{Resumption, TaskState, WaitCall};
 pub(crate) use identity::TaskIdent;
 #[cfg(debug_assertions)]
@@ -38,7 +39,7 @@ pub(crate) use weak::{Origin, TaskWeak};
 
 pub use kernel_api::model::unit::ExitCause as TaskExitCause;
 
-pub(crate) const MAX_ARGS: usize = 64;
+pub(crate) const MAX_ARGS: usize = kernel_api::model::unit::TaskStart::MAX_ARGUMENTS;
 
 /// 一个任务：身份（`TaskIdent`，含它自己的内存段）、状态机（`TaskState`）与能力
 /// 账本（`Pend`）的组合，加上它作为家长持有的子团队表。

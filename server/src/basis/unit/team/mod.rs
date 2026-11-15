@@ -10,8 +10,8 @@ use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::authority::admission::Admission;
 use crate::basis::room::scheduler;
+use crate::basis::unit::task::Bootstrap;
 use crate::basis::unit::task::Task;
-use crate::basis::unit::task::TaskBuilder;
 use crate::basis::unit::task::TaskWeak;
 
 mod builder;
@@ -151,8 +151,8 @@ impl Team {
         self.node.all_reaped()
     }
 
-    pub fn task(self: &Arc<Self>) -> TaskBuilder {
-        TaskBuilder::new(self.clone())
+    pub fn task(self: &Arc<Self>) -> Bootstrap {
+        Bootstrap::new(self.clone())
     }
 
     pub(crate) fn release_held(&self, task: &Arc<Task>) -> bool {
@@ -219,13 +219,12 @@ impl Drop for Team {
     }
 }
 
-/// Publish execution after entry/stack preparation. Data access is delegated separately through Pend.
+/// Publish an ordinary User execution context. The caller prepared all user
+/// memory through its existing, separately authorized Nest/Flat operations.
 pub(crate) fn spawn(
     target: &Arc<Team>,
-    caller: Option<&Arc<Task>>,
-    entry: usize,
-    words: Vec<usize>,
-    stack: usize,
+    caller: &Arc<Task>,
+    start: kernel_api::model::unit::TaskStart,
 ) -> Result<Arc<Task>, UnitFail> {
     fn map_err(error: NestError) -> UnitFail {
         match error {
@@ -235,35 +234,29 @@ pub(crate) fn spawn(
         }
     }
     let _construction = target.operation().ok_or(UnitFail::Busy)?;
-    let first = !target.ready();
-    let entry_va = if entry == 0 {
-        target.default_entry()
-    } else {
-        entry
+    let validate = || {
+        if !crate::basis::pend::live(caller)
+            || target.nest.kind().is_supervisor()
+            || !(Arc::ptr_eq(target, &caller.ident.team)
+                || caller
+                    .clan(target.id)
+                    .is_some_and(|team| Arc::ptr_eq(&team, target)))
+        {
+            return Err(NestError::WidenDenied);
+        }
+        target.nest.validate_start(start)
     };
-    // 入口的前两个字节都要取得到：取不到就拒收。
-    let entry = crate::metal::mmu::internal::canonical(entry_va);
-    if !entry_va.is_multiple_of(2)
-        || target.nest.instruction_byte(entry).is_none()
-        || target.nest.instruction_byte(entry + 1).is_none()
-    {
-        return Err(UnitFail::BadEntry);
-    }
-    let mut builder = target
-        .task()
-        .entry(crate::metal::mmu::internal::canonical(entry_va))
-        .args(words);
-    if let Some(caller) = caller {
-        builder = builder.controller(caller.ident.id);
-    }
-    if stack > 0 {
-        builder = builder.stack(stack);
-    }
-    let mut prepared = builder.prepare().map_err(map_err)?;
+    validate().map_err(map_err)?;
+    let first = !target.ready();
+    let mut prepared =
+        crate::basis::unit::task::prepare_user(target.clone(), caller.ident.id, start)
+            .map_err(map_err)?;
+    // COMMIT excludes revocation while the final authority/mapping checks and
+    // execution publication commit. The creation operation excludes Team retire.
     prepared
-        .publish(|| {
+        .publish(validate, || {
             if first {
-                target.set_default_entry(entry_va);
+                target.set_default_entry(start.entry.get());
             }
         })
         .map_err(map_err)

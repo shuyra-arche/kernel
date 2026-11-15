@@ -157,7 +157,7 @@ pub fn check(log: &str, kind: &Kind, harts: u8) -> Result<Value> {
             );
             match mode.as_str() {
                 "irq"=>markers.extend([format!("PASS irq rounds={events}"),
-                        "PASS user-ecall breakpoints=2 unknown=1".into(),"observers=6".into(),"revoke-sign=1 revoke-view=1 ancestor-view=1 rebind=4".into()]),
+                        "PASS user-ecall breakpoints=2 unknown=1".into(), "PASS task-start cross-page=1 independent-sp=1 guard=1 retained-stack=1".into(),"observers=6".into(),"revoke-sign=1 revoke-view=1 ancestor-view=1 rebind=4".into()]),
                 "room"=>markers.extend(["PASS room workers=8 turns=512 steps=4096".into(),format!("warmup_timers={}",!cold)]),
                 "realtime"=>markers.extend([format!("PASS realtime harts={harts}"),if harts==1 {"unsupported=1"} else {"budget=1 replenishment=1 freeze=1 no-credit-reset=1 preemption=1 fixed-hart=1 overload=denied ordinary-pool=restored"}.into()]),
                 _=>return Err("invalid Room mode".into()),

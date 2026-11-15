@@ -3,6 +3,8 @@
 #![no_std]
 #![no_main]
 #[allow(dead_code)]
+mod stack;
+#[allow(dead_code)]
 mod support;
 use core::{
     fmt::Write,
@@ -68,10 +70,7 @@ fn wait(mut ready: impl FnMut() -> bool) {
 fn spawn(entry: extern "C" fn() -> !) -> TaskId {
     let bytes = UnitCreate::Task {
         team: None,
-        entry: VirtAddr::new(entry as *const () as usize),
-        args: VirtAddr::new(0),
-        count: 0,
-        stack: VirtAddr::new(0),
+        start: stack::Stack::resident(entry as *const () as usize, &[], 65536).start,
     }
     .to_bytes();
     let end = room::clock() + 5_000_000_000;

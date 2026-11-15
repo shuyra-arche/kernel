@@ -3,6 +3,8 @@
 #![no_std]
 #![no_main]
 #[allow(dead_code)]
+mod stack;
+#[allow(dead_code)]
 mod support;
 use core::{
     fmt::Write,
@@ -95,10 +97,7 @@ fn wait(mut ready: impl FnMut() -> bool) {
 fn spawn(entry: extern "C" fn() -> !) -> TaskId {
     let bytes = UnitCreate::Task {
         team: None,
-        entry: VirtAddr::new(entry as *const () as usize),
-        args: VirtAddr::new(0),
-        count: 0,
-        stack: VirtAddr::new(0),
+        start: stack::Stack::new(entry as *const () as usize, &[], 65536).start,
     }
     .to_bytes();
     let end = until();
@@ -253,12 +252,16 @@ extern "C" fn driver() -> ! {
 }
 extern "C" fn breakpoint32() -> ! {
     use kernel_api::abi::{call::unit::operations::Exit, operation::RegisterCall};
-    unsafe { core::arch::asm!(".option push", ".option norvc", "ebreak", ".option pop", in("a7") Exit::SLOT, in("a0") 73usize, in("a1") 0usize, in("a2") 0usize, in("a3") 0usize, in("a4") 0usize, options(nostack)); }
+    unsafe {
+        core::arch::asm!(".option push", ".option norvc", "ebreak", ".option pop", in("a7") Exit::SLOT, in("a0") 73usize, in("a1") 0usize, in("a2") 0usize, in("a3") 0usize, in("a4") 0usize, options(nostack));
+    }
     exit(74)
 }
 extern "C" fn breakpoint16() -> ! {
     use kernel_api::abi::{call::unit::operations::Exit, operation::RegisterCall};
-    unsafe { core::arch::asm!(".2byte 0x9002", in("a7") Exit::SLOT, in("a0") 75usize, in("a1") 0usize, in("a2") 0usize, in("a3") 0usize, in("a4") 0usize, options(nostack)); }
+    unsafe {
+        core::arch::asm!(".2byte 0x9002", in("a7") Exit::SLOT, in("a0") 75usize, in("a1") 0usize, in("a2") 0usize, in("a3") 0usize, in("a4") 0usize, options(nostack));
+    }
     exit(76)
 }
 fn transport_contract() {
@@ -268,18 +271,110 @@ fn transport_contract() {
     for entry in [breakpoint32 as extern "C" fn() -> !, breakpoint16] {
         let task = spawn(entry);
         unit::resume(UnitTarget::Task(task)).unwrap();
-        wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).exit.is_some());
+        wait(|| {
+            support::task_info(UnitQuery::Target(UnitTarget::Task(task)))
+                .exit
+                .is_some()
+        });
         let info = support::task_info(UnitQuery::Target(UnitTarget::Task(task)));
-        assert_eq!(info.exit.unwrap().0, kernel_api::model::unit::ExitCause::Fault);
+        assert_eq!(
+            info.exit.unwrap().0,
+            kernel_api::model::unit::ExitCause::Fault
+        );
         wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).reclaimed);
         unit::delete(UnitTarget::Task(task)).unwrap();
     }
     marker(b"PASS user-ecall breakpoints=2 unknown=1\n");
 }
+extern "C" fn explicit_entry(at: *const usize, count: usize) -> ! {
+    assert_eq!(count, 2);
+    assert_eq!(unsafe { at.read() }, 0x1234);
+    assert_eq!(unsafe { at.add(1).read() }, 0x5678);
+    exit(77)
+}
+extern "C" fn guard_entry(at: *const usize, _: usize) -> ! {
+    let guard = unsafe { at.read() };
+    unsafe {
+        (guard as *mut usize).write_volatile(1);
+    }
+    exit(78)
+}
+fn startup_contract() {
+    use kernel_api::model::unit::ExitCause;
+    let memory = stack::Stack::new(explicit_entry as *const () as usize, &[], 65536);
+    let mut start = memory.start;
+    // Deliberately separate arguments from SP and span a page boundary.
+    start.arguments = memory.base + 2 * 4096 - 8;
+    start.argument_count = 2;
+    start.stack_pointer = start.stack_pointer - 32;
+    unsafe {
+        (start.arguments.get() as *mut usize).write(0x1234);
+        ((start.arguments.get() + 8) as *mut usize).write(0x5678);
+    }
+    let create = |start| {
+        let bytes = UnitCreate::Task { team: None, start }.to_bytes();
+        let CreatedUnit::Task(task) = unit::create(VirtAddr::new(bytes.as_ptr() as usize)).unwrap()
+        else {
+            panic!("Task")
+        };
+        task
+    };
+    let task = create(start);
+    unit::resume(UnitTarget::Task(task)).unwrap();
+    wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).reclaimed);
+    assert_eq!(
+        support::task_info(UnitQuery::Target(UnitTarget::Task(task))).exit,
+        Some((ExitCause::Reap, 0))
+    );
+    assert_eq!(
+        support::task_info(UnitQuery::Target(UnitTarget::Task(task))).result,
+        Some(77)
+    );
+    // Task reclamation must leave the Runtime's stack and arguments accessible.
+    assert_eq!(
+        unsafe { (start.arguments.get() as *const usize).read_volatile() },
+        0x1234
+    );
+    unit::delete(UnitTarget::Task(task)).unwrap();
+    memory.retire();
+    let guard = stack::Stack::new(guard_entry as *const () as usize, &[0], 32768);
+    unsafe {
+        (guard.start.arguments.get() as *mut usize).write(guard.base.get());
+    }
+    let task = create(guard.start);
+    unit::resume(UnitTarget::Task(task)).unwrap();
+    wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).reclaimed);
+    assert_eq!(
+        support::task_info(UnitQuery::Target(UnitTarget::Task(task)))
+            .exit
+            .unwrap()
+            .0,
+        ExitCause::Fault
+    );
+    unit::delete(UnitTarget::Task(task)).unwrap();
+    guard.retire();
+    let withdrawn = stack::Stack::new(guard_entry as *const () as usize, &[], 32768);
+    let task = create(withdrawn.start);
+    // A dormant Task has never touched the backing. An authorized owner may
+    // retract it before first Resume; the saved SP is not a mapping lease.
+    withdrawn.retire();
+    unit::resume(UnitTarget::Task(task)).unwrap();
+    wait(|| support::task_info(UnitQuery::Target(UnitTarget::Task(task))).reclaimed);
+    assert_eq!(
+        support::task_info(UnitQuery::Target(UnitTarget::Task(task)))
+            .exit
+            .unwrap()
+            .0,
+        ExitCause::Fault
+    );
+    unit::delete(UnitTarget::Task(task)).unwrap();
+    marker(b"PASS task-start cross-page=1 independent-sp=1 guard=1 retained-stack=1 withdrawn=1\n");
+}
 #[unsafe(no_mangle)]
 extern "C" fn run(at: usize, count: usize) -> ! {
     support::boot(at, count);
     transport_contract();
+    startup_contract();
     let words = unsafe { core::slice::from_raw_parts(at as *const usize, count) };
     let entries = Entries::new(unsafe {
         core::slice::from_raw_parts(words[args::LEDGER] as *const u8, words[args::LEDGER_LEN])

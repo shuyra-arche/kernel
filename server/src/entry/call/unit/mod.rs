@@ -1,5 +1,4 @@
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::abi::call::unit::UnitCall;
@@ -11,11 +10,9 @@ use kernel_api::model::pend::{
 };
 use kernel_api::model::unit::{CreatedUnit, UnitTarget};
 
-use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::SpaceKind;
 use crate::basis::pend::{self, PendEntry, Target};
-use crate::basis::unit::task::MAX_ARGS;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskIdent;
@@ -51,26 +48,6 @@ fn map_pend_err(error: PendFail) -> UnitFail {
         PendFail::Busy => UnitFail::Busy,
         _ => UnitFail::Denied,
     }
-}
-
-fn copy_words(space: &Nest, va: KVirt, count: usize) -> Option<Vec<usize>> {
-    if count > MAX_ARGS {
-        return None;
-    }
-    let width = size_of::<usize>();
-    let len = count * width;
-    let mut bytes = [0u8; MAX_ARGS * size_of::<usize>()];
-    if !space.copy_in(&mut bytes[..len], va) {
-        return None;
-    }
-    let mut out: Vec<usize> = Vec::new();
-    out.try_reserve(count).ok()?;
-    for i in 0..count {
-        let mut w = [0u8; size_of::<usize>()];
-        w.copy_from_slice(&bytes[i * width..(i + 1) * width]);
-        out.push(usize::from_le_bytes(w));
-    }
-    Some(out)
 }
 
 use core::sync::atomic::Ordering;
@@ -338,26 +315,12 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
     }
     let spec = UnitCreate::from_bytes(&bytes).ok_or(UnitFail::Denied)?;
     match spec {
-        UnitCreate::Task {
-            team,
-            entry,
-            args,
-            count,
-            stack,
-        } => {
+        UnitCreate::Task { team, start } => {
             let target = match team {
                 None => me.ident.team.clone(),
                 Some(team) => me.clan(team).ok_or(UnitFail::Denied)?,
             };
-            let words =
-                copy_words(&me.ident.team.nest, args, count as usize).ok_or(UnitFail::Denied)?;
-            let task = crate::basis::unit::team::spawn(
-                &target,
-                Some(me),
-                entry.get(),
-                words,
-                stack.get(),
-            )?;
+            let task = crate::basis::unit::team::spawn(&target, me, start)?;
             Ok(CreatedUnit::Task(task.ident.id))
         }
         UnitCreate::Team {

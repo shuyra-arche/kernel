@@ -4,8 +4,8 @@ use kernel_api::{
     model::{
         identity::{TaskId, TeamId},
         unit::{
-            ControlId, CreatedUnit, ExitCause, UnitCreate, UnitInfo, UnitQuery, UnitState,
-            UnitTarget,
+            ControlId, CreatedUnit, ExitCause, TaskStart, UnitCreate, UnitInfo, UnitQuery,
+            UnitState, UnitTarget,
         },
     },
 };
@@ -19,10 +19,12 @@ fn creation_variants_use_checked_fixed_width_snapshots() {
         },
         UnitCreate::Task {
             team: Some(TeamId::new(9)),
-            entry: VirtAddr::new(0x4000),
-            args: VirtAddr::new(0x8000),
-            count: 2,
-            stack: VirtAddr::new(0),
+            start: TaskStart {
+                entry: VirtAddr::new(0x4000),
+                arguments: VirtAddr::new(0x8000),
+                argument_count: 2,
+                stack_pointer: VirtAddr::new(0x9000),
+            },
         },
         UnitCreate::Team {
             nest: Some(kernel_api::model::identity::PendId::mint(9)),
@@ -136,4 +138,66 @@ fn create_reply_preserves_team_nest_authority_and_rejects_malformed_triples() {
         CreatedUnit::decode(1, isize::MAX as usize, isize::MAX as usize),
         Some(CreatedUnit::Team { .. })
     ));
+}
+
+#[test]
+fn explicit_start_geometry_rejects_bad_registers_and_legacy_stack_descriptors() {
+    let end = 1usize << 38;
+    let good = TaskStart {
+        entry: VirtAddr::new(0x1002),
+        stack_pointer: VirtAddr::new(end),
+        arguments: VirtAddr::new(0x1ff8),
+        argument_count: 2,
+    };
+    assert!(good.valid(end)); // Arguments span pages; SP is the exclusive bound.
+    for sp in [0, 1, end - 1, end + 16, usize::MAX & !15] {
+        assert!(
+            !TaskStart {
+                stack_pointer: VirtAddr::new(sp),
+                ..good
+            }
+            .valid(end)
+        );
+    }
+    for pc in [0, 1, end, usize::MAX] {
+        assert!(
+            !TaskStart {
+                entry: VirtAddr::new(pc),
+                ..good
+            }
+            .valid(end)
+        );
+    }
+    for (address, count) in [
+        (0, 1),
+        (3, 1),
+        (end - 8, 2),
+        (usize::MAX - 7, 2),
+        (0x1000, usize::MAX),
+    ] {
+        assert!(
+            !TaskStart {
+                arguments: VirtAddr::new(address),
+                argument_count: count,
+                ..good
+            }
+            .valid(end)
+        );
+    }
+    assert!(
+        TaskStart {
+            arguments: VirtAddr::new(0),
+            argument_count: 0,
+            ..good
+        }
+        .valid(end)
+    );
+    let mut bytes = UnitCreate::Task {
+        team: None,
+        start: good,
+    }
+    .to_bytes();
+    assert_eq!(&bytes[..8], &2usize.to_le_bytes());
+    bytes[..8].copy_from_slice(&1usize.to_le_bytes());
+    assert!(UnitCreate::from_bytes(&bytes).is_none());
 }

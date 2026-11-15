@@ -41,7 +41,11 @@ impl PreparedTask {
 
     /// 把这一份预备公开成团队里的一个成员：先按预留容量落座，再写上外壳、挂上
     /// 团队表与暂扣表。`commit` 是公开那一刻要回调的动作。
-    pub(crate) fn publish(&mut self, commit: impl FnOnce()) -> Result<Arc<Task>, NestError> {
+    pub(crate) fn publish(
+        &mut self,
+        validate: impl FnOnce() -> Result<(), NestError>,
+        commit: impl FnOnce(),
+    ) -> Result<Arc<Task>, NestError> {
         let team = self.ident.team.clone();
         let mut receipts = team.receipts()?;
         let controller = self.ident.controller;
@@ -90,6 +94,7 @@ impl PreparedTask {
                 .map_err(|_| NestError::OutOfMemory)?;
         }
         let _commit = crate::basis::commit();
+        validate()?;
         if !team.node.admitting() {
             return Err(NestError::NoRegion);
         }

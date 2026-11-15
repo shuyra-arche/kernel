@@ -51,6 +51,8 @@ impl TrapContext {
         pa: PhysAddr,
         self_va: VirtAddr,
     ) {
+        self.gpr = Gprs([0; 32]);
+        self.kernel_sp = VirtAddr::new(0);
         self.kernel_satp = template.kernel_satp;
         self.trap_handler = template.trap_handler;
         self.trap_stack_corrupt = template.trap_stack_corrupt;
