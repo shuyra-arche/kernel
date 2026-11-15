@@ -101,6 +101,21 @@ fn resume(task: TaskId) {
 fn admit(task: TaskId, schedule: Schedule) -> Result<(), UnitFail> {
     unit::admit(task, VirtAddr::new(schedule.to_bytes().as_ptr() as usize)).map_err(|e| e.source)
 }
+// Busy is a rejected preparation/admission, not proof of an admitted schedule.
+// Keep the same Task/spec and require actual success before testing its budget.
+fn admit_ready(task: TaskId, schedule: Schedule) {
+    let end = room::clock() + 5_000_000_000;
+    loop {
+        match admit(task, schedule) {
+            Ok(()) => return,
+            Err(UnitFail::Busy) => {
+                assert!(room::clock() < end, "realtime admission stayed busy");
+                room::yield_();
+            }
+            other => panic!("admit: {other:?}"),
+        }
+    }
+}
 fn profile(task: TaskId) -> ScheduleInfo {
     let mut bytes = [0; ScheduleInfo::WIDTH];
     unit::profile(task, VirtAddr::new(bytes.as_mut_ptr() as usize)).unwrap();
@@ -201,7 +216,7 @@ extern "C" fn run(at: usize, count: usize) -> ! {
     LOW_TOKEN.store(low_token.get(), Ordering::Release);
     let (high_gate, high_token) = gate(high_task);
     HIGH_TOKEN.store(high_token.get(), Ordering::Release);
-    assert_eq!(admit(worker, schedule), Ok(()));
+    admit_ready(worker, schedule);
     assert_eq!(room::inspect(RoomQuery::Ordinary).unwrap(), harts - 1);
     marker(b"ROOM:steady\n");
     resume(worker);
@@ -235,8 +250,8 @@ extern "C" fn run(at: usize, count: usize) -> ! {
     wait(|| room::inspect(RoomQuery::Ordinary).unwrap() == harts);
     let slow = spec(1, 4_000_000_000, 10_000_000_000);
     let fast = spec(9, 1_000_000_000, 10_000_000_000);
-    assert_eq!(admit(low_task, slow), Ok(()));
-    assert_eq!(admit(high_task, fast), Ok(()));
+    admit_ready(low_task, slow);
+    admit_ready(high_task, fast);
     assert_eq!(
         admit(excess, spec(10, 9_990_000_000, 10_000_000_000)),
         Err(UnitFail::Busy)
