@@ -11,7 +11,7 @@ use crate::basis::{
     },
     unit::task::registry,
 };
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use alloc::{sync::Arc, vec::Vec};
 use core::{
     alloc::{AllocError, Allocator, Layout},
@@ -140,8 +140,8 @@ impl Case {
         .unwrap()
     }
 }
-static CURRENT: SpinLock<Option<Arc<Case>>> = SpinLock::new(None);
-static WORKERS: [SpinLock<Option<Arc<Task>>>; 35] = [const { SpinLock::new(None) }; 35];
+static CURRENT: LegacyLock<crate::metal::sync::order::ProbeRegistry,Option<Arc<Case>>> = LegacyLock::new(None);
+static WORKERS: [LegacyLock<crate::metal::sync::order::ProbeRegistry,Option<Arc<Task>>>; 35] = [const { LegacyLock::new(None) }; 35];
 static NEXT: [AtomicUsize; 7] = [const { AtomicUsize::new(0) }; 7];
 
 pub(super) fn prepare() -> Result<(), BootError> {

@@ -1,6 +1,5 @@
 use crate::basis::name::Recycle;
-use crate::metal::sync::Level;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 
 pub(crate) const ASID_BITS: u32 = 16;
 pub(super) const VACANT: usize = 1 << ASID_BITS;
@@ -11,7 +10,8 @@ pub(crate) const fn vacant() -> usize {
     VACANT
 }
 
-static ASID_ALLOCATOR: SpinLock<Recycle> = SpinLock::new_level(Level::Asid, Recycle::new(1, 65536));
+static ASID_ALLOCATOR: LegacyLock<crate::metal::sync::order::Asid, Recycle> =
+    LegacyLock::new(Recycle::new(1, 65536));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Asid(usize);

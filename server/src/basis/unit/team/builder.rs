@@ -10,9 +10,8 @@ use crate::basis::unit::task::Origin;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::team::TeamNode;
 use crate::metal::generic::mmu::Attributes;
-use crate::metal::sync::Level;
+use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
-use crate::metal::sync::SpinLock;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
@@ -144,26 +143,23 @@ fn make_team(
     let parent = sire.as_ref().map(|task| task.ident.team.node.clone());
     let owner = sire.as_ref().map_or(TaskId::new(0), |task| task.ident.id);
     let id = next_id()?;
-    let state = SpinLock::new_level(
-        Level::UnitState,
-        TeamState::new(if constructing {
-            TeamStage::Constructing
-        } else {
-            TeamStage::Ready { default_entry: 0 }
-        }),
-    );
-    let tasks = SpinLock::new_level(Level::TeamTasks, Vec::new());
+    let state = LegacyLock::new(TeamState::new(if constructing {
+        TeamStage::Constructing
+    } else {
+        TeamStage::Ready { default_entry: 0 }
+    }));
+    let tasks = LegacyLock::new(Vec::new());
     let life = Arc::try_new(TeamNode {
         id,
         owner,
         parent: parent.clone(),
         state,
         tasks,
-        children: SpinLock::new(Vec::new()),
+        children: LegacyLock::new(Vec::new()),
         life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
         exit: ExitPolicy::new(),
         member_exit,
-        termination: SpinLock::new(crate::basis::unit::lifecycle::Termination::new()),
+        termination: LegacyLock::new(crate::basis::unit::lifecycle::Termination::new()),
     })
     .map_err(|_| NestError::OutOfMemory)?;
     if guarded {
@@ -179,10 +175,10 @@ fn make_team(
             TaskWeak::stored(Arc::downgrade(task), Origin::Sire)
         }),
         tasks: Tasks {
-            held: SpinLock::new_level(Level::L3, Vec::new()),
+            held: LegacyLock::new(Vec::new()),
         },
         node: life.clone(),
-        operation: SpinLock::new(()),
+        operation: core::sync::atomic::AtomicBool::new(false),
     })
     .map_err(|_| NestError::OutOfMemory)?;
     stage(&team)?;
@@ -214,18 +210,27 @@ fn make_team(
         if depth >= MAX_DEPTH {
             return Err(NestError::NoRegion);
         }
-        let mut children = parent.children.lock();
-        let mut heirs = sire.heir.lock();
-        if children.len() >= MAX_CHILDREN || children.len() == children.capacity() {
-            return Err(NestError::OutOfMemory);
-        }
-        if heirs.len() == heirs.capacity() {
-            return Err(NestError::OutOfMemory);
-        }
-        let at = children.partition_point(|node| node.id.get() < life.id.get());
+        let at = {
+            let children = parent.children.lock();
+            let heirs = sire.heir.lock();
+            if children.len() >= MAX_CHILDREN || children.len() == children.capacity() {
+                return Err(NestError::OutOfMemory);
+            }
+            if heirs.len() == heirs.capacity() {
+                return Err(NestError::OutOfMemory);
+            }
+            children.partition_point(|node| node.id.get() < life.id.get())
+        };
+        // COMMIT excludes topology publication/removal. Concurrent capacity
+        // preparation can only grow these vectors; no fallible work remains
+        // after attachment. Nest must not be entered under children/heir storage.
         team.nest.attach_team(id)?;
-        children.insert(at, life);
-        heirs.push(team.clone());
+        {
+            let mut children = parent.children.lock();
+            let mut heirs = sire.heir.lock();
+            children.insert(at, life);
+            heirs.push(team.clone());
+        }
     } else {
         let _commit = commit();
         team.nest.attach_team(id)?;

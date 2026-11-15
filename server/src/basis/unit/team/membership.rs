@@ -7,11 +7,11 @@ use kernel_api::model::unit::TaskExit;
 use crate::basis::unit::anchor::Anchor;
 use crate::basis::unit::task::{Task, TaskState, TaskWeak};
 use crate::basis::unit::team::TeamNode;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 
 /// Executions retained while held or parked. Persistent membership belongs to TeamNode.
 pub(crate) struct Tasks {
-    pub(crate) held: SpinLock<Vec<Arc<Task>>>,
+    pub(crate) held: LegacyLock<crate::metal::sync::order::TeamHeld, Vec<Arc<Task>>>,
 }
 
 impl Tasks {
@@ -57,11 +57,11 @@ pub(crate) struct Member {
     pub reclaimed: core::sync::atomic::AtomicBool,
     pub task: TaskWeak,
     pub node: alloc::sync::Weak<TeamNode>,
-    pub state: Arc<SpinLock<TaskState>>,
+    pub state: Arc<LegacyLock<crate::metal::sync::order::TaskState, TaskState>>,
     pub life: Arc<Anchor>,
-    pub receipts: SpinLock<Vec<Receipt>>,
+    pub receipts: LegacyLock<crate::metal::sync::order::TaskReceipts, Vec<Receipt>>,
     /// Explicitly returned value, retained with the completion receipts.
-    pub result: SpinLock<Option<usize>>,
+    pub result: LegacyLock<crate::metal::sync::order::TaskResult, Option<usize>>,
 }
 
 impl Member {

@@ -8,7 +8,7 @@ use crate::{
     },
     metal::{
         mmu::{activity, completion::Pending},
-        sync::SpinLock,
+        sync::LegacyLock,
     },
 };
 use alloc::sync::Arc;
@@ -34,7 +34,7 @@ pub(crate) struct Identity {
 }
 pub(crate) struct State {
     identity: Identity,
-    history: SpinLock<History<Pending>>,
+    history: LegacyLock<crate::metal::sync::order::ActivityHistory, History<Pending>>,
 }
 fn now() -> u64 {
     crate::metal::clock::uptime()
@@ -105,7 +105,7 @@ impl Nest {
         };
         let spare = Arc::try_new(State {
             identity,
-            history: SpinLock::new(History::new()),
+            history: LegacyLock::new(History::new()),
         })
         .map_err(|_| Failure::OutOfMemory)?;
         let _operation = span.operation().ok_or(Failure::Busy)?;

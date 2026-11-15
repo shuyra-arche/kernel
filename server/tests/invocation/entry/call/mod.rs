@@ -9,7 +9,9 @@ pub(crate) fn invoke(
     number: u64,
     registers: [usize; 6],
 ) {
-    next_memory::dispatch(frame, ident.clone(), number, registers);
+    crate::metal::sync::boundary(|root| {
+        next_memory::dispatch(frame, ident.clone(), number, registers, root)
+    });
 }
 mod memory {
     use super::*;
@@ -22,7 +24,11 @@ mod memory {
 mod flat {
     pub(super) mod next {
         use super::super::*;
-        pub(crate) fn inspect(_: &Arc<Task>, _: Query) -> Result<Observation, Failure> {
+        pub(crate) fn inspect(
+            _: &mut crate::metal::sync::Root<'_>,
+            _: &Arc<Task>,
+            _: Query,
+        ) -> Result<Observation, Failure> {
             Err(Failure::Unsupported)
         }
         pub(crate) fn prepare(_: &Arc<Task>, _: Action) -> Result<Option<()>, Failure> {

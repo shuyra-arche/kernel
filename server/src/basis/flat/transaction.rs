@@ -6,7 +6,7 @@
 //! panic=abort 都不会让承载失去归属——它始终在源槽里。到点 `commit` 消费守卫，
 //! 没 commit 就被 Drop 的按同一笔身份原样回退两端。
 //!
-//! 同一份来源只取一次锁；不同来源按地址序共持一对（`metal::sync::with_pair`）。
+//! 同一份来源只取一次锁；不同来源按地址序共持一对（同一份 RAII PairGuard）。
 //! 可失败的步骤（两端资格、两端驻留与在途、目标槽容量，以及在这之后、写槽之前的
 //! 纯 core 准备回调）全在任何槽被改动之前做完；随后只有承载独占与写槽，写槽不再
 //! 返回失败。
@@ -17,7 +17,6 @@
 use alloc::sync::Arc;
 
 use crate::basis::flat::transfer::TransferError;
-use crate::metal::sync::with_pair;
 use kernel_api::address::PageIndex;
 
 use super::Flat;
@@ -89,7 +88,7 @@ impl Transaction {
         let source = source.flat().clone();
         let target = target.flat().clone();
         let carried = if same {
-            let mut state = source.state.lock();
+            let mut state = source.state_storage().lock();
             state.source_ready(source_page)?;
             let was_missing = state.target_ready(target_page)?;
             state.reserve(target_page)?;
@@ -99,7 +98,9 @@ impl Transaction {
             state.claim_target(target_page, id, was_missing);
             (carried, gate)
         } else {
-            with_pair(&source.state, &target.state, |from, to| {
+            {
+                let mut pair = source.pair_state(&target);
+                let (from, to) = pair.values();
                 from.source_ready(source_page)?;
                 let was_missing = to.target_ready(target_page)?;
                 to.reserve(target_page)?;
@@ -107,8 +108,8 @@ impl Transaction {
                 let gate = claim_page(from, source_page, change)?;
                 from.claim_source(source_page, id);
                 to.claim_target(target_page, id, was_missing);
-                Ok((carried, gate))
-            })?
+                (carried, gate)
+            }
         };
         let transaction = Self {
             source,
@@ -132,14 +133,16 @@ impl Transaction {
     fn settle(&self) {
         debug_assert!(self.change.page().changing());
         if Arc::ptr_eq(&self.source, &self.target) {
-            let mut state = self.source.state.lock();
+            let mut state = self.source.state_storage().lock();
             let cell = state.settle_source(self.source_page, self.id);
             state.settle_target(self.target_page, self.id, cell);
         } else {
-            with_pair(&self.source.state, &self.target.state, |from, to| {
+            {
+                let mut pair = self.source.pair_state(&self.target);
+                let (from, to) = pair.values();
                 let cell = from.settle_source(self.source_page, self.id);
                 to.settle_target(self.target_page, self.id, cell);
-            });
+            };
         }
     }
 }
@@ -151,14 +154,16 @@ impl Drop for Transaction {
             return;
         }
         if Arc::ptr_eq(&self.source, &self.target) {
-            let mut state = self.source.state.lock();
+            let mut state = self.source.state_storage().lock();
             state.rollback_source(self.source_page, self.id);
             state.rollback_target(self.target_page, self.id);
         } else {
-            with_pair(&self.source.state, &self.target.state, |from, to| {
+            {
+                let mut pair = self.source.pair_state(&self.target);
+                let (from, to) = pair.values();
                 from.rollback_source(self.source_page, self.id);
                 to.rollback_target(self.target_page, self.id);
-            });
+            };
         }
     }
 }

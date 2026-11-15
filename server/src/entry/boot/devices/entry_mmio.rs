@@ -4,7 +4,7 @@ use crate::basis::{
     flat::{BorrowedRegion, Flat},
     nest::{Access, Nest, NestError, Placement, RegionKind},
 };
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use alloc::{sync::Arc, vec::Vec};
 use kernel_api::{
     abi::call::pend::PendFail,
@@ -20,7 +20,8 @@ struct Mapping {
     physical: Region,
     address: VirtAddr,
 }
-static STAGED: SpinLock<Layout> = SpinLock::new(Layout::Open(Vec::new()));
+static STAGED: LegacyLock<crate::metal::sync::order::BootMmio, Layout> =
+    LegacyLock::new(Layout::Open(Vec::new()));
 
 pub(in crate::entry::boot) fn stage(region: Region, address: VirtAddr) -> Result<(), PendFail> {
     super::admission::description()?.admits(region)?;

@@ -7,7 +7,7 @@ use crate::{
         pend::{self, Pend, PendEntry},
         unit::task::Task,
     },
-    metal::{iommu::Fault, sync::SpinLock},
+    metal::{iommu::Fault, sync::LegacyLock},
 };
 use alloc::{
     sync::{Arc, Weak},
@@ -32,7 +32,8 @@ struct Organization {
     fault: Option<Fault>,
     fault_sequence: u64,
 }
-static ORGANIZATIONS: SpinLock<Vec<Organization>> = SpinLock::new(Vec::new());
+static ORGANIZATIONS: LegacyLock<crate::metal::sync::order::Organizations, Vec<Organization>> =
+    LegacyLock::new(Vec::new());
 
 pub(crate) fn authorized(
     actor: &Task,

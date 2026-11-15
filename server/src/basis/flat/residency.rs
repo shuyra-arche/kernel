@@ -7,32 +7,32 @@ use kernel_api::model::flat::{FlatVersion, SlotPhase, SlotStatus, SlotVersion};
 
 impl Flat {
     pub(crate) fn phase(&self) -> kernel_api::model::flat::FlatPhase {
-        self.state.lock().phase
+        self.state_storage().lock().phase
     }
     pub(crate) fn begin_close(&self, expected: FlatVersion) -> Result<FlatVersion, Error> {
-        self.state.lock().begin_close(expected)
+        self.state_storage().lock().begin_close(expected)
     }
     pub(crate) fn finish_close(&self) -> Result<(), Error> {
-        let released = self.state.lock().finish_close()?;
+        let released = self.state_storage().lock().finish_close()?;
         drop(released);
         Ok(())
     }
     pub(crate) fn is_explicit(&self) -> bool {
-        self.state.lock().explicit
+        self.state_storage().lock().explicit
     }
     /// Only before the fresh source is registered or exposed to another owner.
     pub(crate) fn explicit(&mut self) {
-        self.state.lock().explicit = true;
+        self.state_storage().lock().explicit = true;
     }
     pub(crate) fn revision(&self) -> FlatVersion {
-        self.state.lock().revision.current()
+        self.state_storage().lock().revision.current()
     }
 }
 
 impl FlatRange {
     pub(crate) fn provenance(&self) -> Option<alloc::sync::Arc<crate::basis::pend::Provenance>> {
         self.flat()
-            .state
+            .state_storage()
             .lock()
             .provenance
             .iter()
@@ -41,7 +41,7 @@ impl FlatRange {
     }
     pub(crate) fn staged(&self) -> bool {
         self.flat()
-            .state
+            .state_storage()
             .lock()
             .staged
             .iter()
@@ -52,11 +52,16 @@ impl FlatRange {
         block: &alloc::sync::Arc<crate::basis::pend::RangeBlock>,
         page: PageId,
     ) -> bool {
-        self.flat().state.lock().staged.iter().any(|(at, stage)| {
-            *at == self.index()
-                && stage.page == page
-                && alloc::sync::Arc::ptr_eq(&stage.block, block)
-        })
+        self.flat()
+            .state_storage()
+            .lock()
+            .staged
+            .iter()
+            .any(|(at, stage)| {
+                *at == self.index()
+                    && stage.page == page
+                    && alloc::sync::Arc::ptr_eq(&stage.block, block)
+            })
     }
     pub(crate) fn stage_origin(
         &self,
@@ -64,7 +69,7 @@ impl FlatRange {
         page: PageId,
     ) -> Option<usize> {
         self.flat()
-            .state
+            .state_storage()
             .lock()
             .staged
             .iter()
@@ -77,7 +82,7 @@ impl FlatRange {
     }
     pub(crate) fn slot_version(&self) -> Result<SlotVersion, Error> {
         let grain = self.grain();
-        let state = self.flat().state.lock();
+        let state = self.flat().state_storage().lock();
         if !state.explicit || self.page_count().get() != grain {
             return Err(Error::Unsupported);
         }
@@ -99,7 +104,7 @@ impl FlatRange {
             return Err(Error::Unsupported);
         }
         if alloc::sync::Arc::ptr_eq(self.flat(), target.flat()) {
-            self.flat().state.lock().move_within_during(
+            self.flat().state_storage().lock().move_within_during(
                 self.index(),
                 expected,
                 target.index(),
@@ -109,7 +114,9 @@ impl FlatRange {
                 provenance,
             )
         } else {
-            crate::metal::sync::with_pair(&self.flat().state, &target.flat().state, |from, to| {
+            {
+                let mut pair = self.flat().pair_state(target.flat());
+                let (from, to) = pair.values();
                 from.move_to_during(
                     self.index(),
                     expected,
@@ -120,7 +127,7 @@ impl FlatRange {
                     stage,
                     provenance,
                 )
-            })
+            }
         }
     }
     pub(crate) fn transfer_to(
@@ -137,7 +144,7 @@ impl FlatRange {
             return Err(Error::Unsupported);
         }
         if alloc::sync::Arc::ptr_eq(self.flat(), target.flat()) {
-            self.flat().state.lock().move_within(
+            self.flat().state_storage().lock().move_within(
                 self.index(),
                 expected,
                 target.index(),
@@ -145,7 +152,9 @@ impl FlatRange {
                 provenance,
             )
         } else {
-            crate::metal::sync::with_pair(&self.flat().state, &target.flat().state, |from, to| {
+            {
+                let mut pair = self.flat().pair_state(target.flat());
+                let (from, to) = pair.values();
                 from.move_to(
                     self.index(),
                     expected,
@@ -154,7 +163,7 @@ impl FlatRange {
                     target_version,
                     provenance,
                 )
-            })
+            }
         }
     }
     pub(crate) fn inspect_slot(&self) -> Result<SlotStatus, Error> {
@@ -162,7 +171,7 @@ impl FlatRange {
         if self.page_count().get() != self.grain() {
             return Err(Error::Unsupported);
         }
-        let state = self.flat().state.lock();
+        let state = self.flat().state_storage().lock();
         if !state.explicit {
             return Err(Error::Unsupported);
         }
@@ -213,7 +222,7 @@ impl FlatRange {
             return Err(Error::Unsupported);
         }
         self.flat()
-            .state
+            .state_storage()
             .lock()
             .occupy(self.index(), expected, page)
     }
@@ -227,7 +236,7 @@ impl FlatRange {
         }
         let (stamp, page) =
             self.flat()
-                .state
+                .state_storage()
                 .lock()
                 .vacate(self.index(), expected, Some(blocks))?;
         drop(page);
@@ -243,9 +252,12 @@ impl FlatRange {
         if range.offset() != self.index().get() || range.count() != self.page_count().get() {
             return Err(Error::Unsupported);
         }
-        self.flat()
-            .state
-            .lock()
-            .reshape(self.flat().level, range, direction, expected, blocks)
+        self.flat().state_storage().lock().reshape(
+            self.flat().level,
+            range,
+            direction,
+            expected,
+            blocks,
+        )
     }
 }

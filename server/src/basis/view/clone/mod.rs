@@ -9,8 +9,7 @@ use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering;
 
 use crate::metal::clock;
-use crate::metal::sync::Level;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 
 use kernel_api::model::clone_view::CloneCondition;
 use kernel_api::model::clone_view::CloneLimits;
@@ -31,7 +30,7 @@ pub struct CloneView {
     pub(crate) id: usize,
     life: Arc<Anchor>,
     owner: TaskId,
-    pending: SpinLock<Pending>,
+    pending: LegacyLock<crate::metal::sync::order::CloneQueue, Pending>,
     limits: CloneLimits,
     alarmed: AtomicBool,
 }
@@ -50,7 +49,7 @@ impl CloneView {
             id: super::next_id().map_err(|_| crate::basis::nest::NestError::OutOfMemory)?,
             life,
             owner,
-            pending: SpinLock::new_level(Level::L3, Pending::Queue(Queue::default())),
+            pending: LegacyLock::new(Pending::Queue(Queue::default())),
             limits,
             alarmed: AtomicBool::new(false),
         })

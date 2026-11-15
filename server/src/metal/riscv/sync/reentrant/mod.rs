@@ -3,7 +3,6 @@ use ::core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::metal::hart;
 
-use super::depend;
 use super::trap::TrapGuard;
 use super::turn::Turns;
 
@@ -26,7 +25,7 @@ pub struct RelLock<T: ?Sized> {
     outer: UnsafeCell<Option<crate::metal::measure::Transaction>>,
 
     #[cfg(debug_assertions)]
-    level: Option<depend::Level>,
+    class: super::order::Class,
     data: UnsafeCell<T>,
 }
 
@@ -34,7 +33,7 @@ pub struct RelLock<T: ?Sized> {
 unsafe impl<T: ?Sized + Send> Sync for RelLock<T> {}
 
 impl<T> RelLock<T> {
-    pub const fn new_level(_level: depend::Level, val: T) -> Self {
+    pub(super) const fn new(_class: super::order::Class, val: T) -> Self {
         RelLock {
             turns: Turns::new(),
             owner: AtomicUsize::new(0),
@@ -42,7 +41,7 @@ impl<T> RelLock<T> {
             #[cfg(feature = "latency")]
             outer: UnsafeCell::new(None),
             #[cfg(debug_assertions)]
-            level: Some(_level),
+            class: _class,
             data: UnsafeCell::new(val),
         }
     }
@@ -56,7 +55,7 @@ impl<T: ?Sized> RelLock<T> {
     #[inline(never)]
     pub fn try_lock(&self) -> Option<RelLockGuard<'_, T>> {
         #[cfg(debug_assertions)]
-        let caller = crate::metal::sync::depend_enter!(self);
+        let caller = crate::metal::sync::deadlock_caller!();
         let trap = unsafe { TrapGuard::save() };
         #[cfg(feature = "latency")]
         let start = crate::metal::measure::stamp();
@@ -67,10 +66,10 @@ impl<T: ?Sized> RelLock<T> {
             // Acquire observes the previous outer release. Reserve only an
             // empty queue: a failed try creates no abandoned ticket, and a
             // free owner between turns does not let this caller barge.
+            crate::metal::sync::deadlock_before!(self, caller);
             if !self.turns.try_enter() {
                 return None;
             }
-            crate::metal::sync::depend_check!(self, caller);
             self.owner.store(me.word(), Ordering::Relaxed);
             unsafe { *self.count.get() = 1 };
             #[cfg(feature = "latency")]
@@ -80,7 +79,7 @@ impl<T: ?Sized> RelLock<T> {
                     core::panic::Location::caller(),
                 ));
             }
-            crate::metal::sync::depend_acquire!(self, caller);
+            crate::metal::sync::deadlock_acquired!(self, caller);
         }
         #[cfg(feature = "latency")]
         crate::metal::measure::elapsed(crate::metal::measure::Metric::CommitWait, start);
@@ -104,7 +103,7 @@ impl<T: ?Sized> RelLock<T> {
     #[inline(never)]
     pub fn lock(&self) -> RelLockGuard<'_, T> {
         #[cfg(debug_assertions)]
-        let caller = crate::metal::sync::depend_enter!(self);
+        let caller = crate::metal::sync::deadlock_caller!();
         let trap = unsafe { TrapGuard::save() };
         #[cfg(feature = "latency")]
         let start = crate::metal::measure::stamp();
@@ -112,9 +111,9 @@ impl<T: ?Sized> RelLock<T> {
 
         #[cfg(debug_assertions)]
         if Owner::from_word(self.owner.load(Ordering::Relaxed)) != me {
-            depend::check(
+            super::deadlock::before(
                 self as *const Self as *const () as usize,
-                self.level,
+                self.class,
                 caller,
             );
         }
@@ -132,7 +131,7 @@ impl<T: ?Sized> RelLock<T> {
                     core::panic::Location::caller(),
                 ));
             }
-            crate::metal::sync::depend_acquire!(self, caller);
+            crate::metal::sync::deadlock_acquired!(self, caller);
         }
 
         {

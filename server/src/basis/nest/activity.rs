@@ -16,7 +16,7 @@ use crate::{
         unit::task::Task,
         view::View,
     },
-    metal::sync::SpinLock,
+    metal::sync::LegacyLock,
 };
 use alloc::{
     sync::{Arc, Weak},
@@ -48,10 +48,11 @@ struct Registry {
 }
 static DELIVERY: crate::basis::name::Serial =
     crate::basis::name::Serial::new(1, isize::MAX as usize);
-static REGISTRY: SpinLock<Registry> = SpinLock::new(Registry {
-    slots: [const { Slot::Free }; protocol::MAX_SUBSCRIPTIONS],
-    cursor: 0,
-});
+static REGISTRY: LegacyLock<crate::metal::sync::order::ActivityRegistry, Registry> =
+    LegacyLock::new(Registry {
+        slots: [const { Slot::Free }; protocol::MAX_SUBSCRIPTIONS],
+        cursor: 0,
+    });
 struct Reservation(usize);
 impl Reservation {
     fn take() -> Result<Self, Failure> {
@@ -100,7 +101,7 @@ struct Subscription {
     address: usize,
     registered: AtomicU64,
     cancelled: AtomicBool,
-    delivery: SpinLock<Delivery>,
+    delivery: LegacyLock<crate::metal::sync::order::ActivityDelivery, Delivery>,
 }
 fn now() -> u64 {
     crate::metal::clock::uptime()
@@ -131,9 +132,8 @@ pub(crate) fn derive(
     license: PendId,
     request: AccordRequest,
 ) -> Result<PendId, ShareFail> {
-    pend::with_pair_uncommitted(sender, actor, || prepare(sender, actor, license, request))
-        .map_err(|e| error(failure(e)))?
-        .map_err(error)
+    let _pair = pend::pair(sender, actor).map_err(|e| error(failure(e)))?;
+    prepare(sender, actor, license, request).map_err(error)
 }
 fn prepare(
     sender: &Arc<Task>,
@@ -255,7 +255,7 @@ fn prepare(
         address,
         registered: AtomicU64::new(0),
         cancelled: AtomicBool::new(false),
-        delivery: SpinLock::new(Delivery {
+        delivery: LegacyLock::new(Delivery {
             cursor: None,
             pending: None,
             stopped: None,

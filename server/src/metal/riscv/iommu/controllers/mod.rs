@@ -4,7 +4,10 @@
 use super::mmio::Mmio;
 mod pool;
 
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 pub(crate) use pool::Controllers;
 
-pub(crate) static CONTROLLERS: SpinLock<Option<Controllers<Mmio>>> = SpinLock::new(None);
+pub(crate) static CONTROLLERS: LegacyLock<
+    crate::metal::sync::order::Controllers,
+    Option<Controllers<Mmio>>,
+> = LegacyLock::new(None);

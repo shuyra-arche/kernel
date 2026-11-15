@@ -28,7 +28,7 @@ pub(crate) struct PendEntry {
     sire: Option<PendId>,
     lord: Weak<Task>,
     sender: Option<Sender>,
-    charge: crate::metal::sync::SpinLock<Option<Charge>>,
+    charge: crate::metal::sync::LegacyLock<crate::metal::sync::order::LedgerCharge, Option<Charge>>,
     meta: Target,
 }
 
@@ -228,7 +228,7 @@ impl PendEntry {
             sire,
             lord: Weak::new(),
             sender: None,
-            charge: crate::metal::sync::SpinLock::new(None),
+            charge: crate::metal::sync::LegacyLock::new(None),
             meta,
         })
     }

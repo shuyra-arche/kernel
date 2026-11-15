@@ -11,9 +11,8 @@ use alloc::sync::Arc;
 use alloc::sync::Weak;
 use alloc::vec::Vec;
 
-use crate::metal::sync::Level;
+use crate::metal::sync::LegacyLock;
 use crate::metal::sync::OnceLock;
-use crate::metal::sync::SpinLock;
 
 use kernel_api::address::PageIndex;
 use kernel_api::address::VirtAddr;
@@ -35,13 +34,13 @@ struct Record {
 
 /// 全核唯一的一份关联：单链头，每条一个关系。
 struct SourceReservations {
-    head: SpinLock<Option<Box<Record>>>,
+    head: LegacyLock<crate::metal::sync::order::SourceIndex, Option<Box<Record>>>,
 }
 
 fn registry() -> &'static SourceReservations {
     static REGISTRY: OnceLock<SourceReservations> = OnceLock::new();
     REGISTRY.get_or_init(|| SourceReservations {
-        head: SpinLock::new_level(Level::L3, None),
+        head: LegacyLock::new(None),
     })
 }
 

@@ -18,6 +18,16 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+// Script a hardware boundary without asserting actual MMU/IOMMU completion.
+std::thread_local! {
+    static WITHDRAW_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const {std::cell::RefCell::new(None)};
+}
+pub(crate) fn on_withdraw(hook: impl FnOnce() + 'static) {
+    WITHDRAW_HOOK.with_borrow_mut(|slot| {
+        assert!(slot.is_none());
+        *slot = Some(Box::new(hook));
+    });
+}
 pub(crate) struct SpinLock<T>(Mutex<T>);
 impl<T> SpinLock<T> {
     pub(crate) fn new(value: T) -> Self {
@@ -232,6 +242,10 @@ impl Nest {
     ) -> Result<(), PendFail> {
         if self.busy.load(Ordering::Acquire) {
             return Err(PendFail::Busy);
+        }
+        let hook = WITHDRAW_HOOK.with_borrow_mut(Option::take);
+        if let Some(hook) = hook {
+            hook();
         }
         self.withdrawn
             .lock()

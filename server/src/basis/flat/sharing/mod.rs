@@ -23,8 +23,7 @@ use crate::basis::pend::SourceAuthorization;
 use crate::basis::sign;
 use crate::basis::sign::WakeKey;
 use crate::basis::unit::anchor::Anchor;
-use crate::metal::sync::Level;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
@@ -50,9 +49,12 @@ pub struct Sharing {
     source: FlatRange,
     /// 这份来源的授权记录：从已有来源创建时就是那一份（根 Pend 接手），
     /// 否则为 `None`。撤销时由它收回名下关系。
-    authorization: SpinLock<Option<Arc<SourceAuthorization>>>,
-    maps: SpinLock<Vec<HeldMap>>,
-    authorities: SpinLock<Vec<Authority>>,
+    authorization: LegacyLock<
+        crate::metal::sync::order::SourceAuthorizationRef,
+        Option<Arc<SourceAuthorization>>,
+    >,
+    maps: LegacyLock<crate::metal::sync::order::SourceMaps, Vec<HeldMap>>,
+    authorities: LegacyLock<crate::metal::sync::order::SourceAuthorities, Vec<Authority>>,
     live: AtomicBool,
     operating: AtomicBool,
     owner: TaskId,
@@ -77,9 +79,9 @@ impl Sharing {
             .map_err(|_| PendFail::OutOfMemory)?;
         Arc::try_new(Self {
             source,
-            authorization: SpinLock::new(None),
-            maps: SpinLock::new(maps),
-            authorities: SpinLock::new_level(Level::L3, authorities),
+            authorization: LegacyLock::new(None),
+            maps: LegacyLock::new(maps),
+            authorities: LegacyLock::new(authorities),
             live: AtomicBool::new(true),
             operating: AtomicBool::new(false),
             owner,

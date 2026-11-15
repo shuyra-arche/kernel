@@ -1,5 +1,4 @@
-use crate::metal::sync::Level;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use kernel_api::abi::call::unit::UnitFail;
 use kernel_api::model::identity::TaskId;
 
@@ -20,19 +19,16 @@ struct State {
 }
 
 pub(crate) struct ExitPolicy {
-    state: SpinLock<State>,
+    state: LegacyLock<crate::metal::sync::order::TeamExit, State>,
 }
 
 impl ExitPolicy {
     pub(crate) const fn new() -> Self {
         Self {
-            state: SpinLock::new_level(
-                Level::L3,
-                State {
-                    mode: Mode::Dormant,
-                    deaths: 0,
-                },
-            ),
+            state: LegacyLock::new(State {
+                mode: Mode::Dormant,
+                deaths: 0,
+            }),
         }
     }
 

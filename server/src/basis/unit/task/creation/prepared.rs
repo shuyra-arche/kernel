@@ -9,7 +9,7 @@ use crate::basis::unit::lifecycle::tally;
 use crate::basis::unit::task::Origin;
 use crate::basis::unit::team::MAX_MEMBERS;
 use crate::basis::unit::team::Member;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 
 use super::super::Task;
 use super::super::TaskIdent;
@@ -20,7 +20,7 @@ use super::super::TaskWeak;
 pub(crate) struct PreparedTask {
     ident: Arc<TaskIdent>,
     life: Arc<Anchor>,
-    state: Arc<SpinLock<TaskState>>,
+    state: Arc<LegacyLock<crate::metal::sync::order::TaskState, TaskState>>,
     slot: Option<Arc<MaybeUninit<Task>>>,
 }
 
@@ -28,7 +28,7 @@ impl PreparedTask {
     pub(crate) fn new(
         ident: Arc<TaskIdent>,
         life: Arc<Anchor>,
-        state: Arc<SpinLock<TaskState>>,
+        state: Arc<LegacyLock<crate::metal::sync::order::TaskState, TaskState>>,
         slot: Arc<MaybeUninit<Task>>,
     ) -> PreparedTask {
         PreparedTask {
@@ -70,15 +70,14 @@ impl PreparedTask {
             node: Arc::downgrade(&team.node),
             state: self.state.clone(),
             life: self.life.clone(),
-            receipts: SpinLock::new(receipts),
-            result: SpinLock::new(None),
+            receipts: LegacyLock::new(receipts),
+            result: LegacyLock::new(None),
         })
         .map_err(|_| NestError::OutOfMemory)?;
         crate::basis::unit::task::registry::reserve().map_err(|_| NestError::OutOfMemory)?;
         // 下面的提交段在 `NoAllocation` 下并持几把锁：这里自己四把（提交锁、成员表、
         // 暂扣表、名册），回调里还会取它自己那几把。依赖栈容量按「自己四把 + 四把
         // 余量」先在这里备好：提交段里惰性扩容就是一次分配，回调再取锁就只剩溢出。
-        crate::metal::sync::reserve_depend(8).map_err(|_| NestError::OutOfMemory)?;
         {
             let mut tasks = team.node.tasks.lock();
             if tasks.len() >= MAX_MEMBERS {
@@ -116,12 +115,12 @@ impl PreparedTask {
                     life: self.life.clone(),
                     state: self.state.clone(),
                     pend,
-                    memory_results: SpinLock::new(None),
+                    memory_results: LegacyLock::new(None),
                     administration: crate::basis::unit::control::Table::new(),
-                    heir: SpinLock::new(Vec::new()),
-                    retirement: SpinLock::new(super::super::retirement::Retirement::new()),
-                    schedule: SpinLock::new(super::super::schedule::Schedule::new()),
-                    extensions: SpinLock::new(
+                    heir: LegacyLock::new(Vec::new()),
+                    retirement: LegacyLock::new(super::super::retirement::Retirement::new()),
+                    schedule: LegacyLock::new(super::super::schedule::Schedule::new()),
+                    extensions: LegacyLock::new(
                         crate::metal::switcher::context::extension::ExtendedContext::new(),
                     ),
                 });

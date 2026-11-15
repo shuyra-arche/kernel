@@ -13,8 +13,6 @@ use crate::basis::room::scheduler;
 use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskBuilder;
 use crate::basis::unit::task::TaskWeak;
-use crate::metal::sync::SpinLock;
-use crate::metal::sync::SpinLockGuard;
 
 mod builder;
 pub(crate) mod capsule;
@@ -40,7 +38,7 @@ pub struct Team {
     pub(crate) creator: TaskId,
     pub(crate) tasks: Tasks,
     pub(crate) node: Arc<TeamNode>,
-    operation: SpinLock<()>,
+    operation: core::sync::atomic::AtomicBool,
 }
 
 unsafe impl Sync for Team {}
@@ -103,8 +101,16 @@ impl Team {
         self.node.state.lock().ready()
     }
 
-    pub(crate) fn operation(&self) -> Option<SpinLockGuard<'_, ()>> {
-        self.operation.try_lock()
+    pub(crate) fn operation(&self) -> Option<Operation<'_>> {
+        self.operation
+            .compare_exchange(
+                false,
+                true,
+                core::sync::atomic::Ordering::Acquire,
+                core::sync::atomic::Ordering::Relaxed,
+            )
+            .ok()?;
+        Some(Operation(&self.operation))
     }
 
     pub(crate) fn retire(&self) -> Result<(), NestError> {
@@ -266,8 +272,8 @@ pub(crate) fn spawn(
 pub(crate) fn oust(me: &Arc<Task>, id: TeamId) -> Result<(), UnitFail> {
     let child = me.clan(id).ok_or(UnitFail::Denied)?;
     child.retire().map_err(|_| UnitFail::Busy)?;
-    let operation = child.operation().ok_or(UnitFail::Busy)?;
-    let retired = {
+    let _retired = {
+        let _operation = child.operation().ok_or(UnitFail::Busy)?;
         let _commit = commit();
         if !child.all_reaped() {
             return Err(UnitFail::Busy);
@@ -278,7 +284,14 @@ pub(crate) fn oust(me: &Arc<Task>, id: TeamId) -> Result<(), UnitFail> {
         let detached = sire.as_ref().and_then(|sire| sire.detach_heir(id));
         (sire, detached)
     };
-    drop(operation);
-    drop(retired);
     Ok(())
+}
+
+// A nonblocking operation lease serializes construction/retirement without
+// retaining a software lock or masking IRQs over publication or completion.
+pub(crate) struct Operation<'a>(&'a core::sync::atomic::AtomicBool);
+impl Drop for Operation<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, core::sync::atomic::Ordering::Release);
+    }
 }

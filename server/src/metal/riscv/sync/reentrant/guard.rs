@@ -50,7 +50,7 @@ impl<T: ?Sized> Drop for RelLockGuard<'_, T> {
                 crate::metal::measure::complete(outer);
             }
             #[cfg(debug_assertions)]
-            super::depend::release(self.lock as *const _ as *const () as usize);
+            crate::metal::sync::deadlock::released(self.lock as *const _ as *const () as usize);
             self.lock.owner.store(Owner::FREE.word(), Ordering::Relaxed);
             // Publish all protected writes before the next reserved Hart may
             // enter. Recursive releases never advance the queue.

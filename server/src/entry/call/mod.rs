@@ -27,7 +27,11 @@ use outcome::ret_err;
 ///
 /// **不碰 `sepc`**：客人那条 `ebreak` 有多宽、之后从哪里续跑，是入口那一手的事
 /// （`entry::trap::envcall`）——这里只管把这一格调用服务完，并把答案写进这一帧。
-pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut TrapContext> {
+pub(crate) fn dispatch(
+    frame: &mut TrapContext,
+    ident: Arc<TaskIdent>,
+    root: crate::metal::sync::Root<'_>,
+) -> Option<*mut TrapContext> {
     let number = frame.gpr.x(Gprs::A7);
     let regs = [
         frame.gpr.x(Gprs::A0),
@@ -39,8 +43,15 @@ pub fn dispatch(frame: &mut TrapContext, ident: Arc<TaskIdent>) -> Option<*mut T
     ];
     // Calls, Capsule and Ledger share the single API version.
     if kernel_api::abi::memory::Opcode::from_call_number(number as u64).is_some() {
-        return Some(next_memory::dispatch(frame, ident, number as u64, regs));
+        return Some(next_memory::dispatch(
+            frame,
+            ident,
+            number as u64,
+            regs,
+            root,
+        ));
     }
+    drop(root); // legacy dispatch owns no typed scope
     let envcall = match EnvCall::from_wire(number, &regs) {
         Ok(c) => c,
         Err(_) => {

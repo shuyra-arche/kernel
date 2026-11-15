@@ -19,7 +19,9 @@ fn with_parent<T>(
     run: impl FnOnce() -> Result<T, PendFail>,
 ) -> Result<T, PendFail> {
     if let Some(parent) = entry.lord().upgrade() {
-        super::with_pair(task, &parent, run)?
+        let mut pair = super::pair(task, &parent)?;
+        let _commit = pair.lock(crate::metal::sync::global_commit());
+        run()
     } else {
         let _serial = task.pend.try_lock().ok_or(PendFail::Busy)?;
         let _commit = crate::basis::commit();

@@ -1,7 +1,7 @@
 use crate::{
     cell::{Owner, Page},
     error::FlatError,
-    host_lock::SpinLock,
+    host_lock::{LegacyLock, order},
     state::{
         FlatSource, FlatState,
         materialize::{Reservation, Step},
@@ -16,10 +16,13 @@ use kernel_api::{
 };
 use std::sync::Barrier;
 
-fn source() -> SpinLock<FlatState> {
-    SpinLock::new(FlatState::new(FlatSource::Managed(Vec::new()), true))
+fn source() -> LegacyLock<order::Flat, FlatState> {
+    LegacyLock::new(FlatState::new(FlatSource::Managed(Vec::new()), true))
 }
-fn reserve(state: &SpinLock<FlatState>, at: usize) -> Result<Reservation<'_>, FlatError> {
+fn reserve(
+    state: &LegacyLock<order::Flat, FlatState>,
+    at: usize,
+) -> Result<Reservation<'_>, FlatError> {
     match Reservation::prepare(state, PageIndex::new(at), at + 1, CellLevel::BASE)? {
         Step::Allocate(r) => Ok(r),
         Step::Ready(_) => panic!("expected Fresh"),

@@ -182,3 +182,76 @@ fn child_retirement_does_not_discharge_root_or_sibling_obligations() {
     unsafe { parent.release_retirement() };
     parent.settle().unwrap();
 }
+
+#[test]
+fn borrowing_releases_lender_state_before_installing_child_obligation() {
+    for external in [false, true] {
+        let operations = Operations::None(CreationRights::empty());
+        let parent =
+            Pend::try_new_scope(Yes, PendScope::Object, operations, Distributable::Yes).unwrap();
+        let child = root(operations);
+        super::storage::single(|| {
+            if external {
+                parent.borrow_external(&child).unwrap();
+            } else {
+                parent.lend_registers(&child).unwrap();
+            }
+        });
+        assert_eq!(parent.modifiable(), None);
+        child.invalidate();
+        child.settle().unwrap();
+        assert_eq!(parent.modifiable(), Some(Yes));
+        assert!(!parent.external_pending());
+    }
+}
+
+#[test]
+fn returning_owns_child_obligation_before_accessing_lender_state() {
+    for external in [false, true] {
+        let operations = Operations::None(CreationRights::empty());
+        let parent =
+            Pend::try_new_scope(Yes, PendScope::Object, operations, Distributable::Yes).unwrap();
+        let first = root(operations);
+        let second = root(operations);
+        for child in [&first, &second] {
+            if external {
+                parent.borrow_external(child).unwrap();
+            } else {
+                parent.lend_registers(child).unwrap();
+            }
+        }
+        super::storage::single(|| {
+            assert_eq!(parent.modifiable(), None);
+            first.invalidate();
+            first.settle().unwrap();
+            assert_eq!(
+                parent.modifiable(),
+                None,
+                "second reader still owns its loan"
+            );
+            second.invalidate();
+            second.settle().unwrap();
+            assert_eq!(parent.modifiable(), Some(Yes));
+            assert!(!parent.external_pending());
+            // Settlement takes the return record once; a repeated call must
+            // not discharge the lender a second time.
+            second.settle().unwrap();
+            assert_eq!(parent.modifiable(), Some(Yes));
+        });
+    }
+}
+
+#[test]
+fn unpublished_cancellation_returns_obligation_without_nesting_storage_guards() {
+    let operations = Operations::None(CreationRights::empty());
+    let parent =
+        Pend::try_new_scope(Yes, PendScope::Object, operations, Distributable::Yes).unwrap();
+    let child = root(operations);
+    parent.borrow_external(&child).unwrap();
+    super::storage::single(|| {
+        // This child has never authorized or published any hardware access.
+        unsafe { child.cancel_unpublished() }.unwrap();
+        assert!(!parent.external_pending());
+        assert_eq!(parent.modifiable(), Some(Yes));
+    });
+}

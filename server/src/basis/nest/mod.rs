@@ -26,9 +26,8 @@ use crate::metal::layout::TEAM_FRAME_BASE;
 use crate::metal::layout::TEAM_FRAME_WINDOW_SIZE;
 use crate::metal::layout::TRAP_STACK_BASE;
 use crate::metal::mmu::{self, Geometry, Root, Table, identity};
-use crate::metal::sync::Level;
-use crate::metal::sync::SpinLock;
-use crate::metal::sync::SpinLockGuard;
+use crate::metal::sync::LegacyGuard;
+use crate::metal::sync::LegacyLock;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
@@ -98,9 +97,9 @@ pub struct Nest {
     cpu: Option<CpuContext>,
     life: Arc<Anchor>,
     pub(crate) reservations: authority::ReservationRegistry,
-    layout: SpinLock<Layout>,
-    pending_cleanup: SpinLock<Option<Box<CleanupNode>>>,
-    state: ManuallyDrop<SpinLock<NestState>>,
+    layout: LegacyLock<crate::metal::sync::order::Address, Layout>,
+    pending_cleanup: LegacyLock<crate::metal::sync::order::Cleanup, Option<Box<CleanupNode>>>,
+    state: ManuallyDrop<LegacyLock<crate::metal::sync::order::Nest, NestState>>,
 }
 
 impl Nest {
@@ -237,9 +236,9 @@ impl Nest {
             cpu: Some(CpuContext { domain, kind }),
             life,
             reservations: authority::ReservationRegistry::new(),
-            layout: SpinLock::new_level(Level::Address, layout),
-            pending_cleanup: SpinLock::new_level(Level::Address, None),
-            state: ManuallyDrop::new(SpinLock::new_level(Level::Nest, NestState::new(root))),
+            layout: LegacyLock::new(layout),
+            pending_cleanup: LegacyLock::new(None),
+            state: ManuallyDrop::new(LegacyLock::new(NestState::new(root))),
         })
         .map_err(|_| NestError::OutOfMemory)?;
         nest.cpu
@@ -251,7 +250,7 @@ impl Nest {
     }
 
     /// 尚未发布的事务只在这些阶段可见：Clean 且未关闭。
-    fn ready_state(&self) -> Result<SpinLockGuard<'_, NestState>, NestError> {
+    fn ready_state(&self) -> Result<LegacyGuard<'_, NestState>, NestError> {
         // One covering fence per turn. A peer may dirty a new batch before the
         // final lock acquisition; admission then returns Busy for continuation.
         for turn in 0..2 {

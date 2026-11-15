@@ -8,7 +8,9 @@ impl Flat {
         if core::ptr::eq(self, target) || self.page_count != target.page_count {
             return Err(FlatError::OutOfRange);
         }
-        crate::metal::sync::with_pair(&self.state, &target.state, |from, to| {
+        {
+            let mut pair = self.pair_state(target);
+            let (from, to) = pair.values();
             if from.explicit
                 || to.explicit
                 || !from.transferable
@@ -64,6 +66,6 @@ impl Flat {
                     })
                 }
             }
-        })
+        }
     }
 }

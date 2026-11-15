@@ -5,7 +5,7 @@ mod authority;
 mod branch;
 mod ledger;
 mod source;
-pub(crate) use authority::{Export, Pend, PreparedLimit};
+pub(crate) use authority::{Export, Pend};
 pub(crate) use source::maintenance::{MaintenanceUse, Stage};
 pub(crate) use source::{Provenance, Tracking};
 mod target;
@@ -19,8 +19,7 @@ use crate::basis::unit::task::Task;
 pub(crate) use branch::{accord, reduce};
 pub(crate) use ledger::{
     PendEntry, PreparedReservationGrant, Table, accede, available, doom, insert, locate, notify,
-    prepare_native_reservation, prepare_reservation, retire, return_, revoke, vestor,
-    with_pair_uncommitted,
+    pair, prepare_native_reservation, prepare_reservation, retire, return_, revoke, vestor,
 };
 pub(crate) use source::{
     ExternalBorrow, Geometry, Hold, HoldTable, RangeBlock, SourceAuthorization,

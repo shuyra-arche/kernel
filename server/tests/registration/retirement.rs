@@ -312,3 +312,63 @@ fn accord_and_narrow_check_complete_cell_and_external_original_span_geometry() {
     let full = child(&task, &task, &root, PendRange::Inherit);
     assert_eq!(full.scope(), root.scope());
 }
+
+#[test]
+fn narrowing_releases_serial_for_withdrawal_and_revalidates_a_new_heir_before_commit() {
+    let (task, nest, whole) = setup(Yes, Distributable::Yes);
+    let root = reserve(&task, &nest, &whole, 8, CellLevel::BASE);
+    let original = root.authority().limits();
+    let receiver = Task::new(2);
+    let token = Arc::new(std::sync::Mutex::new(None));
+    let (publisher, recipient, parent, created) =
+        (task.clone(), receiver.clone(), root.clone(), token.clone());
+    super::support::on_withdraw(move || {
+        {
+            let _serial = publisher
+                .pend
+                .try_lock()
+                .expect("hardware withdrawal retained LedgerSerial");
+        }
+        let grant = child(&publisher, &recipient, &parent, PendRange::Inherit);
+        *created.lock().unwrap() = Some(grant.token());
+    });
+    let narrower = Limits {
+        scope: map(1, 0, 4),
+        ..original
+    };
+    assert_eq!(
+        branch::reduce(&task, root.token(), narrower),
+        Err(PendFail::Busy)
+    );
+    assert_eq!(root.authority().limits(), original);
+    ledger::return_(&receiver, token.lock().unwrap().take().unwrap()).unwrap();
+    branch::reduce(&task, root.token(), narrower).unwrap();
+    assert_eq!(root.scope(), map(1, 0, 4));
+}
+
+#[test]
+fn task_pair_uses_actual_owners_same_task_once_and_rejects_duplicate_identity() {
+    let a = Task::new(101);
+    let b = Task::new(102);
+    let impostor = Task::new(101);
+    {
+        let _pair = ledger::pair(&b, &a).unwrap();
+        assert!(a.pend.try_lock().is_none());
+        assert!(b.pend.try_lock().is_none());
+    }
+    assert!(a.pend.try_lock().is_some());
+    assert!(b.pend.try_lock().is_some());
+    {
+        let _single = ledger::pair(&a, &a).unwrap();
+        assert!(a.pend.try_lock().is_none());
+    }
+    assert!(matches!(ledger::pair(&a, &impostor), Err(PendFail::Denied)));
+    assert!(a.pend.try_lock().is_some());
+    assert!(impostor.pend.try_lock().is_some());
+    {
+        let _second = b.pend.lock();
+        assert!(matches!(ledger::pair(&a, &b), Err(PendFail::Busy)));
+        assert!(a.pend.try_lock().is_some());
+    }
+    assert!(ledger::pair(&a, &b).is_ok());
+}

@@ -9,10 +9,10 @@ use crate::basis::unit::task::Task;
 pub(crate) struct RangeBlock {
     authority: Arc<Pend>,
     geometry: Arc<Geometry>,
-    pages: SpinLock<Vec<Block>>,
-    native: SpinLock<Option<NativeBlock>>,
-    pub(super) uses: SpinLock<Vec<Weak<MaintenanceUse>>>,
-    pub(super) stages: SpinLock<Vec<Weak<Stage>>>,
+    pages: LegacyLock<crate::metal::sync::order::BlockPages, Vec<Block>>,
+    native: LegacyLock<crate::metal::sync::order::BlockEpoch, Option<NativeBlock>>,
+    pub(super) uses: LegacyLock<crate::metal::sync::order::BlockUses, Vec<Weak<MaintenanceUse>>>,
+    pub(super) stages: LegacyLock<crate::metal::sync::order::BlockStages, Vec<Weak<Stage>>>,
 }
 
 impl RangeBlock {
@@ -426,10 +426,10 @@ impl SourceAuthorization {
         let block = Arc::try_new(RangeBlock {
             authority: authority.clone(),
             geometry: Geometry::new(offset, count)?,
-            pages: SpinLock::new(Vec::new()),
-            native: SpinLock::new(None),
-            uses: SpinLock::new(Vec::new()),
-            stages: SpinLock::new(Vec::new()),
+            pages: LegacyLock::new(Vec::new()),
+            native: LegacyLock::new(None),
+            uses: LegacyLock::new(Vec::new()),
+            stages: LegacyLock::new(Vec::new()),
         })
         .map_err(|_| PendFail::OutOfMemory)?;
         blocks.push(block.clone());

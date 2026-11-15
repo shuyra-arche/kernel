@@ -1,6 +1,6 @@
 //! Telemetry owned by the retention lifecycle. It is never consulted by reclaim.
 use super::Kind;
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 #[derive(Clone, Copy)]
 pub(crate) struct Snapshot {
     pub cpu: u64,
@@ -8,12 +8,13 @@ pub(crate) struct Snapshot {
     pub retiring: u64,
     pub abandoned: u64,
 }
-static TOTAL: SpinLock<Snapshot> = SpinLock::new(Snapshot {
-    cpu: 0,
-    external: 0,
-    retiring: 0,
-    abandoned: 0,
-});
+static TOTAL: LegacyLock<crate::metal::sync::order::RetentionStatistics, Snapshot> =
+    LegacyLock::new(Snapshot {
+        cpu: 0,
+        external: 0,
+        retiring: 0,
+        abandoned: 0,
+    });
 fn add(value: &mut u64, bytes: u64) {
     *value = value.checked_add(bytes).unwrap_or(u64::MAX);
 }

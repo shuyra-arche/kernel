@@ -17,7 +17,7 @@ use crate::metal::{
         context::{Gprs, TrapContext},
         stack::trap_stack_edge,
     },
-    sync::{Level, SpinLock},
+    sync::LegacyLock,
 };
 use alloc::sync::Arc;
 use identity::Publication;
@@ -33,9 +33,10 @@ struct Inner {
 #[repr(align(64))]
 pub(crate) struct Slot {
     pub(super) hart: HartId,
-    inner: SpinLock<Inner>,
+    inner: LegacyLock<crate::metal::sync::order::Scheduler, Inner>,
     identity: Publication,
-    pub(super) admission: SpinLock<super::contract::Admission>,
+    pub(super) admission:
+        LegacyLock<crate::metal::sync::order::SchedulerAdmission, super::contract::Admission>,
     pub(super) isolated: core::sync::atomic::AtomicBool,
 }
 /// Required destination state when a current Task leaves this scheduler.
@@ -54,16 +55,13 @@ impl Slot {
     pub(super) fn new(hart: HartId) -> Self {
         Self {
             hart,
-            inner: SpinLock::new_level(
-                Level::Scheduler,
-                Inner {
-                    running: None,
-                    ready: Ready::new(hart),
-                    pending: crate::basis::unit::task::chain::Chain::new(),
-                },
-            ),
+            inner: LegacyLock::new(Inner {
+                running: None,
+                ready: Ready::new(hart),
+                pending: crate::basis::unit::task::chain::Chain::new(),
+            }),
             identity: Publication::new(),
-            admission: SpinLock::new(super::contract::Admission::new()),
+            admission: LegacyLock::new(super::contract::Admission::new()),
             isolated: core::sync::atomic::AtomicBool::new(false),
         }
     }

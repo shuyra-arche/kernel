@@ -6,7 +6,7 @@ use crate::metal::sync::trap::TrapGuard;
 use super::SpinLock;
 
 pub struct SpinLockGuard<'a, T: ?Sized> {
-    lock: &'a SpinLock<T>,
+    pub(super) lock: &'a SpinLock<T>,
     _not_send: PhantomData<*const ()>,
     _trap: TrapGuard,
     #[cfg(feature = "latency")]
@@ -41,7 +41,7 @@ impl<T: ?Sized> DerefMut for SpinLockGuard<'_, T> {
 
 impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
     fn drop(&mut self) {
-        crate::metal::sync::depend_release!(self.lock);
+        crate::metal::sync::deadlock_released!(self.lock);
         #[cfg(feature = "latency")]
         crate::metal::measure::elapsed(crate::metal::measure::Metric::SpinHold, self.start);
         self.lock.turns.leave();

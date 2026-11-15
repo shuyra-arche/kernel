@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 
 use super::{Nest, Span};
 use crate::basis::pend::{Pend, SourceAuthorization};
-use crate::metal::sync::SpinLock;
+use crate::metal::sync::LegacyLock;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::model::identity::TaskId;
 use kernel_api::model::pend::PendStatus;
@@ -102,13 +102,13 @@ struct Ranges {
 }
 
 pub(crate) struct ReservationRegistry {
-    ranges: SpinLock<Ranges>,
+    ranges: LegacyLock<crate::metal::sync::order::NestAuthority, Ranges>,
 }
 
 impl ReservationRegistry {
     pub(crate) fn new() -> Self {
         Self {
-            ranges: SpinLock::new(Ranges {
+            ranges: LegacyLock::new(Ranges {
                 entries: Vec::new(),
                 prepared: 0,
                 cursor: 0,

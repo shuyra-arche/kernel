@@ -65,6 +65,14 @@ pub(crate) mod basis {
     }
 }
 pub(crate) mod metal {
+    // This dispatch fixture has no Hart/IRQ boundary. Production Root lifetime
+    // and anti-forgery properties are compiled and exercised in tests/sync.
+    pub(crate) mod sync {
+        pub(crate) struct Root<'a>(core::marker::PhantomData<&'a mut ()>);
+        pub(crate) fn boundary<R>(body: impl for<'a> FnOnce(Root<'a>) -> R) -> R {
+            body(Root(core::marker::PhantomData))
+        }
+    }
     pub(crate) mod switcher {
         pub(crate) mod context {
             pub(crate) use crate::support::{Gprs, TrapContext};

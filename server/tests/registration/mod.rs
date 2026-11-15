@@ -1,4 +1,10 @@
+#![allow(internal_features)]
+#![feature(std_internals)]
+#![feature(reentrant_lock)]
 #![feature(allocator_ext)]
+#[allow(dead_code, unused_imports)]
+#[path = "../support/lock.rs"]
+mod host_lock;
 extern crate alloc;
 
 // Production authority, scopes, ancestry and ledger preparation run on the host.
@@ -143,16 +149,16 @@ mod basis {
             }
         }
     }
-    pub(crate) fn commit() -> std::sync::MutexGuard<'static, ()> {
-        static COMMIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        COMMIT.lock().unwrap()
+    pub(crate) fn commit() -> std::sync::ReentrantLockGuard<'static, ()> {
+        crate::host_lock::commit()
     }
 }
 mod metal {
     pub(crate) mod sync {
-        pub(crate) use crate::support::{SpinLock, spin};
+        pub(crate) use crate::host_lock::{
+            LegacyGuard, LegacyLock, Root, global_commit, lock, order,
+        };
         pub(crate) use std::sync::OnceLock;
-        pub(crate) type SpinLockGuard<'a, T> = std::sync::MutexGuard<'a, T>;
     }
 }
 

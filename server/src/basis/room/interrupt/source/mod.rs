@@ -9,7 +9,7 @@ use crate::basis::{
 };
 use crate::metal::{
     generic::interrupt::Irq,
-    sync::{Level, OnceLock, SpinLock},
+    sync::{LegacyLock, OnceLock},
 };
 use alloc::sync::{Arc, Weak};
 use kernel_api::{
@@ -30,7 +30,7 @@ pub(crate) struct Source {
     pub(super) maintenance_slot: usize,
     pub(crate) endpoint: Arc<Endpoint>,
     view: OnceLock<Arc<Sharing>>,
-    state: SpinLock<State<Receiver>>,
+    state: LegacyLock<crate::metal::sync::order::InterruptSource, State<Receiver>>,
 }
 struct Receiver {
     task: Weak<Task>,
@@ -45,7 +45,7 @@ impl Source {
             maintenance_slot,
             endpoint: Endpoint::try_new(TaskId::new(0)).map_err(|_| PendFail::OutOfMemory)?,
             view: OnceLock::new(),
-            state: SpinLock::new_level(Level::L3, State::new()),
+            state: LegacyLock::new(State::new()),
         })
     }
     pub(super) fn matches(&self, sign: Option<&Endpoint>, view: Option<&Sharing>) -> bool {

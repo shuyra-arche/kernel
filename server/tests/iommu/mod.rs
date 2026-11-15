@@ -1,3 +1,6 @@
+#![allow(internal_features)]
+#![feature(std_internals)]
+#![feature(reentrant_lock)]
 #![feature(allocator_ext)]
 
 extern crate alloc;
@@ -40,6 +43,7 @@ mod basis {
 mod completion;
 mod engine;
 mod hardware;
+#[allow(dead_code, unused_imports)]
 #[path = "../support/lock.rs"]
 mod host_lock;
 mod lifecycle;

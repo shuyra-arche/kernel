@@ -8,7 +8,7 @@ use crate::basis::nest::PublicationError as Error;
 use crate::basis::pend::ExternalBorrow;
 use crate::basis::unit::anchor::Anchor;
 use crate::metal::iommu::{Backend, Fault};
-use crate::metal::sync::{Level, SpinLock};
+use crate::metal::sync::LegacyLock;
 use alloc::sync::Arc;
 use core::mem::ManuallyDrop;
 pub(super) use state::External;
@@ -50,9 +50,9 @@ impl Nest {
             cpu: None,
             life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
             reservations: super::super::authority::ReservationRegistry::new(),
-            layout: SpinLock::new_level(Level::Address, Layout::new()),
-            pending_cleanup: SpinLock::new(None),
-            state: ManuallyDrop::new(SpinLock::new_level(Level::Nest, NestState::external())),
+            layout: LegacyLock::new(Layout::new()),
+            pending_cleanup: LegacyLock::new(None),
+            state: ManuallyDrop::new(LegacyLock::new(NestState::external())),
         })
         .map_err(|_| NestError::OutOfMemory)
     }

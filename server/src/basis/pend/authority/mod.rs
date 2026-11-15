@@ -1,5 +1,5 @@
 //! Live authorization, immutable ancestry and unsettled device access.
-use crate::metal::sync::{OnceLock, SpinLock, SpinLockGuard};
+use crate::metal::sync::{LegacyGuard, LegacyLock, OnceLock};
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::{
@@ -29,8 +29,8 @@ struct ParentBorrow {
 }
 
 pub(crate) struct Pend {
-    state: SpinLock<State>,
-    parent: SpinLock<Option<ParentBorrow>>,
+    state: LegacyLock<crate::metal::sync::order::PendState, State>,
+    parent: LegacyLock<crate::metal::sync::order::PendParent, Option<ParentBorrow>>,
     // Immutable authority ancestry applies to every target. ParentBorrow is
     // separately the data-access obligation returned only after settlement.
     ancestor: OnceLock<Arc<Pend>>,
@@ -62,8 +62,8 @@ impl Pend {
         distributable: Distributable,
     ) -> Result<Arc<Self>, PendFail> {
         Arc::try_new(Self {
-            state: SpinLock::new(State::authorized(access, scope, operations, distributable)),
-            parent: SpinLock::new(None),
+            state: LegacyLock::new(State::authorized(access, scope, operations, distributable)),
+            parent: LegacyLock::new(None),
             ancestor: OnceLock::new(),
             holder: OnceLock::new(),
             external: AtomicUsize::new(0),
@@ -188,13 +188,18 @@ impl Pend {
         }
         child.inherit(self)?;
         let access = child.configured();
-        let mut state = self.state.lock();
-        if self.routing.load(Ordering::Acquire) != 0 {
-            return Err(PendFail::Busy);
-        }
-        *state = state.transition(Event::Borrow(access)).map_err(fail)?;
-        if matches!(device, DeviceBorrow::External) {
-            self.external.fetch_add(1, Ordering::Release);
+        // The caller serializes publication with COMMIT. Commit the lender's
+        // state first, then install the unpublished child's return obligation;
+        // the two storage guards do not need to coexist.
+        {
+            let mut state = self.state.lock();
+            if self.routing.load(Ordering::Acquire) != 0 {
+                return Err(PendFail::Busy);
+            }
+            *state = state.transition(Event::Borrow(access)).map_err(fail)?;
+            if matches!(device, DeviceBorrow::External) {
+                self.external.fetch_add(1, Ordering::Release);
+            }
         }
         *child.parent.lock() = Some(ParentBorrow {
             parent: self.clone(),
@@ -331,17 +336,22 @@ impl Pend {
         self.finish(Event::Cancel)
     }
     fn finish(&self, event: Event) -> Result<(), PendFail> {
-        let mut state = self.state.lock();
-        if self.external_pending() {
-            return Err(PendFail::Busy);
+        {
+            let mut state = self.state.lock();
+            if self.external_pending() {
+                return Err(PendFail::Busy);
+            }
+            *state = state.transition(event).map_err(fail)?;
         }
-        *state = state.transition(event).map_err(fail)?;
-        drop(state);
+        // Own the exact return obligation after releasing the child storage
+        // lock. An if-let scrutinee guard would otherwise remain held while
+        // taking the lender's state, opposite to borrow_device's old nesting.
+        let obligation = { self.parent.lock().take() };
         if let Some(ParentBorrow {
             parent,
             access,
             device,
-        }) = self.parent.lock().take()
+        }) = obligation
         {
             let mut state = parent.state.lock();
             if matches!(device, DeviceBorrow::External) {
@@ -357,7 +367,7 @@ impl Pend {
 
 #[must_use = "an uncommitted limit leaves the current authority unchanged"]
 pub(crate) struct PreparedLimit<'a> {
-    state: SpinLockGuard<'a, State>,
+    state: LegacyGuard<'a, State>,
     next: State,
 }
 
