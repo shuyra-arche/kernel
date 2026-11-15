@@ -45,13 +45,13 @@ fn wait(mut predicate: impl FnMut() -> bool) {
     }
 }
 fn reserve(flat: &Flat) -> Reservation<'_> {
-    match Reservation::prepare(&flat.state, PageIndex::ZERO, GRAIN, level()).unwrap() {
+    match Reservation::prepare(flat.state_storage(), PageIndex::ZERO, GRAIN, level()).unwrap() {
         Step::Allocate(reservation) => reservation,
         Step::Ready(_) => panic!("expected Fresh"),
     }
 }
 fn resident(flat: &Flat, index: usize) -> (usize, usize) {
-    let guard = flat.state.lock();
+    let guard = flat.state_storage().lock();
     let FlatSource::Managed(slots) = &guard.source else {
         unreachable!()
     };
@@ -367,7 +367,7 @@ fn allocation_failure() {
     let _pin = Pin::new();
     let source = flat(Owner::Kernel, 2);
     {
-        let mut state = source.state.lock();
+        let mut state = source.state_storage().lock();
         state.residencies.try_reserve(2).unwrap();
         let FlatSource::Managed(slots) = &mut state.source else {
             unreachable!()
@@ -401,7 +401,7 @@ fn allocation_failure() {
     ));
     let prefix = resident(&source, 0);
     {
-        let state = source.state.lock();
+        let state = source.state_storage().lock();
         let FlatSource::Managed(slots) = &state.source else {
             unreachable!()
         };
