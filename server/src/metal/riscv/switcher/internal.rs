@@ -56,13 +56,22 @@ extern "C" fn schedule(frame: &mut TrapContext) -> ! {
     assert!(task.ident.team.nest.asid().is_kernel());
     assert!(task.ident.team.nest.kind().is_supervisor());
     assert_eq!(task.ident.frame_pa.as_usize(), frame as *mut _ as usize);
-    let exit = frame.gpr.x(super::context::Gprs::A1) != 0;
+    let action = frame.gpr.x(super::context::Gprs::A1);
     let at = frame.gpr.x(super::context::Gprs::A0) as u64;
+    let id = task.ident.id.get();
     drop(task);
-    let next = if exit {
+    let next = if action == 1 {
         crate::basis::unit::lifecycle::set_exit_reason(0);
         crate::basis::unit::lifecycle::quit()
+    } else if action == 2 {
+        let work = &crate::basis::unit::lifecycle::WORK;
+        assert!(work.identifies(id), "resident wait owner");
+        match work.wait() {
+            crate::basis::room::Handoff::Resume(()) => frame as *mut _ as usize,
+            crate::basis::room::Handoff::Switch(pa) => pa,
+        }
     } else if at == 0 {
+        assert_eq!(action, 0, "internal scheduling action");
         crate::basis::room::scheduler::slot::current().reschedule()
     } else {
         crate::basis::sign::park_until::<kernel_api::abi::call::room::RoomFail>(at)
@@ -77,6 +86,12 @@ pub(crate) fn sleep(at: u64) {
     // SAFETY: private callers are Kernel Team tasks at an explicit, guard-free
     // scheduling boundary. The selected context returns through sret.
     unsafe { suspend(at, 0) }
+}
+
+/// Park the registered cleanup Task on its allocation-free retained wake Site.
+/// The saved ordinary-call continuation resumes after this boundary.
+pub(crate) fn wait() {
+    unsafe { suspend(0, 2) }
 }
 
 pub(crate) fn exit() -> ! {

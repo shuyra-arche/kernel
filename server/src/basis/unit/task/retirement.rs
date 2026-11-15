@@ -18,9 +18,9 @@ impl Retirement {
     }
 }
 impl Task {
-    /// Advance one child or one local stage, without recursive Task retirement.
-    /// Busy retains the husk. The phase guard is tried, never waited on.
-    pub(crate) fn retire(self: &Arc<Self>) -> Result<(), NestError> {
+    /// One owner-controlled step. Ok(false) is an immediately runnable next
+    /// stage; Err retains an obligation requiring a later attempt.
+    pub(crate) fn advance_retirement(self: &Arc<Self>) -> Result<bool, NestError> {
         let phase = {
             let mut stored = self.retirement.try_lock().ok_or(NestError::Busy)?;
             if matches!(*stored, Retirement::Active) {
@@ -66,13 +66,13 @@ impl Task {
             Retirement::Receipts(cursor) => {
                 if cursor.advance(self.ident.id, None) {
                     *phase = Retirement::Settled;
-                    return Ok(());
+                    return Ok(true);
                 }
             }
-            Retirement::Settled => return Ok(()),
+            Retirement::Settled => return Ok(true),
             Retirement::Active => unreachable!("only the owned continuation advances retirement"),
         }
-        Err(NestError::Busy)
+        Ok(false)
     }
 }
 

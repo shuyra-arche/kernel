@@ -31,6 +31,12 @@ pub enum Commands {
         #[command(flatten)]
         inputs: Inputs,
     },
+    Lifecycle {
+        #[command(flatten)]
+        inputs: Inputs,
+        #[arg(long)]
+        cancel: bool,
+    },
     Activity {
         #[command(flatten)]
         inputs: Inputs,
@@ -113,8 +119,14 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         command.env_remove(name);
     }
     match &kind {
-        Kind::Smp => {
+        Kind::Smp | Kind::Lifecycle { .. } => {
             compose::apply("smp-provider", &provider, &patches)?;
+            if let Kind::Lifecycle { cancel } = &kind {
+                compose::apply("lifecycle-provider", &provider, &patches)?;
+                if *cancel {
+                    compose::apply("lifecycle-cancel", &provider, &patches)?;
+                }
+            }
             compose::apply("smp-fixture", &fixture, &patches)?;
             copy_guest("target/metal/riscv/mmu/completion/cases.rs", &fixture)?;
             fs::rename(
@@ -381,6 +393,7 @@ fn boot(
 pub fn run(command: Commands) -> Result<()> {
     let (mut args, kind, baseline, warmup) = match command {
         Commands::Smp { inputs } => (inputs, Kind::Smp, None, false),
+        Commands::Lifecycle { inputs, cancel } => (inputs, Kind::Lifecycle { cancel }, None, false),
         Commands::Activity {
             inputs,
             unsupported,

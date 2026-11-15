@@ -1,0 +1,27 @@
+--- a/server/src/entry/work/lifecycle/mod.rs
++++ b/server/src/entry/work/lifecycle/mod.rs
+@@ -34,6 +34,7 @@
+             let _local = unsafe { crate::metal::sync::TrapGuard::save() };
+             lifecycle::advance()
+         };
++        probe::record();
+         match progress {
+             Progress::Ready => super::yield_now(),
+             Progress::Blocked => {
+@@ -46,3 +47,6 @@
+     WORK.close();
+     super::exit()
+ }
++
++#[path = "../../../../tests/target/basis/unit/lifecycle/probe.rs"]
++pub(crate) mod probe;
+--- a/server/src/entry/report/shutdown.rs
++++ b/server/src/entry/report/shutdown.rs
+@@ -16,6 +16,7 @@
+ }
+ 
+ pub(crate) fn report() {
++    crate::entry::work::lifecycle::probe::report();
+     crate::metal::mmu::internal::completion::probe::report_migrations();
+     putln!("task: all tasks exited, system halted");
+     let (late_n, late_max, late_sum) = deadline::late_stats();

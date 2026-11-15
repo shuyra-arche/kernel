@@ -66,6 +66,7 @@ pub fn start() -> Result<(), BootError> {
     if let Some(entry) = spawn_entry()? {
         crate::basis::room::shutdown::watch(&entry);
         crate::entry::work::observe::start()?;
+        crate::entry::work::lifecycle::start()?;
     }
 
     crate::basis::unit::lifecycle::tally::rooted();
