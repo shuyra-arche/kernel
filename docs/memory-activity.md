@@ -297,3 +297,33 @@ as ordinary calls. It is not a public ABI operation or S-mode ecall. The reserve
 Site retains early/coalesced wakes under COMMIT. Enrollment uses a reserved ticket
 with no timer/holder allocation and debug enforces its allocation-free section.
 All identity borrows and guards end before scheduler-stack handoff.
+
+## Exit obligations and shutdown preparation
+
+Task exit performs fixed logical closure in `basis/unit/lifecycle/reap::close`:
+clear task administration, request descendant termination through Unit, then close
+Pend admission through Pend. These obligations do not depend on boot installing
+callbacks. They precede Reaped; physical retirement remains the owner's retryable
+Heirs/Pends/Memory/Receipts/Settled continuation.
+
+Shutdown separates task settlement, hardware preparation and Hart convergence.
+The required entry binding prepares owned IOMMU engines **before** any Hart enters
+the final barrier. Busy retains the engines and keeps scheduler/interrupt progress
+available; Failed withholds normal reset and retains resources. A leased engine
+or a payload-only receipt does not satisfy preparation. The `Converged` argument
+proves Hart convergence only, never external-agent retirement.
+
+The preparation owner has explicit states/events and a pure `decide` function.
+An atomic commit validates the observed state before selecting the hardware
+executor. Only the unique synchronous preparer publishes its completion. Busy
+permits a later attempt; terminal failure cannot transition to Ready. No generic
+lifecycle framework or asynchronous completion registry is involved.
+
+After convergence the elected leader runs required scheduler housekeeping and
+allocator flushing once, then optional observation and reset. Observation carries
+read-only scalar snapshots, runs outside COMMIT, and must not block, reenter the
+coordinator or make authority/retirement decisions. The existing debug report may
+read the weak registry for a fixed-size ID sample; it holds no owning Task across
+reporting. Hardware Busy/Failed notices are coalesced to one per reason. Omitting
+all observers changes no required effect or readiness decision. A forced failure
+reset remains a separate terminal path and provides no reclamation proof.

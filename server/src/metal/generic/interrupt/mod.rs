@@ -15,3 +15,5 @@ pub(crate) trait Delivery: Send + Sync {
     fn unmask(&self, irq: Irq);
     fn prioritize(&self, irq: Irq);
 }
+
+pub(crate) mod service;

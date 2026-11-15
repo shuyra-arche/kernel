@@ -340,7 +340,12 @@ fn bound_controller_uses_admitted_device_id_and_cannot_be_assigned_twice() {
     let tables = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));
     let cells = tables.map(|p| Page::from_internal(PageOwner::Kernel, p.page().unwrap()).unwrap());
     let proof = Arc::new(Mutex::new(Evidence::default()));
+    assert!(!controllers.has_assigned());
     let adapter = unsafe { controllers.bind(CONTROLLER, 16, cells, Proof(proof.clone())) }.unwrap();
+    assert!(
+        controllers.has_assigned(),
+        "leased context is not shutdown preparation evidence"
+    );
     let mut space = Target::new(adapter);
     let payload = Pool::new(0);
     let cell = Arc::new(Page::from_internal(PageOwner::Kernel, payload.page().unwrap()).unwrap());
@@ -679,9 +684,14 @@ fn leaves_retire_independently_and_context_reuse_requires_binding_proof() {
     );
     assert!(tables.iter().all(|p| p.gives() == 0));
     assert!(adapter.take_engine().is_none());
+    assert!(
+        controllers.has_assigned(),
+        "payload retirement does not settle context/platform use"
+    );
     evidence.lock().unwrap().outcomes.push_back(Ok(true));
     assert!(adapter.shutdown().unwrap());
     controllers.restore(adapter.take_engine().unwrap()).unwrap();
+    assert!(!controllers.has_assigned());
     assert!(tables.iter().all(|p| p.gives() == 1));
     assert!(queues.iter().all(|p| p.gives() == 0));
     let next_tables = core::array::from_fn::<_, 4, _>(|_| Pool::new(0));

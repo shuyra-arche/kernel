@@ -31,6 +31,12 @@ pub enum Commands {
         #[command(flatten)]
         inputs: Inputs,
     },
+    Shutdown {
+        #[command(flatten)]
+        inputs: Inputs,
+        #[arg(long)]
+        quiet: bool,
+    },
     Lifecycle {
         #[command(flatten)]
         inputs: Inputs,
@@ -125,12 +131,18 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         )?;
     }
     match &kind {
-        Kind::Smp | Kind::Lifecycle { .. } => {
+        Kind::Smp | Kind::Lifecycle { .. } | Kind::Shutdown { .. } => {
             compose::apply("smp-provider", &provider, &patches)?;
             if let Kind::Lifecycle { cancel } = &kind {
                 compose::apply("lifecycle-provider", &provider, &patches)?;
                 if *cancel {
                     compose::apply("lifecycle-cancel", &provider, &patches)?;
+                }
+            }
+            if let Kind::Shutdown { quiet } = &kind {
+                compose::apply("shutdown-provider", &provider, &patches)?;
+                if *quiet {
+                    compose::apply("shutdown-quiet", &provider, &patches)?;
                 }
             }
             compose::apply("smp-fixture", &fixture, &patches)?;
@@ -399,6 +411,7 @@ fn boot(
 pub fn run(command: Commands) -> Result<()> {
     let (mut args, kind, baseline, warmup) = match command {
         Commands::Smp { inputs } => (inputs, Kind::Smp, None, false),
+        Commands::Shutdown { inputs, quiet } => (inputs, Kind::Shutdown { quiet }, None, false),
         Commands::Lifecycle { inputs, cancel } => (inputs, Kind::Lifecycle { cancel }, None, false),
         Commands::Activity {
             inputs,

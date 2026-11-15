@@ -16,6 +16,8 @@ specification. Use the [design](design/main.typ) for reasons and the
 | Who accepts, replays and records memory requests? | [Memory requests](../api/src/abi/memory/request.rs) | [Task request owner](../server/src/basis/unit/task/request/); Entry copies/routes descriptors and resource owners enforce transitions |
 | What supplies trusted external hardware facts? | [Boot](../api/src/boot/), [memory contract](../api/memory.md) | [Boot](../server/src/entry/boot/), [Metal](../server/src/metal/) |
 | What retains retired resource responsibility? | [Memory](../api/memory.md#coherence-and-retirement) | [Nest translation](../server/src/basis/nest/translation/), [IOMMU](../server/src/metal/riscv/mmu/external/) |
+| Who owns mandatory Task exit closure? | Internal Unit lifecycle | [Exit coordinator](../server/src/basis/unit/lifecycle/reap.rs); Unit and Pend retain their own termination/authorization state |
+| What permits final shutdown? | Internal shutdown preparation and Hart barrier | [Shutdown owner](../server/src/basis/room/shutdown/), [entry finalization](../server/src/entry/boot/finalization.rs); optional observation grants no completion evidence |
 | Where does deferred Unit cleanup execute? | Kernel-internal Task entry | [Lifecycle Task](../server/src/entry/work/lifecycle/); [Unit owner](../server/src/basis/unit/lifecycle/) retains queues, retirement stages and fallback |
 | Who supplies global memory observations? | [Snapshot](../api/src/model/memory/mod.rs) | [Observer](../server/src/entry/work/observe/), [Allocator](../server/src/metal/allocator/) |
 | How is behavior checked? | [API tests](../api/tests/) | [Kernel tests](../server/tests/), [Vanllia integration](https://github.com/shuyra-arche/vanllia) |

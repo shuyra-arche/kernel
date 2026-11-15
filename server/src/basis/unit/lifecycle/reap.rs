@@ -12,7 +12,6 @@ use crate::basis::unit::task::Task;
 use crate::basis::unit::task::TaskExitCause;
 use crate::basis::unit::task::TaskState;
 use crate::basis::unit::task::chain::Chain;
-use crate::metal::sync::OnceLock;
 use kernel_api::address::VirtAddr;
 
 use crate::basis::sign;
@@ -20,7 +19,7 @@ use crate::basis::sign::WakeKey;
 use crate::basis::sign::wipe;
 
 // Off-Hart terminal Tasks retain their existing intrusive membership while
-// housekeeping performs logical hooks and physical retirement.
+// the lifecycle coordinator performs logical closure and physical retirement.
 static PENDING: LegacyLock<crate::basis::sync::order::ReapQueue, Chain> =
     LegacyLock::new(Chain::new());
 pub(super) static HUSKS: LegacyLock<crate::basis::sync::order::Husks, Husks> =
@@ -87,7 +86,7 @@ pub(super) fn reap(task: Arc<Task>, cause: TaskExitCause, reason: usize) {
     crate::basis::unit::team::exit::member_dying(&task, reason);
     crate::basis::room::scheduler::contract::release(&task);
     task.release_extensions();
-    hooked(&task);
+    close(&task);
     {
         let _commit = crate::basis::commit();
         task.transform_checked(TaskState::reaped(cause, reason));
@@ -247,22 +246,13 @@ pub(crate) fn advance() -> Progress {
     }
 }
 
-type Hook = fn(&Arc<Task>);
-
-static HOOKS: OnceLock<&'static [Hook]> = OnceLock::new();
-
-pub(crate) fn hook(hooks: &'static [Hook]) {
-    let _ = HOOKS.set(hooks);
-}
-
-fn hooked(task: &Arc<Task>) {
+/// Fixed logical closure, in the established order. These owners retain their
+/// own descendant/authorization state; physical retirement remains deferred.
+fn close(task: &Arc<Task>) {
     {
         let _commit = crate::basis::commit();
         task.administration.clear();
     }
-    if let Some(hooks) = HOOKS.get() {
-        for h in hooks.iter() {
-            h(task);
-        }
-    }
+    super::doom(task);
+    crate::basis::pend::doom(task);
 }

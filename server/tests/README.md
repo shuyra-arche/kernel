@@ -164,3 +164,18 @@ epilogue after eight turns; the source must detect death and scheduler fallback
 must finish retirement. Both use reviewed source/preimage patches; the probe lives
 under `target/basis/unit/lifecycle`. Debug enrollment enforces NoAllocation before
 handoff. These checks do not constitute a system-wide low-memory stress test.
+
+## Explicit finalization
+
+`verify shutdown` runs the SMP workload with required prepare/finalize probes.
+Preparation must run once before any Hart enters the final barrier; required
+housekeeping must finish after convergence with every Task reaped. Run debug and
+release on 1/4 Harts. `verify shutdown --quiet` installs no optional shutdown
+observers and must still finish the same effects and exit normally. Its required
+test probe emits migration evidence directly, independently of optional reporting;
+the production observer's normal-completion marker must be absent.
+
+Host Room tests exercise pure preparation decisions, rejected/duplicate completion
+states, Busy retry, terminal failure and exclusive preparation under concurrency.
+Interrupt tests exercise missing and duplicate service binding. Controller tests
+keep assigned/context obligations distinct from payload settlement.

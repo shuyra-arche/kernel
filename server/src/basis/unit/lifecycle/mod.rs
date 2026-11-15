@@ -97,7 +97,6 @@ pub(crate) fn bury() {
     }
 }
 
-pub(crate) use reap::hook;
 pub(crate) use reap::quit;
 
 /// Only for a detached ordinary wait continuation, after its ticket and wait

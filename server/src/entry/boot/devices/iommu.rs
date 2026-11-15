@@ -123,41 +123,54 @@ fn failure(error: crate::metal::mmu::external::EngineError) -> PendFail {
     PendFail::Denied
 }
 
-pub(in super::super) fn shutdown() {
-    if let Some(route) = crate::basis::room::interrupt::external() {
-        route.report();
-    }
-    let (closed, unsettled) = {
-        let mut storage = CONTROLLERS.lock();
-        let Some(controllers) = storage.as_mut() else {
-            return;
-        };
-        let (mut closed, mut unsettled) = (0, 0);
-        for engine in controllers.unassigned() {
-            if engine.phase() == Phase::Closed {
-                continue;
-            }
-            if engine.stop().is_err() {
-                continue;
-            }
-            for _ in 0..STEP_BUDGET {
-                match engine.step() {
-                    Ok(Phase::Closed) | Err(_) => break,
-                    _ => {}
+pub(in super::super) fn prepare_shutdown() -> Result<(), crate::basis::room::shutdown::Unsettled> {
+    use crate::basis::room::shutdown::Unsettled;
+    let mut storage = CONTROLLERS.lock();
+    let Some(controllers) = storage.as_mut() else {
+        return Ok(());
+    };
+    // A leased/abandoned engine remains its backend's obligation. No Hart
+    // barrier, queue read or driver acknowledgement certifies its settlement.
+    let mut pending = controllers.has_assigned();
+    for engine in controllers.unassigned() {
+        match engine.phase() {
+            Phase::Closed => continue,
+            Phase::Prepared | Phase::Ready => {
+                if engine.stop().is_err() {
+                    return Err(Unsettled::Failed);
                 }
             }
-            if engine.phase() == Phase::Closed {
-                closed += 1;
-            } else {
-                unsettled += 1;
+            Phase::Failed => return Err(Unsettled::Failed),
+            _ => {}
+        }
+        for _ in 0..8 {
+            match engine.step() {
+                Ok(Phase::Closed) => break,
+                Ok(_) => {}
+                Err(_) => return Err(Unsettled::Failed),
             }
         }
-        (closed, unsettled)
-    };
-    for _ in 0..unsettled {
-        log::error!("iommu: shutdown unsettled; hardware pages retained");
+        pending |= engine.phase() != Phase::Closed;
     }
+    if pending {
+        Err(Unsettled::Busy)
+    } else {
+        Ok(())
+    }
+}
+
+/// Optional terminal observation; never advances a controller or authorizes free.
+pub(in super::super) fn report_shutdown() {
+    let closed = {
+        let mut storage = CONTROLLERS.lock();
+        storage.as_mut().map_or(0, |controllers| {
+            controllers
+                .unassigned()
+                .filter(|engine| engine.phase() == Phase::Closed)
+                .count()
+        })
+    };
     for _ in 0..closed {
-        crate::metal::console::_write(format_args!("iommu: command engine closed\n"));
+        crate::putln!("iommu: command engine closed");
     }
 }

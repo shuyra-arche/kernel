@@ -1,7 +1,6 @@
 use crate::basis::{
     room::{deadline, shutdown},
     sign,
-    unit::lifecycle::tally,
 };
 use crate::metal::interrupt::{self, ipi};
 const BEACON_TICK: u64 = 250_000;
@@ -105,7 +104,7 @@ fn wait() -> usize {
         leave(me);
         return pa;
     }
-    if tally::done() {
+    if shutdown::ready() {
         shutdown::finish();
     }
     loop {
@@ -119,7 +118,7 @@ fn wait() -> usize {
         if !super::isolated(me) {
             crate::basis::unit::lifecycle::bury();
         }
-        if tally::done() {
+        if shutdown::ready() {
             leave(me);
             shutdown::finish();
         }

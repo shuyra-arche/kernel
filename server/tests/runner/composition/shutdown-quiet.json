@@ -1,0 +1,4 @@
+{
+  "server/src/entry/boot/mod.rs": "73d4f7abda4e2a639183aa7259fd17cfcd127f16ab2fc1512107a5f170f4b0b7",
+  "server/tests/target/basis/room/shutdown/probe.rs": "9bbd809b71294e9c31eb5a885de145032969f3681acb502125f649dcec2c8df7"
+}
