@@ -3,7 +3,7 @@
 //! stack switch, Rust call, allocation, lock, controller claim or Task change.
 //! External delivery is attempted only after the last exclusion guard leaves;
 //! timer/IPI levels remain owned by the ordinary scheduling entry.
-use crate::metal::{hart, layout::MAX_HART_SLOTS, sync::OnceLock};
+use crate::metal::{hart, layout::MAX_HART_SLOTS};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[repr(align(64))]
@@ -32,14 +32,19 @@ impl Local {
     }
 }
 static LOCALS: [Local; MAX_HART_SLOTS] = [const { Local::new() }; MAX_HART_SLOTS];
-static SERVICE: OnceLock<fn(usize)> = OnceLock::new();
+use crate::metal::generic::interrupt::service::{BindingError, Service};
+static SERVICE: Service<crate::metal::sync::Environment> = Service::new();
 fn local() -> &'static Local {
     &LOCALS[hart::hart_id().get()]
 }
-pub(crate) fn bind(service: fn(usize)) {
-    assert!(SERVICE.set(service).is_ok());
+pub(crate) fn bind(service: fn(usize)) -> Result<(), BindingError> {
+    SERVICE.bind(service)
 }
 pub(crate) fn arm() {
+    assert!(
+        SERVICE.require().is_ok(),
+        "interrupt service must be bound before arm"
+    );
     local().ready.store(true, Ordering::Release);
 }
 pub(crate) fn enter() {
@@ -57,7 +62,7 @@ pub(crate) fn drain() {
     {
         return;
     }
-    let Some(service) = SERVICE.get() else { return };
+    let service = SERVICE.require().expect("armed interrupt service binding");
     if local.serving.swap(true, Ordering::Relaxed) {
         return;
     }

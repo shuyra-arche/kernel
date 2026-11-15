@@ -6,7 +6,10 @@ pub(super) use admission::{admit, configured, ready};
 
 pub(super) use external::init as init_external;
 pub use external::{ExternalRoute, MapMmio};
-pub(super) use iommu::{init as init_iommu, shutdown as shutdown_iommu};
+pub(super) use iommu::{
+    init as init_iommu, prepare_shutdown as prepare_iommu_shutdown,
+    report_shutdown as report_iommu_shutdown,
+};
 
 use crate::basis::nest::Access;
 use crate::basis::pend;

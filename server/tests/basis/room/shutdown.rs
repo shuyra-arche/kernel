@@ -32,3 +32,51 @@ fn progress_restarts_the_interval_without_truncating_counts() {
     assert!(!state.observe(200, (2, 2), 100));
     assert_eq!(state, Progress::Idle);
 }
+
+#[path = "../../../src/basis/room/shutdown/preparation.rs"]
+mod preparation;
+use preparation::{Claim, Preparation, Unsettled};
+#[test]
+fn final_barrier_requires_success_and_busy_or_failure_preserves_obligations() {
+    let gate = Preparation::new();
+    assert_eq!(gate.claim(), Claim::Prepare);
+    assert_eq!(gate.claim(), Claim::Wait);
+    assert!(!gate.complete(Err(Unsettled::Busy)));
+    assert_eq!(gate.claim(), Claim::Prepare);
+    assert!(gate.complete(Ok(())));
+    for _ in 0..8 {
+        assert_eq!(gate.claim(), Claim::Ready);
+    }
+    let failed = Preparation::new();
+    assert_eq!(failed.claim(), Claim::Prepare);
+    assert!(!failed.complete(Err(Unsettled::Failed)));
+    for _ in 0..8 {
+        assert_eq!(failed.claim(), Claim::Failed);
+    }
+}
+#[test]
+fn only_one_hart_can_prepare_and_publish_finalization_readiness() {
+    let gate = std::sync::Arc::new(Preparation::new());
+    let (notice, ready) = std::sync::mpsc::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let owner = gate.clone();
+    let thread = std::thread::spawn(move || {
+        assert_eq!(owner.claim(), Claim::Prepare);
+        notice.send(()).unwrap();
+        wait.recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(owner.complete(Ok(())));
+    });
+    ready
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    std::thread::scope(|scope| {
+        for _ in 0..16 {
+            let gate = &gate;
+            scope.spawn(move || assert_eq!(gate.claim(), Claim::Wait));
+        }
+    });
+    release.send(()).unwrap();
+    thread.join().unwrap();
+    assert_eq!(gate.claim(), Claim::Ready);
+}

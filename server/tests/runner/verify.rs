@@ -4,6 +4,9 @@ use serde_json::{Value, json};
 #[derive(Clone, Debug)]
 pub enum Kind {
     Smp,
+    Shutdown {
+        quiet: bool,
+    },
     Lifecycle {
         cancel: bool,
     },
@@ -28,7 +31,11 @@ fn captures(log: &str, pattern: &str) -> Result<Vec<String>> {
         .collect())
 }
 pub fn check(log: &str, kind: &Kind, harts: u8) -> Result<Value> {
-    let mut markers = vec!["task: all tasks exited".to_owned()];
+    let mut markers = if matches!(kind, Kind::Shutdown { .. }) {
+        vec!["PASS shutdown required=1 prepared=1 converged=1".to_owned()]
+    } else {
+        vec!["task: all tasks exited".to_owned()]
+    };
     let mut extra = true;
     let mut evidence = json!({});
     match kind {
@@ -45,7 +52,7 @@ pub fn check(log: &str, kind: &Kind, harts: u8) -> Result<Value> {
             result["lifecycle"] = json!({ "turns": turns, "cancel": cancel, "passed": valid });
             return Ok(result);
         }
-        Kind::Smp => {
+        Kind::Smp | Kind::Shutdown { .. } => {
             markers.extend(
                 [
                     "PASS native-memory",
@@ -63,7 +70,10 @@ pub fn check(log: &str, kind: &Kind, harts: u8) -> Result<Value> {
             );
             let writers = captures(log, r"PASS smp-writer task=(\d+)")?;
             let migrants = captures(log, r"TRACE smp-migration task=(\d+)")?;
-            extra = writers.len() == 2
+            if let Kind::Shutdown { quiet } = kind {
+                extra &= log.contains("task: all tasks exited") != *quiet;
+            }
+            extra &= writers.len() == 2
                 && writers[0] != writers[1]
                 && (harts == 1 || writers.iter().all(|w| migrants.contains(w)));
             evidence = json!({"writers":writers,"migrants":migrants});

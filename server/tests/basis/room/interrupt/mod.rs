@@ -1,11 +1,17 @@
+extern crate alloc;
+mod binding;
 #[allow(dead_code)]
-#[path = "../../../../src/metal/generic/interrupt.rs"]
+#[path = "../../../../src/metal/generic/interrupt/mod.rs"]
 mod mechanism;
 #[path = "../../../../src/basis/room/interrupt/source/state.rs"]
 mod state;
+#[allow(dead_code)]
+#[path = "../../../../src/metal/generic/sync/mod.rs"]
+mod synchronization;
 mod metal {
     pub(crate) mod generic {
         pub(crate) use crate::mechanism as interrupt;
+        pub(crate) use crate::synchronization as sync;
     }
 }
 #[path = "../../../../src/basis/room/interrupt/progress.rs"]

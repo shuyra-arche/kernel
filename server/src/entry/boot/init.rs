@@ -45,6 +45,7 @@ pub unsafe fn init(platform: crate::metal::platform::Platform) -> Result<(), Boo
 pub unsafe fn configure(
     description: crate::metal::platform::devices::Devices<'_>,
 ) -> Result<(), BootError> {
+    super::bind_runtime()?;
     super::devices::admit(description).map_err(|source| BootError::Resources {
         operation: ResourceOperation::Devices,
         source,

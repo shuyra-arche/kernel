@@ -1,0 +1,25 @@
+--- a/server/src/entry/boot/finalization.rs
++++ b/server/src/entry/boot/finalization.rs
+@@ -2,11 +2,14 @@
+ //! post-barrier housekeeping must need no Task, interrupt or remote-Hart work.
+ use crate::basis::room::shutdown::{Converged, Observation, Unsettled};
+ pub(super) fn prepare() -> Result<(), Unsettled> {
+-    super::devices::prepare_iommu_shutdown()
++    let result = super::devices::prepare_iommu_shutdown();
++    if result.is_ok() { probe::prepared(); }
++    result
+ }
+ pub(super) fn finish(_harts: Converged) {
+     crate::basis::room::scheduler::rip();
+     crate::metal::allocator::block::flush();
++    probe::finished();
+ }
+ /// Optional, bounded read-only diagnostics; called outside COMMIT after required
+ /// housekeeping. No authority, reclaim decision or completion value is returned.
+@@ -24,3 +27,6 @@
+         reason
+     );
+ }
++
++#[path = "../../../tests/target/basis/room/shutdown/probe.rs"]
++pub(crate) mod probe;

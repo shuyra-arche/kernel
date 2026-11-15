@@ -116,6 +116,12 @@ impl<R: Registers> Controllers<R> {
         Ok(())
     }
 
+    pub(crate) fn has_assigned(&self) -> bool {
+        self.slots
+            .iter()
+            .any(|(_, slot)| matches!(slot, Slot::Assigned))
+    }
+
     pub(crate) fn unassigned(&mut self) -> impl Iterator<Item = &mut Engine<R>> {
         self.slots.iter_mut().filter_map(|(_, slot)| match slot {
             Slot::Available(engine) => Some(engine),

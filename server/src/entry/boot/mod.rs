@@ -1,6 +1,7 @@
 pub(crate) mod devices;
 pub(crate) mod error;
 pub(crate) mod facts;
+mod finalization;
 mod init;
 pub(crate) mod resources;
 mod space;
@@ -61,7 +62,6 @@ pub fn start() -> Result<(), BootError> {
     scheduler::init().map_err(BootError::Scheduler)?;
     #[cfg(feature = "latency")]
     crate::metal::measure::init().map_err(BootError::Scheduler)?;
-    register_runtime_hooks();
 
     if let Some(entry) = spawn_entry()? {
         crate::basis::room::shutdown::watch(&entry);
@@ -95,27 +95,22 @@ extern "C" fn run_on_stack() -> ! {
     restore(scheduler::run())
 }
 
-pub(crate) fn register_runtime_hooks() {
-    crate::metal::interrupt::window::bind(crate::entry::trap::service);
-    use crate::basis::room::shutdown;
-
-    static EXIT_HOOKS: &[fn(&alloc::sync::Arc<crate::basis::unit::task::Task>)] = &[
-        crate::basis::unit::lifecycle::doom,
-        crate::basis::pend::doom,
-    ];
-    crate::basis::unit::lifecycle::hook(EXIT_HOOKS);
-
-    const SHUTDOWN_HOOKS: &[fn()] = &[
-        devices::shutdown_iommu,
-        crate::entry::report::shutdown::report,
-        crate::basis::room::scheduler::rip,
-        crate::metal::allocator::block::flush,
-    ];
-    shutdown::hook(
-        SHUTDOWN_HOOKS,
-        crate::entry::report::shutdown::waiting,
-        crate::entry::report::shutdown::stalled,
-    );
+pub(super) fn bind_runtime() -> Result<(), BootError> {
+    crate::metal::interrupt::window::bind(crate::entry::trap::service)
+        .map_err(|_| BootError::Description("interrupt service already bound"))?;
+    crate::basis::room::shutdown::bind_finalization(crate::basis::room::shutdown::Finalization {
+        prepare: finalization::prepare,
+        finish: finalization::finish,
+    })
+    .map_err(BootError::Description)?;
+    crate::basis::room::shutdown::observe_with(crate::basis::room::shutdown::Observers {
+        waiting: crate::entry::report::shutdown::waiting,
+        stalled: crate::entry::report::shutdown::stalled,
+        finished: finalization::report,
+        unsettled: finalization::unsettled,
+    })
+    .map_err(BootError::Description)?;
+    Ok(())
 }
 
 fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Task>>, BootError> {

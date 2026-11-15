@@ -1,6 +1,7 @@
 //! Normal shutdown: observe progress, collect Harts, then finalize exactly once.
 //! Entry installs reporting effects; this owner supplies coherent observations.
 use crate::basis::sync::LegacyLock;
+mod preparation;
 mod progress;
 use crate::basis::unit::{
     lifecycle::tally,
@@ -13,6 +14,8 @@ use core::{
     time::Duration,
 };
 use kernel_api::model::identity::TaskId;
+pub(crate) use preparation::Unsettled;
+use preparation::{Claim, Preparation};
 use progress::Progress;
 
 const BARRIER_REPORT_AT: usize = 20_000_000;
@@ -51,24 +54,72 @@ pub(crate) struct Observation {
     pub pushed: usize,
     pub reaped: usize,
 }
-type Hook = fn();
-struct Hooks {
-    finish: &'static [Hook],
-    waiting: fn(),
-    stalled: fn(Observation),
+/// Only Hart convergence, not CPU/IOMMU/external-agent retirement evidence.
+/// Constructed after preparation and the final Hart barrier both complete.
+pub(crate) struct Converged {
+    _private: (),
 }
-static HOOKS: OnceLock<Hooks> = OnceLock::new();
-pub(crate) fn hook(finish: &'static [Hook], waiting: fn(), stalled: fn(Observation)) {
-    assert!(
-        HOOKS
-            .set(Hooks {
-                finish,
-                waiting,
-                stalled
-            })
-            .is_ok(),
-        "shutdown hooks already installed"
-    );
+pub(crate) struct Finalization {
+    pub prepare: fn() -> Result<(), Unsettled>,
+    pub finish: fn(Converged),
+}
+pub(crate) struct Observers {
+    pub waiting: fn(),
+    pub stalled: fn(Observation),
+    pub finished: fn(Observation),
+    pub unsettled: fn(Observation, Unsettled),
+}
+static FINALIZATION: OnceLock<Finalization> = OnceLock::new();
+static OBSERVERS: OnceLock<Observers> = OnceLock::new();
+static PREPARATION: Preparation = Preparation::new();
+static REPORTED: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+pub(crate) fn bind_finalization(binding: Finalization) -> Result<(), &'static str> {
+    FINALIZATION
+        .set(binding)
+        .map_err(|_| "shutdown finalization already bound")
+}
+/// Observers must be bounded, synchronous, nonblocking and non-reentrant.
+/// They run without COMMIT and receive no owning Task/resource reference.
+/// Omitting them changes no mandatory transition or finalization effect.
+pub(crate) fn observe_with(observers: Observers) -> Result<(), &'static str> {
+    OBSERVERS
+        .set(observers)
+        .map_err(|_| "shutdown observers already bound")
+}
+/// Failed/Busy preparation leaves Harts on their scheduler stacks with normal
+/// maintenance and completion progress available. It never authorizes a reset.
+pub(crate) fn ready() -> bool {
+    if !tally::done() {
+        return false;
+    }
+    let binding = FINALIZATION
+        .get()
+        .expect("required shutdown binding before operation");
+    match PREPARATION.claim() {
+        Claim::Prepare => {
+            let result = (binding.prepare)();
+            let ready = PREPARATION.complete(result);
+            if let Err(reason) = result {
+                let bit = if reason == Unsettled::Busy { 1 } else { 2 };
+                if REPORTED.fetch_or(bit, Ordering::Relaxed) & bit == 0
+                    && let Some(observers) = OBSERVERS.get()
+                {
+                    let (pushed, reaped) = tally::counts();
+                    (observers.unsettled)(
+                        Observation {
+                            hart: hart::hart_id(),
+                            pushed,
+                            reaped,
+                        },
+                        reason,
+                    );
+                }
+            }
+            ready
+        }
+        Claim::Ready => true,
+        Claim::Wait | Claim::Failed => false,
+    }
 }
 pub(crate) fn watch(root: &Arc<Task>) {
     ROOT_ID.store(root.ident.id.get(), Ordering::Relaxed);
@@ -101,7 +152,7 @@ pub(crate) fn observe(hart: hart::HartId) {
             })
     };
     if let Some(observation) = observation
-        && let Some(hooks) = HOOKS.get()
+        && let Some(hooks) = OBSERVERS.get()
     {
         (hooks.stalled)(observation);
     }
@@ -111,6 +162,7 @@ pub(crate) fn barrier() -> (usize, usize) {
 }
 /// The elected leader waits for every Hart, finalizes and resets. Followers stop.
 pub(super) fn finish() -> ! {
+    assert!(matches!(PREPARATION.claim(), Claim::Ready));
     crate::metal::mmu::internal::identity::vacate();
     if let Arrival::Leader = BARRIER.arrive() {
         super::scheduler::idle::yell();
@@ -118,7 +170,7 @@ pub(super) fn finish() -> ! {
         while BARRIER.count() < hart::hart_count() {
             spins += 1;
             if spins == BARRIER_REPORT_AT
-                && let Some(hooks) = HOOKS.get()
+                && let Some(hooks) = OBSERVERS.get()
             {
                 (hooks.waiting)();
             }
@@ -126,10 +178,18 @@ pub(super) fn finish() -> ! {
         }
         #[cfg(feature = "latency")]
         crate::metal::measure::report();
-        if let Some(hooks) = HOOKS.get() {
-            for finish in hooks.finish {
-                finish();
-            }
+        let (pushed, reaped) = tally::counts();
+        let snapshot = Observation {
+            hart: hart::hart_id(),
+            pushed,
+            reaped,
+        };
+        (FINALIZATION
+            .get()
+            .expect("required shutdown binding")
+            .finish)(Converged { _private: () });
+        if let Some(hooks) = OBSERVERS.get() {
+            (hooks.finished)(snapshot);
         }
         crate::metal::stop::reset();
     }
