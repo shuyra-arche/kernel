@@ -328,3 +328,27 @@ fn partial_release_fails_closed_when_the_generation_does_not_own_every_page() {
             .release(right_address, right_address + page - 1, right_generation)
     );
 }
+
+#[test]
+fn partial_release_waits_for_the_retirement_ticket_to_settle() {
+    let mut layout = Layout::new();
+    let page = 4096;
+    let placement = Placement::fixed(VirtAddr::new(0x30000), page).unwrap();
+    let (start, generation) = layout.reserve(placement).unwrap();
+    let prepared = layout
+        .occupancy
+        .prepare_retirement(start, start + page - 1, generation)
+        .unwrap();
+    let ticket = layout.occupancy.retire(prepared)[0].2;
+    assert!(
+        !layout
+            .occupancy
+            .release_range(start, start + page - 1, generation)
+    );
+    assert!(layout.occupancy.has_id(generation));
+    layout.occupancy.reclaim(ticket);
+    assert!(!layout.occupancy.has_id(generation));
+    let (reused, replacement) = layout.reserve(placement).unwrap();
+    assert_eq!(reused, start);
+    assert_ne!(replacement, generation);
+}
