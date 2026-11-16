@@ -1752,8 +1752,8 @@ impl Nest {
     /// 身份消失或活动权限不容纳这次访问是 `Invalid`。
     pub(crate) fn probe_fault(&self, address: VirtAddr, kind: FaultKind) -> FaultOutcome {
         let index = self.address.lock();
-        let state = self.state.lock();
-        FaultOutcome::probe(&state, &index.index, self.geometry(), address, kind)
+        self.state
+            .probe_fault(&index.index, self.geometry(), address, kind)
     }
 
     /// 用户页错误的完整解析：先结清待办失效，再按纯探针的结论物化并发布，

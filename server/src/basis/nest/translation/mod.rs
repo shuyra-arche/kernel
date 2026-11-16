@@ -20,6 +20,7 @@ use super::{Access, Span};
 use super::{Asid, NestError};
 use crate::basis::cell::page::{Change, Page};
 use crate::metal::generic::mmu::internal::PageTable;
+use crate::metal::generic::trap::FaultKind;
 use crate::metal::mmu::internal::Geometry;
 use kernel_api::address::VirtAddr;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
@@ -55,6 +56,17 @@ impl Translation {
 
     pub(crate) fn lock(&self) -> LegacyGuard<'_, TranslationState> {
         self.state.lock()
+    }
+
+    /// Read the current fault outcome under the shared translation state.
+    pub(crate) fn probe_fault(
+        &self,
+        index: &Index,
+        geometry: Geometry,
+        address: VirtAddr,
+        kind: FaultKind,
+    ) -> FaultOutcome {
+        FaultOutcome::probe(&self.lock(), index, geometry, address, kind)
     }
 }
 
