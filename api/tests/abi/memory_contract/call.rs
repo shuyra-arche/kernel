@@ -67,7 +67,12 @@ fn register_envelope_rejects_spares_overflow_and_descriptor_substitution() {
     assert_eq!(frame.input(), frame.output());
     let bytes = call.request().to_bytes();
     assert!(frame.snapshot(&bytes[..255]).is_none());
-    let other = Frame::decode(Opcode::Delete(Domain::Flat).call_number(), [0; 6]).unwrap();
+    let other = Frame::decode(
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Delete)
+            .call_number(),
+        [0; 6],
+    )
+    .unwrap();
     assert!(other.snapshot(&bytes).is_none());
     assert!(Frame::decode((10 << 48) | (12 << 32) | 16, [0; 6]).is_none());
 }

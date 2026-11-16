@@ -30,45 +30,64 @@ fn block_value(phase: BlockPhase) -> Value {
 
 fn results() -> Vec<Reply> {
     let mut cases = vec![
-        (Opcode::Occupy, Outcome::Committed(slot_value(17))),
-        (Opcode::Vacate, Outcome::Pending(slot_value(17))),
-        (Opcode::Vacate, Outcome::Committed(slot_value(0))),
         (
-            Opcode::Block,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Committed(slot_value(17)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Vacate),
+            Outcome::Pending(slot_value(17)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Vacate),
+            Outcome::Committed(slot_value(0)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
             Outcome::Pending(block_value(BlockPhase::Draining)),
         ),
         (
-            Opcode::Block,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
             Outcome::Committed(block_value(BlockPhase::Held)),
         ),
         (
-            Opcode::Allow,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Allow),
             Outcome::Pending(block_value(BlockPhase::Releasing)),
         ),
         (
-            Opcode::Allow,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Allow),
             Outcome::Committed(block_value(BlockPhase::Closed)),
         ),
         (
-            Opcode::Block,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
             Outcome::Failed {
                 failure: Failure::Dead,
                 retained: Some(block_value(BlockPhase::Orphaned)),
             },
         ),
-        (Opcode::Inspect(Domain::Flat), Outcome::Expired),
-        (Opcode::Inspect(Domain::Nest), Outcome::Expired),
+        (
+            kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Flat),
+            Outcome::Expired,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Nest),
+            Outcome::Expired,
+        ),
     ];
     for opcode in [
-        Opcode::Insert,
-        Opcode::Remove,
-        Opcode::Publish,
-        Opcode::Retract,
-        Opcode::Protect,
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Insert),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Remove),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Retract),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Protect),
     ] {
         cases.push((opcode, Outcome::Committed(memo_value())));
     }
-    for opcode in [Opcode::Publish, Opcode::Retract, Opcode::Protect] {
+    for opcode in [
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Retract),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Protect),
+    ] {
         cases.push((opcode, Outcome::Pending(memo_value())));
         cases.push((
             opcode,
@@ -78,7 +97,10 @@ fn results() -> Vec<Reply> {
             },
         ));
     }
-    for opcode in [Opcode::Push, Opcode::Pull] {
+    for opcode in [
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Push),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Pull),
+    ] {
         cases.push((
             opcode,
             Outcome::Committed(Value::Transfer {
@@ -105,10 +127,13 @@ fn results() -> Vec<Reply> {
         Failure::Invalid,
         Failure::Hardware,
     ] {
-        cases.push((Opcode::Occupy, Outcome::Rejected(failure)));
+        cases.push((
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Rejected(failure),
+        ));
     }
     cases.push((
-        Opcode::Occupy,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
         Outcome::Failed {
             failure: Failure::OutOfMemory,
             retained: None,
@@ -161,7 +186,12 @@ fn failures_have_explicit_codes_and_unknown_codes_reject() {
 
 #[test]
 fn committed_and_rejected_results_have_independent_byte_vectors() {
-    let committed = Reply::new(id(), Opcode::Occupy, Outcome::Committed(slot_value(17))).unwrap();
+    let committed = Reply::new(
+        id(),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+        Outcome::Committed(slot_value(17)),
+    )
+    .unwrap();
     let mut expected = [0u8; 128];
     for (index, word) in [14, 12, 19, u64::MAX, 2, 0, 1, 1 << 63, 17]
         .into_iter()
@@ -178,7 +208,12 @@ fn committed_and_rejected_results_have_independent_byte_vectors() {
     {
         set_word(&mut expected, index, word);
     }
-    let rejected = Reply::new(id(), Opcode::Occupy, Outcome::Rejected(Failure::Busy)).unwrap();
+    let rejected = Reply::new(
+        id(),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+        Outcome::Rejected(Failure::Busy),
+    )
+    .unwrap();
     assert_eq!(rejected.to_bytes(), expected);
     assert_eq!(Reply::from_bytes(&expected), Some(rejected));
     for result in results() {
@@ -189,53 +224,86 @@ fn committed_and_rejected_results_have_independent_byte_vectors() {
 #[test]
 fn pending_and_failure_cannot_masquerade_as_committed_or_no_effect() {
     for (opcode, outcome) in [
-        (Opcode::Occupy, Outcome::Pending(slot_value(17))),
-        (Opcode::Occupy, Outcome::Committed(slot_value(0))),
-        (Opcode::Vacate, Outcome::Committed(slot_value(17))),
-        (Opcode::Vacate, Outcome::Pending(slot_value(0))),
         (
-            Opcode::Block,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Pending(slot_value(17)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Committed(slot_value(0)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Vacate),
+            Outcome::Committed(slot_value(17)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Vacate),
+            Outcome::Pending(slot_value(0)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
             Outcome::Committed(block_value(BlockPhase::Draining)),
         ),
         (
-            Opcode::Block,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
             Outcome::Pending(block_value(BlockPhase::Held)),
         ),
         (
-            Opcode::Allow,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Allow),
             Outcome::Committed(block_value(BlockPhase::Releasing)),
         ),
         (
-            Opcode::Allow,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Allow),
             Outcome::Pending(block_value(BlockPhase::Closed)),
         ),
-        (Opcode::Insert, Outcome::Pending(memo_value())),
-        (Opcode::Remove, Outcome::Pending(memo_value())),
-        (Opcode::Occupy, Outcome::Committed(memo_value())),
-        (Opcode::Publish, Outcome::Committed(slot_value(17))),
         (
-            Opcode::Inspect(Domain::Flat),
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Insert),
+            Outcome::Pending(memo_value()),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Remove),
+            Outcome::Pending(memo_value()),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Committed(memo_value()),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
             Outcome::Committed(slot_value(17)),
         ),
-        (Opcode::Occupy, Outcome::Rejected(Failure::ResultExpired)),
-        (Opcode::Occupy, Outcome::Rejected(Failure::ReplyFault)),
         (
-            Opcode::Occupy,
+            kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Flat),
+            Outcome::Committed(slot_value(17)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Rejected(Failure::ResultExpired),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Rejected(Failure::ReplyFault),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
             Outcome::Failed {
                 failure: Failure::RequestMismatch,
                 retained: None,
             },
         ),
         (
-            Opcode::Occupy,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
             Outcome::Failed {
                 failure: Failure::ReplyFault,
                 retained: None,
             },
         ),
-        (Opcode::Occupy, Outcome::Committed(slot_value(u64::MAX))),
         (
-            Opcode::Push,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Committed(slot_value(u64::MAX)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Push),
             Outcome::Committed(Value::Transfer {
                 local: SlotVersion::INITIAL,
                 remote: SlotVersion::INITIAL,
@@ -250,7 +318,7 @@ fn pending_and_failure_cannot_masquerade_as_committed_or_no_effect() {
     }
     let pending = Reply::new(
         id(),
-        Opcode::Block,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
         Outcome::Pending(block_value(BlockPhase::Draining)),
     )
     .unwrap();
@@ -273,16 +341,28 @@ fn replies_correlate_to_operation_identity_and_result_inspection() {
         },
     )
     .unwrap();
-    let reply = Reply::new(id(), Opcode::Occupy, Outcome::Committed(slot_value(17))).unwrap();
+    let reply = Reply::new(
+        id(),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+        Outcome::Committed(slot_value(17)),
+    )
+    .unwrap();
     assert!(reply.matches(request));
     assert_eq!(reply.request(), id());
-    assert_eq!(reply.opcode(), Opcode::Occupy);
+    assert_eq!(
+        reply.opcode(),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy)
+    );
     assert_eq!(reply.outcome(), Outcome::Committed(slot_value(17)));
     let old = RequestId::new(1).unwrap();
     assert!(
-        !Reply::new(old, Opcode::Occupy, reply.outcome())
-            .unwrap()
-            .matches(request)
+        !Reply::new(
+            old,
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            reply.outcome()
+        )
+        .unwrap()
+        .matches(request)
     );
     let wrong = Request::new(
         Some(id()),
@@ -303,7 +383,12 @@ fn replies_correlate_to_operation_identity_and_result_inspection() {
     )
     .unwrap();
     assert!(reply.matches(inspect));
-    let expired = Reply::new(id(), Opcode::Inspect(Domain::Flat), Outcome::Expired).unwrap();
+    let expired = Reply::new(
+        id(),
+        kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Flat),
+        Outcome::Expired,
+    )
+    .unwrap();
     assert!(expired.matches(inspect));
     let other_domain = Request::new(
         None,
@@ -327,9 +412,13 @@ fn replies_correlate_to_operation_identity_and_result_inspection() {
 
 #[test]
 fn malformed_reply_tags_statuses_and_tail_words_reject() {
-    let good = Reply::new(id(), Opcode::Occupy, Outcome::Committed(slot_value(17)))
-        .unwrap()
-        .to_bytes();
+    let good = Reply::new(
+        id(),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+        Outcome::Committed(slot_value(17)),
+    )
+    .unwrap()
+    .to_bytes();
     for (word, value) in [
         (0, 10),
         (1, 2),
@@ -355,13 +444,18 @@ fn malformed_reply_tags_statuses_and_tail_words_reject() {
     let mut bad = good.to_vec();
     bad.push(0);
     assert!(Reply::from_bytes(&bad).is_none());
-    let expired = Reply::new(id(), Opcode::Inspect(Domain::Flat), Outcome::Expired).unwrap();
+    let expired = Reply::new(
+        id(),
+        kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Flat),
+        Outcome::Expired,
+    )
+    .unwrap();
     let mut bad = expired.to_bytes();
     set_word(&mut bad, 5, 0);
     assert!(Reply::from_bytes(&bad).is_none());
     let mut bad = Reply::new(
         id(),
-        Opcode::Block,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
         Outcome::Committed(block_value(BlockPhase::Held)),
     )
     .unwrap()
@@ -411,7 +505,12 @@ fn register_delivery_is_not_the_stored_mutation_outcome() {
         assert!(Delivery::from_registers(words).is_none());
     }
     // Delivery can fail after commit; the retained record remains committed.
-    let reply = Reply::new(id(), Opcode::Occupy, Outcome::Committed(slot_value(17))).unwrap();
+    let reply = Reply::new(
+        id(),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+        Outcome::Committed(slot_value(17)),
+    )
+    .unwrap();
     let bytes = reply.to_bytes();
     assert_eq!(
         Delivery::from_registers([(-15i64) as u64, 0, 0]),
@@ -426,16 +525,46 @@ fn register_delivery_is_not_the_stored_mutation_outcome() {
 #[test]
 fn failed_outcomes_do_not_claim_atomic_commit_or_discard_known_maintenance() {
     for (opcode, retained) in [
-        (Opcode::Occupy, Some(slot_value(17))),
-        (Opcode::Occupy, Some(slot_value(0))),
-        (Opcode::Insert, Some(memo_value())),
-        (Opcode::Vacate, Some(slot_value(0))),
-        (Opcode::Vacate, None),
-        (Opcode::Block, Some(block_value(BlockPhase::Held))),
-        (Opcode::Block, Some(block_value(BlockPhase::Closed))),
-        (Opcode::Block, None),
-        (Opcode::Allow, Some(block_value(BlockPhase::Closed))),
-        (Opcode::Allow, None),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Some(slot_value(17)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Some(slot_value(0)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Insert),
+            Some(memo_value()),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Vacate),
+            Some(slot_value(0)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Vacate),
+            None,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
+            Some(block_value(BlockPhase::Held)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
+            Some(block_value(BlockPhase::Closed)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
+            None,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Allow),
+            Some(block_value(BlockPhase::Closed)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Allow),
+            None,
+        ),
     ] {
         assert!(
             Reply::new(
@@ -450,12 +579,30 @@ fn failed_outcomes_do_not_claim_atomic_commit_or_discard_known_maintenance() {
         );
     }
     for (opcode, retained) in [
-        (Opcode::Vacate, Some(slot_value(17))),
-        (Opcode::Publish, Some(memo_value())),
-        (Opcode::Block, Some(block_value(BlockPhase::Draining))),
-        (Opcode::Allow, Some(block_value(BlockPhase::Releasing))),
-        (Opcode::Block, Some(block_value(BlockPhase::Orphaned))),
-        (Opcode::Allow, Some(block_value(BlockPhase::Orphaned))),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Vacate),
+            Some(slot_value(17)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
+            Some(memo_value()),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
+            Some(block_value(BlockPhase::Draining)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Allow),
+            Some(block_value(BlockPhase::Releasing)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
+            Some(block_value(BlockPhase::Orphaned)),
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Allow),
+            Some(block_value(BlockPhase::Orphaned)),
+        ),
     ] {
         let result = Reply::new(
             id(),

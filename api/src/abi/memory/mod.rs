@@ -175,45 +175,6 @@ pub enum Opcode {
     Nest(nest::Opcode),
 }
 
-#[allow(non_snake_case, non_upper_case_globals)]
-impl Opcode {
-    pub const fn Create(domain: Domain) -> Self {
-        match domain {
-            Domain::Flat => Self::Flat(flat::Opcode::Create),
-            Domain::Nest => Self::Nest(nest::Opcode::Create),
-        }
-    }
-
-    pub const fn Delete(domain: Domain) -> Self {
-        match domain {
-            Domain::Flat => Self::Flat(flat::Opcode::Delete),
-            Domain::Nest => Self::Nest(nest::Opcode::Delete),
-        }
-    }
-
-    pub const fn Inspect(domain: Domain) -> Self {
-        Self::inspect(domain)
-    }
-
-    pub const CreateSpan: Self = Self::Nest(nest::Opcode::Reserve);
-    pub const DeleteSpan: Self = Self::Nest(nest::Opcode::Release);
-    pub const ReleaseRange: Self = Self::Nest(nest::Opcode::ReleaseRange);
-    pub const Occupy: Self = Self::Flat(flat::Opcode::Occupy);
-    pub const Vacate: Self = Self::Flat(flat::Opcode::Vacate);
-    pub const Block: Self = Self::Flat(flat::Opcode::Block);
-    pub const Allow: Self = Self::Flat(flat::Opcode::Allow);
-    pub const Push: Self = Self::Flat(flat::Opcode::Push);
-    pub const Pull: Self = Self::Flat(flat::Opcode::Pull);
-    pub const Split: Self = Self::Flat(flat::Opcode::Split);
-    pub const Merge: Self = Self::Flat(flat::Opcode::Merge);
-    pub const Insert: Self = Self::Nest(nest::Opcode::Insert);
-    pub const Remove: Self = Self::Nest(nest::Opcode::Remove);
-    pub const Publish: Self = Self::Nest(nest::Opcode::Publish);
-    pub const Retract: Self = Self::Nest(nest::Opcode::Retract);
-    pub const Protect: Self = Self::Nest(nest::Opcode::Protect);
-    pub const FaultRoute: Self = Self::Nest(nest::Opcode::FaultRoute);
-}
-
 impl Opcode {
     pub const fn inspect(domain: Domain) -> Self {
         match domain {

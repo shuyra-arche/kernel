@@ -135,7 +135,10 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
         }
         assert_eq!(request.to_bytes(), bytes);
         assert_eq!(
-            Request::from_call(Opcode::Inspect(query.domain()).call_number(), &bytes),
+            Request::from_call(
+                kernel_api::abi::memory::Opcode::inspect(query.domain()).call_number(),
+                &bytes
+            ),
             Some(request)
         );
         assert!(Request::new(Some(id()), Action::Inspect(query)).is_none());
@@ -221,7 +224,12 @@ fn observations_cannot_be_used_as_commit_receipts_or_for_another_position() {
     for (query, snapshot) in fixtures() {
         let observation = Observation::new(snapshot).unwrap();
         assert!(Reply::from_bytes(&observation.to_bytes()).is_none());
-        let receipt = Reply::new(id(), Opcode::Occupy, Outcome::Rejected(Failure::Busy)).unwrap();
+        let receipt = Reply::new(
+            id(),
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Rejected(Failure::Busy),
+        )
+        .unwrap();
         assert!(Observation::from_bytes(&receipt.to_bytes()).is_none());
         assert!(!receipt.matches(Request::new(None, Action::Inspect(query)).unwrap()));
         assert!(
@@ -495,5 +503,8 @@ fn accepted_query_and_observation_mutations_reencode_canonically() {
             }
         }
     }
-    assert_eq!(Opcode::Inspect(Domain::Flat).slot(), 18);
+    assert_eq!(
+        kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Flat).slot(),
+        18
+    );
 }

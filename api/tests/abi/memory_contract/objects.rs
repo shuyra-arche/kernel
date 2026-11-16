@@ -66,7 +66,7 @@ pub(super) fn results() -> Vec<Reply> {
     let mut results = vec![
         Reply::new(
             id(),
-            Opcode::Create(Domain::Flat),
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Create),
             Outcome::Committed(Value::CreatedFlat {
                 token: PendId::mint(5),
                 flat,
@@ -76,7 +76,7 @@ pub(super) fn results() -> Vec<Reply> {
         .unwrap(),
         Reply::new(
             id(),
-            Opcode::Create(Domain::Nest),
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Create),
             Outcome::Committed(Value::CreatedNest {
                 token: PendId::mint(5),
                 nest,
@@ -86,7 +86,7 @@ pub(super) fn results() -> Vec<Reply> {
         .unwrap(),
         Reply::new(
             id(),
-            Opcode::CreateSpan,
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Reserve),
             Outcome::Committed(Value::Span {
                 token: PendId::mint(5),
                 nest,
@@ -112,7 +112,16 @@ pub(super) fn results() -> Vec<Reply> {
                 retained: Some(value),
             },
         };
-        results.push(Reply::new(id(), Opcode::Delete(Domain::Flat), outcome).unwrap());
+        results.push(
+            Reply::new(
+                id(),
+                kernel_api::abi::memory::Opcode::Flat(
+                    kernel_api::abi::memory::flat::Opcode::Delete,
+                ),
+                outcome,
+            )
+            .unwrap(),
+        );
     }
     for phase in [NestPhase::Closing, NestPhase::Closed, NestPhase::Failed] {
         let value = Value::NestLifecycle {
@@ -128,7 +137,16 @@ pub(super) fn results() -> Vec<Reply> {
                 retained: Some(value),
             },
         };
-        results.push(Reply::new(id(), Opcode::Delete(Domain::Nest), outcome).unwrap());
+        results.push(
+            Reply::new(
+                id(),
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::Delete,
+                ),
+                outcome,
+            )
+            .unwrap(),
+        );
     }
     for phase in [SpanPhase::Closing, SpanPhase::Closed, SpanPhase::Failed] {
         let value = Value::SpanLifecycle {
@@ -145,7 +163,16 @@ pub(super) fn results() -> Vec<Reply> {
                 retained: Some(value),
             },
         };
-        results.push(Reply::new(id(), Opcode::DeleteSpan, outcome).unwrap());
+        results.push(
+            Reply::new(
+                id(),
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::Release,
+                ),
+                outcome,
+            )
+            .unwrap(),
+        );
     }
     results
 }
@@ -278,7 +305,7 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
     }
     let cases = [
         (
-            Opcode::Delete(Domain::Flat),
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Delete),
             Value::FlatLifecycle {
                 flat: slot(0).flat(),
                 version: FlatVersion::INITIAL,
@@ -286,7 +313,7 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
             },
         ),
         (
-            Opcode::Delete(Domain::Nest),
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Delete),
             Value::NestLifecycle {
                 nest: memo(0).nest(),
                 version: NestVersion::INITIAL,
@@ -294,7 +321,7 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
             },
         ),
         (
-            Opcode::DeleteSpan,
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Release),
             Value::SpanLifecycle {
                 nest: memo(0).nest(),
                 span: memo(0).span(),
@@ -329,7 +356,7 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
     assert!(
         Reply::new(
             id(),
-            Opcode::Create(Domain::Flat),
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Create),
             Outcome::Pending(created)
         )
         .is_none()
@@ -337,7 +364,7 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
     assert!(
         Reply::new(
             id(),
-            Opcode::Create(Domain::Nest),
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Create),
             Outcome::Committed(created)
         )
         .is_none()
@@ -345,7 +372,7 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
     assert!(
         Reply::new(
             id(),
-            Opcode::Create(Domain::Flat),
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Create),
             Outcome::Failed {
                 failure: Failure::OutOfMemory,
                 retained: Some(created)
@@ -361,7 +388,7 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
     assert!(
         Reply::new(
             id(),
-            Opcode::Create(Domain::Flat),
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Create),
             Outcome::Committed(invalid)
         )
         .is_none()
@@ -468,7 +495,10 @@ fn release_range_encodes_identity_expected_revision_and_page_window() {
         );
     }
     assert_eq!(Request::from_bytes(&bytes), Some(request));
-    assert_eq!(request.action().opcode(), Opcode::ReleaseRange);
+    assert_eq!(
+        request.action().opcode(),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::ReleaseRange)
+    );
 
     let value = Value::SpanLifecycle {
         nest: NestId::new(13).unwrap(),
@@ -476,7 +506,12 @@ fn release_range_encodes_identity_expected_revision_and_page_window() {
         version: SpanVersion::new(4).unwrap(),
         phase: SpanPhase::Open,
     };
-    let reply = Reply::new(id(), Opcode::ReleaseRange, Outcome::Committed(value)).unwrap();
+    let reply = Reply::new(
+        id(),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::ReleaseRange),
+        Outcome::Committed(value),
+    )
+    .unwrap();
     assert!(reply.matches(request));
 }
 
@@ -503,7 +538,9 @@ fn release_range_rejects_empty_or_overflowing_windows_and_non_open_replies() {
     assert!(
         Reply::new(
             id(),
-            Opcode::ReleaseRange,
+            kernel_api::abi::memory::Opcode::Nest(
+                kernel_api::abi::memory::nest::Opcode::ReleaseRange
+            ),
             Outcome::Committed(value(SpanPhase::Open))
         )
         .unwrap()
@@ -512,7 +549,9 @@ fn release_range_rejects_empty_or_overflowing_windows_and_non_open_replies() {
     assert!(
         Reply::new(
             id(),
-            Opcode::ReleaseRange,
+            kernel_api::abi::memory::Opcode::Nest(
+                kernel_api::abi::memory::nest::Opcode::ReleaseRange
+            ),
             Outcome::Committed(value(SpanPhase::Closed))
         )
         .is_none()

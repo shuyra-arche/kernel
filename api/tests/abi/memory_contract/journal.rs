@@ -29,7 +29,7 @@ fn execute(journal: &mut Journal, request: Request) -> Accepted {
 fn committed(id: u64) -> Reply {
     Reply::new(
         RequestId::new(id).unwrap(),
-        Opcode::Occupy,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
         Outcome::Committed(Value::Slot {
             version: SlotVersion::new(2).unwrap(),
             page: 17,
@@ -61,7 +61,7 @@ fn lost_delivery_replays_one_commit_without_reentering_execution() {
     journal.record(&accepted, committed(1)).unwrap(); // identical completion is idempotent
     let rejected = Reply::new(
         RequestId::new(1).unwrap(),
-        Opcode::Occupy,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
         Outcome::Rejected(Failure::Busy),
     )
     .unwrap();
@@ -166,14 +166,19 @@ fn pending_cannot_be_evicted_or_turned_into_no_effect_rejection() {
     let value = Value::Memo {
         generation: MemoGeneration::new(2).unwrap(),
     };
-    let pending = Reply::new(req.id().unwrap(), Opcode::Publish, Outcome::Pending(value)).unwrap();
+    let pending = Reply::new(
+        req.id().unwrap(),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
+        Outcome::Pending(value),
+    )
+    .unwrap();
     journal.record(&accepted, pending).unwrap();
     assert!(
         matches!(journal.begin(actor(), req), Ok(Admission::InFlight(Some(r))) if r == pending)
     );
     let rejected = Reply::new(
         req.id().unwrap(),
-        Opcode::Publish,
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
         Outcome::Rejected(Failure::Busy),
     )
     .unwrap();
@@ -188,7 +193,7 @@ fn pending_cannot_be_evicted_or_turned_into_no_effect_rejection() {
     );
     let failed = Reply::new(
         req.id().unwrap(),
-        Opcode::Publish,
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
         Outcome::Failed {
             failure: Failure::Hardware,
             retained: Some(value),
@@ -230,11 +235,16 @@ fn rejected_attempt_is_retained_but_inspections_and_expired_results_are_not_muta
     let mut journal = Journal::new(actor()).unwrap();
     let req = request(1);
     let accepted = execute(&mut journal, req);
-    let expired = Reply::new(req.id().unwrap(), Opcode::Occupy, Outcome::Expired).unwrap();
+    let expired = Reply::new(
+        req.id().unwrap(),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+        Outcome::Expired,
+    )
+    .unwrap();
     assert_eq!(journal.record(&accepted, expired), Err(Failure::Invalid));
     let rejected = Reply::new(
         req.id().unwrap(),
-        Opcode::Occupy,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
         Outcome::Rejected(Failure::Denied),
     )
     .unwrap();
@@ -277,7 +287,9 @@ fn takeover_updates_retained_epoch_before_a_later_failure() {
                 &accepted,
                 Reply::new(
                     req.id().unwrap(),
-                    Opcode::Block,
+                    kernel_api::abi::memory::Opcode::Flat(
+                        kernel_api::abi::memory::flat::Opcode::Block,
+                    ),
                     Outcome::Pending(Value::Maintenance {
                         block,
                         phase: BlockPhase::Draining,
@@ -289,7 +301,7 @@ fn takeover_updates_retained_epoch_before_a_later_failure() {
     }
     let failed = Reply::new(
         req.id().unwrap(),
-        Opcode::Block,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
         Outcome::Failed {
             failure: Failure::Busy,
             retained: Some(Value::Maintenance {

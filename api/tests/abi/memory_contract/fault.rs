@@ -45,7 +45,9 @@ pub(super) fn results() -> Vec<Reply> {
         .map(|phase| {
             Reply::new(
                 id(),
-                Opcode::FaultRoute,
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::FaultRoute,
+                ),
                 Outcome::Committed(Value::FaultRoute {
                     nest: memo(0).nest(),
                     span: memo(0).span(),
@@ -125,7 +127,13 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
         }
         assert_eq!(request.to_bytes(), expected);
         assert_eq!(
-            Request::from_call(Opcode::FaultRoute.call_number(), &expected),
+            Request::from_call(
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::FaultRoute
+                )
+                .call_number(),
+                &expected
+            ),
             Some(request)
         );
         assert!(Request::new(None, action).is_none());
@@ -190,7 +198,8 @@ fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
         assert_eq!(request.to_bytes(), expected_queries[index]);
         assert_eq!(
             Request::from_call(
-                Opcode::Inspect(kernel_api::abi::memory::Domain::Nest).call_number(),
+                kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Nest)
+                    .call_number(),
                 &expected_queries[index]
             ),
             Some(request)
@@ -388,11 +397,22 @@ fn route_loss_and_disabled_status_cannot_masquerade_as_active_service() {
         let Outcome::Committed(value) = reply.outcome() else {
             unreachable!()
         };
-        assert!(Reply::new(id(), Opcode::FaultRoute, Outcome::Pending(value)).is_none());
         assert!(
             Reply::new(
                 id(),
-                Opcode::FaultRoute,
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::FaultRoute
+                ),
+                Outcome::Pending(value)
+            )
+            .is_none()
+        );
+        assert!(
+            Reply::new(
+                id(),
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::FaultRoute
+                ),
                 Outcome::Failed {
                     failure: Failure::HandlerGone,
                     retained: Some(value)
@@ -407,7 +427,9 @@ fn route_loss_and_disabled_status_cannot_masquerade_as_active_service() {
     assert!(
         Reply::new(
             id(),
-            Opcode::FaultRoute,
+            kernel_api::abi::memory::Opcode::Nest(
+                kernel_api::abi::memory::nest::Opcode::FaultRoute
+            ),
             Outcome::Rejected(Failure::FaultExpired)
         )
         .is_none()
