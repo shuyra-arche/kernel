@@ -324,42 +324,6 @@ impl Nest {
         }
     }
 
-    /// Sample phase and revision under the same owner lock as physical completion.
-    /// The caller holds COMMIT while selecting the live authority window.
-    pub(crate) fn span_snapshot(
-        &self,
-        span: &Arc<Span>,
-        offset: PageOffset,
-        count: PageCount,
-        writable: bool,
-    ) -> Result<kernel_api::model::nest::SpanStatus, NestError> {
-        use kernel_api::model::nest::{SpanId, SpanPhase, SpanStatus};
-        self.check_owner(span)?;
-        let state = self.state.lock();
-        let inner = span.state.lock();
-        let phase = match inner.phase {
-            address::span::SpanPhase::Open if state.is_open() => SpanPhase::Open,
-            address::span::SpanPhase::Gone => SpanPhase::Closed,
-            _ => SpanPhase::Closing,
-        };
-        let mut access = inner.initial_access;
-        if !writable {
-            access.remove(Access::WRITE);
-        }
-        Ok(SpanStatus {
-            nest: self.id(),
-            span: SpanId::from_bytes(&(span.identity() as u64).to_le_bytes())
-                .expect("span identity"),
-            version: span.version(),
-            offset: offset.get(),
-            count: count.get(),
-            address: span.initial_start(),
-            level: span.level(),
-            access: access.bits() << 1,
-            phase,
-        })
-    }
-
     pub(crate) fn span_root(
         &self,
         id: kernel_api::model::nest::SpanId,
