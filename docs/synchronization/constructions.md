@@ -24,7 +24,7 @@ Baseline `852b396d20a1ae2954503a4dee9d970658c43558` had 96 textual constructors:
 | 13 | `server/src/basis/nest/activity.rs:258` / `new` | `None` | `LegacyLock<order::ActivityDelivery, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
 | 14 | `server/src/basis/nest/address/span/mod.rs:137` / `new` | `None` | `LegacyLock<order::FaultPolicy, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
 | 15 | `server/src/basis/nest/address/span/mod.rs:141` / `new` | `None` | `LegacyLock<order::SpanExports, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
-| 16 | `server/src/basis/nest/address/span/mod.rs:147` / `new_level` | `Reservation` | `LegacyLock<order::Reservation, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
+| 16 | `server/src/basis/nest/address/span/mod.rs:147` / `new_level` | `Span` | `LegacyLock<order::Span, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
 | 17 | `server/src/basis/nest/authority/binding.rs:35` / `new` | `None` | `LegacyLock<order::Organizations, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
 | 18 | `server/src/basis/nest/authority/mod.rs:111` / `new` | `None` | `LegacyLock<order::NestAuthority, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
 | 19 | `server/src/basis/nest/fault/queue.rs:81` / `new` | `None` | `LegacyLock<order::FaultProgress, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
