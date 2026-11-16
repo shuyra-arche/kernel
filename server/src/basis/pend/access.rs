@@ -139,7 +139,7 @@ impl SpanRoute {
         let cleanup = rights == NestRights::INSPECT
             || rights == NestRights::RETRACT
             || rights == NestRights::REMOVE;
-        if !cleanup && (!nest.is_open() || !nest.span_open(id)) {
+        if !cleanup && (!nest.is_open() || !nest.span(id).is_some_and(|span| span.is_open())) {
             return Err(PendFail::Dead);
         }
         let (offset, count) = entry.authority().window().ok_or(PendFail::Denied)?;

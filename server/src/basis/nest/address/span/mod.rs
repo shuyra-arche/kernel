@@ -352,7 +352,7 @@ impl Span {
             .ok_or(NestError::NoRegion)
     }
 
-    pub(in crate::basis::nest) fn is_open(&self) -> bool {
+    pub(crate) fn is_open(&self) -> bool {
         self.admission.is_open() && self.state.lock().phase == SpanPhase::Open
     }
 

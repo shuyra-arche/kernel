@@ -307,10 +307,6 @@ impl Nest {
         self.spans.registered(id.get())?.span
     }
 
-    pub(crate) fn span_open(&self, id: kernel_api::model::nest::SpanId) -> bool {
-        self.is_open() && self.span(id).is_some_and(|mapping| mapping.is_open())
-    }
-
     pub(crate) fn span_status(
         &self,
         id: kernel_api::model::nest::SpanId,

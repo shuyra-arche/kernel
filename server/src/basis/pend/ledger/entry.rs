@@ -74,9 +74,10 @@ impl PendEntry {
         self.meta.alive()
             && self.authority.alive()
             && match self.scope() {
-                PendScope::Nest(NestScope::Span { id, .. }) => {
-                    self.meta.nest().is_some_and(|nest| nest.span_open(id))
-                }
+                PendScope::Nest(NestScope::Span { id, .. }) => self
+                    .meta
+                    .nest()
+                    .is_some_and(|nest| nest.span(id).is_some_and(|span| span.is_open())),
                 _ => true,
             }
     }

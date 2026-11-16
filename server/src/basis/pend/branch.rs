@@ -40,7 +40,7 @@ fn effective_limits(
             }
             PendScope::Nest(NestScope::Span { id, .. }) => {
                 let nest = entry.target().nest().ok_or(PendFail::Denied)?;
-                if !nest.span_open(id) {
+                if !nest.span(id).is_some_and(|span| span.is_open()) {
                     return Err(PendFail::Dead);
                 }
                 let span = nest.span(id).ok_or(PendFail::Denied)?;
