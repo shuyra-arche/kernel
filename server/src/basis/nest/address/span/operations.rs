@@ -398,7 +398,7 @@ impl Span {
                 }
         };
         if !valid {
-            let _ = nest.retract_position(self, index, None, change, true);
+            let _ = self.retract_forced(nest, index, change);
             result = Err(AccessError::Denied);
         }
         self.finish_memo(index);
@@ -410,5 +410,152 @@ impl Span {
             span: self.identity(),
         });
         result
+    }
+}
+
+impl Span {
+    /// Retract one position under the caller's live authority.
+    pub(crate) fn retract(
+        self: &Arc<Self>,
+        nest: &Nest,
+        index: usize,
+        expected: u64,
+        change: Arc<Change>,
+        authorize: &mut impl FnMut() -> Result<(), memo::AccessError>,
+        accepted: &mut impl FnMut(u64),
+    ) -> Result<(), memo::AccessError> {
+        let _operation = self.operation().ok_or(memo::AccessError::Busy)?;
+        nest.ensure_span(self)?;
+        self.position(index)?;
+        let result = self.retract_position(
+            nest,
+            index,
+            Some(expected),
+            change,
+            false,
+            false,
+            authorize,
+            accepted,
+        );
+        sign::signal(WakeKey::Span {
+            space: self.identity.nest_id(),
+            span: self.identity(),
+        });
+        if nest.is_external() {
+            sign::signal(WakeKey::ExternalSpan {
+                id: self.identity(),
+            });
+        }
+        result
+    }
+
+    /// Forced cleanup uses the same local transition without user authority.
+    pub(in crate::basis::nest) fn retract_forced(
+        self: &Arc<Self>,
+        nest: &Nest,
+        index: usize,
+        change: Arc<Change>,
+    ) -> Result<(), memo::AccessError> {
+        self.retract_position(
+            nest,
+            index,
+            None,
+            change,
+            true,
+            false,
+            &mut || Ok(()),
+            &mut |_| {},
+        )
+    }
+
+    pub(in crate::basis::nest) fn retract_polling(
+        self: &Arc<Self>,
+        nest: &Nest,
+        index: usize,
+        change: Arc<Change>,
+        polling: bool,
+    ) -> Result<(), memo::AccessError> {
+        self.retract_position(
+            nest,
+            index,
+            None,
+            change,
+            true,
+            polling,
+            &mut || Ok(()),
+            &mut |_| {},
+        )
+    }
+
+    /// The caller owns span.operation. Forced cleanup never wraps generation MAX.
+    fn retract_position(
+        self: &Arc<Self>,
+        nest: &Nest,
+        index: usize,
+        expected: Option<u64>,
+        change: Arc<Change>,
+        forced: bool,
+        polling: bool,
+        authorize: &mut impl FnMut() -> Result<(), memo::AccessError>,
+        accepted: &mut impl FnMut(u64),
+    ) -> Result<(), memo::AccessError> {
+        if !nest.is_external() {
+            nest.finish_invalidation_with(polling)?;
+        }
+        self.finish_memo(index);
+        let page = {
+            let _commit = crate::basis::commit();
+            authorize()?;
+            let mut state = self.state.lock();
+            let Some(memo) = state.memos.existing_mut(index) else {
+                return if forced {
+                    Ok(())
+                } else {
+                    Err(memo::AccessError::SourceEmpty)
+                };
+            };
+            if expected.is_some_and(|expected| memo.generation() != expected) {
+                return Err(memo::AccessError::Busy);
+            }
+            let page = memo.page().ok_or(memo::AccessError::SourceEmpty)?;
+            if !Arc::ptr_eq(&page, change.page()) {
+                return Err(memo::AccessError::Busy);
+            }
+            if memo.publication().is_none() {
+                return if !memo.busy() && (forced || memo.frozen()) {
+                    Ok(())
+                } else {
+                    Err(memo::AccessError::Busy)
+                };
+            }
+            if !memo.retracting() {
+                if !forced {
+                    self.prepare_revision()?;
+                }
+                memo.begin_retract(memo.generation(), change, forced)?;
+                self.changed();
+            }
+            accepted(memo.generation());
+            page
+        };
+        if nest.is_external() {
+            nest.progress_external(self)
+                .map_err(memo::publication_failure)?;
+        } else {
+            let result = nest.unpublish_page_with(
+                self,
+                VirtAddr::new(self.position(index)?),
+                &page,
+                polling,
+            );
+            self.finish_memo(index);
+            result?;
+        }
+        let state = self.state.lock();
+        if state.memos.get(index).is_some_and(memo::Memo::busy) {
+            Err(memo::AccessError::Busy)
+        } else {
+            Ok(())
+        }
     }
 }
