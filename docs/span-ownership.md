@@ -79,8 +79,10 @@ primitive:
 - keep left/right occupancy slots under the same generation identity;
 - remove the range from active access and refresh the index from remaining
   active ranges;
-- refuse while a publication, source or translation batch still owns it, and
-  refuse to release the last active range.
+- refuse while a publication or translation batch still owns it, and refuse
+  to release the last active range. A source-backed Span keeps its implicit
+  source for the remaining ranges; the released hole is no longer accessible
+  and the source is released when the owning Nest/Team closes.
 
 `Action::ReleaseRange` (Nest slot 27) is the userspace entry. It requires the
 `DELETE_SPAN` authority, an exact expected Span revision and a range inside

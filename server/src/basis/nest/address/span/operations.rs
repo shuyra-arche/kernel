@@ -1145,10 +1145,7 @@ impl Span {
         let mut address = nest.address.lock();
         let translation = self.translation.lock();
         let mut inner = self.state.lock();
-        if inner.phase != super::SpanPhase::Open
-            || inner.source.is_some()
-            || translation.retirement.pending_for(self)
-        {
+        if inner.phase != super::SpanPhase::Open || translation.retirement.pending_for(self) {
             return Err(NestError::Busy);
         }
         if inner.memos.published().any(|(page, _)| {
