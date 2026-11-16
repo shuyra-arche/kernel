@@ -504,6 +504,9 @@ impl Outcome {
                         (Opcode::DeleteSpan, Value::SpanLifecycle { phase, .. }) => {
                             phase == SpanPhase::Closed
                         }
+                        (Opcode::ReleaseRange, Value::SpanLifecycle { phase, .. }) => {
+                            phase == SpanPhase::Open
+                        }
                         (Opcode::Occupy, Value::Slot { page, .. }) => page != 0,
                         (Opcode::Vacate, Value::Slot { page, .. }) => page == 0,
                         (Opcode::Block, Value::Maintenance { phase, .. }) => {
