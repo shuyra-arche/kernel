@@ -10,8 +10,8 @@ macro_rules! domain {
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub struct Call(Request);
             impl Call {
-                pub fn new(id: Option<RequestId>, action: Action) -> Option<Self> {
-                    Self::from_request(Request::new(id, action)?)
+                pub fn new(id: Option<RequestId>, action: impl Into<Action>) -> Option<Self> {
+                    Self::from_request(Request::new(id, action.into())?)
                 }
                 pub fn from_request(request: Request) -> Option<Self> {
                     (request.action().opcode().domain() == Domain::$domain).then_some(Self(request))
