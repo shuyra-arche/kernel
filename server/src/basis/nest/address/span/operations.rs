@@ -1132,6 +1132,14 @@ impl Span {
             .checked_add(count.checked_bytes().ok_or(NestError::NotAligned)?)
             .and_then(|end| end.checked_sub(1))
             .ok_or(NestError::NotAligned)?;
+        let pages = self.initial_size() / kernel_api::address::PAGE_SIZE;
+        if offset
+            .get()
+            .checked_add(count.get())
+            .is_none_or(|end| end > pages)
+        {
+            return Err(NestError::NotAligned);
+        }
         let mut address = nest.address.lock();
         let translation = self.translation.lock();
         let mut inner = self.state.lock();
