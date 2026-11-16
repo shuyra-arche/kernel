@@ -171,11 +171,11 @@ impl Cpu {
             return Ok(false);
         }
         let principal = self
-            .nest
+            .span
             .state
             .lock()
             .memos
-            .get(&self.span, wire.memo_page)
+            .get(wire.memo_page)
             .and_then(|memo| memo.principal())
             .ok_or(Failure::Denied)?;
         principal

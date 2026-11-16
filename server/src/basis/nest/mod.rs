@@ -108,7 +108,8 @@ impl Nest {
         usage: &Arc<crate::basis::pend::MaintenanceUse>,
     ) -> bool {
         let state = self.state.lock();
-        state.memos.get(span, index).is_some_and(|memo| {
+        let inner = span.state.lock();
+        inner.memos.get(index).is_some_and(|memo| {
             memo.maintenance()
                 .is_some_and(|known| Arc::ptr_eq(known, usage))
                 && memo.failed(state.retirement.invalidation() == Invalidation::Failed)
@@ -125,8 +126,8 @@ impl Nest {
         let _operation = span.operation().ok_or(PendFail::Busy)?;
         {
             let _commit = crate::basis::commit();
-            let state = self.state.lock();
-            if state.memos.get(span, index).is_none_or(|memo| {
+            let state = span.state.lock();
+            if state.memos.get(index).is_none_or(|memo| {
                 memo.generation() < generation
                     || memo
                         .maintenance()
@@ -371,13 +372,6 @@ impl Nest {
         PageCount::new(self.span(id)?.initial_size() / PAGE_SIZE)
     }
 
-    pub(crate) fn span_level(
-        &self,
-        id: kernel_api::model::nest::SpanId,
-    ) -> Option<kernel_api::model::cell::CellLevel> {
-        Some(self.span(id)?.level())
-    }
-
     pub(crate) fn asid(&self) -> Asid {
         self.cpu
             .as_ref()
@@ -454,8 +448,8 @@ impl Nest {
         let _operation = span.operation().ok_or(PendFail::Busy)?;
         let change = {
             let _commit = crate::basis::commit();
-            let state = self.state.lock();
-            let Some(memo) = state.memos.get(span, index) else {
+            let state = span.state.lock();
+            let Some(memo) = state.memos.get(index) else {
                 return Ok(());
             };
             if !memo.matches(binding) {
@@ -481,8 +475,8 @@ impl Nest {
     ) -> Option<memo::source::Source> {
         let index = binding.page()?;
         let mapping = self.spans.registered(binding.id())?.span?;
-        let state = self.state.lock();
-        let memo = state.memos.get(&mapping, index)?;
+        let state = mapping.state.lock();
+        let memo = state.memos.get(index)?;
         if !memo.matches(binding) {
             return None;
         }
@@ -500,7 +494,8 @@ impl Nest {
             return false;
         };
         let state = self.state.lock();
-        state.memos.get(span, index).is_some_and(|memo| {
+        let inner = span.state.lock();
+        inner.memos.get(index).is_some_and(|memo| {
             memo.matches(binding)
                 && memo.failed(state.retirement.invalidation() == Invalidation::Failed)
         })
@@ -521,7 +516,8 @@ impl Nest {
             return false;
         };
         let state = self.state.lock();
-        state.memos.get(span, index).is_some_and(|memo| {
+        let inner = span.state.lock();
+        inner.memos.get(index).is_some_and(|memo| {
             memo.matches(binding)
                 && memo.provenance().is_some_and(|p| p.contains(origin))
                 && memo.failed(state.retirement.invalidation() == Invalidation::Failed)
@@ -535,24 +531,22 @@ impl Nest {
             return binding.page().is_none() && Arc::ptr_eq(&entry.binding, binding);
         };
         let state = self.state.lock();
+        let inner = mapping.state.lock();
         if let Some(index) = binding.page() {
-            return state
+            return inner
                 .memos
-                .get(mapping, index)
+                .get(index)
                 .is_some_and(|memo| memo.matches(binding) && memo.busy());
         }
-        let borrowed = {
-            let inner = mapping.state.lock();
-            !inner.active.is_empty()
-                && inner
-                    .source
-                    .as_ref()
-                    .is_some_and(|source| source.is_borrowed())
-        };
+        let borrowed = !inner.active.is_empty()
+            && inner
+                .source
+                .as_ref()
+                .is_some_and(|source| source.is_borrowed());
         Arc::ptr_eq(&entry.binding, binding)
             && !state.phase.is_closed()
             && (!state.retirement.invalidation().is_clean()
-                || state.memos.published(mapping).next().is_some()
+                || inner.memos.published().next().is_some()
                 || borrowed)
     }
 
@@ -587,15 +581,15 @@ impl Nest {
         let mut cursor = None;
         let mut busy = false;
         loop {
-            let index = self.state.lock().memos.next_page(&mapping, cursor);
+            let index = mapping.state.lock().memos.next_page(cursor);
             let Some(index) = index else { break };
             cursor = Some(index);
             self.finish_memo(&mapping, index);
-            let pending = self
+            let pending = mapping
                 .state
                 .lock()
                 .memos
-                .get(&mapping, index)
+                .get(index)
                 .is_some_and(memo::Memo::busy);
             if pending {
                 let Some(page) = self.memo_page(&mapping, index)? else {
@@ -619,10 +613,11 @@ impl Nest {
             }
             let cleared = {
                 let _commit = crate::basis::commit();
-                self.state
+                mapping
+                    .state
                     .lock()
                     .memos
-                    .existing_mut(&mapping, index)
+                    .existing_mut(index)
                     .expect("selected Memo")
                     .clear()
                     .map(|removed| {
@@ -652,7 +647,8 @@ impl Nest {
             let mut state = self.state.lock();
             // An unrelated Reservation may already own a newer fence. Only
             // this mapping's retained batch and resources prevent its release.
-            if state.retirement.pending_for(&mapping) || state.memos.has_resources(&mapping) {
+            if state.retirement.pending_for(&mapping) || mapping.state.lock().memos.has_resources()
+            {
                 return Err(AccessError::Busy);
             }
             state.index.remove(&mapping);
@@ -699,7 +695,7 @@ impl Nest {
         let mut cursor = None;
         let mut busy = false;
         loop {
-            let Some(index) = self.state.lock().memos.next_page(&mapping, cursor) else {
+            let Some(index) = mapping.state.lock().memos.next_page(cursor) else {
                 break;
             };
             cursor = Some(index);
@@ -796,7 +792,7 @@ impl Nest {
             }
             let mut cursor = None;
             loop {
-                let Some(index) = self.state.lock().memos.next_page(mapping, cursor) else {
+                let Some(index) = mapping.state.lock().memos.next_page(cursor) else {
                     break;
                 };
                 cursor = Some(index);
@@ -820,8 +816,8 @@ impl Nest {
         };
         let page = {
             let _commit = crate::basis::commit();
-            let state = self.state.lock();
-            let Some(memo) = state.memos.get(mapping, index) else {
+            let state = mapping.state.lock();
+            let Some(memo) = state.memos.get(index) else {
                 return Ok(());
             };
             if !memo.matches(binding) {
@@ -842,11 +838,11 @@ impl Nest {
                 .map_err(|_| PendFail::Busy)?;
         }
         self.finish_memo(mapping, index);
-        let pending = self
+        let pending = mapping
             .state
             .lock()
             .memos
-            .get(mapping, index)
+            .get(index)
             .is_some_and(memo::Memo::busy);
         if pending {
             let page = page.ok_or(PendFail::Busy)?;
@@ -867,8 +863,8 @@ impl Nest {
             let cleared = {
                 let _commit = crate::basis::commit();
                 // Revalidate the exact shared binding; a stale (id,page) cannot clear a replacement.
-                let mut state = self.state.lock();
-                let Some(memo) = state.memos.existing_mut(mapping, index) else {
+                let mut state = mapping.state.lock();
+                let Some(memo) = state.memos.existing_mut(index) else {
                     return Ok(());
                 };
                 if !memo.matches(binding) {
@@ -1167,7 +1163,7 @@ impl Nest {
             .mappings
             .try_reserve(1)
             .map_err(|_| NestError::OutOfMemory)?;
-        state.memos.reserve(published.len())?;
+        mapping.state.lock().memos.reserve(published.len())?;
         // 首条 PTE 之前登记来源↔关系：撤页要按来源枚举全部关系，不能只看用户注册表。
         source::register(&implicit, mapping, None)?;
         for run in mapping.state.lock().runs(start, &published) {
@@ -1226,8 +1222,11 @@ impl Nest {
                 self.geometry(),
             );
         }
-        for (page, cell) in published {
-            state.memos.publish(mapping, page, cell);
+        {
+            let mut inner = mapping.state.lock();
+            for (page, cell) in published {
+                inner.memos.publish(page, cell);
+            }
         }
         state.index.insert(node);
         state.retirement.mark_dirty(mapping.is_global());
@@ -1266,7 +1265,7 @@ impl Nest {
             .ok_or(NestError::NotAligned)?;
         let mut state = self.ready_state()?;
         self.ensure_owned(mapping, &state)?;
-        let inner = mapping.state.lock();
+        let mut inner = mapping.state.lock();
         if !inner.covers(start.as_usize(), end) {
             return Err(NestError::NoRegion);
         }
@@ -1289,7 +1288,7 @@ impl Nest {
             .map_err(|_| NestError::OutOfMemory)?;
         for (offset, cell) in materialized {
             let page = first + offset.get();
-            if state.memos.publication(mapping, page).is_none() {
+            if inner.memos.publication(page).is_none() {
                 let address = mapping.range.start() + page * PAGE_SIZE;
                 let range = inner
                     .active
@@ -1305,7 +1304,8 @@ impl Nest {
         if fresh.is_empty() {
             return Ok(());
         }
-        state.memos.reserve(fresh.len())?;
+        inner.memos.reserve(fresh.len())?;
+        let source = inner.source.as_ref().ok_or(NestError::Missing)?;
         state
             .retirement
             .mappings
@@ -1340,7 +1340,7 @@ impl Nest {
             );
         }
         for (page, cell) in fresh {
-            state.memos.publish(mapping, page, cell);
+            inner.memos.publish(page, cell);
         }
         state.retirement.mark_dirty(mapping.is_global());
         drop(inner);
@@ -1356,8 +1356,8 @@ impl Nest {
     ) -> Result<Option<Arc<Page>>, NestError> {
         self.check_owner(mapping)?;
         mapping.position(page)?;
-        let state = self.state.lock();
-        Ok(state.memos.get(mapping, page).and_then(|memo| memo.page()))
+        let state = mapping.state.lock();
+        Ok(state.memos.get(page).and_then(|memo| memo.page()))
     }
 
     pub(crate) fn associate_logical(
@@ -1417,11 +1417,12 @@ impl Nest {
             .reserve_binding()
             .map_err(memo::namespace_error)?;
         {
-            let mut state = self.state.lock();
+            let state = self.state.lock();
             if !state.retirement.invalidation().is_clean() {
                 return Err(NestError::Busy);
             }
-            let memo = state.memos.get_mut(mapping, index)?;
+            let mut inner = mapping.state.lock();
+            let memo = inner.memos.get_mut(index)?;
             if page.is_none() && !memo.accepts_logical() {
                 return Err(NestError::Pinned);
             }
@@ -1442,13 +1443,14 @@ impl Nest {
         }
         let authorization = source.source().clone();
         let replaced = {
-            let mut state = self.state.lock();
+            let state = self.state.lock();
             if !state.is_open() || !mapping.is_open() {
                 return Err(NestError::NoRegion);
             }
-            state
+            let mut inner = mapping.state.lock();
+            inner
                 .memos
-                .existing_mut(mapping, index)
+                .existing_mut(index)
                 .expect("prepared Memo")
                 .associate(expected, page, source, binding.clone())
         };
@@ -1475,8 +1477,8 @@ impl Nest {
         if mapping.source().is_some() {
             return Err(NestError::Pinned);
         }
-        let state = self.state.lock();
-        let Some(memo) = state.memos.get(mapping, index) else {
+        let state = mapping.state.lock();
+        let Some(memo) = state.memos.get(index) else {
             return if expected == 1 {
                 Ok(None)
             } else {
@@ -1503,8 +1505,9 @@ impl Nest {
             return Err(NestError::Pinned);
         }
         let state = self.state.lock();
+        let inner = mapping.state.lock();
         let vacant = memo::Memo::vacant();
-        let memo = state.memos.get(mapping, index).unwrap_or(&vacant);
+        let memo = inner.memos.get(index).unwrap_or(&vacant);
         if !memo.accepts_logical() {
             return Err(NestError::Pinned);
         }
@@ -1533,11 +1536,12 @@ impl Nest {
         }
         let _commit = crate::basis::commit();
         let removed = {
-            let mut state = self.state.lock();
+            let state = self.state.lock();
             if !state.retirement.invalidation().is_clean() {
                 return Err(NestError::Busy);
             }
-            let memo = state.memos.get_mut(mapping, index)?;
+            let mut inner = mapping.state.lock();
+            let memo = inner.memos.get_mut(index)?;
             if !memo.accepts_logical() {
                 return Err(NestError::Pinned);
             }
@@ -1561,20 +1565,22 @@ impl Nest {
         index: usize,
         authority: &Arc<crate::basis::pend::Pend>,
     ) -> bool {
-        self.state
+        mapping
+            .state
             .lock()
             .memos
-            .get(mapping, index)
+            .get(index)
             .is_some_and(|memo| memo.published_by(authority))
     }
 
     pub(crate) fn finish_memo(&self, mapping: &Arc<Span>, index: usize) {
         let settled = {
-            let mut state = self.state.lock();
+            let state = self.state.lock();
             if !state.retirement.invalidation().is_clean() {
                 return;
             }
-            state.memos.existing_mut(mapping, index).map(|memo| {
+            let mut inner = mapping.state.lock();
+            inner.memos.existing_mut(index).map(|memo| {
                 let before = memo.inspect(VirtAddr::new(0));
                 let settled = memo.finish();
                 if memo.inspect(VirtAddr::new(0)) != before {
@@ -1614,11 +1620,8 @@ impl Nest {
         }
         let actor = principal.check(self, mapping, index, access)?;
         let (page, source, binding) = {
-            let state = self.state.lock();
-            let memo = state
-                .memos
-                .get(mapping, index)
-                .ok_or(AccessError::SourceEmpty)?;
+            let state = mapping.state.lock();
+            let memo = state.memos.get(index).ok_or(AccessError::SourceEmpty)?;
             if memo.generation() != expected || memo.busy() {
                 return Err(AccessError::Busy);
             }
@@ -1745,27 +1748,27 @@ impl Nest {
             if !state.is_open() || !mapping.is_open() {
                 return Err(AccessError::Denied);
             }
-            let memo = state
-                .memos
-                .existing_mut(mapping, index)
-                .ok_or(AccessError::Denied)?;
-            if !memo.matches(&binding) {
-                return Err(AccessError::Busy);
+            {
+                let mut inner = mapping.state.lock();
+                let memo = inner.memos.existing_mut(index).ok_or(AccessError::Denied)?;
+                if !memo.matches(&binding) {
+                    return Err(AccessError::Busy);
+                }
+                mapping.prepare_revision()?;
+                memo.begin_publish(expected, change.clone(), access.bits() << 1)?;
+                mapping.changed();
+                memo.retain(
+                    publisher.take().expect("prepared publishing route"),
+                    None,
+                    maintenance.clone(),
+                    source.provenance(),
+                );
+                accepted(memo.generation());
+                mapping
+                    .faults
+                    .lock()
+                    .publishing(index, expected, memo.generation());
             }
-            mapping.prepare_revision()?;
-            memo.begin_publish(expected, change.clone(), access.bits() << 1)?;
-            mapping.changed();
-            memo.retain(
-                publisher.take().expect("prepared publishing route"),
-                None,
-                maintenance.clone(),
-                source.provenance(),
-            );
-            accepted(memo.generation());
-            mapping
-                .faults
-                .lock()
-                .publishing(index, expected, memo.generation());
             state
                 .publish_page(
                     self.geometry(),
@@ -1889,8 +1892,8 @@ impl Nest {
         let page = {
             let _commit = crate::basis::commit();
             authorize()?;
-            let mut state = self.state.lock();
-            let Some(memo) = state.memos.existing_mut(mapping, index) else {
+            let mut state = mapping.state.lock();
+            let Some(memo) = state.memos.existing_mut(index) else {
                 return if forced {
                     Ok(())
                 } else {
@@ -1934,12 +1937,8 @@ impl Nest {
             self.finish_memo(mapping, index);
             result?;
         }
-        let state = self.state.lock();
-        if state
-            .memos
-            .get(mapping, index)
-            .is_some_and(memo::Memo::busy)
-        {
+        let state = mapping.state.lock();
+        if state.memos.get(index).is_some_and(memo::Memo::busy) {
             Err(AccessError::Busy)
         } else {
             Ok(())
@@ -1983,11 +1982,8 @@ impl Nest {
             return Err(AccessError::Denied);
         }
         let ((page, source, binding), retained, maintenance) = {
-            let state = self.state.lock();
-            let memo = state
-                .memos
-                .get(mapping, index)
-                .ok_or(AccessError::SourceEmpty)?;
+            let state = mapping.state.lock();
+            let memo = state.memos.get(index).ok_or(AccessError::SourceEmpty)?;
             if memo.generation() != expected || memo.in_flight() {
                 return Err(AccessError::Busy);
             }
@@ -2017,28 +2013,33 @@ impl Nest {
             .as_ref()
             .and_then(|usage| usage.source_owner(&source));
         if page.is_none() {
-            let mut state = self.state.lock();
-            let memo = state
-                .memos
-                .existing_mut(mapping, index)
-                .ok_or(AccessError::SourceEmpty)?;
-            if !memo.logical() || memo.busy() || !memo.matches(&binding) {
-                return Err(AccessError::Busy);
-            }
-            memo.can_advance(expected)?;
             mapping.prepare_revision()?;
             let selection = mapping.range(PageOffset::new(index), count)?;
             let mut inner = mapping.state.lock();
+            {
+                let memo = inner
+                    .memos
+                    .existing_mut(index)
+                    .ok_or(AccessError::SourceEmpty)?;
+                if !memo.logical() || memo.busy() || !memo.matches(&binding) {
+                    return Err(AccessError::Busy);
+                }
+                memo.can_advance(expected)?;
+            }
             let transition = inner.protection_transition(
                 mapping.initial_start(),
                 selection.window(),
                 address::span::Protection::SetAccess(access),
                 |_| false,
             )?;
-            memo.advance(expected)?;
             inner.active = transition.active;
+            let generation = {
+                let memo = inner.memos.existing_mut(index).expect("prepared Memo");
+                memo.advance(expected)?;
+                memo.generation()
+            };
             mapping.changed();
-            accepted(memo.generation());
+            accepted(generation);
             return Ok(());
         }
         let page = page.expect("retained publication Page");
@@ -2099,12 +2100,12 @@ impl Nest {
             if !state.is_open() || !mapping.is_open() {
                 return Err(AccessError::Denied);
             }
-            let memo = state
-                .memos
-                .existing_mut(mapping, index)
-                .ok_or(AccessError::Denied)?;
-            if !memo.matches(&binding) {
-                return Err(AccessError::Busy);
+            {
+                let inner = mapping.state.lock();
+                let memo = inner.memos.get(index).ok_or(AccessError::Denied)?;
+                if !memo.matches(&binding) {
+                    return Err(AccessError::Busy);
+                }
             }
             let mut operation_freeze = if retained.is_some() {
                 Some(Freeze::new(change.clone(), None).map_err(NestError::from)?)
@@ -2164,9 +2165,11 @@ impl Nest {
                     accepted(expected.checked_add(1).expect("prepared generation"));
                 },
             )?;
-            state
+            mapping
+                .state
+                .lock()
                 .memos
-                .existing_mut(mapping, index)
+                .existing_mut(index)
                 .expect("prepared Memo")
                 .protect(expected, operation_freeze.take());
             if state.retirement.invalidation().is_clean() {
@@ -2212,34 +2215,6 @@ impl Nest {
         } else {
             Err(AccessError::Denied)
         }
-    }
-
-    fn inspect_memo(
-        &self,
-        mapping: &Span,
-        index: usize,
-    ) -> Result<crate::basis::nest::memo::MemoInfo, NestError> {
-        let state = self.state.lock();
-        if mapping.state.lock().phase == address::span::SpanPhase::Gone {
-            return Err(NestError::NoRegion);
-        }
-        let level = if mapping.source().is_none() {
-            let id = kernel_api::model::nest::SpanId::from_bytes(
-                &(mapping.identity() as u64).to_le_bytes(),
-            )
-            .ok_or(NestError::NoRegion)?;
-            self.span_level(id).ok_or(NestError::NoRegion)?
-        } else {
-            mapping.level()
-        };
-        let address = mapping.position(index)?;
-        let mut info = state
-            .memos
-            .get(mapping, index)
-            .unwrap_or(&memo::Memo::vacant())
-            .inspect(VirtAddr::new(address));
-        info.level = level;
-        Ok(info)
     }
 
     /// 撤下 `mapping` 在 `address` 上的 4KiB 映射，把它那一页的承载交给退休。
@@ -2489,9 +2464,9 @@ impl Nest {
         let next = ActiveRange::split(&inner.active, start.as_usize(), last, None)?;
         let first_page = mapping.page_index(start);
         let last_page = mapping.page_index(crate::metal::mmu::internal::canonical(last));
-        let removed = state
+        let removed = inner
             .memos
-            .published(mapping)
+            .published()
             .filter(|(p, _)| *p >= first_page && *p <= last_page)
             .count();
         let next_node = if next.is_empty() {
@@ -2523,11 +2498,11 @@ impl Nest {
         let tickets = layout.occupancy.retire(prepared);
         state.withdraw_prepared(start, len, self.geometry());
         state.retirement.mappings.push(mapping.clone());
+        if inner
+            .memos
+            .withdraw(first_page, last_page, &mut state.retirement.cells)
         {
-            let NestState {
-                memos, retirement, ..
-            } = &mut *state;
-            memos.withdraw(mapping, first_page, last_page, &mut retirement.cells);
+            mapping.changed();
         }
         inner.active = next;
         drop(inner);
@@ -2753,7 +2728,7 @@ impl Nest {
                 self.changed();
             }
             drop(state);
-            fenced.release(self);
+            fenced.release();
             return Ok(());
         }
         if self.cpu.is_none() {
@@ -2815,7 +2790,7 @@ impl Nest {
         };
         // Retired Page and table resources can leave the lock. Address
         // tickets are reclaimed by detach or explicit retry_invalidation.
-        fenced.release(self);
+        fenced.release();
         Ok(())
     }
 

@@ -67,6 +67,17 @@ impl Index {
         find_span(self.root.as_deref(), address)
     }
 
+    /// Visit every indexed Span until the predicate accepts one.
+    pub(super) fn any(&self, mut predicate: impl FnMut(&Arc<Span>) -> bool) -> bool {
+        fn visit(node: Option<&IndexNode>, predicate: &mut impl FnMut(&Arc<Span>) -> bool) -> bool {
+            let Some(node) = node else { return false };
+            visit(node.left.as_deref(), predicate)
+                || predicate(&node.span)
+                || visit(node.right.as_deref(), predicate)
+        }
+        visit(self.root.as_deref(), &mut predicate)
+    }
+
     /// 与 [lo, hi] 相交的第一个关系。
     pub(super) fn first_overlap(&self, lo: usize, hi: usize) -> Option<Arc<Span>> {
         first_overlap(self.root.as_deref(), lo, hi)
@@ -86,14 +97,8 @@ impl Index {
 
     /// 索引内的关系与地址空间、硬件页表一致。
     #[cfg(debug_assertions)]
-    pub(super) fn audit_spans(
-        &self,
-        nest: &Nest,
-        root: &Table,
-        geo: Geometry,
-        memos: &super::memo::Memos,
-    ) {
-        audit_spans(self.root.as_deref(), nest, root, geo, memos);
+    pub(super) fn audit_spans(&self, nest: &Nest, root: &Table, geo: Geometry) {
+        audit_spans(self.root.as_deref(), nest, root, geo);
     }
 }
 
@@ -249,15 +254,9 @@ fn overlaps_other(node: &IndexNode, span: &Arc<Span>, lo: usize, hi: usize) -> b
 }
 
 #[cfg(debug_assertions)]
-fn audit_spans(
-    node: Option<&IndexNode>,
-    nest: &Nest,
-    root: &Table,
-    geo: Geometry,
-    memos: &super::memo::Memos,
-) {
+fn audit_spans(node: Option<&IndexNode>, nest: &Nest, root: &Table, geo: Geometry) {
     let Some(node) = node else { return };
-    audit_spans(node.left.as_deref(), nest, root, geo, memos);
+    audit_spans(node.left.as_deref(), nest, root, geo);
     let span = &node.span;
     assert!(
         span.identity.owner().is_some_and(|owner| core::ptr::eq(
@@ -269,7 +268,7 @@ fn audit_spans(
     let state = span.state.lock();
     if let Some(source) = &state.source {
         assert!(
-            !source.is_borrowed() || memos.published(span).next().is_none(),
+            !source.is_borrowed() || state.memos.published().next().is_none(),
             "borrowed Span also holds published Cells"
         );
         assert_eq!(
@@ -280,7 +279,7 @@ fn audit_spans(
         assert_eq!(source.level(), span.level(), "implicit source geometry");
     }
     assert!(span.initial_size().is_multiple_of(span.grain() * PAGE_SIZE));
-    for (page, cell) in memos.published(span) {
+    for (page, cell) in state.memos.published() {
         let address = span.initial_start() + page * PAGE_SIZE;
         assert!(
             state.covers(address.as_usize(), address.as_usize()),
@@ -312,5 +311,5 @@ fn audit_spans(
         );
     }
     drop(state);
-    audit_spans(node.right.as_deref(), nest, root, geo, memos);
+    audit_spans(node.right.as_deref(), nest, root, geo);
 }

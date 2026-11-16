@@ -17,7 +17,6 @@ impl NestState {
     fn external() -> Self {
         Self {
             root: Storage::External(External::new()),
-            memos: super::super::memo::Memos::new(),
             index: super::super::index::Index::new(),
             retirement: super::retirement::Retirement::new(),
             phase: ClosePhase::Open,
@@ -34,11 +33,8 @@ impl Nest {
         generation: u64,
         completion: crate::basis::unit::task::request::Completion,
     ) {
-        let mut state = self.state.lock();
-        let memo = state
-            .memos
-            .existing_mut(span, index)
-            .expect("accepted Memo");
+        let mut state = span.state.lock();
+        let memo = state.memos.existing_mut(index).expect("accepted Memo");
         assert_eq!(memo.generation(), generation);
         memo.retain_completion(completion);
     }
@@ -100,15 +96,11 @@ impl Nest {
         if !state.is_open() || !span.is_open() {
             return Err(Error::Closed);
         }
-        let NestState {
-            root: Storage::External(external),
-            memos,
-            ..
-        } = &mut *state
-        else {
+        let Storage::External(external) = &mut state.root else {
             return Err(Error::InvalidState);
         };
-        let memo = memos.get_mut(span, 0).map_err(|_| Error::OutOfMemory)?;
+        let mut inner = span.state.lock();
+        let memo = inner.memos.get_mut(0).map_err(|_| Error::OutOfMemory)?;
         let publication = if let Some(usage) = maintenance {
             external.prepare_access(
                 memo.publication().is_some(),
@@ -146,15 +138,11 @@ impl Nest {
 
     pub(crate) fn submit_external(&self, span: &Arc<Span>) -> Result<(), Error> {
         let mut state = self.state.lock();
-        let NestState {
-            root: Storage::External(external),
-            memos,
-            ..
-        } = &mut *state
-        else {
+        let Storage::External(external) = &mut state.root else {
             return Err(Error::InvalidState);
         };
-        let memo = memos.existing_mut(span, 0).ok_or(Error::UnknownBinding)?;
+        let mut inner = span.state.lock();
+        let memo = inner.memos.existing_mut(0).ok_or(Error::UnknownBinding)?;
         memo.attempted();
         external.submit(memo.publication_mut())
     }
@@ -170,15 +158,11 @@ impl Nest {
     /// At most one bounded backend step; the caller releases all guards before notification.
     pub(crate) fn progress_external(&self, span: &Arc<Span>) -> Result<(), Error> {
         let mut state = self.state.lock();
-        let NestState {
-            root: Storage::External(external),
-            memos,
-            ..
-        } = &mut *state
-        else {
+        let Storage::External(external) = &mut state.root else {
             return Err(Error::InvalidState);
         };
-        let Some(memo) = memos.existing_mut(span, 0) else {
+        let mut inner = span.state.lock();
+        let Some(memo) = inner.memos.existing_mut(0) else {
             external.progress(None, false)?;
             return Ok(());
         };
@@ -190,6 +174,7 @@ impl Nest {
         }
         if let Err(error) = progress {
             let completion = memo.take_completion();
+            drop(inner);
             drop(state);
             if let Some(completion) = completion {
                 completion.finish(crate::basis::unit::task::request::Transition::Failed(
@@ -208,6 +193,7 @@ impl Nest {
         if memo.inspect(span.initial_start()) != before {
             span.changed();
         }
+        drop(inner);
         drop(state);
         settled.release();
         // The binding worker owns the final transition and its NestClosed wakeup.
@@ -229,7 +215,7 @@ impl Nest {
     }
     pub(crate) fn progress_external_close(&self) -> Result<bool, Error> {
         let mut state = self.state.lock();
-        if !state.memos.idle() {
+        if state.index.any(|span| !span.state.lock().memos.idle()) {
             return Ok(false);
         }
         match &mut state.root {
