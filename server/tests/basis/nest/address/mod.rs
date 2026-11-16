@@ -291,3 +291,40 @@ fn partial_release_keeps_generation_on_both_sides_and_frees_a_reusable_hole() {
             .release(middle, middle + page - 1, replacement)
     );
 }
+
+#[test]
+fn partial_release_fails_closed_when_the_generation_does_not_own_every_page() {
+    let mut layout = Layout::new();
+    let page = 4096;
+    let left = Placement::fixed(VirtAddr::new(0x20000), page).unwrap();
+    let right = Placement::fixed(VirtAddr::new(0x21000), page).unwrap();
+    let (left_address, left_generation) = layout.reserve(left).unwrap();
+    let (right_address, right_generation) = layout.reserve(right).unwrap();
+    assert_eq!(left_address, 0x20000);
+    assert_eq!(right_address, 0x21000);
+
+    assert!(!layout.occupancy.release_range(
+        left_address,
+        right_address + page - 1,
+        left_generation,
+    ));
+    assert!(layout.occupancy.has_id(left_generation));
+    assert!(layout.occupancy.has_id(right_generation));
+    assert!(
+        !layout
+            .occupancy
+            .release_range(left_address, right_address, left_generation)
+    );
+    assert!(layout.occupancy.has_id(left_generation));
+    assert!(
+        layout
+            .occupancy
+            .release_range(left_address, left_address + page - 1, left_generation)
+    );
+    assert!(!layout.occupancy.has_id(left_generation));
+    assert!(
+        layout
+            .occupancy
+            .release(right_address, right_address + page - 1, right_generation)
+    );
+}
