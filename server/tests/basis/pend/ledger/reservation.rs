@@ -59,7 +59,7 @@ pub(super) fn setup(
 }
 
 #[test]
-fn licensed_reservation_root_retains_parent_limits_and_actual_creation_edge() {
+fn licensed_span_root_retains_parent_limits_and_actual_creation_edge() {
     let (task, nest, parent) = setup(Modifiable::No, Distributable::No);
     let serial = task.pend.lock();
     let prepared =

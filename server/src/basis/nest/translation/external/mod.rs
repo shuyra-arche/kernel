@@ -49,7 +49,7 @@ impl Nest {
             revision: core::sync::atomic::AtomicU64::new(1),
             cpu: None,
             life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
-            reservations: super::super::authority::ReservationRegistry::new(),
+            spans: super::super::authority::SpanIndex::new(),
             layout: LegacyLock::new(Layout::new()),
             pending_cleanup: LegacyLock::new(None),
             state: ManuallyDrop::new(LegacyLock::new(NestState::external())),

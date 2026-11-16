@@ -68,10 +68,12 @@ pub(in crate::entry::boot) fn install(nest: &Arc<Nest>) -> Result<(), NestError>
             BorrowedRegion::new(PhysAddr::from_raw(region.base), region.size)?
         })?
         .whole();
-        let reservation =
-            nest.reserve(Placement::exact(RegionKind::Normal, address, region.size)?)?;
+        let span = nest.reserve(
+            Placement::exact(RegionKind::Normal, address, region.size)?,
+            source.level(),
+        )?;
         let access = Access::READ | Access::WRITE;
-        nest.attach(reservation, source, access, access)?;
+        nest.attach(span, source, access, access)?;
     }
     Ok(())
 }

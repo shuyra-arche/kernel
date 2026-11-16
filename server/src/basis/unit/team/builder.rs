@@ -274,7 +274,11 @@ fn seed_trampoline(target: &Arc<Nest>, source: &Nest) -> Result<(), NestError> {
         flags & (Attributes::USER | Attributes::GLOBAL | Attributes::ACCESSED | Attributes::DIRTY);
     // 活动形状与来源都在登记占用之前备好：准备失败不放下一笔无人持有的占用。
     let active = ActiveRange::new(TRAMPOLINE, PAGE_SIZE, access, access)?;
-    let reservation = target.reserve(Placement::fixed(TRAMPOLINE, PAGE_SIZE)?)?;
-    target.attach_shaped(reservation, source_range, attrs, &[active])?;
+    let span = target.reserve_with(
+        Placement::fixed(TRAMPOLINE, PAGE_SIZE)?,
+        source_range.level(),
+        attrs,
+    )?;
+    target.attach_shaped(span, source_range, &[active])?;
     Ok(())
 }

@@ -16,7 +16,7 @@ pub(super) struct Binding {
     reservation: Arc<pend::Pend>,
     token: PendId,
     sign: Arc<pend::Pend>,
-    reservation_key: sign::WakeKey,
+    span_key: sign::WakeKey,
     pub endpoint: Arc<Endpoint>,
     wake: Arc<Endpoint>,
     keys: [sign::WakeKey; 4],
@@ -68,7 +68,7 @@ impl Binding {
             reservation: reservation.authority().clone(),
             token: reservation.token(),
             sign: sign.authority().clone(),
-            reservation_key: span_key(&nest, span),
+            span_key: span_key(&nest, span),
             endpoint,
             wake,
             keys,
@@ -160,6 +160,6 @@ impl Drop for Binding {
         for key in self.keys {
             sign::unforward(key, self.wake.id);
         }
-        sign::unforward(self.reservation_key, self.wake.id);
+        sign::unforward(self.span_key, self.wake.id);
     }
 }

@@ -40,14 +40,14 @@ fn effective_limits(
             }
             PendScope::Nest(NestScope::Span { id, .. }) => {
                 let nest = entry.target().nest().ok_or(PendFail::Denied)?;
-                if !nest.reservation_open(id) {
+                if !nest.span_open(id) {
                     return Err(PendFail::Dead);
                 }
-                let span = nest.reservation(id).ok_or(PendFail::Denied)?;
+                let span = nest.span(id).ok_or(PendFail::Denied)?;
                 span.range(offset, count)
                     .map_err(|_| PendFail::NotAligned)?;
                 if nest.is_external()
-                    && (offset != PageOffset::ZERO || Some(count) != nest.reservation_count(id))
+                    && (offset != PageOffset::ZERO || Some(count) != nest.span_count(id))
                 {
                     return Err(PendFail::NotAligned);
                 }
@@ -263,7 +263,7 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
                 .target()
                 .nest()
                 .ok_or(PendFail::Denied)?
-                .withdraw_reservation(id, window, observed.authority())?;
+                .withdraw_span(id, window, observed.authority())?;
         }
         if let Some(meta) = &share {
             meta.close_maps(Some(token))?;
