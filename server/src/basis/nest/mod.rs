@@ -19,7 +19,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::mem::ManuallyDrop;
 
-use crate::basis::cell::page::{Change, Freeze, Page};
+use crate::basis::cell::page::{Freeze, Page};
 use crate::basis::flat::Pages;
 use crate::basis::sign::{self, WakeKey};
 use crate::basis::sync::LegacyGuard;
@@ -139,7 +139,7 @@ impl Nest {
                 return Ok(());
             }
         }
-        self.retract_position(span, index, None, usage.permit().change().clone(), true)
+        span.retract_forced(self, index, usage.permit().change().clone())
             .map_err(|_| PendFail::Busy)
     }
     /// Called under COMMIT after live whole-resource authority/version checks.
@@ -472,7 +472,7 @@ impl Nest {
             }
             crate::basis::cell::change::acquire(&page).map_err(|_| PendFail::Busy)?
         };
-        self.retract_position(span, index, None, change, true)
+        span.retract_forced(self, index, change)
             .map_err(|_| PendFail::Busy)
     }
     pub(crate) fn binding_source(
@@ -609,10 +609,7 @@ impl Nest {
                         continue;
                     }
                 };
-                if self
-                    .retract_position(&mapping, index, None, change, true)
-                    .is_err()
-                {
+                if mapping.retract_forced(self, index, change).is_err() {
                     busy = true;
                     continue;
                 }
@@ -717,11 +714,7 @@ impl Nest {
                 continue;
             };
             match crate::basis::cell::change::acquire(&page) {
-                Ok(change) => {
-                    busy |= self
-                        .retract_position(&mapping, index, None, change, true)
-                        .is_err()
-                }
+                Ok(change) => busy |= mapping.retract_forced(self, index, change).is_err(),
                 Err(_) => busy = true,
             }
         }
@@ -850,17 +843,9 @@ impl Nest {
         if pending {
             let page = page.ok_or(PendFail::Busy)?;
             let change = crate::basis::cell::change::acquire(&page).map_err(|_| PendFail::Busy)?;
-            self.retract_position_report(
-                mapping,
-                index,
-                None,
-                change,
-                true,
-                polling,
-                &mut || Ok(()),
-                &mut |_| {},
-            )
-            .map_err(|_| PendFail::Busy)?;
+            mapping
+                .retract_polling(self, index, change, polling)
+                .map_err(|_| PendFail::Busy)?;
         }
         if clear {
             let cleared = {
@@ -1401,131 +1386,6 @@ impl Nest {
         ))
     }
 
-    pub(crate) fn retract_memo_report(
-        self: &Arc<Self>,
-        mapping: &Arc<Span>,
-        index: usize,
-        expected: u64,
-        change: Arc<Change>,
-        authorize: &mut impl FnMut() -> Result<(), crate::basis::nest::memo::AccessError>,
-        accepted: &mut impl FnMut(u64),
-    ) -> Result<(), crate::basis::nest::memo::AccessError> {
-        use crate::basis::nest::memo::AccessError;
-        let _operation = mapping.operation().ok_or(AccessError::Busy)?;
-        self.ensure_span(mapping)?;
-        mapping.position(index)?;
-        let result = self.retract_position_report(
-            mapping,
-            index,
-            Some(expected),
-            change,
-            false,
-            false,
-            authorize,
-            accepted,
-        );
-        sign::signal(self.span_key(mapping));
-        if self.is_external() {
-            sign::signal(WakeKey::ExternalSpan {
-                id: mapping.identity(),
-            });
-        }
-        result
-    }
-
-    /// The caller owns span.operation. Forced cleanup never wraps generation MAX.
-    fn retract_position(
-        &self,
-        mapping: &Arc<Span>,
-        index: usize,
-        expected: Option<u64>,
-        change: Arc<Change>,
-        forced: bool,
-    ) -> Result<(), crate::basis::nest::memo::AccessError> {
-        self.retract_position_report(
-            mapping,
-            index,
-            expected,
-            change,
-            forced,
-            false,
-            &mut || Ok(()),
-            &mut |_| {},
-        )
-    }
-
-    fn retract_position_report(
-        &self,
-        mapping: &Arc<Span>,
-        index: usize,
-        expected: Option<u64>,
-        change: Arc<Change>,
-        forced: bool,
-        polling: bool,
-        authorize: &mut impl FnMut() -> Result<(), crate::basis::nest::memo::AccessError>,
-        accepted: &mut impl FnMut(u64),
-    ) -> Result<(), crate::basis::nest::memo::AccessError> {
-        use crate::basis::nest::memo::AccessError;
-        if !self.is_external() {
-            self.finish_invalidation_with(polling)?;
-        }
-        mapping.finish_memo(index);
-        let page = {
-            let _commit = crate::basis::commit();
-            authorize()?;
-            let mut state = mapping.state.lock();
-            let Some(memo) = state.memos.existing_mut(index) else {
-                return if forced {
-                    Ok(())
-                } else {
-                    Err(AccessError::SourceEmpty)
-                };
-            };
-            if expected.is_some_and(|expected| memo.generation() != expected) {
-                return Err(AccessError::Busy);
-            }
-            let page = memo.page().ok_or(AccessError::SourceEmpty)?;
-            if !Arc::ptr_eq(&page, change.page()) {
-                return Err(AccessError::Busy);
-            }
-            if memo.publication().is_none() {
-                return if !memo.busy() && (forced || memo.frozen()) {
-                    Ok(())
-                } else {
-                    Err(AccessError::Busy)
-                };
-            }
-            if !memo.retracting() {
-                if !forced {
-                    mapping.prepare_revision()?;
-                }
-                memo.begin_retract(memo.generation(), change, forced)?;
-                mapping.changed();
-            }
-            accepted(memo.generation());
-            page
-        };
-        if self.is_external() {
-            self.progress_external(mapping)
-                .map_err(memo::publication_failure)?;
-        } else {
-            let result = self.unpublish_page_with(
-                mapping,
-                VirtAddr::new(mapping.position(index)?),
-                &page,
-                polling,
-            );
-            mapping.finish_memo(index);
-            result?;
-        }
-        let state = mapping.state.lock();
-        if state.memos.get(index).is_some_and(memo::Memo::busy) {
-            Err(AccessError::Busy)
-        } else {
-            Ok(())
-        }
-    }
-
     pub(crate) fn protect_memo_report(
         self: &Arc<Self>,
         mapping: &Arc<Span>,
@@ -1787,7 +1647,7 @@ impl Nest {
                 }
         };
         if !valid {
-            let _ = self.retract_position(mapping, index, None, change, true);
+            let _ = mapping.retract_forced(self, index, change);
         }
         drop(instructions);
         drop(lease);
