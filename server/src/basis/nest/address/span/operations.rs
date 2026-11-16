@@ -1166,3 +1166,9 @@ impl Span {
         Ok(())
     }
 }
+
+impl Span {
+    pub(crate) fn count(&self) -> Option<kernel_api::address::PageCount> {
+        kernel_api::address::PageCount::new(self.initial_size() / kernel_api::address::PAGE_SIZE)
+    }
+}

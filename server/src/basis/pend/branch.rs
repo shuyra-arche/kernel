@@ -47,7 +47,8 @@ fn effective_limits(
                 span.range(offset, count)
                     .map_err(|_| PendFail::NotAligned)?;
                 if nest.is_external()
-                    && (offset != PageOffset::ZERO || Some(count) != nest.span_count(id))
+                    && (offset != PageOffset::ZERO
+                        || Some(count) != nest.span(id).and_then(|span| span.count()))
                 {
                     return Err(PendFail::NotAligned);
                 }
