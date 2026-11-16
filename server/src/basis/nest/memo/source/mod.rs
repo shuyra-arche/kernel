@@ -417,7 +417,7 @@ impl Source {
                 .is_some_and(|route| route.any(|route| route.actor(task)))
     }
 
-    pub(crate) fn uses_reservation(&self, span: &crate::basis::nest::Span) -> bool {
+    pub(crate) fn uses_span(&self, span: &crate::basis::nest::Span) -> bool {
         self.lineage
             .as_ref()
             .is_some_and(|route| route.any(|route| route.span(span)))

@@ -638,33 +638,35 @@ impl Nest {
         if busy {
             return Err(AccessError::Busy);
         }
-        // Own Memos have been removed, including same-Reservation exports.
+        // Own Memos have been removed, including same-Span exports.
         // Foreign destinations must retire before this address can be reused.
-        memo::source::exports::withdraw(&mapping.exports, |source| {
-            source.uses_reservation(&mapping)
-        })
-        .map_err(memo::pend_failure)?;
-        {
-            let _commit = crate::basis::commit();
-            let mut layout = self.address.lock();
-            let state = self.state.lock();
-            // An unrelated Reservation may already own a newer fence. Only
-            // this mapping's retained batch and resources prevent its release.
-            if state.retirement.pending_for(&mapping) || mapping.state.lock().memos.has_resources()
-            {
-                return Err(AccessError::Busy);
-            }
-            layout.index.remove(&mapping);
-            layout.occupancy.release_settled(mapping.identity());
-            let mut inner = mapping.state.lock();
-            inner.active.clear();
-            inner.phase = SpanPhase::Gone;
-            mapping.changed();
-        }
+        mapping.withdraw_exports()?;
+        self.reclaim(&mapping)?;
         sign::signal(self.span_key(&mapping));
         if self.is_external() {
             sign::signal(WakeKey::ExternalSpan { id: id.get() });
         }
+        Ok(())
+    }
+
+    /// Return a fully drained Span's address to the Nest authority.
+    fn reclaim(&self, mapping: &Arc<Span>) -> Result<(), crate::basis::nest::memo::AccessError> {
+        use crate::basis::nest::memo::AccessError;
+        use address::span::SpanPhase;
+        let _commit = crate::basis::commit();
+        let mut address = self.address.lock();
+        let state = self.state.lock();
+        // An unrelated batch may already own a newer fence. Only this
+        // mapping's retained batch and resources prevent its release.
+        if state.retirement.pending_for(mapping) || mapping.state.lock().memos.has_resources() {
+            return Err(AccessError::Busy);
+        }
+        address.index.remove(mapping);
+        address.occupancy.release_settled(mapping.identity());
+        let mut inner = mapping.state.lock();
+        inner.active.clear();
+        inner.phase = SpanPhase::Gone;
+        mapping.changed();
         Ok(())
     }
 
