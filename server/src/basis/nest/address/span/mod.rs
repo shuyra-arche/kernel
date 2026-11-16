@@ -6,7 +6,7 @@ use super::super::{CleanupNode, Nest, NestId};
 use super::NestRange;
 pub use access::{Access, ActiveRange};
 use alloc::boxed::Box;
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::basis::flat::FlatRange;
@@ -21,13 +21,11 @@ use kernel_api::model::cell::CellLevel;
 
 /// A stable address-span identity: the occupancy generation and its Nest.
 ///
-/// The numeric identity is the ABI `SpanId`. It is descriptive and never grants
-/// access; the owning Nest is retained weakly until positions move into the
-/// Span in the following #220 step.
+/// The numeric identity is the ABI `SpanId`; the `NestId` attributes it without
+/// retaining or locating the parent. It is descriptive and never grants access.
 pub(crate) struct SpanIdentity {
     id: usize,
     nest: NestId,
-    owner: Weak<Nest>,
 }
 
 impl SpanIdentity {
@@ -35,7 +33,6 @@ impl SpanIdentity {
         Self {
             id,
             nest: nest.id(),
-            owner: Arc::downgrade(nest),
         }
     }
 
@@ -45,10 +42,6 @@ impl SpanIdentity {
 
     pub(crate) fn nest_id(&self) -> NestId {
         self.nest
-    }
-
-    pub(crate) fn owner(&self) -> Option<Arc<Nest>> {
-        self.owner.upgrade()
     }
 }
 
@@ -284,10 +277,6 @@ impl Span {
     }
 
     /// 认住它的那个 Nest；已关闭的 Nest 不算。
-    pub fn owner(&self) -> Option<Arc<Nest>> {
-        let nest = self.identity.owner()?;
-        (!nest.is_closed()).then_some(nest)
-    }
 
     /// 这段关系等待位的那一对坐标：`(软件空间身份, 关系身份)`。
     ///
