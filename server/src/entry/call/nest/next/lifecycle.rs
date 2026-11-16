@@ -81,11 +81,11 @@ pub(super) fn mutate(actor: &Arc<Task>, action: NestAction) -> Result<Value, Fai
     }
 }
 
-pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Failure> {
+pub(super) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation, Failure> {
     let _serial = actor.pend.lock();
     let _commit = basis::commit();
     let value = match query {
-        Query::Nest { token, nest: id } => {
+        NestQuery::Nest { token, nest: id } => {
             let entry = binding::authorized(actor, token, NestRights::INSPECT).map_err(error)?;
             let nest = entry.target().nest().ok_or(Failure::Denied)?;
             if nest.id() != id {
@@ -99,7 +99,7 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
                 }
             }
         }
-        Query::Span {
+        NestQuery::Span {
             token,
             nest: id,
             span: reservation,

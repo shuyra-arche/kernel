@@ -61,7 +61,12 @@ fn run(
     if let Action::Inspect(query) = request.action()
         && query.domain() == memory::Domain::Flat
     {
-        let output = super::flat::next::inspect(&mut root, &actor, query)?.to_bytes();
+        let output = super::flat::next::inspect(
+            &mut root,
+            &actor,
+            memory::flat::Query::try_from(query).map_err(|_| Failure::Unsupported)?,
+        )?
+        .to_bytes();
         if !ident
             .team
             .nest
@@ -100,7 +105,10 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
     if let Action::Inspect(query) = request.action() {
         return match query.domain() {
             memory::Domain::Flat => return Err(Failure::Unsupported),
-            memory::Domain::Nest => super::nest::next::inspect(actor, query),
+            memory::Domain::Nest => super::nest::next::inspect(
+                actor,
+                memory::nest::Query::try_from(query).map_err(|_| Failure::Unsupported)?,
+            ),
         }
         .map(|value| value.to_bytes());
     }

@@ -9,7 +9,10 @@ use crate::basis::{
 };
 use alloc::sync::Arc;
 use kernel_api::{
-    abi::memory::{self, Failure, Observation, Query, Snapshot, Value, nest::Action as NestAction},
+    abi::memory::{
+        self, Failure, Observation, Snapshot, Value, nest::Action as NestAction,
+        nest::Query as NestQuery,
+    },
     address::{PageCount, PageOffset},
     model::pend::{FlatRights, NestRights, Operations},
 };
@@ -310,15 +313,15 @@ pub(in crate::entry::call) fn effect(
 
 pub(in crate::entry::call) fn inspect(
     actor: &Arc<Task>,
-    query: Query,
+    query: NestQuery,
 ) -> Result<Observation, Failure> {
-    if matches!(query, Query::FaultRoute { .. }) {
-        return basis::nest::fault::inspect(actor, query);
+    if matches!(query, NestQuery::FaultRoute { .. }) {
+        return basis::nest::fault::inspect(actor, query.into());
     }
-    if !matches!(query, Query::Memo(_)) {
-        return lifecycle::inspect(actor, query);
+    if !matches!(query, NestQuery::Memo(_)) {
+        return lifecycle::inspect(actor, query.into());
     }
-    let Query::Memo(position) = query else {
+    let NestQuery::Memo(position) = query else {
         return Err(Failure::Unsupported);
     };
     let _serial = actor.pend.lock();

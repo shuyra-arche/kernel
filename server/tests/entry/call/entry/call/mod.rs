@@ -3,7 +3,7 @@ mod next_memory;
 use crate::support::*;
 use kernel_api::abi::memory::{
     Action, Failure, Observation, Query, Value, flat::Action as FlatAction,
-    nest::Action as NestAction,
+    flat::Query as FlatQuery, nest::Action as NestAction, nest::Query as NestQuery,
 };
 use std::sync::{Arc, atomic::Ordering};
 pub(crate) fn invoke(
@@ -30,7 +30,7 @@ mod flat {
         pub(crate) fn inspect(
             _: &mut crate::basis::sync::Root<'_>,
             _: &Arc<Task>,
-            _: Query,
+            _: FlatQuery,
         ) -> Result<Observation, Failure> {
             Err(Failure::Unsupported)
         }
@@ -61,7 +61,7 @@ mod flat {
 mod nest {
     pub(super) mod next {
         use super::super::*;
-        pub(crate) fn inspect(_: &Arc<Task>, _: Query) -> Result<Observation, Failure> {
+        pub(crate) fn inspect(_: &Arc<Task>, _: NestQuery) -> Result<Observation, Failure> {
             Err(Failure::Unsupported)
         }
         pub(crate) fn mutate(_: &Arc<Task>, _: NestAction) -> Result<Value, Failure> {

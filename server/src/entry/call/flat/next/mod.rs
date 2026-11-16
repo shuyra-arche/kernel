@@ -5,7 +5,10 @@ mod reshape;
 use crate::basis::{self, flat, pend, unit::task::Task};
 use alloc::sync::Arc;
 use kernel_api::{
-    abi::memory::{self, Failure, Observation, Query, Snapshot, Value, flat::Action as FlatAction},
+    abi::memory::{
+        self, Failure, Observation, Snapshot, Value, flat::Action as FlatAction,
+        flat::Query as FlatQuery,
+    },
     model::pend::FlatRights,
 };
 pub(in crate::entry::call) fn effect(
@@ -23,7 +26,7 @@ pub(in crate::entry::call) fn effect(
 pub(in crate::entry::call) fn inspect(
     root: &mut crate::basis::sync::Root<'_>,
     actor: &Arc<Task>,
-    query: Query,
+    query: FlatQuery,
 ) -> Result<Observation, Failure> {
     let mut serial = actor.pend.after(root);
     let mut commit = basis::after_ledger(&mut serial);
@@ -31,7 +34,7 @@ pub(in crate::entry::call) fn inspect(
         return Err(Failure::Dead);
     }
     let snapshot = match query {
-        Query::Slot(position) => {
+        FlatQuery::Slot(position) => {
             let range =
                 flat::authority::slot(actor, position, FlatRights::INSPECT).map_err(pend_error)?;
             let mut status = range.inspect_slot().map_err(residency_error)?;
@@ -51,7 +54,7 @@ pub(in crate::entry::call) fn inspect(
                 .is_err();
             Snapshot::Slot(status)
         }
-        Query::Flat { token, flat: id } => {
+        FlatQuery::Flat { token, flat: id } => {
             let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
             if !entry
                 .authority()
@@ -82,7 +85,7 @@ pub(in crate::entry::call) fn inspect(
                 },
             })
         }
-        Query::Block(maintenance) => {
+        FlatQuery::Block(maintenance) => {
             let entry = pend::locate(actor, maintenance.token).ok_or(Failure::Denied)?;
             if !entry.alive()
                 || !entry.authority().limits().operations.contains(
@@ -107,7 +110,6 @@ pub(in crate::entry::call) fn inspect(
             }
             Snapshot::Block(source.inspect_block(&block).map_err(pend_error)?)
         }
-        _ => return Err(Failure::Unsupported),
     };
     Observation::new(snapshot).ok_or(Failure::Invalid)
 }
