@@ -112,7 +112,9 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
         request.action(),
         Action::Block { .. } | Action::Allow { .. } | Action::DeleteFlat { .. }
     ) {
-        let result = super::flat::next::effect(actor, request.action(), &mut receipt);
+        let action =
+            memory::flat::Action::try_from(request.action()).map_err(|_| Failure::Unsupported)?;
+        let result = super::flat::next::effect(actor, action, &mut receipt);
         return Ok(receipt.finish(result));
     }
     if matches!(
@@ -124,17 +126,27 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
             | Action::DeleteSpan { .. }
             | Action::DeleteNest { .. }
     ) {
-        let result = super::nest::next::effect(actor, request.action(), &mut receipt);
+        let action =
+            memory::nest::Action::try_from(request.action()).map_err(|_| Failure::Unsupported)?;
+        let result = super::nest::next::effect(actor, action.into(), &mut receipt);
         return Ok(receipt.finish(result));
     }
     let _serial = actor.pend.lock();
     // Occupy allocates/zeroes before COMMIT, then rechecks both live selection
     // and expected version. A losing preparation remains private and is freed.
-    let prepared = super::flat::next::prepare(actor, request.action());
+    let action = request.action();
+    let prepared = super::flat::next::prepare(
+        actor,
+        memory::flat::Action::try_from(action).map_err(|_| Failure::Unsupported)?,
+    );
     let _commit = basis::commit();
-    let result = prepared.and_then(|prepared| match request.action().opcode().domain() {
-        memory::Domain::Flat => super::flat::next::mutate(actor, request.action(), prepared),
-        memory::Domain::Nest => super::nest::next::mutate(actor, request.action()),
+    let result = prepared.and_then(|prepared| match action.opcode().domain() {
+        memory::Domain::Flat => super::flat::next::mutate(
+            actor,
+            memory::flat::Action::try_from(action).map_err(|_| Failure::Unsupported)?,
+            prepared,
+        ),
+        memory::Domain::Nest => super::nest::next::mutate(actor, action),
     });
     Ok(receipt.finish(result))
 }

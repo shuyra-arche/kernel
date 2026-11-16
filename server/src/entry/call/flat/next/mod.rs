@@ -5,15 +5,15 @@ mod reshape;
 use crate::basis::{self, flat, pend, unit::task::Task};
 use alloc::sync::Arc;
 use kernel_api::{
-    abi::memory::{self, Action, Failure, Observation, Query, Snapshot, Value},
+    abi::memory::{self, Failure, Observation, Query, Snapshot, Value, flat::Action as FlatAction},
     model::pend::FlatRights,
 };
 pub(in crate::entry::call) fn effect(
     actor: &Arc<Task>,
-    action: Action,
+    action: FlatAction,
     receipt: &mut crate::entry::call::next_memory::Receipt<'_>,
 ) -> Result<Value, Failure> {
-    if matches!(action, Action::DeleteFlat { .. }) {
+    if matches!(action, FlatAction::Delete { .. }) {
         lifecycle::delete(actor, action, receipt)
     } else {
         maintenance::effect(actor, action, receipt)
@@ -137,9 +137,9 @@ fn resolve(
 
 pub(in crate::entry::call) fn prepare(
     actor: &Arc<Task>,
-    action: Action,
+    action: FlatAction,
 ) -> Result<Option<crate::basis::cell::page::Page>, Failure> {
-    let Action::Occupy { slot, expected } = action else {
+    let FlatAction::Occupy { slot, expected } = action else {
         return Ok(None);
     };
     let range = {
@@ -164,20 +164,20 @@ pub(in crate::entry::call) fn prepare(
 
 pub(in crate::entry::call) fn mutate(
     actor: &Arc<Task>,
-    action: Action,
+    action: FlatAction,
     prepared: Option<crate::basis::cell::page::Page>,
 ) -> Result<Value, Failure> {
     if !pend::live(actor) {
         return Err(Failure::Dead);
     }
     match action {
-        Action::Split {
+        FlatAction::Split {
             start,
             expected,
             parent,
             maintenance,
         }
-        | Action::Merge {
+        | FlatAction::Merge {
             start,
             expected,
             parent,
@@ -188,20 +188,20 @@ pub(in crate::entry::call) fn mutate(
             expected,
             parent,
             maintenance,
-            if matches!(action, Action::Split { .. }) {
+            if matches!(action, FlatAction::Split { .. }) {
                 flat::Direction::Split
             } else {
                 flat::Direction::Combine
             },
         ),
-        Action::Push {
+        FlatAction::Push {
             local,
             local_version,
             remote,
             remote_version,
             maintenance,
         }
-        | Action::Pull {
+        | FlatAction::Pull {
             local,
             local_version,
             remote,
@@ -209,7 +209,7 @@ pub(in crate::entry::call) fn mutate(
             maintenance,
         } => {
             if let Some(maintenance) = maintenance {
-                let (local, remote, page) = if matches!(action, Action::Push { .. }) {
+                let (local, remote, page) = if matches!(action, FlatAction::Push { .. }) {
                     maintenance::transfer(
                         actor,
                         local,
@@ -237,7 +237,7 @@ pub(in crate::entry::call) fn mutate(
             }
             let local_range = resolve(actor, local, FlatRights::TRANSFER)?;
             let remote_range = resolve(actor, remote, FlatRights::TRANSFER)?;
-            let donor = if matches!(action, Action::Push { .. }) {
+            let donor = if matches!(action, FlatAction::Push { .. }) {
                 &local_range
             } else {
                 &remote_range
@@ -245,7 +245,7 @@ pub(in crate::entry::call) fn mutate(
             if let Some(origin) = donor.provenance() {
                 origin.admit(None).map_err(pend_error)?;
             }
-            let (local, remote, page) = if matches!(action, Action::Push { .. }) {
+            let (local, remote, page) = if matches!(action, FlatAction::Push { .. }) {
                 local_range
                     .transfer_to(
                         local_version,
@@ -291,7 +291,7 @@ pub(in crate::entry::call) fn mutate(
                 page: page.get() as u64,
             })
         }
-        Action::CreateFlat {
+        FlatAction::Create {
             license,
             count,
             level,
@@ -305,7 +305,7 @@ pub(in crate::entry::call) fn mutate(
                 version,
             })
         }
-        Action::Occupy { slot, expected } => {
+        FlatAction::Occupy { slot, expected } => {
             let range = resolve(actor, slot, memory::rights::OCCUPY)?;
             let (version, page) = range
                 .occupy(expected, prepared.ok_or(Failure::Invalid)?)
@@ -315,7 +315,7 @@ pub(in crate::entry::call) fn mutate(
                 page: page.get() as u64,
             })
         }
-        Action::Vacate {
+        FlatAction::Vacate {
             slot,
             expected,
             maintenance,

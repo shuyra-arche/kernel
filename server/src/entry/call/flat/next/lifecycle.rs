@@ -7,10 +7,10 @@ use kernel_api::{
 
 pub(super) fn delete(
     actor: &Arc<Task>,
-    action: Action,
+    action: FlatAction,
     receipt: &mut crate::entry::call::next_memory::Receipt<'_>,
 ) -> Result<Value, Failure> {
-    let Action::DeleteFlat {
+    let FlatAction::Delete {
         token,
         flat: id,
         expected,

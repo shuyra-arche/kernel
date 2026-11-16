@@ -1,7 +1,9 @@
 #[path = "../../../../../src/entry/call/next_memory.rs"]
 mod next_memory;
 use crate::support::*;
-use kernel_api::abi::memory::{Action, Failure, Observation, Query, Value};
+use kernel_api::abi::memory::{
+    Action, Failure, Observation, Query, Value, flat::Action as FlatAction,
+};
 use std::sync::{Arc, atomic::Ordering};
 pub(crate) fn invoke(
     frame: &mut TrapContext,
@@ -31,12 +33,12 @@ mod flat {
         ) -> Result<Observation, Failure> {
             Err(Failure::Unsupported)
         }
-        pub(crate) fn prepare(_: &Arc<Task>, _: Action) -> Result<Option<()>, Failure> {
+        pub(crate) fn prepare(_: &Arc<Task>, _: FlatAction) -> Result<Option<()>, Failure> {
             Ok(None)
         }
         pub(crate) fn mutate(
             actor: &Arc<Task>,
-            _: Action,
+            _: FlatAction,
             _: Option<()>,
         ) -> Result<Value, Failure> {
             assert_ne!(commit_depth(), 0);
@@ -48,7 +50,7 @@ mod flat {
         }
         pub(crate) fn effect(
             _: &Arc<Task>,
-            _: Action,
+            _: FlatAction,
             _: &mut next_memory::Receipt<'_>,
         ) -> Result<Value, Failure> {
             Err(Failure::Unsupported)
