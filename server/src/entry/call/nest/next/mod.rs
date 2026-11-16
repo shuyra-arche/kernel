@@ -172,8 +172,8 @@ pub(in crate::entry::call) fn effect(
         Action::Retract { .. } => {
             let change = basis::cell::change::acquire(data.as_ref().expect("selected Page"))
                 .map_err(cell_error)?;
-            route.nest().retract_memo_report(
-                &span,
+            span.retract(
+                route.nest(),
                 index,
                 expected.get(),
                 change,
