@@ -258,7 +258,7 @@ impl Nest {
             && let Some(span) = entry.span()
         {
             loop {
-                let memo = self.state.lock().memos.take_metadata(span);
+                let memo = span.state.lock().memos.take_metadata();
                 if memo.is_none() {
                     break;
                 }
@@ -306,10 +306,10 @@ impl Nest {
                 continue;
             }
             let snapshot = {
-                let state = self.state.lock();
+                let state = span.state.lock();
                 state
                     .memos
-                    .get(span, 0)
+                    .get(0)
                     .map(|memo| (memo.association(), memo.principal()))
             };
             let Some((association, principal)) = snapshot else {
@@ -334,9 +334,9 @@ impl Nest {
                     );
                 }
             } else if let Some(_operation) = span.operation() {
-                let before = self.inspect_memo(span, 0).ok();
+                let before = span.inspect_memo(0).ok();
                 let _ = self.progress_external(span);
-                if before != self.inspect_memo(span, 0).ok() {
+                if before != span.inspect_memo(0).ok() {
                     crate::basis::sign::signal(crate::basis::sign::WakeKey::ExternalSpan {
                         id: id.get(),
                     });

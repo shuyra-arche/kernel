@@ -121,7 +121,6 @@ impl Retirement {
     pub(in crate::basis::nest) fn complete(
         &mut self,
         proof: Completed<Request<Asid>>,
-        memos: &mut super::super::memo::Memos,
     ) -> Result<Fenced, super::super::NestError> {
         if !self.invalidation.is_fencing()
             || self
@@ -137,7 +136,7 @@ impl Retirement {
         let count = self
             .mappings
             .iter()
-            .map(|mapping| memos.awaiting_cpu(mapping))
+            .map(|mapping| mapping.state.lock().memos.awaiting_cpu())
             .sum();
         if settled.try_reserve(count).is_err() {
             self.fail();
@@ -146,7 +145,10 @@ impl Retirement {
         self.pending = None;
         self.deferred = None;
         for mapping in &self.mappings {
-            memos.complete(mapping, &mut settled);
+            {
+                let mut state = mapping.state.lock();
+                state.memos.complete(&mut settled);
+            }
             mapping.changed();
         }
         self.tickets.settle();
@@ -170,7 +172,7 @@ pub(in crate::basis::nest) struct Fenced {
 }
 
 impl Fenced {
-    pub(in crate::basis::nest) fn release(self, nest: &super::super::Nest) {
+    pub(in crate::basis::nest) fn release(self) {
         drop(self.tables);
         for retained in self.cells {
             // SAFETY: Retirement constructed this batch only after the fence
@@ -182,7 +184,10 @@ impl Fenced {
         }
         for mapping in &self.mappings {
             loop {
-                let memo = nest.state.lock().memos.take_deleted(mapping);
+                let memo = {
+                    let mut state = mapping.state.lock();
+                    state.take_deleted(mapping.initial_start())
+                };
                 if memo.is_none() {
                     break;
                 }
