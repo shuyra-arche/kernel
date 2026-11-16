@@ -1,0 +1,42 @@
+--- a/server/src/entry/work/retirement/mod.rs
++++ b/server/src/entry/work/retirement/mod.rs
+@@ -25,7 +25,9 @@
+         if stopping {
+             break;
+         }
+-        match retirement::advance() {
++        let progress = retirement::advance();
++        crate::basis::nest::retirement::probe::record();
++        match progress {
+             Progress::Ready => super::yield_now(),
+             Progress::Idle => super::wait(),
+             Progress::Blocked => {
+--- a/server/src/basis/nest/retirement.rs
++++ b/server/src/basis/nest/retirement.rs
+@@ -103,3 +103,6 @@
+     }
+     settled
+ }
++
++#[path = "../../../tests/target/basis/nest/retirement/probe.rs"]
++pub(crate) mod probe;
+--- a/server/src/basis/nest/index/source.rs
++++ b/server/src/basis/nest/index/source.rs
+@@ -260,6 +260,7 @@
+             Step::Idle => break,
+             Step::Visited(candidate) => candidate,
+         };
++        crate::basis::nest::retirement::probe::visited();
+         if let Some((space, reservation)) = candidate {
+             crate::basis::sign::signal(crate::basis::sign::WakeKey::Reservation {
+                 space,
+--- a/server/src/entry/report/shutdown.rs
++++ b/server/src/entry/report/shutdown.rs
+@@ -16,6 +16,7 @@
+ }
+ 
+ pub(crate) fn report() {
++    crate::basis::nest::retirement::probe::report();
+     crate::metal::mmu::internal::completion::probe::report_migrations();
+     putln!("task: all tasks exited, system halted");
+     let (late_n, late_max, late_sum) = deadline::late_stats();

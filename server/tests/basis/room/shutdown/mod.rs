@@ -1,4 +1,4 @@
-#[path = "../../../src/basis/room/shutdown/progress.rs"]
+#[path = "../../../../src/basis/room/shutdown/progress.rs"]
 mod progress;
 use progress::Progress;
 #[test]
@@ -33,7 +33,7 @@ fn progress_restarts_the_interval_without_truncating_counts() {
     assert_eq!(state, Progress::Idle);
 }
 
-#[path = "../../../src/basis/room/shutdown/preparation.rs"]
+#[path = "../../../../src/basis/room/shutdown/preparation.rs"]
 mod preparation;
 use preparation::{Claim, Preparation, Unsettled};
 #[test]
@@ -121,3 +121,5 @@ fn preparation_decisions_reject_completion_outside_the_owned_running_state() {
         })
     );
 }
+
+mod root;

@@ -1,0 +1,6 @@
+{
+  "server/src/entry/work/retirement/mod.rs": "addc096e307f19b26e1f6d2e66c36634cadcf34ea14313ec850dacfc083e41f1",
+  "server/src/basis/nest/retirement.rs": "d82822177af3e9e51233e5ff8089f6af3a790df7f83b60c8281677af2f5dbb5a",
+  "server/src/basis/nest/index/source.rs": "67ffdeedd18aa9a717e286e47cea427fb205643744adb978d4efb6f60c80094b",
+  "server/src/entry/report/shutdown.rs": "cccb50682ca09af4ad4f26f22bfb5870c79e463fd245d9e3eaada9e6a446650e"
+}

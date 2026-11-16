@@ -1,6 +1,6 @@
 {
   "server/Cargo.toml": "fe7c601549e6324e71160a7a225948de105b72aca56023e84e70e14fb8944d40",
   "server/src/basis/flat/mod.rs": "7054e7e06be049c77cc461c3270406318154e6e00655e98053e5cfb4640941d4",
-  "server/src/entry/boot/mod.rs": "5831a084cc3e862c28e2a76c420c60ab4a960be4c8d8c7367fc93e69bd5a2896",
+  "server/src/entry/boot/mod.rs": "3725f070b2b17fe12eaa466257e62ba2c0cf48cf52bdb387310f78e30ae9fa30",
   "server/src/metal/generic/sync/spin/guard.rs": "ae897d6afdaacc8fbffb8f2a323a0bd781b52c7bbaab2cd4c3bb75795bc5d1ff"
 }

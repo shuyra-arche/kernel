@@ -7,7 +7,7 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | Class | Current typed storage/navigation | Minimal declared predecessors | Minimal declared successors |
 | --- | --- | --- | --- |
 | `ProbeRegistry` | injected guest probe only |  |  |
-| `LiveChanges` | [basis/cell/change.rs:9](../../server/src/basis/cell/change.rs#L9) | `Flat` | `ChangeBlocks` |
+| `LiveChanges` | [basis/cell/change.rs:14](../../server/src/basis/cell/change.rs#L14) | `Flat` | `ChangeBlocks` |
 | `PageMembership` | [basis/cell/page/mod.rs:61](../../server/src/basis/cell/page/mod.rs#L61) | `ChangeBlocks`, `Controllers` | `BlockPool`, `BlockPump`, `RetentionStatistics` |
 | `ChangeBlocks` | [basis/cell/page/reclaim/change.rs:29](../../server/src/basis/cell/page/reclaim/change.rs#L29) | `LiveChanges` | `PageMembership` |
 | `RetentionStatistics` | [basis/cell/page/reclaim/statistics.rs:11](../../server/src/basis/cell/page/reclaim/statistics.rs#L11) | `PageMembership` |  |
@@ -24,11 +24,11 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `Organizations` | [basis/nest/authority/binding.rs:36](../../server/src/basis/nest/authority/binding.rs#L36) | `Commit` | `Nest` |
 | `NestAuthority` | [basis/nest/authority/mod.rs:105](../../server/src/basis/nest/authority/mod.rs#L105) | `Nest` | `BlockPool`, `BlockPump` |
 | `FaultProgress` | [basis/nest/fault/queue.rs:13](../../server/src/basis/nest/fault/queue.rs#L13) | `FaultPolicy` |  |
-| `SourceIndex` | [basis/nest/index/source.rs:33](../../server/src/basis/nest/index/source.rs#L33) | `Flat` | `BlockPool`, `BlockPump` |
+| `SourceIndex` | [basis/nest/index/source.rs:34](../../server/src/basis/nest/index/source.rs#L34) | `Flat` | `BlockPool`, `BlockPump` |
 | `ActivityHistory` | [basis/nest/memo/activity/mod.rs:35](../../server/src/basis/nest/memo/activity/mod.rs#L35) | `Nest` |  |
-| `Address` | [basis/nest/mod.rs:97](../../server/src/basis/nest/mod.rs#L97) | `Commit` | `Nest` |
-| `Cleanup` | [basis/nest/mod.rs:98](../../server/src/basis/nest/mod.rs#L98) |  | `Nest` |
-| `Nest` | [basis/nest/mod.rs:99](../../server/src/basis/nest/mod.rs#L99) | `Organizations`, `Address`, `Cleanup`, `BootNests` | `ActivityHistory`, `Controllers`, `NestAuthority`, `Reservation`, `SourcePhase`, `TaskJournal` |
+| `Address` | [basis/nest/mod.rs:98](../../server/src/basis/nest/mod.rs#L98) | `Commit` | `Nest` |
+| `Cleanup` | [basis/nest/mod.rs:99](../../server/src/basis/nest/mod.rs#L99) |  | `Nest` |
+| `Nest` | [basis/nest/mod.rs:100](../../server/src/basis/nest/mod.rs#L100) | `Organizations`, `Address`, `Cleanup`, `BootNests` | `ActivityHistory`, `Controllers`, `NestAuthority`, `Reservation`, `SourcePhase`, `TaskJournal` |
 | `PendState` | [basis/pend/authority/mod.rs:33](../../server/src/basis/pend/authority/mod.rs#L33) | `LedgerEntries`, `SourcePhase`, `ProvenanceGrant` |  |
 | `PendParent` | [basis/pend/authority/mod.rs:34](../../server/src/basis/pend/authority/mod.rs#L34) | `Commit` |  |
 | `LedgerAdmission` | [basis/pend/ledger/admission.rs:29](../../server/src/basis/pend/ledger/admission.rs#L29) | `LedgerCharge` | `BlockPool`, `BlockPump` |
@@ -69,7 +69,7 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `TerminationQueue` | [basis/unit/lifecycle/doom.rs:83](../../server/src/basis/unit/lifecycle/doom.rs#L83) | `Commit` | `TeamState`, `TeamTermination` |
 | `ReapQueue` | [basis/unit/lifecycle/reap.rs:23](../../server/src/basis/unit/lifecycle/reap.rs#L23) |  | `TaskState` |
 | `Husks` | [basis/unit/lifecycle/reap.rs:25](../../server/src/basis/unit/lifecycle/reap.rs#L25) | `Commit` | `TaskState` |
-| `TaskState` | [basis/unit/task/creation/prepared.rs:23](../../server/src/basis/unit/task/creation/prepared.rs#L23), [basis/unit/task/creation/prepared.rs:31](../../server/src/basis/unit/task/creation/prepared.rs#L31), [basis/unit/task/mod.rs:51](../../server/src/basis/unit/task/mod.rs#L51), [basis/unit/team/membership.rs:60](../../server/src/basis/unit/team/membership.rs#L60) | `BlockEpoch`, `Scheduler`, `SchedulerAdmission`, `WaitSites`, `ReapQueue`, `Husks`, `TeamTasks` |  |
+| `TaskState` | [basis/room/shutdown/root.rs:7](../../server/src/basis/room/shutdown/root.rs#L7), [basis/unit/task/creation/prepared.rs:23](../../server/src/basis/unit/task/creation/prepared.rs#L23), [basis/unit/task/creation/prepared.rs:31](../../server/src/basis/unit/task/creation/prepared.rs#L31), [basis/unit/task/mod.rs:51](../../server/src/basis/unit/task/mod.rs#L51), [basis/unit/team/membership.rs:60](../../server/src/basis/unit/team/membership.rs#L60) | `BlockEpoch`, `Scheduler`, `SchedulerAdmission`, `WaitSites`, `ReapQueue`, `Husks`, `TeamTasks` |  |
 | `TaskReceipts` | [basis/unit/team/membership.rs:62](../../server/src/basis/unit/team/membership.rs#L62) | `TeamTasks` | `BlockPool`, `BlockPump` |
 | `TaskResult` | [basis/unit/team/membership.rs:64](../../server/src/basis/unit/team/membership.rs#L64) | `Commit` |  |
 | `TaskJournal` | [basis/unit/task/request/mod.rs:19](../../server/src/basis/unit/task/request/mod.rs#L19) | `Nest` | `Frame` |

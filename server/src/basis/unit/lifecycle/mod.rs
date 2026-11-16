@@ -81,10 +81,7 @@ pub(super) fn progressed() {
 /// service starvation. Normal retained cleanup executes on the resident Task.
 pub(crate) fn bury() {
     WORK.poll();
-    let stopping = {
-        let _commit = crate::basis::commit();
-        crate::basis::room::shutdown::active()
-    };
+    let stopping = crate::basis::room::shutdown::active();
     if stopping {
         WORK.notify();
     }

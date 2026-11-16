@@ -86,11 +86,14 @@ pub(crate) fn event(
 }
 
 pub(crate) fn maintain() -> bool {
-    crate::basis::cell::change::maintain();
     if let Some(route) = crate::basis::room::interrupt::external() {
         route.rearm();
     }
-    super::binding::maintain()
+    let pending = super::binding::maintain();
+    // Binding progression may itself drop the last Page/Span owner. Admit its
+    // completion before an idle caller decides that it can disarm and use WFI.
+    super::super::retirement::maintain();
+    pending
 }
 
 /// Gone metadata is not an occupied address or an unsettled device use.

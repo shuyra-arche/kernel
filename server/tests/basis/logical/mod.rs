@@ -57,8 +57,3 @@ struct Nest {
 struct RetirementState {
     memos: memo::Memos,
 }
-pub(crate) mod index {
-    pub(crate) mod source {
-        pub(crate) fn wake_all() {}
-    }
-}

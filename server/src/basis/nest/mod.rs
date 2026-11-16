@@ -9,6 +9,7 @@ pub(crate) mod authority;
 mod error;
 pub(crate) mod index;
 pub(crate) mod memo;
+pub(crate) mod retirement;
 mod translation;
 pub(crate) mod wait;
 

@@ -104,6 +104,10 @@ path = "entry/report/mod.rs"
 name = "activity"
 path = "basis/nest/memo/activity/mod.rs"
 
+[[test]]
+name = "retirement"
+path = "basis/nest/index/mod.rs"
+
 # Imported production synchronization code retains its provider feature gates.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("latency"))'] }

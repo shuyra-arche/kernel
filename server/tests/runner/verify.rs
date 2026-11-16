@@ -10,6 +10,9 @@ pub enum Kind {
     Lifecycle {
         cancel: bool,
     },
+    Retirement {
+        cancel: bool,
+    },
     Activity {
         unsupported: bool,
         stopped: bool,
@@ -39,6 +42,19 @@ pub fn check(log: &str, kind: &Kind, harts: u8) -> Result<Value> {
     let mut extra = true;
     let mut evidence = json!({});
     match kind {
+        Kind::Retirement { cancel } => {
+            let mut result = check(log, &Kind::Smp, harts)?;
+            let rows: Vec<_> = Regex::new(r"PASS retirement turns=(\d+) task-records=(\d+) fallback-records=(\d+) cancel=(\d+) pending=0 retained-source=0")?
+                .captures_iter(log).map(|row| (1..=4).map(|at| row[at].parse::<usize>()).collect::<std::result::Result<Vec<_>, _>>()).collect::<std::result::Result<_, _>>()?;
+            let valid = rows.len() == 1
+                && rows[0][0] >= if *cancel { 8 } else { 2 }
+                && rows[0][1] > 0
+                && (!*cancel || rows[0][2] > 0)
+                && rows[0][3] == usize::from(*cancel);
+            result["passed"] = json!(result["passed"] == true && valid);
+            result["retirement"] = json!({"rows": rows, "cancel": cancel, "passed": valid});
+            return Ok(result);
+        }
         Kind::Lifecycle { cancel } => {
             let mut result = check(log, &Kind::Smp, harts)?;
             let turns = captures(log, r"PASS lifecycle turns=(\d+)")?;

@@ -34,6 +34,11 @@ pub(crate) mod basis {
         }
     }
     pub(crate) mod nest {
+        pub(crate) mod retirement {
+            pub(crate) fn maintain() {
+                assert_eq!(crate::support::commit_depth(), 0);
+            }
+        }
         pub(crate) mod fault {
             pub(crate) mod read {
                 pub(crate) struct Read;
@@ -57,13 +62,6 @@ pub(crate) mod basis {
         pub(crate) mod task {
             pub(crate) use crate::request;
             pub(crate) use crate::support::{Task, TaskIdent};
-        }
-    }
-    pub(crate) mod cell {
-        pub(crate) mod change {
-            pub(crate) fn maintain() {
-                assert_eq!(crate::support::commit_depth(), 0);
-            }
         }
     }
 }
