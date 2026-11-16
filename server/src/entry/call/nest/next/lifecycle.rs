@@ -50,7 +50,7 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
                 return Err(Failure::Denied);
             }
             let prepared = nest
-                .reserve_reservation(
+                .prepare_span(
                     placement(&nest, request).map_err(error)?,
                     request.level,
                     access,
@@ -59,8 +59,8 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
                 .map_err(nest_error)?;
             let span = prepared.span();
             span.faults.lock().enable_native();
-            let id = SpanId::from_bytes(&(span.identity() as u64).to_le_bytes())
-                .expect("reservation identity");
+            let id =
+                SpanId::from_bytes(&(span.identity() as u64).to_le_bytes()).expect("span identity");
             let grant =
                 pend::prepare_reservation(actor, &parent, id, request.count).map_err(pend_error)?;
             let token = grant.entry().token();
@@ -105,7 +105,7 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
             span: reservation,
         } => {
             let route =
-                Reservation::acquire(actor, token, NestRights::INSPECT).map_err(pend_error)?;
+                SpanRoute::acquire(actor, token, NestRights::INSPECT).map_err(pend_error)?;
             if route.id() != reservation || route.nest().id() != id {
                 return Err(Failure::Denied);
             }
@@ -114,7 +114,7 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
             Snapshot::Span(
                 route
                     .nest()
-                    .reservation_snapshot(
+                    .span_snapshot(
                         &span,
                         offset,
                         count,
@@ -200,7 +200,7 @@ pub(super) fn effect(
                 if nest.id() != id {
                     return Err(Failure::Denied);
                 }
-                let span = nest.reservation(reservation).ok_or(Failure::Dead)?;
+                let span = nest.span(reservation).ok_or(Failure::Dead)?;
                 let (offset, count) = entry.authority().window().ok_or(Failure::Denied)?;
                 if offset.get() != 0 || count.checked_bytes() != Some(span.initial_size()) {
                     return Err(Failure::Denied);
@@ -218,7 +218,7 @@ pub(super) fn effect(
                 });
                 (nest, span)
             };
-            nest.release_reservation(reservation).map_err(cell_error)?;
+            nest.close_span(reservation).map_err(cell_error)?;
             let _commit = basis::commit();
             let value = Value::SpanLifecycle {
                 nest: id,
@@ -285,7 +285,7 @@ fn placement(nest: &Nest, request: CreateSpanRequest) -> Result<Placement, Bindi
         kernel_api::model::cell::PlacementAt::Highest => PlacementAt::Highest,
         kernel_api::model::cell::PlacementAt::Exact(address) => {
             // CPU reservations belong to the Team's Normal window. External
-            // exact addresses use the backend geometry checked by reserve_reservation;
+            // exact addresses use the backend geometry checked by prepare_span;
             // their Layout only records occupancy and has no dynamic windows.
             if !nest.is_external() {
                 if !Nest::user_range(address, size) {

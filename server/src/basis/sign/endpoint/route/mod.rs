@@ -50,7 +50,7 @@ impl Route {
                     Err(_) => Some(Some(SignEventFail::Denied)),
                 }
             }
-            Watch::ExternalReservation {
+            Watch::ExternalSpan {
                 token,
                 reservation,
                 published,

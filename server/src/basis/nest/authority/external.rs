@@ -21,7 +21,7 @@ fn authorized(actor: &Task, token: PendId, id: SpanId) -> Result<Arc<PendEntry>,
     {
         return Err(AccessError::Denied);
     }
-    let span = nest.reservation(id).ok_or(AccessError::Denied)?;
+    let span = nest.span(id).ok_or(AccessError::Denied)?;
     let count = kernel_api::address::PageCount::new(span.grain()).ok_or(AccessError::Denied)?;
     if !entry
         .authority()
@@ -48,7 +48,7 @@ pub(crate) fn event(
     use kernel_api::abi::call::sign::SignEventFail;
     let entry = authorized(actor, token, id)?;
     let nest = entry.target().nest().ok_or(AccessError::Denied)?;
-    let span = nest.reservation(id).ok_or(AccessError::Denied)?;
+    let span = nest.span(id).ok_or(AccessError::Denied)?;
     let info = span.inspect_memo(0)?;
     if expected == 0 {
         return Err(AccessError::Denied);
@@ -94,5 +94,5 @@ pub(crate) fn maintain() -> bool {
 
 /// Gone metadata is not an occupied address or an unsettled device use.
 pub(super) fn discard(nest: &Arc<Nest>) -> bool {
-    nest.reservations_gone()
+    nest.spans_gone()
 }

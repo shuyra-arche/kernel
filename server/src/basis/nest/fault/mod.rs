@@ -1,4 +1,4 @@
-//! Native Reservation fault recovery. The Reservation owns the route and queue;
+//! Native Span fault recovery. The Span owns the route and queue;
 //! Task continuations retain one exact event, never a new data authority.
 mod binding;
 mod queue;
@@ -109,17 +109,17 @@ pub(in crate::basis::nest) fn wake_span(span: &Span) {
 }
 pub(in crate::basis::nest) fn wake_nest(nest: &Nest) {
     let mut after = 0;
-    while let Some(entry) = nest.reservations.next(after) {
+    while let Some(entry) = nest.spans.next(after) {
         after = entry.binding.id();
-        if let Some(span) = entry.reservation() {
+        if let Some(span) = entry.span() {
             wake_span(span);
         }
     }
 }
 fn span_key(nest: &Nest, span: &Span) -> sign::WakeKey {
-    sign::WakeKey::Reservation {
+    sign::WakeKey::Span {
         space: nest.id(),
-        reservation: span.identity(),
+        span: span.identity(),
     }
 }
 fn full_route(
@@ -128,9 +128,9 @@ fn full_route(
     id: NestId,
     reservation: SpanId,
     rights: kernel_api::model::pend::NestRights,
-) -> Result<(pend::access::Reservation, Arc<Span>), Failure> {
+) -> Result<(pend::access::SpanRoute, Arc<Span>), Failure> {
     let route =
-        pend::access::Reservation::acquire(actor, token, rights).map_err(|_| Failure::Denied)?;
+        pend::access::SpanRoute::acquire(actor, token, rights).map_err(|_| Failure::Denied)?;
     if route.nest().id() != id || route.id() != reservation {
         return Err(Failure::Denied);
     }

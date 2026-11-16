@@ -60,14 +60,14 @@ mod basis {
     pub(crate) mod sign {
         use super::super::{host_lock, source};
         pub(crate) enum WakeKey {
-            Reservation {
+            Span {
                 space: kernel_api::model::nest::NestId,
-                reservation: usize,
+                span: usize,
             },
         }
         static DELIVERED: host_lock::TestLock<Vec<usize>> = host_lock::TestLock::new(Vec::new());
-        pub(crate) fn signal(WakeKey::Reservation { reservation, .. }: WakeKey) {
-            DELIVERED.lock().push(reservation);
+        pub(crate) fn signal(WakeKey::Span { span, .. }: WakeKey) {
+            DELIVERED.lock().push(span);
             if source::AGAIN.swap(false, std::sync::atomic::Ordering::Relaxed) {
                 source::mechanism::request();
             }

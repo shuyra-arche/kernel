@@ -122,7 +122,7 @@ fn remove(task: &Arc<Task>, entry: &Arc<PendEntry>) -> Result<(), PendFail> {
     if let crate::basis::pend::Target::Nest { nest, .. } = entry.target()
         && let PendScope::Nest(NestScope::Span { id, .. }) = entry.scope()
     {
-        nest.retire_reservation(id.get());
+        nest.retire_span(id.get());
     }
     super::notify(task.ident.id, entry.token());
     if let (Some(source), Some(parent)) = (entry.sire(), entry.lord().upgrade()) {
@@ -155,11 +155,11 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
                 .withdraw_exports(holder.ident.id, entry.token())?;
             match entry.scope() {
                 PendScope::Nest(NestScope::Span { id, .. }) => {
-                    if nest.reservation_root(id, entry.authority()) {
-                        nest.release_reservation(id).map_err(reservation_failure)?;
+                    if nest.span_root(id, entry.authority()) {
+                        nest.close_span(id).map_err(reservation_failure)?;
                     } else {
                         let window = entry.authority().window().ok_or(PendFail::Denied)?;
-                        nest.withdraw_reservation(id, window, entry.authority())?;
+                        nest.withdraw_span(id, window, entry.authority())?;
                     }
                 }
                 PendScope::Nest(NestScope::Whole)

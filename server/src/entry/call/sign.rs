@@ -215,7 +215,7 @@ pub(crate) fn typed_cell(
             )
             .map_err(|_| SignFail::Denied)?;
             keys.push((
-                WakeKey::ExternalReservation {
+                WakeKey::ExternalSpan {
                     id: reservation.get(),
                 },
                 life,
@@ -227,7 +227,7 @@ pub(crate) fn typed_cell(
                 },
                 actor.life(),
             ));
-            Watch::ExternalReservation {
+            Watch::ExternalSpan {
                 token,
                 reservation,
                 published,

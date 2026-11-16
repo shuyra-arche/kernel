@@ -231,10 +231,10 @@ pub(crate) fn settle_block(
         let Some(nest) = binding.nest().upgrade() else {
             return Err(PendFail::Busy);
         };
-        let Some(record) = nest.reservations.registered(binding.id()) else {
+        let Some(record) = nest.spans.registered(binding.id()) else {
             continue;
         };
-        let Some(span) = record.reservation() else {
+        let Some(span) = record.span() else {
             return Err(PendFail::Busy);
         };
         let _mapping = span.operation().ok_or(PendFail::Busy)?;

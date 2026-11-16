@@ -74,10 +74,9 @@ impl PendEntry {
         self.meta.alive()
             && self.authority.alive()
             && match self.scope() {
-                PendScope::Nest(NestScope::Span { id, .. }) => self
-                    .meta
-                    .nest()
-                    .is_some_and(|nest| nest.reservation_open(id)),
+                PendScope::Nest(NestScope::Span { id, .. }) => {
+                    self.meta.nest().is_some_and(|nest| nest.span_open(id))
+                }
                 _ => true,
             }
     }
@@ -86,7 +85,7 @@ impl PendEntry {
         let status = self.authority.status();
         if let Target::Nest { nest, .. } = &self.meta {
             if let PendScope::Nest(NestScope::Span { id, .. }) = self.scope() {
-                match nest.reservation_status(id) {
+                match nest.span_status(id) {
                     PendStatus::Dead => return PendStatus::Dead,
                     PendStatus::Retiring if status != PendStatus::Dead => {
                         return PendStatus::Retiring;
@@ -290,7 +289,7 @@ pub(crate) fn prepare_reservation<'a>(
     parent: &Arc<PendEntry>,
     id: SpanId,
     count: PageCount,
-) -> Result<PreparedReservationGrant<'a>, PendFail> {
+) -> Result<PreparedSpanGrant<'a>, PendFail> {
     if !super::live(task) || !parent.alive() {
         return Err(PendFail::Dead);
     }
@@ -338,7 +337,7 @@ pub(crate) fn prepare_reservation<'a>(
         .pend
         .prepare_heir(parent.token(), Arc::downgrade(task), entry.token())?;
     let registration = task.pend.prepare(entry.clone())?;
-    Ok(PreparedReservationGrant {
+    Ok(PreparedSpanGrant {
         entry,
         _parent: parent.clone(),
         heir,
@@ -347,14 +346,14 @@ pub(crate) fn prepare_reservation<'a>(
 }
 
 #[must_use = "an unpublished Reservation rolls back its ledger and heir reservations"]
-pub(crate) struct PreparedReservationGrant<'a> {
+pub(crate) struct PreparedSpanGrant<'a> {
     entry: Arc<PendEntry>,
     _parent: Arc<PendEntry>,
     heir: HeirRegistration<'a>,
     registration: Registration<'a>,
 }
 
-impl PreparedReservationGrant<'_> {
+impl PreparedSpanGrant<'_> {
     pub(crate) fn entry(&self) -> &Arc<PendEntry> {
         &self.entry
     }

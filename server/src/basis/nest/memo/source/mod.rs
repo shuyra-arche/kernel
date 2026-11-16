@@ -291,7 +291,7 @@ impl Source {
     pub(crate) fn export(
         &self,
         actor: &Arc<Task>,
-        route: &pend::access::Reservation,
+        route: &pend::access::SpanRoute,
         index: usize,
     ) -> Result<Self, AccessError> {
         use kernel_api::model::pend::{
@@ -420,7 +420,7 @@ impl Source {
     pub(crate) fn uses_reservation(&self, span: &crate::basis::nest::Span) -> bool {
         self.lineage
             .as_ref()
-            .is_some_and(|route| route.any(|route| route.reservation(span)))
+            .is_some_and(|route| route.any(|route| route.span(span)))
     }
 
     pub(crate) fn exported_by(&self, task: TaskId, token: PendId) -> bool {
