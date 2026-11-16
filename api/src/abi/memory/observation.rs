@@ -577,3 +577,128 @@ fn boolean(input: &mut Reader<'_>) -> Option<bool> {
         _ => None,
     }
 }
+
+/// Flat-domain observations.
+pub mod flat {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Query {
+        Flat { token: PendId, flat: FlatId },
+        Slot(SlotPosition),
+        Block(Maintenance),
+    }
+
+    impl From<Query> for super::Query {
+        fn from(query: Query) -> Self {
+            match query {
+                Query::Flat { token, flat } => Self::Flat { token, flat },
+                Query::Slot(slot) => Self::Slot(slot),
+                Query::Block(block) => Self::Block(block),
+            }
+        }
+    }
+
+    impl TryFrom<super::Query> for Query {
+        type Error = ();
+
+        fn try_from(query: super::Query) -> Result<Self, Self::Error> {
+            Ok(match query {
+                super::Query::Flat { token, flat } => Self::Flat { token, flat },
+                super::Query::Slot(slot) => Self::Slot(slot),
+                super::Query::Block(block) => Self::Block(block),
+                _ => return Err(()),
+            })
+        }
+    }
+}
+
+/// Nest-domain observations. The range is still named by the internal Span in
+/// this transitional type; the Pend-bound range replaces it in the next slice.
+pub mod nest {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Query {
+        FaultRoute {
+            token: PendId,
+            nest: NestId,
+            span: SpanId,
+        },
+        FaultEvent {
+            token: PendId,
+            nest: NestId,
+            span: SpanId,
+            epoch: FaultEpoch,
+            after: u64,
+            wait: Wait,
+        },
+        Nest {
+            token: PendId,
+            nest: NestId,
+        },
+        Memo(MemoPosition),
+        Span {
+            token: PendId,
+            nest: NestId,
+            span: SpanId,
+        },
+    }
+
+    impl From<Query> for super::Query {
+        fn from(query: Query) -> Self {
+            match query {
+                Query::FaultRoute { token, nest, span } => Self::FaultRoute { token, nest, span },
+                Query::FaultEvent {
+                    token,
+                    nest,
+                    span,
+                    epoch,
+                    after,
+                    wait,
+                } => Self::FaultEvent {
+                    token,
+                    nest,
+                    span,
+                    epoch,
+                    after,
+                    wait,
+                },
+                Query::Nest { token, nest } => Self::Nest { token, nest },
+                Query::Memo(memo) => Self::Memo(memo),
+                Query::Span { token, nest, span } => Self::Span { token, nest, span },
+            }
+        }
+    }
+
+    impl TryFrom<super::Query> for Query {
+        type Error = ();
+
+        fn try_from(query: super::Query) -> Result<Self, Self::Error> {
+            Ok(match query {
+                super::Query::FaultRoute { token, nest, span } => {
+                    Self::FaultRoute { token, nest, span }
+                }
+                super::Query::FaultEvent {
+                    token,
+                    nest,
+                    span,
+                    epoch,
+                    after,
+                    wait,
+                } => Self::FaultEvent {
+                    token,
+                    nest,
+                    span,
+                    epoch,
+                    after,
+                    wait,
+                },
+                super::Query::Nest { token, nest } => Self::Nest { token, nest },
+                super::Query::Memo(memo) => Self::Memo(memo),
+                super::Query::Span { token, nest, span } => Self::Span { token, nest, span },
+                _ => return Err(()),
+            })
+        }
+    }
+}
