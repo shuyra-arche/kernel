@@ -1,5 +1,5 @@
 use kernel_verification::{capsule, process};
-use std::{fs, process::Command, time::Duration};
+use std::{fs, process::Command, thread, time::Duration};
 fn scratch(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("vanllia-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
@@ -45,6 +45,54 @@ fn deadline_kills_even_after_success_marker() {
     assert_eq!(result.status, "timeout");
     assert!(!result.success());
     assert!(result.elapsed_seconds < 5.0);
+    let cleanup: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("cleanup.json")).unwrap()).unwrap();
+    assert_eq!(cleanup["settled"], true);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn successful_leader_cannot_leave_a_background_process() {
+    let root = scratch("background");
+    let result = process::run(
+        Command::new("sh").args(["-c", "sleep 30 & echo PASS; exit 0"]),
+        &root,
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    let cleanup: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("cleanup.json")).unwrap()).unwrap();
+    assert_eq!(result.code, Some(0));
+    assert_eq!(result.status, "cleanup-failed");
+    assert!(!result.success());
+    assert_eq!(cleanup["unexpected_descendants"], true);
+    assert_eq!(cleanup["killed"], true);
+    assert_eq!(cleanup["settled"], true);
+    assert!(cleanup["reaped"].as_u64().unwrap() >= 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn nonzero_exit_with_a_background_process_is_not_a_clean_business_result() {
+    let root = scratch("background-nonzero");
+    let result = process::run(
+        Command::new("sh").args(["-c", "sleep 30 & echo PASS; exit 2"]),
+        &root,
+        Duration::from_secs(2),
+    );
+    assert!(result.is_err());
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("result.json")).unwrap()).unwrap();
+    let cleanup: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("cleanup.json")).unwrap()).unwrap();
+    assert_eq!(receipt["status"], "exited");
+    assert_eq!(receipt["code"], 2);
+    assert_eq!(receipt["passed"], false);
+    assert_eq!(cleanup["unexpected_descendants"], true);
+    assert_eq!(cleanup["settled"], true);
+    assert!(cleanup["reaped"].as_u64().unwrap() >= 1);
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -115,5 +163,61 @@ fn failed_launch_preserves_a_failed_result() {
         serde_json::from_slice(&fs::read(root.join("result.json")).unwrap()).unwrap();
     assert_eq!(result["status"], "spawn-error");
     assert_eq!(result["passed"], false);
+    let cleanup: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("cleanup.json")).unwrap()).unwrap();
+    assert_eq!(cleanup["spawned"], false);
+    assert_eq!(cleanup["settled"], true);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn runner_cancellation_signals_the_direct_child() {
+    if let Some(marker) = std::env::var_os("KERNEL_VERIFICATION_PARENT_DEATH_MARKER") {
+        let child_dir = std::env::var_os("KERNEL_VERIFICATION_CHILD_DIR")
+            .expect("parent passes the child log directory");
+        let child_dir = std::path::PathBuf::from(child_dir);
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            r#"echo child-started; sleep 3; touch "$KERNEL_VERIFICATION_PARENT_DEATH_MARKER""#,
+        ]);
+        command.env("KERNEL_VERIFICATION_PARENT_DEATH_MARKER", marker);
+        let _ = process::run(&mut command, &child_dir, Duration::from_secs(10));
+        return;
+    }
+
+    let root = scratch("cancel-runner");
+    let marker = root.join("orphan-finished");
+    let child_dir = root.join("child");
+    let mut test_child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "execution::runner_cancellation_signals_the_direct_child",
+        ])
+        .env("KERNEL_VERIFICATION_PARENT_DEATH_MARKER", &marker)
+        .env("KERNEL_VERIFICATION_CHILD_DIR", &child_dir)
+        .spawn()
+        .unwrap();
+    for _ in 0..100 {
+        if fs::read_to_string(child_dir.join("serial.log"))
+            .is_ok_and(|serial| serial.contains("child-started"))
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        fs::read_to_string(child_dir.join("serial.log"))
+            .is_ok_and(|serial| serial.contains("child-started")),
+        "process helper child did not start"
+    );
+    test_child.kill().unwrap();
+    test_child.wait().unwrap();
+    thread::sleep(Duration::from_millis(3_200));
+    assert!(
+        !marker.exists(),
+        "direct child continued after runner cancellation"
+    );
     fs::remove_dir_all(root).unwrap();
 }
