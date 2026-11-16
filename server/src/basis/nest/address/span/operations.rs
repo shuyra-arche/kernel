@@ -1201,7 +1201,7 @@ impl Span {
                 .ok_or(NestError::NotAligned)?;
             let part = self.range(offset, count)?;
             part.source()?.materialize()?;
-            nest.publish(part)?;
+            self.publish_segments(nest, &part)?;
         }
         Ok(())
     }
@@ -1378,6 +1378,20 @@ impl Span {
             )
             .map_err(|_| PendFail::Busy)?;
             self.finish_memo(index);
+        }
+        Ok(())
+    }
+}
+
+impl Span {
+    /// Publish each active segment of a selection from this Span.
+    pub(crate) fn publish_segments(
+        self: &Arc<Self>,
+        nest: &Arc<Nest>,
+        selection: &NestRange,
+    ) -> Result<(), NestError> {
+        for (start, size) in self.active_segments(nest, selection)? {
+            self.publish_segment(nest, start, size)?;
         }
         Ok(())
     }

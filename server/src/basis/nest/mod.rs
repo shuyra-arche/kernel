@@ -1072,14 +1072,6 @@ impl Nest {
     /// 把该窗口里已经物化/借用的页发布到本关系：不动 Flat 的物化。
     ///
     /// 只发布活动形状内的页，不偷分配未物化的页。
-    fn publish(self: &Arc<Self>, selection: NestRange) -> Result<(), NestError> {
-        let mapping = selection.span().clone();
-        for (start, size) in mapping.active_segments(self, &selection)? {
-            mapping.publish_segment(self, start, size)?;
-        }
-        Ok(())
-    }
-
     /// Persistent source lookup never materializes or retains a physical Page.
     /// 让 `Flat` 物化该窗口的活动页，再在本关系发布。
     ///
