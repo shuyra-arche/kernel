@@ -363,7 +363,7 @@ impl Nest {
     }
 
     pub(crate) fn has_pending_invalidation(&self) -> bool {
-        !self.state.lock().retirement.invalidation().is_clean()
+        self.state.has_pending_invalidation()
     }
 
     pub(crate) fn contains_span(&self, id: usize) -> bool {

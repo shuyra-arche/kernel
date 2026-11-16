@@ -58,6 +58,11 @@ impl Translation {
         self.state.lock()
     }
 
+    /// Whether any retained invalidation still waits for a covering proof.
+    pub(crate) fn has_pending_invalidation(&self) -> bool {
+        !self.lock().retirement.invalidation().is_clean()
+    }
+
     /// Read the current fault outcome under the shared translation state.
     pub(crate) fn probe_fault(
         &self,
