@@ -360,6 +360,7 @@ impl Span {
         let mut inner = self.state.lock();
         if inner.phase == SpanPhase::Open {
             inner.phase = SpanPhase::Closing;
+            inner.drain_cursor = None;
             self.changed();
             self.faults.lock().close();
         }
@@ -465,6 +466,14 @@ pub(crate) struct ProtectionTransition {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+/// One bounded step of a Span-local close drain.
+pub(in crate::basis::nest) enum DrainStep {
+    Done,
+    Progress,
+    Blocked,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::basis::nest) enum SpanPhase {
     Open,
     Closing,
@@ -482,6 +491,7 @@ pub(crate) struct SpanState {
     pub(in crate::basis::nest) memos: crate::basis::nest::memo::Memos,
     /// The narrowest creation access across all active ranges.
     pub(crate) initial_access: Access,
+    pub(in crate::basis::nest) drain_cursor: Option<usize>,
     pub(in crate::basis::nest) phase: SpanPhase,
 }
 
@@ -501,6 +511,7 @@ impl SpanState {
             source: None,
             memos: crate::basis::nest::memo::Memos::new(),
             initial_access: Access::empty(),
+            drain_cursor: None,
             phase: SpanPhase::Open,
         }
     }

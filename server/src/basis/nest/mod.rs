@@ -562,7 +562,7 @@ impl Nest {
         id: kernel_api::model::nest::SpanId,
     ) -> Result<(), crate::basis::nest::memo::AccessError> {
         use crate::basis::nest::memo::AccessError;
-        use address::span::SpanPhase;
+        use address::span::{DrainStep, SpanPhase};
         let Some(mapping) = self.span(id) else {
             return Ok(());
         };
@@ -584,59 +584,12 @@ impl Nest {
         if !self.is_external() && self.state.lock().retirement.pending_for(&mapping) {
             self.finish_invalidation()?;
         }
-        let mut cursor = None;
-        let mut busy = false;
         loop {
-            let index = mapping.state.lock().memos.next_page(cursor);
-            let Some(index) = index else { break };
-            cursor = Some(index);
-            mapping.finish_memo(index);
-            let pending = mapping
-                .state
-                .lock()
-                .memos
-                .get(index)
-                .is_some_and(memo::Memo::busy);
-            if pending {
-                let Some(page) = mapping.memo_page(index)? else {
-                    busy = true;
-                    continue;
-                };
-                let change = match crate::basis::cell::change::acquire(&page) {
-                    Ok(change) => change,
-                    Err(_) => {
-                        busy = true;
-                        continue;
-                    }
-                };
-                if mapping.retract_forced(self, index, change).is_err() {
-                    busy = true;
-                    continue;
-                }
+            match mapping.drain_one(self)? {
+                DrainStep::Done => break,
+                DrainStep::Progress => {}
+                DrainStep::Blocked => return Err(AccessError::Busy),
             }
-            let cleared = {
-                let _commit = crate::basis::commit();
-                mapping
-                    .state
-                    .lock()
-                    .memos
-                    .existing_mut(index)
-                    .expect("selected Memo")
-                    .clear()
-                    .map(|removed| {
-                        mapping.changed();
-                        removed
-                    })
-            };
-            match cleared {
-                Ok(cleared) => {
-                    cleared.release();
-                }
-                Err(_) => busy = true,
-            }
-        }
-        if busy {
-            return Err(AccessError::Busy);
         }
         // Own Memos have been removed, including same-Span exports.
         // Foreign destinations must retire before this address can be reused.

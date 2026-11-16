@@ -1,7 +1,7 @@
 //! Logical position transitions owned by the Span.
 use alloc::sync::Arc;
 
-use super::{Access, Span};
+use super::{Access, DrainStep, Span};
 use crate::basis::cell::page::{Change, Freeze};
 use crate::basis::nest::memo::publication::Publication;
 use crate::basis::nest::{
@@ -843,5 +843,57 @@ impl Span {
     pub(in crate::basis::nest) fn withdraw_exports(&self) -> Result<(), memo::AccessError> {
         memo::source::exports::withdraw(&self.exports, |source| source.uses_span(self))
             .map_err(memo::pend_failure)
+    }
+}
+
+impl Span {
+    /// Advance the local close drain by at most one position.
+    ///
+    /// The cursor moves only after a position is cleared, so a blocked page is
+    /// retried by the next call instead of being skipped.
+    pub(in crate::basis::nest) fn drain_one(
+        self: &Arc<Self>,
+        nest: &Nest,
+    ) -> Result<DrainStep, memo::AccessError> {
+        let cursor = self.state.lock().drain_cursor;
+        let Some(index) = self.state.lock().memos.next_page(cursor) else {
+            return Ok(DrainStep::Done);
+        };
+        self.finish_memo(index);
+        let pending = self
+            .state
+            .lock()
+            .memos
+            .get(index)
+            .is_some_and(memo::Memo::busy);
+        if pending {
+            let Some(page) = self.memo_page(index)? else {
+                return Ok(DrainStep::Blocked);
+            };
+            let change =
+                crate::basis::cell::change::acquire(&page).map_err(|_| memo::AccessError::Busy)?;
+            self.retract_forced(nest, index, change)?;
+        }
+        let cleared = {
+            let _commit = crate::basis::commit();
+            self.state
+                .lock()
+                .memos
+                .existing_mut(index)
+                .expect("selected Memo")
+                .clear()
+                .map(|removed| {
+                    self.changed();
+                    removed
+                })
+        };
+        match cleared {
+            Ok(cleared) => {
+                self.state.lock().drain_cursor = Some(index);
+                cleared.release();
+                Ok(DrainStep::Progress)
+            }
+            Err(_) => Ok(DrainStep::Blocked),
+        }
     }
 }
