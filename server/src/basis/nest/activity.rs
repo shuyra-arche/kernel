@@ -176,8 +176,8 @@ fn prepare(
     } else {
         request.mark
     };
-    let generation = nest
-        .inspect_logical(&span, page)
+    let generation = span
+        .inspect(page)
         .map_err(|_| Failure::Busy)?
         .generation
         .get();
