@@ -1,5 +1,5 @@
 {
-  "server/src/basis/nest/activity.rs": "ca579c79f2e76207dd20fe6ff9caec3ecb70429d99f2e5a13a915f1deb6b6645",
+  "server/src/basis/nest/activity.rs": "6f46edf353c667bc9c8d2f1eb75e011c4892ce26683eb65d132824114dbd0707",
   "server/src/basis/nest/translation/retirement.rs": "ee5a8749443446f3432f9dbab88dbbb2e972bd69c746390c44879651f657987d",
   "server/src/entry/boot/mod.rs": "c13d40184982e7d6ac4083d177e61906a4e6acb8e51d54c956900e403e371d8a",
   "server/src/entry/report/shutdown.rs": "6e7b3899751611073ddbccc2164c61108ae61c9dbd62d1dca45d854c6cfea598",

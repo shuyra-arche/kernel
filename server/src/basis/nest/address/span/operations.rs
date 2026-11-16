@@ -897,3 +897,60 @@ impl Span {
         }
     }
 }
+
+impl Span {
+    /// Persistent source lookup never materializes or retains a physical Page.
+    pub(crate) fn logical_source(
+        &self,
+        index: usize,
+        expected: u64,
+    ) -> Result<Option<Source>, NestError> {
+        self.position(index)?;
+        if self.source().is_some() {
+            return Err(NestError::Pinned);
+        }
+        let state = self.state.lock();
+        let Some(memo) = state.memos.get(index) else {
+            return if expected == 1 {
+                Ok(None)
+            } else {
+                Err(NestError::Busy)
+            };
+        };
+        if memo.generation() != expected {
+            return Err(NestError::Busy);
+        }
+        if !memo.accepts_logical() {
+            return Err(NestError::Pinned);
+        }
+        Ok(memo.association().map(|(_, source, _)| source))
+    }
+
+    /// Snapshot one logical position with this Span's own identity and the
+    /// shared Translation's failure state.
+    pub(crate) fn inspect(
+        &self,
+        index: usize,
+    ) -> Result<kernel_api::model::nest::MemoStatus, NestError> {
+        self.position(index)?;
+        if self.source().is_some() {
+            return Err(NestError::Pinned);
+        }
+        let translation = self.translation.lock();
+        let state = self.state.lock();
+        let vacant = memo::Memo::vacant();
+        let memo = state.memos.get(index).unwrap_or(&vacant);
+        if !memo.accepts_logical() {
+            return Err(NestError::Pinned);
+        }
+        Ok(memo.snapshot(
+            self.identity.nest_id(),
+            kernel_api::model::nest::SpanId::from_bytes(&(self.identity() as u64).to_le_bytes())
+                .expect("span identity"),
+            index,
+            self.level(),
+            translation.retirement.invalidation()
+                == crate::basis::nest::translation::Invalidation::Failed,
+        ))
+    }
+}
