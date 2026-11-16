@@ -51,22 +51,22 @@ until their boot owner explicitly attests these conditions.
 ## Observation and authority
 
 The observation object is one Memo's actual CPU PTE leaf, not Page-global
-activity. Its identity contains NestId, span identity, Memo coordinate,
+activity. Its identity contains NestId, reservation identity, Memo coordinate,
 MemoGeneration, PageId and effective leaf geometry. The PageId correlates a
 sample with an allocation; it confers no authority and does not cause an alias
 search. FlatId, MemoId, PageId, Team membership and the global statistics Share
 cannot register a sampling range.
 
 Every operation resolves a caller-local live Pend again, using its current
-Nest span and narrowed window. A leaf must lie completely inside that
+Nest reservation and narrowed window. A leaf must lie completely inside that
 window. A large leaf crossing its boundary is Unsupported; sampling must not
 split a mapping merely to observe a restricted window. No result aggregates
 other Memos, other Nests or unauthorised aliases of the same Page.
 
 | Operation | Required authority | Result or failure |
 | --- | --- | --- |
-| Inspect Memo metadata | INSPECT in the current span window | Existing descriptive Memo metadata; no A/D clearing or activity grant |
-| Derive an activity View | INSPECT plus SAMPLE in the selected span, and the existing SHARE creation license | Receiver-local `(Sign, Share View)` Pends; INSPECT alone is Denied |
+| Inspect Memo metadata | INSPECT in the current reservation window | Existing descriptive Memo metadata; no A/D clearing or activity grant |
+| Derive an activity View | INSPECT plus SAMPLE in the selected reservation, and the existing SHARE creation license | Receiver-local `(Sign, Share View)` Pends; INSPECT alone is Denied |
 | Derive on an unsupported backend/geometry | Live INSPECT plus SAMPLE in the selected scope | Unsupported before grants or PTE changes |
 | Cancel | Actual subscription owner, or loss of any required live authority | Stop delivery and retract its output mappings; repeat cancellation is harmless |
 
@@ -149,26 +149,26 @@ and never contains the union of per-Unit samples.
 ## Public interface and compatibility review
 
 API, Client and Server change together in one provider revision. This is an
-extension of the source-pinned ABI 14 contract, not a mixed-revision binary
+extension of the source-pinned ABI 11 contract, not a mixed-revision binary
 compatibility guarantee:
 
 | Surface | Version 1 decision |
 | --- | --- |
 | Entry | Existing Share.Derive (class 10, slot 4); no added call or reopened retired memory slot |
 | Request | Existing 104-byte AccordRequest: source Pend, Caller/Task recipient, descriptive Mark and ordinary readonly Share limits |
-| Selection | Limits select one fixed-origin Pages coordinate; the live source must be a Span Pend with INSPECT and SAMPLE |
-| Authority | Span-only `NestRights::SAMPLE = 8192`; the sender authorizes sampling, while the recipient needs only the delivered readonly View and notification |
+| Selection | Limits select one fixed-origin Pages coordinate; the live source must be a Reservation Pend with INSPECT and SAMPLE |
+| Authority | Reservation-only `NestRights::SAMPLE = 8192`; the sender authorizes sampling, while the recipient needs only the delivered readonly View and notification |
 | Result | Existing call returns the receiver-local Share Pend; its companion Sign is published atomically in the same recipient ledger, marked with that Share Pend ID |
 | Pair | `(Sign Pend, Share View Pend)` in that order; API validates the Kernel-origin metadata, Client resolves it using existing Pend.Inspect/Collect |
-| View | One actual 4096-byte page at the selected Span coordinate; inaccessible sparse holes contain no other samples; map the View Pend's actual page window |
+| View | One actual 4096-byte page at the selected Reservation coordinate; inaccessible sparse holes contain no other samples; map the View Pend's actual page window |
 | Sample | Protocol 1, 128 checked bytes in a 4096-byte seqlock page; allocation/counters stop on exhaustion |
 | Period/capacity | Initial fixed 10 ms policy, 16 admitted/pending subscriptions, eight slot visits per turn; actual intervals include fair scheduling and fence completion |
 | Cancel/ack | Return either output Pend to stop delivery; consume the exact Sign receipt only after a coherent read; return remaining dead registrations to release their ledger charges |
 
-No operation number, request width, Capsule format (2), Ledger version (14) or
+No operation number, request width, Capsule format (2), Ledger version (11) or
 global memory-page layout changes. No new authorization domain, Swap call,
 opaque subscription identity or decorative operation pair is introduced.
-Share.Derive keeps its ordinary Flat/Share behavior; only a qualified Span
+Share.Derive keeps its ordinary Flat/Share behavior; only a qualified Reservation
 source with explicit sampling authority produces activity data. Unsupported is
 an added Share failure vocabulary, not a new call. Period aggregation and
 candidate ranking belong to the consumer.
@@ -190,9 +190,9 @@ a second Derive to recover a lookup or lost notification. The existing source
 and output Pends own authorization and cancellation; Mark and Page IDs do not.
 
 Old strict PendInfo/Limits decoders do not know bit 8192 and may reject a newly
-issued Span. Upgrade API, Client, Server, consumer binaries and image
+issued Reservation. Upgrade API, Client, Server, consumer binaries and image
 producers to one matching full source SHA and rebuild the complete image.
-Do not combine an older rights decoder with this Server. Rollback requires
+Do not combine an old ABI 11 rights decoder with this Server. Rollback requires
 rebuilding the complete old pinned image. Existing release tags remain
 immutable and do not acquire sampling. The sample page has its own explicit protocol version; an unknown page version
 does not decode as a completed sample.
@@ -289,7 +289,7 @@ Lifecycle and Page-completion discovery also have independent resident Tasks:
   registration before Exit; Reaped detection handles an unexpected exit. No
   resident Task is excluded from ordinary tally accounting.
 - Controller-Hart router rearming and retained external-binding progression stay
-  on their existing valid paths. Nested Span/Memo scans do not yet have
+  on their existing valid paths. Nested reservation/Memo scans do not yet have
   an independently bounded Task contract. Internal CPU retirement remains part
   of Unit's retained Task/Team continuation. Neither receives a second retirement
   ledger or transfers completion authority to the worker.

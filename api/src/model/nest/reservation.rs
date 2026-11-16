@@ -1,4 +1,4 @@
-//! Stable address-span identity. Access requires a live span-scoped
+//! Stable address-reservation identity. Access requires a live reservation-scoped
 //! Nest Pend; this descriptive identity never grants authority.
 
 use crate::abi::register::{Decode, Wire};
@@ -7,9 +7,9 @@ use crate::address::VirtAddr;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
-pub struct SpanId(pub(crate) usize);
+pub struct ReservationId(pub(crate) usize);
 
-impl SpanId {
+impl ReservationId {
     /// 无效哨兵（0）：没有这一段关系。
     pub const NONE: Self = Self(0);
 
@@ -30,7 +30,7 @@ impl SpanId {
         (raw <= isize::MAX as usize).then(|| Self::new(raw))
     }
 
-    /// **交出**：号变回线上的那 8 字节（与 [`SpanId::from_bytes`] 成对）。
+    /// **交出**：号变回线上的那 8 字节（与 [`ReservationId::from_bytes`] 成对）。
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         (self.0 as u64).to_le_bytes()
     }
@@ -40,13 +40,13 @@ impl SpanId {
     }
 }
 
-impl From<SpanId> for usize {
-    fn from(span: SpanId) -> Self {
-        span.0
+impl From<ReservationId> for usize {
+    fn from(reservation: ReservationId) -> Self {
+        reservation.0
     }
 }
 
-impl Wire for SpanId {
+impl Wire for ReservationId {
     const WORDS: usize = 1;
     fn pack(&self, s: &mut [usize; 6], i: &mut usize) {
         s[*i] = self.0;
@@ -62,8 +62,8 @@ impl Wire for SpanId {
     }
 }
 
-impl FromPair for (SpanId, VirtAddr) {
+impl FromPair for (ReservationId, VirtAddr) {
     fn from_pair(v0: usize, v1: usize) -> Self {
-        (SpanId::new(v0), VirtAddr(v1))
+        (ReservationId::new(v0), VirtAddr(v1))
     }
 }

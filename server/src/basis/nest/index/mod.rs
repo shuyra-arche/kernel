@@ -30,7 +30,7 @@ impl Index {
     pub(super) fn close_faults(&self) {
         fn visit(node: Option<&IndexNode>) {
             if let Some(node) = node {
-                node.span.faults.lock().close();
+                node.reservation.faults.lock().close();
                 visit(node.left.as_deref());
                 visit(node.right.as_deref());
             }
@@ -53,8 +53,8 @@ impl Index {
     }
 
     /// 按关系身份摘除节点；摘到才减计数。
-    pub(super) fn remove(&mut self, span: &Arc<Span>) -> bool {
-        let (root, removed) = remove_span(self.root.take(), span);
+    pub(super) fn remove(&mut self, reservation: &Arc<Span>) -> bool {
+        let (root, removed) = remove_reservation(self.root.take(), reservation);
         self.root = root;
         if removed {
             self.len -= 1;
@@ -64,18 +64,7 @@ impl Index {
 
     /// 覆盖 `address` 的关系。
     pub(super) fn find(&self, address: usize) -> Option<Arc<Span>> {
-        find_span(self.root.as_deref(), address)
-    }
-
-    /// Visit every indexed Span until the predicate accepts one.
-    pub(super) fn any(&self, mut predicate: impl FnMut(&Arc<Span>) -> bool) -> bool {
-        fn visit(node: Option<&IndexNode>, predicate: &mut impl FnMut(&Arc<Span>) -> bool) -> bool {
-            let Some(node) = node else { return false };
-            visit(node.left.as_deref(), predicate)
-                || predicate(&node.span)
-                || visit(node.right.as_deref(), predicate)
-        }
-        visit(self.root.as_deref(), &mut predicate)
+        find_reservation(self.root.as_deref(), address)
     }
 
     /// 与 [lo, hi] 相交的第一个关系。
@@ -84,8 +73,8 @@ impl Index {
     }
 
     /// 关系区间变化后重算其节点缓存。
-    pub(super) fn refresh(&mut self, span: &Arc<Span>) -> bool {
-        refresh(&mut self.root, span)
+    pub(super) fn refresh(&mut self, reservation: &Arc<Span>) -> bool {
+        refresh(&mut self.root, reservation)
     }
 
     /// 索引自身的不变量：节点数等于计数，键、高度与缓存都要对。
@@ -97,8 +86,14 @@ impl Index {
 
     /// 索引内的关系与地址空间、硬件页表一致。
     #[cfg(debug_assertions)]
-    pub(super) fn audit_spans(&self, nest: &Nest, root: &Table, geo: Geometry) {
-        audit_spans(self.root.as_deref(), nest, root, geo);
+    pub(super) fn audit_reservations(
+        &self,
+        nest: &Nest,
+        root: &Table,
+        geo: Geometry,
+        memos: &super::memo::Memos,
+    ) {
+        audit_reservations(self.root.as_deref(), nest, root, geo, memos);
     }
 }
 
@@ -114,19 +109,22 @@ fn insert(root: Option<Box<IndexNode>>, node: Box<IndexNode>) -> Box<IndexNode> 
 }
 
 /// 按关系身份摘除节点，返回 (新根, 是否摘到)。
-fn remove_span(root: Option<Box<IndexNode>>, span: &Arc<Span>) -> (Option<Box<IndexNode>>, bool) {
+fn remove_reservation(
+    root: Option<Box<IndexNode>>,
+    reservation: &Arc<Span>,
+) -> (Option<Box<IndexNode>>, bool) {
     let Some(mut node) = root else {
         return (None, false);
     };
-    if Arc::ptr_eq(&node.span, span) {
+    if Arc::ptr_eq(&node.reservation, reservation) {
         return (IndexNode::detach(node), true);
     }
-    let (left, found) = remove_span(node.left.take(), span);
+    let (left, found) = remove_reservation(node.left.take(), reservation);
     node.left = left;
     if found {
         return (Some(IndexNode::balance(node)), true);
     }
-    let (right, found) = remove_span(node.right.take(), span);
+    let (right, found) = remove_reservation(node.right.take(), reservation);
     node.right = right;
     if found {
         (Some(IndexNode::balance(node)), true)
@@ -136,22 +134,22 @@ fn remove_span(root: Option<Box<IndexNode>>, span: &Arc<Span>) -> (Option<Box<In
 }
 
 /// 覆盖 `address` 的关系（先左子树，再看本节点，再右子树）。
-fn find_span(root: Option<&IndexNode>, address: usize) -> Option<Arc<Span>> {
+fn find_reservation(root: Option<&IndexNode>, address: usize) -> Option<Arc<Span>> {
     let node = root?;
     if node
         .left
         .as_ref()
         .is_some_and(|left| left.max_end >= address)
     {
-        if let Some(span) = find_span(node.left.as_deref(), address) {
-            return Some(span);
+        if let Some(reservation) = find_reservation(node.left.as_deref(), address) {
+            return Some(reservation);
         }
     }
-    if node.span.overlaps(address, address) {
-        return Some(node.span.clone());
+    if node.reservation.overlaps(address, address) {
+        return Some(node.reservation.clone());
     }
     (node.start.as_usize() <= address)
-        .then(|| find_span(node.right.as_deref(), address))
+        .then(|| find_reservation(node.right.as_deref(), address))
         .flatten()
 }
 
@@ -162,12 +160,12 @@ fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<S
         return None;
     }
     if node.left.as_ref().is_some_and(|left| left.max_end >= lo) {
-        if let Some(span) = first_overlap(node.left.as_deref(), lo, hi) {
-            return Some(span);
+        if let Some(reservation) = first_overlap(node.left.as_deref(), lo, hi) {
+            return Some(reservation);
         }
     }
-    if node.span.overlaps(lo, hi) {
-        return Some(node.span.clone());
+    if node.reservation.overlaps(lo, hi) {
+        return Some(node.reservation.clone());
     }
     if node.start.as_usize() <= hi {
         first_overlap(node.right.as_deref(), lo, hi)
@@ -176,15 +174,15 @@ fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<S
     }
 }
 
-fn refresh(root: &mut Option<Box<IndexNode>>, span: &Arc<Span>) -> bool {
+fn refresh(root: &mut Option<Box<IndexNode>>, reservation: &Arc<Span>) -> bool {
     let Some(node) = root.as_deref_mut() else {
         return false;
     };
-    if Arc::ptr_eq(&node.span, span) {
+    if Arc::ptr_eq(&node.reservation, reservation) {
         node.update();
         return true;
     }
-    if refresh(&mut node.left, span) || refresh(&mut node.right, span) {
+    if refresh(&mut node.left, reservation) || refresh(&mut node.right, reservation) {
         node.update();
         true
     } else {
@@ -205,15 +203,18 @@ fn audit_index(
     let (left_height, left_end, left_count) = audit_index(node.left.as_deref(), lower, Some(key));
     let (right_height, right_end, right_count) =
         audit_index(node.right.as_deref(), Some(key), upper);
-    let local = node.span.active_snapshot();
-    assert!(!local.is_empty(), "indexed span has no active ranges");
+    let local = node.reservation.active_snapshot();
+    assert!(
+        !local.is_empty(),
+        "indexed reservation has no active ranges"
+    );
     assert!(
         local.windows(2).all(|pair| pair[0].1 < pair[1].0),
-        "span ranges overlap or are unordered"
+        "reservation ranges overlap or are unordered"
     );
     for (lo, hi) in &local {
         assert!(
-            !overlaps_other(node, &node.span, *lo, *hi),
+            !overlaps_other(node, &node.reservation, *lo, *hi),
             "distinct mappings overlap in the nest index"
         );
     }
@@ -232,52 +233,72 @@ fn audit_index(
 }
 
 #[cfg(debug_assertions)]
-fn overlaps_other(node: &IndexNode, span: &Arc<Span>, lo: usize, hi: usize) -> bool {
+fn overlaps_other(node: &IndexNode, reservation: &Arc<Span>, lo: usize, hi: usize) -> bool {
     if node.max_end < lo {
         return false;
     }
     if node
         .left
         .as_ref()
-        .is_some_and(|left| left.max_end >= lo && overlaps_other(left, span, lo, hi))
+        .is_some_and(|left| left.max_end >= lo && overlaps_other(left, reservation, lo, hi))
     {
         return true;
     }
-    if !Arc::ptr_eq(&node.span, span) && node.span.overlaps(lo, hi) {
+    if !Arc::ptr_eq(&node.reservation, reservation) && node.reservation.overlaps(lo, hi) {
         return true;
     }
     node.start.as_usize() <= hi
         && node
             .right
             .as_ref()
-            .is_some_and(|right| overlaps_other(right, span, lo, hi))
+            .is_some_and(|right| overlaps_other(right, reservation, lo, hi))
 }
 
 #[cfg(debug_assertions)]
-fn audit_spans(node: Option<&IndexNode>, nest: &Nest, root: &Table, geo: Geometry) {
+fn audit_reservations(
+    node: Option<&IndexNode>,
+    nest: &Nest,
+    root: &Table,
+    geo: Geometry,
+    memos: &super::memo::Memos,
+) {
     let Some(node) = node else { return };
-    audit_spans(node.left.as_deref(), nest, root, geo);
-    let span = &node.span;
+    audit_reservations(node.left.as_deref(), nest, root, geo, memos);
+    let reservation = &node.reservation;
     assert!(
-        span.identity.belongs_to(nest.id()),
+        reservation
+            .reservation
+            .nest()
+            .is_some_and(|owner| core::ptr::eq(
+                Arc::as_ptr(&owner) as *const Nest,
+                nest as *const Nest
+            )),
         "indexed Span belongs to another Nest"
     );
-    let state = span.state.lock();
+    let state = reservation.state.lock();
     if let Some(source) = &state.source {
         assert!(
-            !source.is_borrowed() || state.memos.published().next().is_none(),
+            !source.is_borrowed() || memos.published(reservation).next().is_none(),
             "borrowed Span also holds published Cells"
         );
         assert_eq!(
             source.page_count().checked_bytes(),
-            Some(span.initial_size()),
+            Some(reservation.initial_size()),
             "Span source extent differs from its initial range"
         );
-        assert_eq!(source.level(), span.level(), "implicit source geometry");
+        assert_eq!(
+            source.level(),
+            reservation.level(),
+            "implicit source geometry"
+        );
     }
-    assert!(span.initial_size().is_multiple_of(span.grain() * PAGE_SIZE));
-    for (page, cell) in state.memos.published() {
-        let address = span.initial_start() + page * PAGE_SIZE;
+    assert!(
+        reservation
+            .initial_size()
+            .is_multiple_of(reservation.grain() * PAGE_SIZE)
+    );
+    for (page, cell) in memos.published(reservation) {
+        let address = reservation.initial_start() + page * PAGE_SIZE;
         assert!(
             state.covers(address.as_usize(), address.as_usize()),
             "published Page lies outside live Span ranges"
@@ -290,7 +311,7 @@ fn audit_spans(node: Option<&IndexNode>, nest: &Nest, root: &Table, geo: Geometr
             cell.physical_address(),
             "published Page PTE physical address"
         );
-        let expected = span.leaf_attributes(
+        let expected = reservation.leaf_attributes(
             state
                 .range_at(address.as_usize())
                 .expect("Page range exists")
@@ -308,5 +329,5 @@ fn audit_spans(node: Option<&IndexNode>, nest: &Nest, root: &Table, geo: Geometr
         );
     }
     drop(state);
-    audit_spans(node.right.as_deref(), nest, root, geo);
+    audit_reservations(node.right.as_deref(), nest, root, geo, memos);
 }

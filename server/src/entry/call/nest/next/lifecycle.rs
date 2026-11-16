@@ -5,11 +5,11 @@ use crate::basis::nest::{Access, SpaceKind, authority::binding};
 use crate::basis::nest::{
     Nest, Placement, PlacementAt, RegionKind, authority::binding::Error as BindingError,
 };
-use kernel_api::model::nest::CreateSpanRequest;
+use kernel_api::model::nest::ReserveRequest;
 use kernel_api::model::{
     identity::Mark,
     modifiable::Modifiable,
-    nest::{NestPhase, NestStatus, SpanId, SpanPhase},
+    nest::{NestPhase, NestStatus, ReservationId, ReservationPhase},
     pend::{CreationRights, NestScope, PendScope},
 };
 
@@ -26,14 +26,13 @@ fn error(error: BindingError) -> Failure {
 
 pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure> {
     match action {
-        Action::CreateSpan {
+        Action::Reserve {
             token,
             nest: id,
             expected,
-            request,
+            reservation,
         } => {
-            let parent =
-                binding::authorized(actor, token, NestRights::CREATE_SPAN).map_err(error)?;
+            let parent = binding::authorized(actor, token, NestRights::RESERVE).map_err(error)?;
             let nest = parent.target().nest().ok_or(Failure::Denied)?;
             if nest.id() != id {
                 return Err(Failure::Denied);
@@ -42,37 +41,37 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
                 return Err(Failure::Stale);
             }
             expected.next().ok_or(Failure::VersionExhausted)?;
-            if request.level.get() >= crate::metal::mmu::internal::mode::levels() {
+            if reservation.level.get() >= crate::metal::mmu::internal::mode::levels() {
                 return Err(Failure::NotAligned);
             }
-            let access = Access::from_wire(request.access).ok_or(Failure::Invalid)?;
+            let access = Access::from_wire(reservation.access).ok_or(Failure::Invalid)?;
             if access.contains(Access::WRITE) && parent.modifiable() != Modifiable::Yes {
                 return Err(Failure::Denied);
             }
             let prepared = nest
-                .prepare_span(
-                    placement(&nest, request).map_err(error)?,
-                    request.level,
+                .reserve_reservation(
+                    placement(&nest, reservation).map_err(error)?,
+                    reservation.level,
                     access,
                     actor.ident.id,
                 )
                 .map_err(nest_error)?;
             let span = prepared.span();
             span.faults.lock().enable_native();
-            let id =
-                SpanId::from_bytes(&(span.identity() as u64).to_le_bytes()).expect("span identity");
-            let grant =
-                pend::prepare_reservation(actor, &parent, id, request.count).map_err(pend_error)?;
+            let id = ReservationId::from_bytes(&(span.identity() as u64).to_le_bytes())
+                .expect("reservation identity");
+            let grant = pend::prepare_reservation(actor, &parent, id, reservation.count)
+                .map_err(pend_error)?;
             let token = grant.entry().token();
             let span = prepared
                 .publish(grant.entry().authority())
                 .map_err(nest_error)?;
             grant.publish();
-            Ok(Value::Span {
+            Ok(Value::Reservation {
                 token,
                 nest: nest.id(),
                 nest_version: nest.version(),
-                span: id,
+                reservation: id,
                 version: span.version(),
                 address: span.initial_start(),
             })
@@ -99,26 +98,28 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
                 }
             }
         }
-        Query::Span {
+        Query::Reservation {
             token,
             nest: id,
-            span: reservation,
+            reservation,
         } => {
             let route =
-                SpanRoute::acquire(actor, token, NestRights::INSPECT).map_err(pend_error)?;
+                Reservation::acquire(actor, token, NestRights::INSPECT).map_err(pend_error)?;
             if route.id() != reservation || route.nest().id() != id {
                 return Err(Failure::Denied);
             }
             let span = route.span().map_err(pend_error)?;
             let (offset, count) = route.entry().authority().window().ok_or(Failure::Denied)?;
-            Snapshot::Span(
-                span.snapshot(
-                    route.nest(),
-                    offset,
-                    count,
-                    route.entry().modifiable() == Modifiable::Yes,
-                )
-                .map_err(nest_error)?,
+            Snapshot::Reservation(
+                route
+                    .nest()
+                    .reservation_snapshot(
+                        &span,
+                        offset,
+                        count,
+                        route.entry().modifiable() == Modifiable::Yes,
+                    )
+                    .map_err(nest_error)?,
             )
         }
         _ => return Err(Failure::Unsupported),
@@ -174,10 +175,10 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        Action::DeleteSpan {
+        Action::Release {
             token,
             nest: id,
-            span: reservation,
+            reservation,
             expected,
         } => {
             let (nest, span) = {
@@ -189,8 +190,8 @@ pub(super) fn effect(
                 let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
                 if !entry
                     .authority()
-                    .permits(Operations::Nest(NestRights::DELETE_SPAN))
-                    || !matches!(entry.scope(), PendScope::Nest(NestScope::Span { id, .. }) if id == reservation)
+                    .permits(Operations::Nest(NestRights::RELEASE))
+                    || !matches!(entry.scope(), PendScope::Nest(NestScope::Reservation { id, .. }) if id == reservation)
                 {
                     return Err(Failure::Denied);
                 }
@@ -198,7 +199,7 @@ pub(super) fn effect(
                 if nest.id() != id {
                     return Err(Failure::Denied);
                 }
-                let span = nest.span(reservation).ok_or(Failure::Dead)?;
+                let span = nest.reservation(reservation).ok_or(Failure::Dead)?;
                 let (offset, count) = entry.authority().window().ok_or(Failure::Denied)?;
                 if offset.get() != 0 || count.checked_bytes() != Some(span.initial_size()) {
                     return Err(Failure::Denied);
@@ -208,21 +209,21 @@ pub(super) fn effect(
                 }
                 expected.next().ok_or(Failure::VersionExhausted)?;
                 nest.begin_release(&span, expected).map_err(nest_error)?;
-                receipt.start(Value::SpanLifecycle {
+                receipt.start(Value::ReservationLifecycle {
                     nest: id,
-                    span: reservation,
+                    reservation,
                     version: span.version(),
-                    phase: SpanPhase::Closing,
+                    phase: ReservationPhase::Releasing,
                 });
                 (nest, span)
             };
-            nest.close_span(reservation).map_err(cell_error)?;
+            nest.release_reservation(reservation).map_err(cell_error)?;
             let _commit = basis::commit();
-            let value = Value::SpanLifecycle {
+            let value = Value::ReservationLifecycle {
                 nest: id,
-                span: reservation,
+                reservation,
                 version: span.version(),
-                phase: SpanPhase::Closed,
+                phase: ReservationPhase::Released,
             };
             receipt.committed(value);
             Ok(value)
@@ -273,7 +274,7 @@ pub(super) fn effect(
     }
 }
 
-fn placement(nest: &Nest, request: CreateSpanRequest) -> Result<Placement, BindingError> {
+fn placement(nest: &Nest, request: ReserveRequest) -> Result<Placement, BindingError> {
     let size = request
         .count
         .checked_bytes()
@@ -283,7 +284,7 @@ fn placement(nest: &Nest, request: CreateSpanRequest) -> Result<Placement, Bindi
         kernel_api::model::cell::PlacementAt::Highest => PlacementAt::Highest,
         kernel_api::model::cell::PlacementAt::Exact(address) => {
             // CPU reservations belong to the Team's Normal window. External
-            // exact addresses use the backend geometry checked by prepare_span;
+            // exact addresses use the backend geometry checked by reserve_reservation;
             // their Layout only records occupancy and has no dynamic windows.
             if !nest.is_external() {
                 if !Nest::user_range(address, size) {

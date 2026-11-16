@@ -26,12 +26,6 @@ struct Span {
 struct SpanState {
     source: Option<()>,
     active: Vec<ActiveRange>,
-    memos: memo::Memos,
-}
-impl SpanState {
-    fn take_deleted(&mut self, base: kernel_api::address::VirtAddr) -> Option<memo::Memo> {
-        self.memos.take_deleted(base, &self.active)
-    }
 }
 struct ActiveRange;
 impl ActiveRange {
@@ -46,7 +40,6 @@ impl Span {
             state: crate::host_lock::TestLock::new(SpanState {
                 source: None,
                 active: Vec::new(),
-                memos: memo::Memos::new(),
             }),
         }
     }
@@ -57,4 +50,10 @@ impl Span {
         kernel_api::address::VirtAddr::new(0)
     }
     fn changed(&self) {}
+}
+struct Nest {
+    state: crate::host_lock::TestLock<RetirementState>,
+}
+struct RetirementState {
+    memos: memo::Memos,
 }

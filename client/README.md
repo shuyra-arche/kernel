@@ -6,7 +6,7 @@ runtime, service implementation, TLS registry or ownership manager.
 
 ## Image and transport
 
-API, Client and Server implement ABI/Ledger 14 with Capsule format 2.
+API, Client and Server implement ABI/Ledger 11 with Capsule format 2.
 No ABI feature is needed. Use [`memory::{flat,nest}`](src/memory.rs) for memory
 operations and the accepted non-memory [`call::*`](src/call/) interfaces.
 Old Cell and Share Open/Shut operations are rejected by the provider.
@@ -53,7 +53,7 @@ authorizes them. `Entry::dispatch()` returns a distinct `(View, Sign)`
 pair. Sign delivery, memory publication and verified CPU/IOMMU
 retirement are different events. The read-only global memory
 snapshot reports per-page A/D as `UNKNOWN` rather than assuming
-cleanliness. Use existing `call::share_view::derive` with a sampling-authorized Span
+cleanliness. Use existing `call::share_view::derive` with a sampling-authorized Reservation
 source and readonly Share limits. `memory::activity::pair(view)` resolves the
 receiver-local `(Sign Pend, Share View Pend)` using existing Pend calls.
 A Busy lookup retains the same View; retry the lookup, not Derive. Follow the

@@ -22,7 +22,7 @@ pub fn call(mut action: Action) -> Result<Response, Error> {
         let request = request(action);
         let response = invoke(request)?;
         if let (
-            Action::DeleteSpan {
+            Action::Release {
                 token,
                 nest,
                 reservation,
@@ -35,7 +35,7 @@ pub fn call(mut action: Action) -> Result<Response, Error> {
                 reply.outcome(),
                 Outcome::Failed {
                     failure: Failure::Busy,
-                    retained: Some(Value::SpanLifecycle { .. })
+                    retained: Some(Value::ReservationLifecycle { .. })
                 }
             );
             if accepted
@@ -54,7 +54,7 @@ pub fn call(mut action: Action) -> Result<Response, Error> {
                     "retained reservation did not release"
                 );
                 let Response::Observation(observation) = invoke(crate::support::request(
-                    Action::Inspect(Query::Span {
+                    Action::Inspect(Query::Reservation {
                         token,
                         nest,
                         reservation,
@@ -63,10 +63,10 @@ pub fn call(mut action: Action) -> Result<Response, Error> {
                 else {
                     panic!("reservation")
                 };
-                let Snapshot::Span(status) = observation.snapshot() else {
+                let Snapshot::Reservation(status) = observation.snapshot() else {
                     panic!("reservation")
                 };
-                action = Action::DeleteSpan {
+                action = Action::Release {
                     token,
                     nest,
                     reservation,

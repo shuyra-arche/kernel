@@ -33,7 +33,7 @@ pub struct Sample {
     pub sequence: u64,
     pub epoch: u64,
     pub nest: u64,
-    pub span: u64,
+    pub reservation: u64,
     pub position: u64,
     pub generation: u64,
     pub page: u64,
@@ -57,7 +57,7 @@ impl Sample {
                 self.sequence as usize,
                 self.epoch as usize,
                 self.nest as usize,
-                self.span as usize,
+                self.reservation as usize,
                 self.position as usize,
                 self.generation as usize,
                 self.page as usize,
@@ -123,7 +123,7 @@ impl Sample {
             sequence: w[1] as u64,
             epoch: w[2] as u64,
             nest: w[3] as u64,
-            span: w[4] as u64,
+            reservation: w[4] as u64,
             position: w[5] as u64,
             generation: w[6] as u64,
             page: w[7] as u64,
@@ -191,7 +191,7 @@ impl SamplePage {
     }
 }
 
-/// Readonly View limits, using the observed Span's fixed-origin page.
+/// Readonly View limits, using the observed Reservation's fixed-origin page.
 /// Only that coordinate is backed in the new View; no adjacent facts exist.
 pub fn limits(page: usize) -> Option<crate::model::pend::Limits> {
     use crate::model::{modifiable::Modifiable, pend::*};

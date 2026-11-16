@@ -154,7 +154,7 @@ fn compound_field_widths_match_their_actual_register_consumption() {
 fn mapping_observation_requires_a_pend_and_retired_device_abi_is_rejected() {
     use kernel_api::{
         abi::call::EnvCall,
-        model::{identity::PendId, nest::SpanId, sign::SignSource},
+        model::{identity::PendId, nest::ReservationId, sign::SignSource},
     };
     for slot in [2, 3, 7, 8, 9] {
         assert!(
@@ -172,10 +172,10 @@ fn mapping_observation_requires_a_pend_and_retired_device_abi_is_rejected() {
         );
     }
     let token = PendId::mint(17);
-    let span = SpanId::from_bytes(&23u64.to_le_bytes()).unwrap();
+    let reservation = ReservationId::from_bytes(&23u64.to_le_bytes()).unwrap();
     for source in [
-        SignSource::SpanRetired { token, span },
-        SignSource::SpanPublished { token, span },
+        SignSource::ReservationRetired { token, reservation },
+        SignSource::ReservationPublished { token, reservation },
     ] {
         assert_eq!(SignSource::of(source.words()), Some(source));
         let mut words = source.words();

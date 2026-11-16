@@ -187,13 +187,13 @@ impl Target {
                 let scope = scope.unwrap_or(PendScope::Nest(NestScope::Whole));
                 let rights = match scope {
                     PendScope::Nest(NestScope::Whole) if nest.is_adopted() => {
-                        NestRights::INSPECT | NestRights::CREATE_SPAN
+                        NestRights::INSPECT | NestRights::RESERVE
                     }
                     PendScope::Nest(NestScope::Whole) => NestRights::whole(),
-                    PendScope::Nest(NestScope::Span {
+                    PendScope::Nest(NestScope::Reservation {
                         range: PendRange::Pages { .. },
                         ..
-                    }) if PendScope::of(scope.words()) == Some(scope) => NestRights::span(),
+                    }) if PendScope::of(scope.words()) == Some(scope) => NestRights::reservation(),
                     _ => return Err(PendFail::Denied),
                 };
                 (scope, Operations::Nest(rights))

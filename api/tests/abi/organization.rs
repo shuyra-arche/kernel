@@ -43,14 +43,14 @@ fn organization_snapshots_reject_unknown_identity_geometry_and_phase() {
 }
 
 #[test]
-fn create_span_snapshot_is_source_free_and_checks_count_level_placement_and_access() {
+fn reserve_snapshot_is_source_free_and_checks_count_level_placement_and_access() {
     use super::fetch_words;
     use kernel_api::model::{
         cell::{CellLevel, Placement},
-        nest::CreateSpanRequest,
+        nest::ReserveRequest,
     };
-    assert_eq!(CreateSpanRequest::WIDTH, 48);
-    let request = CreateSpanRequest {
+    assert_eq!(ReserveRequest::WIDTH, 48);
+    let request = ReserveRequest {
         placement: Placement::exact(VirtAddr::new(0x8000), 4096).unwrap(),
         count: PageCount::new(1024).unwrap(),
         level: CellLevel::new(1).unwrap(),
@@ -67,15 +67,12 @@ fn create_span_snapshot_is_source_free_and_checks_count_level_placement_and_acce
         request.placement,
     ] {
         for access in [2, 6, 8, 10, 14] {
-            let value = CreateSpanRequest {
+            let value = ReserveRequest {
                 placement,
                 access,
                 ..request
             };
-            assert_eq!(
-                CreateSpanRequest::from_bytes(&value.to_bytes()),
-                Some(value)
-            );
+            assert_eq!(ReserveRequest::from_bytes(&value.to_bytes()), Some(value));
         }
     }
     for (word, invalid) in [
@@ -100,14 +97,14 @@ fn create_span_snapshot_is_source_free_and_checks_count_level_placement_and_acce
         let mut bytes = request.to_bytes();
         bytes[word * 8..(word + 1) * 8].copy_from_slice(&invalid.to_le_bytes());
         assert_eq!(
-            CreateSpanRequest::from_bytes(&bytes),
+            ReserveRequest::from_bytes(&bytes),
             None,
             "word {word}, value {invalid}"
         );
     }
     for count in [1, 513, usize::MAX / 4096 + 1] {
         assert!(
-            !CreateSpanRequest {
+            !ReserveRequest {
                 count: PageCount::new(count).unwrap(),
                 ..request
             }
@@ -115,25 +112,22 @@ fn create_span_snapshot_is_source_free_and_checks_count_level_placement_and_acce
         );
     }
     for access in [0, 1, 4, 12, 16, u64::MAX] {
-        assert!(!CreateSpanRequest { access, ..request }.valid());
+        assert!(!ReserveRequest { access, ..request }.valid());
     }
-    let mut bytes = CreateSpanRequest {
+    let mut bytes = ReserveRequest {
         placement: Placement::lowest(4096).unwrap(),
         ..request
     }
     .to_bytes();
     bytes[8] = 1;
-    assert_eq!(CreateSpanRequest::from_bytes(&bytes), None);
-    for len in 0..CreateSpanRequest::WIDTH {
-        assert_eq!(
-            CreateSpanRequest::from_bytes(&request.to_bytes()[..len]),
-            None
-        );
+    assert_eq!(ReserveRequest::from_bytes(&bytes), None);
+    for len in 0..ReserveRequest::WIDTH {
+        assert_eq!(ReserveRequest::from_bytes(&request.to_bytes()[..len]), None);
     }
-    assert_eq!(CreateSpanRequest::from_bytes(&[0; 49]), None);
+    assert_eq!(ReserveRequest::from_bytes(&[0; 49]), None);
     // Logical Cell level is not a hardware-leaf alignment requirement.
     assert!(
-        CreateSpanRequest {
+        ReserveRequest {
             placement: Placement::exact(VirtAddr::new(4096), 4096).unwrap(),
             ..request
         }

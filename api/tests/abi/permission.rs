@@ -3,7 +3,7 @@ use kernel_api::model::{
     identity::{Mark, PendId, TaskId},
     modifiable::Modifiable,
     nest::NestId,
-    nest::SpanId,
+    nest::ReservationId,
     pend::{
         CloneRights, CreationRights, Distributable, FlatRights, Limits, NestRights, NestScope,
         Operations, PendInfo, PendRange, PendScope, PendStatus, ShareRights, Target, ViewTarget,
@@ -13,8 +13,8 @@ use kernel_api::model::{
 };
 
 fn mapping(id: u64, range: PendRange) -> PendScope {
-    PendScope::Nest(NestScope::Span {
-        id: SpanId::from_bytes(&id.to_le_bytes()).unwrap(),
+    PendScope::Nest(NestScope::Reservation {
+        id: ReservationId::from_bytes(&id.to_le_bytes()).unwrap(),
         range,
     })
 }
@@ -33,7 +33,7 @@ fn grant(operations: Operations) -> Limits {
 }
 
 #[test]
-fn span_migration_preserves_the_joint_target_scope_operation_contract() {
+fn reservation_migration_preserves_the_joint_target_scope_operation_contract() {
     let targets = [
         Target::None,
         Target::View(ViewTarget::Clone(ViewId::new(7))),
@@ -69,7 +69,7 @@ fn span_migration_preserves_the_joint_target_scope_operation_contract() {
         ),
         (3, 1, Operations::Flat(FlatRights::all())),
         (4, 2, Operations::Nest(NestRights::whole())),
-        (4, 3, Operations::Nest(NestRights::span())),
+        (4, 3, Operations::Nest(NestRights::reservation())),
         (5, 0, Operations::Sign(SignRights::all())),
     ];
     for (family, allowed_scope, operations) in families {
@@ -97,8 +97,8 @@ fn span_migration_preserves_the_joint_target_scope_operation_contract() {
             }
         }
     }
-    // A Span is a scope, not a new top-level Target. Former target tags
-    // stay invalid, including a nonzero value that is a valid SpanId.
+    // Reservation is a scope, not a new top-level Target. Former target tags
+    // stay invalid, including a nonzero value that is a valid ReservationId.
     for tag in [5, 7, 8] {
         assert!(Target::of([tag, 19]).is_none());
     }
@@ -284,7 +284,7 @@ fn scope_codec_is_five_canonical_words_with_a_checked_mapping_identity() {
         assert_eq!(
             scope.range(),
             match scope {
-                PendScope::Pages(range) | PendScope::Nest(NestScope::Span { range, .. }) =>
+                PendScope::Pages(range) | PendScope::Nest(NestScope::Reservation { range, .. }) =>
                     Some(range),
                 _ => None,
             }
@@ -319,8 +319,8 @@ fn scope_codec_is_five_canonical_words_with_a_checked_mapping_identity() {
         assert_eq!(PendScope::of(invalid), None, "{invalid:?}");
     }
     let invalid = Limits {
-        scope: PendScope::Nest(NestScope::Span {
-            id: SpanId::NONE,
+        scope: PendScope::Nest(NestScope::Reservation {
+            id: ReservationId::NONE,
             range: PendRange::Inherit,
         }),
         ..grant(Operations::Nest(NestRights::INSPECT))
@@ -332,13 +332,16 @@ fn scope_codec_is_five_canonical_words_with_a_checked_mapping_identity() {
 fn whole_and_mapping_rights_have_distinct_masks_and_retired_bits_stay_invalid() {
     assert_eq!(NestRights::whole().bits(), 1 | 2 | 8 | 512);
     assert_eq!(
-        NestRights::span().bits(),
+        NestRights::reservation().bits(),
         1 | 4 | 64 | 128 | 256 | 1024 | 2048 | 4096 | 8192
     );
-    assert_eq!(NestRights::all(), NestRights::whole() | NestRights::span());
+    assert_eq!(
+        NestRights::all(),
+        NestRights::whole() | NestRights::reservation()
+    );
     for (scope, mask) in [
         (PendScope::Nest(NestScope::Whole), NestRights::whole()),
-        (mapping(7, PendRange::Inherit), NestRights::span()),
+        (mapping(7, PendRange::Inherit), NestRights::reservation()),
     ] {
         for bit in 0..14 {
             let bits = 1u32 << bit;
@@ -398,7 +401,7 @@ fn info_requires_resolved_scope_and_matching_target_family() {
     let info = PendInfo {
         token: PendId::mint(1),
         target: Target::Nest(NestId::new(3).unwrap()),
-        limits: grant(Operations::Nest(NestRights::CREATE_SPAN)),
+        limits: grant(Operations::Nest(NestRights::RESERVE)),
         owner: TaskId::new(5),
         lender: TaskId::new(0),
         mark: Mark::NONE,
@@ -465,7 +468,7 @@ fn observation_and_access_cannot_supply_mutation_authority() {
         NestRights::PUBLISH,
         NestRights::RETRACT,
         NestRights::PROTECT,
-        NestRights::DELETE_SPAN,
+        NestRights::RELEASE,
     ] {
         assert!(!inspect.permits_child(Limits {
             operations: Operations::Nest(operation),

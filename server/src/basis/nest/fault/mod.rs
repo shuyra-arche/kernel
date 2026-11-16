@@ -1,4 +1,4 @@
-//! Native Span fault recovery. The Span owns the route and queue;
+//! Native Reservation fault recovery. The Reservation owns the route and queue;
 //! Task continuations retain one exact event, never a new data authority.
 mod binding;
 mod queue;
@@ -10,7 +10,7 @@ use alloc::sync::{Arc, Weak};
 use binding::Binding;
 use kernel_api::{
     abi::memory::{Failure, Observation, Query, Snapshot, Value},
-    model::nest::{FaultEpoch, FaultPhase, FaultRoute, FaultStatus, NestId, SpanId},
+    model::nest::{FaultEpoch, FaultPhase, FaultRoute, FaultStatus, NestId, ReservationId},
 };
 use queue::Queue;
 
@@ -109,28 +109,28 @@ pub(in crate::basis::nest) fn wake_span(span: &Span) {
 }
 pub(in crate::basis::nest) fn wake_nest(nest: &Nest) {
     let mut after = 0;
-    while let Some(entry) = nest.spans.next(after) {
+    while let Some(entry) = nest.reservations.next(after) {
         after = entry.binding.id();
-        if let Some(span) = entry.span() {
+        if let Some(span) = entry.reservation() {
             wake_span(span);
         }
     }
 }
 fn span_key(nest: &Nest, span: &Span) -> sign::WakeKey {
-    sign::WakeKey::Span {
+    sign::WakeKey::Reservation {
         space: nest.id(),
-        span: span.identity(),
+        reservation: span.identity(),
     }
 }
 fn full_route(
     actor: &Arc<Task>,
     token: kernel_api::model::identity::PendId,
     id: NestId,
-    reservation: SpanId,
+    reservation: ReservationId,
     rights: kernel_api::model::pend::NestRights,
-) -> Result<(pend::access::SpanRoute, Arc<Span>), Failure> {
+) -> Result<(pend::access::Reservation, Arc<Span>), Failure> {
     let route =
-        pend::access::SpanRoute::acquire(actor, token, rights).map_err(|_| Failure::Denied)?;
+        pend::access::Reservation::acquire(actor, token, rights).map_err(|_| Failure::Denied)?;
     if route.nest().id() != id || route.id() != reservation {
         return Err(Failure::Denied);
     }
@@ -147,7 +147,7 @@ pub(crate) fn configure(
     let kernel_api::abi::memory::Action::FaultRoute {
         token,
         nest,
-        span: reservation,
+        reservation,
         expected,
         epoch,
         route: config,
@@ -172,12 +172,13 @@ pub(crate) fn configure(
     let version = expected.next().ok_or(Failure::VersionExhausted)?;
     let epoch = epoch.next().ok_or(Failure::VersionExhausted)?;
     let binding = config
-        .map(|config| Binding::prepare(actor, route.entry(), route.nest(), &span, config))
+        .map(|config| Binding::prepare(actor, route.entry(), &span, config))
         .transpose()?;
     let old = {
         let nest_state = route.nest().state.lock();
         let span_state = span.state.lock();
-        if !nest_state.is_open() || span_state.phase != super::address::span::SpanPhase::Open {
+        if !nest_state.is_open() || span_state.phase != super::address::span::ReservationPhase::Open
+        {
             return Err(Failure::Dead);
         }
         if span.version() != expected {
@@ -192,7 +193,7 @@ pub(crate) fn configure(
     }
     Ok(Value::FaultRoute {
         nest,
-        span: reservation,
+        reservation,
         version,
         epoch,
         phase: if config.is_some() {
@@ -206,7 +207,7 @@ pub(crate) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
     let Query::FaultRoute {
         token,
         nest,
-        span: reservation,
+        reservation,
     } = query
     else {
         return Err(Failure::Invalid);
@@ -223,7 +224,7 @@ pub(crate) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
     let state = span.faults.lock();
     let status = FaultStatus {
         nest,
-        span: reservation,
+        reservation,
         epoch: state.epoch,
         phase: match active {
             Ok(_) if !state.lost() => FaultPhase::Active,

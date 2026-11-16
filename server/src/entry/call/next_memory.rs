@@ -121,7 +121,7 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
             | Action::Publish { .. }
             | Action::Retract { .. }
             | Action::Protect { .. }
-            | Action::DeleteSpan { .. }
+            | Action::Release { .. }
             | Action::DeleteNest { .. }
     ) {
         let result = super::nest::next::effect(actor, request.action(), &mut receipt);

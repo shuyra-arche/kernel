@@ -150,7 +150,7 @@ pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), Error> {
         }
     }
     nest.close_external().map_err(|_| Error::Denied)?;
-    nest.progress_spans();
+    nest.progress_reservations();
     if !super::external::discard(&nest) {
         return Err(Error::Busy);
     }
@@ -226,7 +226,7 @@ pub(crate) fn maintain() -> bool {
                 }
             }
         }
-        nest.progress_spans();
+        nest.progress_reservations();
         let settled = binding && nest.progress_external_close().unwrap_or(false);
         let remove = invalid
             && nest.external_settled()

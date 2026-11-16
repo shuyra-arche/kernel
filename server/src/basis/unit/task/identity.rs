@@ -40,7 +40,7 @@ impl TaskMemory {
             stack.retire()?;
             self.bootstrap = None;
         }
-        self.nest.reap_spans();
+        self.nest.reap_reservations();
         Ok(())
     }
 }

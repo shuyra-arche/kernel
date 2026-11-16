@@ -46,12 +46,10 @@ pub(in super::super) fn mapped(base: usize, size: usize) -> Result<usize, PendFa
         .whole();
     let placement =
         Placement::lowest(RegionKind::Normal, size, PAGE_SIZE).map_err(|_| PendFail::Denied)?;
-    let span = nest
-        .reserve(placement, source.level())
-        .map_err(|_| PendFail::OutOfMemory)?;
+    let reserve = nest.reserve(placement).map_err(|_| PendFail::OutOfMemory)?;
     let access = Access::READ | Access::WRITE;
     let mapping = nest
-        .attach(span, source, access, access)
+        .attach(reserve, source, access, access)
         .map_err(|_| PendFail::Denied)?;
     Ok(mapping.initial_start().as_usize())
 }

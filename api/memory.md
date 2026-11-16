@@ -12,7 +12,7 @@ Changing one does not silently transfer the responsibilities of another.
 | --- | --- |
 | Flat / Slot | Logical source, current Page holding, Fresh/Resident/Missing and in-flight transitions |
 | Page | Physical identity, allocation receipt, admission and retention of all accessors |
-| Nest / Span | Translation space, exclusive address-span identity and lifetime |
+| Nest / Reservation | Translation space, exclusive address reservation identity and lifetime |
 | Memo | Logical association, expected generation and concrete hardware publications |
 | Pend | Rights, scope/data window, attenuation, distribution and live revocation ancestry |
 | Retention / Metal | Exact CPU/External publication obligation and trusted completion evidence |
@@ -26,14 +26,12 @@ ABI positions use **4 KiB units**. A physical `CellLevel` has size
 the supported levels. A large Page spans multiple base coordinates.
 CPU/IOMMU hardware leaf sizes are separate from physical holding identity.
 
-## ABI 14
+## ABI 11
 
 The current revision has one ABI. Native Flat/Nest operations use fixed-origin
 SlotPosition / MemoPosition with independent versions. Flat owns Occupy/Vacate,
 Push/Pull, Split/Merge and Block/Allow. Nest owns association, publication and
-Span FaultRoute. `SpanId`, `SpanVersion` and `SpanStatus` name the occupied
-address span; `CreateSpanRequest` and `Action::CreateSpan`/`DeleteSpan` create
-and delete it. ABI 13 and older calls, Ledger entries and Capsules reject. Versioned RequestIds and a bounded journal report
+Reservation FaultRoute. Versioned RequestIds and a bounded journal report
 Rejected/Pending/Committed/Failed outcomes and checked observations.
 
 No Cargo feature selects the ABI. Calls, memory descriptors, Ledger and Capsule
@@ -121,7 +119,7 @@ separates Host, RV64, QEMU and real hardware evidence.
 
 ## Authorized CPU activity
 
-Existing [Share.Derive](src/abi/call/view/share.rs) accepts a Span source
+Existing [Share.Derive](src/abi/call/view/share.rs) accepts a Reservation source
 with live INSPECT plus SAMPLE. Its unchanged AccordRequest selects one
 fixed-origin page and a recipient. It atomically issues a readonly Share View
 and LISTEN/CONSUME Sign, forming `(Sign Pend, Share View Pend)` in that order.

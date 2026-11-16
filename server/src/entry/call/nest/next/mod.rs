@@ -4,7 +4,7 @@ mod lifecycle;
 use crate::basis::{
     self,
     nest::memo::source::Source,
-    pend::{self, access::SpanRoute},
+    pend::{self, access::Reservation},
     unit::task::Task,
 };
 use alloc::sync::Arc;
@@ -21,7 +21,7 @@ pub(in crate::entry::call) fn effect(
 ) -> Result<Value, Failure> {
     if matches!(
         action,
-        Action::CreateNest { .. } | Action::DeleteSpan { .. } | Action::DeleteNest { .. }
+        Action::CreateNest { .. } | Action::Release { .. } | Action::DeleteNest { .. }
     ) {
         return lifecycle::effect(actor, action, receipt);
     }
@@ -40,10 +40,13 @@ pub(in crate::entry::call) fn effect(
     let (route, span, index, data, publisher, maintenance) = {
         let _serial = actor.pend.lock();
         let _commit = basis::commit();
-        let route = SpanRoute::acquire(actor, position.token(), rights).map_err(pend_error)?;
+        let route = Reservation::acquire(actor, position.token(), rights).map_err(pend_error)?;
         let index = route.position(position).map_err(pend_error)?;
         let span = route.span().map_err(pend_error)?;
-        let info = span.inspect(index).map_err(nest_error)?;
+        let info = route
+            .nest()
+            .inspect_logical(&span, index)
+            .map_err(nest_error)?;
         if info.generation != expected {
             return Err(Failure::Stale);
         }
@@ -66,8 +69,9 @@ pub(in crate::entry::call) fn effect(
             }
         }
         let data = if rights == NestRights::PUBLISH {
-            let source = span
-                .logical_source(index, expected.get())
+            let source = route
+                .nest()
+                .logical_source(&span, index, expected.get())
                 .map_err(nest_error)?
                 .ok_or(Failure::SourceEmpty)?;
             Some(
@@ -85,7 +89,7 @@ pub(in crate::entry::call) fn effect(
                     .ok_or(Failure::SourceEmpty)?,
             )
         } else {
-            let page = span.memo_page(index).map_err(nest_error)?;
+            let page = route.nest().memo_page(&span, index).map_err(nest_error)?;
             if rights == NestRights::RETRACT && page.is_none() {
                 return Err(Failure::SourceEmpty);
             }
@@ -121,8 +125,9 @@ pub(in crate::entry::call) fn effect(
         {
             let (_, _, block) =
                 super::super::flat::next::maintenance::resolve(actor, credential, true)?;
-            let source = span
-                .logical_source(index, expected.get())
+            let source = route
+                .nest()
+                .logical_source(&span, index, expected.get())
                 .map_err(nest_error)?
                 .ok_or(Failure::SourceEmpty)?;
             Some(
@@ -154,8 +159,8 @@ pub(in crate::entry::call) fn effect(
         Action::Publish { .. } => {
             let change = basis::cell::change::acquire(data.as_ref().expect("selected Page"))
                 .map_err(cell_error)?;
-            span.publish(
-                route.nest(),
+            route.nest().publish_memo_report(
+                &span,
                 index,
                 expected.get(),
                 change,
@@ -167,8 +172,8 @@ pub(in crate::entry::call) fn effect(
         Action::Retract { .. } => {
             let change = basis::cell::change::acquire(data.as_ref().expect("selected Page"))
                 .map_err(cell_error)?;
-            span.retract(
-                route.nest(),
+            route.nest().retract_memo_report(
+                &span,
                 index,
                 expected.get(),
                 change,
@@ -189,8 +194,8 @@ pub(in crate::entry::call) fn effect(
         }
         Action::Protect { access, .. } => {
             let access = Access::from_wire(access).ok_or(Failure::Invalid)?;
-            span.protect(
-                route.nest(),
+            route.nest().protect_memo_report(
+                &span,
                 index,
                 expected.get(),
                 access,
@@ -216,7 +221,10 @@ pub(in crate::entry::call) fn effect(
             .progress_external(&span)
             .map_err(|_| Failure::Hardware)?;
         let _commit = basis::commit();
-        let status = span.inspect(index).map_err(nest_error)?;
+        let status = route
+            .nest()
+            .inspect_logical(&span, index)
+            .map_err(nest_error)?;
         let pending = matches!(
             (action, status.phase),
             (
@@ -270,7 +278,10 @@ pub(in crate::entry::call) fn effect(
     let _commit = basis::commit();
     let value = receipt.started().ok_or(Failure::Busy)?;
     if matches!(action, Action::Publish { .. }) {
-        let status = span.inspect(index).map_err(nest_error)?;
+        let status = route
+            .nest()
+            .inspect_logical(&span, index)
+            .map_err(nest_error)?;
         if status.phase != kernel_api::model::nest::MemoPhase::Published
             || value
                 != (Value::Memo {
@@ -282,8 +293,9 @@ pub(in crate::entry::call) fn effect(
         if !pend::live(actor) || !route.entry().permits(Operations::Nest(NestRights::PUBLISH)) {
             return Err(Failure::Denied);
         }
-        let source = span
-            .logical_source(index, status.generation.get())
+        let source = route
+            .nest()
+            .logical_source(&span, index, status.generation.get())
             .map_err(nest_error)?
             .ok_or(Failure::SourceEmpty)?;
         if let Some(usage) = &maintenance_check {
@@ -324,11 +336,16 @@ pub(in crate::entry::call) fn inspect(
     let _serial = actor.pend.lock();
     let _commit = basis::commit();
     let mapping =
-        SpanRoute::acquire(actor, position.token(), NestRights::INSPECT).map_err(pend_error)?;
+        Reservation::acquire(actor, position.token(), NestRights::INSPECT).map_err(pend_error)?;
     let index = mapping.position(position).map_err(pend_error)?;
     let span = mapping.span().map_err(pend_error)?;
-    Observation::new(Snapshot::Memo(span.inspect(index).map_err(nest_error)?))
-        .ok_or(Failure::Invalid)
+    Observation::new(Snapshot::Memo(
+        mapping
+            .nest()
+            .inspect_logical(&span, index)
+            .map_err(nest_error)?,
+    ))
+    .ok_or(Failure::Invalid)
 }
 
 pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure> {
@@ -337,17 +354,20 @@ pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Resul
     }
     match action {
         Action::FaultRoute { .. } => basis::nest::fault::configure(actor, action),
-        Action::CreateSpan { .. } => lifecycle::mutate(actor, action),
+        Action::Reserve { .. } => lifecycle::mutate(actor, action),
         Action::Insert {
             target,
             expected,
             source,
         } => {
-            let mapping = SpanRoute::acquire(actor, target.token(), NestRights::INSERT)
+            let mapping = Reservation::acquire(actor, target.token(), NestRights::INSERT)
                 .map_err(pend_error)?;
             let index = mapping.position(target).map_err(pend_error)?;
             let span = mapping.span().map_err(pend_error)?;
-            let info = span.inspect(index).map_err(nest_error)?;
+            let info = mapping
+                .nest()
+                .inspect_logical(&span, index)
+                .map_err(nest_error)?;
             if info.generation != expected {
                 return Err(Failure::Stale);
             }
@@ -362,22 +382,29 @@ pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Resul
             }
             let count = PageCount::new(span.grain()).ok_or(Failure::NotAligned)?;
             let selected = select(actor, source, count)?;
-            span.insert(mapping.nest(), index, expected.get(), selected)
+            mapping
+                .nest()
+                .associate_logical(&span, index, expected.get(), selected)
                 .map_err(nest_error)?;
             Ok(Value::Memo { generation })
         }
         Action::Remove { memo, expected } => {
-            let mapping =
-                SpanRoute::acquire(actor, memo.token(), NestRights::REMOVE).map_err(pend_error)?;
+            let mapping = Reservation::acquire(actor, memo.token(), NestRights::REMOVE)
+                .map_err(pend_error)?;
             let index = mapping.position(memo).map_err(pend_error)?;
             let span = mapping.span().map_err(pend_error)?;
-            let info = span.inspect(index).map_err(nest_error)?;
+            let info = mapping
+                .nest()
+                .inspect_logical(&span, index)
+                .map_err(nest_error)?;
             if info.generation != expected {
                 return Err(Failure::Stale);
             }
             let generation = expected.next().ok_or(Failure::VersionExhausted)?;
             span.version().next().ok_or(Failure::VersionExhausted)?;
-            span.remove(mapping.nest(), index, expected.get())
+            mapping
+                .nest()
+                .remove_logical(&span, index, expected.get())
                 .map_err(nest_error)?;
             Ok(Value::Memo { generation })
         }
@@ -426,7 +453,7 @@ fn select(
             Source::from_pend(actor, token, PageOffset::new(page), count).map_err(cell_error)
         }
         memory::Source::Memo { position, expected } => {
-            let mapping = SpanRoute::acquire(actor, position.token(), NestRights::PUBLISH)
+            let mapping = Reservation::acquire(actor, position.token(), NestRights::PUBLISH)
                 .map_err(pend_error)?;
             let index = mapping.position(position).map_err(pend_error)?;
             let span = mapping.span().map_err(pend_error)?;
@@ -436,8 +463,9 @@ fn select(
             if span.inspect_memo(index).map_err(nest_error)?.generation != expected.get() {
                 return Err(Failure::Stale);
             }
-            let source = span
-                .logical_source(index, expected.get())
+            let source = mapping
+                .nest()
+                .logical_source(&span, index, expected.get())
                 .map_err(nest_error)?
                 .ok_or(Failure::SourceEmpty)?;
             let source = source.export(actor, &mapping, index).map_err(cell_error)?;

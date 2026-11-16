@@ -71,17 +71,17 @@ pub fn run() {
             room::sleep_until(room::clock() + 1_000_000).unwrap();
         }
         let action = if release {
-            let Snapshot::Span(status) = inspect(Query::Span {
+            let Snapshot::Reservation(status) = inspect(Query::Reservation {
                 token: memo.token(),
                 nest: memo.nest(),
-                span: memo.span(),
+                reservation: memo.reservation(),
             }) else {
                 panic!("reservation")
             };
-            Action::DeleteSpan {
+            Action::Release {
                 token: memo.token(),
                 nest: memo.nest(),
-                span: memo.span(),
+                reservation: memo.reservation(),
                 expected: status.version,
             }
         } else {
@@ -116,17 +116,17 @@ pub fn run() {
             } => {
                 let deadline = room::clock() + 5_000_000_000;
                 loop {
-                    let Snapshot::Span(status) = inspect(Query::Span {
+                    let Snapshot::Reservation(status) = inspect(Query::Reservation {
                         token: memo.token(),
                         nest: memo.nest(),
-                        span: memo.span(),
+                        reservation: memo.reservation(),
                     }) else {
                         panic!("reservation")
                     };
-                    let reply = invoke(crate::support::request(Action::DeleteSpan {
+                    let reply = invoke(crate::support::request(Action::Release {
                         token: memo.token(),
                         nest: memo.nest(),
-                        span: memo.span(),
+                        reservation: memo.reservation(),
                         expected: status.version,
                     }));
                     match reply.outcome() {

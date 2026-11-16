@@ -12,7 +12,7 @@ pub(super) struct Lineage {
     actor: Weak<Task>,
     task: TaskId,
     token: PendId,
-    span: Option<Weak<Span>>,
+    reservation: Option<Weak<Span>>,
     previous: Option<Arc<Self>>,
     depth: usize,
 }
@@ -47,7 +47,7 @@ impl Lineage {
             actor: Arc::downgrade(actor),
             task: actor.ident.id,
             token: entry.token(),
-            span: reservation.map(Arc::downgrade),
+            reservation: reservation.map(Arc::downgrade),
             previous,
             depth,
         })
@@ -67,7 +67,7 @@ impl Lineage {
                 || !Arc::ptr_eq(entry.authority(), route.grant.authority())
                 || !route.grant.permits(access)
                 || route
-                    .span
+                    .reservation
                     .as_ref()
                     .is_some_and(|span| span.upgrade().is_none_or(|span| !span.is_open()))
             {
@@ -94,8 +94,8 @@ impl Lineage {
     pub(super) fn actor(&self, task: TaskId) -> bool {
         self.task == task
     }
-    pub(super) fn span(&self, span: &Span) -> bool {
-        self.span
+    pub(super) fn reservation(&self, span: &Span) -> bool {
+        self.reservation
             .as_ref()
             .is_some_and(|known| core::ptr::eq(known.as_ptr(), span))
     }
@@ -103,7 +103,7 @@ impl Lineage {
         !self.grant.authority().alive()
             || self.actor.upgrade().is_none_or(|actor| !pend::live(&actor))
             || self
-                .span
+                .reservation
                 .as_ref()
                 .is_some_and(|span| span.upgrade().is_none_or(|span| !span.is_open()))
     }

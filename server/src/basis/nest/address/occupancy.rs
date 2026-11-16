@@ -21,11 +21,11 @@ pub(crate) struct Occupancy {
 }
 
 /// Prepared while the owning Layout lock remains held through commit. This is
-/// unpublished capacity and identity span, not a second occupancy ledger.
+/// unpublished capacity and identity reservation, not a second occupancy ledger.
 pub(crate) struct PreparedRetirement {
     pieces: Vec<(usize, usize, usize)>,
     identities: Option<core::ops::RangeInclusive<usize>>,
-    span: usize,
+    reservation: usize,
 }
 
 impl PreparedRetirement {
@@ -150,54 +150,6 @@ impl Occupancy {
         }
     }
 
-    /// Release a page-aligned subrange of one exact occupancy generation.
-    /// The remaining left/right pieces keep the same generation identity, so a
-    /// stale credential cannot release a newer occupant.
-    pub(crate) fn release_range(
-        &mut self,
-        start: usize,
-        last: usize,
-        reservation_id: usize,
-    ) -> bool {
-        if start > last {
-            return false;
-        }
-        let Some(at) = self.spans.iter().position(|slot| {
-            slot.start <= start
-                && slot.last >= last
-                && slot.id == reservation_id
-                && slot.ticket == 0
-        }) else {
-            return false;
-        };
-        let whole_start = self.spans[at].start;
-        let whole_last = self.spans[at].last;
-        if start == whole_start && last == whole_last {
-            self.spans.remove(at);
-            return true;
-        }
-        if start == whole_start {
-            self.spans[at].start = last + 1;
-            return true;
-        }
-        if last == whole_last {
-            self.spans[at].last = start - 1;
-            return true;
-        }
-        if self.spans.try_reserve(1).is_err() {
-            return false;
-        }
-        let right = Span {
-            start: last + 1,
-            last: whole_last,
-            ticket: 0,
-            id: reservation_id,
-        };
-        self.spans[at].last = start - 1;
-        self.spans.insert(at + 1, right);
-        true
-    }
-
     /// 该 generation 是否还在占用表里。
     pub(crate) fn has_id(&self, id: usize) -> bool {
         self.spans.iter().any(|slot| slot.id == id)
@@ -261,9 +213,9 @@ impl Occupancy {
         &mut self,
         start: usize,
         last: usize,
-        span: usize,
+        reservation: usize,
     ) -> Result<PreparedRetirement, AddressError> {
-        let pieces = self.pieces(start, last, span)?;
+        let pieces = self.pieces(start, last, reservation)?;
         let fresh = pieces.iter().filter(|(_, _, ticket)| *ticket == 0).count();
         self.spans
             .try_reserve(fresh.checked_mul(2).ok_or(AddressError::OutOfMemory)?)
@@ -278,7 +230,7 @@ impl Occupancy {
         Ok(PreparedRetirement {
             pieces,
             identities,
-            span,
+            reservation,
         })
     }
 
@@ -295,7 +247,7 @@ impl Occupancy {
                     .as_mut()
                     .and_then(Iterator::next)
                     .expect("prepared retirement identity");
-                self.retire_piece(*start, *last, prepared.span, *ticket);
+                self.retire_piece(*start, *last, prepared.reservation, *ticket);
             }
         }
         prepared.pieces
@@ -354,7 +306,7 @@ impl Occupancy {
         }
     }
 
-    /// Caller proved every hardware obligation of this span settled.
+    /// Caller proved every hardware obligation of this reservation settled.
     pub(crate) fn release_settled(&mut self, id: usize) {
         self.spans.retain(|span| span.id != id);
     }

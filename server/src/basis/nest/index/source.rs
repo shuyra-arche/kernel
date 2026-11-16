@@ -23,14 +23,14 @@ use crate::basis::nest::{NestError, NestId, authority::RangeBinding};
 
 struct Record {
     source_id: kernel_api::model::flat::FlatId,
-    span: Weak<Span>,
+    reservation: Weak<Span>,
     binding: Option<Weak<RangeBinding>>,
     wake: (NestId, usize),
     next: Option<alloc::boxed::Box<Record>>,
 }
 
 /// 全核唯一的一份关联：单链头，每条一个关系。
-struct SourceSpans {
+struct SourceReservations {
     records: LegacyLock<crate::basis::sync::order::SourceIndex, Records>,
 }
 
@@ -127,7 +127,7 @@ impl Records {
 }
 impl Record {
     fn live(&self) -> bool {
-        self.span.strong_count() != 0
+        self.reservation.strong_count() != 0
             && self
                 .binding
                 .as_ref()
@@ -135,9 +135,9 @@ impl Record {
     }
 }
 
-fn registry() -> &'static SourceSpans {
-    static REGISTRY: OnceLock<SourceSpans> = OnceLock::new();
-    REGISTRY.get_or_init(|| SourceSpans {
+fn registry() -> &'static SourceReservations {
+    static REGISTRY: OnceLock<SourceReservations> = OnceLock::new();
+    REGISTRY.get_or_init(|| SourceReservations {
         records: LegacyLock::new(Records::new()),
     })
 }
@@ -197,7 +197,7 @@ pub(crate) fn register(
     // 先备好节点：锁内不分配也不升级任何强引用。
     let record = Box::try_new(Record {
         source_id,
-        span: Arc::downgrade(reservation),
+        reservation: Arc::downgrade(reservation),
         binding: binding.map(Arc::downgrade),
         wake,
         next: None,
@@ -208,7 +208,7 @@ pub(crate) fn register(
     let mut duplicate = false;
     let mut inspect = |known: &Record| {
         if known.source_id == source_id
-            && known.span.as_ptr() == identity
+            && known.reservation.as_ptr() == identity
             && match (&known.binding, binding) {
                 (None, None) => true,
                 (Some(known), Some(binding)) => known.as_ptr() == Arc::as_ptr(binding),
@@ -260,8 +260,11 @@ pub(crate) fn advance() -> bool {
             Step::Idle => break,
             Step::Visited(candidate) => candidate,
         };
-        if let Some((space, span)) = candidate {
-            crate::basis::sign::signal(crate::basis::sign::WakeKey::Span { space, span });
+        if let Some((space, reservation)) = candidate {
+            crate::basis::sign::signal(crate::basis::sign::WakeKey::Reservation {
+                space,
+                reservation,
+            });
         }
     }
     pending()

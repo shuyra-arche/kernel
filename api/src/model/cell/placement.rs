@@ -1,5 +1,5 @@
 //! 一次选址的完整数据：选址方式与起始对齐。
-//! 选址值嵌入 CreateSpanRequest 的单次快照；ABI codec 负责 checked 解码。
+//! 选址值嵌入 ReserveRequest 的单次快照；ABI codec 负责 checked 解码。
 //!
 //! 描述里只有选址数据：没有来源、授权、清理或长度。
 
