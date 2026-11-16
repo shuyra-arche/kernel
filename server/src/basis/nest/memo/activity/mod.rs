@@ -42,8 +42,8 @@ fn now() -> u64 {
 fn authorized(authority: &Pend, span: &Span, page: usize) -> bool {
     authority.selects(
         Operations::Nest(NestRights::INSPECT | NestRights::SAMPLE),
-        PendScope::Nest(NestScope::Reservation {
-            id: kernel_api::model::nest::ReservationId::from_bytes(
+        PendScope::Nest(NestScope::Span {
+            id: kernel_api::model::nest::SpanId::from_bytes(
                 &(span.identity() as u64).to_le_bytes(),
             )
             .expect("reservation identity"),

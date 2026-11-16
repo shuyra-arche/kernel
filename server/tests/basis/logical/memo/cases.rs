@@ -86,11 +86,11 @@ fn in_place_protect_requires_a_fresh_cpu_completion_without_republishing_retenti
 
 #[test]
 fn next_observation_keeps_physical_identity_through_failed_fence_and_retirement() {
-    use kernel_api::model::nest::{MemoPhase, NestId, ReservationId};
+    use kernel_api::model::nest::{MemoPhase, NestId, SpanId};
     let observe = |memo: &Memo, failed| {
         memo.snapshot(
             NestId::new(1).unwrap(),
-            ReservationId::from_bytes(&2u64.to_le_bytes()).unwrap(),
+            SpanId::from_bytes(&2u64.to_le_bytes()).unwrap(),
             0,
             kernel_api::model::cell::CellLevel::BASE,
             failed,
@@ -144,7 +144,7 @@ fn next_observation_keeps_physical_identity_through_failed_fence_and_retirement(
 
 #[test]
 fn whole_namespace_withdrawal_retains_memo_page_until_its_batch_settles() {
-    use kernel_api::model::nest::{MemoPhase, NestId, ReservationId};
+    use kernel_api::model::nest::{MemoPhase, NestId, SpanId};
     let (mut memo, registry, binding) = logical();
     let pool = Pool::new(0);
     let data = page(pool);
@@ -158,7 +158,7 @@ fn whole_namespace_withdrawal_retains_memo_page_until_its_batch_settles() {
     assert!(memo.clear().is_err());
     let status = memo.snapshot(
         NestId::new(1).unwrap(),
-        ReservationId::from_bytes(&2u64.to_le_bytes()).unwrap(),
+        SpanId::from_bytes(&2u64.to_le_bytes()).unwrap(),
         0,
         kernel_api::model::cell::CellLevel::BASE,
         false,

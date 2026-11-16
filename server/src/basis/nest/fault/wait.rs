@@ -95,7 +95,7 @@ impl Cpu {
                 .ok_or(Failure::VersionExhausted)?;
             let wire = FaultEvent {
                 nest: nest.id(),
-                reservation: memo.reservation,
+                span: memo.span,
                 epoch: state.epoch,
                 sequence: FaultSequence::new(1).unwrap(),
                 memo_page: page,

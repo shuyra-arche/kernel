@@ -128,7 +128,7 @@ impl Reservation {
             return Err(PendFail::Dead);
         }
         let entry = pend::locate(actor, token).ok_or(PendFail::Denied)?;
-        let PendScope::Nest(NestScope::Reservation { id, .. }) = entry.scope() else {
+        let PendScope::Nest(NestScope::Span { id, .. }) = entry.scope() else {
             return Err(PendFail::Denied);
         };
         if !entry.authority().permits(Operations::Nest(rights)) {
@@ -165,10 +165,11 @@ impl Reservation {
         nest
     }
 
-    pub(crate) fn id(&self) -> kernel_api::model::nest::ReservationId {
-        let kernel_api::model::pend::PendScope::Nest(
-            kernel_api::model::pend::NestScope::Reservation { id, .. },
-        ) = self.entry.scope()
+    pub(crate) fn id(&self) -> kernel_api::model::nest::SpanId {
+        let kernel_api::model::pend::PendScope::Nest(kernel_api::model::pend::NestScope::Span {
+            id,
+            ..
+        }) = self.entry.scope()
         else {
             unreachable!("scope attenuation preserves Reservation identity")
         };
@@ -188,7 +189,7 @@ impl Reservation {
         use kernel_api::model::pend::{NestScope, PendRange, PendScope};
         if position.token() != self.entry.token()
             || position.nest() != self.nest().id()
-            || position.reservation() != self.id()
+            || position.span() != self.id()
         {
             return Err(PendFail::Denied);
         }
@@ -197,8 +198,8 @@ impl Reservation {
         let grain = span.grain();
         if !self.entry.authority().selects(
             Operations::Nest(self.rights),
-            PendScope::Nest(NestScope::Reservation {
-                id: position.reservation(),
+            PendScope::Nest(NestScope::Span {
+                id: position.span(),
                 range: PendRange::Pages {
                     offset: page,
                     count: grain,

@@ -21,7 +21,7 @@ pub(in crate::entry::call) fn effect(
 ) -> Result<Value, Failure> {
     if matches!(
         action,
-        Action::CreateNest { .. } | Action::Release { .. } | Action::DeleteNest { .. }
+        Action::CreateNest { .. } | Action::DeleteSpan { .. } | Action::DeleteNest { .. }
     ) {
         return lifecycle::effect(actor, action, receipt);
     }
@@ -354,7 +354,7 @@ pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Resul
     }
     match action {
         Action::FaultRoute { .. } => basis::nest::fault::configure(actor, action),
-        Action::Reserve { .. } => lifecycle::mutate(actor, action),
+        Action::CreateSpan { .. } => lifecycle::mutate(actor, action),
         Action::Insert {
             target,
             expected,

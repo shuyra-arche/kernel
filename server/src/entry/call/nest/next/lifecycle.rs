@@ -5,11 +5,11 @@ use crate::basis::nest::{Access, SpaceKind, authority::binding};
 use crate::basis::nest::{
     Nest, Placement, PlacementAt, RegionKind, authority::binding::Error as BindingError,
 };
-use kernel_api::model::nest::ReserveRequest;
+use kernel_api::model::nest::CreateSpanRequest;
 use kernel_api::model::{
     identity::Mark,
     modifiable::Modifiable,
-    nest::{NestPhase, NestStatus, ReservationId, ReservationPhase},
+    nest::{NestPhase, NestStatus, SpanId, SpanPhase},
     pend::{CreationRights, NestScope, PendScope},
 };
 
@@ -26,13 +26,14 @@ fn error(error: BindingError) -> Failure {
 
 pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure> {
     match action {
-        Action::Reserve {
+        Action::CreateSpan {
             token,
             nest: id,
             expected,
-            reservation,
+            request,
         } => {
-            let parent = binding::authorized(actor, token, NestRights::RESERVE).map_err(error)?;
+            let parent =
+                binding::authorized(actor, token, NestRights::CREATE_SPAN).map_err(error)?;
             let nest = parent.target().nest().ok_or(Failure::Denied)?;
             if nest.id() != id {
                 return Err(Failure::Denied);
@@ -41,37 +42,37 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
                 return Err(Failure::Stale);
             }
             expected.next().ok_or(Failure::VersionExhausted)?;
-            if reservation.level.get() >= crate::metal::mmu::internal::mode::levels() {
+            if request.level.get() >= crate::metal::mmu::internal::mode::levels() {
                 return Err(Failure::NotAligned);
             }
-            let access = Access::from_wire(reservation.access).ok_or(Failure::Invalid)?;
+            let access = Access::from_wire(request.access).ok_or(Failure::Invalid)?;
             if access.contains(Access::WRITE) && parent.modifiable() != Modifiable::Yes {
                 return Err(Failure::Denied);
             }
             let prepared = nest
                 .reserve_reservation(
-                    placement(&nest, reservation).map_err(error)?,
-                    reservation.level,
+                    placement(&nest, request).map_err(error)?,
+                    request.level,
                     access,
                     actor.ident.id,
                 )
                 .map_err(nest_error)?;
             let span = prepared.span();
             span.faults.lock().enable_native();
-            let id = ReservationId::from_bytes(&(span.identity() as u64).to_le_bytes())
+            let id = SpanId::from_bytes(&(span.identity() as u64).to_le_bytes())
                 .expect("reservation identity");
-            let grant = pend::prepare_reservation(actor, &parent, id, reservation.count)
-                .map_err(pend_error)?;
+            let grant =
+                pend::prepare_reservation(actor, &parent, id, request.count).map_err(pend_error)?;
             let token = grant.entry().token();
             let span = prepared
                 .publish(grant.entry().authority())
                 .map_err(nest_error)?;
             grant.publish();
-            Ok(Value::Reservation {
+            Ok(Value::Span {
                 token,
                 nest: nest.id(),
                 nest_version: nest.version(),
-                reservation: id,
+                span: id,
                 version: span.version(),
                 address: span.initial_start(),
             })
@@ -98,10 +99,10 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
                 }
             }
         }
-        Query::Reservation {
+        Query::Span {
             token,
             nest: id,
-            reservation,
+            span: reservation,
         } => {
             let route =
                 Reservation::acquire(actor, token, NestRights::INSPECT).map_err(pend_error)?;
@@ -110,7 +111,7 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
             }
             let span = route.span().map_err(pend_error)?;
             let (offset, count) = route.entry().authority().window().ok_or(Failure::Denied)?;
-            Snapshot::Reservation(
+            Snapshot::Span(
                 route
                     .nest()
                     .reservation_snapshot(
@@ -175,10 +176,10 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        Action::Release {
+        Action::DeleteSpan {
             token,
             nest: id,
-            reservation,
+            span: reservation,
             expected,
         } => {
             let (nest, span) = {
@@ -190,8 +191,8 @@ pub(super) fn effect(
                 let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
                 if !entry
                     .authority()
-                    .permits(Operations::Nest(NestRights::RELEASE))
-                    || !matches!(entry.scope(), PendScope::Nest(NestScope::Reservation { id, .. }) if id == reservation)
+                    .permits(Operations::Nest(NestRights::DELETE_SPAN))
+                    || !matches!(entry.scope(), PendScope::Nest(NestScope::Span { id, .. }) if id == reservation)
                 {
                     return Err(Failure::Denied);
                 }
@@ -209,21 +210,21 @@ pub(super) fn effect(
                 }
                 expected.next().ok_or(Failure::VersionExhausted)?;
                 nest.begin_release(&span, expected).map_err(nest_error)?;
-                receipt.start(Value::ReservationLifecycle {
+                receipt.start(Value::SpanLifecycle {
                     nest: id,
-                    reservation,
+                    span: reservation,
                     version: span.version(),
-                    phase: ReservationPhase::Releasing,
+                    phase: SpanPhase::Closing,
                 });
                 (nest, span)
             };
             nest.release_reservation(reservation).map_err(cell_error)?;
             let _commit = basis::commit();
-            let value = Value::ReservationLifecycle {
+            let value = Value::SpanLifecycle {
                 nest: id,
-                reservation,
+                span: reservation,
                 version: span.version(),
-                phase: ReservationPhase::Released,
+                phase: SpanPhase::Closed,
             };
             receipt.committed(value);
             Ok(value)
@@ -274,7 +275,7 @@ pub(super) fn effect(
     }
 }
 
-fn placement(nest: &Nest, request: ReserveRequest) -> Result<Placement, BindingError> {
+fn placement(nest: &Nest, request: CreateSpanRequest) -> Result<Placement, BindingError> {
     let size = request
         .count
         .checked_bytes()

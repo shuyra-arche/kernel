@@ -10,7 +10,7 @@ use alloc::sync::{Arc, Weak};
 use binding::Binding;
 use kernel_api::{
     abi::memory::{Failure, Observation, Query, Snapshot, Value},
-    model::nest::{FaultEpoch, FaultPhase, FaultRoute, FaultStatus, NestId, ReservationId},
+    model::nest::{FaultEpoch, FaultPhase, FaultRoute, FaultStatus, NestId, SpanId},
 };
 use queue::Queue;
 
@@ -126,7 +126,7 @@ fn full_route(
     actor: &Arc<Task>,
     token: kernel_api::model::identity::PendId,
     id: NestId,
-    reservation: ReservationId,
+    reservation: SpanId,
     rights: kernel_api::model::pend::NestRights,
 ) -> Result<(pend::access::Reservation, Arc<Span>), Failure> {
     let route =
@@ -147,7 +147,7 @@ pub(crate) fn configure(
     let kernel_api::abi::memory::Action::FaultRoute {
         token,
         nest,
-        reservation,
+        span: reservation,
         expected,
         epoch,
         route: config,
@@ -177,8 +177,7 @@ pub(crate) fn configure(
     let old = {
         let nest_state = route.nest().state.lock();
         let span_state = span.state.lock();
-        if !nest_state.is_open() || span_state.phase != super::address::span::ReservationPhase::Open
-        {
+        if !nest_state.is_open() || span_state.phase != super::address::span::SpanPhase::Open {
             return Err(Failure::Dead);
         }
         if span.version() != expected {
@@ -193,7 +192,7 @@ pub(crate) fn configure(
     }
     Ok(Value::FaultRoute {
         nest,
-        reservation,
+        span: reservation,
         version,
         epoch,
         phase: if config.is_some() {
@@ -207,7 +206,7 @@ pub(crate) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
     let Query::FaultRoute {
         token,
         nest,
-        reservation,
+        span: reservation,
     } = query
     else {
         return Err(Failure::Invalid);
@@ -224,7 +223,7 @@ pub(crate) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
     let state = span.faults.lock();
     let status = FaultStatus {
         nest,
-        reservation,
+        span: reservation,
         epoch: state.epoch,
         phase: match active {
             Ok(_) if !state.lost() => FaultPhase::Active,

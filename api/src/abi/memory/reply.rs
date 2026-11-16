@@ -9,10 +9,10 @@ use crate::model::{
     cell::CellLevel,
     flat::{BlockPhase, BlockRef, FlatId, FlatPhase, FlatVersion, Reshape, SlotVersion},
     identity::PendId,
-    nest::ReservationId,
+    nest::SpanId,
     nest::{
-        FaultEpoch, FaultPhase, MemoGeneration, NestId, NestPhase, NestVersion, ReservationPhase,
-        ReservationVersion,
+        FaultEpoch, FaultPhase, MemoGeneration, NestId, NestPhase, NestVersion, SpanPhase,
+        SpanVersion,
     },
 };
 
@@ -22,8 +22,8 @@ use crate::model::{
 pub enum Value {
     FaultRoute {
         nest: NestId,
-        reservation: ReservationId,
-        version: ReservationVersion,
+        span: SpanId,
+        version: SpanVersion,
         epoch: FaultEpoch,
         phase: FaultPhase,
     },
@@ -45,12 +45,12 @@ pub enum Value {
         nest: NestId,
         version: NestVersion,
     },
-    Reservation {
+    Span {
         token: PendId,
         nest: NestId,
         nest_version: NestVersion,
-        reservation: ReservationId,
-        version: ReservationVersion,
+        span: SpanId,
+        version: SpanVersion,
         address: VirtAddr,
     },
     FlatLifecycle {
@@ -63,11 +63,11 @@ pub enum Value {
         version: NestVersion,
         phase: NestPhase,
     },
-    ReservationLifecycle {
+    SpanLifecycle {
         nest: NestId,
-        reservation: ReservationId,
-        version: ReservationVersion,
-        phase: ReservationPhase,
+        span: SpanId,
+        version: SpanVersion,
+        phase: SpanPhase,
     },
     Slot {
         version: SlotVersion,
@@ -92,7 +92,7 @@ impl Value {
         match (self, opcode) {
             (
                 Self::FaultRoute {
-                    reservation,
+                    span,
                     version,
                     epoch,
                     phase,
@@ -100,7 +100,7 @@ impl Value {
                 },
                 Opcode::FaultRoute,
             ) => {
-                valid_token(reservation.get())
+                valid_token(span.get())
                     && version.get() > 1
                     && epoch.get() > 1
                     && matches!(phase, FaultPhase::Active | FaultPhase::Disabled)
@@ -113,24 +113,22 @@ impl Value {
                 valid_token(token.get())
             }
             (
-                Self::Reservation {
+                Self::Span {
                     token,
-                    reservation,
+                    span,
                     address,
                     ..
                 },
-                Opcode::Reserve,
+                Opcode::CreateSpan,
             ) => {
                 valid_token(token.get())
-                    && valid_token(reservation.get())
+                    && valid_token(span.get())
                     && address.get().is_multiple_of(BASE_PAGE_SIZE)
                     && address.get().checked_add(BASE_PAGE_SIZE).is_some()
             }
             (Self::FlatLifecycle { .. }, Opcode::Delete(Domain::Flat))
             | (Self::NestLifecycle { .. }, Opcode::Delete(Domain::Nest)) => true,
-            (Self::ReservationLifecycle { reservation, .. }, Opcode::Release) => {
-                valid_token(reservation.get())
-            }
+            (Self::SpanLifecycle { span, .. }, Opcode::DeleteSpan) => valid_token(span.get()),
             (Self::Slot { page, .. }, Opcode::Occupy | Opcode::Vacate) => page <= isize::MAX as u64,
             (Self::Transfer { page, .. }, Opcode::Push | Opcode::Pull) => {
                 page > 0 && page <= isize::MAX as u64
@@ -152,7 +150,7 @@ impl Value {
         match self {
             Self::FaultRoute {
                 nest,
-                reservation,
+                span,
                 version,
                 epoch,
                 phase,
@@ -160,7 +158,7 @@ impl Value {
                 for word in [
                     12,
                     nest.get() as u64,
-                    reservation.get() as u64,
+                    span.get() as u64,
                     version.get(),
                     epoch.get(),
                     phase as u64,
@@ -202,11 +200,11 @@ impl Value {
                 out.word(nest.get() as u64)?;
                 out.word(version.get())
             }
-            Self::Reservation {
+            Self::Span {
                 token,
                 nest,
                 nest_version,
-                reservation,
+                span,
                 version,
                 address,
             } => {
@@ -214,7 +212,7 @@ impl Value {
                 out.word(token.get() as u64)?;
                 out.word(nest.get() as u64)?;
                 out.word(nest_version.get())?;
-                out.word(reservation.get() as u64)?;
+                out.word(span.get() as u64)?;
                 out.word(version.get())?;
                 out.word(address.get() as u64)
             }
@@ -238,15 +236,15 @@ impl Value {
                 out.word(version.get())?;
                 out.word(phase as u64)
             }
-            Self::ReservationLifecycle {
+            Self::SpanLifecycle {
                 nest,
-                reservation,
+                span,
                 version,
                 phase,
             } => {
                 out.word(10)?;
                 out.word(nest.get() as u64)?;
-                out.word(reservation.get() as u64)?;
+                out.word(span.get() as u64)?;
                 out.word(version.get())?;
                 out.word(phase as u64)
             }
@@ -281,8 +279,8 @@ impl Value {
         Some(match input.word()? {
             12 => Some(Self::FaultRoute {
                 nest: NestId::new(input.size()?)?,
-                reservation: input.reservation()?,
-                version: ReservationVersion::new(input.word()?)?,
+                span: input.span()?,
+                version: SpanVersion::new(input.word()?)?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 phase: FaultPhase::from_tag(input.word()?)?,
             }),
@@ -302,12 +300,12 @@ impl Value {
                 nest: NestId::new(input.size()?)?,
                 version: NestVersion::new(input.word()?)?,
             }),
-            7 => Some(Self::Reservation {
+            7 => Some(Self::Span {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
                 nest_version: NestVersion::new(input.word()?)?,
-                reservation: input.reservation()?,
-                version: ReservationVersion::new(input.word()?)?,
+                span: input.span()?,
+                version: SpanVersion::new(input.word()?)?,
                 address: VirtAddr::new(input.size()?),
             }),
             8 => Some(Self::FlatLifecycle {
@@ -327,11 +325,11 @@ impl Value {
                     _ => return None,
                 },
             }),
-            10 => Some(Self::ReservationLifecycle {
+            10 => Some(Self::SpanLifecycle {
                 nest: NestId::new(input.size()?)?,
-                reservation: input.reservation()?,
-                version: ReservationVersion::new(input.word()?)?,
-                phase: ReservationPhase::from_tag(input.word()?)?,
+                span: input.span()?,
+                version: SpanVersion::new(input.word()?)?,
+                phase: SpanPhase::from_tag(input.word()?)?,
             }),
             0 => None,
             1 => Some(Self::Slot {
@@ -394,7 +392,7 @@ impl Outcome {
                         | Failure::RequestMismatch
                         | Failure::FaultExpired
                 ) && match (opcode, retained) {
-                    (Opcode::Create(_) | Opcode::Reserve | Opcode::FaultRoute, None) => true,
+                    (Opcode::Create(_) | Opcode::CreateSpan | Opcode::FaultRoute, None) => true,
                     (
                         Opcode::Delete(Domain::Flat),
                         Some(Value::FlatLifecycle {
@@ -410,10 +408,10 @@ impl Outcome {
                         }),
                     ) => true,
                     (
-                        Opcode::Release,
+                        Opcode::DeleteSpan,
                         Some(
-                            value @ Value::ReservationLifecycle {
-                                phase: ReservationPhase::Releasing | ReservationPhase::Failed,
+                            value @ Value::SpanLifecycle {
+                                phase: SpanPhase::Closing | SpanPhase::Failed,
                                 ..
                             },
                         ),
@@ -469,9 +467,9 @@ impl Outcome {
                                 ..
                             }
                         ) | (
-                            Opcode::Release,
-                            Value::ReservationLifecycle {
-                                phase: ReservationPhase::Releasing,
+                            Opcode::DeleteSpan,
+                            Value::SpanLifecycle {
+                                phase: SpanPhase::Closing,
                                 ..
                             }
                         ) | (
@@ -501,8 +499,8 @@ impl Outcome {
                         (Opcode::Delete(Domain::Nest), Value::NestLifecycle { phase, .. }) => {
                             phase == NestPhase::Closed
                         }
-                        (Opcode::Release, Value::ReservationLifecycle { phase, .. }) => {
-                            phase == ReservationPhase::Released
+                        (Opcode::DeleteSpan, Value::SpanLifecycle { phase, .. }) => {
+                            phase == SpanPhase::Closed
                         }
                         (Opcode::Occupy, Value::Slot { page, .. }) => page != 0,
                         (Opcode::Vacate, Value::Slot { page, .. }) => page == 0,
@@ -602,7 +600,7 @@ impl Reply {
                     (
                         Action::FaultRoute {
                             nest,
-                            reservation,
+                            span,
                             expected,
                             epoch,
                             route,
@@ -610,14 +608,14 @@ impl Reply {
                         },
                         Outcome::Committed(Value::FaultRoute {
                             nest: actual_nest,
-                            reservation: actual_reservation,
+                            span: actual_span,
                             version,
                             epoch: actual_epoch,
                             phase,
                         }),
                     ) => {
                         nest == actual_nest
-                            && reservation == actual_reservation
+                            && span == actual_span
                             && expected.next() == Some(version)
                             && epoch.next() == Some(actual_epoch)
                             && phase

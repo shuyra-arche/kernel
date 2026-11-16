@@ -38,7 +38,7 @@ fn effective_limits(
                     .range(offset, count)
                     .map_err(|_| PendFail::NotAligned)?;
             }
-            PendScope::Nest(NestScope::Reservation { id, .. }) => {
+            PendScope::Nest(NestScope::Span { id, .. }) => {
                 let nest = entry.target().nest().ok_or(PendFail::Denied)?;
                 if !nest.reservation_open(id) {
                     return Err(PendFail::Dead);
@@ -257,7 +257,7 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
             (observed, limits, authorization)
         };
         // Persistent publisher routes discharge only through exact hardware withdrawal.
-        if let PendScope::Nest(NestScope::Reservation { id, .. }) = observed.scope() {
+        if let PendScope::Nest(NestScope::Span { id, .. }) = observed.scope() {
             let window = observed.authority().window().ok_or(PendFail::Denied)?;
             observed
                 .target()

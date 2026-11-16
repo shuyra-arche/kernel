@@ -162,7 +162,7 @@ impl Nest {
     pub(crate) fn begin_release(
         &self,
         span: &Arc<Span>,
-        expected: kernel_api::model::nest::ReservationVersion,
+        expected: kernel_api::model::nest::SpanVersion,
     ) -> Result<(), NestError> {
         self.check_owner(&span.reservation)?;
         let _state = self.state.lock();
@@ -297,14 +297,11 @@ impl Nest {
         Ok(())
     }
 
-    pub(crate) fn reservation(
-        &self,
-        id: kernel_api::model::nest::ReservationId,
-    ) -> Option<Arc<Span>> {
+    pub(crate) fn reservation(&self, id: kernel_api::model::nest::SpanId) -> Option<Arc<Span>> {
         self.reservations.registered(id.get())?.reservation
     }
 
-    pub(crate) fn reservation_open(&self, id: kernel_api::model::nest::ReservationId) -> bool {
+    pub(crate) fn reservation_open(&self, id: kernel_api::model::nest::SpanId) -> bool {
         self.is_open()
             && self
                 .reservation(id)
@@ -313,17 +310,17 @@ impl Nest {
 
     pub(crate) fn reservation_status(
         &self,
-        id: kernel_api::model::nest::ReservationId,
+        id: kernel_api::model::nest::SpanId,
     ) -> kernel_api::model::pend::PendStatus {
-        use address::span::ReservationPhase;
+        use address::span::SpanPhase;
         use kernel_api::model::pend::PendStatus;
         match self
             .reservation(id)
             .map(|mapping| mapping.state.lock().phase)
         {
-            Some(ReservationPhase::Open) if self.is_open() => PendStatus::Active,
-            Some(ReservationPhase::Open | ReservationPhase::Closing) => PendStatus::Retiring,
-            Some(ReservationPhase::Gone) | None => PendStatus::Dead,
+            Some(SpanPhase::Open) if self.is_open() => PendStatus::Active,
+            Some(SpanPhase::Open | SpanPhase::Closing) => PendStatus::Retiring,
+            Some(SpanPhase::Gone) | None => PendStatus::Dead,
         }
     }
 
@@ -335,23 +332,23 @@ impl Nest {
         offset: PageOffset,
         count: PageCount,
         writable: bool,
-    ) -> Result<kernel_api::model::nest::ReservationStatus, NestError> {
-        use kernel_api::model::nest::{ReservationId, ReservationPhase, ReservationStatus};
+    ) -> Result<kernel_api::model::nest::SpanStatus, NestError> {
+        use kernel_api::model::nest::{SpanId, SpanPhase, SpanStatus};
         self.check_owner(&span.reservation)?;
         let state = self.state.lock();
         let inner = span.state.lock();
         let phase = match inner.phase {
-            address::span::ReservationPhase::Open if state.is_open() => ReservationPhase::Open,
-            address::span::ReservationPhase::Gone => ReservationPhase::Released,
-            _ => ReservationPhase::Releasing,
+            address::span::SpanPhase::Open if state.is_open() => SpanPhase::Open,
+            address::span::SpanPhase::Gone => SpanPhase::Closed,
+            _ => SpanPhase::Closing,
         };
         let mut access = span.initial_access();
         if !writable {
             access.remove(Access::WRITE);
         }
-        Ok(ReservationStatus {
+        Ok(SpanStatus {
             nest: self.id(),
-            reservation: ReservationId::from_bytes(&(span.identity() as u64).to_le_bytes())
+            span: SpanId::from_bytes(&(span.identity() as u64).to_le_bytes())
                 .expect("reservation identity"),
             version: span.version(),
             offset: offset.get(),
@@ -365,7 +362,7 @@ impl Nest {
 
     pub(crate) fn reservation_root(
         &self,
-        id: kernel_api::model::nest::ReservationId,
+        id: kernel_api::model::nest::SpanId,
         root: &Arc<crate::basis::pend::Pend>,
     ) -> bool {
         self.reservations.registered(id.get()).is_some_and(|entry| {
@@ -378,14 +375,14 @@ impl Nest {
 
     pub(crate) fn reservation_count(
         &self,
-        id: kernel_api::model::nest::ReservationId,
+        id: kernel_api::model::nest::SpanId,
     ) -> Option<PageCount> {
         PageCount::new(self.reservation(id)?.initial_size() / PAGE_SIZE)
     }
 
     pub(crate) fn reservation_level(
         &self,
-        id: kernel_api::model::nest::ReservationId,
+        id: kernel_api::model::nest::SpanId,
     ) -> Option<kernel_api::model::cell::CellLevel> {
         Some(self.reservation(id)?.level())
     }
@@ -571,10 +568,10 @@ impl Nest {
     /// Close reservation admission before contending for its operation gate.
     pub(crate) fn release_reservation(
         &self,
-        id: kernel_api::model::nest::ReservationId,
+        id: kernel_api::model::nest::SpanId,
     ) -> Result<(), crate::basis::nest::memo::AccessError> {
         use crate::basis::nest::memo::AccessError;
-        use address::span::ReservationPhase;
+        use address::span::SpanPhase;
         let Some(mapping) = self.reservation(id) else {
             return Ok(());
         };
@@ -587,7 +584,7 @@ impl Nest {
         }
         fault::wake_span(&mapping);
         let _operation = mapping.operation().ok_or(AccessError::Busy)?;
-        if mapping.state.lock().phase == ReservationPhase::Gone {
+        if mapping.state.lock().phase == SpanPhase::Gone {
             return Ok(());
         }
         if mapping.source().is_some() {
@@ -671,7 +668,7 @@ impl Nest {
             layout.occupancy.release_settled(mapping.identity());
             let mut inner = mapping.state.lock();
             inner.active.clear();
-            inner.phase = ReservationPhase::Gone;
+            inner.phase = SpanPhase::Gone;
             mapping.changed();
         }
         sign::signal(self.reservation_key(&mapping));
@@ -683,7 +680,7 @@ impl Nest {
 
     pub(crate) fn withdraw_reservation(
         self: &Arc<Self>,
-        id: kernel_api::model::nest::ReservationId,
+        id: kernel_api::model::nest::SpanId,
         window: (PageOffset, PageCount),
         authority: &Arc<crate::basis::pend::Pend>,
     ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
@@ -696,7 +693,7 @@ impl Nest {
         mapping
             .range(window.0, window.1)
             .map_err(|_| PendFail::NotAligned)?;
-        if !matches!(authority.scope(), PendScope::Nest(NestScope::Reservation { id: known, .. }) if known == id)
+        if !matches!(authority.scope(), PendScope::Nest(NestScope::Span { id: known, .. }) if known == id)
         {
             return Err(PendFail::Denied);
         }
@@ -1495,10 +1492,8 @@ impl Nest {
         }
         Ok(memo.snapshot(
             self.id(),
-            kernel_api::model::nest::ReservationId::from_bytes(
-                &(mapping.identity() as u64).to_le_bytes(),
-            )
-            .expect("reservation identity"),
+            kernel_api::model::nest::SpanId::from_bytes(&(mapping.identity() as u64).to_le_bytes())
+                .expect("reservation identity"),
             index,
             mapping.level(),
             state.retirement.invalidation() == Invalidation::Failed,
@@ -1959,7 +1954,7 @@ impl Nest {
             self.is_open()
                 && mapping.is_open()
                 && authority.permits(Operations::Nest(NestRights::PROTECT))
-                && matches!(authority.scope(), PendScope::Nest(NestScope::Reservation { id, .. })
+                && matches!(authority.scope(), PendScope::Nest(NestScope::Span { id, .. })
                     if id.get() == mapping.identity())
                 && authority.contains(PageOffset::new(index), count)
                 && (!access.contains(Access::WRITE)
@@ -2207,11 +2202,11 @@ impl Nest {
         index: usize,
     ) -> Result<crate::basis::nest::memo::MemoInfo, NestError> {
         let state = self.state.lock();
-        if mapping.state.lock().phase == address::span::ReservationPhase::Gone {
+        if mapping.state.lock().phase == address::span::SpanPhase::Gone {
             return Err(NestError::NoRegion);
         }
         let level = if mapping.source().is_none() {
-            let id = kernel_api::model::nest::ReservationId::from_bytes(
+            let id = kernel_api::model::nest::SpanId::from_bytes(
                 &(mapping.identity() as u64).to_le_bytes(),
             )
             .ok_or(NestError::NoRegion)?;
