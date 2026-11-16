@@ -1,4 +1,4 @@
-//! An occupied address span and its range policy. Positions live in Nest's Memo table.
+//! An occupied address span and its range policy. Positions live in the Span's Memo table.
 mod access;
 use super::super::index::source;
 use super::super::memo::publication::{CellRuns, Publication};
@@ -6,7 +6,7 @@ use super::super::{CleanupNode, Nest, NestId};
 use super::NestRange;
 pub use access::{Access, ActiveRange};
 use alloc::boxed::Box;
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::basis::flat::FlatRange;
@@ -21,13 +21,11 @@ use kernel_api::model::cell::CellLevel;
 
 /// A stable address-span identity: the occupancy generation and its Nest.
 ///
-/// The numeric identity is the ABI `SpanId`. It is descriptive and never grants
-/// access; the owning Nest is retained weakly until positions move into the
-/// Span in the following #220 step.
+/// The numeric identity is the ABI `SpanId`; the `NestId` attributes it without
+/// retaining or locating the parent. It is descriptive and never grants access.
 pub(crate) struct SpanIdentity {
     id: usize,
     nest: NestId,
-    owner: Weak<Nest>,
 }
 
 impl SpanIdentity {
@@ -35,7 +33,6 @@ impl SpanIdentity {
         Self {
             id,
             nest: nest.id(),
-            owner: Arc::downgrade(nest),
         }
     }
 
@@ -47,8 +44,9 @@ impl SpanIdentity {
         self.nest
     }
 
-    pub(crate) fn owner(&self) -> Option<Arc<Nest>> {
-        self.owner.upgrade()
+    /// Whether this span belongs to `nest`, without locating it.
+    pub(crate) fn belongs_to(&self, nest: NestId) -> bool {
+        self.nest == nest
     }
 }
 
@@ -95,9 +93,8 @@ impl SpanRange {
 /// An occupied address span: identity, original range, permissions and source
 /// selection.
 ///
-/// It has no per-position Page, generation, publication or retirement state.
-/// Nest still owns those Memos in this step; the following #220 change makes
-/// them local to the Span. Keeping a historical span cannot keep a deleted
+/// It owns its per-position Memos; Nest owns the address index, translation
+/// and retirement batches. Keeping a historical span cannot keep a deleted
 /// position's Page or freeze alive.
 pub struct Span {
     pub(crate) faults:
@@ -284,12 +281,6 @@ impl Span {
         self.identity.id()
     }
 
-    /// 认住它的那个 Nest；已关闭的 Nest 不算。
-    pub fn owner(&self) -> Option<Arc<Nest>> {
-        let nest = self.identity.owner()?;
-        (!nest.is_closed()).then_some(nest)
-    }
-
     /// 这段关系等待位的那一对坐标：`(软件空间身份, 关系身份)`。
     ///
     /// 用**原始** Nest（关闭了也照给）：放行只看 NestId 与身份，已关闭的空间里
@@ -425,10 +416,19 @@ impl Span {
         &self,
         index: usize,
     ) -> Result<crate::basis::nest::memo::MemoInfo, NestError> {
-        self.identity
-            .owner()
-            .ok_or(NestError::NoRegion)?
-            .inspect_memo(self, index)
+        let state = self.state.lock();
+        if state.phase == SpanPhase::Gone {
+            return Err(NestError::NoRegion);
+        }
+        let address = self.position(index)?;
+        let vacant = crate::basis::nest::memo::Memo::vacant();
+        let mut info = state
+            .memos
+            .get(index)
+            .unwrap_or(&vacant)
+            .inspect(VirtAddr::new(address));
+        info.level = self.level();
+        Ok(info)
     }
 }
 
@@ -471,17 +471,28 @@ pub(crate) struct SpanState {
     pub(in crate::basis::nest) cleanup: Option<Box<CleanupNode>>,
     pub(crate) active: Vec<ActiveRange>,
     pub(crate) source: Option<FlatRange>,
+    /// Logical positions and their exact hardware obligations, owned here.
+    pub(in crate::basis::nest) memos: crate::basis::nest::memo::Memos,
     /// The narrowest creation access across all active ranges.
     pub(crate) initial_access: Access,
     pub(in crate::basis::nest) phase: SpanPhase,
 }
 
 impl SpanState {
+    /// Remove a settled non-active position after the covering fence.
+    pub(crate) fn take_deleted(&mut self, base: VirtAddr) -> Option<super::super::memo::Memo> {
+        if self.source.is_none() {
+            return None;
+        }
+        self.memos.take_deleted(base, &self.active)
+    }
+
     pub(crate) fn vacant() -> Self {
         Self {
             cleanup: None,
             active: Vec::new(),
             source: None,
+            memos: crate::basis::nest::memo::Memos::new(),
             initial_access: Access::empty(),
             phase: SpanPhase::Open,
         }

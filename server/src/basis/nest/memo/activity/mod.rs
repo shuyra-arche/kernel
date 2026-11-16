@@ -89,8 +89,8 @@ impl Nest {
         }
         // Physical identity is checked again while publishing this owner.
         let page_id = {
-            let state = self.state.lock();
-            let memo = state.memos.get(span, page).ok_or(Failure::Stale)?;
+            let state = span.state.lock();
+            let memo = state.memos.get(page).ok_or(Failure::Stale)?;
             if memo.generation() != generation {
                 return Err(Failure::Stale);
             }
@@ -112,12 +112,13 @@ impl Nest {
             if !authorized(authority, span, page) {
                 return Err(Failure::Denied);
             }
-            let mut state = self.state.lock();
+            let state = self.state.lock();
             self.ensure_owned(span, &state)
                 .map_err(|_| Failure::Stale)?;
-            let physical = state
+            let mut inner = span.state.lock();
+            let physical = inner
                 .memos
-                .get(span, page)
+                .get(page)
                 .and_then(|m| m.publication())
                 .ok_or(Failure::Stale)?
                 .cell()
@@ -134,7 +135,7 @@ impl Nest {
             {
                 return Err(Failure::Unsupported);
             }
-            let memo = state.memos.existing_mut(span, page).ok_or(Failure::Stale)?;
+            let memo = inner.memos.existing_mut(page).ok_or(Failure::Stale)?;
             if memo.generation() != generation
                 || memo
                     .publication()
@@ -171,7 +172,8 @@ impl Nest {
         if !state.retirement.invalidation().is_clean() {
             return Err(Failure::Busy);
         }
-        let memo = state.memos.get(span, page).ok_or(Failure::Stale)?;
+        let inner = span.state.lock();
+        let memo = inner.memos.get(page).ok_or(Failure::Stale)?;
         if memo.generation() != sampling.identity.generation
             || memo.in_flight()
             || memo
@@ -218,7 +220,8 @@ impl Nest {
             if !state.retirement.invalidation().is_clean() {
                 return Err(Failure::Busy);
             }
-            let memo = state.memos.get(span, page).ok_or(Failure::Stale)?;
+            let inner = span.state.lock();
+            let memo = inner.memos.get(page).ok_or(Failure::Stale)?;
             let identity = sampling.identity;
             if memo.generation() != identity.generation
                 || memo
