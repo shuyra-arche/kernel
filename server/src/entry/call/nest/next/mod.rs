@@ -316,7 +316,7 @@ pub(in crate::entry::call) fn inspect(
     query: NestQuery,
 ) -> Result<Observation, Failure> {
     if matches!(query, NestQuery::FaultRoute { .. }) {
-        return basis::nest::fault::inspect(actor, query.into());
+        return basis::nest::fault::inspect(actor, query);
     }
     if !matches!(query, NestQuery::Memo(_)) {
         return lifecycle::inspect(actor, query.into());
@@ -342,7 +342,7 @@ pub(in crate::entry::call) fn mutate(
         return Err(Failure::Dead);
     }
     match action {
-        NestAction::FaultRoute { .. } => basis::nest::fault::configure(actor, action.into()),
+        NestAction::FaultRoute { .. } => basis::nest::fault::configure(actor, action),
         NestAction::Reserve { .. } => lifecycle::mutate(actor, action),
         NestAction::Insert {
             target,

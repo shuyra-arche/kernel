@@ -20,7 +20,7 @@ pub(crate) struct Read {
     actor: Weak<Task>,
     span: Arc<Span>,
     binding: Arc<Binding>,
-    query: Query,
+    query: NestQuery,
     output: VirtAddr,
     deadline: u64,
 }
@@ -30,8 +30,12 @@ pub(crate) struct Read {
 unsafe impl Send for Read {}
 unsafe impl Sync for Read {}
 impl Read {
-    pub(crate) fn new(actor: &Arc<Task>, query: Query, output: VirtAddr) -> Result<Self, Failure> {
-        let Query::FaultEvent {
+    pub(crate) fn new(
+        actor: &Arc<Task>,
+        query: NestQuery,
+        output: VirtAddr,
+    ) -> Result<Self, Failure> {
+        let NestQuery::FaultEvent {
             token,
             nest,
             span: reservation,
@@ -75,7 +79,7 @@ impl Read {
         self.deadline
     }
     fn poll(&self) -> Result<FaultEvent, Failure> {
-        let Query::FaultEvent {
+        let NestQuery::FaultEvent {
             token,
             epoch,
             after,
@@ -115,7 +119,7 @@ impl Read {
         matches!(result, Err(Failure::Busy))
             && matches!(
                 self.query,
-                Query::FaultEvent {
+                NestQuery::FaultEvent {
                     wait: Wait::At(_),
                     ..
                 }

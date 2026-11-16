@@ -78,8 +78,11 @@ fn run(
     }
     drop(root);
     if let Action::Inspect(query @ memory::Query::FaultEvent { .. }) = request.action() {
-        let wait =
-            basis::nest::fault::read::Read::new(&actor, query, VirtAddr::new(frame.output()))?;
+        let wait = basis::nest::fault::read::Read::new(
+            &actor,
+            memory::nest::Query::try_from(query).map_err(|_| Failure::Unsupported)?,
+            VirtAddr::new(frame.output()),
+        )?;
         drop(actor);
         drop(ident);
         return Ok(match basis::nest::fault::read::park(wait) {

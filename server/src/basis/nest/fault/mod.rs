@@ -9,7 +9,9 @@ use crate::basis::{pend, sign, unit::task::Task};
 use alloc::sync::{Arc, Weak};
 use binding::Binding;
 use kernel_api::{
-    abi::memory::{Failure, Observation, Query, Snapshot, Value},
+    abi::memory::{
+        Failure, Observation, Snapshot, Value, nest::Action as NestAction, nest::Query as NestQuery,
+    },
     model::nest::{FaultEpoch, FaultPhase, FaultRoute, FaultStatus, NestId, SpanId},
 };
 use queue::Queue;
@@ -140,11 +142,8 @@ fn full_route(
     }
     Ok((route, span))
 }
-pub(crate) fn configure(
-    actor: &Arc<Task>,
-    action: kernel_api::abi::memory::Action,
-) -> Result<Value, Failure> {
-    let kernel_api::abi::memory::Action::FaultRoute {
+pub(crate) fn configure(actor: &Arc<Task>, action: NestAction) -> Result<Value, Failure> {
+    let NestAction::FaultRoute {
         token,
         nest,
         span: reservation,
@@ -202,8 +201,8 @@ pub(crate) fn configure(
         },
     })
 }
-pub(crate) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Failure> {
-    let Query::FaultRoute {
+pub(crate) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation, Failure> {
+    let NestQuery::FaultRoute {
         token,
         nest,
         span: reservation,

@@ -45,7 +45,7 @@ pub(crate) mod basis {
                 impl Read {
                     pub(crate) fn new(
                         _: &std::sync::Arc<crate::support::Task>,
-                        _: kernel_api::abi::memory::Query,
+                        _: kernel_api::abi::memory::nest::Query,
                         _: kernel_api::address::VirtAddr,
                     ) -> Result<Self, kernel_api::abi::memory::Failure> {
                         Err(kernel_api::abi::memory::Failure::Unsupported)
