@@ -2,7 +2,7 @@
 use alloc::sync::Arc;
 
 use super::{Access, Span};
-use crate::basis::cell::page::Change;
+use crate::basis::cell::page::{Change, Freeze};
 use crate::basis::nest::memo::publication::Publication;
 use crate::basis::nest::{
     Nest, NestError, authority,
@@ -11,7 +11,7 @@ use crate::basis::nest::{
 };
 use crate::basis::sign::WakeKey;
 use crate::metal::mmu::internal::identity;
-use kernel_api::address::{PageOffset, VirtAddr};
+use kernel_api::address::{PageCount, PageOffset, VirtAddr};
 
 impl Span {
     /// Insert a logical association into one position. The caller holds COMMIT
@@ -556,6 +556,284 @@ impl Span {
             Err(memo::AccessError::Busy)
         } else {
             Ok(())
+        }
+    }
+}
+
+impl Span {
+    pub(crate) fn protect(
+        self: &Arc<Self>,
+        nest: &Arc<Nest>,
+        index: usize,
+        expected: u64,
+        access: Access,
+        authority: &Arc<crate::basis::pend::Pend>,
+        actor: Option<&Arc<crate::basis::unit::task::Task>>,
+        accepted: &mut impl FnMut(u64),
+    ) -> Result<(), crate::basis::nest::memo::AccessError> {
+        use crate::basis::nest::memo::AccessError;
+        use kernel_api::model::modifiable::Modifiable;
+        use kernel_api::model::pend::{NestRights, NestScope, Operations, PendScope};
+        let _operation = self.operation().ok_or(AccessError::Busy)?;
+        nest.ensure_span(self)?;
+        if nest.is_external() || !access.is_leaf_set() {
+            return Err(AccessError::Denied);
+        }
+        nest.finish_invalidation()?;
+        self.finish_memo(index);
+        let (ceiling, _) = self.access(index)?;
+        let count = PageCount::new(self.grain()).ok_or(AccessError::NotAligned)?;
+        let admitted = || {
+            nest.is_open()
+                && self.is_open()
+                && authority.permits(Operations::Nest(NestRights::PROTECT))
+                && matches!(authority.scope(), PendScope::Nest(NestScope::Span { id, .. })
+                    if id.get() == self.identity())
+                && authority.contains(PageOffset::new(index), count)
+                && (!access.contains(Access::WRITE)
+                    || authority.modifiable() == Some(Modifiable::Yes))
+        };
+        let commit = crate::basis::commit();
+        if !admitted() {
+            return Err(AccessError::Denied);
+        }
+        let ((page, source, binding), retained, maintenance) = {
+            let state = self.state.lock();
+            let memo = state.memos.get(index).ok_or(AccessError::SourceEmpty)?;
+            if memo.generation() != expected || memo.in_flight() {
+                return Err(AccessError::Busy);
+            }
+            memo.can_advance(expected)?;
+            (
+                {
+                    let (_, source, binding) =
+                        memo.association().ok_or(AccessError::SourceEmpty)?;
+                    (memo.page(), source, binding)
+                },
+                memo.publication().map(|publication| publication.writable()),
+                memo.maintenance().cloned(),
+            )
+        };
+        if !ceiling.contains(access) || !source.ceiling().contains(access) {
+            return Err(AccessError::WidenDenied);
+        }
+        let _provenance = source.hold_provenance()?;
+        let range = source.check(access)?;
+        if let Some(usage) = &maintenance {
+            if !actor.is_some_and(|actor| usage.owned_by(actor)) {
+                return Err(AccessError::Denied);
+            }
+            usage.check(&source, access)?;
+        }
+        let maintenance_owner = maintenance
+            .as_ref()
+            .and_then(|usage| usage.source_owner(&source));
+        if page.is_none() {
+            self.prepare_revision()?;
+            let selection = self.range(PageOffset::new(index), count)?;
+            let mut inner = self.state.lock();
+            {
+                let memo = inner
+                    .memos
+                    .existing_mut(index)
+                    .ok_or(AccessError::SourceEmpty)?;
+                if !memo.logical() || memo.busy() || !memo.matches(&binding) {
+                    return Err(AccessError::Busy);
+                }
+                memo.can_advance(expected)?;
+            }
+            let transition = inner.protection_transition(
+                self.initial_start(),
+                selection.window(),
+                super::Protection::SetAccess(access),
+                |_| false,
+            )?;
+            inner.active = transition.active;
+            let generation = {
+                let memo = inner.memos.existing_mut(index).expect("prepared Memo");
+                memo.advance(expected)?;
+                memo.generation()
+            };
+            self.changed();
+            accepted(generation);
+            return Ok(());
+        }
+        let page = page.expect("retained publication Page");
+        source.same_page(&page)?;
+        let change = crate::basis::cell::change::acquire(&page)?;
+        let flight = source.begin_cpu(self.identity(), access, maintenance_owner.as_deref())?;
+        let lease = range.reside_during(&change)?;
+        // A prepared executable membership excludes writers before FENCE.I,
+        // and stays alive until the real PTE publication owns that obligation.
+        let instructions = if access.contains(Access::EXECUTE) {
+            Some(
+                Publication::prepare_cpu(
+                    &page,
+                    false,
+                    &change,
+                    maintenance.as_ref().map(|usage| usage.permit()),
+                    crate::metal::generic::memory::Endpoint::Cpu {
+                        nest: core::num::NonZeroU64::new(nest.id.get() as u64).unwrap(),
+                        leases: core::num::NonZeroU64::new(nest.id.get() as u64).unwrap(),
+                    },
+                    crate::metal::generic::memory::Access::new((access.bits() << 1) as u8)
+                        .ok_or(AccessError::Denied)?,
+                )
+                .map_err(NestError::from)?,
+            )
+        } else {
+            None
+        };
+        let commit = if instructions.is_some() {
+            drop(commit);
+            identity::sync_instructions().map_err(AccessError::from)?;
+            let commit = crate::basis::commit();
+            if !admitted() {
+                return Err(AccessError::Denied);
+            }
+            source.check(access)?;
+            source.same_page(&page)?;
+            if let Some(usage) = &maintenance {
+                usage.check(&source, access)?;
+            } else {
+                source.admit_provenance(None)?;
+                source
+                    .source()
+                    .check_publish(source.window().0, source.window().1)
+                    .map_err(|_| AccessError::Denied)?;
+            }
+            commit
+        } else {
+            commit
+        };
+        let writable = access.contains(Access::WRITE);
+        let admission;
+        let result = {
+            let mut address = nest.address.lock();
+            let mut state = self.translation.lock();
+            if !state.retirement.invalidation().is_clean() {
+                return Err(AccessError::Busy);
+            }
+            if !state.is_open() || !self.is_open() {
+                return Err(AccessError::Denied);
+            }
+            {
+                let inner = self.state.lock();
+                let memo = inner.memos.get(index).ok_or(AccessError::Denied)?;
+                if !memo.matches(&binding) {
+                    return Err(AccessError::Busy);
+                }
+            }
+            let mut operation_freeze = if retained.is_some() {
+                Some(Freeze::new(change.clone(), None).map_err(NestError::from)?)
+            } else {
+                None
+            };
+            let replacement = if retained.is_some_and(|old| old != writable) {
+                Some((
+                    index,
+                    Publication::prepare_cpu(
+                        &page,
+                        writable,
+                        &change,
+                        maintenance.as_ref().map(|u| u.permit()),
+                        crate::metal::generic::memory::Endpoint::Cpu {
+                            nest: core::num::NonZeroU64::new(nest.id.get() as u64).unwrap(),
+                            leases: core::num::NonZeroU64::new(nest.id.get() as u64).unwrap(),
+                        },
+                        crate::metal::generic::memory::Access::new((access.bits() << 1) as u8)
+                            .ok_or(AccessError::Denied)?,
+                    )
+                    .map_err(NestError::from)?,
+                ))
+            } else {
+                None
+            };
+            // Admission and PTE edits share the checked retirement batch.
+            admission = if retained.is_some() && replacement.is_none() {
+                Some(
+                    Publication::prepare_cpu(
+                        &page,
+                        writable,
+                        &change,
+                        maintenance.as_ref().map(|u| u.permit()),
+                        crate::metal::generic::memory::Endpoint::Cpu {
+                            nest: core::num::NonZeroU64::new(nest.id.get() as u64).unwrap(),
+                            leases: core::num::NonZeroU64::new(nest.id.get() as u64).unwrap(),
+                        },
+                        crate::metal::generic::memory::Access::new((access.bits() << 1) as u8)
+                            .ok_or(AccessError::Denied)?,
+                    )
+                    .map_err(NestError::from)?,
+                )
+            } else {
+                None
+            };
+            let selection = self.range(PageOffset::new(index), count)?;
+            self.prepare_revision()?;
+            state.protect(
+                &mut address.index,
+                nest.geometry(),
+                self,
+                selection.window(),
+                super::Protection::SetAccess(access),
+                replacement,
+                &mut || {
+                    self.changed();
+                    accepted(expected.checked_add(1).expect("prepared generation"));
+                },
+            )?;
+            self.state
+                .lock()
+                .memos
+                .existing_mut(index)
+                .expect("prepared Memo")
+                .protect(expected, operation_freeze.take());
+            if state.retirement.invalidation().is_clean() {
+                Ok::<_, AccessError>(None)
+            } else {
+                state
+                    .retirement
+                    .begin(nest.id.get(), nest.asid())
+                    .map(Some)
+                    .map_err(AccessError::from)
+            }
+        };
+        drop(commit);
+        let result = result.and_then(|target| match target {
+            Some(target) => nest.invalidate(target).map_err(AccessError::from),
+            None => Ok(()),
+        });
+        drop(admission);
+        let valid = {
+            let _commit = crate::basis::commit();
+            admitted()
+                && source.check(access).is_ok()
+                && source.same_page(&page).is_ok()
+                && if let Some(usage) = &maintenance {
+                    usage.check_retained(&source, access).is_ok()
+                } else {
+                    source.admit_provenance(None).is_ok()
+                        && source
+                            .source()
+                            .check_publish(source.window().0, source.window().1)
+                            .is_ok()
+                }
+        };
+        if !valid {
+            let _ = self.retract_forced(nest, index, change);
+        }
+        drop(instructions);
+        drop(lease);
+        drop(flight);
+        sign::signal(WakeKey::Span {
+            space: self.identity.nest_id(),
+            span: self.identity(),
+        });
+        if valid {
+            result
+        } else {
+            Err(AccessError::Denied)
         }
     }
 }

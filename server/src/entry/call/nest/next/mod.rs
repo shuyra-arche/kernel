@@ -194,8 +194,8 @@ pub(in crate::entry::call) fn effect(
         }
         Action::Protect { access, .. } => {
             let access = Access::from_wire(access).ok_or(Failure::Invalid)?;
-            route.nest().protect_memo_report(
-                &span,
+            span.protect(
+                route.nest(),
                 index,
                 expected.get(),
                 access,
