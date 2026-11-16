@@ -19,15 +19,13 @@ use super::memo::publication::Publication;
 use super::{Access, Span};
 use super::{Asid, NestError};
 use crate::basis::cell::page::{Change, Page};
-use crate::metal::generic::mmu::internal::PageTable;
+use crate::metal::generic::mmu::internal::{Attributes, PageTable};
 use crate::metal::generic::trap::FaultKind;
 use crate::metal::mmu::internal::Geometry;
 use kernel_api::address::VirtAddr;
 use kernel_api::address::{PAGE_SIZE, PhysAddr};
 #[cfg(debug_assertions)]
-use {
-    super::Nest, crate::metal::generic::mmu::internal::Attributes, kernel_api::address::PageOffset,
-};
+use {super::Nest, kernel_api::address::PageOffset};
 
 use crate::metal::generic::mmu::internal::fence::Completed;
 use crate::metal::generic::mmu::internal::fence::Request;
@@ -56,6 +54,24 @@ impl Translation {
 
     pub(crate) fn lock(&self) -> LegacyGuard<'_, TranslationState> {
         self.state.lock()
+    }
+
+    /// Walk the shared page table for one indexed address.
+    pub(crate) fn translate(
+        &self,
+        index: &Index,
+        geometry: Geometry,
+        address: VirtAddr,
+    ) -> Option<(PhysAddr, Attributes)> {
+        index.find(address.as_usize())?;
+        let state = self.lock();
+        let (physical, flags) = state
+            .root
+            .cpu()
+            .ok()?
+            .walk_ref_geometry(address, geometry)
+            .ok()?;
+        Some((physical + address.offset(), flags))
     }
 
     /// Whether any retained invalidation still waits for a covering proof.

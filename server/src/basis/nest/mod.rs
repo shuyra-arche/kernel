@@ -1691,15 +1691,7 @@ impl Nest {
 
     pub(crate) fn translate(&self, address: VirtAddr) -> Option<(PhysAddr, Attributes)> {
         let index = self.address.lock();
-        let state = self.ready_state().ok()?;
-        index.index.find(address.as_usize())?;
-        let (pa, flags) = state
-            .root
-            .cpu()
-            .ok()?
-            .walk_ref_geometry(address, self.geometry())
-            .ok()?;
-        Some((pa + address.offset(), flags))
+        self.state.translate(&index.index, self.geometry(), address)
     }
 
     /// 用户页错误的纯一致探针：只读当前的身份、活动权限、承载与硬件条目。
