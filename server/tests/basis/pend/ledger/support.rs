@@ -129,6 +129,9 @@ impl Span {
     ) -> Result<(), PendFail> {
         nest.withdraw_span(self.id, window, authority)
     }
+    pub(crate) fn count(&self) -> Option<PageCount> {
+        Some(self.count)
+    }
     pub(crate) fn is_open(&self) -> bool {
         self.open.load(Ordering::Acquire)
     }

@@ -337,10 +337,6 @@ impl Nest {
         })
     }
 
-    pub(crate) fn span_count(&self, id: kernel_api::model::nest::SpanId) -> Option<PageCount> {
-        PageCount::new(self.span(id)?.initial_size() / PAGE_SIZE)
-    }
-
     pub(crate) fn asid(&self) -> Asid {
         self.cpu
             .as_ref()
