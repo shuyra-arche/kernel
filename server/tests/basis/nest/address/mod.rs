@@ -4,6 +4,7 @@ extern crate alloc;
 #[path = "../../../../src/basis/name/mod.rs"]
 mod name;
 
+mod active;
 #[path = "../../name/allocation.rs"]
 mod allocation;
 
@@ -12,6 +13,39 @@ mod basis {
     pub(crate) mod nest {
         #[allow(dead_code)]
         pub struct Nest;
+        #[allow(dead_code)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(crate) enum NestError {
+            OutOfMemory,
+            NotAligned,
+            NoRegion,
+        }
+    }
+}
+
+mod metal {
+    pub(crate) mod generic {
+        pub(crate) mod mmu {
+            pub(crate) mod internal {
+                #[derive(Clone, Copy)]
+                pub(crate) struct Attributes(pub(crate) u64);
+                impl Attributes {
+                    pub(crate) fn from_bits_truncate(bits: u64) -> Self {
+                        Self(bits)
+                    }
+                    pub(crate) fn bits(self) -> u64 {
+                        self.0
+                    }
+                }
+            }
+        }
+    }
+    pub(crate) mod mmu {
+        pub(crate) mod internal {
+            pub(crate) fn canonical(address: usize) -> kernel_api::address::VirtAddr {
+                kernel_api::address::VirtAddr::new(address)
+            }
+        }
     }
 }
 
