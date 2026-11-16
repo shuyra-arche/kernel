@@ -80,7 +80,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
         assert_eq!(state.memos.awaiting_cpu(), 1);
     }
     let mut pending = Retirement::new();
-    pending.mappings.push(span.clone());
+    pending.mappings.push(Arc::downgrade(&span));
     assert!(pending.pending_for(&span));
     pending.mark_dirty(false);
     let request = pending.begin(7, 3).unwrap();
@@ -104,7 +104,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
             .unwrap();
         pending.cells.push(memo.withdraw().unwrap());
     }
-    pending.mappings.push(span.clone());
+    pending.mappings.push(Arc::downgrade(&span));
     pending.mark_dirty(false);
     let request = pending.begin(7, 3).unwrap();
     let fenced = pending
@@ -114,7 +114,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
     // A different PTE batch starts before callbacks and Page drops of the old
     // batch. Its unfinished fence cannot strand the old Memo's activity.
     let unrelated = Arc::new(super::Span::new(10));
-    pending.mappings.push(unrelated.clone());
+    pending.mappings.push(Arc::downgrade(&unrelated));
     pending.mark_dirty(false);
     pending.begin(7, 3).unwrap();
     assert!(pending.pending_for(&unrelated));
@@ -160,7 +160,7 @@ fn retirement_settles_only_memos_owned_by_its_own_span() {
     assert_eq!(right.state.lock().memos.awaiting_cpu(), 1);
 
     let mut pending = Retirement::new();
-    pending.mappings.push(left.clone());
+    pending.mappings.push(Arc::downgrade(&left));
     pending.mark_dirty(false);
     let request = pending.begin(7, 3).unwrap();
     let fenced = pending

@@ -32,7 +32,7 @@ use kernel_api::address::PageCount;
 use kernel_api::address::PageOffset;
 use kernel_api::address::PhysAddr;
 use kernel_api::address::VirtAddr;
-use translation::Invalidation;
+use translation::{Invalidation, Translation};
 
 use crate::metal::generic::trap::FaultKind;
 pub(crate) use address::PreparedSpan;
@@ -75,8 +75,8 @@ impl CleanupNode {
 
 /// 一个地址组织：身份、翻译后端、全局占用、关系与同步退休。
 ///
-/// Nest owns admission, address organization and the translation; each Span
-/// owns its Memos and the index never duplicates per-position state.
+/// Nest owns admission and address organization and holds the shared
+/// Translation; each Span owns its Memos and holds that same Translation.
 pub use kernel_api::model::nest::NestId;
 fn next_id() -> Result<NestId, NestError> {
     static NEXT: crate::basis::name::Serial =
@@ -100,7 +100,7 @@ pub struct Nest {
     pub(crate) spans: authority::SpanIndex,
     address: LegacyLock<crate::basis::sync::order::Address, AddressState>,
     pending_cleanup: LegacyLock<crate::basis::sync::order::Cleanup, Option<Box<CleanupNode>>>,
-    state: ManuallyDrop<LegacyLock<crate::basis::sync::order::Nest, NestState>>,
+    state: ManuallyDrop<Arc<Translation>>,
 }
 
 impl Nest {
@@ -110,7 +110,7 @@ impl Nest {
         index: usize,
         usage: &Arc<crate::basis::pend::MaintenanceUse>,
     ) -> bool {
-        let state = self.state.lock();
+        let state = span.translation.lock();
         let inner = span.state.lock();
         inner.memos.get(index).is_some_and(|memo| {
             memo.maintenance()
@@ -230,7 +230,7 @@ impl Nest {
             spans: authority::SpanIndex::new(),
             address: LegacyLock::new(AddressState::new(layout)),
             pending_cleanup: LegacyLock::new(None),
-            state: ManuallyDrop::new(LegacyLock::new(NestState::new(root))),
+            state: ManuallyDrop::new(Translation::new(NestState::new(root))?),
         })
         .map_err(|_| NestError::OutOfMemory)?;
         nest.cpu
@@ -1195,7 +1195,7 @@ impl Nest {
         for (_, retained) in &mut published {
             retained.publish();
         }
-        state.retirement.mappings.push(mapping.clone());
+        state.retirement.mappings.push(Arc::downgrade(mapping));
         for run in mapping.state.lock().runs(start, &published) {
             let run = run?;
             state.root.cpu_mut()?.map_range_prepared_geometry(
@@ -1327,7 +1327,7 @@ impl Nest {
         for (_, retained) in &mut fresh {
             retained.publish();
         }
-        state.retirement.mappings.push(mapping.clone());
+        state.retirement.mappings.push(Arc::downgrade(mapping));
         for run in inner.runs(mapping.initial_start(), &fresh) {
             let run = run?;
             state.root.cpu_mut()?.map_range_prepared_geometry(
@@ -2494,7 +2494,7 @@ impl Nest {
         // 开票之后没有可失败准备：票、PTE 与关系在同一提交内转入退休责任。
         let tickets = layout.occupancy.retire(prepared);
         state.withdraw_prepared(start, len, self.geometry());
-        state.retirement.mappings.push(mapping.clone());
+        state.retirement.mappings.push(Arc::downgrade(mapping));
         if inner
             .memos
             .withdraw(first_page, last_page, &mut state.retirement.cells)

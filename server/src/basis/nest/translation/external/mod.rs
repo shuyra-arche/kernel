@@ -48,7 +48,7 @@ impl Nest {
                 super::super::address::Layout::new(),
             )),
             pending_cleanup: LegacyLock::new(None),
-            state: ManuallyDrop::new(LegacyLock::new(NestState::external())),
+            state: ManuallyDrop::new(super::Translation::new(NestState::external())?),
         })
         .map_err(|_| NestError::OutOfMemory)
     }
