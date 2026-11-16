@@ -153,10 +153,6 @@ impl Occupancy {
     /// Release a page-aligned subrange of one exact occupancy generation.
     /// The remaining left/right pieces keep the same generation identity, so a
     /// stale credential cannot release a newer occupant.
-    #[allow(
-        dead_code,
-        reason = "M3 partial-release primitive; the ReleaseRange ABI follows"
-    )]
     pub(crate) fn release_range(
         &mut self,
         start: usize,

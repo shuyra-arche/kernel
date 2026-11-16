@@ -565,6 +565,21 @@ impl Nest {
         Ok(())
     }
 
+    /// Release a page-aligned subrange of a Span's access and occupancy.
+    #[allow(
+        dead_code,
+        reason = "M3 partial-release primitive; the ReleaseRange ABI follows"
+    )]
+    pub(crate) fn reclaim_range(
+        &self,
+        id: kernel_api::model::nest::SpanId,
+        offset: PageOffset,
+        count: PageCount,
+    ) -> Result<(), NestError> {
+        let span = self.span(id).ok_or(NestError::NoRegion)?;
+        span.release_range(self, offset, count)
+    }
+
     /// Return a fully drained Span's address to the Nest authority.
     fn reclaim(&self, mapping: &Arc<Span>) -> Result<(), crate::basis::nest::memo::AccessError> {
         use crate::basis::nest::memo::AccessError;
