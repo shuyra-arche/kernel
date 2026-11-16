@@ -57,10 +57,12 @@ pub(in super::super) fn init(
             .whole();
         let placement =
             Placement::lowest(RegionKind::Normal, 4096, 4096).map_err(|_| PendFail::Denied)?;
-        let reservation = nest.reserve(placement).map_err(|_| PendFail::OutOfMemory)?;
+        let span = nest
+            .reserve(placement, source.level())
+            .map_err(|_| PendFail::OutOfMemory)?;
         let access = Access::READ | Access::WRITE;
         let mapping = nest
-            .attach(reservation, source, access, access)
+            .attach(span, source, access, access)
             .map_err(|_| PendFail::Denied)?;
         let cells = [
             crate::basis::cell::allocate(Owner::Kernel),

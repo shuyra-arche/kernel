@@ -52,7 +52,7 @@ impl NestRange {
         })
     }
 
-    pub(crate) fn reservation(&self) -> &Arc<Span> {
+    pub(crate) fn span(&self) -> &Arc<Span> {
         match self {
             Self::Whole(mapping) => mapping,
             Self::Pages { mapping, .. } => mapping,
@@ -79,7 +79,7 @@ impl NestRange {
 
     /// 源在本选择内的子范围：强持同一来源、不复制数据。
     pub(crate) fn source(&self) -> Result<FlatRange, NestError> {
-        let mapping = self.reservation();
+        let mapping = self.span();
         let (offset, count) = match self {
             Self::Whole(_) => (
                 PageOffset::ZERO,

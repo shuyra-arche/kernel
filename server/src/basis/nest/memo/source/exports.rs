@@ -3,7 +3,7 @@
 use super::*;
 use crate::{basis::pend::Tracking, basis::sync::LegacyLock};
 
-/// Task and Reservation indexes refer to the same SourceAuthorization. No index
+/// Task and Span indexes refer to the same SourceAuthorization. No index
 /// lock, Task ledger serial or COMMIT guard crosses a hardware retirement.
 pub(crate) fn withdraw(
     sources: &LegacyLock<impl crate::basis::sync::order::Order, Tracking<SourceAuthorization>>,

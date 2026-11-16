@@ -628,7 +628,7 @@ impl Memo {
     pub(in crate::basis::nest) fn snapshot(
         &self,
         nest: kernel_api::model::nest::NestId,
-        reservation: kernel_api::model::nest::ReservationId,
+        reservation: kernel_api::model::nest::SpanId,
         coordinate: usize,
         level: kernel_api::model::cell::CellLevel,
         failed_fence: bool,
@@ -653,7 +653,7 @@ impl Memo {
         };
         MemoStatus {
             nest,
-            reservation,
+            span: reservation,
             coordinate,
             level,
             generation: MemoGeneration::new(self.generation()).expect("Memo generation"),

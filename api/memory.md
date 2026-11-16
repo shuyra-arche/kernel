@@ -12,7 +12,7 @@ Changing one does not silently transfer the responsibilities of another.
 | --- | --- |
 | Flat / Slot | Logical source, current Page holding, Fresh/Resident/Missing and in-flight transitions |
 | Page | Physical identity, allocation receipt, admission and retention of all accessors |
-| Nest / Reservation | Translation space, exclusive address reservation identity and lifetime |
+| Nest / Span | Translation space, exclusive address-span identity and lifetime |
 | Memo | Logical association, expected generation and concrete hardware publications |
 | Pend | Rights, scope/data window, attenuation, distribution and live revocation ancestry |
 | Retention / Metal | Exact CPU/External publication obligation and trusted completion evidence |
@@ -26,12 +26,15 @@ ABI positions use **4 KiB units**. A physical `CellLevel` has size
 the supported levels. A large Page spans multiple base coordinates.
 CPU/IOMMU hardware leaf sizes are separate from physical holding identity.
 
-## ABI 11
+## ABI 14
 
 The current revision has one ABI. Native Flat/Nest operations use fixed-origin
 SlotPosition / MemoPosition with independent versions. Flat owns Occupy/Vacate,
 Push/Pull, Split/Merge and Block/Allow. Nest owns association, publication and
-Reservation FaultRoute. Versioned RequestIds and a bounded journal report
+Span FaultRoute. `SpanId`, `SpanVersion` and `SpanStatus` name the occupied
+address span; `CreateSpanRequest` and `Action::CreateSpan`/`DeleteSpan` create
+and delete it. `Action::ReleaseRange` releases a page-aligned subrange while
+keeping the Span open; see [ReleaseRange](../docs/release-range.md). ABI 13 and older calls, Ledger entries and Capsules reject. Versioned RequestIds and a bounded journal report
 Rejected/Pending/Committed/Failed outcomes and checked observations.
 
 No Cargo feature selects the ABI. Calls, memory descriptors, Ledger and Capsule
@@ -39,7 +42,7 @@ ABI derive from `abi::VERSION`; Capsule format remains 2. Remove the former
 `memory-v11` dependency feature and rebuild all components at the same source
 revision. ABI 10 remains available only through old immutable source pins.
 
-Native `Opcode` selects Flat domain 12 or Nest domain 13, slots 16–26.
+Native `Opcode` selects Flat domain 12 or Nest domain 13, slots 16–27.
 [`Action` and `Request`](src/abi/memory/request.rs) define the current
 256-byte request, and [`Reply` and `Observation`](src/abi/memory/reply.rs)
 define 128-byte result buffers. The [Frame](src/abi/memory/call.rs) binds
@@ -119,7 +122,7 @@ separates Host, RV64, QEMU and real hardware evidence.
 
 ## Authorized CPU activity
 
-Existing [Share.Derive](src/abi/call/view/share.rs) accepts a Reservation source
+Existing [Share.Derive](src/abi/call/view/share.rs) accepts a Span source
 with live INSPECT plus SAMPLE. Its unchanged AccordRequest selects one
 fixed-origin page and a recipient. It atomically issues a readonly Share View
 and LISTEN/CONSUME Sign, forming `(Sign Pend, Share View Pend)` in that order.

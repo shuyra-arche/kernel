@@ -14,9 +14,9 @@ pub(crate) enum Watch {
     Direct {
         token: kernel_api::model::identity::PendId,
     },
-    ExternalReservation {
+    ExternalSpan {
         token: kernel_api::model::identity::PendId,
-        reservation: kernel_api::model::nest::ReservationId,
+        reservation: kernel_api::model::nest::SpanId,
         published: bool,
         generation: u64,
     },
@@ -45,21 +45,21 @@ impl Watch {
     pub(crate) fn source(&self) -> SignSource {
         match self {
             Watch::Direct { token } => SignSource::Sign { token: *token },
-            Watch::ExternalReservation {
+            Watch::ExternalSpan {
                 token,
                 reservation,
                 published,
                 ..
             } => {
                 if *published {
-                    SignSource::ReservationPublished {
+                    SignSource::SpanPublished {
                         token: *token,
-                        reservation: *reservation,
+                        span: *reservation,
                     }
                 } else {
-                    SignSource::ReservationRetired {
+                    SignSource::SpanRetired {
                         token: *token,
-                        reservation: *reservation,
+                        span: *reservation,
                     }
                 }
             }

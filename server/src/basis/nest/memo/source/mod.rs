@@ -203,13 +203,19 @@ impl Source {
         Ok(())
     }
     pub(crate) fn range(&self) -> Result<FlatRange, AccessError> {
+        let actor = self.actor().ok_or(AccessError::Denied)?;
+        self.range_for(&actor)
+    }
+
+    /// Resolve the range against an actor whose liveness was observed before
+    /// the caller's inner locks. The authority is still rechecked here.
+    pub(crate) fn range_for(&self, actor: &Arc<Task>) -> Result<FlatRange, AccessError> {
         self.check_provenance(Access::READ, false)?;
         if let Some(lineage) = &self.lineage {
             lineage.check(Modifiable::No)?;
         }
-        let actor = self.actor().ok_or(AccessError::Denied)?;
         self.source().ensure_internal().map_err(failure)?;
-        let _authority = self.authority(&actor)?;
+        let _authority = self.authority(actor)?;
         let range = self
             .hold
             .resolve_window(self.offset, self.count)
@@ -291,7 +297,7 @@ impl Source {
     pub(crate) fn export(
         &self,
         actor: &Arc<Task>,
-        route: &pend::access::Reservation,
+        route: &pend::access::SpanRoute,
         index: usize,
     ) -> Result<Self, AccessError> {
         use kernel_api::model::pend::{
@@ -344,7 +350,7 @@ impl Source {
             actor,
             route.entry(),
             Operations::Nest(NestRights::PUBLISH),
-            PendScope::Nest(NestScope::Reservation {
+            PendScope::Nest(NestScope::Span {
                 id: route.id(),
                 range: PendRange::Pages {
                     offset: index,
@@ -417,10 +423,10 @@ impl Source {
                 .is_some_and(|route| route.any(|route| route.actor(task)))
     }
 
-    pub(crate) fn uses_reservation(&self, span: &crate::basis::nest::Span) -> bool {
+    pub(crate) fn uses_span(&self, span: &crate::basis::nest::Span) -> bool {
         self.lineage
             .as_ref()
-            .is_some_and(|route| route.any(|route| route.reservation(span)))
+            .is_some_and(|route| route.any(|route| route.span(span)))
     }
 
     pub(crate) fn exported_by(&self, task: TaskId, token: PendId) -> bool {

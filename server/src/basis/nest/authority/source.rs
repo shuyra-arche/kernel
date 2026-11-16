@@ -1,4 +1,4 @@
-//! Withdraw source-qualified uses without destroying independent reservations.
+//! Withdraw source-qualified uses without destroying independent spans.
 use crate::basis::{
     flat::source::Export,
     pend::{RangeBlock, SourceAuthorization},
@@ -56,12 +56,9 @@ pub(crate) fn withdraw_source_window(
             {
                 continue;
             }
-            let entry = nest
-                .reservations
-                .registered(binding.id())
-                .ok_or(PendFail::Busy)?;
-            let span = entry.reservation().ok_or(PendFail::Busy)?;
-            let Some(data) = nest.memo_page(span, page).map_err(|_| PendFail::Busy)? else {
+            let entry = nest.spans.registered(binding.id()).ok_or(PendFail::Busy)?;
+            let span = entry.span().ok_or(PendFail::Busy)?;
+            let Some(data) = span.memo_page(page).map_err(|_| PendFail::Busy)? else {
                 continue;
             };
             block.retain(data)?;

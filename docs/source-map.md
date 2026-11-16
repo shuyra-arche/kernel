@@ -8,7 +8,7 @@ specification. Use the [design](design/main.typ) for reasons and the
 | --- | --- | --- |
 | Who executes, stops, schedules and waits? | [Unit](../api/src/abi/call/unit.rs), [Room](../api/src/abi/call/room.rs) | [Unit](../server/src/basis/unit/), [Room](../server/src/basis/room/) |
 | What holds and transfers Page storage? | [Memory contract](../api/memory.md), [Native Flat requests](../api/src/abi/memory/request.rs) | [Flat](../server/src/basis/flat/), [Page](../server/src/basis/cell/page/) |
-| What reserves addresses and publishes access? | [native memory request](../api/src/abi/memory/request.rs) | [Nest](../server/src/basis/nest/) |
+| What reserves addresses and publishes access? | [native memory request](../api/src/abi/memory/request.rs), [ownership](span-ownership.md), [ReleaseRange](release-range.md) | [Nest](../server/src/basis/nest/) |
 | Who delegates or revokes resource access? | [Pend](../api/src/abi/call/pend.rs), [scopes](../api/src/model/pend/scope.rs) | [Pend](../server/src/basis/pend/) |
 | How are data and control delivered? | [Clone](../api/src/abi/call/view/clone.rs), [Share](../api/src/abi/call/view/share.rs), [Sign](../api/src/abi/call/sign.rs) | [View](../server/src/basis/view/), [Sign](../server/src/basis/sign/) |
 | Who owns a Flat export shared by Flat Pend and Share? | [Share](../api/src/abi/call/view/share.rs) | [Flat source](../server/src/basis/flat/source/); [Pend source authority](../server/src/basis/pend/source/) owns live permission and [Nest](../server/src/basis/nest/) owns publication/retirement |

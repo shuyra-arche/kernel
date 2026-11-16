@@ -38,16 +38,17 @@ fn effective_limits(
                     .range(offset, count)
                     .map_err(|_| PendFail::NotAligned)?;
             }
-            PendScope::Nest(NestScope::Reservation { id, .. }) => {
+            PendScope::Nest(NestScope::Span { id, .. }) => {
                 let nest = entry.target().nest().ok_or(PendFail::Denied)?;
-                if !nest.reservation_open(id) {
+                if !nest.span(id).is_some_and(|span| span.is_open()) {
                     return Err(PendFail::Dead);
                 }
-                let span = nest.reservation(id).ok_or(PendFail::Denied)?;
+                let span = nest.span(id).ok_or(PendFail::Denied)?;
                 span.range(offset, count)
                     .map_err(|_| PendFail::NotAligned)?;
                 if nest.is_external()
-                    && (offset != PageOffset::ZERO || Some(count) != nest.reservation_count(id))
+                    && (offset != PageOffset::ZERO
+                        || Some(count) != nest.span(id).and_then(|span| span.count()))
                 {
                     return Err(PendFail::NotAligned);
                 }
@@ -257,13 +258,12 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
             (observed, limits, authorization)
         };
         // Persistent publisher routes discharge only through exact hardware withdrawal.
-        if let PendScope::Nest(NestScope::Reservation { id, .. }) = observed.scope() {
+        if let PendScope::Nest(NestScope::Span { id, .. }) = observed.scope() {
             let window = observed.authority().window().ok_or(PendFail::Denied)?;
-            observed
-                .target()
-                .nest()
-                .ok_or(PendFail::Denied)?
-                .withdraw_reservation(id, window, observed.authority())?;
+            let nest = observed.target().nest().ok_or(PendFail::Denied)?;
+            if let Some(span) = nest.span(id) {
+                span.withdraw(&nest, window, observed.authority())?;
+            }
         }
         if let Some(meta) = &share {
             meta.close_maps(Some(token))?;

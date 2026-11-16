@@ -53,7 +53,7 @@ fn reshape_vectors_cover_exact_parent_range_and_aggregate_version() {
         let request = Request::new(Some(id()), action).unwrap();
         let mut expected = [0; Request::WIDTH];
         for (index, word) in [
-            13,
+            14,
             12,
             operation,
             u64::MAX,
@@ -81,7 +81,7 @@ fn reshape_vectors_cover_exact_parent_range_and_aggregate_version() {
         assert!(Request::new(None, action).is_none());
         let mut result_bytes = [0; Reply::WIDTH];
         for (index, word) in [
-            13,
+            14,
             12,
             operation,
             u64::MAX,

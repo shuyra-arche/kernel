@@ -20,7 +20,7 @@ use kernel_api::{
         flat::{FlatId, SlotVersion},
         nest::{
             FAULT_CAPACITY, FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultSequence,
-            MemoGeneration, NestId, ReservationId,
+            MemoGeneration, NestId, SpanId,
         },
     },
 };
@@ -28,7 +28,7 @@ use queue::{Progress, Queue};
 fn event(page: usize, epoch: u64) -> FaultEvent {
     FaultEvent {
         nest: NestId::new(1).unwrap(),
-        reservation: ReservationId::from_bytes(&2u64.to_le_bytes()).unwrap(),
+        span: SpanId::from_bytes(&2u64.to_le_bytes()).unwrap(),
         epoch: FaultEpoch::new(epoch).unwrap(),
         sequence: FaultSequence::new(1).unwrap(),
         memo_page: page,

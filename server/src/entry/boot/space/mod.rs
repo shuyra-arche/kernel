@@ -111,11 +111,18 @@ pub fn init() -> NestResult<()> {
                         access,
                         access,
                     )?;
-                    let reservation =
-                        nest.reserve(Placement::exact(RegionKind::Normal, grid.start, size)?)?;
-                    nest.attach_shaped(reservation, source.clone(), arch(flags), &[grid])?;
-                    let reservation = nest.reserve(Placement::fixed(lower.start, size)?)?;
-                    nest.attach_shaped(reservation, source, arch(flags), &[lower])?;
+                    let span = nest.reserve_with(
+                        Placement::exact(RegionKind::Normal, grid.start, size)?,
+                        source.level(),
+                        arch(flags),
+                    )?;
+                    nest.attach_shaped(span, source.clone(), &[grid])?;
+                    let span = nest.reserve_with(
+                        Placement::fixed(lower.start, size)?,
+                        source.level(),
+                        arch(flags),
+                    )?;
+                    nest.attach_shaped(span, source, &[lower])?;
                 }
             }
             nest.advance_window(RegionKind::Normal, image_end)?;
@@ -188,7 +195,7 @@ fn attach_exact(
         .checked_bytes()
         .ok_or(NestError::NotAligned)?;
     let active = ActiveRange::new(start, size, access, access)?;
-    let reservation = nest.reserve(Placement::fixed(start, size)?)?;
-    nest.attach_shaped(reservation, source, attrs, &[active])?;
+    let span = nest.reserve_with(Placement::fixed(start, size)?, source.level(), attrs)?;
+    nest.attach_shaped(span, source, &[active])?;
     Ok(())
 }

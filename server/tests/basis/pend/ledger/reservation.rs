@@ -9,7 +9,7 @@ use kernel_api::{
     model::{
         identity::{Mark, TaskId},
         modifiable::Modifiable,
-        nest::ReservationId,
+        nest::SpanId,
         pend::{
             Distributable, Limits, NestRights, NestScope, Operations, PendRange, PendScope,
             PendStatus,
@@ -18,11 +18,11 @@ use kernel_api::{
 };
 use std::sync::{Arc, atomic::Ordering};
 
-pub(super) fn id(raw: usize) -> ReservationId {
-    ReservationId::from_bytes(&(raw as u64).to_le_bytes()).unwrap()
+pub(super) fn id(raw: usize) -> SpanId {
+    SpanId::from_bytes(&(raw as u64).to_le_bytes()).unwrap()
 }
 pub(super) fn map(raw: usize, offset: usize, count: usize) -> PendScope {
-    PendScope::Nest(NestScope::Reservation {
+    PendScope::Nest(NestScope::Span {
         id: id(raw),
         range: PendRange::Pages { offset, count },
     })
@@ -46,7 +46,7 @@ pub(super) fn setup(
         .unwrap(),
     );
     root.narrow(Limits {
-        operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
+        operations: Operations::Nest(NestRights::INSPECT | NestRights::CREATE_SPAN),
         distributable,
         ..root.authority().limits()
     })
@@ -59,7 +59,7 @@ pub(super) fn setup(
 }
 
 #[test]
-fn licensed_reservation_root_retains_parent_limits_and_actual_creation_edge() {
+fn licensed_span_root_retains_parent_limits_and_actual_creation_edge() {
     let (task, nest, parent) = setup(Modifiable::No, Distributable::No);
     let serial = task.pend.lock();
     let prepared =
@@ -69,7 +69,7 @@ fn licensed_reservation_root_retains_parent_limits_and_actual_creation_edge() {
     assert_eq!(
         entry.authority().limits(),
         Limits {
-            operations: Operations::Nest(NestRights::reservation()),
+            operations: Operations::Nest(NestRights::span()),
             modifiable: Modifiable::No,
             distributable: Distributable::No,
             scope: map(1, 0, 8),

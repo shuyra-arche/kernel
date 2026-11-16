@@ -1,47 +1,45 @@
-//! Reservation identity is independent of address, revision and permission.
+//! Span identity is independent of address, revision and permission.
 use super::{memo, request::set_word};
 use kernel_api::{
     abi::memory::{Action, Observation, Query, Request, Snapshot},
     address::VirtAddr,
     model::{
         cell::CellLevel,
-        nest::{
-            MemoPosition, ReservationId, ReservationPhase, ReservationStatus, ReservationVersion,
-        },
+        nest::{MemoPosition, SpanId, SpanPhase, SpanStatus, SpanVersion},
         sign::SignSource,
     },
 };
 
 #[test]
-fn reusing_an_address_and_revision_cannot_match_an_old_reservation_observation() {
+fn reusing_an_address_and_revision_cannot_match_an_old_span_observation() {
     let old = memo(0);
-    let new_id = ReservationId::from_bytes(&23u64.to_le_bytes()).unwrap();
+    let new_id = SpanId::from_bytes(&23u64.to_le_bytes()).unwrap();
     let current = MemoPosition::new(old.token(), old.nest(), new_id, 0).unwrap();
     let query = |position: MemoPosition| {
         Request::new(
             None,
-            Action::Inspect(Query::Reservation {
+            Action::Inspect(Query::Span {
                 token: position.token(),
                 nest: position.nest(),
-                reservation: position.reservation(),
+                span: position.span(),
             }),
         )
         .unwrap()
     };
-    let status = ReservationStatus {
+    let status = SpanStatus {
         nest: old.nest(),
-        reservation: old.reservation(),
-        version: ReservationVersion::INITIAL,
+        span: old.span(),
+        version: SpanVersion::INITIAL,
         offset: 0,
         count: 1,
         address: VirtAddr::new(0x8000),
         level: CellLevel::BASE,
         access: 2,
-        phase: ReservationPhase::Open,
+        phase: SpanPhase::Open,
     };
-    let previous = Observation::new(Snapshot::Reservation(status)).unwrap();
-    let replacement = Observation::new(Snapshot::Reservation(ReservationStatus {
-        reservation: current.reservation(),
+    let previous = Observation::new(Snapshot::Span(status)).unwrap();
+    let replacement = Observation::new(Snapshot::Span(SpanStatus {
+        span: current.span(),
         ..status
     }))
     .unwrap();
@@ -55,7 +53,7 @@ fn reusing_an_address_and_revision_cannot_match_an_old_reservation_observation()
         &bytes[32..64],
         &[2u64, 13, 17, 19].map(u64::to_le_bytes).concat()
     );
-    for version in [10, 11, 12, 14] {
+    for version in [10, 11, 13, 15] {
         let mut mixed = bytes;
         set_word(&mut mixed, 0, version);
         assert!(Request::from_bytes(&mixed).is_none());
@@ -66,21 +64,21 @@ fn reusing_an_address_and_revision_cannot_match_an_old_reservation_observation()
 }
 
 #[test]
-fn reservation_sign_identity_keeps_v10_tags_without_creating_authority() {
+fn span_sign_identity_keeps_v10_tags_without_creating_authority() {
     let position = memo(0);
     for (tag, source) in [
         (
             9,
-            SignSource::ReservationRetired {
+            SignSource::SpanRetired {
                 token: position.token(),
-                reservation: position.reservation(),
+                span: position.span(),
             },
         ),
         (
             11,
-            SignSource::ReservationPublished {
+            SignSource::SpanPublished {
                 token: position.token(),
-                reservation: position.reservation(),
+                span: position.span(),
             },
         ),
     ] {

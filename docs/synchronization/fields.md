@@ -1,5 +1,10 @@
 # Current lock fields and acquisition relations
 
+> **Historical #185 catalogue.** This snapshot predates the #220 span/translation split. For the current authority and lock order use
+[Span/Memo/Translation ownership](../span-ownership.md). The lock class
+previously named `Reservation` is now `Span`; line references here are
+kept only as history.
+
 Generated with `cargo +nightly run --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- inventory --kernel .`. The [audit](README.md) supplies owner, lifetime, failure, IRQ and migration obligations. The [complete call-site catalogue](acquisitions.json) links each textual acquisition to its source function; overloaded names and `with` calls require the source context. This is a review index, not execution coverage.
 
 Only this table’s predecessors/successors are a display of the transitive reduction of the production `relations!` closure. They are permitted directions, not claims that every possible edge is executed. All omitted ordinary combinations are forbidden; controlled peers and source-borrow try admission are separate protocols.
@@ -12,15 +17,15 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `ChangeBlocks` | [basis/cell/page/reclaim/change.rs:29](../../server/src/basis/cell/page/reclaim/change.rs#L29) | `LiveChanges` | `PageMembership` |
 | `RetentionStatistics` | [basis/cell/page/reclaim/statistics.rs:11](../../server/src/basis/cell/page/reclaim/statistics.rs#L11) | `PageMembership` |  |
 | `Commit` | [basis/sync/lock/mod.rs:47](../../server/src/basis/sync/lock/mod.rs#L47) | `LedgerSerial`, `BootRegions` | `ActivityDelivery`, `Address`, `BlockStages`, `BlockUses`, `ControlTable`, `Deadline`, `HeldSources`, `Husks`, `LedgerHeirs`, `Organizations`, `PendParent`, `ProvenanceGrant`, `ProvenanceUses`, `Scheduler`, `SchedulerAdmission`, `SourceAuthorities`, `SourceAuthorizationRef`, `SourceBindings`, `SourceGate`, `SourceMaps`, `SourceOrigins`, `SpanExports`, `TaskResult`, `TeamChildren`, `TeamExit`, `TeamTasks`, `TerminationQueue`, `WaitHolders` |
-| `Flat` | [basis/flat/mod.rs:54](../../server/src/basis/flat/mod.rs#L54), [basis/flat/mod.rs:132](../../server/src/basis/flat/mod.rs#L132), [basis/flat/storage/materialize.rs:32](../../server/src/basis/flat/storage/materialize.rs#L32), [basis/flat/storage/materialize.rs:41](../../server/src/basis/flat/storage/materialize.rs#L41) | `Reservation`, `BlockPages` | `LiveChanges`, `SourceIndex` |
+| `Flat` | [basis/flat/mod.rs:54](../../server/src/basis/flat/mod.rs#L54), [basis/flat/mod.rs:132](../../server/src/basis/flat/mod.rs#L132), [basis/flat/storage/materialize.rs:32](../../server/src/basis/flat/storage/materialize.rs#L32), [basis/flat/storage/materialize.rs:41](../../server/src/basis/flat/storage/materialize.rs#L41) | `Span`, `BlockPages` | `LiveChanges`, `SourceIndex` |
 | `SourceAuthorizationRef` | [basis/flat/source/mod.rs:44](../../server/src/basis/flat/source/mod.rs#L44) | `Commit` |  |
 | `SourceMaps` | [basis/flat/source/mod.rs:45](../../server/src/basis/flat/source/mod.rs#L45) | `Commit` |  |
 | `SourceAuthorities` | [basis/flat/source/mod.rs:46](../../server/src/basis/flat/source/mod.rs#L46) | `Commit` | `BlockPool`, `BlockPump` |
 | `ActivityRegistry` | [basis/nest/activity.rs:51](../../server/src/basis/nest/activity.rs#L51) | `SourceGate` |  |
 | `ActivityDelivery` | [basis/nest/activity.rs:104](../../server/src/basis/nest/activity.rs#L104) | `Commit` | `SignState`, `WaitSites` |
-| `FaultPolicy` | [basis/nest/address/span/mod.rs:31](../../server/src/basis/nest/address/span/mod.rs#L31) | `Reservation` | `BlockPool`, `BlockPump`, `FaultProgress`, `SignQueue`, `SignState` |
+| `FaultPolicy` | [basis/nest/address/span/mod.rs:31](../../server/src/basis/nest/address/span/mod.rs#L31) | `Span` | `BlockPool`, `BlockPump`, `FaultProgress`, `SignQueue`, `SignState` |
 | `SpanExports` | [basis/nest/address/span/mod.rs:41](../../server/src/basis/nest/address/span/mod.rs#L41) | `Commit` | `BlockPool`, `BlockPump` |
-| `Reservation` | [basis/nest/address/span/mod.rs:36](../../server/src/basis/nest/address/span/mod.rs#L36) | `Nest` | `FaultPolicy`, `Flat` |
+| `Span` | [basis/nest/address/span/mod.rs:36](../../server/src/basis/nest/address/span/mod.rs#L36) | `Nest` | `FaultPolicy`, `Flat` |
 | `Organizations` | [basis/nest/authority/binding.rs:36](../../server/src/basis/nest/authority/binding.rs#L36) | `Commit` | `Nest` |
 | `NestAuthority` | [basis/nest/authority/mod.rs:105](../../server/src/basis/nest/authority/mod.rs#L105) | `Nest` | `BlockPool`, `BlockPump` |
 | `FaultProgress` | [basis/nest/fault/queue.rs:13](../../server/src/basis/nest/fault/queue.rs#L13) | `FaultPolicy` |  |
@@ -28,7 +33,7 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `ActivityHistory` | [basis/nest/memo/activity/mod.rs:35](../../server/src/basis/nest/memo/activity/mod.rs#L35) | `Nest` |  |
 | `Address` | [basis/nest/mod.rs:98](../../server/src/basis/nest/mod.rs#L98) | `Commit` | `Nest` |
 | `Cleanup` | [basis/nest/mod.rs:99](../../server/src/basis/nest/mod.rs#L99) |  | `Nest` |
-| `Nest` | [basis/nest/mod.rs:100](../../server/src/basis/nest/mod.rs#L100) | `Organizations`, `Address`, `Cleanup`, `BootNests` | `ActivityHistory`, `Controllers`, `NestAuthority`, `Reservation`, `SourcePhase`, `TaskJournal` |
+| `Nest` | [basis/nest/mod.rs:100](../../server/src/basis/nest/mod.rs#L100) | `Organizations`, `Address`, `Cleanup`, `BootNests` | `ActivityHistory`, `Controllers`, `NestAuthority`, `Span`, `SourcePhase`, `TaskJournal` |
 | `PendState` | [basis/pend/authority/mod.rs:33](../../server/src/basis/pend/authority/mod.rs#L33) | `LedgerEntries`, `SourcePhase`, `ProvenanceGrant` |  |
 | `PendParent` | [basis/pend/authority/mod.rs:34](../../server/src/basis/pend/authority/mod.rs#L34) | `Commit` |  |
 | `LedgerAdmission` | [basis/pend/ledger/admission.rs:29](../../server/src/basis/pend/ledger/admission.rs#L29) | `LedgerCharge` | `BlockPool`, `BlockPump` |
@@ -97,3 +102,4 @@ Only this table’s predecessors/successors are a display of the transitive redu
 | `Spare` | [metal/allocator/spare/mod.rs:27](../../server/src/metal/allocator/spare/mod.rs#L27) |  |  |
 | `Controllers` | [metal/riscv/mmu/external/controllers/mod.rs:10](../../server/src/metal/riscv/mmu/external/controllers/mod.rs#L10) | `Nest` | `PageMembership` |
 | `Asid` | [metal/riscv/mmu/internal/identity/asid.rs:13](../../server/src/metal/riscv/mmu/internal/identity/asid.rs#L13) | `LedgerSerial` | `Frame` |
+

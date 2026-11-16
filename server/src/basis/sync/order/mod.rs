@@ -20,7 +20,7 @@ pub enum Class {
     ActivityDelivery,
     FaultPolicy,
     SpanExports,
-    Reservation,
+    Span,
     Organizations,
     NestAuthority,
     FaultProgress,
@@ -115,7 +115,7 @@ impl Class {
         Self::ActivityDelivery,
         Self::FaultPolicy,
         Self::SpanExports,
-        Self::Reservation,
+        Self::Span,
         Self::Organizations,
         Self::NestAuthority,
         Self::FaultProgress,
@@ -234,7 +234,7 @@ classes! {
     ActivityDelivery,
     FaultPolicy,
     SpanExports,
-    Reservation,
+    Span,
     Organizations,
     NestAuthority,
     FaultProgress,
@@ -332,7 +332,7 @@ construction! {
     ActivityDelivery,
     FaultPolicy,
     SpanExports,
-    Reservation,
+    Span,
     Organizations,
     NestAuthority,
     FaultProgress,
@@ -421,7 +421,8 @@ impl sealed::Pair for Flat {}
 impl PairOrder for Flat {}
 
 // Explicit reachability closure, not a numeric rank and not a transitive
-// blanket impl. This one table emits the static proof and Debug predicate.
+// blanket impl. Each row starts with its direct edges; the const pass closes
+// them so a new leaf does not need a hand-written edge from every ancestor.
 macro_rules! relations {
     ($($parent:ident => [$($child:ident),* $(,)?]),* $(,)?) => {
         $($(impl sealed::Relation<$child> for $parent {}
@@ -430,6 +431,22 @@ macro_rules! relations {
         static RELATIONS:[[bool;Class::ALL.len()];Class::ALL.len()]={
             let mut rows=[[false;Class::ALL.len()];Class::ALL.len()];
             $($(rows[Class::$parent as usize][Class::$child as usize]=true;)*)*
+            let n=Class::ALL.len();
+            let mut k=0;
+            while k<n {
+                let mut i=0;
+                while i<n {
+                    if rows[i][k] {
+                        let mut j=0;
+                        while j<n {
+                            if rows[k][j] { rows[i][j]=true; }
+                            j+=1;
+                        }
+                    }
+                    i+=1;
+                }
+                k+=1;
+            }
             rows
         };
         #[cfg(debug_assertions)]
@@ -443,21 +460,21 @@ relations! {
     LiveChanges => [PageMembership,ChangeBlocks,RetentionStatistics,BlockPool,BlockPump,Tally,Frame],
     PageMembership => [RetentionStatistics,BlockPool,BlockPump,Tally,Frame],
     ChangeBlocks => [PageMembership,RetentionStatistics,BlockPool,BlockPump,Tally,Frame],
-    Commit => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,SourceAuthorizationRef,SourceMaps,SourceAuthorities,ActivityRegistry,ActivityDelivery,FaultPolicy,SpanExports,Reservation,Organizations,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Address,Nest,PendState,PendParent,LedgerAdmission,LedgerCharge,LedgerEntries,LedgerHeirs,BlockPages,BlockEpoch,BlockUses,BlockStages,HeldSources,SourceFlights,SourceGate,SourceBindings,SourceBlocks,SourceOrigins,SourcePhase,ProvenanceGrant,ProvenanceUses,Deadline,InterruptController,InterruptProgress,InterruptSources,InterruptSource,Scheduler,SchedulerAdmission,SignQueue,SignState,SignRouting,SignDelivery,WaitHolders,WaitSites,ControlTable,TerminationQueue,Husks,TaskState,TaskReceipts,TaskResult,TaskJournal,TaskHeir,TaskSchedule,TaskExtensions,Registry,TeamState,TeamTasks,TeamChildren,TeamTermination,TeamHeld,TeamExit,CloneQueue,BlockPool,BlockPump,Tally,Frame,Controllers],
+    Commit => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,SourceAuthorizationRef,SourceMaps,SourceAuthorities,ActivityRegistry,ActivityDelivery,FaultPolicy,SpanExports,Span,Organizations,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Address,Nest,PendState,PendParent,LedgerAdmission,LedgerCharge,LedgerEntries,LedgerHeirs,BlockPages,BlockEpoch,BlockUses,BlockStages,HeldSources,SourceFlights,SourceGate,SourceBindings,SourceBlocks,SourceOrigins,SourcePhase,ProvenanceGrant,ProvenanceUses,Deadline,InterruptController,InterruptProgress,InterruptSources,InterruptSource,Scheduler,SchedulerAdmission,SignQueue,SignState,SignRouting,SignDelivery,WaitHolders,WaitSites,ControlTable,TerminationQueue,Husks,TaskState,TaskReceipts,TaskResult,TaskJournal,TaskHeir,TaskSchedule,TaskExtensions,Registry,TeamState,TeamTasks,TeamChildren,TeamTermination,TeamHeld,TeamExit,CloneQueue,BlockPool,BlockPump,Tally,Frame,Controllers],
     Flat => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,SourceIndex,BlockPool,BlockPump,Tally,Frame],
     SourceAuthorities => [BlockPool,BlockPump,Tally,Frame],
     ActivityDelivery => [SignState,WaitSites,TaskState,BlockPool,BlockPump,Tally,Frame],
     FaultPolicy => [FaultProgress,SignQueue,SignState,SignDelivery,BlockPool,BlockPump,Tally,Frame],
     SpanExports => [BlockPool,BlockPump,Tally,Frame],
-    Reservation => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,FaultProgress,SourceIndex,SignQueue,SignState,SignDelivery,BlockPool,BlockPump,Tally,Frame],
-    Organizations => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Reservation,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
+    Span => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,FaultProgress,SourceIndex,SourcePhase,SourceBindings,WaitSites,TaskJournal,SignQueue,SignState,SignDelivery,BlockPool,BlockPump,Tally,Frame],
+    Organizations => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
     NestAuthority => [BlockPool,BlockPump,Tally,Frame],
     SourceIndex => [BlockPool,BlockPump,Tally,Frame],
-    Address => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Reservation,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
-    Nest => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Reservation,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
+    Address => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,WaitSites,SourceBindings,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
+    Nest => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,PendState,WaitSites,SourceBindings,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
     LedgerAdmission => [BlockPool,BlockPump,Tally,Frame],
     LedgerCharge => [LedgerAdmission,BlockPool,BlockPump,Tally,Frame],
-    LedgerSerial => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Commit,Flat,SourceAuthorizationRef,SourceMaps,SourceAuthorities,ActivityRegistry,ActivityDelivery,FaultPolicy,SpanExports,Reservation,Organizations,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Address,Nest,PendState,PendParent,LedgerAdmission,LedgerCharge,LedgerEntries,LedgerHeirs,BlockPages,BlockEpoch,BlockUses,BlockStages,HeldSources,SourceFlights,SourceGate,SourceBindings,SourceBlocks,SourceOrigins,SourcePhase,ProvenanceGrant,ProvenanceUses,Deadline,InterruptController,InterruptProgress,InterruptSources,InterruptSource,Scheduler,SchedulerAdmission,SignQueue,SignState,SignRouting,SignDelivery,WaitHolders,WaitSites,ControlTable,TerminationQueue,Husks,TaskState,TaskReceipts,TaskResult,TaskJournal,TaskHeir,TaskSchedule,TaskExtensions,Registry,TeamState,TeamTasks,TeamChildren,TeamTermination,TeamHeld,TeamExit,CloneQueue,BlockPool,BlockPump,Tally,Frame,Controllers,Asid],
+    LedgerSerial => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Commit,Flat,SourceAuthorizationRef,SourceMaps,SourceAuthorities,ActivityRegistry,ActivityDelivery,FaultPolicy,SpanExports,Span,Organizations,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Address,Nest,PendState,PendParent,LedgerAdmission,LedgerCharge,LedgerEntries,LedgerHeirs,BlockPages,BlockEpoch,BlockUses,BlockStages,HeldSources,SourceFlights,SourceGate,SourceBindings,SourceBlocks,SourceOrigins,SourcePhase,ProvenanceGrant,ProvenanceUses,Deadline,InterruptController,InterruptProgress,InterruptSources,InterruptSource,Scheduler,SchedulerAdmission,SignQueue,SignState,SignRouting,SignDelivery,WaitHolders,WaitSites,ControlTable,TerminationQueue,Husks,TaskState,TaskReceipts,TaskResult,TaskJournal,TaskHeir,TaskSchedule,TaskExtensions,Registry,TeamState,TeamTasks,TeamChildren,TeamTermination,TeamHeld,TeamExit,CloneQueue,BlockPool,BlockPump,Tally,Frame,Controllers,Asid],
     LedgerEntries => [PendState,LedgerAdmission,LedgerCharge,CloneQueue,BlockPool,BlockPump,Tally,Frame],
     LedgerHeirs => [BlockPool,BlockPump,Tally,Frame],
     BlockPages => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,SourceIndex,BlockPool,BlockPump,Tally,Frame],
@@ -493,8 +510,8 @@ relations! {
     TeamChildren => [TaskHeir,BlockPool,BlockPump,Tally,Frame],
     TeamHeld => [Registry,TeamState,BlockPool,BlockPump,Tally,Frame],
     BootMmio => [BlockPool,BlockPump,Tally,Frame],
-    BootRegions => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Commit,Flat,SourceAuthorizationRef,SourceMaps,SourceAuthorities,ActivityRegistry,ActivityDelivery,FaultPolicy,SpanExports,Reservation,Organizations,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Address,Nest,PendState,PendParent,LedgerAdmission,LedgerCharge,LedgerEntries,LedgerHeirs,BlockPages,BlockEpoch,BlockUses,BlockStages,HeldSources,SourceFlights,SourceGate,SourceBindings,SourceBlocks,SourceOrigins,SourcePhase,ProvenanceGrant,ProvenanceUses,Deadline,InterruptController,InterruptProgress,InterruptSources,InterruptSource,Scheduler,SchedulerAdmission,SignQueue,SignState,SignRouting,SignDelivery,WaitHolders,WaitSites,ControlTable,TerminationQueue,Husks,TaskState,TaskReceipts,TaskResult,TaskJournal,TaskHeir,TaskSchedule,TaskExtensions,Registry,TeamState,TeamTasks,TeamChildren,TeamTermination,TeamHeld,TeamExit,CloneQueue,BlockPool,BlockPump,Tally,Frame,Controllers],
-    BootNests => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Reservation,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
+    BootRegions => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Commit,Flat,SourceAuthorizationRef,SourceMaps,SourceAuthorities,ActivityRegistry,ActivityDelivery,FaultPolicy,SpanExports,Span,Organizations,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Address,Nest,PendState,PendParent,LedgerAdmission,LedgerCharge,LedgerEntries,LedgerHeirs,BlockPages,BlockEpoch,BlockUses,BlockStages,HeldSources,SourceFlights,SourceGate,SourceBindings,SourceBlocks,SourceOrigins,SourcePhase,ProvenanceGrant,ProvenanceUses,Deadline,InterruptController,InterruptProgress,InterruptSources,InterruptSource,Scheduler,SchedulerAdmission,SignQueue,SignState,SignRouting,SignDelivery,WaitHolders,WaitSites,ControlTable,TerminationQueue,Husks,TaskState,TaskReceipts,TaskResult,TaskJournal,TaskHeir,TaskSchedule,TaskExtensions,Registry,TeamState,TeamTasks,TeamChildren,TeamTermination,TeamHeld,TeamExit,CloneQueue,BlockPool,BlockPump,Tally,Frame,Controllers],
+    BootNests => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
     // Queue growth and payload release may allocate/free while CloneQueue is
     // held; atomic receive also attaches its prepared registration charge.
     // These leaves never acquire CloneQueue or LedgerSerial.
@@ -502,7 +519,7 @@ relations! {
     BlockPool => [Tally,Frame],
     Controllers => [PageMembership,RetentionStatistics,BlockPool,BlockPump,Tally,Frame],
     Asid => [Frame],
-    Cleanup => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Reservation,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
+    Cleanup => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
 }
 
 // A full closure has no self edges. Longest-path relaxation also rejects a

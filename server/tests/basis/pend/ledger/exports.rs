@@ -64,7 +64,7 @@ fn extend(
         entry,
         Operations::Nest(NestRights::PUBLISH),
         map(1, 2, 2),
-        nest.reservation(id(1)).as_ref(),
+        nest.span(id(1)).as_ref(),
     )
 }
 
@@ -115,7 +115,7 @@ fn closing_an_intermediate_reservation_or_task_invalidates_downstream() {
             two.dead.store(true, Ordering::Release);
         } else {
             second
-                .reservation(id(1))
+                .span(id(1))
                 .unwrap()
                 .open
                 .store(false, Ordering::Release);

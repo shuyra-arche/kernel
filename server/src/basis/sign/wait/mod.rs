@@ -268,7 +268,7 @@ pub(crate) fn wipe_space(space: NestId) -> bool {
                     .find(|k| {
                         matches!(
                             k,
-                            WakeKey::Reservation { space: s, .. } | WakeKey::Value { space: s, .. }
+                            WakeKey::Span { space: s, .. } | WakeKey::Value { space: s, .. }
                                 if *s == space
                         )
                     })
