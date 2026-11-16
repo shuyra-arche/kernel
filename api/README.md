@@ -84,7 +84,7 @@ memory descriptors, Boot Ledger and Capsule ABI use the single version in
 
 ABI 14 names the address contract by its real owner, the Span: `SpanId`,
 `SpanVersion`, `SpanStatus`, `SpanPhase`, `CreateSpanRequest`,
-`Action::CreateSpan`/`DeleteSpan`, `Query::Span`/`Snapshot::Span`,
+`Action::CreateSpan`/`DeleteSpan`/`ReleaseRange`, `Query::Span`/`Snapshot::Span`,
 `MemoPosition::span`, the `span` field of fault and activity observations,
 `SignSource::SpanRetired`/`SpanPublished`, `NestScope::Span` and
 `NestRights::CREATE_SPAN`/`DELETE_SPAN`. The explicit `Reservation` object and
