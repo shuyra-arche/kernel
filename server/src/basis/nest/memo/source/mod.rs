@@ -344,7 +344,7 @@ impl Source {
             actor,
             route.entry(),
             Operations::Nest(NestRights::PUBLISH),
-            PendScope::Nest(NestScope::Reservation {
+            PendScope::Nest(NestScope::Span {
                 id: route.id(),
                 range: PendRange::Pages {
                     offset: index,

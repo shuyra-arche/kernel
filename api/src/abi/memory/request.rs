@@ -7,10 +7,10 @@ use crate::model::{
     cell::CellLevel,
     flat::{BlockRef, FlatId, FlatVersion, Reshape, SlotPosition, SlotVersion},
     identity::PendId,
-    nest::ReservationId,
+    nest::SpanId,
     nest::{
-        FaultEpoch, FaultRoute, MemoGeneration, MemoPosition, NestId, NestVersion,
-        ReservationVersion, ReserveRequest,
+        CreateSpanRequest, FaultEpoch, FaultRoute, MemoGeneration, MemoPosition, NestId,
+        NestVersion, SpanVersion,
     },
     view::ViewId,
 };
@@ -127,13 +127,13 @@ impl Source {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// Atomically install/replace or disable a Reservation-owned fault route. The
+    /// Atomically install/replace or disable a Span-owned fault route. The
     /// provider binds the actual caller, never a caller-supplied handler Task.
     FaultRoute {
         token: PendId,
         nest: NestId,
-        reservation: ReservationId,
-        expected: ReservationVersion,
+        span: SpanId,
+        expected: SpanVersion,
         epoch: FaultEpoch,
         route: Option<FaultRoute>,
     },
@@ -155,17 +155,17 @@ pub enum Action {
         nest: NestId,
         expected: NestVersion,
     },
-    Reserve {
+    CreateSpan {
         token: PendId,
         nest: NestId,
         expected: NestVersion,
-        reservation: ReserveRequest,
+        request: CreateSpanRequest,
     },
-    Release {
+    DeleteSpan {
         token: PendId,
         nest: NestId,
-        reservation: ReservationId,
-        expected: ReservationVersion,
+        span: SpanId,
+        expected: SpanVersion,
     },
     /// One parent to its 512 immediate children. The expected Flat revision
     /// covers every affected coordinate, not merely the first Slot's stamp.
@@ -255,8 +255,8 @@ impl Action {
             Self::DeleteFlat { .. } => Opcode::Delete(Domain::Flat),
             Self::CreateNest { .. } => Opcode::Create(Domain::Nest),
             Self::DeleteNest { .. } => Opcode::Delete(Domain::Nest),
-            Self::Reserve { .. } => Opcode::Reserve,
-            Self::Release { .. } => Opcode::Release,
+            Self::CreateSpan { .. } => Opcode::CreateSpan,
+            Self::DeleteSpan { .. } => Opcode::DeleteSpan,
             Self::Split { .. } => Opcode::Split,
             Self::Merge { .. } => Opcode::Merge,
             Self::Inspect(query) => Opcode::Inspect(query.domain()),
@@ -278,13 +278,10 @@ impl Action {
     fn valid(self) -> bool {
         match self {
             Self::FaultRoute {
-                token,
-                reservation,
-                route,
-                ..
+                token, span, route, ..
             } => {
                 valid_token(token.get())
-                    && valid_token(reservation.get())
+                    && valid_token(span.get())
                     && route.is_none_or(FaultRoute::valid)
             }
             Self::CreateFlat {
@@ -302,13 +299,11 @@ impl Action {
             Self::DeleteFlat { token, .. } | Self::DeleteNest { token, .. } => {
                 valid_token(token.get())
             }
-            Self::Reserve {
-                token, reservation, ..
-            } => {
+            Self::CreateSpan { token, request, .. } => {
                 valid_token(token.get())
-                    && reservation.valid()
-                    && match reservation.placement.at() {
-                        crate::model::cell::PlacementAt::Exact(address) => reservation
+                    && request.valid()
+                    && match request.placement.at() {
+                        crate::model::cell::PlacementAt::Exact(address) => request
                             .count
                             .checked_bytes()
                             .and_then(|bytes| address.get().checked_add(bytes))
@@ -316,9 +311,9 @@ impl Action {
                         _ => true,
                     }
             }
-            Self::Release {
-                token, reservation, ..
-            } => valid_token(token.get()) && valid_token(reservation.get()),
+            Self::DeleteSpan { token, span, .. } => {
+                valid_token(token.get()) && valid_token(span.get())
+            }
             Self::Split {
                 start,
                 parent,
@@ -375,7 +370,7 @@ impl Action {
             Self::FaultRoute {
                 token,
                 nest,
-                reservation,
+                span,
                 expected,
                 epoch,
                 route,
@@ -383,7 +378,7 @@ impl Action {
                 for word in [
                     token.get() as u64,
                     nest.get() as u64,
-                    reservation.get() as u64,
+                    span.get() as u64,
                     expected.get(),
                     epoch.get(),
                     u64::from(route.is_some()),
@@ -424,26 +419,26 @@ impl Action {
                 out.word(nest.get() as u64)?;
                 out.word(expected.get())
             }
-            Self::Reserve {
+            Self::CreateSpan {
                 token,
                 nest,
                 expected,
-                reservation,
+                request,
             } => {
                 out.word(token.get() as u64)?;
                 out.word(nest.get() as u64)?;
                 out.word(expected.get())?;
-                out.bytes(&reservation.to_bytes())
+                out.bytes(&request.to_bytes())
             }
-            Self::Release {
+            Self::DeleteSpan {
                 token,
                 nest,
-                reservation,
+                span,
                 expected,
             } => {
                 out.word(token.get() as u64)?;
                 out.word(nest.get() as u64)?;
-                out.word(reservation.get() as u64)?;
+                out.word(span.get() as u64)?;
                 out.word(expected.get())
             }
             Self::Split {
@@ -544,8 +539,8 @@ impl Action {
             Opcode::FaultRoute => Self::FaultRoute {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
-                reservation: input.reservation()?,
-                expected: ReservationVersion::new(input.word()?)?,
+                span: input.span()?,
+                expected: SpanVersion::new(input.word()?)?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 route: match input.word()? {
                     0 => None,
@@ -574,17 +569,17 @@ impl Action {
                 nest: NestId::new(input.size()?)?,
                 expected: NestVersion::new(input.word()?)?,
             },
-            Opcode::Reserve => Self::Reserve {
+            Opcode::CreateSpan => Self::CreateSpan {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
                 expected: NestVersion::new(input.word()?)?,
-                reservation: ReserveRequest::from_bytes(input.bytes::<48>()?)?,
+                request: CreateSpanRequest::from_bytes(input.bytes::<48>()?)?,
             },
-            Opcode::Release => Self::Release {
+            Opcode::DeleteSpan => Self::DeleteSpan {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
-                reservation: input.reservation()?,
-                expected: ReservationVersion::new(input.word()?)?,
+                span: input.span()?,
+                expected: SpanVersion::new(input.word()?)?,
             },
             Opcode::Split | Opcode::Merge => {
                 let start = SlotPosition::from_bytes(input.bytes::<24>()?)?;

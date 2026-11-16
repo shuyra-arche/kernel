@@ -85,7 +85,7 @@ impl RangeEntry {
         nest.settled(self.binding.id())
             && self.root.as_ref().is_none_or(|root| {
                 self.reservation().is_some_and(|span| {
-                    span.state.lock().phase == super::address::span::ReservationPhase::Gone
+                    span.state.lock().phase == super::address::span::SpanPhase::Gone
                 }) && root
                     .authority
                     .upgrade()
@@ -214,7 +214,7 @@ impl ReservationRegistry {
                 .as_ref()
                 .is_some_and(|root| root.creator != creator)
                 && entry.reservation().is_some_and(|span| {
-                    span.state.lock().phase != super::address::span::ReservationPhase::Gone
+                    span.state.lock().phase != super::address::span::SpanPhase::Gone
                 })
             {
                 return true;
@@ -281,7 +281,7 @@ impl Nest {
 
     /// The whole-Nest keeper advances a bounded number of the real namespace records.
     pub(crate) fn progress_reservations(self: &Arc<Self>) {
-        use kernel_api::model::nest::ReservationId;
+        use kernel_api::model::nest::SpanId;
         if !self.is_external() {
             return;
         }
@@ -296,8 +296,7 @@ impl Nest {
             let Some(root) = entry.root.as_ref() else {
                 continue;
             };
-            let Some(id) =
-                ReservationId::from_bytes(&(reservation.identity() as u64).to_le_bytes())
+            let Some(id) = SpanId::from_bytes(&(reservation.identity() as u64).to_le_bytes())
             else {
                 continue;
             };
@@ -361,10 +360,10 @@ impl Nest {
             let Some(reservation) = entry.reservation() else {
                 continue;
             };
-            if reservation.state.lock().phase == super::address::span::ReservationPhase::Gone {
+            if reservation.state.lock().phase == super::address::span::SpanPhase::Gone {
                 continue;
             }
-            let id = kernel_api::model::nest::ReservationId::from_bytes(
+            let id = kernel_api::model::nest::SpanId::from_bytes(
                 &(reservation.identity() as u64).to_le_bytes(),
             )
             .ok_or(super::NestError::NoRegion)?;
@@ -384,7 +383,7 @@ impl Nest {
             cursor = entry.binding.id();
             if entry.root.is_some()
                 && entry.reservation().is_some_and(|reservation| {
-                    reservation.state.lock().phase != super::address::span::ReservationPhase::Gone
+                    reservation.state.lock().phase != super::address::span::SpanPhase::Gone
                 })
             {
                 return false;

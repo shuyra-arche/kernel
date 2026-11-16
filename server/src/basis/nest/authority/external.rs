@@ -6,21 +6,17 @@ use crate::basis::pend::{self, PendEntry};
 use crate::basis::unit::{anchor::Anchor, task::Task};
 use alloc::sync::{Arc, Weak};
 use kernel_api::model::identity::PendId;
-use kernel_api::model::nest::ReservationId;
+use kernel_api::model::nest::SpanId;
 use kernel_api::model::pend::{NestRights, NestScope, Operations, PendScope};
 
-fn authorized(
-    actor: &Task,
-    token: PendId,
-    id: ReservationId,
-) -> Result<Arc<PendEntry>, AccessError> {
+fn authorized(actor: &Task, token: PendId, id: SpanId) -> Result<Arc<PendEntry>, AccessError> {
     let entry = pend::locate(actor, token).ok_or(AccessError::Denied)?;
     let nest = entry.target().nest().ok_or(AccessError::Denied)?;
     if !pend::live(actor)
         || !entry
             .authority()
             .permits(Operations::Nest(NestRights::INSPECT))
-        || !matches!(entry.authority().scope(), PendScope::Nest(NestScope::Reservation { id: selected, .. }) if selected == id)
+        || !matches!(entry.authority().scope(), PendScope::Nest(NestScope::Span { id: selected, .. }) if selected == id)
         || !nest.is_external()
     {
         return Err(AccessError::Denied);
@@ -39,7 +35,7 @@ fn authorized(
 pub(crate) fn event(
     actor: &Task,
     token: PendId,
-    id: ReservationId,
+    id: SpanId,
     published: bool,
     expected: u64,
 ) -> Result<

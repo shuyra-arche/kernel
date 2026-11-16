@@ -49,8 +49,8 @@ bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct NestRights: u32 {
         const INSPECT = 1;
-        const RESERVE = 2;
-        const RELEASE = 4;
+        const CREATE_SPAN = 2;
+        const DELETE_SPAN = 4;
         /// Adopt an empty, exclusive Internal Nest when constructing a Team.
         /// This does not authorize external source discovery or binding.
         const ATTACH = 8;
@@ -61,7 +61,7 @@ bitflags::bitflags! {
         const INSERT = 1024;
         const REMOVE = 2048;
         const FAULT = 4096;
-        /// Clear and rearm CPU activity observations in the live reservation window.
+        /// Clear and rearm CPU activity observations in the live span window.
         const SAMPLE = 8192;
     }
 }
@@ -76,14 +76,14 @@ impl ShareRights {
 impl NestRights {
     pub const fn whole() -> Self {
         Self::INSPECT
-            .union(Self::RESERVE)
+            .union(Self::CREATE_SPAN)
             .union(Self::ATTACH)
             .union(Self::DELETE)
     }
 
-    pub const fn reservation() -> Self {
+    pub const fn span() -> Self {
         Self::INSPECT
-            .union(Self::RELEASE)
+            .union(Self::DELETE_SPAN)
             .union(Self::PUBLISH)
             .union(Self::RETRACT)
             .union(Self::PROTECT)
@@ -193,8 +193,8 @@ impl Limits {
             (Operations::Nest(rights), PendScope::Nest(NestScope::Whole)) => {
                 NestRights::whole().contains(rights)
             }
-            (Operations::Nest(rights), PendScope::Nest(NestScope::Reservation { .. })) => {
-                NestRights::reservation().contains(rights)
+            (Operations::Nest(rights), PendScope::Nest(NestScope::Span { .. })) => {
+                NestRights::span().contains(rights)
             }
             _ => false,
         }
@@ -204,7 +204,7 @@ impl Limits {
     pub fn permits_child(self, child: Self) -> bool {
         self.permits_narrowing(child) && self.distributable == Distributable::Yes
     }
-    /// Whole and Reservation scopes, or different ReservationIds, never attenuate into
+    /// Whole and Span scopes, or different SpanIds, never attenuate into
     /// one another. Relative range bounds must also be checked by the server.
     pub fn permits_narrowing(self, child: Self) -> bool {
         self.valid()

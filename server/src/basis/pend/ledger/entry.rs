@@ -13,7 +13,7 @@ use crate::basis::pend::Target;
 use crate::basis::unit::task::Task;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
-use kernel_api::model::nest::ReservationId;
+use kernel_api::model::nest::SpanId;
 use kernel_api::model::pend::{
     Limits, NestRights, NestScope, Operations, PendRange, PendScope, PendStatus,
 };
@@ -74,7 +74,7 @@ impl PendEntry {
         self.meta.alive()
             && self.authority.alive()
             && match self.scope() {
-                PendScope::Nest(NestScope::Reservation { id, .. }) => self
+                PendScope::Nest(NestScope::Span { id, .. }) => self
                     .meta
                     .nest()
                     .is_some_and(|nest| nest.reservation_open(id)),
@@ -85,7 +85,7 @@ impl PendEntry {
     pub(crate) fn status(&self) -> PendStatus {
         let status = self.authority.status();
         if let Target::Nest { nest, .. } = &self.meta {
-            if let PendScope::Nest(NestScope::Reservation { id, .. }) = self.scope() {
+            if let PendScope::Nest(NestScope::Span { id, .. }) = self.scope() {
                 match nest.reservation_status(id) {
                     PendStatus::Dead => return PendStatus::Dead,
                     PendStatus::Retiring if status != PendStatus::Dead => {
@@ -288,7 +288,7 @@ impl PendEntry {
 pub(crate) fn prepare_reservation<'a>(
     task: &'a Arc<Task>,
     parent: &Arc<PendEntry>,
-    id: ReservationId,
+    id: SpanId,
     count: PageCount,
 ) -> Result<PreparedReservationGrant<'a>, PendFail> {
     if !super::live(task) || !parent.alive() {
@@ -297,12 +297,12 @@ pub(crate) fn prepare_reservation<'a>(
     let current = locate(task, parent.token()).ok_or(PendFail::Denied)?;
     if !Arc::ptr_eq(&current, parent)
         || parent.scope() != PendScope::Nest(NestScope::Whole)
-        || !parent.permits(Operations::Nest(NestRights::RESERVE))
+        || !parent.permits(Operations::Nest(NestRights::CREATE_SPAN))
     {
         return Err(PendFail::Denied);
     }
     let ceiling = parent.authority().limits();
-    let scope = PendScope::Nest(NestScope::Reservation {
+    let scope = PendScope::Nest(NestScope::Span {
         id,
         range: PendRange::Pages {
             offset: 0,
@@ -310,7 +310,7 @@ pub(crate) fn prepare_reservation<'a>(
         },
     });
     let limits = Limits {
-        operations: Operations::Nest(NestRights::reservation()),
+        operations: Operations::Nest(NestRights::span()),
         modifiable: ceiling.modifiable,
         distributable: ceiling.distributable,
         scope,
@@ -328,7 +328,7 @@ pub(crate) fn prepare_reservation<'a>(
     entry.authority = Pend::try_new_scope(
         limits.modifiable,
         scope,
-        Operations::Nest(NestRights::reservation() | kernel_api::abi::memory::rights::FAULT),
+        Operations::Nest(NestRights::span() | kernel_api::abi::memory::rights::FAULT),
         limits.distributable,
     )?;
     entry.authority.inherit(parent.authority())?;

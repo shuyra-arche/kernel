@@ -407,7 +407,7 @@ impl Subscription {
             sequence,
             epoch: snapshot.epoch,
             nest: self.nest.id().get() as u64,
-            reservation: self.span.identity() as u64,
+            span: self.span.identity() as u64,
             position: self.page as u64,
             generation: self.identity.generation,
             page: self.identity.page as u64,

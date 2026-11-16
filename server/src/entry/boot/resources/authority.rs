@@ -43,7 +43,7 @@ pub(crate) fn register_space(
         None,
     )?;
     root.narrow(Limits {
-        operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
+        operations: Operations::Nest(NestRights::INSPECT | NestRights::CREATE_SPAN),
         modifiable: Modifiable::Yes,
         distributable: Distributable::Yes,
         scope: PendScope::Nest(NestScope::Whole),

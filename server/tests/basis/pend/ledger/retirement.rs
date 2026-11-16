@@ -47,7 +47,7 @@ fn child(
         parent.token(),
         &Arc::downgrade(target),
         Limits {
-            scope: PendScope::Nest(NestScope::Reservation { id: id(1), range }),
+            scope: PendScope::Nest(NestScope::Span { id: id(1), range }),
             ..parent.authority().limits()
         },
         Mark::NONE,

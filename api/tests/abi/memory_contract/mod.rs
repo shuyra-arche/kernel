@@ -7,8 +7,8 @@ mod objects;
 mod observation;
 mod reply;
 mod request;
-mod reservation;
 mod reshape;
+mod span;
 
 use kernel_api::{
     abi::{self, call::EnvCall},
@@ -17,7 +17,7 @@ use kernel_api::{
         cell::CellLevel,
         flat::{BlockGeneration, BlockRef, FlatId, SlotPosition, SlotVersion},
         identity::PendId,
-        nest::ReservationId,
+        nest::SpanId,
         nest::{MemoGeneration, MemoPosition, NestId},
     },
 };
@@ -30,7 +30,7 @@ fn memo(page: usize) -> MemoPosition {
     MemoPosition::new(
         PendId::mint(13),
         NestId::new(17).unwrap(),
-        ReservationId::from_bytes(&19u64.to_le_bytes()).unwrap(),
+        SpanId::from_bytes(&19u64.to_le_bytes()).unwrap(),
         page,
     )
     .unwrap()
@@ -60,7 +60,7 @@ fn positions_encode_identity_separately_from_expected_revision() {
         (
             memo.token().get(),
             memo.nest().get(),
-            memo.reservation().get(),
+            memo.span().get(),
             memo.page()
         ),
         (13, 17, 19, 512)
@@ -143,15 +143,7 @@ fn position_decoders_reject_sentinels_overflow_and_nonexact_lengths() {
     assert!(SlotPosition::from_bytes(&[0; SlotPosition::WIDTH + 1]).is_none());
     assert!(MemoPosition::from_bytes(&[0; MemoPosition::WIDTH + 1]).is_none());
     assert!(SlotPosition::new(PendId::NONE, FlatId::new(1).unwrap(), 0).is_none());
-    assert!(
-        MemoPosition::new(
-            PendId::mint(1),
-            NestId::new(1).unwrap(),
-            ReservationId::NONE,
-            0
-        )
-        .is_none()
-    );
+    assert!(MemoPosition::new(PendId::mint(1), NestId::new(1).unwrap(), SpanId::NONE, 0).is_none());
 }
 
 #[test]
@@ -210,10 +202,10 @@ fn maintenance_reference_preserves_full_width_record_and_generation() {
 
 #[test]
 fn legacy_register_adapters_are_not_native_memory_dispatch() {
-    assert_eq!(abi::VERSION, 13);
+    assert_eq!(abi::VERSION, 14);
     for domain in [2usize, 12, 13] {
         for operation in 0..=32 {
-            assert!(EnvCall::from_wire((13 << 48) | (domain << 32) | operation, &[0; 6]).is_err());
+            assert!(EnvCall::from_wire((14 << 48) | (domain << 32) | operation, &[0; 6]).is_err());
         }
     }
 }

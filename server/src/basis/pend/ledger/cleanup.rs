@@ -120,7 +120,7 @@ fn remove(task: &Arc<Task>, entry: &Arc<PendEntry>) -> Result<(), PendFail> {
     })?;
     entry.release();
     if let crate::basis::pend::Target::Nest { nest, .. } = entry.target()
-        && let PendScope::Nest(NestScope::Reservation { id, .. }) = entry.scope()
+        && let PendScope::Nest(NestScope::Span { id, .. }) = entry.scope()
     {
         nest.retire_reservation(id.get());
     }
@@ -154,7 +154,7 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
                 .references
                 .withdraw_exports(holder.ident.id, entry.token())?;
             match entry.scope() {
-                PendScope::Nest(NestScope::Reservation { id, .. }) => {
+                PendScope::Nest(NestScope::Span { id, .. }) => {
                     if nest.reservation_root(id, entry.authority()) {
                         nest.release_reservation(id).map_err(reservation_failure)?;
                     } else {

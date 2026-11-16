@@ -152,7 +152,7 @@ impl PreparedReservation {
                     )
                     .expect("admitted mapping extent"),
                 ))
-            || !matches!(root.scope(), PendScope::Nest(NestScope::Reservation { id, .. })
+            || !matches!(root.scope(), PendScope::Nest(NestScope::Span { id, .. })
                 if id.get() == self.span.identity())
         {
             return Err(super::super::NestError::NoRegion);

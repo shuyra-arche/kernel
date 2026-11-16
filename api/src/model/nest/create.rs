@@ -1,4 +1,4 @@
-//! Source-free reservation geometry. Admission and active Sv mode are checked by Kernel.
+//! Source-free span geometry. Admission and active Sv mode are checked by Kernel.
 
 use crate::{
     abi::layout::{fetch_words, store_words},
@@ -10,14 +10,14 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ReserveRequest {
+pub struct CreateSpanRequest {
     pub placement: Placement,
     pub count: PageCount,
     pub level: CellLevel,
     pub access: u64,
 }
 
-impl ReserveRequest {
+impl CreateSpanRequest {
     pub const WIDTH: usize = 48;
 
     pub fn valid(self) -> bool {
@@ -64,11 +64,11 @@ impl crate::abi::reply::FromPair for (PendId, VirtAddr) {
     fn from_pair(token: usize, address: usize) -> Self {
         assert!(
             token != 0 && token <= isize::MAX as usize,
-            "invalid reservation Pend"
+            "invalid span Pend"
         );
         assert!(
             address.is_multiple_of(BASE_PAGE_SIZE),
-            "invalid reservation address"
+            "invalid span address"
         );
         (PendId::new(token), VirtAddr::new(address))
     }

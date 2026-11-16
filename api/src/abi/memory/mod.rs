@@ -18,13 +18,13 @@ use core::num::NonZeroU64;
 /// The same version governs calls, memory descriptors, Ledger and Capsule ABI.
 pub const VERSION: u64 = crate::abi::VERSION as u64;
 
-/// Rights for native holding and reservation operations.
+/// Rights for native holding and span operations.
 pub mod rights {
     use crate::model::pend::{FlatRights, Limits, Operations};
     pub const OCCUPY: FlatRights = FlatRights::OCCUPY;
     pub const VACATE: FlatRights = FlatRights::VACATE;
     pub const RESHAPE: FlatRights = FlatRights::RESHAPE;
-    /// Reservation-only native fault control.
+    /// Span-only native fault control.
     pub const FAULT: crate::model::pend::NestRights = crate::model::pend::NestRights::FAULT;
 
     /// Select already-issued Flat rights using the common attenuation rule.
@@ -88,8 +88,8 @@ pub enum Opcode {
     Create(Domain),
     Delete(Domain),
     Inspect(Domain),
-    Reserve,
-    Release,
+    CreateSpan,
+    DeleteSpan,
     Occupy,
     Vacate,
     Block,
@@ -130,8 +130,8 @@ impl Opcode {
             | Self::Pull
             | Self::Split
             | Self::Merge => Domain::Flat,
-            Self::Reserve
-            | Self::Release
+            Self::CreateSpan
+            | Self::DeleteSpan
             | Self::Insert
             | Self::Remove
             | Self::Publish
@@ -146,8 +146,8 @@ impl Opcode {
             Self::Create(_) => 16,
             Self::Delete(_) => 17,
             Self::Inspect(_) => 18,
-            Self::Occupy | Self::Reserve => 19,
-            Self::Vacate | Self::Release => 20,
+            Self::Occupy | Self::CreateSpan => 19,
+            Self::Vacate | Self::DeleteSpan => 20,
             Self::Block | Self::Insert => 21,
             Self::Allow | Self::Remove => 22,
             Self::Push | Self::Publish => 23,
@@ -170,8 +170,8 @@ impl Opcode {
             (Domain::Flat, 24) => Self::Pull,
             (Domain::Flat, 25) => Self::Split,
             (Domain::Flat, 26) => Self::Merge,
-            (Domain::Nest, 19) => Self::Reserve,
-            (Domain::Nest, 20) => Self::Release,
+            (Domain::Nest, 19) => Self::CreateSpan,
+            (Domain::Nest, 20) => Self::DeleteSpan,
             (Domain::Nest, 21) => Self::Insert,
             (Domain::Nest, 22) => Self::Remove,
             (Domain::Nest, 23) => Self::Publish,
@@ -269,9 +269,9 @@ impl<'a> Reader<'a> {
         valid_token(value).then(|| crate::model::identity::PendId::mint(value))
     }
 
-    fn reservation(&mut self) -> Option<crate::model::nest::ReservationId> {
+    fn span(&mut self) -> Option<crate::model::nest::SpanId> {
         let value = self.size()?;
-        valid_token(value).then(|| crate::model::nest::ReservationId::new(value))
+        valid_token(value).then(|| crate::model::nest::SpanId::new(value))
     }
 
     fn finish(self) -> Option<()> {

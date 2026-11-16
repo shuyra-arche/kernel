@@ -34,7 +34,7 @@ impl Read {
         let Query::FaultEvent {
             token,
             nest,
-            reservation,
+            span: reservation,
             epoch,
             wait,
             ..

@@ -8,17 +8,17 @@ use crate::model::unit::UnitTarget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignSource {
-    /// Retained external reservation completion. Requires reservation-scoped Nest INSPECT
-    /// for this identity/window; the numeric reservation is only a consistency check.
-    ReservationRetired {
+    /// Retained external span completion. Requires span-scoped Nest INSPECT
+    /// for this identity/window; the numeric span is only a consistency check.
+    SpanRetired {
         token: PendId,
-        reservation: crate::model::nest::ReservationId,
+        span: crate::model::nest::SpanId,
     },
     /// Retained completion of one exact publication generation, authorized by a
-    /// reservation-scoped Nest INSPECT grant for the same identity/window.
-    ReservationPublished {
+    /// span-scoped Nest INSPECT grant for the same identity/window.
+    SpanPublished {
         token: PendId,
-        reservation: crate::model::nest::ReservationId,
+        span: crate::model::nest::SpanId,
     },
     /// Oldest unattributed fault retained by this binding; never a reclaim proof.
     NestFault {
@@ -47,10 +47,8 @@ pub enum SignSource {
 impl SignSource {
     pub fn words(self) -> [usize; 3] {
         match self {
-            Self::ReservationRetired { token, reservation } => [9, token.get(), reservation.get()],
-            Self::ReservationPublished { token, reservation } => {
-                [11, token.get(), reservation.get()]
-            }
+            Self::SpanRetired { token, span } => [9, token.get(), span.get()],
+            Self::SpanPublished { token, span } => [11, token.get(), span.get()],
             Self::NestFault { token } => [12, token.get(), 0],
             Self::NestClosed { token } => [13, token.get(), 0],
             Self::Clone { token, condition } => [1, token.get(), condition as usize],
@@ -67,19 +65,19 @@ impl SignSource {
 
     pub fn of(words: [usize; 3]) -> Option<Self> {
         match words {
-            [tag, token, reservation]
+            [tag, token, span]
                 if matches!(tag, 9 | 11)
                     && token != 0
-                    && reservation != 0
+                    && span != 0
                     && token <= isize::MAX as usize
-                    && reservation <= isize::MAX as usize =>
+                    && span <= isize::MAX as usize =>
             {
                 let token = PendId::new(token);
-                let reservation = crate::model::nest::ReservationId::new(reservation);
+                let span = crate::model::nest::SpanId::new(span);
                 Some(if tag == 9 {
-                    Self::ReservationRetired { token, reservation }
+                    Self::SpanRetired { token, span }
                 } else {
-                    Self::ReservationPublished { token, reservation }
+                    Self::SpanPublished { token, span }
                 })
             }
             [12, token, 0] if token > 0 && token <= isize::MAX as usize => Some(Self::NestFault {

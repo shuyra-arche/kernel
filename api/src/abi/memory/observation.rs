@@ -10,11 +10,11 @@ use crate::model::{
         SlotPosition, SlotStatus, SlotVersion,
     },
     identity::{PendId, TaskId},
-    nest::ReservationId,
+    nest::SpanId,
     nest::{
         FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase, FaultSequence, FaultStatus,
         MemoGeneration, MemoPhase, MemoPosition, MemoStatus, NestId, NestInfo, NestKind, NestPhase,
-        NestStatus, NestVersion, ReservationPhase, ReservationStatus, ReservationVersion,
+        NestStatus, NestVersion, SpanPhase, SpanStatus, SpanVersion,
     },
     wait::Wait,
 };
@@ -27,14 +27,14 @@ pub enum Query {
     FaultRoute {
         token: PendId,
         nest: NestId,
-        reservation: ReservationId,
+        span: SpanId,
     },
     /// Observe the next retained event without consuming it. Only the actual
     /// registered handler may read events; timeout never resolves a fault.
     FaultEvent {
         token: PendId,
         nest: NestId,
-        reservation: ReservationId,
+        span: SpanId,
         epoch: FaultEpoch,
         after: u64,
         wait: Wait,
@@ -50,10 +50,10 @@ pub enum Query {
         nest: NestId,
     },
     Memo(MemoPosition),
-    Reservation {
+    Span {
         token: PendId,
         nest: NestId,
-        reservation: ReservationId,
+        span: SpanId,
     },
 }
 
@@ -68,7 +68,7 @@ impl Query {
         match self {
             Self::Flat { .. } | Self::Nest { .. } => 0,
             Self::Slot(_) | Self::Memo(_) => 1,
-            Self::Block(_) | Self::Reservation { .. } => 2,
+            Self::Block(_) | Self::Span { .. } => 2,
             Self::FaultRoute { .. } => 4,
             Self::FaultEvent { .. } => 5,
         }
@@ -77,20 +77,12 @@ impl Query {
         match self {
             Self::Flat { token, .. } | Self::Nest { token, .. } => valid_token(token.get()),
             Self::Block(h) => valid_token(h.token.get()),
-            Self::Reservation {
-                token, reservation, ..
+            Self::Span { token, span, .. } | Self::FaultRoute { token, span, .. } => {
+                valid_token(token.get()) && valid_token(span.get())
             }
-            | Self::FaultRoute {
-                token, reservation, ..
-            } => valid_token(token.get()) && valid_token(reservation.get()),
             Self::FaultEvent {
-                token,
-                reservation,
-                wait,
-                ..
-            } => {
-                valid_token(token.get()) && valid_token(reservation.get()) && wait != Wait::Infinite
-            }
+                token, span, wait, ..
+            } => valid_token(token.get()) && valid_token(span.get()) && wait != Wait::Infinite,
             _ => true,
         }
     }
@@ -111,24 +103,15 @@ impl Query {
                 out.word(nest.get() as u64)
             }
             Self::Memo(memo) => out.bytes(&memo.to_bytes()),
-            Self::Reservation {
-                token,
-                nest,
-                reservation,
-            }
-            | Self::FaultRoute {
-                token,
-                nest,
-                reservation,
-            } => {
+            Self::Span { token, nest, span } | Self::FaultRoute { token, nest, span } => {
                 out.word(token.get() as u64)?;
                 out.word(nest.get() as u64)?;
-                out.word(reservation.get() as u64)
+                out.word(span.get() as u64)
             }
             Self::FaultEvent {
                 token,
                 nest,
-                reservation,
+                span,
                 epoch,
                 after,
                 wait,
@@ -136,7 +119,7 @@ impl Query {
                 for word in [
                     token.get() as u64,
                     nest.get() as u64,
-                    reservation.get() as u64,
+                    span.get() as u64,
                     epoch.get(),
                     after,
                 ] {
@@ -172,20 +155,20 @@ impl Query {
                 nest: NestId::new(input.size()?)?,
             },
             (Domain::Nest, 1) => Self::Memo(MemoPosition::from_bytes(input.bytes::<32>()?)?),
-            (Domain::Nest, 2) => Self::Reservation {
+            (Domain::Nest, 2) => Self::Span {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
-                reservation: input.reservation()?,
+                span: input.span()?,
             },
             (Domain::Nest, 4) => Self::FaultRoute {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
-                reservation: input.reservation()?,
+                span: input.span()?,
             },
             (Domain::Nest, 5) => Self::FaultEvent {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
-                reservation: input.reservation()?,
+                span: input.span()?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 after: input.word()?,
                 wait: match (input.word()?, input.word()?) {
@@ -208,7 +191,7 @@ pub enum Snapshot {
     Block(BlockStatus),
     Nest(NestStatus),
     Memo(MemoStatus),
-    Reservation(ReservationStatus),
+    Span(SpanStatus),
 }
 
 impl Snapshot {
@@ -222,7 +205,7 @@ impl Snapshot {
         match self {
             Self::Flat(_) | Self::Nest(_) => 0,
             Self::Slot(_) | Self::Memo(_) => 1,
-            Self::Block(_) | Self::Reservation(_) => 2,
+            Self::Block(_) | Self::Span(_) => 2,
             Self::FaultRoute(_) => 4,
             Self::FaultEvent(_) => 5,
         }
@@ -234,47 +217,34 @@ impl Snapshot {
             Self::Block(s) => s.valid(),
             Self::Nest(_) => true,
             Self::Memo(s) => s.valid(),
-            Self::Reservation(s) => s.valid(),
+            Self::Span(s) => s.valid(),
             Self::FaultRoute(s) => s.valid(),
             Self::FaultEvent(s) => s.valid(),
         }
     }
     fn matches(self, query: Query) -> bool {
         match (self, query) {
-            (
-                Self::FaultRoute(s),
-                Query::FaultRoute {
-                    nest, reservation, ..
-                },
-            ) => s.nest == nest && s.reservation == reservation,
+            (Self::FaultRoute(s), Query::FaultRoute { nest, span, .. }) => {
+                s.nest == nest && s.span == span
+            }
             (
                 Self::FaultEvent(s),
                 Query::FaultEvent {
                     nest,
-                    reservation,
+                    span,
                     epoch,
                     after,
                     ..
                 },
-            ) => {
-                s.nest == nest
-                    && s.reservation == reservation
-                    && s.epoch == epoch
-                    && s.sequence.get() > after
-            }
+            ) => s.nest == nest && s.span == span && s.epoch == epoch && s.sequence.get() > after,
             (Self::Flat(s), Query::Flat { flat, .. }) => s.id == flat,
             (Self::Slot(s), Query::Slot(p)) => s.flat == p.flat() && s.coordinate == p.page(),
             (Self::Block(s), Query::Block(h)) => s.block == h.block,
             (Self::Nest(s), Query::Nest { nest, .. }) => s.info.id == nest,
             (Self::Memo(s), Query::Memo(p)) => {
-                s.nest == p.nest() && s.reservation == p.reservation() && s.coordinate == p.page()
+                s.nest == p.nest() && s.span == p.span() && s.coordinate == p.page()
             }
-            (
-                Self::Reservation(s),
-                Query::Reservation {
-                    nest, reservation, ..
-                },
-            ) => s.nest == nest && s.reservation == reservation,
+            (Self::Span(s), Query::Span { nest, span, .. }) => s.nest == nest && s.span == span,
             _ => false,
         }
     }
@@ -284,7 +254,7 @@ impl Snapshot {
                 out,
                 &[
                     s.nest.get() as u64,
-                    s.reservation.get() as u64,
+                    s.span.get() as u64,
                     s.epoch.get(),
                     s.phase as u64,
                     s.handler.map_or(0, |task| task.get()) as u64,
@@ -296,7 +266,7 @@ impl Snapshot {
                 out,
                 &[
                     s.nest.get() as u64,
-                    s.reservation.get() as u64,
+                    s.span.get() as u64,
                     s.epoch.get(),
                     s.sequence.get(),
                     s.memo_page as u64,
@@ -364,7 +334,7 @@ impl Snapshot {
                     out,
                     &[
                         s.nest.get() as u64,
-                        s.reservation.get() as u64,
+                        s.span.get() as u64,
                         s.coordinate as u64,
                         s.generation.get(),
                         s.phase as u64,
@@ -376,11 +346,11 @@ impl Snapshot {
                     ],
                 )
             }
-            Self::Reservation(s) => words(
+            Self::Span(s) => words(
                 out,
                 &[
                     s.nest.get() as u64,
-                    s.reservation.get() as u64,
+                    s.span.get() as u64,
                     s.version.get(),
                     s.offset as u64,
                     s.count as u64,
@@ -396,7 +366,7 @@ impl Snapshot {
         Some(match (domain, tag) {
             (Domain::Nest, 4) => Self::FaultRoute(FaultStatus {
                 nest: NestId::new(input.size()?)?,
-                reservation: input.reservation()?,
+                span: input.span()?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 phase: FaultPhase::from_tag(input.word()?)?,
                 handler: match input.size()? {
@@ -408,7 +378,7 @@ impl Snapshot {
             }),
             (Domain::Nest, 5) => {
                 let nest = NestId::new(input.size()?)?;
-                let reservation = input.reservation()?;
+                let span = input.span()?;
                 let epoch = FaultEpoch::new(input.word()?)?;
                 let sequence = FaultSequence::new(input.word()?)?;
                 let memo_page = input.size()?;
@@ -422,7 +392,7 @@ impl Snapshot {
                 }
                 Self::FaultEvent(FaultEvent {
                     nest,
-                    reservation,
+                    span,
                     epoch,
                     sequence,
                     memo_page,
@@ -492,7 +462,7 @@ impl Snapshot {
             }
             (Domain::Nest, 1) => {
                 let nest = NestId::new(input.size()?)?;
-                let reservation = input.reservation()?;
+                let span = input.span()?;
                 let coordinate = input.size()?;
                 let generation = MemoGeneration::new(input.word()?)?;
                 let phase = MemoPhase::from_tag(input.word()?)?;
@@ -505,7 +475,7 @@ impl Snapshot {
                 };
                 Self::Memo(MemoStatus {
                     nest,
-                    reservation,
+                    span,
                     coordinate,
                     generation,
                     phase,
@@ -515,16 +485,16 @@ impl Snapshot {
                     level: CellLevel::new(input.size()?)?,
                 })
             }
-            (Domain::Nest, 2) => Self::Reservation(ReservationStatus {
+            (Domain::Nest, 2) => Self::Span(SpanStatus {
                 nest: NestId::new(input.size()?)?,
-                reservation: input.reservation()?,
-                version: ReservationVersion::new(input.word()?)?,
+                span: input.span()?,
+                version: SpanVersion::new(input.word()?)?,
                 offset: input.size()?,
                 count: input.size()?,
                 address: VirtAddr::new(input.size()?),
                 level: CellLevel::new(input.size()?)?,
                 access: input.word()?,
-                phase: ReservationPhase::from_tag(input.word()?)?,
+                phase: SpanPhase::from_tag(input.word()?)?,
             }),
             _ => return None,
         })

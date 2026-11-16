@@ -287,7 +287,7 @@ impl NestState {
             return Err(NestError::NoRegion);
         }
         let inner = mapping.state.lock();
-        if inner.phase != super::address::span::ReservationPhase::Open {
+        if inner.phase != super::address::span::SpanPhase::Open {
             return Err(NestError::NoRegion);
         }
         let index = mapping.page_index(address);
@@ -404,7 +404,7 @@ impl NestState {
             return Err(NestError::NoRegion);
         }
         let mut inner = mapping.state.lock();
-        if inner.phase != super::address::span::ReservationPhase::Open {
+        if inner.phase != super::address::span::SpanPhase::Open {
             return Err(NestError::NoRegion);
         }
         let transition =
