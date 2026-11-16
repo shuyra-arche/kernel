@@ -382,9 +382,7 @@ pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Resul
             }
             let count = PageCount::new(span.grain()).ok_or(Failure::NotAligned)?;
             let selected = select(actor, source, count)?;
-            mapping
-                .nest()
-                .associate_logical(&span, index, expected.get(), selected)
+            span.insert(mapping.nest(), index, expected.get(), selected)
                 .map_err(nest_error)?;
             Ok(Value::Memo { generation })
         }
@@ -402,9 +400,7 @@ pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Resul
             }
             let generation = expected.next().ok_or(Failure::VersionExhausted)?;
             span.version().next().ok_or(Failure::VersionExhausted)?;
-            mapping
-                .nest()
-                .remove_logical(&span, index, expected.get())
+            span.remove(mapping.nest(), index, expected.get())
                 .map_err(nest_error)?;
             Ok(Value::Memo { generation })
         }
