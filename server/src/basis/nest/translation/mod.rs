@@ -36,14 +36,12 @@ use phase::ClosePhase;
 use self::retirement::{Fenced, Retirement};
 use super::index::Index;
 
-/// 地址空间的共享状态：根页表、关系索引、待失效标记、退休中的资源
-/// 与尚未结算的占用票。每个 Span 自己持有它的 Memo 表。
+/// 地址空间的翻译状态：根页表、待失效标记、退休资源与关闭阶段。
+/// 地址索引、占用与 Team 归属属于 Nest 的 AddressState；每个 Span 自己持有 Memo 表。
 pub(super) struct NestState {
     pub(super) root: Storage,
-    pub(super) index: Index,
     pub(super) retirement: Retirement,
     pub(super) phase: ClosePhase,
-    pub(super) team: Option<kernel_api::model::identity::TeamId>,
 }
 
 impl NestState {
@@ -51,10 +49,8 @@ impl NestState {
     pub(super) fn new(root: Table) -> Self {
         Self {
             root: Storage::Cpu(root),
-            index: Index::new(),
             retirement: Retirement::new(),
             phase: ClosePhase::Open,
-            team: None,
         }
     }
 
@@ -101,15 +97,19 @@ impl NestState {
 
     /// Withdraw the indexed mappings in one locked transition and retain
     /// their obligations until the covering fence succeeds.
-    pub(super) fn close_mappings(&mut self, geometry: Geometry) -> Result<(), NestError> {
+    pub(super) fn close_mappings(
+        &mut self,
+        index: &mut Index,
+        geometry: Geometry,
+    ) -> Result<(), NestError> {
         if !self.retirement.invalidation().is_clean() {
             return Err(NestError::Busy);
         }
         // One indexed Span per service turn. Its admitted Page/active-range
         // geometry bounds the backend work; no complete-Nest snapshot is made.
         self.phase = ClosePhase::Draining;
-        self.index.close_faults();
-        let mappings = self.index.first_overlap(0, usize::MAX);
+        index.close_faults();
+        let mappings = index.first_overlap(0, usize::MAX);
         let cell_count = mappings
             .iter()
             .map(|mapping| mapping.state.lock().memos.published().count())
@@ -150,7 +150,7 @@ impl NestState {
         }
         let global = mappings.iter().any(|mapping| mapping.is_global());
         for mapping in mappings.iter() {
-            self.index.remove(mapping);
+            index.remove(mapping);
             self.retirement.mappings.push(mapping.clone());
             let mut inner = mapping.state.lock();
             if inner
@@ -162,17 +162,16 @@ impl NestState {
             inner.active.clear();
         }
         self.retirement.mark_dirty(global);
-        if self.index.len() == 0 {
+        if index.len() == 0 {
             self.phase = self.phase.begin();
         }
         Ok(())
     }
 
     #[cfg(debug_assertions)]
-    pub(super) fn audit(&self, owner: &Nest, geometry: Geometry) {
-        self.index.audit();
-        self.index
-            .audit_spans(owner, self.root.cpu().expect("CPU audit"), geometry);
+    pub(super) fn audit(&self, index: &Index, owner: &Nest, geometry: Geometry) {
+        index.audit();
+        index.audit_spans(owner, self.root.cpu().expect("CPU audit"), geometry);
         self.root.cpu().expect("CPU audit").visit_leaves(
             geometry,
             &mut |start, physical, flags, size| {
@@ -180,12 +179,10 @@ impl NestState {
                     .as_usize()
                     .checked_add(size - 1)
                     .expect("leaf virtual interval is representable");
-                let mapping = self
-                    .index
+                let mapping = index
                     .find(start.as_usize())
                     .expect("hardware leaf is absent from the nest index");
-                let end_mapping = self
-                    .index
+                let end_mapping = index
                     .find(end)
                     .expect("hardware leaf extends beyond the nest index");
                 assert!(
@@ -389,6 +386,7 @@ impl NestState {
 
     pub(super) fn protect(
         &mut self,
+        index: &mut Index,
         geometry: Geometry,
         mapping: &Arc<Span>,
         window: (usize, usize),
@@ -461,7 +459,7 @@ impl NestState {
         }
         inner.active = transition.active;
         drop(inner);
-        self.index.refresh(mapping);
+        index.refresh(mapping);
         self.retirement.mark_dirty(mapping.is_global());
         Ok(())
     }

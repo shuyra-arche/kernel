@@ -43,8 +43,8 @@ pub use identity::Asid;
 pub use translation::FaultOutcome;
 pub(crate) mod fault;
 
-use address::Layout;
 pub(crate) use address::NestRange;
+use address::{AddressState, Layout};
 pub(crate) use address::{Placement, PlacementAt, RegionKind};
 use admission::Admission;
 
@@ -98,7 +98,7 @@ pub struct Nest {
     life: Arc<Anchor>,
     admission: Arc<Admission>,
     pub(crate) spans: authority::SpanIndex,
-    layout: LegacyLock<crate::basis::sync::order::Address, Layout>,
+    address: LegacyLock<crate::basis::sync::order::Address, AddressState>,
     pending_cleanup: LegacyLock<crate::basis::sync::order::Cleanup, Option<Box<CleanupNode>>>,
     state: ManuallyDrop<LegacyLock<crate::basis::sync::order::Nest, NestState>>,
 }
@@ -148,6 +148,7 @@ impl Nest {
             return Err(NestError::Pinned);
         }
         self.admission.close();
+        let address = self.address.lock();
         let mut state = self.state.lock();
         if state.phase.is_open() {
             self.version().next().ok_or(NestError::OutOfMemory)?;
@@ -155,7 +156,7 @@ impl Nest {
                 external.close();
             }
             state.phase = translation::phase::ClosePhase::Draining;
-            state.index.close_faults();
+            address.index.close_faults();
             self.changed();
         }
         drop(state);
@@ -227,7 +228,7 @@ impl Nest {
             life,
             admission: Admission::new()?,
             spans: authority::SpanIndex::new(),
-            layout: LegacyLock::new(layout),
+            address: LegacyLock::new(AddressState::new(layout)),
             pending_cleanup: LegacyLock::new(None),
             state: ManuallyDrop::new(LegacyLock::new(NestState::new(root))),
         })
@@ -280,7 +281,7 @@ impl Nest {
     }
 
     pub(crate) fn is_adopted(&self) -> bool {
-        self.state.lock().team.is_some()
+        self.address.lock().team.is_some()
     }
 
     /// The Team becomes the CPU Nest's lifetime owner exactly once.
@@ -291,15 +292,15 @@ impl Nest {
         if self.is_external() {
             return Err(NestError::NoRegion);
         }
-        let mut state = self.state.lock();
-        if !state.is_open()
-            || state.team.is_some()
-            || !state.retirement.invalidation().is_clean()
-            || !self.spans.empty()
-        {
+        let mut address = self.address.lock();
+        if address.team.is_some() {
             return Err(NestError::Busy);
         }
-        state.team = Some(team);
+        let state = self.state.lock();
+        if !state.is_open() || !state.retirement.invalidation().is_clean() || !self.spans.empty() {
+            return Err(NestError::Busy);
+        }
+        address.team = Some(team);
         Ok(())
     }
 
@@ -415,8 +416,8 @@ impl Nest {
             .as_usize()
             .checked_add(size - 1)
             .ok_or(NestError::NotAligned)?;
-        let state = self.state.lock();
-        Ok(state.index.first_overlap(start.as_usize(), end).is_some())
+        let address = self.address.lock();
+        Ok(address.index.first_overlap(start.as_usize(), end).is_some())
     }
 
     pub(crate) fn has_pending_invalidation(&self) -> bool {
@@ -424,7 +425,7 @@ impl Nest {
     }
 
     pub(crate) fn contains_span(&self, id: usize) -> bool {
-        self.layout.lock().occupancy.has_id(id)
+        self.address.lock().occupancy.has_id(id)
     }
 
     /// 原身份的占用票已撤下，或全空间关闭的失效同步已完成。
@@ -648,15 +649,15 @@ impl Nest {
         .map_err(memo::pend_failure)?;
         {
             let _commit = crate::basis::commit();
-            let mut layout = self.layout.lock();
-            let mut state = self.state.lock();
+            let mut layout = self.address.lock();
+            let state = self.state.lock();
             // An unrelated Reservation may already own a newer fence. Only
             // this mapping's retained batch and resources prevent its release.
             if state.retirement.pending_for(&mapping) || mapping.state.lock().memos.has_resources()
             {
                 return Err(AccessError::Busy);
             }
-            state.index.remove(&mapping);
+            layout.index.remove(&mapping);
             layout.occupancy.release_settled(mapping.identity());
             let mut inner = mapping.state.lock();
             inner.active.clear();
@@ -962,7 +963,7 @@ impl Nest {
 
     /// 抬高窗口的选址下界；已登记的占用不动。
     pub(crate) fn advance_window(&self, region: RegionKind, base: usize) -> Result<(), NestError> {
-        Ok(self.layout.lock().advance_window(region, base)?)
+        Ok(self.address.lock().advance_window(region, base)?)
     }
 
     /// 该区域的动态窗口是否含住 `[start, start + size)`。
@@ -970,7 +971,7 @@ impl Nest {
         let Some(last) = start.as_usize().checked_add(size - 1) else {
             return false;
         };
-        self.layout
+        self.address
             .lock()
             .window_contains(region, start.as_usize(), last)
     }
@@ -992,7 +993,7 @@ impl Nest {
         level: kernel_api::model::cell::CellLevel,
         attrs: Attributes,
     ) -> Result<Arc<Span>, NestError> {
-        let (raw, id) = self.layout.lock().reserve(placement)?;
+        let (raw, id) = self.address.lock().reserve(placement)?;
         let start = if self.cpu.is_some() {
             crate::metal::mmu::internal::canonical(raw)
         } else {
@@ -1074,13 +1075,11 @@ impl Nest {
     /// 安装失败的责任划分：已发布就把回收交给清理链（占用仍禁复用），
     /// 未发布就退回占用与临时数据。
     fn settle_failed_install(&self, mapping: &Arc<Span>) {
-        let published = {
-            let state = self.state.lock();
-            state
-                .index
-                .find(mapping.initial_start().as_usize())
-                .is_some_and(|held| Arc::ptr_eq(&held, mapping))
-        };
+        let address = self.address.lock();
+        let published = address
+            .index
+            .find(mapping.initial_start().as_usize())
+            .is_some_and(|held| Arc::ptr_eq(&held, mapping));
         if !published {
             self.give_back(mapping);
             return;
@@ -1102,7 +1101,7 @@ impl Nest {
         let start = mapping.range.start();
         let end = mapping.range.last();
         {
-            let layout = self.layout.lock();
+            let layout = self.address.lock();
             if !layout.occupancy.has_id(mapping.identity()) {
                 return Err(NestError::NoRegion);
             }
@@ -1153,8 +1152,9 @@ impl Nest {
         }
         let node =
             Box::try_new(IndexNode::new(mapping.clone())?).map_err(|_| NestError::OutOfMemory)?;
+        let mut address = self.address.lock();
         let mut state = self.ready_state()?;
-        if state.index.first_overlap(start.as_usize(), end).is_some() {
+        if address.index.first_overlap(start.as_usize(), end).is_some() {
             return Err(NestError::AlreadyMapped);
         }
         state
@@ -1227,7 +1227,7 @@ impl Nest {
                 inner.memos.publish(page, cell);
             }
         }
-        state.index.insert(node);
+        address.index.insert(node);
         state.retirement.mark_dirty(mapping.is_global());
         // Installation still owns its unpublished Span. Reserve the sole fence
         // initiator before unlocking, so an observer cannot steal progress and
@@ -2091,6 +2091,7 @@ impl Nest {
         let writable = access.contains(Access::WRITE);
         let admission;
         let result = {
+            let mut address = self.address.lock();
             let mut state = self.state.lock();
             if !state.retirement.invalidation().is_clean() {
                 return Err(AccessError::Busy);
@@ -2153,6 +2154,7 @@ impl Nest {
             let selection = mapping.range(PageOffset::new(index), count)?;
             mapping.prepare_revision()?;
             state.protect(
+                &mut address.index,
                 self.geometry(),
                 mapping,
                 selection.window(),
@@ -2383,7 +2385,7 @@ impl Nest {
             }
         }
         {
-            let layout = self.layout.lock();
+            let layout = self.address.lock();
             for (start, last, _) in layout.occupancy.retired_of(mapping.identity())? {
                 let at = start.max(lo);
                 let last = last.min(hi);
@@ -2442,7 +2444,7 @@ impl Nest {
         drop(self.ready_state()?);
 
         // 地址 → Nest → Span：准备与提交共享临界区，不暴露无人接管的退休票。
-        let mut layout = self.layout.lock();
+        let mut layout = self.address.lock();
         let prepared =
             layout
                 .occupancy
@@ -2501,9 +2503,9 @@ impl Nest {
         }
         inner.active = next;
         drop(inner);
-        state.index.remove(mapping);
+        layout.index.remove(mapping);
         if let Some(node) = next_node {
-            state.index.insert(node);
+            layout.index.insert(node);
         }
         for &(_, _, ticket) in &tickets {
             state.retirement.tickets.retire(ticket);
@@ -2515,7 +2517,7 @@ impl Nest {
         // 三、同步成功之后才结算这一段的票；失败时票、Page、表页与来源都留着。
         self.invalidate(target)?;
         if !tickets.is_empty() {
-            let mut layout = self.layout.lock();
+            let mut layout = self.address.lock();
             let mut state = self.state.lock();
             for (_, _, ticket) in tickets {
                 if state.retirement.tickets.claim(ticket) {
@@ -2572,7 +2574,7 @@ impl Nest {
             return Err(NestError::NotAligned);
         }
         let (right_start, left_id, right_id) = {
-            let mut layout = self.layout.lock();
+            let mut layout = self.address.lock();
             match layout
                 .occupancy
                 .split(start.as_usize(), last, original, left_size)
@@ -2628,7 +2630,7 @@ impl Nest {
         right_id: usize,
         error: NestError,
     ) -> NestError {
-        let mut layout = self.layout.lock();
+        let mut layout = self.address.lock();
         let left_last = start.as_usize() + (left_size - 1);
         let _ = layout
             .occupancy
@@ -2656,7 +2658,7 @@ impl Nest {
 
     /// 按占用身份交还一段尚未落地的跨度（凭证已经不在手里时用）。
     fn give_back_span(&self, start: VirtAddr, size: usize, identity: usize) -> bool {
-        self.layout.lock().occupancy.release(
+        self.address.lock().occupancy.release(
             start.as_usize(),
             start.as_usize() + (size - 1),
             identity,
@@ -2674,7 +2676,7 @@ impl Nest {
             return Ok(());
         }
         if self.state.lock().retirement.tickets.has_settled() {
-            let mut layout = self.layout.lock();
+            let mut layout = self.address.lock();
             let mut state = self.state.lock();
             for ticket in state.retirement.tickets.drain(4) {
                 layout.occupancy.reclaim(ticket);
@@ -2798,6 +2800,7 @@ impl Nest {
             return Err(NestError::Pinned);
         }
         self.finish_invalidation()?;
+        let mut address = self.address.lock();
         let mut state = {
             let state = self.state.lock();
             if state.phase.is_closed() {
@@ -2812,7 +2815,7 @@ impl Nest {
             state
         };
         let phase = state.phase;
-        let result = state.close_mappings(self.geometry());
+        let result = state.close_mappings(&mut address.index, self.geometry());
         if phase != state.phase {
             self.changed();
         }
@@ -2923,7 +2926,7 @@ impl Nest {
 
     fn check_span(&self, span: &Span) -> Result<(), NestError> {
         self.check_owner(span)?;
-        if !self.layout.lock().occupancy.has_id(span.identity()) {
+        if !self.address.lock().occupancy.has_id(span.identity()) {
             return Err(NestError::NoRegion);
         }
         Ok(())
@@ -2939,8 +2942,9 @@ impl Nest {
     }
 
     pub(crate) fn translate(&self, address: VirtAddr) -> Option<(PhysAddr, Attributes)> {
+        let index = self.address.lock();
         let state = self.ready_state().ok()?;
-        state.index.find(address.as_usize())?;
+        index.index.find(address.as_usize())?;
         let (pa, flags) = state
             .root
             .cpu()
@@ -2960,7 +2964,9 @@ impl Nest {
     /// `Missing`/`Moving`/`Reserved` 一律 `Wait`，不因旧 PTE 还在就绕过等待；
     /// 身份消失或活动权限不容纳这次访问是 `Invalid`。
     pub(crate) fn probe_fault(&self, address: VirtAddr, kind: FaultKind) -> FaultOutcome {
-        FaultOutcome::probe(&self.state.lock(), self.geometry(), address, kind)
+        let index = self.address.lock();
+        let state = self.state.lock();
+        FaultOutcome::probe(&state, &index.index, self.geometry(), address, kind)
     }
 
     /// 用户页错误的完整解析：先结清待办失效，再按纯探针的结论物化并发布，
@@ -2993,8 +2999,8 @@ impl Nest {
     fn materialize_page(self: &Arc<Self>, address: VirtAddr) -> Result<(), NestError> {
         let page = address.page_align();
         let selection = {
-            let state = self.state.lock();
-            let mapping = state
+            let address_index = self.address.lock();
+            let mapping = address_index
                 .index
                 .find(address.as_usize())
                 .ok_or(NestError::NoRegion)?;
@@ -3008,7 +3014,8 @@ impl Nest {
 
     #[cfg(debug_assertions)]
     pub(crate) fn audit(&self) {
-        self.state.lock().audit(self, self.geometry());
+        let index = self.address.lock();
+        self.state.lock().audit(&index.index, self, self.geometry());
     }
 }
 
