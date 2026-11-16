@@ -112,15 +112,13 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
             let span = route.span().map_err(pend_error)?;
             let (offset, count) = route.entry().authority().window().ok_or(Failure::Denied)?;
             Snapshot::Span(
-                route
-                    .nest()
-                    .span_snapshot(
-                        &span,
-                        offset,
-                        count,
-                        route.entry().modifiable() == Modifiable::Yes,
-                    )
-                    .map_err(nest_error)?,
+                span.snapshot(
+                    route.nest(),
+                    offset,
+                    count,
+                    route.entry().modifiable() == Modifiable::Yes,
+                )
+                .map_err(nest_error)?,
             )
         }
         _ => return Err(Failure::Unsupported),
