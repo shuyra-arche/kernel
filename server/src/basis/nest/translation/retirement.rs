@@ -1,6 +1,6 @@
 //! Resources held across CPU translation invalidation.
 
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
 use super::{Invalidation, tickets::Tickets};
@@ -21,7 +21,7 @@ pub(in crate::basis::nest) struct Retirement {
     pub(in crate::basis::nest) tickets: Tickets,
     pub(in crate::basis::nest) tables: Vec<Table>,
     pub(in crate::basis::nest) cells: Vec<Publication>,
-    pub(in crate::basis::nest) mappings: Vec<Arc<Span>>,
+    pub(in crate::basis::nest) mappings: Vec<Weak<Span>>,
 }
 
 impl Retirement {
@@ -66,7 +66,9 @@ impl Retirement {
 
     /// Only this batch's retained mappings still depend on its completion.
     pub(in crate::basis::nest) fn pending_for(&self, mapping: &Arc<Span>) -> bool {
-        self.mappings.iter().any(|held| Arc::ptr_eq(held, mapping))
+        self.mappings
+            .iter()
+            .any(|held| held.as_ptr() == Arc::as_ptr(mapping))
     }
 
     pub(in crate::basis::nest) fn mark_dirty(&mut self, global: bool) {
@@ -111,7 +113,9 @@ impl Retirement {
         self.deferred = None;
         if self.invalidation != Invalidation::Failed {
             for mapping in &self.mappings {
-                mapping.changed();
+                if let Some(mapping) = mapping.upgrade() {
+                    mapping.changed();
+                }
             }
         }
         self.invalidation = self.invalidation.fail();
@@ -132,9 +136,20 @@ impl Retirement {
         }
         // Allocate before consuming any obligation. Failure leaves the entire
         // batch retained and retryable, even though the hardware fence ran.
+        let mut held = Vec::new();
+        if held.try_reserve(self.mappings.len()).is_err() {
+            self.fail();
+            return Err(super::super::NestError::OutOfMemory);
+        }
+        for mapping in &self.mappings {
+            let Some(mapping) = mapping.upgrade() else {
+                self.fail();
+                return Err(super::super::NestError::NoRegion);
+            };
+            held.push(mapping);
+        }
         let mut settled = Vec::new();
-        let count = self
-            .mappings
+        let count = held
             .iter()
             .map(|mapping| mapping.state.lock().memos.awaiting_cpu())
             .sum();
@@ -144,7 +159,7 @@ impl Retirement {
         }
         self.pending = None;
         self.deferred = None;
-        for mapping in &self.mappings {
+        for mapping in &held {
             {
                 let mut state = mapping.state.lock();
                 state.memos.complete(&mut settled);
@@ -154,11 +169,12 @@ impl Retirement {
         self.tickets.settle();
         self.invalidation = self.invalidation.complete();
         self.scope = Scope::AddressSpace;
+        self.mappings.clear();
         Ok(Fenced {
             settled,
             tables: core::mem::take(&mut self.tables),
             cells: core::mem::take(&mut self.cells),
-            mappings: core::mem::take(&mut self.mappings),
+            mappings: held,
         })
     }
 }
