@@ -9,6 +9,7 @@ pub enum Kind {
     },
     Lifecycle {
         cancel: bool,
+        pressure: bool,
     },
     Retirement {
         cancel: bool,
@@ -55,17 +56,30 @@ pub fn check(log: &str, kind: &Kind, harts: u8) -> Result<Value> {
             result["retirement"] = json!({"rows": rows, "cancel": cancel, "passed": valid});
             return Ok(result);
         }
-        Kind::Lifecycle { cancel } => {
+        Kind::Lifecycle { cancel, pressure } => {
             let mut result = check(log, &Kind::Smp, harts)?;
             let turns = captures(log, r"PASS lifecycle turns=(\d+)")?;
-            let valid = turns.len() == 1
+            let mut valid = turns.len() == 1
                 && turns[0].parse::<usize>()? >= if *cancel { 8 } else { 2 }
                 && log.contains(&format!(
                     "cancel={} retained-source=0",
                     usize::from(*cancel)
                 ));
+            let pressure_rows = Regex::new(
+                r"PASS lifecycle-pressure checks=(\d+) denied=(\d+) blocked=(\d+) live=0",
+            )?;
+            let rows: Vec<_> = pressure_rows.captures_iter(log).collect();
+            valid &= if *pressure {
+                rows.len() == 1
+                    && rows[0][1].parse::<usize>()? > 0
+                    && rows[0][1] == rows[0][2]
+                    && rows[0][3].parse::<usize>()? > 0
+            } else {
+                rows.is_empty()
+            };
             result["passed"] = json!(result["passed"] == true && valid);
-            result["lifecycle"] = json!({ "turns": turns, "cancel": cancel, "passed": valid });
+            result["lifecycle"] =
+                json!({ "turns": turns, "cancel": cancel, "pressure": pressure, "passed": valid });
             return Ok(result);
         }
         Kind::Smp | Kind::Shutdown { .. } => {
