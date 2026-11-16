@@ -340,11 +340,8 @@ impl Nest {
         Root {
             frame: self
                 .state
-                .lock()
-                .root
-                .cpu()
-                .expect("execution root requires CPU target")
-                .frame(),
+                .root_frame()
+                .expect("execution root requires CPU target"),
             asid: self.asid(),
         }
     }

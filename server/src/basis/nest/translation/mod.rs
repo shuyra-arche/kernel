@@ -56,6 +56,10 @@ impl Translation {
         self.state.lock()
     }
 
+    pub(crate) fn root_frame(&self) -> Option<PhysAddr> {
+        self.lock().root.cpu().ok().map(|cpu| cpu.frame())
+    }
+
     /// Walk the shared page table for one indexed address.
     pub(crate) fn translate(
         &self,
