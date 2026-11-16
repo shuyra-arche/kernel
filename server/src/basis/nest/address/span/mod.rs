@@ -93,15 +93,17 @@ impl SpanRange {
 /// An occupied address span: identity, original range, permissions and source
 /// selection.
 ///
-/// It owns its per-position Memos; Nest owns the address index, translation
-/// and retirement batches. Keeping a historical span cannot keep a deleted
-/// position's Page or freeze alive.
+/// It owns its per-position Memos and holds the shared Translation; the Nest
+/// owns admission and address organization. Keeping a historical span cannot
+/// keep a deleted position's Page or freeze alive.
 pub struct Span {
     pub(crate) faults:
         LegacyLock<crate::basis::sync::order::FaultPolicy, super::super::fault::State>,
     pub(crate) identity: SpanIdentity,
     /// Shared Nest admission; final acceptance still happens under commit.
     admission: Arc<super::super::admission::Admission>,
+    /// Shared hardware translation; Address organization stays in the Nest.
+    pub(in crate::basis::nest) translation: Arc<super::super::translation::Translation>,
     pub(crate) range: SpanRange,
     pub(crate) attrs: Attributes,
     pub(crate) state: LegacyLock<crate::basis::sync::order::Reservation, SpanState>,
@@ -170,6 +172,7 @@ impl Span {
             faults: LegacyLock::new(super::super::fault::State::new()),
             identity,
             admission: nest.admission.clone(),
+            translation: (*nest.state).clone(),
             range,
             attrs,
             state: LegacyLock::new(SpanState::vacant()),

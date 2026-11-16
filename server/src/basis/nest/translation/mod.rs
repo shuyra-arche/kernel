@@ -35,9 +35,29 @@ use phase::ClosePhase;
 
 use self::retirement::{Fenced, Retirement};
 use super::index::Index;
+use crate::basis::sync::{LegacyGuard, LegacyLock};
 
 /// 地址空间的翻译状态：根页表、待失效标记、退休资源与关闭阶段。
 /// 地址索引、占用与 Team 归属属于 Nest 的 AddressState；每个 Span 自己持有 Memo 表。
+/// The shared hardware-translation owner. Address organization is separate, so
+/// a Span can hold this without Translation retaining the Span.
+pub(crate) struct Translation {
+    state: LegacyLock<crate::basis::sync::order::Nest, NestState>,
+}
+
+impl Translation {
+    pub(crate) fn new(state: NestState) -> Result<Arc<Self>, NestError> {
+        Arc::try_new(Self {
+            state: LegacyLock::new(state),
+        })
+        .map_err(|_| NestError::OutOfMemory)
+    }
+
+    pub(crate) fn lock(&self) -> LegacyGuard<'_, NestState> {
+        self.state.lock()
+    }
+}
+
 pub(super) struct NestState {
     pub(super) root: Storage,
     pub(super) retirement: Retirement,
@@ -151,7 +171,7 @@ impl NestState {
         let global = mappings.iter().any(|mapping| mapping.is_global());
         for mapping in mappings.iter() {
             index.remove(mapping);
-            self.retirement.mappings.push(mapping.clone());
+            self.retirement.mappings.push(Arc::downgrade(mapping));
             let mut inner = mapping.state.lock();
             if inner
                 .memos
@@ -330,7 +350,7 @@ impl NestState {
             geometry,
         );
         inner.memos.publish(index, memo);
-        self.retirement.mappings.push(mapping.clone());
+        self.retirement.mappings.push(Arc::downgrade(mapping));
         self.retirement.mark_dirty(mapping.is_global());
         Ok(())
     }
@@ -375,7 +395,7 @@ impl NestState {
 
         // 过了这里只剩下已经定好的状态转移：PTE、发布记录与承载一起转入退休责任。
         self.withdraw_prepared(address, expected.size(), geometry);
-        self.retirement.mappings.push(mapping.clone());
+        self.retirement.mappings.push(Arc::downgrade(mapping));
         if inner.memos.withdraw(page, page, &mut self.retirement.cells) {
             mapping.changed();
         }
@@ -437,7 +457,7 @@ impl NestState {
         }
         // 从此处开始提交不再分配：即使 shootdown 失败，保留映射与 Dirty/Failed 状态。
         accepted();
-        self.retirement.mappings.push(mapping.clone());
+        self.retirement.mappings.push(Arc::downgrade(mapping));
         if let Some((page, mut publication)) = replacement {
             let old = inner
                 .memos
