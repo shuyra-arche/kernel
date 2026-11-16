@@ -76,7 +76,7 @@ impl Query {
             Self::FaultEvent { .. } => 5,
         }
     }
-    pub(super) fn valid(self) -> bool {
+    pub(crate) fn valid(self) -> bool {
         match self {
             Self::Flat { token, .. } | Self::Nest { token, .. } => valid_token(token.get()),
             Self::Block(h) => valid_token(h.token.get()),
@@ -215,40 +215,31 @@ impl Snapshot {
     }
     fn valid(self) -> bool {
         match self {
-            Self::Flat(s) => s.valid(),
-            Self::Slot(s) => s.valid(),
-            Self::Block(s) => s.valid(),
-            Self::Nest(_) => true,
-            Self::Memo(s) => s.valid(),
-            Self::Span(s) => s.valid(),
-            Self::FaultRoute(s) => s.valid(),
-            Self::FaultEvent(s) => s.valid(),
+            Self::Flat(_) => {
+                snapshot::flat::Snapshot::try_from(self).is_ok_and(snapshot::flat::Snapshot::valid)
+            }
+            Self::Slot(_) | Self::Block(_) => {
+                snapshot::flat::Snapshot::try_from(self).is_ok_and(snapshot::flat::Snapshot::valid)
+            }
+            _ => {
+                snapshot::nest::Snapshot::try_from(self).is_ok_and(snapshot::nest::Snapshot::valid)
+            }
         }
     }
     fn matches(self, query: Query) -> bool {
-        match (self, query) {
-            (Self::FaultRoute(s), Query::FaultRoute { nest, span, .. }) => {
-                s.nest == nest && s.span == span
-            }
-            (
-                Self::FaultEvent(s),
-                Query::FaultEvent {
-                    nest,
-                    span,
-                    epoch,
-                    after,
-                    ..
-                },
-            ) => s.nest == nest && s.span == span && s.epoch == epoch && s.sequence.get() > after,
-            (Self::Flat(s), Query::Flat { flat, .. }) => s.id == flat,
-            (Self::Slot(s), Query::Slot(p)) => s.flat == p.flat() && s.coordinate == p.page(),
-            (Self::Block(s), Query::Block(h)) => s.block == h.block,
-            (Self::Nest(s), Query::Nest { nest, .. }) => s.info.id == nest,
-            (Self::Memo(s), Query::Memo(p)) => {
-                s.nest == p.nest() && s.span == p.span() && s.coordinate == p.page()
-            }
-            (Self::Span(s), Query::Span { nest, span, .. }) => s.nest == nest && s.span == span,
-            _ => false,
+        match query.domain() {
+            Domain::Flat => snapshot::flat::Snapshot::try_from(self).is_ok_and(|value| {
+                snapshot::flat::Snapshot::matches(
+                    value,
+                    flat::Query::try_from(query).expect("flat query"),
+                )
+            }),
+            Domain::Nest => snapshot::nest::Snapshot::try_from(self).is_ok_and(|value| {
+                snapshot::nest::Snapshot::matches(
+                    value,
+                    nest::Query::try_from(query).expect("nest query"),
+                )
+            }),
         }
     }
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
@@ -715,6 +706,27 @@ pub mod snapshot {
             Block(BlockStatus),
         }
 
+        impl Snapshot {
+            pub(crate) fn valid(self) -> bool {
+                match self {
+                    Self::Flat(s) => s.valid(),
+                    Self::Slot(s) => s.valid(),
+                    Self::Block(s) => s.valid(),
+                }
+            }
+
+            pub(crate) fn matches(self, query: super::super::flat::Query) -> bool {
+                match (self, query) {
+                    (Self::Flat(s), super::super::flat::Query::Flat { flat, .. }) => s.id == flat,
+                    (Self::Slot(s), super::super::flat::Query::Slot(p)) => {
+                        s.flat == p.flat() && s.coordinate == p.page()
+                    }
+                    (Self::Block(s), super::super::flat::Query::Block(h)) => s.block == h.block,
+                    _ => false,
+                }
+            }
+        }
+
         impl From<Snapshot> for super::super::Snapshot {
             fn from(value: Snapshot) -> Self {
                 match value {
@@ -750,6 +762,50 @@ pub mod snapshot {
             Nest(NestStatus),
             Memo(MemoStatus),
             Span(SpanStatus),
+        }
+
+        impl Snapshot {
+            pub(crate) fn valid(self) -> bool {
+                match self {
+                    Self::FaultRoute(s) => s.valid(),
+                    Self::FaultEvent(s) => s.valid(),
+                    Self::Nest(_) => true,
+                    Self::Memo(s) => s.valid(),
+                    Self::Span(s) => s.valid(),
+                }
+            }
+
+            pub(crate) fn matches(self, query: super::super::nest::Query) -> bool {
+                use super::super::nest::Query;
+                match (self, query) {
+                    (Self::FaultRoute(s), Query::FaultRoute { nest, span, .. }) => {
+                        s.nest == nest && s.span == span
+                    }
+                    (
+                        Self::FaultEvent(s),
+                        Query::FaultEvent {
+                            nest,
+                            span,
+                            epoch,
+                            after,
+                            ..
+                        },
+                    ) => {
+                        s.nest == nest
+                            && s.span == span
+                            && s.epoch == epoch
+                            && s.sequence.get() > after
+                    }
+                    (Self::Nest(s), Query::Nest { nest, .. }) => s.info.id == nest,
+                    (Self::Memo(s), Query::Memo(p)) => {
+                        s.nest == p.nest() && s.span == p.span() && s.coordinate == p.page()
+                    }
+                    (Self::Span(s), Query::Span { nest, span, .. }) => {
+                        s.nest == nest && s.span == span
+                    }
+                    _ => false,
+                }
+            }
         }
 
         impl From<Snapshot> for super::super::Snapshot {
