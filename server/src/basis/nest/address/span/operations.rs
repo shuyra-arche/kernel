@@ -1,11 +1,12 @@
 //! Logical position transitions owned by the Span.
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 
 use super::{Access, DrainStep, Span};
 use crate::basis::cell::page::{Change, Freeze, Page};
 use crate::basis::nest::memo::publication::Publication;
 use crate::basis::nest::{
-    Nest, NestError, authority,
+    Nest, NestError, NestRange, authority,
     memo::{self, source::Source},
     sign,
 };
@@ -1170,5 +1171,59 @@ impl Span {
 impl Span {
     pub(crate) fn count(&self) -> Option<kernel_api::address::PageCount> {
         kernel_api::address::PageCount::new(self.initial_size() / kernel_api::address::PAGE_SIZE)
+    }
+}
+
+impl Span {
+    /// Materialize Flat source pages for one selection and publish each active
+    /// segment. This composes the existing Flat primitive with the Span's own
+    /// publication; it is not a second materialization authority.
+    pub(crate) fn materialize_active(
+        self: &Arc<Self>,
+        nest: &Arc<Nest>,
+        selection: &NestRange,
+    ) -> Result<(), NestError> {
+        if !Arc::ptr_eq(selection.span(), self) {
+            return Err(NestError::NoRegion);
+        }
+        for (start, size) in self.active_segments(nest, selection)? {
+            let offset = PageOffset::new(self.page_index(start));
+            let count = PageCount::new(size / kernel_api::address::PAGE_SIZE)
+                .ok_or(NestError::NotAligned)?;
+            let part = self.range(offset, count)?;
+            part.source()?.materialize()?;
+            nest.publish(part)?;
+        }
+        Ok(())
+    }
+
+    /// Active pages clipped to the selection, as canonical start/size pairs.
+    pub(in crate::basis::nest) fn active_segments(
+        self: &Arc<Self>,
+        nest: &Arc<Nest>,
+        selection: &NestRange,
+    ) -> Result<Vec<(VirtAddr, usize)>, NestError> {
+        let (lo, hi) = selection.window();
+        let state = nest.ready_state()?;
+        nest.ensure_owned(self, &state)?;
+        let inner = self.state.lock();
+        if inner.active.is_empty()
+            || (matches!(selection, NestRange::Pages { .. }) && !inner.covers(lo, hi))
+        {
+            return Err(NestError::NoRegion);
+        }
+        let mut segments = Vec::new();
+        segments
+            .try_reserve(inner.active.len())
+            .map_err(|_| NestError::OutOfMemory)?;
+        for range in &inner.active {
+            if let Some((start, last)) = range.intersection(lo, hi) {
+                segments.push((
+                    crate::metal::mmu::internal::canonical(start),
+                    last - start + 1,
+                ));
+            }
+        }
+        Ok(segments)
     }
 }

@@ -1094,7 +1094,7 @@ impl Nest {
     /// 只发布活动形状内的页，不偷分配未物化的页。
     fn publish(self: &Arc<Self>, selection: NestRange) -> Result<(), NestError> {
         let mapping = selection.span().clone();
-        for (start, size) in self.active_spans(&selection)? {
+        for (start, size) in mapping.active_segments(self, &selection)? {
             self.publish_span(&mapping, start, size)?;
         }
         Ok(())
@@ -1204,48 +1204,6 @@ impl Nest {
     ///
     /// 组合入口：物化原语仍是 `FlatRange::materialize`，这里只把缺页与派生编排
     /// 要的两步（先 Flat、再本关系 publish）接在一起，不是第二套物化权威。
-    pub(crate) fn materialize_active(
-        self: &Arc<Self>,
-        selection: NestRange,
-    ) -> Result<(), NestError> {
-        let mapping = selection.span().clone();
-        for (start, size) in self.active_spans(&selection)? {
-            let offset = PageOffset::new(mapping.page_index(start));
-            let count = PageCount::new(size / PAGE_SIZE).ok_or(NestError::NotAligned)?;
-            let part = mapping.range(offset, count)?;
-            part.source()?.materialize()?;
-            self.publish(part)?;
-        }
-        Ok(())
-    }
-
-    /// 发布只选择活动页，不把尚未结算的撤销重新安装。
-    fn active_spans(&self, selection: &NestRange) -> Result<Vec<(VirtAddr, usize)>, NestError> {
-        let mapping = selection.span();
-        let (lo, hi) = selection.window();
-        let state = self.ready_state()?;
-        self.ensure_owned(mapping, &state)?;
-        let inner = mapping.state.lock();
-        if inner.active.is_empty()
-            || (matches!(selection, NestRange::Pages { .. }) && !inner.covers(lo, hi))
-        {
-            return Err(NestError::NoRegion);
-        }
-        let mut spans = Vec::new();
-        spans
-            .try_reserve(inner.active.len())
-            .map_err(|_| NestError::OutOfMemory)?;
-        for range in &inner.active {
-            if let Some((start, last)) = range.intersection(lo, hi) {
-                spans.push((
-                    crate::metal::mmu::internal::canonical(start),
-                    last - start + 1,
-                ));
-            }
-        }
-        Ok(spans)
-    }
-
     fn span_key(&self, mapping: &Span) -> WakeKey {
         WakeKey::Span {
             space: self.id,
@@ -1936,7 +1894,7 @@ impl Nest {
                 PageCount::new(mapping.grain()).expect("one fault Cell"),
             )?
         };
-        self.materialize_active(selection)
+        selection.span().materialize_active(self, &selection)
     }
 
     #[cfg(debug_assertions)]
