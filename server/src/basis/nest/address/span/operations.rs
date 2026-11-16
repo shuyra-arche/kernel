@@ -11,6 +11,7 @@ use crate::basis::nest::{
     sign,
 };
 use crate::basis::sign::WakeKey;
+use crate::metal::generic::mmu::internal::PageTable;
 use crate::metal::mmu::internal::identity;
 use kernel_api::address::{PageCount, PageOffset, VirtAddr};
 
@@ -1225,5 +1226,108 @@ impl Span {
             }
         }
         Ok(segments)
+    }
+}
+
+impl Span {
+    /// Publish one active segment from the Span's implicit source. This is the
+    /// hardware publication step for materialized pages; Nest supplies the
+    /// ready state, translation root and invalidation progress.
+    pub(crate) fn publish_segment(
+        self: &Arc<Self>,
+        nest: &Arc<Nest>,
+        start: VirtAddr,
+        size: usize,
+    ) -> Result<(), NestError> {
+        if size == 0 || start.offset() != 0 || !size.is_multiple_of(kernel_api::address::PAGE_SIZE)
+        {
+            return Err(NestError::NotAligned);
+        }
+        let end = start
+            .as_usize()
+            .checked_add(size - 1)
+            .ok_or(NestError::NotAligned)?;
+        let mut state = nest.ready_state()?;
+        nest.ensure_owned(self, &state)?;
+        let mut inner = self.state.lock();
+        if !inner.covers(start.as_usize(), end) {
+            return Err(NestError::NoRegion);
+        }
+        let source = inner.source.as_ref().ok_or(NestError::Missing)?;
+        if source.is_borrowed() {
+            return Ok(());
+        }
+        let first = self.page_index(start);
+        let window = source.range(
+            PageOffset::new(first),
+            PageCount::new(size / kernel_api::address::PAGE_SIZE).ok_or(NestError::NotAligned)?,
+        )?;
+        // Hold the source for the whole PTE publication; an in-flight handoff
+        // keeps this Busy before any page-table write.
+        let lease = window.reside()?;
+        let materialized = window.materialized_cells()?;
+        let mut fresh = Vec::new();
+        fresh
+            .try_reserve(materialized.len())
+            .map_err(|_| NestError::OutOfMemory)?;
+        for (offset, cell) in materialized {
+            let page = first + offset.get();
+            if inner.memos.publication(page).is_none() {
+                let address = self.range.start() + page * kernel_api::address::PAGE_SIZE;
+                let range = inner
+                    .active
+                    .iter()
+                    .find(|range| range.contains(address.as_usize()))
+                    .ok_or(NestError::NoRegion)?;
+                fresh.push((
+                    page,
+                    Publication::prepare(&cell, range.ceiling.contains(Access::WRITE), None)?,
+                ));
+            }
+        }
+        if fresh.is_empty() {
+            return Ok(());
+        }
+        inner.memos.reserve(fresh.len())?;
+        let source = inner.source.as_ref().ok_or(NestError::Missing)?;
+        state
+            .retirement
+            .mappings
+            .try_reserve(1)
+            .map_err(|_| NestError::OutOfMemory)?;
+        for run in inner.runs(self.initial_start(), &fresh) {
+            let run = run?;
+            state.root.cpu_mut()?.prepare_range_geometry(
+                run.start,
+                run.physical,
+                run.size,
+                nest.geometry(),
+            )?;
+        }
+        if nest.asid().is_kernel() || self.is_global() {
+            source.mark_untransferable();
+        }
+        for (_, retained) in &mut fresh {
+            retained.publish();
+        }
+        state.retirement.mappings.push(Arc::downgrade(self));
+        for run in inner.runs(self.initial_start(), &fresh) {
+            let run = run?;
+            state.root.cpu_mut()?.map_range_prepared_geometry(
+                run.start,
+                run.physical,
+                run.size,
+                self.leaf_attributes(run.current),
+                nest.geometry(),
+            );
+        }
+        for (page, cell) in fresh {
+            inner.memos.publish(page, cell);
+        }
+        state.retirement.mark_dirty(self.is_global());
+        drop(inner);
+        drop(state);
+        drop(lease);
+        nest.finish_invalidation()
     }
 }
