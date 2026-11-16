@@ -43,6 +43,11 @@ impl SpanIdentity {
     pub(crate) fn nest_id(&self) -> NestId {
         self.nest
     }
+
+    /// Whether this span belongs to `nest`, without locating it.
+    pub(crate) fn belongs_to(&self, nest: NestId) -> bool {
+        self.nest == nest
+    }
 }
 
 /// The original geometry of one occupied span. Active access and the source
@@ -275,8 +280,6 @@ impl Span {
     pub(crate) fn identity(&self) -> usize {
         self.identity.id()
     }
-
-    /// 认住它的那个 Nest；已关闭的 Nest 不算。
 
     /// 这段关系等待位的那一对坐标：`(软件空间身份, 关系身份)`。
     ///

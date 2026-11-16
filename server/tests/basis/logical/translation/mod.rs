@@ -126,6 +126,53 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
 }
 
 #[test]
+fn retirement_settles_only_memos_owned_by_its_own_span() {
+    use super::memo::source::{Registry, Source};
+    use std::sync::atomic::AtomicUsize;
+    fn install(span: &Arc<super::Span>, page: &Arc<Page>) {
+        let mut state = span.state.lock();
+        let memo = state.memos.get_mut(0).unwrap();
+        memo.associate(
+            1,
+            None,
+            Source(Arc::new(Registry(AtomicUsize::new(0)))),
+            Arc::new(super::authority::RangeBinding),
+        )
+        .release();
+        let change = page.begin().unwrap();
+        memo.begin_publish(memo.generation(), change.clone(), 6)
+            .unwrap();
+        let mut publication = Publication::prepare(page, true, Some(&change)).unwrap();
+        publication.publish();
+        memo.install(publication);
+    }
+
+    let left = Arc::new(super::Span::new(21));
+    let right = Arc::new(super::Span::new(22));
+    let pool = Pool::new(0);
+    let left_page = Arc::new(Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap());
+    let right_pool = Pool::new(0);
+    let right_page =
+        Arc::new(Page::from_internal(Owner::Kernel, right_pool.page().unwrap()).unwrap());
+    install(&left, &left_page);
+    install(&right, &right_page);
+    assert_eq!(left.state.lock().memos.awaiting_cpu(), 1);
+    assert_eq!(right.state.lock().memos.awaiting_cpu(), 1);
+
+    let mut pending = Retirement::new();
+    pending.mappings.push(left.clone());
+    pending.mark_dirty(false);
+    let request = pending.begin(7, 3).unwrap();
+    let fenced = pending
+        .complete(scope::invalidate(&Cpu, request).unwrap())
+        .unwrap();
+    assert!(!left.state.lock().memos.get(0).unwrap().in_flight());
+    assert!(right.state.lock().memos.get(0).unwrap().in_flight());
+    assert_eq!(right.state.lock().memos.awaiting_cpu(), 1);
+    fenced.release();
+}
+
+#[test]
 fn editing_owner_claims_its_batch_before_concurrent_retry_observers() {
     let pending = Mutex::new(Retirement::new());
     let original = {
