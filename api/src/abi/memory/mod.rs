@@ -84,6 +84,7 @@ impl Domain {
 pub mod flat {
     pub use super::call::flat::Call;
     pub use super::observation::flat::Query;
+    pub use super::observation::snapshot::flat::Snapshot;
     pub use super::reply::flat::Value;
     pub use super::request::flat::Action;
     /// Flat-domain operation slots. The wire domain is still carried by the
@@ -125,6 +126,7 @@ pub mod flat {
 pub mod nest {
     pub use super::call::nest::Call;
     pub use super::observation::nest::Query;
+    pub use super::observation::snapshot::nest::Snapshot;
     pub use super::reply::nest::Value;
     pub use super::request::nest::Action;
     /// Nest-domain operation slots. Reserve/Release name address occupancy and

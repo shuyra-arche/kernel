@@ -702,3 +702,81 @@ pub mod nest {
         }
     }
 }
+
+/// Flat-domain snapshots.
+pub mod snapshot {
+    pub mod flat {
+        use super::super::*;
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Snapshot {
+            Flat(FlatStatus),
+            Slot(SlotStatus),
+            Block(BlockStatus),
+        }
+
+        impl From<Snapshot> for super::super::Snapshot {
+            fn from(value: Snapshot) -> Self {
+                match value {
+                    Snapshot::Flat(status) => Self::Flat(status),
+                    Snapshot::Slot(status) => Self::Slot(status),
+                    Snapshot::Block(status) => Self::Block(status),
+                }
+            }
+        }
+
+        impl TryFrom<super::super::Snapshot> for Snapshot {
+            type Error = ();
+
+            fn try_from(value: super::super::Snapshot) -> Result<Self, Self::Error> {
+                Ok(match value {
+                    super::super::Snapshot::Flat(status) => Self::Flat(status),
+                    super::super::Snapshot::Slot(status) => Self::Slot(status),
+                    super::super::Snapshot::Block(status) => Self::Block(status),
+                    _ => return Err(()),
+                })
+            }
+        }
+    }
+
+    /// Nest-domain snapshots.
+    pub mod nest {
+        use super::super::*;
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Snapshot {
+            FaultRoute(FaultStatus),
+            FaultEvent(FaultEvent),
+            Nest(NestStatus),
+            Memo(MemoStatus),
+            Span(SpanStatus),
+        }
+
+        impl From<Snapshot> for super::super::Snapshot {
+            fn from(value: Snapshot) -> Self {
+                match value {
+                    Snapshot::FaultRoute(status) => Self::FaultRoute(status),
+                    Snapshot::FaultEvent(event) => Self::FaultEvent(event),
+                    Snapshot::Nest(status) => Self::Nest(status),
+                    Snapshot::Memo(status) => Self::Memo(status),
+                    Snapshot::Span(status) => Self::Span(status),
+                }
+            }
+        }
+
+        impl TryFrom<super::super::Snapshot> for Snapshot {
+            type Error = ();
+
+            fn try_from(value: super::super::Snapshot) -> Result<Self, Self::Error> {
+                Ok(match value {
+                    super::super::Snapshot::FaultRoute(status) => Self::FaultRoute(status),
+                    super::super::Snapshot::FaultEvent(event) => Self::FaultEvent(event),
+                    super::super::Snapshot::Nest(status) => Self::Nest(status),
+                    super::super::Snapshot::Memo(status) => Self::Memo(status),
+                    super::super::Snapshot::Span(status) => Self::Span(status),
+                    _ => return Err(()),
+                })
+            }
+        }
+    }
+}
