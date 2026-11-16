@@ -299,7 +299,7 @@ impl TranslationState {
                     let pages = size / PAGE_SIZE;
                     let last_page = first_page + pages;
                     let mut count = 0;
-                    for (page, cell) in mapping.state.lock().memos.published() {
+                    for (page, cell) in inner.memos.published() {
                         let from = page.max(first_page);
                         let end = (page + cell.cell().pages()).min(last_page);
                         if from >= end {
