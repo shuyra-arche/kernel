@@ -421,7 +421,8 @@ impl sealed::Pair for Flat {}
 impl PairOrder for Flat {}
 
 // Explicit reachability closure, not a numeric rank and not a transitive
-// blanket impl. This one table emits the static proof and Debug predicate.
+// blanket impl. Each row starts with its direct edges; the const pass closes
+// them so a new leaf does not need a hand-written edge from every ancestor.
 macro_rules! relations {
     ($($parent:ident => [$($child:ident),* $(,)?]),* $(,)?) => {
         $($(impl sealed::Relation<$child> for $parent {}
@@ -430,6 +431,22 @@ macro_rules! relations {
         static RELATIONS:[[bool;Class::ALL.len()];Class::ALL.len()]={
             let mut rows=[[false;Class::ALL.len()];Class::ALL.len()];
             $($(rows[Class::$parent as usize][Class::$child as usize]=true;)*)*
+            let n=Class::ALL.len();
+            let mut k=0;
+            while k<n {
+                let mut i=0;
+                while i<n {
+                    if rows[i][k] {
+                        let mut j=0;
+                        while j<n {
+                            if rows[k][j] { rows[i][j]=true; }
+                            j+=1;
+                        }
+                    }
+                    i+=1;
+                }
+                k+=1;
+            }
             rows
         };
         #[cfg(debug_assertions)]
@@ -449,12 +466,12 @@ relations! {
     ActivityDelivery => [SignState,WaitSites,TaskState,BlockPool,BlockPump,Tally,Frame],
     FaultPolicy => [FaultProgress,SignQueue,SignState,SignDelivery,BlockPool,BlockPump,Tally,Frame],
     SpanExports => [BlockPool,BlockPump,Tally,Frame],
-    Span => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,FaultProgress,SourceIndex,SignQueue,SignState,SignDelivery,BlockPool,BlockPump,Tally,Frame],
+    Span => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,FaultProgress,SourceIndex,SourcePhase,SourceBindings,WaitSites,TaskJournal,SignQueue,SignState,SignDelivery,BlockPool,BlockPump,Tally,Frame],
     Organizations => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
     NestAuthority => [BlockPool,BlockPump,Tally,Frame],
     SourceIndex => [BlockPool,BlockPump,Tally,Frame],
-    Address => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,SourceBindings,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
-    Nest => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,PendState,SourceBindings,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
+    Address => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Nest,PendState,WaitSites,SourceBindings,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
+    Nest => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Flat,FaultPolicy,Span,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,PendState,WaitSites,SourceBindings,SourcePhase,SignQueue,SignState,SignDelivery,TaskJournal,BlockPool,BlockPump,Tally,Frame,Controllers],
     LedgerAdmission => [BlockPool,BlockPump,Tally,Frame],
     LedgerCharge => [LedgerAdmission,BlockPool,BlockPump,Tally,Frame],
     LedgerSerial => [LiveChanges,PageMembership,ChangeBlocks,RetentionStatistics,Commit,Flat,SourceAuthorizationRef,SourceMaps,SourceAuthorities,ActivityRegistry,ActivityDelivery,FaultPolicy,SpanExports,Span,Organizations,NestAuthority,FaultProgress,SourceIndex,ActivityHistory,Address,Nest,PendState,PendParent,LedgerAdmission,LedgerCharge,LedgerEntries,LedgerHeirs,BlockPages,BlockEpoch,BlockUses,BlockStages,HeldSources,SourceFlights,SourceGate,SourceBindings,SourceBlocks,SourceOrigins,SourcePhase,ProvenanceGrant,ProvenanceUses,Deadline,InterruptController,InterruptProgress,InterruptSources,InterruptSource,Scheduler,SchedulerAdmission,SignQueue,SignState,SignRouting,SignDelivery,WaitHolders,WaitSites,ControlTable,TerminationQueue,Husks,TaskState,TaskReceipts,TaskResult,TaskJournal,TaskHeir,TaskSchedule,TaskExtensions,Registry,TeamState,TeamTasks,TeamChildren,TeamTermination,TeamHeld,TeamExit,CloneQueue,BlockPool,BlockPump,Tally,Frame,Controllers,Asid],

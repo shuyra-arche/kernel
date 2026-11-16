@@ -1549,6 +1549,7 @@ impl Nest {
             let state = self.state.lock();
             if state.phase.is_closed() {
                 drop(state);
+                drop(address);
                 self.admission.closed();
                 self.drain_closed();
                 return Ok(());
@@ -1564,6 +1565,7 @@ impl Nest {
             self.changed();
         }
         drop(state);
+        drop(address);
         fault::wake_nest(self);
         result?;
         self.finish_invalidation()?;
