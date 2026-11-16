@@ -753,3 +753,314 @@ impl Reply {
         Self::new(request, opcode, outcome)
     }
 }
+
+/// Flat-domain results.
+pub mod flat {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Value {
+        Geometry {
+            flat: FlatId,
+            version: FlatVersion,
+            slots: SlotVersion,
+            range: Reshape,
+        },
+        Created {
+            token: PendId,
+            flat: FlatId,
+            version: FlatVersion,
+        },
+        Lifecycle {
+            flat: FlatId,
+            version: FlatVersion,
+            phase: FlatPhase,
+        },
+        Slot {
+            version: SlotVersion,
+            page: u64,
+        },
+        Transfer {
+            local: SlotVersion,
+            remote: SlotVersion,
+            page: u64,
+        },
+        Maintenance {
+            block: BlockRef,
+            phase: BlockPhase,
+        },
+    }
+
+    impl From<Value> for super::Value {
+        fn from(value: Value) -> Self {
+            match value {
+                Value::Geometry {
+                    flat,
+                    version,
+                    slots,
+                    range,
+                } => Self::Geometry {
+                    flat,
+                    version,
+                    slots,
+                    range,
+                },
+                Value::Created {
+                    token,
+                    flat,
+                    version,
+                } => Self::CreatedFlat {
+                    token,
+                    flat,
+                    version,
+                },
+                Value::Lifecycle {
+                    flat,
+                    version,
+                    phase,
+                } => Self::FlatLifecycle {
+                    flat,
+                    version,
+                    phase,
+                },
+                Value::Slot { version, page } => Self::Slot { version, page },
+                Value::Transfer {
+                    local,
+                    remote,
+                    page,
+                } => Self::Transfer {
+                    local,
+                    remote,
+                    page,
+                },
+                Value::Maintenance { block, phase } => Self::Maintenance { block, phase },
+            }
+        }
+    }
+
+    impl TryFrom<super::Value> for Value {
+        type Error = ();
+
+        fn try_from(value: super::Value) -> Result<Self, Self::Error> {
+            Ok(match value {
+                super::Value::Geometry {
+                    flat,
+                    version,
+                    slots,
+                    range,
+                } => Self::Geometry {
+                    flat,
+                    version,
+                    slots,
+                    range,
+                },
+                super::Value::CreatedFlat {
+                    token,
+                    flat,
+                    version,
+                } => Self::Created {
+                    token,
+                    flat,
+                    version,
+                },
+                super::Value::FlatLifecycle {
+                    flat,
+                    version,
+                    phase,
+                } => Self::Lifecycle {
+                    flat,
+                    version,
+                    phase,
+                },
+                super::Value::Slot { version, page } => Self::Slot { version, page },
+                super::Value::Transfer {
+                    local,
+                    remote,
+                    page,
+                } => Self::Transfer {
+                    local,
+                    remote,
+                    page,
+                },
+                super::Value::Maintenance { block, phase } => Self::Maintenance { block, phase },
+                _ => return Err(()),
+            })
+        }
+    }
+}
+
+/// Nest-domain results.
+pub mod nest {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Value {
+        FaultRoute {
+            nest: NestId,
+            span: SpanId,
+            version: SpanVersion,
+            epoch: FaultEpoch,
+            phase: FaultPhase,
+        },
+        Created {
+            token: PendId,
+            nest: NestId,
+            version: NestVersion,
+        },
+        Span {
+            token: PendId,
+            nest: NestId,
+            nest_version: NestVersion,
+            span: SpanId,
+            version: SpanVersion,
+            address: VirtAddr,
+        },
+        Lifecycle {
+            nest: NestId,
+            version: NestVersion,
+            phase: NestPhase,
+        },
+        SpanLifecycle {
+            nest: NestId,
+            span: SpanId,
+            version: SpanVersion,
+            phase: SpanPhase,
+        },
+        Memo {
+            generation: MemoGeneration,
+        },
+    }
+
+    impl From<Value> for super::Value {
+        fn from(value: Value) -> Self {
+            match value {
+                Value::FaultRoute {
+                    nest,
+                    span,
+                    version,
+                    epoch,
+                    phase,
+                } => Self::FaultRoute {
+                    nest,
+                    span,
+                    version,
+                    epoch,
+                    phase,
+                },
+                Value::Created {
+                    token,
+                    nest,
+                    version,
+                } => Self::CreatedNest {
+                    token,
+                    nest,
+                    version,
+                },
+                Value::Span {
+                    token,
+                    nest,
+                    nest_version,
+                    span,
+                    version,
+                    address,
+                } => Self::Span {
+                    token,
+                    nest,
+                    nest_version,
+                    span,
+                    version,
+                    address,
+                },
+                Value::Lifecycle {
+                    nest,
+                    version,
+                    phase,
+                } => Self::NestLifecycle {
+                    nest,
+                    version,
+                    phase,
+                },
+                Value::SpanLifecycle {
+                    nest,
+                    span,
+                    version,
+                    phase,
+                } => Self::SpanLifecycle {
+                    nest,
+                    span,
+                    version,
+                    phase,
+                },
+                Value::Memo { generation } => Self::Memo { generation },
+            }
+        }
+    }
+
+    impl TryFrom<super::Value> for Value {
+        type Error = ();
+
+        fn try_from(value: super::Value) -> Result<Self, Self::Error> {
+            Ok(match value {
+                super::Value::FaultRoute {
+                    nest,
+                    span,
+                    version,
+                    epoch,
+                    phase,
+                } => Self::FaultRoute {
+                    nest,
+                    span,
+                    version,
+                    epoch,
+                    phase,
+                },
+                super::Value::CreatedNest {
+                    token,
+                    nest,
+                    version,
+                } => Self::Created {
+                    token,
+                    nest,
+                    version,
+                },
+                super::Value::Span {
+                    token,
+                    nest,
+                    nest_version,
+                    span,
+                    version,
+                    address,
+                } => Self::Span {
+                    token,
+                    nest,
+                    nest_version,
+                    span,
+                    version,
+                    address,
+                },
+                super::Value::NestLifecycle {
+                    nest,
+                    version,
+                    phase,
+                } => Self::Lifecycle {
+                    nest,
+                    version,
+                    phase,
+                },
+                super::Value::SpanLifecycle {
+                    nest,
+                    span,
+                    version,
+                    phase,
+                } => Self::SpanLifecycle {
+                    nest,
+                    span,
+                    version,
+                    phase,
+                },
+                super::Value::Memo { generation } => Self::Memo { generation },
+                _ => return Err(()),
+            })
+        }
+    }
+}
