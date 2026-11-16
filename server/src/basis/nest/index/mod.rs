@@ -258,9 +258,8 @@ fn audit_spans(node: Option<&IndexNode>, nest: &Nest, root: &Table, geo: Geometr
     let Some(node) = node else { return };
     audit_spans(node.left.as_deref(), nest, root, geo);
     let span = &node.span;
-    assert_eq!(
-        span.identity.nest_id(),
-        nest.id(),
+    assert!(
+        span.identity.belongs_to(nest.id()),
         "indexed Span belongs to another Nest"
     );
     let state = span.state.lock();

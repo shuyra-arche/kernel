@@ -2245,9 +2245,8 @@ impl Nest {
             address.offset() == 0,
             "unpublish_page takes a page-aligned address"
         );
-        assert_eq!(
-            mapping.identity.nest_id(),
-            self.id,
+        assert!(
+            mapping.identity.belongs_to(self.id),
             "unpublish_page requires the mapping's own live nest"
         );
         self.finish_invalidation_with(polling)?;
@@ -2889,7 +2888,7 @@ impl Nest {
 
     /// 选择的所属与阶段：认住它的那个 Nest，且没有关闭。
     fn ensure_owned(&self, mapping: &Arc<Span>, state: &NestState) -> Result<(), NestError> {
-        if state.phase.is_closed() || mapping.identity.nest_id() != self.id {
+        if state.phase.is_closed() || !mapping.identity.belongs_to(self.id) {
             return Err(NestError::NoRegion);
         }
         Ok(())
@@ -2909,7 +2908,7 @@ impl Nest {
     }
 
     fn check_owner(&self, span: &Span) -> Result<(), NestError> {
-        if span.identity.nest_id() != self.id {
+        if !span.identity.belongs_to(self.id) {
             return Err(NestError::NoRegion);
         }
         Ok(())
