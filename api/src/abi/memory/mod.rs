@@ -99,6 +99,24 @@ pub mod flat {
         Split,
         Merge,
     }
+
+    impl Opcode {
+        pub const fn slot(self) -> u64 {
+            match self {
+                Self::Create => 16,
+                Self::Delete => 17,
+                Self::Inspect => 18,
+                Self::Occupy => 19,
+                Self::Vacate => 20,
+                Self::Block => 21,
+                Self::Allow => 22,
+                Self::Push => 23,
+                Self::Pull => 24,
+                Self::Split => 25,
+                Self::Merge => 26,
+            }
+        }
+    }
 }
 
 pub mod nest {
@@ -120,6 +138,25 @@ pub mod nest {
         FaultRoute,
         ReleaseRange,
     }
+
+    impl Opcode {
+        pub const fn slot(self) -> u64 {
+            match self {
+                Self::Create => 16,
+                Self::Delete => 17,
+                Self::Inspect => 18,
+                Self::Reserve => 19,
+                Self::Release => 20,
+                Self::Insert => 21,
+                Self::Remove => 22,
+                Self::Publish => 23,
+                Self::Retract => 24,
+                Self::Protect => 25,
+                Self::FaultRoute => 26,
+                Self::ReleaseRange => 27,
+            }
+        }
+    }
 }
 
 /// Shared wire opcode envelope. Domain actions keep their own enums; this type
@@ -130,7 +167,7 @@ pub enum Opcode {
     Nest(nest::Opcode),
 }
 
-#[allow(non_snake_case)]
+#[allow(non_snake_case, non_upper_case_globals)]
 impl Opcode {
     pub const fn Create(domain: Domain) -> Self {
         match domain {
@@ -197,33 +234,8 @@ impl Opcode {
 
     pub const fn slot(self) -> u64 {
         match self {
-            Self::Flat(op) => match op {
-                flat::Opcode::Create => 16,
-                flat::Opcode::Delete => 17,
-                flat::Opcode::Inspect => 18,
-                flat::Opcode::Occupy => 19,
-                flat::Opcode::Vacate => 20,
-                flat::Opcode::Block => 21,
-                flat::Opcode::Allow => 22,
-                flat::Opcode::Push => 23,
-                flat::Opcode::Pull => 24,
-                flat::Opcode::Split => 25,
-                flat::Opcode::Merge => 26,
-            },
-            Self::Nest(op) => match op {
-                nest::Opcode::Create => 16,
-                nest::Opcode::Delete => 17,
-                nest::Opcode::Inspect => 18,
-                nest::Opcode::Reserve => 19,
-                nest::Opcode::Release => 20,
-                nest::Opcode::Insert => 21,
-                nest::Opcode::Remove => 22,
-                nest::Opcode::Publish => 23,
-                nest::Opcode::Retract => 24,
-                nest::Opcode::Protect => 25,
-                nest::Opcode::FaultRoute => 26,
-                nest::Opcode::ReleaseRange => 27,
-            },
+            Self::Flat(op) => op.slot(),
+            Self::Nest(op) => op.slot(),
         }
     }
 
