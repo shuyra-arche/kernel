@@ -1,5 +1,6 @@
 //! An occupied address span and its range policy. Positions live in the Span's Memo table.
 mod access;
+mod operations;
 use super::super::index::source;
 use super::super::memo::publication::{CellRuns, Publication};
 use super::super::{CleanupNode, Nest, NestId};
