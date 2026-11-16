@@ -1,5 +1,10 @@
 # Construction migration from the baseline
 
+> **Historical #185 catalogue.** This snapshot predates the #220 span/translation split. For the current authority and lock order use
+[Span/Memo/Translation ownership](../span-ownership.md). The lock class
+previously named `Reservation` is now `Span`; line references here are
+kept only as history.
+
 Baseline `852b396d20a1ae2954503a4dee9d970658c43558` had 96 textual constructors: 66 unranked, 13 `L3`, 17 other ranked. The baseline location below remains a historical fact. Every row now has an explicit semantic class or an explained non-lock replacement. Repeated constructors do not denote additional field identities. See [current declarations and methods](fields.md) and [owner/IRQ/failure audit](README.md).
 
 | # | Baseline constructor | Former level | Current disposition |
@@ -100,3 +105,4 @@ Baseline `852b396d20a1ae2954503a4dee9d970658c43558` had 96 textual constructors:
 | 94 | `server/src/metal/allocator/spare/mod.rs:42` / `new_level` | `Spare` | `LegacyLock<order::Spare, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
 | 95 | `server/src/metal/riscv/mmu/external/controllers/mod.rs:10` / `new` | `None` | `LegacyLock<order::Controllers, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
 | 96 | `server/src/metal/riscv/mmu/internal/identity/asid.rs:14` / `new_level` | `Asid` | `LegacyLock<order::Asid, State>`; staged owner entry, same generic Lock/FIFO and Debug checks. |
+

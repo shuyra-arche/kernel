@@ -1,5 +1,10 @@
 # Synchronization ownership and acquisition audit
 
+> **Historical #185 catalogue.** This snapshot predates the #220 span/translation split. For the current authority and lock order use
+[Span/Memo/Translation ownership](../span-ownership.md). The lock class
+previously named `Reservation` is now `Span`; line references here are
+kept only as history.
+
 This records M5 of [#185](https://github.com/shuyra-arche/kernel/issues/185).
 The implementation is a generic physical `Lock<Order, Reentry, State>`, a
 parent/target-borrowing `LockGuard`, one sealed acquisition relation, and
@@ -267,3 +272,4 @@ exploratory failed boots are not evidence for the final commit. Physical
 hardware, complete wait-cycle detection and whole-Kernel static conversion are
 outside this initial S4 migration. Future typed owner migration must use the
 same real Lock and reviewed graph rather than adding a new permission owner.
+
