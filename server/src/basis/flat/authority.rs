@@ -250,7 +250,7 @@ pub(crate) fn settle_block(
         // Native mixed Flat geometry is represented by per-position bindings.
         for index in (low..high).step_by(span.grain()) {
             let page = index - base;
-            if let Some(data) = nest.memo_page(span, page).map_err(|_| PendFail::Busy)? {
+            if let Some(data) = span.memo_page(page).map_err(|_| PendFail::Busy)? {
                 block.retain(data.clone())?;
                 nest.unpublish_page(
                     span,
@@ -260,7 +260,7 @@ pub(crate) fn settle_block(
                     &data,
                 )
                 .map_err(|_| PendFail::Busy)?;
-                nest.finish_memo(span, page);
+                span.finish_memo(page);
             }
         }
     }

@@ -590,7 +590,7 @@ impl Nest {
             let index = mapping.state.lock().memos.next_page(cursor);
             let Some(index) = index else { break };
             cursor = Some(index);
-            self.finish_memo(&mapping, index);
+            mapping.finish_memo(index);
             let pending = mapping
                 .state
                 .lock()
@@ -598,7 +598,7 @@ impl Nest {
                 .get(index)
                 .is_some_and(memo::Memo::busy);
             if pending {
-                let Some(page) = self.memo_page(&mapping, index)? else {
+                let Some(page) = mapping.memo_page(index)? else {
                     busy = true;
                     continue;
                 };
@@ -708,14 +708,11 @@ impl Nest {
             if index < window.0.get() || index >= end {
                 continue;
             }
-            self.finish_memo(&mapping, index);
-            if !self.memo_published_by(&mapping, index, authority) {
+            mapping.finish_memo(index);
+            if !mapping.memo_published_by(index, authority) {
                 continue;
             }
-            let Some(page) = self
-                .memo_page(&mapping, index)
-                .map_err(|_| PendFail::Busy)?
-            else {
+            let Some(page) = mapping.memo_page(index).map_err(|_| PendFail::Busy)? else {
                 busy = true;
                 continue;
             };
@@ -802,7 +799,7 @@ impl Nest {
                     break;
                 };
                 cursor = Some(index);
-                let Some(page) = self.memo_page(mapping, index).map_err(|_| PendFail::Busy)? else {
+                let Some(page) = mapping.memo_page(index).map_err(|_| PendFail::Busy)? else {
                     continue;
                 };
                 self.unpublish_page(
@@ -811,7 +808,7 @@ impl Nest {
                     &page,
                 )
                 .map_err(|_| PendFail::Busy)?;
-                self.finish_memo(mapping, index);
+                mapping.finish_memo(index);
             }
             return Ok(());
         };
@@ -843,7 +840,7 @@ impl Nest {
             self.finish_invalidation_with(polling)
                 .map_err(|_| PendFail::Busy)?;
         }
-        self.finish_memo(mapping, index);
+        mapping.finish_memo(index);
         let pending = mapping
             .state
             .lock()
@@ -1348,17 +1345,6 @@ impl Nest {
         self.finish_invalidation()
     }
 
-    pub(crate) fn memo_page(
-        &self,
-        mapping: &Arc<Span>,
-        page: usize,
-    ) -> Result<Option<Arc<Page>>, NestError> {
-        self.check_owner(mapping)?;
-        mapping.position(page)?;
-        let state = mapping.state.lock();
-        Ok(state.memos.get(page).and_then(|memo| memo.page()))
-    }
-
     /// Persistent source lookup never materializes or retains a physical Page.
     pub(crate) fn logical_source(
         &self,
@@ -1415,41 +1401,6 @@ impl Nest {
         ))
     }
 
-    pub(crate) fn memo_published_by(
-        &self,
-        mapping: &Arc<Span>,
-        index: usize,
-        authority: &Arc<crate::basis::pend::Pend>,
-    ) -> bool {
-        mapping
-            .state
-            .lock()
-            .memos
-            .get(index)
-            .is_some_and(|memo| memo.published_by(authority))
-    }
-
-    pub(crate) fn finish_memo(&self, mapping: &Arc<Span>, index: usize) {
-        let settled = {
-            let state = self.state.lock();
-            if !state.retirement.invalidation().is_clean() {
-                return;
-            }
-            let mut inner = mapping.state.lock();
-            inner.memos.existing_mut(index).map(|memo| {
-                let before = memo.inspect(VirtAddr::new(0));
-                let settled = memo.finish();
-                if memo.inspect(VirtAddr::new(0)) != before {
-                    mapping.changed();
-                }
-                settled
-            })
-        };
-        if let Some(settled) = settled {
-            settled.release();
-        }
-    }
-
     pub(crate) fn publish_memo_report(
         self: &Arc<Self>,
         mapping: &Arc<Span>,
@@ -1466,7 +1417,7 @@ impl Nest {
         if !self.is_external() {
             self.finish_invalidation()?;
         }
-        self.finish_memo(mapping, index);
+        mapping.finish_memo(index);
         let (_, access) = mapping.access(index)?;
         let principal = publisher.observe();
         let mut publisher = Some(publisher);
@@ -1668,7 +1619,7 @@ impl Nest {
             let _ = self.retract_position(mapping, index, None, change, true);
             result = Err(AccessError::Denied);
         }
-        self.finish_memo(mapping, index);
+        mapping.finish_memo(index);
         drop(instructions);
         drop(lease);
         drop(flight);
@@ -1744,7 +1695,7 @@ impl Nest {
         if !self.is_external() {
             self.finish_invalidation_with(polling)?;
         }
-        self.finish_memo(mapping, index);
+        mapping.finish_memo(index);
         let page = {
             let _commit = crate::basis::commit();
             authorize()?;
@@ -1790,7 +1741,7 @@ impl Nest {
                 &page,
                 polling,
             );
-            self.finish_memo(mapping, index);
+            mapping.finish_memo(index);
             result?;
         }
         let state = mapping.state.lock();
@@ -1820,7 +1771,7 @@ impl Nest {
             return Err(AccessError::Denied);
         }
         self.finish_invalidation()?;
-        self.finish_memo(mapping, index);
+        mapping.finish_memo(index);
         let (ceiling, _) = mapping.access(index)?;
         let count = PageCount::new(mapping.grain()).ok_or(AccessError::NotAligned)?;
         let admitted = || {
@@ -2127,7 +2078,7 @@ impl Nest {
         drop(state);
         // Release retained resources only after this exact invocation completes.
         self.start_invalidation(target, polling)?;
-        self.finish_memo(mapping, mapping.page_index(address));
+        mapping.finish_memo(mapping.page_index(address));
         Ok(())
     }
 

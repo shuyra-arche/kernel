@@ -132,3 +132,49 @@ impl Span {
         Ok(())
     }
 }
+
+impl Span {
+    /// The exact local Memo state for one page, without owning a Nest lookup.
+    pub(crate) fn memo_page(
+        &self,
+        index: usize,
+    ) -> Result<Option<Arc<crate::basis::cell::page::Page>>, NestError> {
+        self.position(index)?;
+        let state = self.state.lock();
+        Ok(state.memos.get(index).and_then(|memo| memo.page()))
+    }
+
+    pub(in crate::basis::nest) fn memo_published_by(
+        &self,
+        index: usize,
+        authority: &Arc<crate::basis::pend::Pend>,
+    ) -> bool {
+        self.state
+            .lock()
+            .memos
+            .get(index)
+            .is_some_and(|memo| memo.published_by(authority))
+    }
+
+    /// Settle the local Memo only when no translation batch is outstanding.
+    pub(crate) fn finish_memo(&self, index: usize) {
+        let settled = {
+            let translation = self.translation.lock();
+            if !translation.retirement.invalidation().is_clean() {
+                return;
+            }
+            let mut inner = self.state.lock();
+            inner.memos.existing_mut(index).map(|memo| {
+                let before = memo.inspect(kernel_api::address::VirtAddr::new(0));
+                let settled = memo.finish();
+                if memo.inspect(kernel_api::address::VirtAddr::new(0)) != before {
+                    self.changed();
+                }
+                settled
+            })
+        };
+        if let Some(settled) = settled {
+            settled.release();
+        }
+    }
+}

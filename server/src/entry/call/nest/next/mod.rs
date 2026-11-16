@@ -89,7 +89,7 @@ pub(in crate::entry::call) fn effect(
                     .ok_or(Failure::SourceEmpty)?,
             )
         } else {
-            let page = route.nest().memo_page(&span, index).map_err(nest_error)?;
+            let page = span.memo_page(index).map_err(nest_error)?;
             if rights == NestRights::RETRACT && page.is_none() {
                 return Err(Failure::SourceEmpty);
             }
