@@ -308,17 +308,6 @@ the final Task/Nest destructor inside COMMIT; actual resource retirement stays
 with its owners. Reading the state therefore needs no caller COMMIT or tracked
 TaskWeak lifetime, and no reference survives the returned stop decision.
 
-The transfer boundary is narrower than the outer maintenance count:
-`binding::maintain` visits at most four organizations, but its reservation and
-Memo progression can still traverse a complete range under COMMIT.
-`cell::change::maintain` coalesces completions into one bit, then
-`index::source::wake_all` repeatedly scans the whole source list to select each
-next reservation. Neither outer count proves a bounded independently scheduled
-step. CPU retirement already belongs to the retained Task/Team continuation;
-any later scheduling change must preserve that owner and its exact evidence.
-These are separate owner-contract changes, not a source relocation. No new
-Retirement, Memory or Interrupt Task is instantiated by the current design.
-
 A future
 independent Task must first supply an owner-controlled bounded step, distinguish
 runnable remainder from hardware-blocked obligations, register its own wake

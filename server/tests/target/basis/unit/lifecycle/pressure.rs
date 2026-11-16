@@ -1,4 +1,4 @@
-//! Target-only allocation refusal during resident wait enrollment. The scope
+//! Target-only allocation refusal during lifecycle wait enrollment. The scope
 //! ends on the trap stack before scheduler handoff; no denial crosses migration.
 use core::alloc::{Allocator, Layout};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

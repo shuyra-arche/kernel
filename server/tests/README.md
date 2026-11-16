@@ -167,7 +167,10 @@ under `target/basis/unit/lifecycle`. Debug enrollment enforces NoAllocation befo
 handoff. These checks do not constitute a system-wide low-memory stress test.
 
 `verify lifecycle --pressure` refuses allocation and growth on the current Hart
-throughout the COMMIT-protected wait enrollment, in both debug and release. A
+throughout the lifecycle Task's COMMIT-protected wait enrollment, in both debug
+and release. The shared wait helper also serves retirement; pointer identity
+limits refusal and blocking counts to lifecycle so another worker cannot supply
+its missing evidence. A
 real failed allocation proves refusal is active; the attempt count must show no
 other allocations, and at least one wait must actually enroll. Refusal ends on
 the trap stack before handoff. Peer Harts retain normal allocation behavior.

@@ -10,19 +10,22 @@
      let (late_n, late_max, late_sum) = deadline::late_stats();
 --- a/server/src/basis/sign/wait/resident.rs
 +++ b/server/src/basis/sign/wait/resident.rs
-@@ -101,6 +101,7 @@
+@@ -101,6 +101,8 @@
      pub(crate) fn wait(&self) -> Handoff<()> {
          let blocked = {
              let commit = crate::basis::commit();
-+            let _pressure = crate::metal::allocator::portal::pressure::enter();
++            let _pressure = core::ptr::eq(self, &crate::basis::unit::lifecycle::WORK)
++                .then(crate::metal::allocator::portal::pressure::enter);
              #[cfg(debug_assertions)]
              let _no_allocation = crate::metal::allocator::NoAllocation::enter();
              let task = current().running_task().expect("resident Task");
-@@ -130,6 +131,7 @@
+@@ -130,6 +132,9 @@
                          .expect("reserved Site")
                          .register(task)
                  );
-+                crate::metal::allocator::portal::pressure::blocked();
++                if _pressure.is_some() {
++                    crate::metal::allocator::portal::pressure::blocked();
++                }
                  block::Blocked::Switch(next)
              }
          };
