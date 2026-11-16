@@ -159,8 +159,8 @@ pub(in crate::entry::call) fn effect(
         Action::Publish { .. } => {
             let change = basis::cell::change::acquire(data.as_ref().expect("selected Page"))
                 .map_err(cell_error)?;
-            route.nest().publish_memo_report(
-                &span,
+            span.publish(
+                route.nest(),
                 index,
                 expected.get(),
                 change,
