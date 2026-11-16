@@ -210,3 +210,50 @@ fn gap_selection_uses_no_scratch_allocation_and_keeps_retired_ranges() {
         0x1000
     );
 }
+
+#[test]
+fn partial_release_keeps_generation_on_both_sides_and_frees_a_reusable_hole() {
+    let mut layout = Layout::new();
+    let page = 4096;
+    let placement = Placement::fixed(VirtAddr::new(0x10000), 3 * page).unwrap();
+    let (start, generation) = layout.reserve(placement).unwrap();
+    assert!(
+        layout
+            .occupancy
+            .release_range(start + page, start + 2 * page - 1, generation)
+    );
+    assert!(layout.occupancy.has_id(generation));
+
+    let hole = Placement::fixed(VirtAddr::new(start + page), page).unwrap();
+    let (middle, replacement) = layout.reserve(hole).unwrap();
+    assert_eq!(middle, start + page);
+    assert_ne!(replacement, generation);
+    assert!(
+        layout
+            .reserve(Placement::fixed(VirtAddr::new(start), page).unwrap())
+            .is_err()
+    );
+    assert!(
+        layout
+            .reserve(Placement::fixed(VirtAddr::new(start + 2 * page), page).unwrap())
+            .is_err()
+    );
+
+    assert!(
+        layout
+            .occupancy
+            .release_range(start, start + page - 1, generation)
+    );
+    assert!(
+        layout
+            .occupancy
+            .release_range(start + 2 * page, start + 3 * page - 1, generation)
+    );
+    assert!(!layout.occupancy.has_id(generation));
+    assert!(layout.occupancy.has_id(replacement));
+    assert!(
+        layout
+            .occupancy
+            .release(middle, middle + page - 1, replacement)
+    );
+}
