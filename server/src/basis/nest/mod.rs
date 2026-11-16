@@ -1042,6 +1042,9 @@ impl Nest {
             }
         }
         address.index.insert(node);
+        // The fence at the end of commit acquires COMMIT. Address is an inner
+        // lock and must not remain held across that acquisition.
+        drop(address);
         state.retirement.mark_dirty(mapping.is_global());
         // Installation still owns its unpublished Span. Reserve the sole fence
         // initiator before unlocking, so an observer cannot steal progress and
