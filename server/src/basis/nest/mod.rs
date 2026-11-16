@@ -651,24 +651,7 @@ impl Nest {
             if mapping.source().is_some_and(|source| source.is_borrowed()) {
                 return Err(PendFail::Busy);
             }
-            let mut cursor = None;
-            loop {
-                let Some(index) = mapping.state.lock().memos.next_page(cursor) else {
-                    break;
-                };
-                cursor = Some(index);
-                let Some(page) = mapping.memo_page(index).map_err(|_| PendFail::Busy)? else {
-                    continue;
-                };
-                mapping
-                    .unpublish_page(
-                        self,
-                        VirtAddr::new(mapping.position(index).map_err(|_| PendFail::Busy)?),
-                        &page,
-                    )
-                    .map_err(|_| PendFail::Busy)?;
-                mapping.finish_memo(index);
-            }
+            mapping.unpublish_all(self)?;
             return Ok(());
         };
         let selected = |source: &memo::source::Source| {

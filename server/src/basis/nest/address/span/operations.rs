@@ -1345,3 +1345,32 @@ impl Span {
         }
     }
 }
+
+impl Span {
+    /// Withdraw every published local Memo. Used by source withdrawal after
+    /// the source authorization has been selected.
+    pub(in crate::basis::nest) fn unpublish_all(
+        self: &Arc<Self>,
+        nest: &Arc<Nest>,
+    ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
+        use kernel_api::abi::call::pend::PendFail;
+        let mut cursor = None;
+        loop {
+            let Some(index) = self.state.lock().memos.next_page(cursor) else {
+                break;
+            };
+            cursor = Some(index);
+            let Some(page) = self.memo_page(index).map_err(|_| PendFail::Busy)? else {
+                continue;
+            };
+            self.unpublish_page(
+                nest,
+                VirtAddr::new(self.position(index).map_err(|_| PendFail::Busy)?),
+                &page,
+            )
+            .map_err(|_| PendFail::Busy)?;
+            self.finish_memo(index);
+        }
+        Ok(())
+    }
+}
