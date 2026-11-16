@@ -188,8 +188,8 @@ impl Cpu {
         source.admit_provenance(None).map_err(|_| Failure::Denied)?;
         // The page and current logical selection must still be the published one.
         let page = self
-            .nest
-            .memo_page(&self.span, wire.memo_page)
+            .span
+            .memo_page(wire.memo_page)
             .map_err(|_| Failure::Stale)?
             .ok_or(Failure::Stale)?;
         source.same_page(&page).map_err(|_| Failure::Stale)?;
