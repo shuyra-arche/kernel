@@ -1155,6 +1155,17 @@ impl Span {
         }) {
             return Err(NestError::Busy);
         }
+        let mut cursor = None;
+        while let Some(page) = inner.memos.next_page(cursor) {
+            cursor = Some(page);
+            if page >= offset.get() && page < offset.get() + count.get() {
+                if let Some(memo) = inner.memos.get(page)
+                    && (memo.in_flight() || memo.busy())
+                {
+                    return Err(NestError::Busy);
+                }
+            }
+        }
         let next = super::ActiveRange::split(&inner.active, start.as_usize(), last, None)?;
         if next.len() == inner.active.len() {
             return Err(NestError::NoRegion);
