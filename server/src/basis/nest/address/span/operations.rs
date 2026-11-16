@@ -30,14 +30,17 @@ impl Span {
         }
         let _operation = self.operation().ok_or(NestError::Busy)?;
         let _commit = crate::basis::commit();
+        // Resolve the actor and its range after COMMIT but before Address,
+        // Nest or Span. Liveness and Registry queries are leaves below COMMIT.
+        let actor = source.actor().ok_or(NestError::NoRegion)?;
+        let range = source.range_for(&actor).map_err(memo::source_error)?;
+        if range.level() != self.level() {
+            return Err(NestError::NotAligned);
+        }
         nest.ensure_span(self)?;
         self.access(index)?;
         if !nest.is_open() || !self.is_open() {
             return Err(NestError::NoRegion);
-        }
-        let range = source.range().map_err(memo::source_error)?;
-        if range.level() != self.level() {
-            return Err(NestError::NotAligned);
         }
         let (offset, count) = source.window();
         source
@@ -71,7 +74,6 @@ impl Span {
         if !nest.is_external() {
             crate::basis::nest::index::source::register(&range, self, Some(&binding))?;
         }
-        source.range().map_err(memo::source_error)?;
         let authorization = source.source().clone();
         let replaced = {
             if !translation.is_open() || !self.is_open() {

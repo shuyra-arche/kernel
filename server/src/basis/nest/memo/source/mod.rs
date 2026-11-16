@@ -203,13 +203,19 @@ impl Source {
         Ok(())
     }
     pub(crate) fn range(&self) -> Result<FlatRange, AccessError> {
+        let actor = self.actor().ok_or(AccessError::Denied)?;
+        self.range_for(&actor)
+    }
+
+    /// Resolve the range against an actor whose liveness was observed before
+    /// the caller's inner locks. The authority is still rechecked here.
+    pub(crate) fn range_for(&self, actor: &Arc<Task>) -> Result<FlatRange, AccessError> {
         self.check_provenance(Access::READ, false)?;
         if let Some(lineage) = &self.lineage {
             lineage.check(Modifiable::No)?;
         }
-        let actor = self.actor().ok_or(AccessError::Denied)?;
         self.source().ensure_internal().map_err(failure)?;
-        let _authority = self.authority(&actor)?;
+        let _authority = self.authority(actor)?;
         let range = self
             .hold
             .resolve_window(self.offset, self.count)
