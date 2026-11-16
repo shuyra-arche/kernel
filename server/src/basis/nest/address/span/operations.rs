@@ -837,3 +837,11 @@ impl Span {
         }
     }
 }
+
+impl Span {
+    /// Retire this Span's exported source discovery before address reuse.
+    pub(in crate::basis::nest) fn withdraw_exports(&self) -> Result<(), memo::AccessError> {
+        memo::source::exports::withdraw(&self.exports, |source| source.uses_span(self))
+            .map_err(memo::pend_failure)
+    }
+}
