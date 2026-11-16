@@ -926,18 +926,18 @@ impl Nest {
             match ActiveRange::new(span.initial_start(), span.initial_size(), access, access) {
                 Ok(active) => active,
                 Err(error) => {
-                    Self::give_back_unpublished(&span);
+                    self.give_back(&span);
                     return Err(error);
                 }
             };
         let mut ranges = Vec::new();
         if ranges.try_reserve(1).is_err() {
-            Self::give_back_unpublished(&span);
+            self.give_back(&span);
             return Err(NestError::OutOfMemory);
         }
         ranges.push(active);
         if let Err(error) = span.stage(ranges) {
-            Self::give_back_unpublished(&span);
+            self.give_back(&span);
             return Err(error);
         }
         PreparedSpan::new(self, span, creator)
@@ -1012,12 +1012,12 @@ impl Nest {
         current: Access,
     ) -> Result<Arc<Span>, NestError> {
         if let Err(error) = self.check_owner(&span) {
-            return Err(Self::abandon(span, error));
+            return Err(self.abandon(span, error));
         }
         let active =
             match ActiveRange::new(span.initial_start(), span.initial_size(), ceiling, current) {
                 Ok(active) => active,
-                Err(error) => return Err(Self::abandon(span, error)),
+                Err(error) => return Err(self.abandon(span, error)),
             };
         self.attach_shaped(span, source, &[active])
     }
@@ -1034,15 +1034,15 @@ impl Nest {
         active: &[ActiveRange],
     ) -> Result<Arc<Span>, NestError> {
         if let Err(error) = self.check_owner(&span) {
-            return Err(Self::abandon(span, error));
+            return Err(self.abandon(span, error));
         }
         let mut ranges = Vec::new();
         if ranges.try_reserve(active.len()).is_err() {
-            return Err(Self::abandon(span, NestError::OutOfMemory));
+            return Err(self.abandon(span, NestError::OutOfMemory));
         }
         ranges.extend_from_slice(active);
         if let Err(error) = span.install(source, ranges) {
-            return Err(Self::abandon(span, error));
+            return Err(self.abandon(span, error));
         }
         match self.commit(&span) {
             Ok(()) => Ok(span),
@@ -1057,18 +1057,12 @@ impl Nest {
     ///
     /// 占用身份是全局唯一的，所以“拿裸坐标去目标表里找一笔”不会误删别人的槽；
     /// 但那样也退不掉真属主的这一笔，因此归还一律按属主。
-    pub(in crate::basis::nest) fn give_back_unpublished(span: &Arc<Span>) -> bool {
-        span.identity
-            .owner()
-            .is_some_and(|owner| owner.give_back(span))
-    }
-
     /// 占用已经交出、本笔操作不再有承接者时唯一的归还路径：按属主交还并交出错误。
     ///
     /// 与调用方主动退的 `release_span` 成对；`give_back` / `give_back_span`
     /// 只是“退还”的原语，不包含“这笔操作失败”的语义。
-    fn abandon(span: Arc<Span>, error: NestError) -> NestError {
-        Self::give_back_unpublished(&span);
+    fn abandon(&self, span: Arc<Span>, error: NestError) -> NestError {
+        self.give_back(&span);
         error
     }
 
@@ -1083,7 +1077,7 @@ impl Nest {
                 .is_some_and(|held| Arc::ptr_eq(&held, mapping))
         };
         if !published {
-            Self::give_back_unpublished(mapping);
+            self.give_back(mapping);
             return;
         }
         let node = mapping.take_cleanup();
@@ -1361,7 +1355,7 @@ impl Nest {
     }
 
     pub(crate) fn associate_logical(
-        &self,
+        self: &Arc<Self>,
         mapping: &Arc<Span>,
         index: usize,
         expected: u64,
@@ -1374,7 +1368,7 @@ impl Nest {
     }
 
     fn associate_kind(
-        &self,
+        self: &Arc<Self>,
         mapping: &Arc<Span>,
         index: usize,
         expected: u64,
@@ -1409,8 +1403,7 @@ impl Nest {
                 .check_publish(offset, count)
                 .map_err(memo::namespace_error)?;
         }
-        let owner = mapping.identity.owner().ok_or(NestError::NoRegion)?;
-        let binding = authority::RangeBinding::new_position(mapping.identity(), &owner, index)
+        let binding = authority::RangeBinding::new_position(mapping.identity(), self, index)
             .map_err(memo::namespace_error)?;
         source
             .source()
@@ -2252,11 +2245,9 @@ impl Nest {
             address.offset() == 0,
             "unpublish_page takes a page-aligned address"
         );
-        assert!(
-            mapping
-                .identity
-                .owner()
-                .is_some_and(|owner| core::ptr::eq(Arc::as_ptr(&owner), self)),
+        assert_eq!(
+            mapping.identity.nest_id(),
+            self.id,
             "unpublish_page requires the mapping's own live nest"
         );
         self.finish_invalidation_with(polling)?;
@@ -2898,10 +2889,7 @@ impl Nest {
 
     /// 选择的所属与阶段：认住它的那个 Nest，且没有关闭。
     fn ensure_owned(&self, mapping: &Arc<Span>, state: &NestState) -> Result<(), NestError> {
-        let owner = mapping.identity.owner().ok_or(NestError::NoRegion)?;
-        if state.phase.is_closed()
-            || !core::ptr::eq(Arc::as_ptr(&owner) as *const Nest, self as *const Nest)
-        {
+        if state.phase.is_closed() || mapping.identity.nest_id() != self.id {
             return Err(NestError::NoRegion);
         }
         Ok(())
@@ -2921,8 +2909,7 @@ impl Nest {
     }
 
     fn check_owner(&self, span: &Span) -> Result<(), NestError> {
-        let owner = span.identity.owner().ok_or(NestError::NoRegion)?;
-        if !core::ptr::eq(Arc::as_ptr(&owner) as *const Nest, self as *const Nest) {
+        if span.identity.nest_id() != self.id {
             return Err(NestError::NoRegion);
         }
         Ok(())

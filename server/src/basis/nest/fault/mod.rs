@@ -172,7 +172,7 @@ pub(crate) fn configure(
     let version = expected.next().ok_or(Failure::VersionExhausted)?;
     let epoch = epoch.next().ok_or(Failure::VersionExhausted)?;
     let binding = config
-        .map(|config| Binding::prepare(actor, route.entry(), &span, config))
+        .map(|config| Binding::prepare(actor, route.entry(), route.nest(), &span, config))
         .transpose()?;
     let old = {
         let nest_state = route.nest().state.lock();

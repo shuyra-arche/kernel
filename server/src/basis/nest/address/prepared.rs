@@ -109,7 +109,7 @@ impl Drop for PreparedSpan {
                 self.nest.spans.cancel_prepared();
             }
             // This staged value has never admitted an association or a PTE.
-            assert!(Nest::give_back_unpublished(&self.span));
+            assert!(self.nest.give_back(&self.span));
         }
     }
 }
