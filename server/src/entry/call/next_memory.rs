@@ -128,7 +128,7 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
     ) {
         let action =
             memory::nest::Action::try_from(request.action()).map_err(|_| Failure::Unsupported)?;
-        let result = super::nest::next::effect(actor, action.into(), &mut receipt);
+        let result = super::nest::next::effect(actor, action, &mut receipt);
         return Ok(receipt.finish(result));
     }
     let _serial = actor.pend.lock();
@@ -146,7 +146,10 @@ fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Fa
             memory::flat::Action::try_from(action).map_err(|_| Failure::Unsupported)?,
             prepared,
         ),
-        memory::Domain::Nest => super::nest::next::mutate(actor, action),
+        memory::Domain::Nest => super::nest::next::mutate(
+            actor,
+            memory::nest::Action::try_from(action).map_err(|_| Failure::Unsupported)?,
+        ),
     });
     Ok(receipt.finish(result))
 }

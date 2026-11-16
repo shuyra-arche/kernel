@@ -24,9 +24,9 @@ fn error(error: BindingError) -> Failure {
     }
 }
 
-pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure> {
+pub(super) fn mutate(actor: &Arc<Task>, action: NestAction) -> Result<Value, Failure> {
     match action {
-        Action::CreateSpan {
+        NestAction::Reserve {
             token,
             nest: id,
             expected,
@@ -128,11 +128,11 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
 
 pub(super) fn effect(
     actor: &Arc<Task>,
-    action: Action,
+    action: NestAction,
     receipt: &mut crate::entry::call::next_memory::Receipt<'_>,
 ) -> Result<Value, Failure> {
     match action {
-        Action::CreateNest { license } => {
+        NestAction::Create { license } => {
             {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
@@ -174,7 +174,7 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        Action::DeleteSpan {
+        NestAction::Release {
             token,
             nest: id,
             span: reservation,
@@ -227,7 +227,7 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        Action::ReleaseRange {
+        NestAction::ReleaseRange {
             token,
             nest: id,
             span: reservation,
@@ -285,7 +285,7 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        Action::DeleteNest {
+        NestAction::Delete {
             token,
             nest: id,
             expected,

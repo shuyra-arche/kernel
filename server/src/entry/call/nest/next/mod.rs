@@ -9,32 +9,32 @@ use crate::basis::{
 };
 use alloc::sync::Arc;
 use kernel_api::{
-    abi::memory::{self, Action, Failure, Observation, Query, Snapshot, Value},
+    abi::memory::{self, Failure, Observation, Query, Snapshot, Value, nest::Action as NestAction},
     address::{PageCount, PageOffset},
     model::pend::{FlatRights, NestRights, Operations},
 };
 
 pub(in crate::entry::call) fn effect(
     actor: &Arc<Task>,
-    action: Action,
+    action: NestAction,
     receipt: &mut super::super::next_memory::Receipt<'_>,
 ) -> Result<Value, Failure> {
     if matches!(
         action,
-        Action::CreateNest { .. } | Action::DeleteSpan { .. } | Action::DeleteNest { .. }
+        NestAction::Create { .. } | NestAction::Release { .. } | NestAction::Delete { .. }
     ) {
         return lifecycle::effect(actor, action, receipt);
     }
     use basis::nest::{Access, memo::Publisher};
     use kernel_api::model::nest::MemoGeneration;
     let (position, expected, rights) = match action {
-        Action::Publish {
+        NestAction::Publish {
             memo,
             expected,
             maintenance: _,
         } => (memo, expected, NestRights::PUBLISH),
-        Action::Retract { memo, expected } => (memo, expected, NestRights::RETRACT),
-        Action::Protect { memo, expected, .. } => (memo, expected, NestRights::PROTECT),
+        NestAction::Retract { memo, expected } => (memo, expected, NestRights::RETRACT),
+        NestAction::Protect { memo, expected, .. } => (memo, expected, NestRights::PROTECT),
         _ => return Err(Failure::Unsupported),
     };
     let (route, span, index, data, publisher, maintenance) = {
@@ -53,7 +53,7 @@ pub(in crate::entry::call) fn effect(
             if crate::metal::memory::topology().is_none() {
                 return Err(Failure::Unsupported);
             }
-            let access = if let Action::Protect { access, .. } = action {
+            let access = if let NestAction::Protect { access, .. } = action {
                 Access::from_wire(access).ok_or(Failure::Invalid)?
             } else {
                 span.access(index).map_err(nest_error)?.1
@@ -95,7 +95,7 @@ pub(in crate::entry::call) fn effect(
             if rights == NestRights::PUBLISH || rights == NestRights::PROTECT {
                 let topology = crate::metal::memory::topology().ok_or(Failure::Unsupported)?;
                 let endpoint = route.nest().memory_endpoint().ok_or(Failure::Unsupported)?;
-                let access = if let Action::Protect { access, .. } = action {
+                let access = if let NestAction::Protect { access, .. } = action {
                     access
                 } else {
                     span.access(index).map_err(nest_error)?.1.bits() << 1
@@ -114,7 +114,7 @@ pub(in crate::entry::call) fn effect(
         } else {
             None
         };
-        let maintenance = if let Action::Publish {
+        let maintenance = if let NestAction::Publish {
             maintenance: Some(credential),
             ..
         } = action
@@ -151,7 +151,7 @@ pub(in crate::entry::call) fn effect(
     };
     let maintenance_check = maintenance.clone();
     let mut result = match action {
-        Action::Publish { .. } => {
+        NestAction::Publish { .. } => {
             let change = basis::cell::change::acquire(data.as_ref().expect("selected Page"))
                 .map_err(cell_error)?;
             span.publish(
@@ -164,7 +164,7 @@ pub(in crate::entry::call) fn effect(
                 &mut accepted,
             )
         }
-        Action::Retract { .. } => {
+        NestAction::Retract { .. } => {
             let change = basis::cell::change::acquire(data.as_ref().expect("selected Page"))
                 .map_err(cell_error)?;
             span.retract(
@@ -187,7 +187,7 @@ pub(in crate::entry::call) fn effect(
                 &mut accepted,
             )
         }
-        Action::Protect { access, .. } => {
+        NestAction::Protect { access, .. } => {
             let access = Access::from_wire(access).ok_or(Failure::Invalid)?;
             span.protect(
                 route.nest(),
@@ -220,10 +220,10 @@ pub(in crate::entry::call) fn effect(
         let pending = matches!(
             (action, status.phase),
             (
-                Action::Publish { .. },
+                NestAction::Publish { .. },
                 kernel_api::model::nest::MemoPhase::Publishing
             ) | (
-                Action::Retract { .. },
+                NestAction::Retract { .. },
                 kernel_api::model::nest::MemoPhase::Retiring
             )
         );
@@ -244,10 +244,10 @@ pub(in crate::entry::call) fn effect(
         if matches!(
             (action, status.phase),
             (
-                Action::Publish { .. },
+                NestAction::Publish { .. },
                 kernel_api::model::nest::MemoPhase::Published
             ) | (
-                Action::Retract { .. },
+                NestAction::Retract { .. },
                 kernel_api::model::nest::MemoPhase::Associated
             )
         ) {
@@ -261,7 +261,7 @@ pub(in crate::entry::call) fn effect(
             cell_error(error)
         }
     })?;
-    if matches!(action, Action::Publish { .. }) && route.nest().is_external() {
+    if matches!(action, NestAction::Publish { .. }) && route.nest().is_external() {
         route
             .nest()
             .progress_external(&span)
@@ -269,7 +269,7 @@ pub(in crate::entry::call) fn effect(
     }
     let _commit = basis::commit();
     let value = receipt.started().ok_or(Failure::Busy)?;
-    if matches!(action, Action::Publish { .. }) {
+    if matches!(action, NestAction::Publish { .. }) {
         let status = span.inspect(index).map_err(nest_error)?;
         if status.phase != kernel_api::model::nest::MemoPhase::Published
             || value
@@ -331,14 +331,17 @@ pub(in crate::entry::call) fn inspect(
         .ok_or(Failure::Invalid)
 }
 
-pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure> {
+pub(in crate::entry::call) fn mutate(
+    actor: &Arc<Task>,
+    action: NestAction,
+) -> Result<Value, Failure> {
     if !pend::live(actor) {
         return Err(Failure::Dead);
     }
     match action {
-        Action::FaultRoute { .. } => basis::nest::fault::configure(actor, action),
-        Action::CreateSpan { .. } => lifecycle::mutate(actor, action),
-        Action::Insert {
+        NestAction::FaultRoute { .. } => basis::nest::fault::configure(actor, action.into()),
+        NestAction::Reserve { .. } => lifecycle::mutate(actor, action),
+        NestAction::Insert {
             target,
             expected,
             source,
@@ -366,7 +369,7 @@ pub(in crate::entry::call) fn mutate(actor: &Arc<Task>, action: Action) -> Resul
                 .map_err(nest_error)?;
             Ok(Value::Memo { generation })
         }
-        Action::Remove { memo, expected } => {
+        NestAction::Remove { memo, expected } => {
             let mapping =
                 SpanRoute::acquire(actor, memo.token(), NestRights::REMOVE).map_err(pend_error)?;
             let index = mapping.position(memo).map_err(pend_error)?;

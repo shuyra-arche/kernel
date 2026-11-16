@@ -3,6 +3,7 @@ mod next_memory;
 use crate::support::*;
 use kernel_api::abi::memory::{
     Action, Failure, Observation, Query, Value, flat::Action as FlatAction,
+    nest::Action as NestAction,
 };
 use std::sync::{Arc, atomic::Ordering};
 pub(crate) fn invoke(
@@ -63,18 +64,18 @@ mod nest {
         pub(crate) fn inspect(_: &Arc<Task>, _: Query) -> Result<Observation, Failure> {
             Err(Failure::Unsupported)
         }
-        pub(crate) fn mutate(_: &Arc<Task>, _: Action) -> Result<Value, Failure> {
+        pub(crate) fn mutate(_: &Arc<Task>, _: NestAction) -> Result<Value, Failure> {
             Err(Failure::Unsupported)
         }
         pub(crate) fn effect(
             actor: &Arc<Task>,
-            action: Action,
+            action: NestAction,
             receipt: &mut next_memory::Receipt<'_>,
         ) -> Result<Value, Failure> {
             if actor.mode.load(Ordering::SeqCst) == 1 {
                 return Err(Failure::Denied);
             }
-            if matches!(action, Action::CreateNest { .. }) {
+            if matches!(action, NestAction::Create { .. }) {
                 // Private address-space preparation may fence. The dispatcher
                 // must release admission locks before entering this boundary.
                 assert_eq!(commit_depth(), 0);
