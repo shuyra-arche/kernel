@@ -1,18 +1,19 @@
 //! Stable nest identity. A numeric identity is descriptive and never grants access.
-mod create;
 mod fault;
 mod position;
-mod span;
-pub use span::SpanId;
+mod reservation;
+mod reserve;
+pub use reservation::ReservationId;
 mod status;
-pub use create::CreateSpanRequest;
 pub use fault::{
     FAULT_CAPACITY, FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase, FaultRoute,
     FaultSequence, FaultStatus, MAX_FAULT_NS, fault_read_deadline,
 };
 pub use position::{MemoGeneration, MemoPosition};
+pub use reserve::ReserveRequest;
 pub use status::{
-    MemoPhase, MemoStatus, NestStatus, NestVersion, SpanPhase, SpanStatus, SpanVersion,
+    MemoPhase, MemoStatus, NestStatus, NestVersion, ReservationPhase, ReservationStatus,
+    ReservationVersion,
 };
 
 use crate::abi::register::{Decode, Wire};

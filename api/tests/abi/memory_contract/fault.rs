@@ -10,8 +10,8 @@ use kernel_api::{
         identity::{PendId, TaskId},
         nest::{
             FAULT_CAPACITY, FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase,
-            FaultRoute, FaultSequence, FaultStatus, MAX_FAULT_NS, MemoGeneration, SpanVersion,
-            fault_read_deadline,
+            FaultRoute, FaultSequence, FaultStatus, MAX_FAULT_NS, MemoGeneration,
+            ReservationVersion, fault_read_deadline,
         },
         pend::NestRights,
         wait::Wait,
@@ -31,8 +31,8 @@ pub(super) fn mutations() -> Vec<Action> {
         .map(|route| Action::FaultRoute {
             token: PendId::mint(13),
             nest: memo(0).nest(),
-            span: memo(0).span(),
-            expected: SpanVersion::new(7).unwrap(),
+            reservation: memo(0).reservation(),
+            expected: ReservationVersion::new(7).unwrap(),
             epoch: FaultEpoch::new(3).unwrap(),
             route,
         })
@@ -48,8 +48,8 @@ pub(super) fn results() -> Vec<Reply> {
                 Opcode::FaultRoute,
                 Outcome::Committed(Value::FaultRoute {
                     nest: memo(0).nest(),
-                    span: memo(0).span(),
-                    version: SpanVersion::new(8).unwrap(),
+                    reservation: memo(0).reservation(),
+                    version: ReservationVersion::new(8).unwrap(),
                     epoch: FaultEpoch::new(4).unwrap(),
                     phase,
                 }),
@@ -62,7 +62,7 @@ pub(super) fn results() -> Vec<Reply> {
 fn event() -> FaultEvent {
     FaultEvent {
         nest: memo(0).nest(),
-        span: memo(0).span(),
+        reservation: memo(0).reservation(),
         epoch: FaultEpoch::new(4).unwrap(),
         sequence: FaultSequence::new(u64::MAX).unwrap(),
         memo_page: 512,
@@ -78,7 +78,7 @@ fn event() -> FaultEvent {
 fn status() -> FaultStatus {
     FaultStatus {
         nest: memo(0).nest(),
-        span: memo(0).span(),
+        reservation: memo(0).reservation(),
         epoch: FaultEpoch::new(4).unwrap(),
         phase: FaultPhase::Active,
         handler: Some(TaskId::new(29)),
@@ -92,12 +92,12 @@ fn queries() -> Vec<Query> {
         Query::FaultRoute {
             token: PendId::mint(13),
             nest: memo(0).nest(),
-            span: memo(0).span(),
+            reservation: memo(0).reservation(),
         },
         Query::FaultEvent {
             token: PendId::mint(13),
             nest: memo(0).nest(),
-            span: memo(0).span(),
+            reservation: memo(0).reservation(),
             epoch: FaultEpoch::new(4).unwrap(),
             after: u64::MAX - 1,
             wait: Wait::At(1 << 63),
@@ -118,7 +118,7 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
     assert_eq!(NestRights::from_bits(1 << 12), Some(NestRights::FAULT));
     for (index, (action, reply)) in mutations().into_iter().zip(results()).enumerate() {
         let request = Request::new(Some(id()), action).unwrap();
-        let mut expected = bytes::<256>(&[14, 13, 26, u64::MAX, 13, 17, 19, 7, 3, index as u64]);
+        let mut expected = bytes::<256>(&[13, 13, 26, u64::MAX, 13, 17, 19, 7, 3, index as u64]);
         if index == 1 {
             set_word(&mut expected, 10, 23);
             set_word(&mut expected, 11, MAX_FAULT_NS);
@@ -129,7 +129,7 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
             Some(request)
         );
         assert!(Request::new(None, action).is_none());
-        let expected = bytes::<128>(&[14, 13, 26, u64::MAX, 2, 0, 12, 17, 19, 8, 4, index as u64]);
+        let expected = bytes::<128>(&[13, 13, 26, u64::MAX, 2, 0, 12, 17, 19, 8, 4, index as u64]);
         assert_eq!(reply.to_bytes(), expected);
         assert_eq!(Reply::from_bytes(&expected), Some(reply));
         assert!(reply.matches(request));
@@ -142,8 +142,8 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
 #[test]
 fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
     let expected_queries = [
-        bytes::<256>(&[14, 13, 18, 0, 4, 13, 17, 19]),
-        bytes::<256>(&[14, 13, 18, 0, 5, 13, 17, 19, 4, u64::MAX - 1, 1, 1 << 63]),
+        bytes::<256>(&[13, 13, 18, 0, 4, 13, 17, 19]),
+        bytes::<256>(&[13, 13, 18, 0, 5, 13, 17, 19, 4, u64::MAX - 1, 1, 1 << 63]),
     ];
     let snapshots = [
         Snapshot::FaultRoute(status()),
@@ -151,7 +151,7 @@ fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
     ];
     let expected_snapshots = [
         bytes::<128>(&[
-            14,
+            13,
             13,
             18,
             0,
@@ -166,7 +166,7 @@ fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
             u64::MAX,
         ]),
         bytes::<128>(&[
-            14,
+            13,
             13,
             18,
             0,
@@ -247,7 +247,7 @@ fn recovery_budgets_and_read_deadlines_are_finite_and_overflow_checked() {
     let Query::FaultEvent {
         token,
         nest,
-        span,
+        reservation,
         epoch,
         after,
         ..
@@ -261,7 +261,7 @@ fn recovery_budgets_and_read_deadlines_are_finite_and_overflow_checked() {
             Action::Inspect(Query::FaultEvent {
                 token,
                 nest,
-                span,
+                reservation,
                 epoch,
                 after,
                 wait: Wait::Infinite
@@ -274,7 +274,7 @@ fn recovery_budgets_and_read_deadlines_are_finite_and_overflow_checked() {
         Action::Inspect(Query::FaultEvent {
             token,
             nest,
-            span,
+            reservation,
             epoch,
             after,
             wait: Wait::Poll,

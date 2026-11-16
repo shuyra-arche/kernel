@@ -435,6 +435,24 @@ impl SourceAuthorization {
         blocks.push(block.clone());
         Ok(block)
     }
+    /// An owner may move a new Page into a blocked window only after enrolling
+    /// its physical gate and settling any old hardware users. Failure retains
+    /// that gate and leaves the transfer transaction untouched.
+    pub(crate) fn retain_blocked(
+        &self,
+        offset: PageOffset,
+        count: PageCount,
+        page: &Arc<Page>,
+    ) -> Result<(), PendFail> {
+        let blocks = self.blocks.lock();
+        for block in blocks.iter().filter(|b| b.geometry.overlaps(offset, count)) {
+            block.retain(page.clone())?;
+            if !block.settled() {
+                return Err(PendFail::Busy);
+            }
+        }
+        Ok(())
+    }
     pub(crate) fn moving(&self) -> bool {
         !self.inflight.lock().is_empty()
     }

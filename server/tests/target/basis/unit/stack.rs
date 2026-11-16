@@ -73,7 +73,7 @@ impl Stack {
         for page in 0..pages {
             let slot = SlotPosition::new(flat.token(), flat.flat(), page).unwrap();
             let target =
-                MemoPosition::new(memo.token(), memo.nest(), memo.span(), page + first)
+                MemoPosition::new(memo.token(), memo.nest(), memo.reservation(), page + first)
                     .unwrap();
             change(|| Action::Occupy {
                 slot,
@@ -119,17 +119,17 @@ impl Stack {
     pub fn retire(self) {
         for memo in [Some(self.memo), self.guard].into_iter().flatten() {
             change(|| {
-                let Snapshot::Span(status) = inspect(Query::Span {
+                let Snapshot::Reservation(status) = inspect(Query::Reservation {
                     token: memo.token(),
                     nest: memo.nest(),
-                    span: memo.span(),
+                    reservation: memo.reservation(),
                 }) else {
                     panic!("reservation")
                 };
-                Action::DeleteSpan {
+                Action::Release {
                     token: memo.token(),
                     nest: memo.nest(),
-                    span: memo.span(),
+                    reservation: memo.reservation(),
                     expected: status.version,
                 }
             });

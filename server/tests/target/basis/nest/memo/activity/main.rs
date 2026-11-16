@@ -51,7 +51,7 @@ fn pause() {
 fn derive(m: MemoPosition, target: AccordTarget) -> Result<PendId, ShareFail> {
     let source = pend_info(m.token());
     if !matches!(source.target,Target::Nest(id) if id==m.nest())
-        || !matches!(source.limits.scope,PendScope::Nest(NestScope::Span {id,..}) if id==m.span())
+        || !matches!(source.limits.scope,PendScope::Nest(NestScope::Reservation {id,..}) if id==m.reservation())
     {
         return Err(ShareFail::Denied);
     }

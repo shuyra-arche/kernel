@@ -194,7 +194,7 @@ impl Export {
                     self.maps.lock().push(entry);
                     return Err(pend_map_error(error));
                 }
-                space.retire_span(id);
+                space.retire_reservation(id);
             }
         }
         if self
@@ -250,7 +250,7 @@ impl Drop for Export {
             if !space.settled(id) {
                 let _ = space.dispose(entry.mapping);
             }
-            space.retire_span(id);
+            space.retire_reservation(id);
         }
     }
 }

@@ -3,7 +3,7 @@
 pub(crate) enum ClosePhase {
     /// 仍接受映射事务。
     Open,
-    /// Nest admission is already closed; indexed mappings are withdrawn one per turn.
+    /// Admission is closed; indexed mappings are withdrawn one per turn.
     Draining,
     /// 映射已撤下，等待 shootdown 结算。
     Closing,

@@ -25,7 +25,7 @@ pub mod operations {
     }
     /// Native v11 source derivation. `request` points to one AccordRequest;
     /// A live Flat/Share source derives ordinary Share access.
-    /// A Span source with INSPECT|SAMPLE derives one readonly activity
+    /// A Reservation source with INSPECT|SAMPLE derives one readonly activity
     /// page in the requested Pages window and a companion Sign in the recipient
     /// ledger. The two Pends form (Sign, Share View); no new call is needed.
     /// The creation license and source authority are checked in one commit.

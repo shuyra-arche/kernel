@@ -163,7 +163,7 @@ fn failures_have_explicit_codes_and_unknown_codes_reject() {
 fn committed_and_rejected_results_have_independent_byte_vectors() {
     let committed = Reply::new(id(), Opcode::Occupy, Outcome::Committed(slot_value(17))).unwrap();
     let mut expected = [0u8; 128];
-    for (index, word) in [14, 12, 19, u64::MAX, 2, 0, 1, 1 << 63, 17]
+    for (index, word) in [13, 12, 19, u64::MAX, 2, 0, 1, 1 << 63, 17]
         .into_iter()
         .enumerate()
     {
@@ -172,7 +172,7 @@ fn committed_and_rejected_results_have_independent_byte_vectors() {
     assert_eq!(committed.to_bytes(), expected);
     assert_eq!(Reply::from_bytes(&expected), Some(committed));
     expected = [0; 128];
-    for (index, word) in [14, 12, 19, u64::MAX, 0, (-3i64) as u64, 0]
+    for (index, word) in [13, 12, 19, u64::MAX, 0, (-3i64) as u64, 0]
         .into_iter()
         .enumerate()
     {

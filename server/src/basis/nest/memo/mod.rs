@@ -1,4 +1,4 @@
-//! Span-owned logical positions, their selected sources and exact hardware obligations.
+//! Nest-owned logical positions, their selected sources and exact hardware obligations.
 mod observation;
 pub(crate) use observation::{MemoInfo, MemoState};
 mod error;

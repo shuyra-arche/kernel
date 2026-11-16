@@ -291,7 +291,7 @@ impl Source {
     pub(crate) fn export(
         &self,
         actor: &Arc<Task>,
-        route: &pend::access::SpanRoute,
+        route: &pend::access::Reservation,
         index: usize,
     ) -> Result<Self, AccessError> {
         use kernel_api::model::pend::{
@@ -344,7 +344,7 @@ impl Source {
             actor,
             route.entry(),
             Operations::Nest(NestRights::PUBLISH),
-            PendScope::Nest(NestScope::Span {
+            PendScope::Nest(NestScope::Reservation {
                 id: route.id(),
                 range: PendRange::Pages {
                     offset: index,
@@ -417,10 +417,10 @@ impl Source {
                 .is_some_and(|route| route.any(|route| route.actor(task)))
     }
 
-    pub(crate) fn uses_span(&self, span: &crate::basis::nest::Span) -> bool {
+    pub(crate) fn uses_reservation(&self, span: &crate::basis::nest::Span) -> bool {
         self.lineage
             .as_ref()
-            .is_some_and(|route| route.any(|route| route.span(span)))
+            .is_some_and(|route| route.any(|route| route.reservation(span)))
     }
 
     pub(crate) fn exported_by(&self, task: TaskId, token: PendId) -> bool {

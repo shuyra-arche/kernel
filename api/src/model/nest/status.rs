@@ -1,9 +1,9 @@
-//! Next-memory-ABI space, span and Memo observations. Descriptive
-//! snapshots do not replace a live Whole/Span Pend or retirement evidence.
+//! Next-memory-ABI space, reservation and Memo observations. Descriptive
+//! snapshots do not replace a live Whole/Reservation Pend or retirement evidence.
 
 use super::{MemoGeneration, NestId, NestInfo};
 use crate::address::{BASE_PAGE_SIZE, VirtAddr};
-use crate::model::{cell::CellLevel, flat::FlatId, nest::SpanId};
+use crate::model::{cell::CellLevel, flat::FlatId, nest::ReservationId};
 use core::num::NonZeroU64;
 
 /// Address-space topology/lifecycle epoch, not a Memo publication generation.
@@ -25,11 +25,11 @@ impl NestVersion {
     }
 }
 
-/// Aggregate Span revision used by DeleteSpan, distinct from one Memo's
-/// generation. Changes anywhere in the Span invalidate an old revision.
+/// Aggregate Reservation revision used by Release, distinct from one Memo's
+/// generation. Changes anywhere in the reservation invalidate an old revision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SpanVersion(NonZeroU64);
-impl SpanVersion {
+pub struct ReservationVersion(NonZeroU64);
+impl ReservationVersion {
     pub const INITIAL: Self = Self(NonZeroU64::MIN);
     pub const fn new(value: u64) -> Option<Self> {
         match NonZeroU64::new(value) {
@@ -53,18 +53,18 @@ pub struct NestStatus {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u64)]
-pub enum SpanPhase {
+pub enum ReservationPhase {
     Open = 0,
-    Closing = 1,
-    Closed = 2,
+    Releasing = 1,
+    Released = 2,
     Failed = 3,
 }
-impl SpanPhase {
+impl ReservationPhase {
     pub const fn from_tag(tag: u64) -> Option<Self> {
         match tag {
             0 => Some(Self::Open),
-            1 => Some(Self::Closing),
-            2 => Some(Self::Closed),
+            1 => Some(Self::Releasing),
+            2 => Some(Self::Released),
             3 => Some(Self::Failed),
             _ => None,
         }
@@ -72,27 +72,27 @@ impl SpanPhase {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpanStatus {
+pub struct ReservationStatus {
     pub nest: NestId,
-    pub span: SpanId,
-    pub version: SpanVersion,
+    pub reservation: ReservationId,
+    pub version: ReservationVersion,
     pub offset: usize,
     pub count: usize,
-    /// Original span base, not the narrowed window's first address.
+    /// Original reservation base, not the narrowed window's first address.
     pub address: VirtAddr,
     pub level: CellLevel,
     /// Creation access ceiling, intersected with this Pend's write ceiling.
     /// Per-position current publication access is reported by MemoStatus.
     pub access: u64,
-    pub phase: SpanPhase,
+    pub phase: ReservationPhase,
 }
-impl SpanStatus {
+impl ReservationStatus {
     pub fn valid(self) -> bool {
         let Some(grain) = self.level.pages() else {
             return false;
         };
-        self.span.get() > 0
-            && self.span.get() <= isize::MAX as usize
+        self.reservation.get() > 0
+            && self.reservation.get() <= isize::MAX as usize
             && crate::model::cell::pages(self.offset, self.count).is_some()
             && self.offset.is_multiple_of(grain)
             && self.count.is_multiple_of(grain)
@@ -136,7 +136,7 @@ impl MemoPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoStatus {
     pub nest: NestId,
-    pub span: SpanId,
+    pub reservation: ReservationId,
     pub coordinate: usize,
     pub generation: MemoGeneration,
     pub phase: MemoPhase,
@@ -151,8 +151,8 @@ impl MemoStatus {
         let Some(grain) = self.level.pages() else {
             return false;
         };
-        if self.span.get() == 0
-            || self.span.get() > isize::MAX as usize
+        if self.reservation.get() == 0
+            || self.reservation.get() > isize::MAX as usize
             || !self.level.fits_at(self.coordinate, self.coordinate, grain)
             || self.page > isize::MAX as u64
             || self

@@ -54,12 +54,9 @@ pub(crate) fn prepare(
         indexed,
     )?
     .whole();
-    let span = nest.reserve(
-        Placement::lowest(RegionKind::Kernel, PAGE_SIZE, PAGE_SIZE)?,
-        source.level(),
-    )?;
-    let frame_va = span.initial_start();
-    memory.frame = Some(nest.attach(span, source, rw, rw)?);
+    let reservation = nest.reserve(Placement::lowest(RegionKind::Kernel, PAGE_SIZE, PAGE_SIZE)?)?;
+    let frame_va = reservation.start();
+    memory.frame = Some(nest.attach(reservation, source, rw, rw)?);
 
     let root = team.nest.root();
     let supervisor = team.nest.kind().is_supervisor();

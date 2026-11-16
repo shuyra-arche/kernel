@@ -4,7 +4,7 @@ use super::super::{MAX_ARGS, Task, identity::TaskMemory};
 use super::prepared::PreparedTask;
 use crate::basis::{
     flat::Flat,
-    nest::{Access, Nest, NestError, Placement, RegionKind, Span},
+    nest::{Access, Nest, NestError, Placement, RegionKind},
     unit::team::Team,
 };
 use crate::metal::layout::{IMAGE_BASE, TASK_STACK_SIZE};
@@ -100,16 +100,13 @@ impl Bootstrap {
         }
         let count = PageCount::new(indexed.len()).ok_or(NestError::NotAligned)?;
         let source = Flat::from_cells(self.team.cells.clone(), count, indexed)?.whole();
-        let slot = nest.reserve(
-            Placement::highest(
-                RegionKind::Normal,
-                stack_size + crate::metal::layout::TASK_STACK_GUARD,
-            )?,
-            source.level(),
-        )?;
-        let (guard, body) = nest.split(slot, crate::metal::layout::TASK_STACK_GUARD)?;
+        let slot = nest.reserve(Placement::highest(
+            RegionKind::Normal,
+            stack_size + crate::metal::layout::TASK_STACK_GUARD,
+        )?)?;
+        let (guard, body) = nest.split_reservation(slot, crate::metal::layout::TASK_STACK_GUARD)?;
         stack.guard = Some(guard);
-        let stack_body_top = body.initial_start().as_usize() + body.initial_size();
+        let stack_body_top = body.start().as_usize() + body.size();
         let rw = Access::READ | Access::WRITE;
         stack.mapping = Some(nest.attach(body, source, rw, rw)?);
 
@@ -144,7 +141,7 @@ impl Bootstrap {
 pub(crate) struct BootstrapStack {
     nest: Arc<Nest>,
     pub(crate) mapping: Option<Arc<crate::basis::nest::Span>>,
-    guard: Option<Arc<Span>>,
+    guard: Option<crate::basis::nest::Reservation>,
 }
 impl BootstrapStack {
     pub(crate) fn retire(&mut self) -> Result<(), NestError> {
@@ -155,8 +152,8 @@ impl BootstrapStack {
             self.mapping = None;
         }
         if let Some(guard) = &self.guard {
-            if !self.nest.settled(guard.identity()) {
-                self.nest.release_span(guard)?;
+            if !self.nest.settled(guard.id()) {
+                self.nest.release_reserved(guard)?;
             }
             self.guard = None;
         }
@@ -169,7 +166,7 @@ impl Drop for BootstrapStack {
             let _ = self.nest.dispose(mapping);
         }
         if let Some(guard) = self.guard.take() {
-            let _ = self.nest.release_span(&guard);
+            let _ = self.nest.cancel_reservation(guard);
         }
     }
 }

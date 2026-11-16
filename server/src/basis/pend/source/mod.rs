@@ -82,7 +82,7 @@ pub(crate) struct SourceAuthorization {
     /// 未结 CPU 关系：包含显式 Attach 控制与资源 Open 映射。
     ///
     /// 成员与 Registry 项是同一个 `Arc<RangeBinding>`，所以“还欠着谁”只有这一份
-    /// 事实：只有显式结清（`Nest::retire_span` / `reap_spans`）才撒下成员，
+    /// 事实：只有显式结清（`Nest::retire_reservation` / `reap_reservations`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
     bindings: LegacyLock<crate::basis::sync::order::SourceBindings, Vec<Arc<RangeBinding>>>,
     blocks: LegacyLock<crate::basis::sync::order::SourceBlocks, Vec<Arc<RangeBlock>>>,
@@ -226,7 +226,7 @@ impl SourceAuthorization {
             return false;
         }
         // 先把相位拷出来放锁，再升弱引用：临时 `Arc` 可能是最后一份强持，
-        // 它的析构会走到 `retire_span` / `settle` 再回本文件取锁。同 `manages`。
+        // 它的析构会走到 `retire_reservation` / `settle` 再回本文件取锁。同 `manages`。
         let meta = {
             let phase = self.phase.lock();
             match &*phase {
@@ -289,7 +289,7 @@ impl SourceAuthorization {
         self.bindings.lock().push(binding);
     }
 
-    /// 撒下一条成员：这份绑定已结清（`Nest::retire_span` / `reap_spans` 的唯一收尾）。
+    /// 撒下一条成员：这份绑定已结清（`Nest::retire_reservation` / `reap_reservations` 的唯一收尾）。
     ///
     /// 最后一条成员撤下就是显式的“结清”事件：来源不再占着任何东西时顺带向上收尾，
     /// 不在 `Drop` 里猜。

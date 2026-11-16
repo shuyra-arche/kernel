@@ -262,11 +262,8 @@ fn spawn_entry() -> Result<Option<alloc::sync::Arc<crate::basis::unit::task::Tas
 fn map_borrowed(nest: &Arc<Nest>, physical: PhysAddr, size: usize) -> Result<VirtAddr, NestError> {
     let borrowed = unsafe { BorrowedRegion::new(physical, size)? };
     let source = Flat::from_region(borrowed)?.whole();
-    let span = nest.reserve(
-        Placement::lowest(RegionKind::Normal, size, PAGE_SIZE)?,
-        source.level(),
-    )?;
-    let mapping = nest.attach(span, source, Access::READ, Access::READ)?;
+    let reservation = nest.reserve(Placement::lowest(RegionKind::Normal, size, PAGE_SIZE)?)?;
+    let mapping = nest.attach(reservation, source, Access::READ, Access::READ)?;
     Ok(mapping.initial_start())
 }
 

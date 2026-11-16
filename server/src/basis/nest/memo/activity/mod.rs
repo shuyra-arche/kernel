@@ -42,8 +42,8 @@ fn now() -> u64 {
 fn authorized(authority: &Pend, span: &Span, page: usize) -> bool {
     authority.selects(
         Operations::Nest(NestRights::INSPECT | NestRights::SAMPLE),
-        PendScope::Nest(NestScope::Span {
-            id: kernel_api::model::nest::SpanId::from_bytes(
+        PendScope::Nest(NestScope::Reservation {
+            id: kernel_api::model::nest::ReservationId::from_bytes(
                 &(span.identity() as u64).to_le_bytes(),
             )
             .expect("reservation identity"),
@@ -89,8 +89,8 @@ impl Nest {
         }
         // Physical identity is checked again while publishing this owner.
         let page_id = {
-            let state = span.state.lock();
-            let memo = state.memos.get(page).ok_or(Failure::Stale)?;
+            let state = self.state.lock();
+            let memo = state.memos.get(span, page).ok_or(Failure::Stale)?;
             if memo.generation() != generation {
                 return Err(Failure::Stale);
             }
@@ -112,13 +112,12 @@ impl Nest {
             if !authorized(authority, span, page) {
                 return Err(Failure::Denied);
             }
-            let state = self.state.lock();
+            let mut state = self.state.lock();
             self.ensure_owned(span, &state)
                 .map_err(|_| Failure::Stale)?;
-            let mut inner = span.state.lock();
-            let physical = inner
+            let physical = state
                 .memos
-                .get(page)
+                .get(span, page)
                 .and_then(|m| m.publication())
                 .ok_or(Failure::Stale)?
                 .cell()
@@ -135,7 +134,7 @@ impl Nest {
             {
                 return Err(Failure::Unsupported);
             }
-            let memo = inner.memos.existing_mut(page).ok_or(Failure::Stale)?;
+            let memo = state.memos.existing_mut(span, page).ok_or(Failure::Stale)?;
             if memo.generation() != generation
                 || memo
                     .publication()
@@ -172,8 +171,7 @@ impl Nest {
         if !state.retirement.invalidation().is_clean() {
             return Err(Failure::Busy);
         }
-        let inner = span.state.lock();
-        let memo = inner.memos.get(page).ok_or(Failure::Stale)?;
+        let memo = state.memos.get(span, page).ok_or(Failure::Stale)?;
         if memo.generation() != sampling.identity.generation
             || memo.in_flight()
             || memo
@@ -220,8 +218,7 @@ impl Nest {
             if !state.retirement.invalidation().is_clean() {
                 return Err(Failure::Busy);
             }
-            let inner = span.state.lock();
-            let memo = inner.memos.get(page).ok_or(Failure::Stale)?;
+            let memo = state.memos.get(span, page).ok_or(Failure::Stale)?;
             let identity = sampling.identity;
             if memo.generation() != identity.generation
                 || memo

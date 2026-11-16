@@ -59,22 +59,22 @@ impl RangeBinding {
 }
 
 #[derive(Clone)]
-pub(in crate::basis::nest) struct SpanRoot {
+pub(in crate::basis::nest) struct ReservationRoot {
     pub(in crate::basis::nest) creator: TaskId,
     pub(in crate::basis::nest) authority: Weak<Pend>,
 }
 
 #[derive(Clone)]
-pub(crate) struct SpanEntry {
+pub(crate) struct RangeEntry {
     pub(crate) binding: Arc<RangeBinding>,
-    pub(crate) span: Option<Arc<Span>>,
+    pub(crate) reservation: Option<Arc<Span>>,
     source: Option<Arc<SourceAuthorization>>,
-    pub(in crate::basis::nest) root: Option<SpanRoot>,
+    pub(in crate::basis::nest) root: Option<ReservationRoot>,
 }
 
-impl SpanEntry {
-    pub(crate) fn span(&self) -> Option<&Arc<Span>> {
-        self.span.as_ref()
+impl RangeEntry {
+    pub(crate) fn reservation(&self) -> Option<&Arc<Span>> {
+        self.reservation.as_ref()
     }
 
     pub(crate) fn source(&self) -> Option<&Arc<SourceAuthorization>> {
@@ -84,8 +84,8 @@ impl SpanEntry {
     fn reapable(&self, nest: &Nest) -> bool {
         nest.settled(self.binding.id())
             && self.root.as_ref().is_none_or(|root| {
-                self.span().is_some_and(|span| {
-                    span.state.lock().phase == super::address::span::SpanPhase::Gone
+                self.reservation().is_some_and(|span| {
+                    span.state.lock().phase == super::address::span::ReservationPhase::Gone
                 }) && root
                     .authority
                     .upgrade()
@@ -94,21 +94,21 @@ impl SpanEntry {
     }
 }
 
-struct Spans {
-    entries: Vec<SpanEntry>,
-    /// Private staging owns capacity, not a visible span or root.
+struct Ranges {
+    entries: Vec<RangeEntry>,
+    /// Private staging owns capacity, not a visible reservation or root.
     prepared: usize,
     cursor: usize,
 }
 
-pub(crate) struct SpanIndex {
-    ranges: LegacyLock<crate::basis::sync::order::NestAuthority, Spans>,
+pub(crate) struct ReservationRegistry {
+    ranges: LegacyLock<crate::basis::sync::order::NestAuthority, Ranges>,
 }
 
-impl SpanIndex {
+impl ReservationRegistry {
     pub(crate) fn new() -> Self {
         Self {
-            ranges: LegacyLock::new(Spans {
+            ranges: LegacyLock::new(Ranges {
                 entries: Vec::new(),
                 prepared: 0,
                 cursor: 0,
@@ -138,7 +138,7 @@ impl SpanIndex {
     pub(in crate::basis::nest) fn publish(
         &self,
         binding: Arc<RangeBinding>,
-        span: Arc<Span>,
+        reservation: Arc<Span>,
         creator: TaskId,
         root: &Arc<Pend>,
     ) {
@@ -151,18 +151,18 @@ impl SpanIndex {
                 .any(|entry| entry.binding.id() == binding.id())
         );
         ranges.prepared -= 1;
-        ranges.entries.push(SpanEntry {
+        ranges.entries.push(RangeEntry {
             binding,
-            span: Some(span),
+            reservation: Some(reservation),
             source: None,
-            root: Some(SpanRoot {
+            root: Some(ReservationRoot {
                 creator,
                 authority: Arc::downgrade(root),
             }),
         });
     }
 
-    pub(crate) fn registered(&self, id: usize) -> Option<SpanEntry> {
+    pub(crate) fn registered(&self, id: usize) -> Option<RangeEntry> {
         self.ranges
             .lock()
             .entries
@@ -171,7 +171,7 @@ impl SpanIndex {
             .cloned()
     }
 
-    pub(in crate::basis::nest) fn next(&self, after: usize) -> Option<SpanEntry> {
+    pub(in crate::basis::nest) fn next(&self, after: usize) -> Option<RangeEntry> {
         self.ranges
             .lock()
             .entries
@@ -181,7 +181,7 @@ impl SpanIndex {
             .cloned()
     }
 
-    pub(in crate::basis::nest) fn progress_entry(&self) -> Option<SpanEntry> {
+    pub(in crate::basis::nest) fn progress_entry(&self) -> Option<RangeEntry> {
         let mut ranges = self.ranges.lock();
         let entry = ranges
             .entries
@@ -205,7 +205,7 @@ impl SpanIndex {
         ranges.entries.is_empty() && ranges.prepared == 0
     }
 
-    pub(in crate::basis::nest) fn competing_span(&self, creator: TaskId) -> bool {
+    pub(in crate::basis::nest) fn competing_reservation(&self, creator: TaskId) -> bool {
         let mut cursor = 0;
         while let Some(entry) = self.next(cursor) {
             cursor = entry.binding.id();
@@ -213,8 +213,8 @@ impl SpanIndex {
                 .root
                 .as_ref()
                 .is_some_and(|root| root.creator != creator)
-                && entry.span().is_some_and(|span| {
-                    span.state.lock().phase != super::address::span::SpanPhase::Gone
+                && entry.reservation().is_some_and(|span| {
+                    span.state.lock().phase != super::address::span::ReservationPhase::Gone
                 })
             {
                 return true;
@@ -223,7 +223,7 @@ impl SpanIndex {
         false
     }
 
-    pub(crate) fn retire(&self, id: usize) -> Option<SpanEntry> {
+    pub(crate) fn retire(&self, id: usize) -> Option<RangeEntry> {
         let mut ranges = self.ranges.lock();
         let at = ranges
             .entries
@@ -232,7 +232,7 @@ impl SpanIndex {
         Some(ranges.entries.remove(at))
     }
 
-    pub(crate) fn take_settled(&self, nest: &Nest) -> Option<SpanEntry> {
+    pub(crate) fn take_settled(&self, nest: &Nest) -> Option<RangeEntry> {
         let mut cursor = 0;
         while let Some(entry) = self.next(cursor) {
             cursor = entry.binding.id();
@@ -246,19 +246,19 @@ impl SpanIndex {
 }
 
 // PendId is observation metadata in SourceAuthorization, never a transferable handle here.
-unsafe impl Send for SpanIndex {}
-unsafe impl Sync for SpanIndex {}
+unsafe impl Send for ReservationRegistry {}
+unsafe impl Sync for ReservationRegistry {}
 
 impl Nest {
-    fn settle(&self, entry: SpanEntry) {
+    fn settle(&self, entry: RangeEntry) {
         if let Some(source) = entry.source() {
             source.release_binding(&entry.binding);
         }
         if entry.root.is_some()
-            && let Some(span) = entry.span()
+            && let Some(reservation) = entry.reservation()
         {
             loop {
-                let memo = span.state.lock().memos.take_metadata();
+                let memo = self.state.lock().memos.take_metadata(reservation);
                 if memo.is_none() {
                     break;
                 }
@@ -267,49 +267,51 @@ impl Nest {
         }
     }
 
-    pub(crate) fn retire_span(&self, id: usize) {
+    pub(crate) fn retire_reservation(&self, id: usize) {
         let _commit = crate::basis::commit();
-        let Some(entry) = self.spans.registered(id) else {
+        let Some(entry) = self.reservations.registered(id) else {
             return;
         };
         if entry.reapable(self)
-            && let Some(entry) = self.spans.retire(id)
+            && let Some(entry) = self.reservations.retire(id)
         {
             self.settle(entry);
         }
     }
 
     /// The whole-Nest keeper advances a bounded number of the real namespace records.
-    pub(crate) fn progress_spans(self: &Arc<Self>) {
-        use kernel_api::model::nest::SpanId;
+    pub(crate) fn progress_reservations(self: &Arc<Self>) {
+        use kernel_api::model::nest::ReservationId;
         if !self.is_external() {
             return;
         }
         for _ in 0..4 {
             let _commit = crate::basis::commit();
-            let Some(entry) = self.spans.progress_entry() else {
+            let Some(entry) = self.reservations.progress_entry() else {
                 break;
             };
-            let Some(span) = entry.span() else {
+            let Some(reservation) = entry.reservation() else {
                 continue;
             };
             let Some(root) = entry.root.as_ref() else {
                 continue;
             };
-            let Some(id) = SpanId::from_bytes(&(span.identity() as u64).to_le_bytes()) else {
+            let Some(id) =
+                ReservationId::from_bytes(&(reservation.identity() as u64).to_le_bytes())
+            else {
                 continue;
             };
             let lost = root.authority.upgrade().is_none_or(|root| !root.alive());
-            if lost || !self.is_open() || !span.is_open() {
-                let _ = self.close_span(id);
-                self.retire_span(id.get());
+            if lost || !self.is_open() || !reservation.is_open() {
+                let _ = self.release_reservation(id);
+                self.retire_reservation(id.get());
                 continue;
             }
             let snapshot = {
-                let state = span.state.lock();
+                let state = self.state.lock();
                 state
                     .memos
-                    .get(0)
+                    .get(reservation, 0)
                     .map(|memo| (memo.association(), memo.principal()))
             };
             let Some((association, principal)) = snapshot else {
@@ -322,22 +324,22 @@ impl Nest {
                 }
             }
             if let Some(principal) = principal
-                && span.access(0).map_or(true, |(_, access)| {
-                    principal.check(self, span, 0, access).is_err()
+                && reservation.access(0).map_or(true, |(_, access)| {
+                    principal.check(self, reservation, 0, access).is_err()
                 })
             {
-                if let Some(count) = kernel_api::address::PageCount::new(span.grain()) {
-                    let _ = span.withdraw(
-                        self,
+                if let Some(count) = kernel_api::address::PageCount::new(reservation.grain()) {
+                    let _ = self.withdraw_reservation(
+                        id,
                         (kernel_api::address::PageOffset::ZERO, count),
                         principal.authority(),
                     );
                 }
-            } else if let Some(_operation) = span.operation() {
-                let before = span.inspect_memo(0).ok();
-                let _ = self.progress_external(span);
-                if before != span.inspect_memo(0).ok() {
-                    crate::basis::sign::signal(crate::basis::sign::WakeKey::ExternalSpan {
+            } else if let Some(_operation) = reservation.operation() {
+                let before = self.inspect_memo(reservation, 0).ok();
+                let _ = self.progress_external(reservation);
+                if before != self.inspect_memo(reservation, 0).ok() {
+                    crate::basis::sign::signal(crate::basis::sign::WakeKey::ExternalReservation {
                         id: id.get(),
                     });
                 }
@@ -346,40 +348,43 @@ impl Nest {
     }
 
     /// CPU shutdown already proved every PTE absent; finish bounded namespace resources.
-    pub(in crate::basis::nest) fn drain_span_resources(&self) -> Result<(), super::NestError> {
+    pub(in crate::basis::nest) fn drain_reservation_resources(
+        &self,
+    ) -> Result<(), super::NestError> {
         if !self.is_closed() {
             return Err(super::NestError::Busy);
         }
         for _ in 0..4 {
-            let Some(entry) = self.spans.progress_entry() else {
+            let Some(entry) = self.reservations.progress_entry() else {
                 break;
             };
-            let Some(span) = entry.span() else {
+            let Some(reservation) = entry.reservation() else {
                 continue;
             };
-            if span.state.lock().phase == super::address::span::SpanPhase::Gone {
+            if reservation.state.lock().phase == super::address::span::ReservationPhase::Gone {
                 continue;
             }
-            let id = kernel_api::model::nest::SpanId::from_bytes(
-                &(span.identity() as u64).to_le_bytes(),
+            let id = kernel_api::model::nest::ReservationId::from_bytes(
+                &(reservation.identity() as u64).to_le_bytes(),
             )
             .ok_or(super::NestError::NoRegion)?;
-            self.close_span(id).map_err(super::memo::source_error)?;
+            self.release_reservation(id)
+                .map_err(super::memo::source_error)?;
         }
-        if self.spans_gone() {
+        if self.reservations_gone() {
             Ok(())
         } else {
             Err(super::NestError::Busy)
         }
     }
 
-    pub(in crate::basis::nest) fn spans_gone(&self) -> bool {
+    pub(in crate::basis::nest) fn reservations_gone(&self) -> bool {
         let mut cursor = 0;
-        while let Some(entry) = self.spans.next(cursor) {
+        while let Some(entry) = self.reservations.next(cursor) {
             cursor = entry.binding.id();
             if entry.root.is_some()
-                && entry.span().is_some_and(|span| {
-                    span.state.lock().phase != super::address::span::SpanPhase::Gone
+                && entry.reservation().is_some_and(|reservation| {
+                    reservation.state.lock().phase != super::address::span::ReservationPhase::Gone
                 })
             {
                 return false;
@@ -388,16 +393,16 @@ impl Nest {
         true
     }
 
-    pub(crate) fn reap_spans(&self) -> bool {
+    pub(crate) fn reap_reservations(&self) -> bool {
         for _ in 0..4 {
             let _commit = crate::basis::commit();
-            let Some(entry) = self.spans.take_settled(self) else {
+            let Some(entry) = self.reservations.take_settled(self) else {
                 break;
             };
             self.settle(entry);
         }
         let mut cursor = 0;
-        while let Some(entry) = self.spans.next(cursor) {
+        while let Some(entry) = self.reservations.next(cursor) {
             cursor = entry.binding.id();
             if !self.settled(cursor) {
                 return false;

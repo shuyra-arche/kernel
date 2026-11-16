@@ -1,6 +1,5 @@
-//! An occupied address span and its range policy. Positions live in the Span's Memo table.
+//! A reserved address span and its range policy. Positions live in Nest's Memo table.
 mod access;
-mod operations;
 use super::super::index::source;
 use super::super::memo::publication::{CellRuns, Publication};
 use super::super::{CleanupNode, Nest, NestId};
@@ -12,6 +11,7 @@ use alloc::vec::Vec;
 
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::NestError;
+use crate::basis::nest::Reservation;
 use crate::basis::sync::LegacyLock;
 use crate::metal::generic::mmu::internal::Attributes;
 use kernel_api::address::PAGE_SIZE;
@@ -20,98 +20,24 @@ use kernel_api::address::PageOffset;
 use kernel_api::address::VirtAddr;
 use kernel_api::model::cell::CellLevel;
 
-/// A stable address-span identity: the occupancy generation and its Nest.
+/// An occupied address span: reservation, permissions and source selection.
 ///
-/// The numeric identity is the ABI `SpanId`; the `NestId` attributes it without
-/// retaining or locating the parent. It is descriptive and never grants access.
-pub(crate) struct SpanIdentity {
-    id: usize,
-    nest: NestId,
-}
-
-impl SpanIdentity {
-    pub(crate) fn new(id: usize, nest: &Arc<Nest>) -> Self {
-        Self {
-            id,
-            nest: nest.id(),
-        }
-    }
-
-    pub(crate) fn id(&self) -> usize {
-        self.id
-    }
-
-    pub(crate) fn nest_id(&self) -> NestId {
-        self.nest
-    }
-
-    /// Whether this span belongs to `nest`, without locating it.
-    pub(crate) fn belongs_to(&self, nest: NestId) -> bool {
-        self.nest == nest
-    }
-}
-
-/// The original geometry of one occupied span. Active access and the source
-/// selection are separate state; a retired hole in the original range never
-/// becomes accessible again through this geometry.
-pub(crate) struct SpanRange {
-    start: VirtAddr,
-    size: usize,
-    level: CellLevel,
-}
-
-impl SpanRange {
-    pub(crate) fn new(start: VirtAddr, size: usize, level: CellLevel) -> Result<Self, NestError> {
-        let cell = level.bytes().ok_or(NestError::NotAligned)?;
-        if size == 0
-            || start.offset() != 0
-            || !size.is_multiple_of(cell)
-            || start.as_usize().checked_add(size - 1).is_none()
-        {
-            return Err(NestError::NotAligned);
-        }
-        Ok(Self { start, size, level })
-    }
-
-    pub(crate) fn start(&self) -> VirtAddr {
-        self.start
-    }
-
-    pub(crate) fn size(&self) -> usize {
-        self.size
-    }
-
-    pub(crate) fn level(&self) -> CellLevel {
-        self.level
-    }
-
-    /// Inclusive final byte of the original range.
-    pub(crate) fn last(&self) -> usize {
-        self.start.as_usize() + (self.size - 1)
-    }
-}
-
-/// An occupied address span: identity, original range, permissions and source
-/// selection.
-///
-/// It owns its per-position Memos and holds the shared Translation; the Nest
-/// owns admission and address organization. Keeping a historical span cannot
-/// keep a deleted position's Page or freeze alive.
+/// It has no per-position Page, generation, publication or retirement state.
+/// Nest owns those Memos. Keeping a historical span cannot keep a deleted
+/// position's Page or freeze alive. The ABI ReservationId denotes this reservation.
+/// Architectural U/G/A/D policy is fixed for the span; logical permissions may narrow.
 pub struct Span {
     pub(crate) faults:
         LegacyLock<crate::basis::sync::order::FaultPolicy, super::super::fault::State>,
-    pub(crate) identity: SpanIdentity,
-    /// Shared Nest admission; final acceptance still happens under commit.
-    admission: Arc<super::super::admission::Admission>,
-    /// Shared hardware translation; Address organization stays in the Nest.
-    pub(in crate::basis::nest) translation: Arc<super::super::translation::Translation>,
-    pub(crate) range: SpanRange,
+    pub(crate) reservation: Reservation,
     pub(crate) attrs: Attributes,
-    pub(crate) state: LegacyLock<crate::basis::sync::order::Span, SpanState>,
+    level: CellLevel,
+    initial_access: Access,
+    pub(crate) state: LegacyLock<crate::basis::sync::order::Reservation, SpanState>,
     operation: core::sync::atomic::AtomicBool,
     revision: core::sync::atomic::AtomicU64,
-    /// Weak discovery of sources exported through this span. Live permission
-    /// remains in each Source's original Pend lineage.
+    /// Weak discovery of sources exported through this reservation. Live
+    /// permission remains in each Source's original Pend lineage.
     pub(crate) exports: LegacyLock<
         crate::basis::sync::order::SpanExports,
         crate::basis::pend::Tracking<crate::basis::pend::SourceAuthorization>,
@@ -135,11 +61,14 @@ impl Drop for Span {
 }
 
 impl Span {
-    pub(crate) fn version(&self) -> kernel_api::model::nest::SpanVersion {
-        kernel_api::model::nest::SpanVersion::new(
+    pub(crate) fn initial_access(&self) -> Access {
+        self.initial_access
+    }
+    pub(crate) fn version(&self) -> kernel_api::model::nest::ReservationVersion {
+        kernel_api::model::nest::ReservationVersion::new(
             self.revision.load(core::sync::atomic::Ordering::Acquire),
         )
-        .expect("span revision")
+        .expect("reservation revision")
     }
     pub(in crate::basis::nest) fn prepare_revision(&self) -> Result<(), NestError> {
         self.version()
@@ -156,106 +85,77 @@ impl Span {
         );
     }
 
-    /// Occupy `range` without a source or active access. This is a legal
-    /// address span; association and publication can follow independently.
-    pub(in crate::basis::nest) fn vacant(
-        nest: &Arc<Nest>,
-        identity: SpanIdentity,
-        range: SpanRange,
+    /// 建立一段关系；活动区间必须落在初始范围内，来源跨度必须等长。
+    ///
+    /// 构造失败即退回占用：调用方交出的凭证不会随失败一起丢掉。
+    pub(crate) fn new(
+        reservation: Reservation,
         attrs: Attributes,
-    ) -> Result<Arc<Self>, NestError> {
-        let (start, size, id) = (range.start(), range.size(), identity.id());
-        if !Self::attrs_are_architectural(attrs) {
-            nest.give_back_span(start, size, id);
-            return Err(NestError::NotAligned);
-        }
-        match Arc::try_new(Self {
-            faults: LegacyLock::new(super::super::fault::State::new()),
-            identity,
-            admission: nest.admission.clone(),
-            translation: (*nest.state).clone(),
-            range,
-            attrs,
-            state: LegacyLock::new(SpanState::vacant()),
-            operation: core::sync::atomic::AtomicBool::new(false),
-            revision: core::sync::atomic::AtomicU64::new(1),
-            exports: LegacyLock::new(crate::basis::pend::Tracking::new()),
-        }) {
-            Ok(span) => Ok(span),
-            Err(_) => {
-                nest.give_back_span(start, size, id);
-                Err(NestError::OutOfMemory)
-            }
-        }
-    }
-
-    /// Admit the active access shape of an unpublished span. The source stays
-    /// absent; association publishes a logical source separately.
-    pub(in crate::basis::nest) fn stage(&self, active: Vec<ActiveRange>) -> Result<(), NestError> {
-        self.check_shape(&active, None)?;
-        let mut state = self.state.lock();
-        if !state.active.is_empty() || state.source.is_some() {
-            return Err(NestError::Busy);
-        }
-        state.initial_access = active
-            .iter()
-            .fold(Access::all(), |access, range| access & range.ceiling);
-        state.active = active;
-        Ok(())
-    }
-
-    /// Attach the implicit source and the full active shape of this span.
-    pub(in crate::basis::nest) fn install(
-        &self,
-        source: FlatRange,
         active: Vec<ActiveRange>,
-    ) -> Result<(), NestError> {
-        self.check_shape(&active, Some(&source))?;
-        let mut state = self.state.lock();
-        if !state.active.is_empty() || state.source.is_some() {
-            return Err(NestError::Busy);
-        }
-        state.initial_access = active
-            .iter()
-            .fold(Access::all(), |access, range| access & range.ceiling);
-        state.active = active;
-        state.source = Some(source);
-        Ok(())
-    }
-
-    fn check_shape(
-        &self,
-        active: &[ActiveRange],
-        source: Option<&FlatRange>,
-    ) -> Result<(), NestError> {
-        let cell_size = self.range.level().bytes().ok_or(NestError::NotAligned)?;
-        let start = self.range.start().as_usize();
-        let end = self.range.last();
-        if active.is_empty()
-            || source.is_some_and(|source| {
-                source.level() != self.range.level()
-                    || source.page_count().checked_bytes() != Some(self.range.size())
+        level: CellLevel,
+        source: Option<FlatRange>,
+    ) -> Result<Arc<Self>, NestError> {
+        let (start, size) = (reservation.start(), reservation.size());
+        let end = start.as_usize().checked_add(size - 1);
+        let reject = |error: NestError| -> NestError {
+            // 构造失败即按属主退回占用：凭证不会随失败一起丢掉。
+            Nest::give_back_unpublished(&reservation);
+            error
+        };
+        let Some(end) = end else {
+            return Err(reject(NestError::NotAligned));
+        };
+        let Some(cell_size) = level.bytes() else {
+            return Err(reject(NestError::NotAligned));
+        };
+        if size == 0
+            || !size.is_multiple_of(cell_size)
+            || active.is_empty()
+            || source.as_ref().is_some_and(|source| {
+                source.level() != level || source.page_count().checked_bytes() != Some(size)
             })
         {
-            return Err(NestError::NotAligned);
+            return Err(reject(NestError::NotAligned));
         }
-        for range in active {
+        for range in &active {
             let last = range.end();
-            if range.start.as_usize() < start
+            if range.start.as_usize() < start.as_usize()
                 || last > end
-                || !(range.start.as_usize() - start).is_multiple_of(cell_size)
+                || !(range.start.as_usize() - start.as_usize()).is_multiple_of(cell_size)
                 || !(last - range.start.as_usize() + 1).is_multiple_of(cell_size)
             {
-                return Err(NestError::NoRegion);
+                return Err(reject(NestError::NoRegion));
             }
         }
         if active
             .windows(2)
             .any(|pair| pair[0].end() >= pair[1].start.as_usize())
         {
-            return Err(NestError::AlreadyMapped);
+            return Err(reject(NestError::AlreadyMapped));
         }
-        Ok(())
+        let nest = reservation.nest();
+        let identity = reservation.id();
+        match Arc::try_new(Self {
+            faults: LegacyLock::new(super::super::fault::State::new()),
+            reservation,
+            operation: core::sync::atomic::AtomicBool::new(false),
+            revision: core::sync::atomic::AtomicU64::new(1),
+            exports: LegacyLock::new(crate::basis::pend::Tracking::new()),
+            attrs,
+            level,
+            initial_access: active
+                .iter()
+                .fold(Access::all(), |access, range| access & range.ceiling),
+            state: LegacyLock::new(SpanState::new(active, source)),
+        }) {
+            Ok(mapping) => Ok(mapping),
+            Err(_) => {
+                if let Some(nest) = nest {
+                    nest.give_back_span(start, size, identity);
+                }
+                Err(NestError::OutOfMemory)
+            }
+        }
     }
 
     pub(in crate::basis::nest) fn prepare_cleanup(&self) -> Result<(), NestError> {
@@ -272,20 +172,26 @@ impl Span {
     }
 
     pub fn initial_start(&self) -> VirtAddr {
-        self.range.start()
+        self.reservation.start()
     }
 
     pub fn initial_size(&self) -> usize {
-        self.range.size()
+        self.reservation.size()
     }
 
     pub fn initial_range(&self) -> (VirtAddr, usize) {
         (self.initial_start(), self.initial_size())
     }
 
-    /// 这段映射在占用表里的身份（generation）；ABI 的 `SpanId` 就是它。
+    /// 这段映射在占用表里的身份（generation）；现有 ABI 的 `ReservationId` 就是它。
     pub(crate) fn identity(&self) -> usize {
-        self.identity.id()
+        self.reservation.id()
+    }
+
+    /// 认住它的那个 Nest；已关闭的 Nest 不算。
+    pub fn owner(&self) -> Option<Arc<Nest>> {
+        let nest = self.reservation.nest()?;
+        (!nest.is_closed()).then_some(nest)
     }
 
     /// 这段关系等待位的那一对坐标：`(软件空间身份, 关系身份)`。
@@ -294,7 +200,8 @@ impl Span {
     /// 没人等在这个键上，`owner()` 的“已关闭即无主”语义在这里反而会漏掉
     /// 刚被撤下的那一段。只交出两个标量，不留 Nest 强引用。
     pub(crate) fn wake_key(&self) -> Option<(NestId, usize)> {
-        Some((self.identity.nest_id(), self.identity()))
+        let nest = self.reservation.nest()?;
+        Some((nest.id(), self.identity()))
     }
 
     /// 整段选择：操作时按当前活动与未结算退休解析。
@@ -316,11 +223,11 @@ impl Span {
     }
 
     pub(crate) fn level(&self) -> CellLevel {
-        self.range.level()
+        self.level
     }
 
     pub(crate) fn grain(&self) -> usize {
-        self.range.level().pages().expect("admitted Cell geometry")
+        self.level.pages().expect("admitted Cell geometry")
     }
 
     pub(crate) fn access(&self, page: usize) -> Result<(Access, Access), NestError> {
@@ -353,14 +260,13 @@ impl Span {
     }
 
     pub(in crate::basis::nest) fn is_open(&self) -> bool {
-        self.admission.is_open() && self.state.lock().phase == SpanPhase::Open
+        self.state.lock().phase == ReservationPhase::Open
     }
 
     pub(in crate::basis::nest) fn close(&self) {
         let mut inner = self.state.lock();
-        if inner.phase == SpanPhase::Open {
-            inner.phase = SpanPhase::Closing;
-            inner.drain_cursor = None;
+        if inner.phase == ReservationPhase::Open {
+            inner.phase = ReservationPhase::Closing;
             self.changed();
             self.faults.lock().close();
         }
@@ -424,19 +330,10 @@ impl Span {
         &self,
         index: usize,
     ) -> Result<crate::basis::nest::memo::MemoInfo, NestError> {
-        let state = self.state.lock();
-        if state.phase == SpanPhase::Gone {
-            return Err(NestError::NoRegion);
-        }
-        let address = self.position(index)?;
-        let vacant = crate::basis::nest::memo::Memo::vacant();
-        let mut info = state
-            .memos
-            .get(index)
-            .unwrap_or(&vacant)
-            .inspect(VirtAddr::new(address));
-        info.level = self.level();
-        Ok(info)
+        self.reservation
+            .nest()
+            .ok_or(NestError::NoRegion)?
+            .inspect_memo(self, index)
     }
 }
 
@@ -466,15 +363,7 @@ pub(crate) struct ProtectionTransition {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-/// One bounded step of a Span-local close drain.
-pub(in crate::basis::nest) enum DrainStep {
-    Done,
-    Progress,
-    Blocked,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::basis::nest) enum SpanPhase {
+pub(in crate::basis::nest) enum ReservationPhase {
     Open,
     Closing,
     Gone,
@@ -487,32 +376,16 @@ pub(crate) struct SpanState {
     pub(in crate::basis::nest) cleanup: Option<Box<CleanupNode>>,
     pub(crate) active: Vec<ActiveRange>,
     pub(crate) source: Option<FlatRange>,
-    /// Logical positions and their exact hardware obligations, owned here.
-    pub(in crate::basis::nest) memos: crate::basis::nest::memo::Memos,
-    /// The narrowest creation access across all active ranges.
-    pub(crate) initial_access: Access,
-    pub(in crate::basis::nest) drain_cursor: Option<usize>,
-    pub(in crate::basis::nest) phase: SpanPhase,
+    pub(in crate::basis::nest) phase: ReservationPhase,
 }
 
 impl SpanState {
-    /// Remove a settled non-active position after the covering fence.
-    pub(crate) fn take_deleted(&mut self, base: VirtAddr) -> Option<super::super::memo::Memo> {
-        if self.source.is_none() {
-            return None;
-        }
-        self.memos.take_deleted(base, &self.active)
-    }
-
-    pub(crate) fn vacant() -> Self {
+    pub(crate) fn new(active: Vec<ActiveRange>, source: Option<FlatRange>) -> Self {
         Self {
             cleanup: None,
-            active: Vec::new(),
-            source: None,
-            memos: crate::basis::nest::memo::Memos::new(),
-            initial_access: Access::empty(),
-            drain_cursor: None,
-            phase: SpanPhase::Open,
+            active,
+            source,
+            phase: ReservationPhase::Open,
         }
     }
 

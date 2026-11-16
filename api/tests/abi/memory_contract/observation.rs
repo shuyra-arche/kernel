@@ -12,10 +12,10 @@ use kernel_api::{
             SlotVersion,
         },
         identity::{PendId, TaskId},
-        nest::SpanId,
+        nest::ReservationId,
         nest::{
             MemoGeneration, MemoPhase, MemoStatus, NestInfo, NestKind, NestPhase, NestStatus,
-            NestVersion, SpanPhase, SpanStatus, SpanVersion,
+            NestVersion, ReservationPhase, ReservationStatus, ReservationVersion,
         },
     },
 };
@@ -23,7 +23,7 @@ use kernel_api::{
 fn fixtures() -> Vec<(Query, Snapshot)> {
     let flat = slot(0).flat();
     let nest = memo(0).nest();
-    let span = memo(0).span();
+    let reservation = memo(0).reservation();
     vec![
         (
             Query::Flat {
@@ -86,7 +86,7 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
             Query::Memo(memo(512)),
             Snapshot::Memo(MemoStatus {
                 nest,
-                span,
+                reservation,
                 coordinate: 512,
                 generation: MemoGeneration::new(6).unwrap(),
                 phase: MemoPhase::Published,
@@ -97,21 +97,21 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
             }),
         ),
         (
-            Query::Span {
+            Query::Reservation {
                 token: PendId::mint(13),
                 nest,
-                span,
+                reservation,
             },
-            Snapshot::Span(SpanStatus {
+            Snapshot::Reservation(ReservationStatus {
                 nest,
-                span,
-                version: SpanVersion::new(7).unwrap(),
+                reservation,
+                version: ReservationVersion::new(7).unwrap(),
                 offset: 512,
                 count: 512,
                 address: VirtAddr::new(0x8000),
                 level: CellLevel::new(1).unwrap(),
                 access: 6,
-                phase: SpanPhase::Open,
+                phase: ReservationPhase::Open,
             }),
         ),
     ]
@@ -120,12 +120,12 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
 #[test]
 fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id() {
     let expected: &[&[u64]] = &[
-        &[14, 12, 18, 0, 0, 7, 11],
-        &[14, 12, 18, 0, 1, 7, 11, 512],
-        &[14, 12, 18, 0, 2, 23, 11, 29, 31],
-        &[14, 13, 18, 0, 0, 13, 17],
-        &[14, 13, 18, 0, 1, 13, 17, 19, 512],
-        &[14, 13, 18, 0, 2, 13, 17, 19],
+        &[13, 12, 18, 0, 0, 7, 11],
+        &[13, 12, 18, 0, 1, 7, 11, 512],
+        &[13, 12, 18, 0, 2, 23, 11, 29, 31],
+        &[13, 13, 18, 0, 0, 13, 17],
+        &[13, 13, 18, 0, 1, 13, 17, 19, 512],
+        &[13, 13, 18, 0, 2, 13, 17, 19],
     ];
     for ((query, _), words) in fixtures().into_iter().zip(expected) {
         let request = Request::new(None, Action::Inspect(query)).unwrap();
@@ -162,10 +162,10 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
     assert!(
         Request::new(
             None,
-            Action::Inspect(Query::Span {
+            Action::Inspect(Query::Reservation {
                 token: PendId::mint(1),
                 nest: memo(0).nest(),
-                span: SpanId::NONE
+                reservation: ReservationId::NONE
             })
         )
         .is_none()
@@ -175,11 +175,11 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
 #[test]
 fn observation_vectors_preserve_source_publication_and_full_width_faults() {
     let expected: &[&[u64]] = &[
-        &[14, 12, 18, 0, 0, 0, 11, 2, 512, 1024, 0],
-        &[14, 12, 18, 0, 1, 0, 11, 512, 3, 1, 1, 53, 7, 1],
-        &[14, 12, 18, 0, 2, 0, 11, 29, 31, 1, 512, 512, 59, 0, 2, 0],
+        &[13, 12, 18, 0, 0, 0, 11, 2, 512, 1024, 0],
+        &[13, 12, 18, 0, 1, 0, 11, 512, 3, 1, 1, 53, 7, 1],
+        &[13, 12, 18, 0, 2, 0, 11, 29, 31, 1, 512, 512, 59, 0, 2, 0],
         &[
-            14,
+            13,
             13,
             18,
             0,
@@ -194,8 +194,8 @@ fn observation_vectors_preserve_source_publication_and_full_width_faults() {
             u64::MAX - 1,
             u64::MAX,
         ],
-        &[14, 13, 18, 0, 1, 0, 17, 19, 512, 6, 3, 11, 1024, 53, 6, 1],
-        &[14, 13, 18, 0, 2, 0, 17, 19, 7, 512, 512, 0x8000, 1, 6, 0],
+        &[13, 13, 18, 0, 1, 0, 17, 19, 512, 6, 3, 11, 1024, 53, 6, 1],
+        &[13, 13, 18, 0, 2, 0, 17, 19, 7, 512, 512, 0x8000, 1, 6, 0],
     ];
     for ((query, snapshot), words) in fixtures().into_iter().zip(expected) {
         let observation = Observation::new(snapshot).unwrap();
@@ -461,11 +461,11 @@ fn malformed_observations_reject_headers_geometry_flags_and_reserved_payloads() 
             "fixture {fixture}, word {word}, value {value}"
         );
     }
-    let Snapshot::Span(status) = fixtures()[5].1 else {
+    let Snapshot::Reservation(status) = fixtures()[5].1 else {
         unreachable!()
     };
     assert!(
-        Observation::new(Snapshot::Span(SpanStatus {
+        Observation::new(Snapshot::Reservation(ReservationStatus {
             address: VirtAddr::new(usize::MAX & !4095),
             ..status
         }))

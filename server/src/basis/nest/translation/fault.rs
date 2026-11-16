@@ -51,16 +51,15 @@ pub enum FaultOutcome {
 impl FaultOutcome {
     pub(in crate::basis::nest) fn probe(
         state: &NestState,
-        index: &super::super::index::Index,
         geometry: Geometry,
         address: VirtAddr,
         kind: FaultKind,
     ) -> Self {
-        let Some(mapping) = index.find(address.as_usize()) else {
+        let Some(mapping) = state.index.find(address.as_usize()) else {
             return Self::Invalid;
         };
         let inner = mapping.state.lock();
-        if inner.phase != super::super::address::span::SpanPhase::Open {
+        if inner.phase != super::super::address::span::ReservationPhase::Open {
             return Self::Invalid;
         }
         let Some(range) = inner.range_at(address.as_usize()) else {

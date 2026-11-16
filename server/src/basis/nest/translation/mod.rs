@@ -35,33 +35,16 @@ use phase::ClosePhase;
 
 use self::retirement::{Fenced, Retirement};
 use super::index::Index;
-use crate::basis::sync::{LegacyGuard, LegacyLock};
 
-/// 地址空间的翻译状态：根页表、待失效标记、退休资源与关闭阶段。
-/// 地址索引、占用与 Team 归属属于 Nest 的 AddressState；每个 Span 自己持有 Memo 表。
-/// The shared hardware-translation owner. Address organization is separate, so
-/// a Span can hold this without Translation retaining the Span.
-pub(crate) struct Translation {
-    state: LegacyLock<crate::basis::sync::order::Nest, NestState>,
-}
-
-impl Translation {
-    pub(crate) fn new(state: NestState) -> Result<Arc<Self>, NestError> {
-        Arc::try_new(Self {
-            state: LegacyLock::new(state),
-        })
-        .map_err(|_| NestError::OutOfMemory)
-    }
-
-    pub(crate) fn lock(&self) -> LegacyGuard<'_, NestState> {
-        self.state.lock()
-    }
-}
-
+/// 地址空间里除每关系库存外的全部状态：根页表、关系索引、
+/// 待失效标记、退休中的资源与尚未结算的占用票。
 pub(super) struct NestState {
     pub(super) root: Storage,
+    pub(super) memos: super::memo::Memos,
+    pub(super) index: Index,
     pub(super) retirement: Retirement,
     pub(super) phase: ClosePhase,
+    pub(super) team: Option<kernel_api::model::identity::TeamId>,
 }
 
 impl NestState {
@@ -69,8 +52,11 @@ impl NestState {
     pub(super) fn new(root: Table) -> Self {
         Self {
             root: Storage::Cpu(root),
+            memos: super::memo::Memos::new(),
+            index: Index::new(),
             retirement: Retirement::new(),
             phase: ClosePhase::Open,
+            team: None,
         }
     }
 
@@ -84,7 +70,7 @@ impl NestState {
 
     /// Complete the current fence and close the address space if needed.
     pub(super) fn settle(&mut self, proof: Completed<Request<Asid>>) -> Result<Fenced, NestError> {
-        let fenced = self.retirement.complete(proof)?;
+        let fenced = self.retirement.complete(proof, &mut self.memos)?;
         self.phase = self.phase.settle();
         Ok(fenced)
     }
@@ -117,22 +103,18 @@ impl NestState {
 
     /// Withdraw the indexed mappings in one locked transition and retain
     /// their obligations until the covering fence succeeds.
-    pub(super) fn close_mappings(
-        &mut self,
-        index: &mut Index,
-        geometry: Geometry,
-    ) -> Result<(), NestError> {
+    pub(super) fn close_mappings(&mut self, geometry: Geometry) -> Result<(), NestError> {
         if !self.retirement.invalidation().is_clean() {
             return Err(NestError::Busy);
         }
         // One indexed Span per service turn. Its admitted Page/active-range
         // geometry bounds the backend work; no complete-Nest snapshot is made.
         self.phase = ClosePhase::Draining;
-        index.close_faults();
-        let mappings = index.first_overlap(0, usize::MAX);
+        self.index.close_faults();
+        let mappings = self.index.first_overlap(0, usize::MAX);
         let cell_count = mappings
             .iter()
-            .map(|mapping| mapping.state.lock().memos.published().count())
+            .map(|mapping| self.memos.published(mapping).count())
             .sum();
         self.retirement
             .cells
@@ -170,28 +152,29 @@ impl NestState {
         }
         let global = mappings.iter().any(|mapping| mapping.is_global());
         for mapping in mappings.iter() {
-            index.remove(mapping);
-            self.retirement.mappings.push(Arc::downgrade(mapping));
+            self.index.remove(mapping);
+            self.retirement.mappings.push(mapping.clone());
             let mut inner = mapping.state.lock();
-            if inner
-                .memos
-                .withdraw(0, usize::MAX, &mut self.retirement.cells)
-            {
-                mapping.changed();
-            }
+            self.memos
+                .withdraw(&mapping, 0, usize::MAX, &mut self.retirement.cells);
             inner.active.clear();
         }
         self.retirement.mark_dirty(global);
-        if index.len() == 0 {
+        if self.index.len() == 0 {
             self.phase = self.phase.begin();
         }
         Ok(())
     }
 
     #[cfg(debug_assertions)]
-    pub(super) fn audit(&self, index: &Index, owner: &Nest, geometry: Geometry) {
-        index.audit();
-        index.audit_spans(owner, self.root.cpu().expect("CPU audit"), geometry);
+    pub(super) fn audit(&self, owner: &Nest, geometry: Geometry) {
+        self.index.audit();
+        self.index.audit_reservations(
+            owner,
+            self.root.cpu().expect("CPU audit"),
+            geometry,
+            &self.memos,
+        );
         self.root.cpu().expect("CPU audit").visit_leaves(
             geometry,
             &mut |start, physical, flags, size| {
@@ -199,10 +182,12 @@ impl NestState {
                     .as_usize()
                     .checked_add(size - 1)
                     .expect("leaf virtual interval is representable");
-                let mapping = index
+                let mapping = self
+                    .index
                     .find(start.as_usize())
                     .expect("hardware leaf is absent from the nest index");
-                let end_mapping = index
+                let end_mapping = self
+                    .index
                     .find(end)
                     .expect("hardware leaf extends beyond the nest index");
                 assert!(
@@ -262,7 +247,7 @@ impl NestState {
                     let pages = size / PAGE_SIZE;
                     let last_page = first_page + pages;
                     let mut count = 0;
-                    for (page, cell) in mapping.state.lock().memos.published() {
+                    for (page, cell) in self.memos.published(&mapping) {
                         let from = page.max(first_page);
                         let end = (page + cell.cell().pages()).min(last_page);
                         if from >= end {
@@ -301,12 +286,12 @@ impl NestState {
         if !self.is_open() {
             return Err(NestError::NoRegion);
         }
-        let mut inner = mapping.state.lock();
-        if inner.phase != super::address::span::SpanPhase::Open {
+        let inner = mapping.state.lock();
+        if inner.phase != super::address::span::ReservationPhase::Open {
             return Err(NestError::NoRegion);
         }
         let index = mapping.page_index(address);
-        if inner.memos.publication(index).is_some() {
+        if self.memos.publication(mapping, index).is_some() {
             return Err(NestError::AlreadyMapped);
         }
         let range = inner
@@ -329,7 +314,7 @@ impl NestState {
             crate::metal::generic::memory::Access::new((retained.bits() << 1) as u8)
                 .ok_or(NestError::Busy)?,
         )?;
-        inner.memos.reserve(1)?;
+        self.memos.reserve(1)?;
         self.retirement
             .mappings
             .try_reserve(1)
@@ -338,7 +323,7 @@ impl NestState {
         self.root
             .cpu_mut()?
             .prepare_range_geometry(address, physical, page.size(), geometry)?;
-        if let Some(position) = inner.memos.existing_mut(index) {
+        if let Some(position) = self.memos.existing_mut(mapping, index) {
             position.attempted();
         }
         memo.publish();
@@ -349,8 +334,8 @@ impl NestState {
             flags,
             geometry,
         );
-        inner.memos.publish(index, memo);
-        self.retirement.mappings.push(Arc::downgrade(mapping));
+        self.memos.publish(mapping, index, memo);
+        self.retirement.mappings.push(mapping.clone());
         self.retirement.mark_dirty(mapping.is_global());
         Ok(())
     }
@@ -366,9 +351,9 @@ impl NestState {
         if !self.retirement.invalidation().is_clean() {
             return Err(NestError::Shootdown);
         }
-        let mut inner = mapping.state.lock();
+        let inner = mapping.state.lock();
         let page = mapping.page_index(address);
-        let Some(publication) = inner.memos.publication(page) else {
+        let Some(publication) = self.memos.publication(mapping, page) else {
             return Ok(false);
         };
         if self.phase.is_closed() {
@@ -395,10 +380,9 @@ impl NestState {
 
         // 过了这里只剩下已经定好的状态转移：PTE、发布记录与承载一起转入退休责任。
         self.withdraw_prepared(address, expected.size(), geometry);
-        self.retirement.mappings.push(Arc::downgrade(mapping));
-        if inner.memos.withdraw(page, page, &mut self.retirement.cells) {
-            mapping.changed();
-        }
+        self.retirement.mappings.push(mapping.clone());
+        self.memos
+            .withdraw(mapping, page, page, &mut self.retirement.cells);
         drop(inner);
         self.retirement.mark_dirty(false);
         Ok(true)
@@ -406,7 +390,6 @@ impl NestState {
 
     pub(super) fn protect(
         &mut self,
-        index: &mut Index,
         geometry: Geometry,
         mapping: &Arc<Span>,
         window: (usize, usize),
@@ -421,14 +404,13 @@ impl NestState {
             return Err(NestError::NoRegion);
         }
         let mut inner = mapping.state.lock();
-        if inner.phase != super::address::span::SpanPhase::Open {
+        if inner.phase != super::address::span::ReservationPhase::Open {
             return Err(NestError::NoRegion);
         }
         let transition =
             inner.protection_transition(mapping.initial_start(), window, request, |p| {
-                inner
-                    .memos
-                    .publication(p / mapping.grain() * mapping.grain())
+                self.memos
+                    .publication(mapping, p / mapping.grain() * mapping.grain())
                     .is_some()
             })?;
 
@@ -447,7 +429,7 @@ impl NestState {
             .map_err(|_| NestError::OutOfMemory)?;
 
         if let Some((page, _)) = &replacement {
-            if inner.memos.publication(*page).is_none() {
+            if self.memos.publication(mapping, *page).is_none() {
                 return Err(NestError::Busy);
             }
             self.retirement
@@ -457,18 +439,21 @@ impl NestState {
         }
         // 从此处开始提交不再分配：即使 shootdown 失败，保留映射与 Dirty/Failed 状态。
         accepted();
-        self.retirement.mappings.push(Arc::downgrade(mapping));
+        self.retirement.mappings.push(mapping.clone());
         if let Some((page, mut publication)) = replacement {
-            let old = inner
+            let old = self
                 .memos
-                .take_publication(page)
+                .take_publication(mapping, page)
                 .expect("prepared publication");
             publication.publish();
-            inner.memos.publish(page, publication);
+            self.memos.publish(mapping, page, publication);
             self.retirement.cells.push(old.retire());
         }
         for update in transition.updates {
-            if let Some(memo) = inner.memos.existing_mut(mapping.page_index(update.address)) {
+            if let Some(memo) = self
+                .memos
+                .existing_mut(mapping, mapping.page_index(update.address))
+            {
                 memo.record_access(update.access.bits() << 1);
             }
             self.root.cpu_mut()?.set_permissions_prepared_geometry(
@@ -479,7 +464,7 @@ impl NestState {
         }
         inner.active = transition.active;
         drop(inner);
-        index.refresh(mapping);
+        self.index.refresh(mapping);
         self.retirement.mark_dirty(mapping.is_global());
         Ok(())
     }

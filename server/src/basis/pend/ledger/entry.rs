@@ -13,7 +13,7 @@ use crate::basis::pend::Target;
 use crate::basis::unit::task::Task;
 use kernel_api::abi::call::pend::PendFail;
 use kernel_api::address::PageCount;
-use kernel_api::model::nest::SpanId;
+use kernel_api::model::nest::ReservationId;
 use kernel_api::model::pend::{
     Limits, NestRights, NestScope, Operations, PendRange, PendScope, PendStatus,
 };
@@ -74,9 +74,10 @@ impl PendEntry {
         self.meta.alive()
             && self.authority.alive()
             && match self.scope() {
-                PendScope::Nest(NestScope::Span { id, .. }) => {
-                    self.meta.nest().is_some_and(|nest| nest.span_open(id))
-                }
+                PendScope::Nest(NestScope::Reservation { id, .. }) => self
+                    .meta
+                    .nest()
+                    .is_some_and(|nest| nest.reservation_open(id)),
                 _ => true,
             }
     }
@@ -84,8 +85,8 @@ impl PendEntry {
     pub(crate) fn status(&self) -> PendStatus {
         let status = self.authority.status();
         if let Target::Nest { nest, .. } = &self.meta {
-            if let PendScope::Nest(NestScope::Span { id, .. }) = self.scope() {
-                match nest.span_status(id) {
+            if let PendScope::Nest(NestScope::Reservation { id, .. }) = self.scope() {
+                match nest.reservation_status(id) {
                     PendStatus::Dead => return PendStatus::Dead,
                     PendStatus::Retiring if status != PendStatus::Dead => {
                         return PendStatus::Retiring;
@@ -287,21 +288,21 @@ impl PendEntry {
 pub(crate) fn prepare_reservation<'a>(
     task: &'a Arc<Task>,
     parent: &Arc<PendEntry>,
-    id: SpanId,
+    id: ReservationId,
     count: PageCount,
-) -> Result<PreparedSpanGrant<'a>, PendFail> {
+) -> Result<PreparedReservationGrant<'a>, PendFail> {
     if !super::live(task) || !parent.alive() {
         return Err(PendFail::Dead);
     }
     let current = locate(task, parent.token()).ok_or(PendFail::Denied)?;
     if !Arc::ptr_eq(&current, parent)
         || parent.scope() != PendScope::Nest(NestScope::Whole)
-        || !parent.permits(Operations::Nest(NestRights::CREATE_SPAN))
+        || !parent.permits(Operations::Nest(NestRights::RESERVE))
     {
         return Err(PendFail::Denied);
     }
     let ceiling = parent.authority().limits();
-    let scope = PendScope::Nest(NestScope::Span {
+    let scope = PendScope::Nest(NestScope::Reservation {
         id,
         range: PendRange::Pages {
             offset: 0,
@@ -309,7 +310,7 @@ pub(crate) fn prepare_reservation<'a>(
         },
     });
     let limits = Limits {
-        operations: Operations::Nest(NestRights::span()),
+        operations: Operations::Nest(NestRights::reservation()),
         modifiable: ceiling.modifiable,
         distributable: ceiling.distributable,
         scope,
@@ -327,7 +328,7 @@ pub(crate) fn prepare_reservation<'a>(
     entry.authority = Pend::try_new_scope(
         limits.modifiable,
         scope,
-        Operations::Nest(NestRights::span() | kernel_api::abi::memory::rights::FAULT),
+        Operations::Nest(NestRights::reservation() | kernel_api::abi::memory::rights::FAULT),
         limits.distributable,
     )?;
     entry.authority.inherit(parent.authority())?;
@@ -337,7 +338,7 @@ pub(crate) fn prepare_reservation<'a>(
         .pend
         .prepare_heir(parent.token(), Arc::downgrade(task), entry.token())?;
     let registration = task.pend.prepare(entry.clone())?;
-    Ok(PreparedSpanGrant {
+    Ok(PreparedReservationGrant {
         entry,
         _parent: parent.clone(),
         heir,
@@ -346,14 +347,14 @@ pub(crate) fn prepare_reservation<'a>(
 }
 
 #[must_use = "an unpublished Reservation rolls back its ledger and heir reservations"]
-pub(crate) struct PreparedSpanGrant<'a> {
+pub(crate) struct PreparedReservationGrant<'a> {
     entry: Arc<PendEntry>,
     _parent: Arc<PendEntry>,
     heir: HeirRegistration<'a>,
     registration: Registration<'a>,
 }
 
-impl PreparedSpanGrant<'_> {
+impl PreparedReservationGrant<'_> {
     pub(crate) fn entry(&self) -> &Arc<PendEntry> {
         &self.entry
     }

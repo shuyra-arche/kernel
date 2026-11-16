@@ -96,7 +96,7 @@ pub mod operations {
         pub task: super::TaskId,
         pub schedule: super::VirtAddr,
     }
-    /// Withdraw a span before its first Resume. Never resets a used budget.
+    /// Withdraw a reservation before its first Resume. Never resets a used budget.
     #[operation(slot = 12, output = (), error = UnitFail)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct Evict {

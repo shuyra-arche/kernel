@@ -12,12 +12,11 @@ use kernel_api::model::{
 
 pub(super) struct Binding {
     actor: Weak<Task>,
-    nest: Weak<Nest>,
     pub handler: TaskId,
     reservation: Arc<pend::Pend>,
     token: PendId,
     sign: Arc<pend::Pend>,
-    span_key: sign::WakeKey,
+    reservation_key: sign::WakeKey,
     pub endpoint: Arc<Endpoint>,
     wake: Arc<Endpoint>,
     keys: [sign::WakeKey; 4],
@@ -32,7 +31,6 @@ impl Binding {
     pub fn prepare(
         actor: &Arc<Task>,
         reservation: &Arc<PendEntry>,
-        nest: &Arc<Nest>,
         span: &Arc<Span>,
         config: FaultRoute,
     ) -> Result<Arc<Self>, Failure> {
@@ -50,6 +48,7 @@ impl Binding {
             .filter(|sign| sign.alive())
             .ok_or(Failure::Denied)?;
         let wake = Endpoint::try_new(actor.ident.id).map_err(|_| Failure::OutOfMemory)?;
+        let nest = span.owner().ok_or(Failure::Dead)?;
         let keys = [
             sign::WakeKey::Task { id: actor.ident.id },
             sign::WakeKey::Inspect {
@@ -65,12 +64,11 @@ impl Binding {
         // The reservation key is also watched, but separately: it has Nest life.
         let binding = Arc::try_new(Self {
             actor: Arc::downgrade(actor),
-            nest: Arc::downgrade(nest),
             handler: actor.ident.id,
             reservation: reservation.authority().clone(),
             token: reservation.token(),
             sign: sign.authority().clone(),
-            span_key: span_key(&nest, span),
+            reservation_key: span_key(&nest, span),
             endpoint,
             wake,
             keys,
@@ -127,7 +125,7 @@ impl Binding {
             ))
             && self.endpoint.alive()
             && span.is_open()
-            && self.nest.upgrade().is_some_and(|nest| nest.is_open())
+            && span.owner().is_some_and(|nest| nest.is_open())
     }
     pub fn reads(&self, actor: &Arc<Task>, token: PendId) -> bool {
         pend::locate(actor, self.token).is_some_and(|reservation| {
@@ -162,6 +160,6 @@ impl Drop for Binding {
         for key in self.keys {
             sign::unforward(key, self.wake.id);
         }
-        sign::unforward(self.span_key, self.wake.id);
+        sign::unforward(self.reservation_key, self.wake.id);
     }
 }

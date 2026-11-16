@@ -231,10 +231,10 @@ pub(crate) fn settle_block(
         let Some(nest) = binding.nest().upgrade() else {
             return Err(PendFail::Busy);
         };
-        let Some(record) = nest.spans.registered(binding.id()) else {
+        let Some(record) = nest.reservations.registered(binding.id()) else {
             continue;
         };
-        let Some(span) = record.span() else {
+        let Some(span) = record.reservation() else {
             return Err(PendFail::Busy);
         };
         let _mapping = span.operation().ok_or(PendFail::Busy)?;
@@ -250,17 +250,17 @@ pub(crate) fn settle_block(
         // Native mixed Flat geometry is represented by per-position bindings.
         for index in (low..high).step_by(span.grain()) {
             let page = index - base;
-            if let Some(data) = span.memo_page(page).map_err(|_| PendFail::Busy)? {
+            if let Some(data) = nest.memo_page(span, page).map_err(|_| PendFail::Busy)? {
                 block.retain(data.clone())?;
-                span.unpublish_page(
-                    &nest,
+                nest.unpublish_page(
+                    span,
                     kernel_api::address::VirtAddr::new(
                         span.initial_start().get() + page * PAGE_SIZE,
                     ),
                     &data,
                 )
                 .map_err(|_| PendFail::Busy)?;
-                span.finish_memo(page);
+                nest.finish_memo(span, page);
             }
         }
     }

@@ -43,14 +43,14 @@ fn next_surface_has_only_flat_and_nest_and_no_duplicate_create_domain() {
         (Call::from(flat), Domain::Flat),
         (Call::from(nest), Domain::Nest),
     ] {
-        assert_eq!(call.number(), (14 << 48) | ((domain as u64) << 32) | 16);
+        assert_eq!(call.number(), (13 << 48) | ((domain as u64) << 32) | 16);
         let frame = Frame::new(call, 0x1001, 0x2003).unwrap();
         assert_eq!(frame.registers(), [0x1001, 0x2003, 0, 0, 0, 0]);
         assert_eq!(frame.snapshot(&call.request().to_bytes()), Some(call));
         assert!(EnvCall::from_wire(call.number() as usize, &frame.registers()).is_err());
     }
     for slot in 0..32 {
-        assert!(Frame::decode((14 << 48) | (2 << 32) | slot, [0; 6]).is_none());
+        assert!(Frame::decode((13 << 48) | (2 << 32) | slot, [0; 6]).is_none());
     }
 }
 #[test]
