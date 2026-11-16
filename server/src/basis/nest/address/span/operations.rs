@@ -1039,3 +1039,67 @@ impl Span {
         })
     }
 }
+
+impl Span {
+    /// Withdraw the published positions in one authority window.
+    pub(crate) fn withdraw(
+        self: &Arc<Self>,
+        nest: &Nest,
+        window: (
+            kernel_api::address::PageOffset,
+            kernel_api::address::PageCount,
+        ),
+        authority: &Arc<crate::basis::pend::Pend>,
+    ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
+        use kernel_api::abi::call::pend::PendFail;
+        use kernel_api::model::pend::{NestScope, PendScope};
+        let _operation = self.operation().ok_or(PendFail::Busy)?;
+        self.range(window.0, window.1)
+            .map_err(|_| PendFail::NotAligned)?;
+        if !matches!(authority.scope(), PendScope::Nest(NestScope::Span { id: known, .. }) if known.get() == self.identity())
+        {
+            return Err(PendFail::Denied);
+        }
+        if !nest.is_external() {
+            nest.finish_invalidation().map_err(|_| PendFail::Busy)?;
+        }
+        let end = window
+            .0
+            .get()
+            .checked_add(window.1.get())
+            .ok_or(PendFail::NotAligned)?;
+        let mut cursor = None;
+        let mut busy = false;
+        loop {
+            let Some(index) = self.state.lock().memos.next_page(cursor) else {
+                break;
+            };
+            cursor = Some(index);
+            if index < window.0.get() || index >= end {
+                continue;
+            }
+            self.finish_memo(index);
+            if !self.memo_published_by(index, authority) {
+                continue;
+            }
+            let Some(page) = self.memo_page(index).map_err(|_| PendFail::Busy)? else {
+                busy = true;
+                continue;
+            };
+            match crate::basis::cell::change::acquire(&page) {
+                Ok(change) => busy |= self.retract_forced(nest, index, change).is_err(),
+                Err(_) => busy = true,
+            }
+        }
+        sign::signal(WakeKey::Span {
+            space: self.identity.nest_id(),
+            span: self.identity(),
+        });
+        if nest.is_external() {
+            sign::signal(WakeKey::ExternalSpan {
+                id: self.identity(),
+            });
+        }
+        if busy { Err(PendFail::Busy) } else { Ok(()) }
+    }
+}

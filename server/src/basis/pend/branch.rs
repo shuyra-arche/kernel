@@ -259,11 +259,10 @@ pub(crate) fn reduce(task: &Arc<Task>, token: PendId, limits: Limits) -> Result<
         // Persistent publisher routes discharge only through exact hardware withdrawal.
         if let PendScope::Nest(NestScope::Span { id, .. }) = observed.scope() {
             let window = observed.authority().window().ok_or(PendFail::Denied)?;
-            observed
-                .target()
-                .nest()
-                .ok_or(PendFail::Denied)?
-                .withdraw_span(id, window, observed.authority())?;
+            let nest = observed.target().nest().ok_or(PendFail::Denied)?;
+            if let Some(span) = nest.span(id) {
+                span.withdraw(&nest, window, observed.authority())?;
+            }
         }
         if let Some(meta) = &share {
             meta.close_maps(Some(token))?;
