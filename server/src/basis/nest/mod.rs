@@ -1731,8 +1731,10 @@ impl Nest {
         if self.has_pending_invalidation() {
             self.retry_invalidation()?;
         }
-        if let FaultOutcome::Materialize = self.probe_fault(address, kind) {
-            match self.materialize_page(address) {
+        if let FaultOutcome::Materialize = self.probe_fault(address, kind)
+            && let Some(mapping) = self.span_at(address)
+        {
+            match mapping.materialize_page(self, address) {
                 Ok(()) => {}
                 // 并发移交或关系已退场：重探会给出真实结论，不在这里判死。
                 Err(NestError::Busy | NestError::Missing | NestError::NoRegion) => {}
@@ -1743,21 +1745,8 @@ impl Nest {
         Ok(self.probe_fault(address, kind))
     }
 
-    /// 物化并发布缺页所在的那一页；关系已消失照实报错。
-    fn materialize_page(self: &Arc<Self>, address: VirtAddr) -> Result<(), NestError> {
-        let page = address.page_align();
-        let selection = {
-            let address_index = self.address.lock();
-            let mapping = address_index
-                .index
-                .find(address.as_usize())
-                .ok_or(NestError::NoRegion)?;
-            mapping.range(
-                PageOffset::new(mapping.page_index(page) / mapping.grain() * mapping.grain()),
-                PageCount::new(mapping.grain()).expect("one fault Cell"),
-            )?
-        };
-        selection.span().materialize_active(self, &selection)
+    fn span_at(&self, address: VirtAddr) -> Option<Arc<Span>> {
+        self.address.lock().index.find(address.as_usize())
     }
 
     #[cfg(debug_assertions)]

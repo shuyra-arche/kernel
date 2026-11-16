@@ -1407,3 +1407,19 @@ impl Span {
         Ok(())
     }
 }
+
+impl Span {
+    /// Materialize and publish the Cell containing one faulting address.
+    pub(crate) fn materialize_page(
+        self: &Arc<Self>,
+        nest: &Arc<Nest>,
+        address: VirtAddr,
+    ) -> Result<(), NestError> {
+        let page = address.page_align();
+        let selection = self.range(
+            PageOffset::new(self.page_index(page) / self.grain() * self.grain()),
+            PageCount::new(self.grain()).expect("one fault Cell"),
+        )?;
+        self.materialize_active(nest, &selection)
+    }
+}
