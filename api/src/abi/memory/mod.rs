@@ -90,6 +90,7 @@ pub enum Opcode {
     Inspect(Domain),
     CreateSpan,
     DeleteSpan,
+    ReleaseRange,
     Occupy,
     Vacate,
     Block,
@@ -132,6 +133,7 @@ impl Opcode {
             | Self::Merge => Domain::Flat,
             Self::CreateSpan
             | Self::DeleteSpan
+            | Self::ReleaseRange
             | Self::Insert
             | Self::Remove
             | Self::Publish
@@ -154,6 +156,7 @@ impl Opcode {
             Self::Pull | Self::Retract => 24,
             Self::Split | Self::Protect => 25,
             Self::Merge | Self::FaultRoute => 26,
+            Self::ReleaseRange => 27,
         }
     }
 
@@ -178,6 +181,7 @@ impl Opcode {
             (Domain::Nest, 24) => Self::Retract,
             (Domain::Nest, 25) => Self::Protect,
             (Domain::Nest, 26) => Self::FaultRoute,
+            (Domain::Nest, 27) => Self::ReleaseRange,
             _ => return None,
         })
     }

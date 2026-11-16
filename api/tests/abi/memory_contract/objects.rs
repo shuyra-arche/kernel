@@ -8,7 +8,7 @@ use kernel_api::{
         flat::{FlatPhase, FlatVersion},
         identity::PendId,
         nest::SpanId,
-        nest::{CreateSpanRequest, NestPhase, NestVersion, SpanPhase, SpanVersion},
+        nest::{CreateSpanRequest, NestId, NestPhase, NestVersion, SpanPhase, SpanVersion},
     },
 };
 
@@ -441,4 +441,41 @@ fn structural_versions_are_nonzero_full_width_and_never_wrap() {
             value.checked_add(1)
         );
     }
+}
+
+#[test]
+fn release_range_encodes_identity_expected_revision_and_page_window() {
+    let request = Request::new(
+        Some(id()),
+        Action::ReleaseRange {
+            token: PendId::mint(7),
+            nest: NestId::new(13).unwrap(),
+            span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
+            expected: SpanVersion::new(3).unwrap(),
+            offset: 1,
+            count: 2,
+        },
+    )
+    .unwrap();
+    let bytes = request.to_bytes();
+    for (index, word) in [14, 13, 27, u64::MAX, 7, 13, 17, 3, 1, 2]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(
+            u64::from_le_bytes(bytes[index * 8..(index + 1) * 8].try_into().unwrap()),
+            word
+        );
+    }
+    assert_eq!(Request::from_bytes(&bytes), Some(request));
+    assert_eq!(request.action().opcode(), Opcode::ReleaseRange);
+
+    let value = Value::SpanLifecycle {
+        nest: NestId::new(13).unwrap(),
+        span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
+        version: SpanVersion::new(4).unwrap(),
+        phase: SpanPhase::Open,
+    };
+    let reply = Reply::new(id(), Opcode::ReleaseRange, Outcome::Committed(value)).unwrap();
+    assert!(reply.matches(request));
 }

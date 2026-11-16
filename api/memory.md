@@ -41,7 +41,7 @@ ABI derive from `abi::VERSION`; Capsule format remains 2. Remove the former
 `memory-v11` dependency feature and rebuild all components at the same source
 revision. ABI 10 remains available only through old immutable source pins.
 
-Native `Opcode` selects Flat domain 12 or Nest domain 13, slots 16–26.
+Native `Opcode` selects Flat domain 12 or Nest domain 13, slots 16–27.
 [`Action` and `Request`](src/abi/memory/request.rs) define the current
 256-byte request, and [`Reply` and `Observation`](src/abi/memory/reply.rs)
 define 128-byte result buffers. The [Frame](src/abi/memory/call.rs) binds

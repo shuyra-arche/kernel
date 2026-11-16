@@ -139,6 +139,7 @@ fn settled_operations_have_distinct_domain_and_slot_contracts() {
         (Opcode::Publish, 13, 23),
         (Opcode::Retract, 13, 24),
         (Opcode::Protect, 13, 25),
+        (Opcode::ReleaseRange, 13, 27),
     ] {
         assert_eq!((opcode.domain() as u64, opcode.slot()), (domain, slot));
         assert_eq!(Opcode::of(domain, slot), Some(opcode));
@@ -151,7 +152,7 @@ fn settled_operations_have_distinct_domain_and_slot_contracts() {
         (12, 0),
         (12, 27),
         (13, 28),
-        (13, 27),
+        (13, 29),
         (14, 21),
         (12, u64::MAX),
         (u64::MAX, 21),

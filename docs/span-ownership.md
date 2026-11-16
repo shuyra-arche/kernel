@@ -82,9 +82,11 @@ primitive:
 - refuse while a publication, source or translation batch still owns it, and
   refuse to release the last active range.
 
-There is **no `ReleaseRange` ABI entry yet**. `Nest::reclaim_range` is the
-staged internal entry; the cross-repository consumer/version step is still
-required before this is a userspace-visible operation.
+`Action::ReleaseRange` (Nest slot 27) is the userspace entry. It requires the
+`DELETE_SPAN` authority, an exact expected Span revision and a range inside
+the authority window. The Span stays open and its revision advances; full
+close remains `DeleteSpan`. The operation is additive within ABI 14, so the
+existing version and consumer pins stay valid.
 
 ## Evidence boundaries
 

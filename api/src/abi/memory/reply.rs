@@ -128,7 +128,9 @@ impl Value {
             }
             (Self::FlatLifecycle { .. }, Opcode::Delete(Domain::Flat))
             | (Self::NestLifecycle { .. }, Opcode::Delete(Domain::Nest)) => true,
-            (Self::SpanLifecycle { span, .. }, Opcode::DeleteSpan) => valid_token(span.get()),
+            (Self::SpanLifecycle { span, .. }, Opcode::DeleteSpan | Opcode::ReleaseRange) => {
+                valid_token(span.get())
+            }
             (Self::Slot { page, .. }, Opcode::Occupy | Opcode::Vacate) => page <= isize::MAX as u64,
             (Self::Transfer { page, .. }, Opcode::Push | Opcode::Pull) => {
                 page > 0 && page <= isize::MAX as u64

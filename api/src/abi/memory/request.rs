@@ -167,6 +167,16 @@ pub enum Action {
         span: SpanId,
         expected: SpanVersion,
     },
+    /// Release a page-aligned subrange of a Span. The Span stays open and its
+    /// revision advances; full close remains `DeleteSpan`.
+    ReleaseRange {
+        token: PendId,
+        nest: NestId,
+        span: SpanId,
+        expected: SpanVersion,
+        offset: usize,
+        count: usize,
+    },
     /// One parent to its 512 immediate children. The expected Flat revision
     /// covers every affected coordinate, not merely the first Slot's stamp.
     Split {
@@ -257,6 +267,7 @@ impl Action {
             Self::DeleteNest { .. } => Opcode::Delete(Domain::Nest),
             Self::CreateSpan { .. } => Opcode::CreateSpan,
             Self::DeleteSpan { .. } => Opcode::DeleteSpan,
+            Self::ReleaseRange { .. } => Opcode::ReleaseRange,
             Self::Split { .. } => Opcode::Split,
             Self::Merge { .. } => Opcode::Merge,
             Self::Inspect(query) => Opcode::Inspect(query.domain()),
@@ -313,6 +324,17 @@ impl Action {
             }
             Self::DeleteSpan { token, span, .. } => {
                 valid_token(token.get()) && valid_token(span.get())
+            }
+            Self::ReleaseRange {
+                token,
+                span,
+                offset,
+                count,
+                ..
+            } => {
+                valid_token(token.get())
+                    && valid_token(span.get())
+                    && crate::model::cell::pages(offset, count).is_some()
             }
             Self::Split {
                 start,
@@ -440,6 +462,26 @@ impl Action {
                 out.word(nest.get() as u64)?;
                 out.word(span.get() as u64)?;
                 out.word(expected.get())
+            }
+            Self::ReleaseRange {
+                token,
+                nest,
+                span,
+                expected,
+                offset,
+                count,
+            } => {
+                for word in [
+                    token.get() as u64,
+                    nest.get() as u64,
+                    span.get() as u64,
+                    expected.get(),
+                    offset as u64,
+                    count as u64,
+                ] {
+                    out.word(word)?;
+                }
+                Some(())
             }
             Self::Split {
                 start,
@@ -580,6 +622,14 @@ impl Action {
                 nest: NestId::new(input.size()?)?,
                 span: input.span()?,
                 expected: SpanVersion::new(input.word()?)?,
+            },
+            Opcode::ReleaseRange => Self::ReleaseRange {
+                token: input.token()?,
+                nest: NestId::new(input.size()?)?,
+                span: input.span()?,
+                expected: SpanVersion::new(input.word()?)?,
+                offset: input.size()?,
+                count: input.size()?,
             },
             Opcode::Split | Opcode::Merge => {
                 let start = SlotPosition::from_bytes(input.bytes::<24>()?)?;

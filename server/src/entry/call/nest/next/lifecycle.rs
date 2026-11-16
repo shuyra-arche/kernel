@@ -227,6 +227,64 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
+        Action::ReleaseRange {
+            token,
+            nest: id,
+            span: reservation,
+            expected,
+            offset,
+            count,
+        } => {
+            let span = {
+                let _serial = actor.pend.lock();
+                let _commit = basis::commit();
+                if !pend::live(actor) {
+                    return Err(Failure::Dead);
+                }
+                let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
+                if !entry
+                    .authority()
+                    .permits(Operations::Nest(NestRights::DELETE_SPAN))
+                    || !matches!(entry.scope(), PendScope::Nest(NestScope::Span { id, .. }) if id == reservation)
+                {
+                    return Err(Failure::Denied);
+                }
+                let nest = entry.target().nest().ok_or(Failure::Denied)?;
+                if nest.id() != id {
+                    return Err(Failure::Denied);
+                }
+                let span = nest.span(reservation).ok_or(Failure::Dead)?;
+                let (window_offset, window_count) =
+                    entry.authority().window().ok_or(Failure::Denied)?;
+                let end = offset.checked_add(count).ok_or(Failure::Denied)?;
+                let window_end = window_offset
+                    .get()
+                    .checked_add(window_count.get())
+                    .ok_or(Failure::Denied)?;
+                if offset < window_offset.get() || end > window_end {
+                    return Err(Failure::Denied);
+                }
+                if span.version() != expected {
+                    return Err(Failure::Stale);
+                }
+                expected.next().ok_or(Failure::VersionExhausted)?;
+                let offset = kernel_api::address::PageOffset::new(offset);
+                let count =
+                    kernel_api::address::PageCount::new(count).ok_or(Failure::NotAligned)?;
+                nest.reclaim_range(reservation, offset, count)
+                    .map_err(nest_error)?;
+                span
+            };
+            let value = Value::SpanLifecycle {
+                nest: id,
+                span: reservation,
+                version: span.version(),
+                phase: SpanPhase::Open,
+            };
+            let _commit = basis::commit();
+            receipt.committed(value);
+            Ok(value)
+        }
         Action::DeleteNest {
             token,
             nest: id,

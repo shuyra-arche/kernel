@@ -566,10 +566,6 @@ impl Nest {
     }
 
     /// Release a page-aligned subrange of a Span's access and occupancy.
-    #[allow(
-        dead_code,
-        reason = "M3 partial-release primitive; the ReleaseRange ABI follows"
-    )]
     pub(crate) fn reclaim_range(
         &self,
         id: kernel_api::model::nest::SpanId,
