@@ -35,7 +35,7 @@ Span FaultRoute. `SpanId`, `SpanVersion` and `SpanStatus` name the occupied
 address span; `CreateSpanRequest` and `Action::CreateSpan`/`DeleteSpan` create
 and delete it. `Action::ReleaseRange` releases a page-aligned subrange while
 keeping the Span open; see [ReleaseRange](../docs/release-range.md). ABI 13 and older calls, Ledger entries and Capsules reject. Versioned RequestIds and a bounded journal report
-Rejected/Pending/Committed/Failed outcomes and checked observations.
+Rejected/Pending/Committed/Failed outcomes and checked observations. Section 12 of the issue replaces this unified operation/list shape with independent Flat and Nest contracts; see [ABI domain split](../docs/abi-domain-split.md).
 
 No Cargo feature selects the ABI. Calls, memory descriptors, Ledger and Capsule
 ABI derive from `abi::VERSION`; Capsule format remains 2. Remove the former
