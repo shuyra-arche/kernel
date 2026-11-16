@@ -59,8 +59,8 @@ or Closed lifecycle is rejected by reply validation.
 
 ## Limits
 
-- Source-backed Spans still require a full close; partial release refuses while
-  an implicit source exists.
+- Source-backed Spans keep their implicit source for the remaining ranges; the
+  released hole is inaccessible and the source is released when the owning Nest/Team closes.
 - The last active range cannot be released partially.
 - Host tests cover occupancy holes, active-range splits and the reply contract.
   QEMU/target-level behavior and cross-repository pins still need the external
