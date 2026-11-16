@@ -2,7 +2,7 @@
 use alloc::sync::Arc;
 
 use super::{Access, DrainStep, Span};
-use crate::basis::cell::page::{Change, Freeze};
+use crate::basis::cell::page::{Change, Freeze, Page};
 use crate::basis::nest::memo::publication::Publication;
 use crate::basis::nest::{
     Nest, NestError, authority,
@@ -542,8 +542,8 @@ impl Span {
             nest.progress_external(self)
                 .map_err(memo::publication_failure)?;
         } else {
-            let result = nest.unpublish_page_with(
-                self,
+            let result = self.unpublish_page_with(
+                nest,
                 VirtAddr::new(self.position(index)?),
                 &page,
                 polling,
@@ -952,5 +952,52 @@ impl Span {
             translation.retirement.invalidation()
                 == crate::basis::nest::translation::Invalidation::Failed,
         ))
+    }
+}
+
+impl Span {
+    /// Withdraw one published page and retain its exact Page responsibility.
+    pub(crate) fn unpublish_page(
+        self: &Arc<Self>,
+        nest: &Nest,
+        address: VirtAddr,
+        expected: &Arc<Page>,
+    ) -> Result<(), NestError> {
+        self.unpublish_page_with(nest, address, expected, false)
+    }
+
+    pub(in crate::basis::nest) fn unpublish_page_with(
+        self: &Arc<Self>,
+        nest: &Nest,
+        address: VirtAddr,
+        expected: &Arc<Page>,
+        polling: bool,
+    ) -> Result<(), NestError> {
+        if nest.asid().is_kernel() || self.is_global() {
+            return Err(NestError::Pinned);
+        }
+        assert!(
+            address.offset() == 0,
+            "unpublish_page takes a page-aligned address"
+        );
+        assert!(
+            self.identity.belongs_to(nest.id),
+            "unpublish_page requires the mapping's own live nest"
+        );
+        nest.finish_invalidation_with(polling)?;
+
+        let mut state = self.translation.lock();
+        if !state.retirement.invalidation().is_clean() {
+            return Err(NestError::Busy);
+        }
+        if !state.unpublish_page(nest.geometry(), self, address, expected)? {
+            return Ok(());
+        }
+        let target = state.retirement.begin(nest.id.get(), nest.asid())?;
+        drop(state);
+        // Release retained resources only after this exact invocation completes.
+        nest.start_invalidation(target, polling)?;
+        self.finish_memo(self.page_index(address));
+        Ok(())
     }
 }

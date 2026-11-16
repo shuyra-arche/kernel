@@ -19,7 +19,6 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::mem::ManuallyDrop;
 
-use crate::basis::cell::page::Page;
 use crate::basis::flat::Pages;
 use crate::basis::sign::{self, WakeKey};
 use crate::basis::sync::LegacyGuard;
@@ -750,12 +749,13 @@ impl Nest {
                 let Some(page) = mapping.memo_page(index).map_err(|_| PendFail::Busy)? else {
                     continue;
                 };
-                self.unpublish_page(
-                    mapping,
-                    VirtAddr::new(mapping.position(index).map_err(|_| PendFail::Busy)?),
-                    &page,
-                )
-                .map_err(|_| PendFail::Busy)?;
+                mapping
+                    .unpublish_page(
+                        self,
+                        VirtAddr::new(mapping.position(index).map_err(|_| PendFail::Busy)?),
+                        &page,
+                    )
+                    .map_err(|_| PendFail::Busy)?;
                 mapping.finish_memo(index);
             }
             return Ok(());
@@ -1286,50 +1286,6 @@ impl Nest {
     }
 
     /// Persistent source lookup never materializes or retains a physical Page.
-    pub(crate) fn unpublish_page(
-        &self,
-        mapping: &Arc<Span>,
-        address: VirtAddr,
-        expected: &Arc<Page>,
-    ) -> Result<(), NestError> {
-        self.unpublish_page_with(mapping, address, expected, false)
-    }
-
-    fn unpublish_page_with(
-        &self,
-        mapping: &Arc<Span>,
-        address: VirtAddr,
-        expected: &Arc<Page>,
-        polling: bool,
-    ) -> Result<(), NestError> {
-        if self.asid().is_kernel() || mapping.is_global() {
-            return Err(NestError::Pinned);
-        }
-        assert!(
-            address.offset() == 0,
-            "unpublish_page takes a page-aligned address"
-        );
-        assert!(
-            mapping.identity.belongs_to(self.id),
-            "unpublish_page requires the mapping's own live nest"
-        );
-        self.finish_invalidation_with(polling)?;
-
-        let mut state = self.state.lock();
-        if !state.retirement.invalidation().is_clean() {
-            return Err(NestError::Busy);
-        }
-        if !state.unpublish_page(self.geometry(), mapping, address, expected)? {
-            return Ok(());
-        }
-        let target = state.retirement.begin(self.id.get(), self.asid())?;
-        drop(state);
-        // Release retained resources only after this exact invocation completes.
-        self.start_invalidation(target, polling)?;
-        mapping.finish_memo(mapping.page_index(address));
-        Ok(())
-    }
-
     /// 让 `Flat` 物化该窗口的活动页，再在本关系发布。
     ///
     /// 组合入口：物化原语仍是 `FlatRange::materialize`，这里只把缺页与派生编排

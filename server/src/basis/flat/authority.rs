@@ -252,8 +252,8 @@ pub(crate) fn settle_block(
             let page = index - base;
             if let Some(data) = span.memo_page(page).map_err(|_| PendFail::Busy)? {
                 block.retain(data.clone())?;
-                nest.unpublish_page(
-                    span,
+                span.unpublish_page(
+                    &nest,
                     kernel_api::address::VirtAddr::new(
                         span.initial_start().get() + page * PAGE_SIZE,
                     ),
