@@ -90,73 +90,13 @@ pub enum Value {
 
 impl Value {
     fn matches(self, opcode: Opcode) -> bool {
-        match (self, opcode) {
-            (
-                Self::FaultRoute {
-                    span,
-                    version,
-                    epoch,
-                    phase,
-                    ..
-                },
-                Opcode::Nest(domain_nest::Opcode::FaultRoute),
-            ) => {
-                valid_token(span.get())
-                    && version.get() > 1
-                    && epoch.get() > 1
-                    && matches!(phase, FaultPhase::Active | FaultPhase::Disabled)
+        match opcode {
+            Opcode::Flat(opcode) => {
+                flat::Value::try_from(self).is_ok_and(|value| value.matches(opcode))
             }
-            (
-                Self::Geometry { version, slots, .. },
-                Opcode::Flat(domain_flat::Opcode::Split) | Opcode::Flat(domain_flat::Opcode::Merge),
-            ) => version.get() > 1 && slots.get() == version.get(),
-            (Self::CreatedFlat { token, .. }, Opcode::Flat(domain_flat::Opcode::Create))
-            | (Self::CreatedNest { token, .. }, Opcode::Nest(domain_nest::Opcode::Create)) => {
-                valid_token(token.get())
+            Opcode::Nest(opcode) => {
+                nest::Value::try_from(self).is_ok_and(|value| value.matches(opcode))
             }
-            (
-                Self::Span {
-                    token,
-                    span,
-                    address,
-                    ..
-                },
-                Opcode::Nest(domain_nest::Opcode::Reserve),
-            ) => {
-                valid_token(token.get())
-                    && valid_token(span.get())
-                    && address.get().is_multiple_of(BASE_PAGE_SIZE)
-                    && address.get().checked_add(BASE_PAGE_SIZE).is_some()
-            }
-            (Self::FlatLifecycle { .. }, Opcode::Flat(domain_flat::Opcode::Delete))
-            | (Self::NestLifecycle { .. }, Opcode::Nest(domain_nest::Opcode::Delete)) => true,
-            (
-                Self::SpanLifecycle { span, .. },
-                Opcode::Nest(domain_nest::Opcode::Release)
-                | Opcode::Nest(domain_nest::Opcode::ReleaseRange),
-            ) => valid_token(span.get()),
-            (
-                Self::Slot { page, .. },
-                Opcode::Flat(domain_flat::Opcode::Occupy)
-                | Opcode::Flat(domain_flat::Opcode::Vacate),
-            ) => page <= isize::MAX as u64,
-            (
-                Self::Transfer { page, .. },
-                Opcode::Flat(domain_flat::Opcode::Push) | Opcode::Flat(domain_flat::Opcode::Pull),
-            ) => page > 0 && page <= isize::MAX as u64,
-            (
-                Self::Memo { .. },
-                Opcode::Nest(domain_nest::Opcode::Insert)
-                | Opcode::Nest(domain_nest::Opcode::Remove)
-                | Opcode::Nest(domain_nest::Opcode::Publish)
-                | Opcode::Nest(domain_nest::Opcode::Retract)
-                | Opcode::Nest(domain_nest::Opcode::Protect),
-            )
-            | (
-                Self::Maintenance { .. },
-                Opcode::Flat(domain_flat::Opcode::Block) | Opcode::Flat(domain_flat::Opcode::Allow),
-            ) => true,
-            _ => false,
         }
     }
 
@@ -791,6 +731,27 @@ pub mod flat {
         },
     }
 
+    impl Value {
+        pub(super) fn matches(self, opcode: domain_flat::Opcode) -> bool {
+            use domain_flat::Opcode;
+            match (self, opcode) {
+                (Self::Geometry { version, slots, .. }, Opcode::Split | Opcode::Merge) => {
+                    version.get() > 1 && slots.get() == version.get()
+                }
+                (Self::Created { token, .. }, Opcode::Create) => valid_token(token.get()),
+                (Self::Lifecycle { .. }, Opcode::Delete) => true,
+                (Self::Slot { page, .. }, Opcode::Occupy | Opcode::Vacate) => {
+                    page <= isize::MAX as u64
+                }
+                (Self::Transfer { page, .. }, Opcode::Push | Opcode::Pull) => {
+                    page > 0 && page <= isize::MAX as u64
+                }
+                (Self::Maintenance { .. }, Opcode::Block | Opcode::Allow) => true,
+                _ => false,
+            }
+        }
+    }
+
     impl From<Value> for super::Value {
         fn from(value: Value) -> Self {
             match value {
@@ -929,6 +890,57 @@ pub mod nest {
         Memo {
             generation: MemoGeneration,
         },
+    }
+
+    impl Value {
+        pub(super) fn matches(self, opcode: domain_nest::Opcode) -> bool {
+            use domain_nest::Opcode;
+            match (self, opcode) {
+                (
+                    Self::FaultRoute {
+                        span,
+                        version,
+                        epoch,
+                        phase,
+                        ..
+                    },
+                    Opcode::FaultRoute,
+                ) => {
+                    valid_token(span.get())
+                        && version.get() > 1
+                        && epoch.get() > 1
+                        && matches!(phase, FaultPhase::Active | FaultPhase::Disabled)
+                }
+                (Self::Created { token, .. }, Opcode::Create) => valid_token(token.get()),
+                (
+                    Self::Span {
+                        token,
+                        span,
+                        address,
+                        ..
+                    },
+                    Opcode::Reserve,
+                ) => {
+                    valid_token(token.get())
+                        && valid_token(span.get())
+                        && address.get().is_multiple_of(BASE_PAGE_SIZE)
+                        && address.get().checked_add(BASE_PAGE_SIZE).is_some()
+                }
+                (Self::Lifecycle { .. }, Opcode::Delete) => true,
+                (Self::SpanLifecycle { span, .. }, Opcode::Release | Opcode::ReleaseRange) => {
+                    valid_token(span.get())
+                }
+                (
+                    Self::Memo { .. },
+                    Opcode::Insert
+                    | Opcode::Remove
+                    | Opcode::Publish
+                    | Opcode::Retract
+                    | Opcode::Protect,
+                ) => true,
+                _ => false,
+            }
+        }
     }
 
     impl From<Value> for super::Value {
