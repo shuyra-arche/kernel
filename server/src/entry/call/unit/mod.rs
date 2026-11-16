@@ -395,7 +395,7 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
                         return Err(UnitFail::Denied);
                     };
                     limits.operations =
-                        Operations::Nest(rights & (NestRights::INSPECT | NestRights::RESERVE));
+                        Operations::Nest(rights & (NestRights::INSPECT | NestRights::CREATE_SPAN));
                     entry.authority().can_narrow(limits).map_err(map_pend_err)?;
                     // COMMIT and the caller's serial exclude authority mutation.
                     // spawn_in stages topology and adopts the selected Nest; it
@@ -426,7 +426,9 @@ fn create(me: &Arc<Task>, request: KVirt) -> Result<CreatedUnit, UnitFail> {
                     .map_err(map_pend_err)?;
                     entry
                         .narrow(Limits {
-                            operations: Operations::Nest(NestRights::INSPECT | NestRights::RESERVE),
+                            operations: Operations::Nest(
+                                NestRights::INSPECT | NestRights::CREATE_SPAN,
+                            ),
                             modifiable: Modifiable::Yes,
                             distributable: Distributable::Yes,
                             scope: PendScope::Nest(NestScope::Whole),

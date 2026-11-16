@@ -7,13 +7,13 @@ use kernel_api::{
         cell::{CellLevel, Placement},
         flat::{FlatPhase, FlatVersion},
         identity::PendId,
-        nest::ReservationId,
-        nest::{NestPhase, NestVersion, ReservationPhase, ReservationVersion, ReserveRequest},
+        nest::SpanId,
+        nest::{CreateSpanRequest, NestId, NestPhase, NestVersion, SpanPhase, SpanVersion},
     },
 };
 
-pub(super) fn reservation() -> ReserveRequest {
-    ReserveRequest {
+pub(super) fn span() -> CreateSpanRequest {
+    CreateSpanRequest {
         placement: Placement::exact(VirtAddr::new(0x8000), 4096).unwrap(),
         count: PageCount::new(512).unwrap(),
         level: CellLevel::new(1).unwrap(),
@@ -41,17 +41,17 @@ pub(super) fn mutations() -> Vec<Action> {
             nest: memo(0).nest(),
             expected: NestVersion::new(u64::MAX).unwrap(),
         },
-        Action::Reserve {
+        Action::CreateSpan {
             token: PendId::mint(7),
             nest: memo(0).nest(),
             expected: NestVersion::new(u64::MAX).unwrap(),
-            reservation: reservation(),
+            request: span(),
         },
-        Action::Release {
+        Action::DeleteSpan {
             token: PendId::mint(7),
             nest: memo(0).nest(),
-            reservation: memo(0).reservation(),
-            expected: ReservationVersion::new(u64::MAX).unwrap(),
+            span: memo(0).span(),
+            expected: SpanVersion::new(u64::MAX).unwrap(),
         },
     ]
 }
@@ -59,10 +59,10 @@ pub(super) fn mutations() -> Vec<Action> {
 pub(super) fn results() -> Vec<Reply> {
     let f = FlatVersion::new(1 << 63).unwrap();
     let n = NestVersion::new(1 << 63).unwrap();
-    let m = ReservationVersion::new(1 << 63).unwrap();
+    let m = SpanVersion::new(1 << 63).unwrap();
     let flat = slot(0).flat();
     let nest = memo(0).nest();
-    let reservation = memo(0).reservation();
+    let span = memo(0).span();
     let mut results = vec![
         Reply::new(
             id(),
@@ -86,12 +86,12 @@ pub(super) fn results() -> Vec<Reply> {
         .unwrap(),
         Reply::new(
             id(),
-            Opcode::Reserve,
-            Outcome::Committed(Value::Reservation {
+            Opcode::CreateSpan,
+            Outcome::Committed(Value::Span {
                 token: PendId::mint(5),
                 nest,
                 nest_version: n,
-                reservation,
+                span,
                 version: m,
                 address: VirtAddr::new(0x8000),
             }),
@@ -130,26 +130,22 @@ pub(super) fn results() -> Vec<Reply> {
         };
         results.push(Reply::new(id(), Opcode::Delete(Domain::Nest), outcome).unwrap());
     }
-    for phase in [
-        ReservationPhase::Releasing,
-        ReservationPhase::Released,
-        ReservationPhase::Failed,
-    ] {
-        let value = Value::ReservationLifecycle {
+    for phase in [SpanPhase::Closing, SpanPhase::Closed, SpanPhase::Failed] {
+        let value = Value::SpanLifecycle {
             nest,
-            reservation,
+            span,
             version: m,
             phase,
         };
         let outcome = match phase {
-            ReservationPhase::Releasing => Outcome::Pending(value),
-            ReservationPhase::Released => Outcome::Committed(value),
+            SpanPhase::Closing => Outcome::Pending(value),
+            SpanPhase::Closed => Outcome::Committed(value),
             _ => Outcome::Failed {
                 failure: Failure::Hardware,
                 retained: Some(value),
             },
         };
-        results.push(Reply::new(id(), Opcode::Release, outcome).unwrap());
+        results.push(Reply::new(id(), Opcode::DeleteSpan, outcome).unwrap());
     }
     results
 }
@@ -157,12 +153,12 @@ pub(super) fn results() -> Vec<Reply> {
 #[test]
 fn object_mutations_use_expected_object_versions_and_exact_wire_layouts() {
     let payloads: &[&[u64]] = &[
-        &[13, 12, 16, u64::MAX, 7, 1024, 1],
-        &[13, 12, 17, u64::MAX, 7, 11, u64::MAX],
-        &[13, 13, 16, u64::MAX, 7],
-        &[13, 13, 17, u64::MAX, 7, 17, u64::MAX],
+        &[14, 12, 16, u64::MAX, 7, 1024, 1],
+        &[14, 12, 17, u64::MAX, 7, 11, u64::MAX],
+        &[14, 13, 16, u64::MAX, 7],
+        &[14, 13, 17, u64::MAX, 7, 17, u64::MAX],
         &[
-            13,
+            14,
             13,
             19,
             u64::MAX,
@@ -176,7 +172,7 @@ fn object_mutations_use_expected_object_versions_and_exact_wire_layouts() {
             1,
             6,
         ],
-        &[13, 13, 20, u64::MAX, 7, 17, 19, u64::MAX],
+        &[14, 13, 20, u64::MAX, 7, 17, 19, u64::MAX],
     ];
     for (action, words) in mutations().into_iter().zip(payloads) {
         let request = Request::new(Some(id()), action).unwrap();
@@ -200,7 +196,7 @@ fn object_mutations_use_expected_object_versions_and_exact_wire_layouts() {
 }
 
 #[test]
-fn creation_reservation_and_release_reject_bad_geometry_identity_or_version() {
+fn creation_span_and_deletion_reject_bad_geometry_identity_or_version() {
     for count in [0, 1, 513, usize::MAX] {
         assert!(
             Request::new(
@@ -232,22 +228,22 @@ fn creation_reservation_and_release_reject_bad_geometry_identity_or_version() {
         set_word(&mut bad, word, value);
         assert!(Request::from_bytes(&bad).is_none(), "word {word}, {value}");
     }
-    // The base may be representable while the full reservation wraps.
+    // The base may be representable while the full span wraps.
     let top = usize::MAX & !4095;
-    let bad = ReserveRequest {
+    let bad = CreateSpanRequest {
         placement: Placement::exact(VirtAddr::new(top), 4096).unwrap(),
         count: PageCount::new(1).unwrap(),
         level: CellLevel::BASE,
-        ..reservation()
+        ..span()
     };
     assert!(
         Request::new(
             Some(id()),
-            Action::Reserve {
+            Action::CreateSpan {
                 token: PendId::mint(1),
                 nest: memo(0).nest(),
                 expected: NestVersion::INITIAL,
-                reservation: bad
+                request: bad
             }
         )
         .is_none()
@@ -258,11 +254,11 @@ fn creation_reservation_and_release_reject_bad_geometry_identity_or_version() {
     assert!(
         Request::new(
             Some(id()),
-            Action::Release {
+            Action::DeleteSpan {
                 token: PendId::mint(1),
                 nest: memo(0).nest(),
-                reservation: ReservationId::NONE,
-                expected: ReservationVersion::INITIAL
+                span: SpanId::NONE,
+                expected: SpanVersion::INITIAL
             }
         )
         .is_none()
@@ -298,12 +294,12 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
             },
         ),
         (
-            Opcode::Release,
-            Value::ReservationLifecycle {
+            Opcode::DeleteSpan,
+            Value::SpanLifecycle {
                 nest: memo(0).nest(),
-                reservation: memo(0).reservation(),
-                version: ReservationVersion::INITIAL,
-                phase: ReservationPhase::Releasing,
+                span: memo(0).span(),
+                version: SpanVersion::INITIAL,
+                phase: SpanPhase::Closing,
             },
         ),
     ];
@@ -373,11 +369,11 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
 }
 
 #[test]
-fn reservation_result_carries_the_new_grant_and_both_structural_versions() {
+fn span_result_carries_the_new_grant_and_both_structural_versions() {
     let result = results()[2];
     let mut expected = [0; Reply::WIDTH];
     for (index, word) in [
-        13,
+        14,
         13,
         19,
         u64::MAX,
@@ -418,10 +414,10 @@ fn reservation_result_carries_the_new_grant_and_both_structural_versions() {
 fn structural_versions_are_nonzero_full_width_and_never_wrap() {
     assert!(FlatVersion::new(0).is_none());
     assert!(NestVersion::new(0).is_none());
-    assert!(ReservationVersion::new(0).is_none());
+    assert!(SpanVersion::new(0).is_none());
     assert_eq!(FlatVersion::INITIAL.get(), 1);
     assert_eq!(NestVersion::INITIAL.get(), 1);
-    assert_eq!(ReservationVersion::INITIAL.get(), 1);
+    assert_eq!(SpanVersion::INITIAL.get(), 1);
     for value in [1, 1 << 63, u64::MAX - 1, u64::MAX] {
         assert_eq!(
             FlatVersion::new(value)
@@ -438,11 +434,87 @@ fn structural_versions_are_nonzero_full_width_and_never_wrap() {
             value.checked_add(1)
         );
         assert_eq!(
-            ReservationVersion::new(value)
+            SpanVersion::new(value)
                 .unwrap()
                 .next()
-                .map(ReservationVersion::get),
+                .map(SpanVersion::get),
             value.checked_add(1)
         );
     }
+}
+
+#[test]
+fn release_range_encodes_identity_expected_revision_and_page_window() {
+    let request = Request::new(
+        Some(id()),
+        Action::ReleaseRange {
+            token: PendId::mint(7),
+            nest: NestId::new(13).unwrap(),
+            span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
+            expected: SpanVersion::new(3).unwrap(),
+            offset: 1,
+            count: 2,
+        },
+    )
+    .unwrap();
+    let bytes = request.to_bytes();
+    for (index, word) in [14, 13, 27, u64::MAX, 7, 13, 17, 3, 1, 2]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(
+            u64::from_le_bytes(bytes[index * 8..(index + 1) * 8].try_into().unwrap()),
+            word
+        );
+    }
+    assert_eq!(Request::from_bytes(&bytes), Some(request));
+    assert_eq!(request.action().opcode(), Opcode::ReleaseRange);
+
+    let value = Value::SpanLifecycle {
+        nest: NestId::new(13).unwrap(),
+        span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
+        version: SpanVersion::new(4).unwrap(),
+        phase: SpanPhase::Open,
+    };
+    let reply = Reply::new(id(), Opcode::ReleaseRange, Outcome::Committed(value)).unwrap();
+    assert!(reply.matches(request));
+}
+
+#[test]
+fn release_range_rejects_empty_or_overflowing_windows_and_non_open_replies() {
+    let action = |offset, count| Action::ReleaseRange {
+        token: PendId::mint(7),
+        nest: NestId::new(13).unwrap(),
+        span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
+        expected: SpanVersion::new(3).unwrap(),
+        offset,
+        count,
+    };
+    assert!(Request::new(Some(id()), action(0, 0)).is_none());
+    assert!(Request::new(Some(id()), action(usize::MAX, 2)).is_none());
+
+    let request = Request::new(Some(id()), action(1, 2)).unwrap();
+    let value = |phase| Value::SpanLifecycle {
+        nest: NestId::new(13).unwrap(),
+        span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
+        version: SpanVersion::new(4).unwrap(),
+        phase,
+    };
+    assert!(
+        Reply::new(
+            id(),
+            Opcode::ReleaseRange,
+            Outcome::Committed(value(SpanPhase::Open))
+        )
+        .unwrap()
+        .matches(request)
+    );
+    assert!(
+        Reply::new(
+            id(),
+            Opcode::ReleaseRange,
+            Outcome::Committed(value(SpanPhase::Closed))
+        )
+        .is_none()
+    );
 }

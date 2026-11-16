@@ -189,7 +189,7 @@ pub(crate) fn typed_cell(
 ) -> Result<Route, SignFail> {
     let memo = matches!(
         source,
-        SignSource::ReservationRetired { .. } | SignSource::ReservationPublished { .. }
+        SignSource::SpanRetired { .. } | SignSource::SpanPublished { .. }
     );
     if memo == (generation == 0) {
         return Err(SignFail::Denied);
@@ -197,9 +197,15 @@ pub(crate) fn typed_cell(
     let mut keys = Vec::new();
     keys.try_reserve(4).map_err(|_| SignFail::OutOfMemory)?;
     let watch = match source {
-        SignSource::ReservationRetired { token, reservation }
-        | SignSource::ReservationPublished { token, reservation } => {
-            let published = matches!(source, SignSource::ReservationPublished { .. });
+        SignSource::SpanRetired {
+            token,
+            span: reservation,
+        }
+        | SignSource::SpanPublished {
+            token,
+            span: reservation,
+        } => {
+            let published = matches!(source, SignSource::SpanPublished { .. });
             let (life, _) = crate::basis::nest::authority::external::event(
                 actor,
                 token,
@@ -209,7 +215,7 @@ pub(crate) fn typed_cell(
             )
             .map_err(|_| SignFail::Denied)?;
             keys.push((
-                WakeKey::ExternalReservation {
+                WakeKey::ExternalSpan {
                     id: reservation.get(),
                 },
                 life,
@@ -221,7 +227,7 @@ pub(crate) fn typed_cell(
                 },
                 actor.life(),
             ));
-            Watch::ExternalReservation {
+            Watch::ExternalSpan {
                 token,
                 reservation,
                 published,

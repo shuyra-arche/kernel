@@ -15,7 +15,7 @@ code or runtime state.
 | `model::unit` | User-only creation, UnitTarget, control authorities, creation descriptors, queries and stable results |
 | `model::{view,pend,clone_view,sign}` | View identity, Pend state, Clone queues and Sign routing |
 | `model::memory` | Bounded global memory observations and authorized CPU leaf activity streams |
-| `model::{flat,nest}` | Source, Nest and ReservationId identities and observations; never independent authorization |
+| `model::{flat,nest}` | Source, Nest and SpanId identities and observations; never independent authorization |
 | `model::{wait,exit}` | Waiting and exit vocabulary |
 | `abi::call` | Operation declarations, domain failures and aggregate dispatch |
 | `abi::operation` | Operation, RegisterCall, KernelCall and TerminalCall traits |
@@ -78,9 +78,20 @@ Cells. ABI coordinates remain 4 KiB units, so a level-1 Cell spans 512 coordinat
 
 ## ABI version
 
-This revision implements ABI 13 unconditionally. Calls, native Flat/Nest
+This revision implements ABI 14 unconditionally. Calls, native Flat/Nest
 memory descriptors, Boot Ledger and Capsule ABI use the single version in
 `abi::VERSION`. Capsule format remains 2. Cargo features do not select an ABI.
+
+ABI 14 names the address contract by its real owner, the Span: `SpanId`,
+`SpanVersion`, `SpanStatus`, `SpanPhase`, `CreateSpanRequest`,
+`Action::CreateSpan`/`DeleteSpan`/`ReleaseRange`, `Query::Span`/`Snapshot::Span`,
+`MemoPosition::span`, the `span` field of fault and activity observations,
+`SignSource::SpanRetired`/`SpanPublished`, `NestScope::Span` and
+`NestRights::CREATE_SPAN`/`DELETE_SPAN`. The explicit `Reservation` object and
+its public names are gone. Wire tags, operation slots and field widths are
+unchanged; the version still advances so ABI 13 calls, Ledger entries and
+Capsules are rejected instead of being assumed binary-compatible. Update every
+pin and rebuild the complete image.
 
 Pin API, Client, Server and image producers to one matching revision. Remove
 `features = ["memory-v11"]` from existing dependencies when upgrading; no
@@ -113,7 +124,7 @@ Capsule and Ledger set; no compatibility fallback is provided.
 | Room: schedule, wait and clock | [Room calls](src/abi/call/room.rs) | [Room](../server/src/basis/room/) |
 | Pend: grant, attenuate and revoke | [Pend calls](src/abi/call/pend.rs), [scope](src/model/pend/scope.rs) | [Pend](../server/src/basis/pend/) |
 | Clone, Share and Sign | [Clone](src/abi/call/view/clone.rs), [Share](src/abi/call/view/share.rs), [Sign](src/abi/call/sign.rs) | [View](../server/src/basis/view/), [Sign](../server/src/basis/sign/) |
-| Native ABI 11 memory | [Flat/Nest descriptors](src/abi/memory/), [memory guide](memory.md) | The same Flat/Nest/Page owners |
+| Native memory | [Flat/Nest descriptors](src/abi/memory/), [memory guide](memory.md) | The same Flat/Nest/Page owners |
 | Debug | [Debug calls](src/abi/call/debug.rs) | [Entry](../server/src/entry/) |
 
 The source of truth for register layouts and failure codes is the
@@ -141,7 +152,7 @@ to 1,024 entries total, at most 256 incoming, 32 per sending Task and
 exhaustion returns `OutOfMemory`. See the [delegation contract](../docs/pend-delegation.md).
 
 **Memory.** Flat owns logical sources and physical holding positions;
-Nest owns address reservations, Memo association and publication; Page
+Nest owns address spans, Memo association and publication; Page
 owns physical lifetime and access admission. Pend authorizes relationships,
 while retained CPU/IOMMU work must settle before physical reuse.
 Read the [current memory contract](memory.md), not a staged design record.
@@ -152,7 +163,7 @@ An explicit `(View, Sign)` boot dispatch pair does not authorize physical
 device reassignment or declare DMA quiescence. The Kernel observer publishes
 read-only versioned global memory statistics via Share and Sign. The global A/D fields remain `UNKNOWN`. A separate
 [authorized CPU activity stream](../docs/memory-activity.md) requires INSPECT
-and SAMPLE in a current Reservation window and explicit boot qualification.
+and SAMPLE in a current Span window and explicit boot qualification.
 NotObserved never proves global cleanliness. Upgrade the complete matching
 source-pinned image: older strict rights decoders reject the new SAMPLE bit.
 
@@ -181,6 +192,6 @@ execute in User mode; only Kernel-owned resident work executes in Supervisor
 mode. Rebuild System/Toolchain boot images as User-mode consumers before
 selecting ABI 12. There is no privileged Capsule construction interface.
 
-Ordinary Task creation uses [explicit startup registers](task.md) in ABI 13.
-The ABI 12 transport migration above is retained in ABI 13; tag-1 stack
-allocation descriptors and ABI 12 images are now rejected.
+Ordinary Task creation uses [explicit startup registers](task.md) in ABI 14.
+The ABI 12 transport migration above is retained in ABI 14; tag-1 stack
+allocation descriptors and ABI 12 images are rejected.

@@ -54,9 +54,8 @@ pub(super) fn wait(
     mapping: usize,
     frame: &mut TrapContext,
 ) -> *mut TrapContext {
-    if let Some(span) =
-        kernel_api::model::nest::ReservationId::from_bytes(&(mapping as u64).to_le_bytes())
-            .and_then(|id| nest.reservation(id))
+    if let Some(span) = kernel_api::model::nest::SpanId::from_bytes(&(mapping as u64).to_le_bytes())
+        .and_then(|id| nest.span(id))
         && span.faults.lock().native()
     {
         let result = crate::basis::room::scheduler::slot::current()
@@ -92,9 +91,9 @@ pub(super) fn wait(
     // 登记失败要终止任务时，身份已经交出去了：先把这一 id 标量留下来。
     let tid = ident.as_ref().map_or(0, Identity::task_id);
     let life = nest.life();
-    let key = WakeKey::Reservation {
+    let key = WakeKey::Span {
         space: nest.id(),
-        reservation: mapping,
+        span: mapping,
     };
     let waiting = FaultWait::new(nest, fault.addr, fault.kind, mapping);
     // 先放掉任务身份；地址探针在提交边界内执行后释放。

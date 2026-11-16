@@ -9,7 +9,7 @@ use kernel_api::{
         flat::FlatId,
         identity::{PendId, TaskId, TeamId},
         nest::NestId,
-        nest::ReservationId,
+        nest::SpanId,
         pend::{PendScope, PendStatus},
         view::ViewKind,
     },
@@ -103,25 +103,59 @@ impl Task {
 // Namespace metadata and scripted completion only; all Pend authorization is production code.
 pub(crate) struct Nest {
     id: NestId,
-    pub(crate) open: AtomicBool,
+    pub(crate) open: Arc<AtomicBool>,
     pub(crate) closed: AtomicBool,
     pub(crate) adopted: AtomicBool,
     pub(crate) external: AtomicBool,
     pub(crate) busy: AtomicBool,
-    pub(crate) reservations: Mutex<Vec<(ReservationId, PendStatus)>>,
-    spans: Mutex<Vec<(ReservationId, Arc<Span>, Weak<Pend>)>>,
-    publications: Mutex<Vec<(ReservationId, Arc<Pend>)>>,
-    pub(crate) withdrawn: Mutex<Vec<(ReservationId, (PageOffset, PageCount), Weak<Pend>)>>,
-    pub(crate) released: Mutex<Vec<(ReservationId, PageCount)>>,
+    pub(crate) reservations: Arc<Mutex<Vec<(SpanId, PendStatus)>>>,
+    spans: Mutex<Vec<(SpanId, Arc<Span>, Weak<Pend>)>>,
+    publications: Mutex<Vec<(SpanId, Arc<Pend>)>>,
+    pub(crate) withdrawn: Mutex<Vec<(SpanId, (PageOffset, PageCount), Weak<Pend>)>>,
+    pub(crate) released: Mutex<Vec<(SpanId, PageCount)>>,
 }
 pub(crate) struct Span {
+    id: SpanId,
+    pub(crate) open: Arc<AtomicBool>,
+    reservations: Arc<Mutex<Vec<(SpanId, PendStatus)>>>,
     count: PageCount,
     level: CellLevel,
-    pub(crate) open: AtomicBool,
 }
 impl Span {
+    pub(crate) fn withdraw(
+        self: &Arc<Self>,
+        nest: &Arc<Nest>,
+        window: (PageOffset, PageCount),
+        authority: &Arc<Pend>,
+    ) -> Result<(), PendFail> {
+        nest.withdraw_span(self.id, window, authority)
+    }
+    pub(crate) fn pend_status(&self, nest_open: bool) -> PendStatus {
+        let status = self
+            .reservations
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(known, _)| *known == self.id)
+            .map_or(PendStatus::Dead, |(_, status)| *status);
+        if !nest_open && status == PendStatus::Active {
+            PendStatus::Retiring
+        } else {
+            status
+        }
+    }
+    pub(crate) fn count(&self) -> Option<PageCount> {
+        Some(self.count)
+    }
     pub(crate) fn is_open(&self) -> bool {
         self.open.load(Ordering::Acquire)
+            && self
+                .reservations
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(known, _)| *known == self.id)
+                .is_some_and(|(_, status)| *status == PendStatus::Active)
     }
     pub(crate) fn range(&self, offset: PageOffset, count: PageCount) -> Result<(), ()> {
         let grain = self.level.pages().ok_or(())?;
@@ -141,25 +175,19 @@ impl Nest {
     pub(crate) fn new(id: usize) -> Arc<Self> {
         Arc::new(Self {
             id: NestId::new(id).unwrap(),
-            open: AtomicBool::new(true),
+            open: Arc::new(AtomicBool::new(true)),
             closed: AtomicBool::new(false),
             adopted: AtomicBool::new(false),
             external: AtomicBool::new(false),
             busy: AtomicBool::new(false),
-            reservations: Mutex::new(Vec::new()),
+            reservations: Arc::new(Mutex::new(Vec::new())),
             spans: Mutex::new(Vec::new()),
             publications: Mutex::new(Vec::new()),
             withdrawn: Mutex::new(Vec::new()),
             released: Mutex::new(Vec::new()),
         })
     }
-    pub(crate) fn install(
-        &self,
-        id: ReservationId,
-        count: PageCount,
-        level: CellLevel,
-        root: &Arc<Pend>,
-    ) {
+    pub(crate) fn install(&self, id: SpanId, count: PageCount, level: CellLevel, root: &Arc<Pend>) {
         self.reservations
             .lock()
             .unwrap()
@@ -167,21 +195,23 @@ impl Nest {
         self.spans.lock().unwrap().push((
             id,
             Arc::new(Span {
+                id,
+                open: self.open.clone(),
+                reservations: self.reservations.clone(),
                 count,
                 level,
-                open: AtomicBool::new(true),
             }),
             Arc::downgrade(root),
         ));
     }
-    pub(crate) fn publish(&self, id: ReservationId, publisher: &Arc<Pend>) {
+    pub(crate) fn publish(&self, id: SpanId, publisher: &Arc<Pend>) {
         publisher.retain_route().unwrap();
         self.publications
             .lock()
             .unwrap()
             .push((id, publisher.clone()));
     }
-    fn complete(&self, id: ReservationId, publisher: Option<&Arc<Pend>>) {
+    fn complete(&self, id: SpanId, publisher: Option<&Arc<Pend>>) {
         self.publications.lock().unwrap().retain(|(known, route)| {
             if *known != id || publisher.is_some_and(|publisher| !Arc::ptr_eq(route, publisher)) {
                 return true;
@@ -206,28 +236,46 @@ impl Nest {
     pub(crate) fn is_external(&self) -> bool {
         self.external.load(Ordering::Acquire)
     }
-    pub(crate) fn reservation(&self, id: ReservationId) -> Option<Arc<Span>> {
-        self.spans
+    pub(crate) fn span(&self, id: SpanId) -> Option<Arc<Span>> {
+        if let Some(span) = self
+            .spans
             .lock()
             .unwrap()
             .iter()
             .find(|(known, _, _)| *known == id)
             .map(|(_, span, _)| span.clone())
+        {
+            return Some(span);
+        }
+        self.reservations
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(known, _)| *known == id)
+            .then(|| {
+                Arc::new(Span {
+                    id,
+                    open: self.open.clone(),
+                    reservations: self.reservations.clone(),
+                    count: PageCount::new(1).unwrap(),
+                    level: CellLevel::BASE,
+                })
+            })
     }
-    pub(crate) fn reservation_count(&self, id: ReservationId) -> Option<PageCount> {
-        Some(self.reservation(id)?.count)
+    pub(crate) fn span_count(&self, id: SpanId) -> Option<PageCount> {
+        Some(self.span(id)?.count)
     }
-    pub(crate) fn reservation_root(&self, id: ReservationId, root: &Arc<Pend>) -> bool {
+    pub(crate) fn span_root(&self, id: SpanId, root: &Arc<Pend>) -> bool {
         self.spans
             .lock()
             .unwrap()
             .iter()
             .any(|(known, _, original)| *known == id && original.ptr_eq(&Arc::downgrade(root)))
     }
-    pub(crate) fn reservation_open(&self, id: ReservationId) -> bool {
-        self.is_open() && self.reservation_status(id) == PendStatus::Active
+    pub(crate) fn span_open(&self, id: SpanId) -> bool {
+        self.is_open() && self.span_status(id) == PendStatus::Active
     }
-    pub(crate) fn reservation_status(&self, id: ReservationId) -> PendStatus {
+    pub(crate) fn span_status(&self, id: SpanId) -> PendStatus {
         self.reservations
             .lock()
             .unwrap()
@@ -235,9 +283,9 @@ impl Nest {
             .find(|(known, _)| *known == id)
             .map_or(PendStatus::Dead, |(_, status)| *status)
     }
-    pub(crate) fn withdraw_reservation(
+    pub(crate) fn withdraw_span(
         &self,
-        id: ReservationId,
+        id: SpanId,
         window: (PageOffset, PageCount),
         publisher: &Arc<Pend>,
     ) -> Result<(), PendFail> {
@@ -255,8 +303,8 @@ impl Nest {
         self.complete(id, Some(publisher));
         Ok(())
     }
-    pub(crate) fn release_reservation(&self, id: ReservationId) -> Result<(), AccessError> {
-        let count = self.reservation_count(id).ok_or(AccessError::Denied)?;
+    pub(crate) fn close_span(&self, id: SpanId) -> Result<(), AccessError> {
+        let count = self.span_count(id).ok_or(AccessError::Denied)?;
         if self.busy.load(Ordering::Acquire) {
             return Err(AccessError::Busy);
         }
@@ -271,10 +319,10 @@ impl Nest {
             .1 = PendStatus::Dead;
         Ok(())
     }
-    pub(crate) fn retire_reservation(&self, raw: usize) {
+    pub(crate) fn retire_span(&self, raw: usize) {
         let removable = self.spans.lock().unwrap().iter().any(|(id, _, root)| {
             id.get() == raw
-                && self.reservation_status(*id) == PendStatus::Dead
+                && self.span_status(*id) == PendStatus::Dead
                 && root
                     .upgrade()
                     .is_none_or(|root| root.status() == PendStatus::Dead)

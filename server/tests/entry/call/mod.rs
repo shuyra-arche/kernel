@@ -15,7 +15,7 @@ use kernel_api::{
     model::{
         flat::{FlatId, SlotPosition, SlotVersion},
         identity::PendId,
-        nest::{MemoGeneration, MemoPosition, NestId, ReservationId},
+        nest::{MemoGeneration, MemoPosition, NestId, SpanId},
     },
 };
 use request::Transition;
@@ -92,7 +92,7 @@ fn request(id: u64, publish: bool) -> Request {
                 memo: MemoPosition::new(
                     PendId::mint(3),
                     NestId::new(4).unwrap(),
-                    ReservationId::from_bytes(&5u64.to_le_bytes()).unwrap(),
+                    SpanId::from_bytes(&5u64.to_le_bytes()).unwrap(),
                     0,
                 )
                 .unwrap(),

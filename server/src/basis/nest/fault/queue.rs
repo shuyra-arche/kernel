@@ -1,4 +1,4 @@
-//! Reservation-owned bounded history. A Task retains its event when terminal
+//! Span-owned bounded history. A Task retains its event when terminal
 //! history is evicted; neither reads nor duplicate faults renew its deadline.
 use crate::basis::sync::LegacyLock;
 use alloc::{sync::Arc, vec::Vec};

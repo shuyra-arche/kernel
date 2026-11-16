@@ -7,8 +7,8 @@ use kernel_api::{
     model::{
         cell::CellLevel,
         identity::PendId,
-        nest::ReservationId,
-        nest::{NestId, NestVersion, ReservationPhase, ReservationStatus, ReservationVersion},
+        nest::SpanId,
+        nest::{NestId, NestVersion, SpanPhase, SpanStatus, SpanVersion},
     },
 };
 use kernel_client::memory::{Error, Response, invoke_with};
@@ -131,28 +131,28 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
 #[test]
 fn observations_require_the_requested_mapping_and_cannot_replace_mutation_results() {
     let nest = NestId::new(19).unwrap();
-    let reservation = ReservationId::from_bytes(&23u64.to_le_bytes()).unwrap();
+    let span = SpanId::from_bytes(&23u64.to_le_bytes()).unwrap();
     let request = memory::nest::Call::new(
         None,
-        Action::Inspect(Query::Reservation {
+        Action::Inspect(Query::Span {
             token: PendId::mint(17),
             nest,
-            reservation,
+            span,
         }),
     )
     .unwrap();
-    let status = ReservationStatus {
+    let status = SpanStatus {
         nest,
-        reservation,
-        version: ReservationVersion::INITIAL,
+        span,
+        version: SpanVersion::INITIAL,
         offset: 0,
         count: 1,
         address: VirtAddr::new(4096),
         level: CellLevel::BASE,
         access: 2,
-        phase: ReservationPhase::Open,
+        phase: SpanPhase::Open,
     };
-    let observation = Observation::new(Snapshot::Reservation(status)).unwrap();
+    let observation = Observation::new(Snapshot::Span(status)).unwrap();
     assert_eq!(
         invoke_with(request, |_, _, out| {
             *out = observation.to_bytes();
@@ -167,7 +167,7 @@ fn observations_require_the_requested_mapping_and_cannot_replace_mutation_result
         }),
         Err(Error::Protocol)
     );
-    let wrong = Observation::new(Snapshot::Reservation(ReservationStatus {
+    let wrong = Observation::new(Snapshot::Span(SpanStatus {
         nest: NestId::new(20).unwrap(),
         ..status
     }))

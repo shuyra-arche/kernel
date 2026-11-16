@@ -158,7 +158,7 @@ fn prepare(
         let _commit = crate::basis::commit();
         pend::access::license(sender, license, CreationRights::SHARE).map_err(failure)?;
     }
-    let route = pend::access::Reservation::acquire(
+    let route = pend::access::SpanRoute::acquire(
         sender,
         request.src,
         NestRights::INSPECT | NestRights::SAMPLE,
@@ -176,8 +176,8 @@ fn prepare(
     } else {
         request.mark
     };
-    let generation = nest
-        .inspect_logical(&span, page)
+    let generation = span
+        .inspect(page)
         .map_err(|_| Failure::Busy)?
         .generation
         .get();
@@ -407,7 +407,7 @@ impl Subscription {
             sequence,
             epoch: snapshot.epoch,
             nest: self.nest.id().get() as u64,
-            reservation: self.span.identity() as u64,
+            span: self.span.identity() as u64,
             position: self.page as u64,
             generation: self.identity.generation,
             page: self.identity.page as u64,

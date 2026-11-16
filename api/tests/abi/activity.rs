@@ -4,7 +4,7 @@ fn sample(sequence: u64) -> Sample {
         sequence,
         epoch: 2,
         nest: 1,
-        reservation: 1,
+        span: 1,
         position: 0,
         generation: 3,
         page: 4,

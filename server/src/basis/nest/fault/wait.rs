@@ -61,11 +61,9 @@ impl Cpu {
         {
             return Err(Failure::Denied);
         }
-        let memo = nest
-            .inspect_logical(&span, page)
-            .map_err(|_| Failure::Denied)?;
-        let source = nest
-            .logical_source(&span, page, memo.generation.get())
+        let memo = span.inspect(page).map_err(|_| Failure::Denied)?;
+        let source = span
+            .logical_source(page, memo.generation.get())
             .map_err(|_| Failure::Stale)?
             .ok_or(Failure::SourceEmpty)?;
         let range = source.check(need).map_err(|_| Failure::Denied)?;
@@ -95,7 +93,7 @@ impl Cpu {
                 .ok_or(Failure::VersionExhausted)?;
             let wire = FaultEvent {
                 nest: nest.id(),
-                reservation: memo.reservation,
+                span: memo.span,
                 epoch: state.epoch,
                 sequence: FaultSequence::new(1).unwrap(),
                 memo_page: page,
@@ -150,15 +148,15 @@ impl Cpu {
         };
         let wire = self.event.wire;
         let memo = self
-            .nest
-            .inspect_logical(&self.span, wire.memo_page)
+            .span
+            .inspect(wire.memo_page)
             .map_err(|_| Failure::Stale)?;
         if memo.generation != wire.generation && Some(memo.generation) != publication {
             return Err(Failure::Stale);
         }
         let source = self
-            .nest
-            .logical_source(&self.span, wire.memo_page, memo.generation.get())
+            .span
+            .logical_source(wire.memo_page, memo.generation.get())
             .map_err(|_| Failure::Stale)?
             .ok_or(Failure::Stale)?;
         let range = source
@@ -171,11 +169,11 @@ impl Cpu {
             return Ok(false);
         }
         let principal = self
-            .nest
+            .span
             .state
             .lock()
             .memos
-            .get(&self.span, wire.memo_page)
+            .get(wire.memo_page)
             .and_then(|memo| memo.principal())
             .ok_or(Failure::Denied)?;
         principal
@@ -188,8 +186,8 @@ impl Cpu {
         source.admit_provenance(None).map_err(|_| Failure::Denied)?;
         // The page and current logical selection must still be the published one.
         let page = self
-            .nest
-            .memo_page(&self.span, wire.memo_page)
+            .span
+            .memo_page(wire.memo_page)
             .map_err(|_| Failure::Stale)?
             .ok_or(Failure::Stale)?;
         source.same_page(&page).map_err(|_| Failure::Stale)?;

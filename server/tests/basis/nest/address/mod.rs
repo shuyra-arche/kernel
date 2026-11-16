@@ -4,6 +4,7 @@ extern crate alloc;
 #[path = "../../../../src/basis/name/mod.rs"]
 mod name;
 
+mod active;
 #[path = "../../name/allocation.rs"]
 mod allocation;
 
@@ -12,6 +13,39 @@ mod basis {
     pub(crate) mod nest {
         #[allow(dead_code)]
         pub struct Nest;
+        #[allow(dead_code)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(crate) enum NestError {
+            OutOfMemory,
+            NotAligned,
+            NoRegion,
+        }
+    }
+}
+
+mod metal {
+    pub(crate) mod generic {
+        pub(crate) mod mmu {
+            pub(crate) mod internal {
+                #[derive(Clone, Copy)]
+                pub(crate) struct Attributes(pub(crate) u64);
+                impl Attributes {
+                    pub(crate) fn from_bits_truncate(bits: u64) -> Self {
+                        Self(bits)
+                    }
+                    pub(crate) fn bits(self) -> u64 {
+                        self.0
+                    }
+                }
+            }
+        }
+    }
+    pub(crate) mod mmu {
+        pub(crate) mod internal {
+            pub(crate) fn canonical(address: usize) -> kernel_api::address::VirtAddr {
+                kernel_api::address::VirtAddr::new(address)
+            }
+        }
     }
 }
 
@@ -209,4 +243,137 @@ fn gap_selection_uses_no_scratch_allocation_and_keeps_retired_ranges() {
             .0,
         0x1000
     );
+}
+
+#[test]
+fn partial_release_keeps_generation_on_both_sides_and_frees_a_reusable_hole() {
+    let mut layout = Layout::new();
+    let page = 4096;
+    let placement = Placement::fixed(VirtAddr::new(0x10000), 3 * page).unwrap();
+    let (start, generation) = layout.reserve(placement).unwrap();
+    assert!(
+        layout
+            .occupancy
+            .release_range(start + page, start + 2 * page - 1, generation)
+    );
+    assert!(layout.occupancy.has_id(generation));
+
+    let hole = Placement::fixed(VirtAddr::new(start + page), page).unwrap();
+    let (middle, replacement) = layout.reserve(hole).unwrap();
+    assert_eq!(middle, start + page);
+    assert_ne!(replacement, generation);
+    assert!(
+        layout
+            .reserve(Placement::fixed(VirtAddr::new(start), page).unwrap())
+            .is_err()
+    );
+    assert!(
+        layout
+            .reserve(Placement::fixed(VirtAddr::new(start + 2 * page), page).unwrap())
+            .is_err()
+    );
+
+    assert!(
+        layout
+            .occupancy
+            .release_range(start, start + page - 1, generation)
+    );
+    assert!(
+        layout
+            .occupancy
+            .release_range(start + 2 * page, start + 3 * page - 1, generation)
+    );
+    assert!(!layout.occupancy.has_id(generation));
+    assert!(layout.occupancy.has_id(replacement));
+    assert!(
+        layout
+            .occupancy
+            .release(middle, middle + page - 1, replacement)
+    );
+}
+
+#[test]
+fn partial_release_fails_closed_when_the_generation_does_not_own_every_page() {
+    let mut layout = Layout::new();
+    let page = 4096;
+    let left = Placement::fixed(VirtAddr::new(0x20000), page).unwrap();
+    let right = Placement::fixed(VirtAddr::new(0x21000), page).unwrap();
+    let (left_address, left_generation) = layout.reserve(left).unwrap();
+    let (right_address, right_generation) = layout.reserve(right).unwrap();
+    assert_eq!(left_address, 0x20000);
+    assert_eq!(right_address, 0x21000);
+
+    assert!(!layout.occupancy.release_range(
+        left_address,
+        right_address + page - 1,
+        left_generation,
+    ));
+    assert!(layout.occupancy.has_id(left_generation));
+    assert!(layout.occupancy.has_id(right_generation));
+    assert!(
+        !layout
+            .occupancy
+            .release_range(left_address, right_address, left_generation)
+    );
+    assert!(layout.occupancy.has_id(left_generation));
+    assert!(
+        layout
+            .occupancy
+            .release_range(left_address, left_address + page - 1, left_generation)
+    );
+    assert!(!layout.occupancy.has_id(left_generation));
+    assert!(
+        layout
+            .occupancy
+            .release(right_address, right_address + page - 1, right_generation)
+    );
+}
+
+#[test]
+fn partial_release_waits_for_the_retirement_ticket_to_settle() {
+    let mut layout = Layout::new();
+    let page = 4096;
+    let placement = Placement::fixed(VirtAddr::new(0x30000), page).unwrap();
+    let (start, generation) = layout.reserve(placement).unwrap();
+    let prepared = layout
+        .occupancy
+        .prepare_retirement(start, start + page - 1, generation)
+        .unwrap();
+    let ticket = layout.occupancy.retire(prepared)[0].2;
+    assert!(
+        !layout
+            .occupancy
+            .release_range(start, start + page - 1, generation)
+    );
+    assert!(layout.occupancy.has_id(generation));
+    layout.occupancy.reclaim(ticket);
+    assert!(!layout.occupancy.has_id(generation));
+    let (reused, replacement) = layout.reserve(placement).unwrap();
+    assert_eq!(reused, start);
+    assert_ne!(replacement, generation);
+}
+
+#[test]
+fn partial_release_rejects_unaligned_windows() {
+    let mut layout = Layout::new();
+    let page = 4096;
+    let placement = Placement::fixed(VirtAddr::new(0x60000), page).unwrap();
+    let (start, generation) = layout.reserve(placement).unwrap();
+    assert!(
+        !layout
+            .occupancy
+            .release_range(start + 1, start + page - 1, generation)
+    );
+    assert!(
+        !layout
+            .occupancy
+            .release_range(start, start + page - 2, generation)
+    );
+    assert!(layout.occupancy.has_id(generation));
+    assert!(
+        layout
+            .occupancy
+            .release_range(start, start + page - 1, generation)
+    );
+    assert!(!layout.occupancy.has_id(generation));
 }

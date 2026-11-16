@@ -1,12 +1,12 @@
-//! A Pend's object or page window. Reservation identities describe a scope, not authority.
+//! A Pend's object or page window. Span identities describe a scope, not authority.
 
 use super::PendRange;
-use crate::model::nest::ReservationId;
+use crate::model::nest::SpanId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NestScope {
     Whole,
-    Reservation { id: ReservationId, range: PendRange },
+    Span { id: SpanId, range: PendRange },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,7 +21,7 @@ impl PendScope {
 
     pub const fn range(self) -> Option<PendRange> {
         match self {
-            Self::Pages(range) | Self::Nest(NestScope::Reservation { range, .. }) => Some(range),
+            Self::Pages(range) | Self::Nest(NestScope::Span { range, .. }) => Some(range),
             Self::Object | Self::Nest(NestScope::Whole) => None,
         }
     }
@@ -31,7 +31,7 @@ impl PendScope {
             Self::Object => return [0; Self::WORDS],
             Self::Pages(range) => (1, 0, range),
             Self::Nest(NestScope::Whole) => return [2, 0, 0, 0, 0],
-            Self::Nest(NestScope::Reservation { id, range }) => (3, id.get(), range),
+            Self::Nest(NestScope::Span { id, range }) => (3, id.get(), range),
         };
         let [range_tag, offset, count] = range.words();
         [tag, id, range_tag, offset, count]
@@ -43,8 +43,8 @@ impl PendScope {
             [1, 0, tag, offset, count] => Some(Self::Pages(PendRange::of([tag, offset, count])?)),
             [2, 0, 0, 0, 0] => Some(Self::Nest(NestScope::Whole)),
             [3, id, tag, offset, count] if id != 0 && id <= isize::MAX as usize => {
-                Some(Self::Nest(NestScope::Reservation {
-                    id: ReservationId::new(id),
+                Some(Self::Nest(NestScope::Span {
+                    id: SpanId::new(id),
                     range: PendRange::of([tag, offset, count])?,
                 }))
             }
@@ -58,8 +58,8 @@ impl PendScope {
             | (Self::Pages(_), Self::Pages(_))
             | (Self::Nest(NestScope::Whole), Self::Nest(NestScope::Whole)) => true,
             (
-                Self::Nest(NestScope::Reservation { id, .. }),
-                Self::Nest(NestScope::Reservation { id: other, .. }),
+                Self::Nest(NestScope::Span { id, .. }),
+                Self::Nest(NestScope::Span { id: other, .. }),
             ) => id == other,
             _ => false,
         }

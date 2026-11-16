@@ -7,9 +7,9 @@ retirement ledger is introduced.
 
 | Owner | Preparation / failure | Infallible commit | Settlement |
 | --- | --- | --- | --- |
-| Layout / Occupancy | Validate exact Reservation generation and complete interval coverage; reserve every cut and the entire non-reusing ticket-ID batch. Failure changes no occupancy. Abandoning preparation can consume unused IDs. | Cut live intervals into retired intervals using reserved IDs. Existing overlapping tickets keep their identity. | Reclaim only tickets claimed from the settled prefix. |
-| NestState / CPU table | Prepare equivalent page-table geometry and reserve retired-table storage. Failure does not withdraw a translation. | Clear prepared PTEs and retain emptied table pages. | Covering CPU proof releases tables outside the Nest lock. |
-| Memos / Publication | Count affected publications and reserve retained-publication capacity. | Remove publications into Retirement; exact Page instances remain retained and retired. Logical associations have their own lifecycle. | The exact covering proof settles physical publication responsibility. |
+| Layout / Occupancy | Validate exact Span generation and complete interval coverage; reserve every cut and the entire non-reusing ticket-ID batch. Failure changes no occupancy. Abandoning preparation can consume unused IDs. | Cut live intervals into retired intervals using reserved IDs. Existing overlapping tickets keep their identity. | Reclaim only tickets claimed from the settled prefix. |
+| Translation / CPU table | Prepare equivalent page-table geometry and reserve retired-table storage. Failure does not withdraw a translation. | Clear prepared PTEs and retain emptied table pages. | Covering CPU proof releases tables outside the Nest lock. |
+| Span Memos / Publication | Count affected publications and reserve retained-publication capacity in the owning Span. | Remove publications into Retirement; exact Page instances remain retained and retired. Logical associations have their own lifecycle. | The exact covering proof settles physical publication responsibility. |
 | Span / Index | Prepare remaining ActiveRanges and replacement index node. | Replace active ranges and index node while holding Nest and Span locks. | A retained Span cannot disappear before its publications settle. |
 | Retirement | Reserve retained Span and ticket capacity. | Retain resources/tickets and include required global coverage in Dirty. | Match domain instance, attempt, ASID and coverage before making tickets claimable and releasing resources. |
 
@@ -101,10 +101,10 @@ in a preallocated release batch. A different invalidation starting before these
 releases cannot strand the first batch's Memo in Retracting. Allocation failure
 before this transition preserves the complete original batch for retry.
 Release capacity counts only hardware states covered by this batch, rather than
-every coordinate of a large Reservation for each single-page publication.
-Reservation Release likewise checks its own retained mappings and Memo resources;
-a newer fence for another Reservation cannot turn already completed retirement
-into an accepted Busy failure. A batch still retaining this Reservation continues
+every coordinate of a large Span for each single-page publication.
+Span deletion likewise checks its own retained mappings and Memo resources;
+a newer fence for another Span cannot turn already completed retirement
+into an accepted Busy failure. A batch still retaining this Span continues
 to prevent release, including its detached tables and address tickets.
 
 Responders allocate nothing and take no locks. They run at trap entry/return,
