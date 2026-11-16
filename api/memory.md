@@ -33,7 +33,8 @@ SlotPosition / MemoPosition with independent versions. Flat owns Occupy/Vacate,
 Push/Pull, Split/Merge and Block/Allow. Nest owns association, publication and
 Span FaultRoute. `SpanId`, `SpanVersion` and `SpanStatus` name the occupied
 address span; `CreateSpanRequest` and `Action::CreateSpan`/`DeleteSpan` create
-and delete it. ABI 13 and older calls, Ledger entries and Capsules reject. Versioned RequestIds and a bounded journal report
+and delete it. `Action::ReleaseRange` releases a page-aligned subrange while
+keeping the Span open; see [ReleaseRange](../docs/release-range.md). ABI 13 and older calls, Ledger entries and Capsules reject. Versioned RequestIds and a bounded journal report
 Rejected/Pending/Committed/Failed outcomes and checked observations.
 
 No Cargo feature selects the ABI. Calls, memory descriptors, Ledger and Capsule
