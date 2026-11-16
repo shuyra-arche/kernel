@@ -52,7 +52,7 @@ use index::source;
 pub(crate) use memo::publication::Error as PublicationError;
 use memo::publication::Publication;
 
-use translation::NestState;
+use translation::TranslationState;
 
 /// 待清理链条上的一环：一笔已经消费、但还没收尾的关系。
 ///
@@ -229,7 +229,7 @@ impl Nest {
             spans: authority::SpanIndex::new(),
             address: LegacyLock::new(AddressState::new(layout)),
             pending_cleanup: LegacyLock::new(None),
-            state: ManuallyDrop::new(Translation::new(NestState::new(root))?),
+            state: ManuallyDrop::new(Translation::new(TranslationState::new(root))?),
         })
         .map_err(|_| NestError::OutOfMemory)?;
         nest.cpu
@@ -241,7 +241,7 @@ impl Nest {
     }
 
     /// 尚未发布的事务只在这些阶段可见：Clean 且未关闭。
-    fn ready_state(&self) -> Result<LegacyGuard<'_, NestState>, NestError> {
+    fn ready_state(&self) -> Result<LegacyGuard<'_, TranslationState>, NestError> {
         // One covering fence per turn. A peer may dirty a new batch before the
         // final lock acquisition; admission then returns Busy for continuation.
         for turn in 0..2 {
@@ -1680,7 +1680,11 @@ impl Nest {
     }
 
     /// 选择的所属与阶段：认住它的那个 Nest，且没有关闭。
-    fn ensure_owned(&self, mapping: &Arc<Span>, _state: &NestState) -> Result<(), NestError> {
+    fn ensure_owned(
+        &self,
+        mapping: &Arc<Span>,
+        _state: &TranslationState,
+    ) -> Result<(), NestError> {
         if !self.admission.is_open() || !mapping.identity.belongs_to(self.id) {
             return Err(NestError::NoRegion);
         }

@@ -1,7 +1,7 @@
 mod state;
 use super::super::memo::Publisher;
 use super::super::{Nest, NestError, Span};
-use super::{ClosePhase, NestState, Storage};
+use super::{ClosePhase, Storage, TranslationState};
 use crate::basis::cell::page::{Change, Page};
 use crate::basis::nest::PublicationError as Error;
 use crate::basis::pend::ExternalBorrow;
@@ -12,7 +12,7 @@ use alloc::sync::Arc;
 use core::mem::ManuallyDrop;
 pub(super) use state::External;
 
-impl NestState {
+impl TranslationState {
     fn external() -> Self {
         Self {
             root: Storage::External(External::new()),
@@ -48,7 +48,7 @@ impl Nest {
                 super::super::address::Layout::new(),
             )),
             pending_cleanup: LegacyLock::new(None),
-            state: ManuallyDrop::new(super::Translation::new(NestState::external())?),
+            state: ManuallyDrop::new(super::Translation::new(TranslationState::external())?),
         })
         .map_err(|_| NestError::OutOfMemory)
     }

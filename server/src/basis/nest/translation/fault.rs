@@ -5,7 +5,7 @@ use crate::metal::generic::mmu::internal::PageTable;
 use crate::metal::mmu::internal::Geometry;
 
 use super::super::Access;
-use super::NestState;
+use super::TranslationState;
 
 use crate::metal::generic::trap::FaultKind;
 
@@ -50,7 +50,7 @@ pub enum FaultOutcome {
 
 impl FaultOutcome {
     pub(in crate::basis::nest) fn probe(
-        state: &NestState,
+        state: &TranslationState,
         index: &super::super::index::Index,
         geometry: Geometry,
         address: VirtAddr,

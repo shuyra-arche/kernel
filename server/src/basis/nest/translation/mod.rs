@@ -42,29 +42,29 @@ use crate::basis::sync::{LegacyGuard, LegacyLock};
 /// The shared hardware-translation owner. Address organization is separate, so
 /// a Span can hold this without Translation retaining the Span.
 pub(crate) struct Translation {
-    state: LegacyLock<crate::basis::sync::order::Nest, NestState>,
+    state: LegacyLock<crate::basis::sync::order::Nest, TranslationState>,
 }
 
 impl Translation {
-    pub(crate) fn new(state: NestState) -> Result<Arc<Self>, NestError> {
+    pub(crate) fn new(state: TranslationState) -> Result<Arc<Self>, NestError> {
         Arc::try_new(Self {
             state: LegacyLock::new(state),
         })
         .map_err(|_| NestError::OutOfMemory)
     }
 
-    pub(crate) fn lock(&self) -> LegacyGuard<'_, NestState> {
+    pub(crate) fn lock(&self) -> LegacyGuard<'_, TranslationState> {
         self.state.lock()
     }
 }
 
-pub(super) struct NestState {
+pub(super) struct TranslationState {
     pub(super) root: Storage,
     pub(super) retirement: Retirement,
     pub(super) phase: ClosePhase,
 }
 
-impl NestState {
+impl TranslationState {
     /// 新地址空间：根页表已建，无关系、无待失效资源。
     pub(super) fn new(root: Table) -> Self {
         Self {
