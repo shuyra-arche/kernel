@@ -56,7 +56,8 @@ impl PreparedSpan {
         root: &Arc<crate::basis::pend::Pend>,
     ) -> Result<Arc<Span>, super::super::NestError> {
         use kernel_api::model::pend::{NestScope, PendScope};
-        let mut state = self.nest.state.lock();
+        let mut address = self.nest.address.lock();
+        let state = self.nest.state.lock();
         if !state.is_open()
             || !root.alive()
             || root.window()
@@ -75,7 +76,7 @@ impl PreparedSpan {
         if self.nest.is_external() && self.nest.spans.competing_span(self.creator) {
             return Err(super::super::NestError::Busy);
         }
-        if state
+        if address
             .index
             .first_overlap(self.span.initial_start().get(), self.span.range.last())
             .is_some()
@@ -92,7 +93,7 @@ impl PreparedSpan {
             self.creator,
             root,
         );
-        state
+        address
             .index
             .insert(self.node.take().expect("prepared address index"));
         self.prepared = false;
