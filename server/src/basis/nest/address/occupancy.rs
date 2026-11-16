@@ -89,7 +89,7 @@ impl Occupancy {
         &mut self,
         start: usize,
         last: usize,
-        reservation_id: usize,
+        generation: usize,
         left_size: usize,
     ) -> Result<(usize, usize, usize), AddressError> {
         let size = last - start + 1;
@@ -107,7 +107,7 @@ impl Occupancy {
                 slot.start == start
                     && slot.last == last
                     && slot.ticket == 0
-                    && slot.id == reservation_id
+                    && slot.id == generation
             })
             .ok_or(AddressError::NoRegion)?;
         self.spans
@@ -135,12 +135,9 @@ impl Occupancy {
     }
 
     /// 交还一段占用：generation 与端点都要对上，旧凭证不会释放新占用。
-    pub(crate) fn release(&mut self, start: usize, last: usize, reservation_id: usize) -> bool {
+    pub(crate) fn release(&mut self, start: usize, last: usize, generation: usize) -> bool {
         match self.spans.iter().position(|slot| {
-            slot.start == start
-                && slot.last == last
-                && slot.ticket == 0
-                && slot.id == reservation_id
+            slot.start == start && slot.last == last && slot.ticket == 0 && slot.id == generation
         }) {
             Some(at) => {
                 self.spans.remove(at);
@@ -153,20 +150,12 @@ impl Occupancy {
     /// Release a page-aligned subrange of one exact occupancy generation.
     /// The remaining left/right pieces keep the same generation identity, so a
     /// stale credential cannot release a newer occupant.
-    pub(crate) fn release_range(
-        &mut self,
-        start: usize,
-        last: usize,
-        reservation_id: usize,
-    ) -> bool {
+    pub(crate) fn release_range(&mut self, start: usize, last: usize, generation: usize) -> bool {
         if start > last {
             return false;
         }
         let Some(at) = self.spans.iter().position(|slot| {
-            slot.start <= start
-                && slot.last >= last
-                && slot.id == reservation_id
-                && slot.ticket == 0
+            slot.start <= start && slot.last >= last && slot.id == generation && slot.ticket == 0
         }) else {
             return false;
         };
@@ -191,7 +180,7 @@ impl Occupancy {
             start: last + 1,
             last: whole_last,
             ticket: 0,
-            id: reservation_id,
+            id: generation,
         };
         self.spans[at].last = start - 1;
         self.spans.insert(at + 1, right);
@@ -211,7 +200,7 @@ impl Occupancy {
         &self,
         start: usize,
         last: usize,
-        reservation_id: usize,
+        generation: usize,
     ) -> Result<Vec<(usize, usize, usize)>, AddressError> {
         let mut pieces = Vec::new();
         pieces
@@ -225,7 +214,7 @@ impl Occupancy {
             if slot.start > last {
                 break;
             }
-            if slot.id != reservation_id || slot.start > at {
+            if slot.id != generation || slot.start > at {
                 return Err(AddressError::NoRegion);
             }
             let hi = slot.last.min(last);
@@ -241,7 +230,7 @@ impl Occupancy {
     /// 该 generation 名下仍在退休中的跨度（含票），按地址升序。
     pub(crate) fn retired_of(
         &self,
-        reservation_id: usize,
+        generation: usize,
     ) -> Result<Vec<(usize, usize, usize)>, AddressError> {
         let mut retired = Vec::new();
         retired
@@ -250,7 +239,7 @@ impl Occupancy {
         retired.extend(
             self.spans
                 .iter()
-                .filter(|slot| slot.id == reservation_id && slot.ticket != 0)
+                .filter(|slot| slot.id == generation && slot.ticket != 0)
                 .map(|slot| (slot.start, slot.last, slot.ticket)),
         );
         Ok(retired)
@@ -302,15 +291,11 @@ impl Occupancy {
     }
 
     /// Occupancy remains reserved until the exact ticket settles.
-    fn retire_piece(&mut self, start: usize, last: usize, reservation_id: usize, ticket: usize) {
+    fn retire_piece(&mut self, start: usize, last: usize, generation: usize, ticket: usize) {
         let mut i = 0;
         while i < self.spans.len() {
             let slot = self.spans[i];
-            if slot.ticket != 0
-                || slot.id != reservation_id
-                || start > slot.last
-                || last < slot.start
-            {
+            if slot.ticket != 0 || slot.id != generation || start > slot.last || last < slot.start {
                 i += 1;
                 continue;
             }
