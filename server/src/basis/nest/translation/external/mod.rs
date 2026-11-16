@@ -45,6 +45,7 @@ impl Nest {
             revision: core::sync::atomic::AtomicU64::new(1),
             cpu: None,
             life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
+            admission: super::super::admission::Admission::new()?,
             spans: super::super::authority::SpanIndex::new(),
             layout: LegacyLock::new(Layout::new()),
             pending_cleanup: LegacyLock::new(None),
@@ -235,6 +236,8 @@ impl Nest {
             return Err(NestError::Busy);
         }
         state.phase = ClosePhase::Closed;
+        drop(state);
+        self.admission.closed();
         Ok(())
     }
     pub(crate) fn external_settled(&self) -> bool {

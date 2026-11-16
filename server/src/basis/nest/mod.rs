@@ -5,6 +5,7 @@
 mod access;
 pub(crate) mod activity;
 pub(crate) mod address;
+mod admission;
 pub(crate) mod authority;
 mod error;
 pub(crate) mod index;
@@ -45,6 +46,7 @@ pub(crate) mod fault;
 use address::Layout;
 pub(crate) use address::NestRange;
 pub(crate) use address::{Placement, PlacementAt, RegionKind};
+use admission::Admission;
 
 use index::IndexNode;
 use index::source;
@@ -73,8 +75,8 @@ impl CleanupNode {
 
 /// 一个地址组织：身份、翻译后端、全局占用、关系与同步退休。
 ///
-/// Nest owns each Memo and its publication. Address spans describe source
-/// selection and permissions; the index never duplicates per-position state.
+/// Nest owns admission, address organization and the translation; each Span
+/// owns its Memos and the index never duplicates per-position state.
 pub use kernel_api::model::nest::NestId;
 fn next_id() -> Result<NestId, NestError> {
     static NEXT: crate::basis::name::Serial =
@@ -94,6 +96,7 @@ pub struct Nest {
     revision: core::sync::atomic::AtomicU64,
     cpu: Option<CpuContext>,
     life: Arc<Anchor>,
+    admission: Arc<Admission>,
     pub(crate) spans: authority::SpanIndex,
     layout: LegacyLock<crate::basis::sync::order::Address, Layout>,
     pending_cleanup: LegacyLock<crate::basis::sync::order::Cleanup, Option<Box<CleanupNode>>>,
@@ -144,6 +147,7 @@ impl Nest {
         if !self.is_external() && (self.is_adopted() || self.asid().is_kernel()) {
             return Err(NestError::Pinned);
         }
+        self.admission.close();
         let mut state = self.state.lock();
         if state.phase.is_open() {
             self.version().next().ok_or(NestError::OutOfMemory)?;
@@ -221,6 +225,7 @@ impl Nest {
             revision: core::sync::atomic::AtomicU64::new(1),
             cpu: Some(CpuContext { domain, kind }),
             life,
+            admission: Admission::new()?,
             spans: authority::SpanIndex::new(),
             layout: LegacyLock::new(layout),
             pending_cleanup: LegacyLock::new(None),
@@ -241,7 +246,7 @@ impl Nest {
         // final lock acquisition; admission then returns Busy for continuation.
         for turn in 0..2 {
             let state = self.state.lock();
-            if !state.phase.is_open() {
+            if !self.admission.is_open() || !state.phase.is_open() {
                 return Err(NestError::NoRegion);
             }
             match state.retirement.invalidation() {
@@ -271,7 +276,7 @@ impl Nest {
     }
 
     pub(crate) fn is_open(&self) -> bool {
-        self.state.lock().is_open()
+        self.admission.is_open()
     }
 
     pub(crate) fn is_adopted(&self) -> bool {
@@ -2797,6 +2802,7 @@ impl Nest {
             let state = self.state.lock();
             if state.phase.is_closed() {
                 drop(state);
+                self.admission.closed();
                 self.drain_closed();
                 return Ok(());
             }
@@ -2816,6 +2822,7 @@ impl Nest {
         self.finish_invalidation()?;
         self.drain_closed();
         if self.is_closed() {
+            self.admission.closed();
             Ok(())
         } else {
             Err(NestError::Busy)
@@ -2887,8 +2894,8 @@ impl Nest {
     }
 
     /// 选择的所属与阶段：认住它的那个 Nest，且没有关闭。
-    fn ensure_owned(&self, mapping: &Arc<Span>, state: &NestState) -> Result<(), NestError> {
-        if state.phase.is_closed() || !mapping.identity.belongs_to(self.id) {
+    fn ensure_owned(&self, mapping: &Arc<Span>, _state: &NestState) -> Result<(), NestError> {
+        if !self.admission.is_open() || !mapping.identity.belongs_to(self.id) {
             return Err(NestError::NoRegion);
         }
         Ok(())
