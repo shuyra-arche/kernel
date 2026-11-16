@@ -1331,3 +1331,17 @@ impl Span {
         nest.finish_invalidation()
     }
 }
+
+impl Span {
+    /// Pend-visible lifecycle. Nest supplies its admission state so a closing
+    /// space retires even while the Span's own phase is still Open.
+    pub(crate) fn pend_status(&self, nest_open: bool) -> kernel_api::model::pend::PendStatus {
+        use super::SpanPhase;
+        use kernel_api::model::pend::PendStatus;
+        match self.state.lock().phase {
+            SpanPhase::Open if nest_open => PendStatus::Active,
+            SpanPhase::Open | SpanPhase::Closing => PendStatus::Retiring,
+            SpanPhase::Gone => PendStatus::Dead,
+        }
+    }
+}

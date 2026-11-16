@@ -315,13 +315,10 @@ impl Nest {
         &self,
         id: kernel_api::model::nest::SpanId,
     ) -> kernel_api::model::pend::PendStatus {
-        use address::span::SpanPhase;
-        use kernel_api::model::pend::PendStatus;
-        match self.span(id).map(|mapping| mapping.state.lock().phase) {
-            Some(SpanPhase::Open) if self.is_open() => PendStatus::Active,
-            Some(SpanPhase::Open | SpanPhase::Closing) => PendStatus::Retiring,
-            Some(SpanPhase::Gone) | None => PendStatus::Dead,
-        }
+        self.span(id)
+            .map_or(kernel_api::model::pend::PendStatus::Dead, |span| {
+                span.pend_status(self.is_open())
+            })
     }
 
     pub(crate) fn span_root(
