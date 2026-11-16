@@ -107,7 +107,7 @@ pub struct Span {
     pub(in crate::basis::nest) translation: Arc<super::super::translation::Translation>,
     pub(crate) range: SpanRange,
     pub(crate) attrs: Attributes,
-    pub(crate) state: LegacyLock<crate::basis::sync::order::Reservation, SpanState>,
+    pub(crate) state: LegacyLock<crate::basis::sync::order::Span, SpanState>,
     operation: core::sync::atomic::AtomicBool,
     revision: core::sync::atomic::AtomicU64,
     /// Weak discovery of sources exported through this span. Live permission
