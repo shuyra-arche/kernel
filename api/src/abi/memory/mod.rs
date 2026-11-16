@@ -83,6 +83,7 @@ impl Domain {
 
 pub mod flat {
     pub use super::call::flat::Call;
+    pub use super::request::flat::Action;
     /// Flat-domain operation slots. The wire domain is still carried by the
     /// shared envelope; these are not mixed with Nest operations.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,6 +122,7 @@ pub mod flat {
 
 pub mod nest {
     pub use super::call::nest::Call;
+    pub use super::request::nest::Action;
     /// Nest-domain operation slots. Reserve/Release name address occupancy and
     /// range release; the internal Span is not a public operation handle.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

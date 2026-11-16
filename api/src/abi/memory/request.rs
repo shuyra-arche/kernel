@@ -873,3 +873,551 @@ fn read_maintenance(input: &mut Reader<'_>) -> Option<Option<Maintenance>> {
         _ => return None,
     })
 }
+
+/// Flat-domain operations. This is the public Flat contract; the shared
+/// envelope adds only the RequestId and wire framing.
+pub mod flat {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Action {
+        Create {
+            license: PendId,
+            count: usize,
+            level: CellLevel,
+        },
+        Delete {
+            token: PendId,
+            flat: FlatId,
+            expected: FlatVersion,
+        },
+        Inspect(Query),
+        InspectResult {
+            request: RequestId,
+        },
+        Occupy {
+            slot: SlotPosition,
+            expected: SlotVersion,
+        },
+        Vacate {
+            slot: SlotPosition,
+            expected: SlotVersion,
+            maintenance: Maintenance,
+        },
+        Block {
+            start: SlotPosition,
+            count: usize,
+            recover: Option<BlockRef>,
+        },
+        Allow {
+            maintenance: Maintenance,
+        },
+        Push {
+            local: SlotPosition,
+            local_version: SlotVersion,
+            remote: SlotPosition,
+            remote_version: SlotVersion,
+            maintenance: Option<Maintenance>,
+        },
+        Pull {
+            local: SlotPosition,
+            local_version: SlotVersion,
+            remote: SlotPosition,
+            remote_version: SlotVersion,
+            maintenance: Option<Maintenance>,
+        },
+        Split {
+            start: SlotPosition,
+            expected: FlatVersion,
+            parent: CellLevel,
+            maintenance: Maintenance,
+        },
+        Merge {
+            start: SlotPosition,
+            expected: FlatVersion,
+            parent: CellLevel,
+            maintenance: Maintenance,
+        },
+    }
+
+    impl TryFrom<super::Action> for Action {
+        type Error = ();
+
+        fn try_from(action: super::Action) -> Result<Self, Self::Error> {
+            Ok(match action {
+                super::Action::CreateFlat {
+                    license,
+                    count,
+                    level,
+                } => Self::Create {
+                    license,
+                    count,
+                    level,
+                },
+                super::Action::DeleteFlat {
+                    token,
+                    flat,
+                    expected,
+                } => Self::Delete {
+                    token,
+                    flat,
+                    expected,
+                },
+                super::Action::Inspect(query) => Self::Inspect(query),
+                super::Action::InspectResult {
+                    domain: Domain::Flat,
+                    request,
+                } => Self::InspectResult { request },
+                super::Action::Occupy { slot, expected } => Self::Occupy { slot, expected },
+                super::Action::Vacate {
+                    slot,
+                    expected,
+                    maintenance,
+                } => Self::Vacate {
+                    slot,
+                    expected,
+                    maintenance,
+                },
+                super::Action::Block {
+                    start,
+                    count,
+                    recover,
+                } => Self::Block {
+                    start,
+                    count,
+                    recover,
+                },
+                super::Action::Allow { maintenance } => Self::Allow { maintenance },
+                super::Action::Push {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                } => Self::Push {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                },
+                super::Action::Pull {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                } => Self::Pull {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                },
+                super::Action::Split {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                } => Self::Split {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                },
+                super::Action::Merge {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                } => Self::Merge {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                },
+                _ => return Err(()),
+            })
+        }
+    }
+
+    impl From<Action> for super::Action {
+        fn from(action: Action) -> Self {
+            match action {
+                Action::Create {
+                    license,
+                    count,
+                    level,
+                } => Self::CreateFlat {
+                    license,
+                    count,
+                    level,
+                },
+                Action::Delete {
+                    token,
+                    flat,
+                    expected,
+                } => Self::DeleteFlat {
+                    token,
+                    flat,
+                    expected,
+                },
+                Action::Inspect(query) => Self::Inspect(query),
+                Action::InspectResult { request } => Self::InspectResult {
+                    domain: Domain::Flat,
+                    request,
+                },
+                Action::Occupy { slot, expected } => Self::Occupy { slot, expected },
+                Action::Vacate {
+                    slot,
+                    expected,
+                    maintenance,
+                } => Self::Vacate {
+                    slot,
+                    expected,
+                    maintenance,
+                },
+                Action::Block {
+                    start,
+                    count,
+                    recover,
+                } => Self::Block {
+                    start,
+                    count,
+                    recover,
+                },
+                Action::Allow { maintenance } => Self::Allow { maintenance },
+                Action::Push {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                } => Self::Push {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                },
+                Action::Pull {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                } => Self::Pull {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                },
+                Action::Split {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                } => Self::Split {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                },
+                Action::Merge {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                } => Self::Merge {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                },
+            }
+        }
+    }
+}
+
+/// Nest-domain operations. Reserve/Release name address occupancy; the
+/// internal Span is not part of the public request surface.
+pub mod nest {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Action {
+        FaultRoute {
+            token: PendId,
+            nest: NestId,
+            span: SpanId,
+            expected: SpanVersion,
+            epoch: FaultEpoch,
+            route: Option<FaultRoute>,
+        },
+        Create {
+            license: PendId,
+        },
+        Delete {
+            token: PendId,
+            nest: NestId,
+            expected: NestVersion,
+        },
+        Reserve {
+            token: PendId,
+            nest: NestId,
+            expected: NestVersion,
+            request: CreateSpanRequest,
+        },
+        Release {
+            token: PendId,
+            nest: NestId,
+            span: SpanId,
+            expected: SpanVersion,
+        },
+        ReleaseRange {
+            token: PendId,
+            nest: NestId,
+            span: SpanId,
+            expected: SpanVersion,
+            offset: usize,
+            count: usize,
+        },
+        Inspect(Query),
+        InspectResult {
+            request: RequestId,
+        },
+        Insert {
+            target: MemoPosition,
+            expected: MemoGeneration,
+            source: Source,
+        },
+        Remove {
+            memo: MemoPosition,
+            expected: MemoGeneration,
+        },
+        Publish {
+            memo: MemoPosition,
+            expected: MemoGeneration,
+            maintenance: Option<Maintenance>,
+        },
+        Retract {
+            memo: MemoPosition,
+            expected: MemoGeneration,
+        },
+        Protect {
+            memo: MemoPosition,
+            expected: MemoGeneration,
+            access: u64,
+        },
+    }
+
+    impl TryFrom<super::Action> for Action {
+        type Error = ();
+
+        fn try_from(action: super::Action) -> Result<Self, Self::Error> {
+            Ok(match action {
+                super::Action::FaultRoute {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    epoch,
+                    route,
+                } => Self::FaultRoute {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    epoch,
+                    route,
+                },
+                super::Action::CreateNest { license } => Self::Create { license },
+                super::Action::DeleteNest {
+                    token,
+                    nest,
+                    expected,
+                } => Self::Delete {
+                    token,
+                    nest,
+                    expected,
+                },
+                super::Action::CreateSpan {
+                    token,
+                    nest,
+                    expected,
+                    request,
+                } => Self::Reserve {
+                    token,
+                    nest,
+                    expected,
+                    request,
+                },
+                super::Action::DeleteSpan {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                } => Self::Release {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                },
+                super::Action::ReleaseRange {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    offset,
+                    count,
+                } => Self::ReleaseRange {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    offset,
+                    count,
+                },
+                super::Action::Inspect(query) => Self::Inspect(query),
+                super::Action::InspectResult {
+                    domain: Domain::Nest,
+                    request,
+                } => Self::InspectResult { request },
+                super::Action::Insert {
+                    target,
+                    expected,
+                    source,
+                } => Self::Insert {
+                    target,
+                    expected,
+                    source,
+                },
+                super::Action::Remove { memo, expected } => Self::Remove { memo, expected },
+                super::Action::Publish {
+                    memo,
+                    expected,
+                    maintenance,
+                } => Self::Publish {
+                    memo,
+                    expected,
+                    maintenance,
+                },
+                super::Action::Retract { memo, expected } => Self::Retract { memo, expected },
+                super::Action::Protect {
+                    memo,
+                    expected,
+                    access,
+                } => Self::Protect {
+                    memo,
+                    expected,
+                    access,
+                },
+                _ => return Err(()),
+            })
+        }
+    }
+
+    impl From<Action> for super::Action {
+        fn from(action: Action) -> Self {
+            match action {
+                Action::FaultRoute {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    epoch,
+                    route,
+                } => Self::FaultRoute {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    epoch,
+                    route,
+                },
+                Action::Create { license } => Self::CreateNest { license },
+                Action::Delete {
+                    token,
+                    nest,
+                    expected,
+                } => Self::DeleteNest {
+                    token,
+                    nest,
+                    expected,
+                },
+                Action::Reserve {
+                    token,
+                    nest,
+                    expected,
+                    request,
+                } => Self::CreateSpan {
+                    token,
+                    nest,
+                    expected,
+                    request,
+                },
+                Action::Release {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                } => Self::DeleteSpan {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                },
+                Action::ReleaseRange {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    offset,
+                    count,
+                } => Self::ReleaseRange {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    offset,
+                    count,
+                },
+                Action::Inspect(query) => Self::Inspect(query),
+                Action::InspectResult { request } => Self::InspectResult {
+                    domain: Domain::Nest,
+                    request,
+                },
+                Action::Insert {
+                    target,
+                    expected,
+                    source,
+                } => Self::Insert {
+                    target,
+                    expected,
+                    source,
+                },
+                Action::Remove { memo, expected } => Self::Remove { memo, expected },
+                Action::Publish {
+                    memo,
+                    expected,
+                    maintenance,
+                } => Self::Publish {
+                    memo,
+                    expected,
+                    maintenance,
+                },
+                Action::Retract { memo, expected } => Self::Retract { memo, expected },
+                Action::Protect {
+                    memo,
+                    expected,
+                    access,
+                } => Self::Protect {
+                    memo,
+                    expected,
+                    access,
+                },
+            }
+        }
+    }
+}
