@@ -2,7 +2,8 @@
 //! the caller's output buffer never transforms Committed into Rejected.
 
 use super::{
-    Action, Domain, Failure, Opcode, Reader, Request, RequestId, VERSION, Writer, valid_token,
+    Action, Failure, Opcode, Reader, Request, RequestId, VERSION, Writer, flat as domain_flat,
+    nest as domain_nest, valid_token,
 };
 use crate::address::{BASE_PAGE_SIZE, VirtAddr};
 use crate::model::{
@@ -98,18 +99,19 @@ impl Value {
                     phase,
                     ..
                 },
-                Opcode::FaultRoute,
+                Opcode::Nest(domain_nest::Opcode::FaultRoute),
             ) => {
                 valid_token(span.get())
                     && version.get() > 1
                     && epoch.get() > 1
                     && matches!(phase, FaultPhase::Active | FaultPhase::Disabled)
             }
-            (Self::Geometry { version, slots, .. }, Opcode::Split | Opcode::Merge) => {
-                version.get() > 1 && slots.get() == version.get()
-            }
-            (Self::CreatedFlat { token, .. }, Opcode::Create(Domain::Flat))
-            | (Self::CreatedNest { token, .. }, Opcode::Create(Domain::Nest)) => {
+            (
+                Self::Geometry { version, slots, .. },
+                Opcode::Flat(domain_flat::Opcode::Split) | Opcode::Flat(domain_flat::Opcode::Merge),
+            ) => version.get() > 1 && slots.get() == version.get(),
+            (Self::CreatedFlat { token, .. }, Opcode::Flat(domain_flat::Opcode::Create))
+            | (Self::CreatedNest { token, .. }, Opcode::Nest(domain_nest::Opcode::Create)) => {
                 valid_token(token.get())
             }
             (
@@ -119,31 +121,41 @@ impl Value {
                     address,
                     ..
                 },
-                Opcode::CreateSpan,
+                Opcode::Nest(domain_nest::Opcode::Reserve),
             ) => {
                 valid_token(token.get())
                     && valid_token(span.get())
                     && address.get().is_multiple_of(BASE_PAGE_SIZE)
                     && address.get().checked_add(BASE_PAGE_SIZE).is_some()
             }
-            (Self::FlatLifecycle { .. }, Opcode::Delete(Domain::Flat))
-            | (Self::NestLifecycle { .. }, Opcode::Delete(Domain::Nest)) => true,
-            (Self::SpanLifecycle { span, .. }, Opcode::DeleteSpan | Opcode::ReleaseRange) => {
-                valid_token(span.get())
-            }
-            (Self::Slot { page, .. }, Opcode::Occupy | Opcode::Vacate) => page <= isize::MAX as u64,
-            (Self::Transfer { page, .. }, Opcode::Push | Opcode::Pull) => {
-                page > 0 && page <= isize::MAX as u64
-            }
+            (Self::FlatLifecycle { .. }, Opcode::Flat(domain_flat::Opcode::Delete))
+            | (Self::NestLifecycle { .. }, Opcode::Nest(domain_nest::Opcode::Delete)) => true,
+            (
+                Self::SpanLifecycle { span, .. },
+                Opcode::Nest(domain_nest::Opcode::Release)
+                | Opcode::Nest(domain_nest::Opcode::ReleaseRange),
+            ) => valid_token(span.get()),
+            (
+                Self::Slot { page, .. },
+                Opcode::Flat(domain_flat::Opcode::Occupy)
+                | Opcode::Flat(domain_flat::Opcode::Vacate),
+            ) => page <= isize::MAX as u64,
+            (
+                Self::Transfer { page, .. },
+                Opcode::Flat(domain_flat::Opcode::Push) | Opcode::Flat(domain_flat::Opcode::Pull),
+            ) => page > 0 && page <= isize::MAX as u64,
             (
                 Self::Memo { .. },
-                Opcode::Insert
-                | Opcode::Remove
-                | Opcode::Publish
-                | Opcode::Retract
-                | Opcode::Protect,
+                Opcode::Nest(domain_nest::Opcode::Insert)
+                | Opcode::Nest(domain_nest::Opcode::Remove)
+                | Opcode::Nest(domain_nest::Opcode::Publish)
+                | Opcode::Nest(domain_nest::Opcode::Retract)
+                | Opcode::Nest(domain_nest::Opcode::Protect),
             )
-            | (Self::Maintenance { .. }, Opcode::Block | Opcode::Allow) => true,
+            | (
+                Self::Maintenance { .. },
+                Opcode::Flat(domain_flat::Opcode::Block) | Opcode::Flat(domain_flat::Opcode::Allow),
+            ) => true,
             _ => false,
         }
     }
@@ -378,7 +390,10 @@ impl Outcome {
         if let Self::Expired = self {
             return true;
         }
-        if matches!(opcode, Opcode::Inspect(_)) {
+        if matches!(
+            opcode,
+            Opcode::Flat(domain_flat::Opcode::Inspect) | Opcode::Nest(domain_nest::Opcode::Inspect)
+        ) {
             return false;
         }
         match self {
@@ -394,23 +409,29 @@ impl Outcome {
                         | Failure::RequestMismatch
                         | Failure::FaultExpired
                 ) && match (opcode, retained) {
-                    (Opcode::Create(_) | Opcode::CreateSpan | Opcode::FaultRoute, None) => true,
                     (
-                        Opcode::Delete(Domain::Flat),
+                        Opcode::Flat(domain_flat::Opcode::Create)
+                        | Opcode::Nest(domain_nest::Opcode::Create)
+                        | Opcode::Nest(domain_nest::Opcode::Reserve)
+                        | Opcode::Nest(domain_nest::Opcode::FaultRoute),
+                        None,
+                    ) => true,
+                    (
+                        Opcode::Flat(domain_flat::Opcode::Delete),
                         Some(Value::FlatLifecycle {
                             phase: FlatPhase::Closing | FlatPhase::Failed,
                             ..
                         }),
                     ) => true,
                     (
-                        Opcode::Delete(Domain::Nest),
+                        Opcode::Nest(domain_nest::Opcode::Delete),
                         Some(Value::NestLifecycle {
                             phase: NestPhase::Closing | NestPhase::Failed,
                             ..
                         }),
                     ) => true,
                     (
-                        Opcode::DeleteSpan,
+                        Opcode::Nest(domain_nest::Opcode::Release),
                         Some(
                             value @ Value::SpanLifecycle {
                                 phase: SpanPhase::Closing | SpanPhase::Failed,
@@ -419,31 +440,34 @@ impl Outcome {
                         ),
                     ) => value.matches(opcode),
                     (
-                        Opcode::Occupy
-                        | Opcode::Push
-                        | Opcode::Pull
-                        | Opcode::Split
-                        | Opcode::Merge
-                        | Opcode::Insert
-                        | Opcode::Remove,
+                        Opcode::Flat(domain_flat::Opcode::Occupy)
+                        | Opcode::Flat(domain_flat::Opcode::Push)
+                        | Opcode::Flat(domain_flat::Opcode::Pull)
+                        | Opcode::Flat(domain_flat::Opcode::Split)
+                        | Opcode::Flat(domain_flat::Opcode::Merge)
+                        | Opcode::Nest(domain_nest::Opcode::Insert)
+                        | Opcode::Nest(domain_nest::Opcode::Remove),
                         None,
                     ) => true,
-                    (Opcode::Vacate, Some(value @ Value::Slot { page: 1.., .. })) => {
-                        value.matches(opcode)
-                    }
                     (
-                        Opcode::Publish | Opcode::Retract | Opcode::Protect,
+                        Opcode::Flat(domain_flat::Opcode::Vacate),
+                        Some(value @ Value::Slot { page: 1.., .. }),
+                    ) => value.matches(opcode),
+                    (
+                        Opcode::Nest(domain_nest::Opcode::Publish)
+                        | Opcode::Nest(domain_nest::Opcode::Retract)
+                        | Opcode::Nest(domain_nest::Opcode::Protect),
                         None | Some(Value::Memo { .. }),
                     ) => true,
                     (
-                        Opcode::Block,
+                        Opcode::Flat(domain_flat::Opcode::Block),
                         Some(Value::Maintenance {
                             phase: BlockPhase::Draining | BlockPhase::Orphaned,
                             ..
                         }),
                     ) => true,
                     (
-                        Opcode::Allow,
+                        Opcode::Flat(domain_flat::Opcode::Allow),
                         Some(Value::Maintenance {
                             phase: BlockPhase::Releasing | BlockPhase::Orphaned,
                             ..
@@ -457,64 +481,79 @@ impl Outcome {
                     && matches!(
                         (opcode, value),
                         (
-                            Opcode::Delete(Domain::Flat),
+                            Opcode::Flat(domain_flat::Opcode::Delete),
                             Value::FlatLifecycle {
                                 phase: FlatPhase::Closing,
                                 ..
                             }
                         ) | (
-                            Opcode::Delete(Domain::Nest),
+                            Opcode::Nest(domain_nest::Opcode::Delete),
                             Value::NestLifecycle {
                                 phase: NestPhase::Closing,
                                 ..
                             }
                         ) | (
-                            Opcode::DeleteSpan,
+                            Opcode::Nest(domain_nest::Opcode::Release),
                             Value::SpanLifecycle {
                                 phase: SpanPhase::Closing,
                                 ..
                             }
                         ) | (
-                            Opcode::Block,
+                            Opcode::Flat(domain_flat::Opcode::Block),
                             Value::Maintenance {
                                 phase: BlockPhase::Draining,
                                 ..
                             }
                         ) | (
-                            Opcode::Allow,
+                            Opcode::Flat(domain_flat::Opcode::Allow),
                             Value::Maintenance {
                                 phase: BlockPhase::Releasing,
                                 ..
                             }
                         ) | (
-                            Opcode::Publish | Opcode::Retract | Opcode::Protect,
+                            Opcode::Nest(domain_nest::Opcode::Publish)
+                                | Opcode::Nest(domain_nest::Opcode::Retract)
+                                | Opcode::Nest(domain_nest::Opcode::Protect),
                             Value::Memo { .. }
-                        ) | (Opcode::Vacate, Value::Slot { page: 1.., .. })
+                        ) | (
+                            Opcode::Flat(domain_flat::Opcode::Vacate),
+                            Value::Slot { page: 1.., .. }
+                        )
                     )
             }
             Self::Committed(value) => {
                 value.matches(opcode)
                     && match (opcode, value) {
-                        (Opcode::Delete(Domain::Flat), Value::FlatLifecycle { phase, .. }) => {
-                            phase == FlatPhase::Closed
+                        (
+                            Opcode::Flat(domain_flat::Opcode::Delete),
+                            Value::FlatLifecycle { phase, .. },
+                        ) => phase == FlatPhase::Closed,
+                        (
+                            Opcode::Nest(domain_nest::Opcode::Delete),
+                            Value::NestLifecycle { phase, .. },
+                        ) => phase == NestPhase::Closed,
+                        (
+                            Opcode::Nest(domain_nest::Opcode::Release),
+                            Value::SpanLifecycle { phase, .. },
+                        ) => phase == SpanPhase::Closed,
+                        (
+                            Opcode::Nest(domain_nest::Opcode::ReleaseRange),
+                            Value::SpanLifecycle { phase, .. },
+                        ) => phase == SpanPhase::Open,
+                        (Opcode::Flat(domain_flat::Opcode::Occupy), Value::Slot { page, .. }) => {
+                            page != 0
                         }
-                        (Opcode::Delete(Domain::Nest), Value::NestLifecycle { phase, .. }) => {
-                            phase == NestPhase::Closed
+                        (Opcode::Flat(domain_flat::Opcode::Vacate), Value::Slot { page, .. }) => {
+                            page == 0
                         }
-                        (Opcode::DeleteSpan, Value::SpanLifecycle { phase, .. }) => {
-                            phase == SpanPhase::Closed
-                        }
-                        (Opcode::ReleaseRange, Value::SpanLifecycle { phase, .. }) => {
-                            phase == SpanPhase::Open
-                        }
-                        (Opcode::Occupy, Value::Slot { page, .. }) => page != 0,
-                        (Opcode::Vacate, Value::Slot { page, .. }) => page == 0,
-                        (Opcode::Block, Value::Maintenance { phase, .. }) => {
-                            phase == BlockPhase::Held
-                        }
-                        (Opcode::Allow, Value::Maintenance { phase, .. }) => {
-                            phase == BlockPhase::Closed
-                        }
+                        (
+                            Opcode::Flat(domain_flat::Opcode::Block),
+                            Value::Maintenance { phase, .. },
+                        ) => phase == BlockPhase::Held,
+                        (
+                            Opcode::Flat(domain_flat::Opcode::Allow),
+                            Value::Maintenance { phase, .. },
+                        ) => phase == BlockPhase::Closed,
                         _ => true,
                     }
             }

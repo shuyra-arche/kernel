@@ -2,7 +2,10 @@
 //! header names the domain and operation; unused bytes have one canonical zero
 //! representation, suitable for comparing duplicate request identities.
 
-use super::{Domain, Opcode, Query, Reader, RequestId, VERSION, Writer, valid_token};
+use super::{
+    Domain, Opcode, Query, Reader, RequestId, VERSION, Writer, flat as domain_flat,
+    nest as domain_nest, valid_token,
+};
 use crate::model::{
     cell::CellLevel,
     flat::{BlockRef, FlatId, FlatVersion, Reshape, SlotPosition, SlotVersion},
@@ -257,32 +260,39 @@ pub enum Action {
     },
 }
 
+const fn inspect_opcode(domain: Domain) -> Opcode {
+    match domain {
+        Domain::Flat => Opcode::Flat(domain_flat::Opcode::Inspect),
+        Domain::Nest => Opcode::Nest(domain_nest::Opcode::Inspect),
+    }
+}
+
 impl Action {
     pub const fn opcode(self) -> Opcode {
         match self {
-            Self::FaultRoute { .. } => Opcode::FaultRoute,
-            Self::CreateFlat { .. } => Opcode::Create(Domain::Flat),
-            Self::DeleteFlat { .. } => Opcode::Delete(Domain::Flat),
-            Self::CreateNest { .. } => Opcode::Create(Domain::Nest),
-            Self::DeleteNest { .. } => Opcode::Delete(Domain::Nest),
-            Self::CreateSpan { .. } => Opcode::CreateSpan,
-            Self::DeleteSpan { .. } => Opcode::DeleteSpan,
-            Self::ReleaseRange { .. } => Opcode::ReleaseRange,
-            Self::Split { .. } => Opcode::Split,
-            Self::Merge { .. } => Opcode::Merge,
-            Self::Inspect(query) => Opcode::Inspect(query.domain()),
-            Self::InspectResult { domain, .. } => Opcode::Inspect(domain),
-            Self::Occupy { .. } => Opcode::Occupy,
-            Self::Vacate { .. } => Opcode::Vacate,
-            Self::Block { .. } => Opcode::Block,
-            Self::Allow { .. } => Opcode::Allow,
-            Self::Push { .. } => Opcode::Push,
-            Self::Pull { .. } => Opcode::Pull,
-            Self::Insert { .. } => Opcode::Insert,
-            Self::Remove { .. } => Opcode::Remove,
-            Self::Publish { .. } => Opcode::Publish,
-            Self::Retract { .. } => Opcode::Retract,
-            Self::Protect { .. } => Opcode::Protect,
+            Self::FaultRoute { .. } => Opcode::Nest(domain_nest::Opcode::FaultRoute),
+            Self::CreateFlat { .. } => Opcode::Flat(domain_flat::Opcode::Create),
+            Self::DeleteFlat { .. } => Opcode::Flat(domain_flat::Opcode::Delete),
+            Self::CreateNest { .. } => Opcode::Nest(domain_nest::Opcode::Create),
+            Self::DeleteNest { .. } => Opcode::Nest(domain_nest::Opcode::Delete),
+            Self::CreateSpan { .. } => Opcode::Nest(domain_nest::Opcode::Reserve),
+            Self::DeleteSpan { .. } => Opcode::Nest(domain_nest::Opcode::Release),
+            Self::ReleaseRange { .. } => Opcode::Nest(domain_nest::Opcode::ReleaseRange),
+            Self::Split { .. } => Opcode::Flat(domain_flat::Opcode::Split),
+            Self::Merge { .. } => Opcode::Flat(domain_flat::Opcode::Merge),
+            Self::Inspect(query) => inspect_opcode(query.domain()),
+            Self::InspectResult { domain, .. } => inspect_opcode(domain),
+            Self::Occupy { .. } => Opcode::Flat(domain_flat::Opcode::Occupy),
+            Self::Vacate { .. } => Opcode::Flat(domain_flat::Opcode::Vacate),
+            Self::Block { .. } => Opcode::Flat(domain_flat::Opcode::Block),
+            Self::Allow { .. } => Opcode::Flat(domain_flat::Opcode::Allow),
+            Self::Push { .. } => Opcode::Flat(domain_flat::Opcode::Push),
+            Self::Pull { .. } => Opcode::Flat(domain_flat::Opcode::Pull),
+            Self::Insert { .. } => Opcode::Nest(domain_nest::Opcode::Insert),
+            Self::Remove { .. } => Opcode::Nest(domain_nest::Opcode::Remove),
+            Self::Publish { .. } => Opcode::Nest(domain_nest::Opcode::Publish),
+            Self::Retract { .. } => Opcode::Nest(domain_nest::Opcode::Retract),
+            Self::Protect { .. } => Opcode::Nest(domain_nest::Opcode::Protect),
         }
     }
 
@@ -578,7 +588,7 @@ impl Action {
 
     fn read(opcode: Opcode, input: &mut Reader<'_>) -> Option<Self> {
         Some(match opcode {
-            Opcode::FaultRoute => Self::FaultRoute {
+            Opcode::Nest(domain_nest::Opcode::FaultRoute) => Self::FaultRoute {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
                 span: input.span()?,
@@ -593,37 +603,37 @@ impl Action {
                     _ => return None,
                 },
             },
-            Opcode::Create(Domain::Flat) => Self::CreateFlat {
+            Opcode::Flat(domain_flat::Opcode::Create) => Self::CreateFlat {
                 license: input.token()?,
                 count: input.size()?,
                 level: CellLevel::new(input.size()?)?,
             },
-            Opcode::Delete(Domain::Flat) => Self::DeleteFlat {
+            Opcode::Flat(domain_flat::Opcode::Delete) => Self::DeleteFlat {
                 token: input.token()?,
                 flat: FlatId::new(input.size()?)?,
                 expected: FlatVersion::new(input.word()?)?,
             },
-            Opcode::Create(Domain::Nest) => Self::CreateNest {
+            Opcode::Nest(domain_nest::Opcode::Create) => Self::CreateNest {
                 license: input.token()?,
             },
-            Opcode::Delete(Domain::Nest) => Self::DeleteNest {
+            Opcode::Nest(domain_nest::Opcode::Delete) => Self::DeleteNest {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
                 expected: NestVersion::new(input.word()?)?,
             },
-            Opcode::CreateSpan => Self::CreateSpan {
+            Opcode::Nest(domain_nest::Opcode::Reserve) => Self::CreateSpan {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
                 expected: NestVersion::new(input.word()?)?,
                 request: CreateSpanRequest::from_bytes(input.bytes::<48>()?)?,
             },
-            Opcode::DeleteSpan => Self::DeleteSpan {
+            Opcode::Nest(domain_nest::Opcode::Release) => Self::DeleteSpan {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
                 span: input.span()?,
                 expected: SpanVersion::new(input.word()?)?,
             },
-            Opcode::ReleaseRange => Self::ReleaseRange {
+            Opcode::Nest(domain_nest::Opcode::ReleaseRange) => Self::ReleaseRange {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
                 span: input.span()?,
@@ -631,12 +641,12 @@ impl Action {
                 offset: input.size()?,
                 count: input.size()?,
             },
-            Opcode::Split | Opcode::Merge => {
+            Opcode::Flat(domain_flat::Opcode::Split) | Opcode::Flat(domain_flat::Opcode::Merge) => {
                 let start = SlotPosition::from_bytes(input.bytes::<24>()?)?;
                 let expected = FlatVersion::new(input.word()?)?;
                 let parent = CellLevel::new(input.size()?)?;
                 let maintenance = Maintenance::read(input)?;
-                if opcode == Opcode::Split {
+                if opcode == Opcode::Flat(domain_flat::Opcode::Split) {
                     Self::Split {
                         start,
                         expected,
@@ -652,7 +662,9 @@ impl Action {
                     }
                 }
             }
-            Opcode::Inspect(domain) => {
+            Opcode::Flat(domain_flat::Opcode::Inspect)
+            | Opcode::Nest(domain_nest::Opcode::Inspect) => {
+                let domain = opcode.domain();
                 let tag = input.word()?;
                 if tag == 3 {
                     Self::InspectResult {
@@ -663,11 +675,11 @@ impl Action {
                     Self::Inspect(Query::read(domain, tag, input)?)
                 }
             }
-            Opcode::Occupy => {
+            Opcode::Flat(domain_flat::Opcode::Occupy) => {
                 let (slot, expected) = read_slot(input)?;
                 Self::Occupy { slot, expected }
             }
-            Opcode::Vacate => {
+            Opcode::Flat(domain_flat::Opcode::Vacate) => {
                 let (slot, expected) = read_slot(input)?;
                 Self::Vacate {
                     slot,
@@ -675,7 +687,7 @@ impl Action {
                     maintenance: Maintenance::read(input)?,
                 }
             }
-            Opcode::Block => {
+            Opcode::Flat(domain_flat::Opcode::Block) => {
                 let start = SlotPosition::from_bytes(input.bytes::<24>()?)?;
                 let count = input.size()?;
                 let recover = match input.word()? {
@@ -689,14 +701,14 @@ impl Action {
                     recover,
                 }
             }
-            Opcode::Allow => Self::Allow {
+            Opcode::Flat(domain_flat::Opcode::Allow) => Self::Allow {
                 maintenance: Maintenance::read(input)?,
             },
-            Opcode::Push | Opcode::Pull => {
+            Opcode::Flat(domain_flat::Opcode::Push) | Opcode::Flat(domain_flat::Opcode::Pull) => {
                 let (local, local_version) = read_slot(input)?;
                 let (remote, remote_version) = read_slot(input)?;
                 let maintenance = read_maintenance(input)?;
-                if opcode == Opcode::Push {
+                if opcode == Opcode::Flat(domain_flat::Opcode::Push) {
                     Self::Push {
                         local,
                         local_version,
@@ -714,7 +726,7 @@ impl Action {
                     }
                 }
             }
-            Opcode::Insert => {
+            Opcode::Nest(domain_nest::Opcode::Insert) => {
                 let (target, expected) = read_memo(input)?;
                 Self::Insert {
                     target,
@@ -722,11 +734,11 @@ impl Action {
                     source: Source::read(input)?,
                 }
             }
-            Opcode::Remove => {
+            Opcode::Nest(domain_nest::Opcode::Remove) => {
                 let (memo, expected) = read_memo(input)?;
                 Self::Remove { memo, expected }
             }
-            Opcode::Publish => {
+            Opcode::Nest(domain_nest::Opcode::Publish) => {
                 let (memo, expected) = read_memo(input)?;
                 Self::Publish {
                     memo,
@@ -734,11 +746,11 @@ impl Action {
                     maintenance: read_maintenance(input)?,
                 }
             }
-            Opcode::Retract => {
+            Opcode::Nest(domain_nest::Opcode::Retract) => {
                 let (memo, expected) = read_memo(input)?;
                 Self::Retract { memo, expected }
             }
-            Opcode::Protect => {
+            Opcode::Nest(domain_nest::Opcode::Protect) => {
                 let (memo, expected) = read_memo(input)?;
                 Self::Protect {
                     memo,

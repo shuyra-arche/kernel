@@ -4,7 +4,7 @@
 
 mod call;
 pub mod journal;
-pub use call::{Call, Frame, flat, nest};
+pub use call::{Call, Frame};
 mod observation;
 mod reply;
 mod request;
@@ -81,34 +81,102 @@ impl Domain {
     }
 }
 
-/// Only operations whose descriptor is implemented here. No wildcard operation,
-/// retired Cell domain or generic transaction command is accepted.
+pub mod flat {
+    pub use super::call::flat::Call;
+    /// Flat-domain operation slots. The wire domain is still carried by the
+    /// shared envelope; these are not mixed with Nest operations.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Opcode {
+        Create,
+        Delete,
+        Inspect,
+        Occupy,
+        Vacate,
+        Block,
+        Allow,
+        Push,
+        Pull,
+        Split,
+        Merge,
+    }
+}
+
+pub mod nest {
+    pub use super::call::nest::Call;
+    /// Nest-domain operation slots. Reserve/Release name address occupancy and
+    /// range release; the internal Span is not a public operation handle.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Opcode {
+        Create,
+        Delete,
+        Inspect,
+        Reserve,
+        Release,
+        Insert,
+        Remove,
+        Publish,
+        Retract,
+        Protect,
+        FaultRoute,
+        ReleaseRange,
+    }
+}
+
+/// Shared wire opcode envelope. Domain actions keep their own enums; this type
+/// only maps a domain opcode to the fixed trap slot table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Opcode {
-    Create(Domain),
-    Delete(Domain),
-    Inspect(Domain),
-    CreateSpan,
-    DeleteSpan,
-    ReleaseRange,
-    Occupy,
-    Vacate,
-    Block,
-    Allow,
-    Push,
-    Pull,
-    Split,
-    Merge,
-    Insert,
-    Remove,
-    Publish,
-    Retract,
-    Protect,
-    FaultRoute,
+    Flat(flat::Opcode),
+    Nest(nest::Opcode),
+}
+
+#[allow(non_snake_case)]
+impl Opcode {
+    pub const fn Create(domain: Domain) -> Self {
+        match domain {
+            Domain::Flat => Self::Flat(flat::Opcode::Create),
+            Domain::Nest => Self::Nest(nest::Opcode::Create),
+        }
+    }
+
+    pub const fn Delete(domain: Domain) -> Self {
+        match domain {
+            Domain::Flat => Self::Flat(flat::Opcode::Delete),
+            Domain::Nest => Self::Nest(nest::Opcode::Delete),
+        }
+    }
+
+    pub const fn Inspect(domain: Domain) -> Self {
+        Self::inspect(domain)
+    }
+
+    pub const CreateSpan: Self = Self::Nest(nest::Opcode::Reserve);
+    pub const DeleteSpan: Self = Self::Nest(nest::Opcode::Release);
+    pub const ReleaseRange: Self = Self::Nest(nest::Opcode::ReleaseRange);
+    pub const Occupy: Self = Self::Flat(flat::Opcode::Occupy);
+    pub const Vacate: Self = Self::Flat(flat::Opcode::Vacate);
+    pub const Block: Self = Self::Flat(flat::Opcode::Block);
+    pub const Allow: Self = Self::Flat(flat::Opcode::Allow);
+    pub const Push: Self = Self::Flat(flat::Opcode::Push);
+    pub const Pull: Self = Self::Flat(flat::Opcode::Pull);
+    pub const Split: Self = Self::Flat(flat::Opcode::Split);
+    pub const Merge: Self = Self::Flat(flat::Opcode::Merge);
+    pub const Insert: Self = Self::Nest(nest::Opcode::Insert);
+    pub const Remove: Self = Self::Nest(nest::Opcode::Remove);
+    pub const Publish: Self = Self::Nest(nest::Opcode::Publish);
+    pub const Retract: Self = Self::Nest(nest::Opcode::Retract);
+    pub const Protect: Self = Self::Nest(nest::Opcode::Protect);
+    pub const FaultRoute: Self = Self::Nest(nest::Opcode::FaultRoute);
 }
 
 impl Opcode {
-    /// Native trap number, accepted only in the matching ABI 11 image.
+    pub const fn inspect(domain: Domain) -> Self {
+        match domain {
+            Domain::Flat => Self::Flat(flat::Opcode::Inspect),
+            Domain::Nest => Self::Nest(nest::Opcode::Inspect),
+        }
+    }
+
     pub const fn call_number(self) -> u64 {
         (VERSION << 48) | ((self.domain() as u64) << 32) | self.slot()
     }
@@ -122,66 +190,68 @@ impl Opcode {
 
     pub const fn domain(self) -> Domain {
         match self {
-            Self::Create(domain) | Self::Delete(domain) | Self::Inspect(domain) => domain,
-            Self::Occupy
-            | Self::Vacate
-            | Self::Block
-            | Self::Allow
-            | Self::Push
-            | Self::Pull
-            | Self::Split
-            | Self::Merge => Domain::Flat,
-            Self::CreateSpan
-            | Self::DeleteSpan
-            | Self::ReleaseRange
-            | Self::Insert
-            | Self::Remove
-            | Self::Publish
-            | Self::Retract
-            | Self::Protect
-            | Self::FaultRoute => Domain::Nest,
+            Self::Flat(_) => Domain::Flat,
+            Self::Nest(_) => Domain::Nest,
         }
     }
 
     pub const fn slot(self) -> u64 {
         match self {
-            Self::Create(_) => 16,
-            Self::Delete(_) => 17,
-            Self::Inspect(_) => 18,
-            Self::Occupy | Self::CreateSpan => 19,
-            Self::Vacate | Self::DeleteSpan => 20,
-            Self::Block | Self::Insert => 21,
-            Self::Allow | Self::Remove => 22,
-            Self::Push | Self::Publish => 23,
-            Self::Pull | Self::Retract => 24,
-            Self::Split | Self::Protect => 25,
-            Self::Merge | Self::FaultRoute => 26,
-            Self::ReleaseRange => 27,
+            Self::Flat(op) => match op {
+                flat::Opcode::Create => 16,
+                flat::Opcode::Delete => 17,
+                flat::Opcode::Inspect => 18,
+                flat::Opcode::Occupy => 19,
+                flat::Opcode::Vacate => 20,
+                flat::Opcode::Block => 21,
+                flat::Opcode::Allow => 22,
+                flat::Opcode::Push => 23,
+                flat::Opcode::Pull => 24,
+                flat::Opcode::Split => 25,
+                flat::Opcode::Merge => 26,
+            },
+            Self::Nest(op) => match op {
+                nest::Opcode::Create => 16,
+                nest::Opcode::Delete => 17,
+                nest::Opcode::Inspect => 18,
+                nest::Opcode::Reserve => 19,
+                nest::Opcode::Release => 20,
+                nest::Opcode::Insert => 21,
+                nest::Opcode::Remove => 22,
+                nest::Opcode::Publish => 23,
+                nest::Opcode::Retract => 24,
+                nest::Opcode::Protect => 25,
+                nest::Opcode::FaultRoute => 26,
+                nest::Opcode::ReleaseRange => 27,
+            },
         }
     }
 
     pub fn of(domain: u64, slot: u64) -> Option<Self> {
         Some(match (Domain::of(domain)?, slot) {
-            (domain, 16) => Self::Create(domain),
-            (domain, 17) => Self::Delete(domain),
-            (domain, 18) => Self::Inspect(domain),
-            (Domain::Flat, 19) => Self::Occupy,
-            (Domain::Flat, 20) => Self::Vacate,
-            (Domain::Flat, 21) => Self::Block,
-            (Domain::Flat, 22) => Self::Allow,
-            (Domain::Flat, 23) => Self::Push,
-            (Domain::Flat, 24) => Self::Pull,
-            (Domain::Flat, 25) => Self::Split,
-            (Domain::Flat, 26) => Self::Merge,
-            (Domain::Nest, 19) => Self::CreateSpan,
-            (Domain::Nest, 20) => Self::DeleteSpan,
-            (Domain::Nest, 21) => Self::Insert,
-            (Domain::Nest, 22) => Self::Remove,
-            (Domain::Nest, 23) => Self::Publish,
-            (Domain::Nest, 24) => Self::Retract,
-            (Domain::Nest, 25) => Self::Protect,
-            (Domain::Nest, 26) => Self::FaultRoute,
-            (Domain::Nest, 27) => Self::ReleaseRange,
+            (Domain::Flat, 16) => Self::Flat(flat::Opcode::Create),
+            (Domain::Flat, 17) => Self::Flat(flat::Opcode::Delete),
+            (Domain::Flat, 18) => Self::Flat(flat::Opcode::Inspect),
+            (Domain::Flat, 19) => Self::Flat(flat::Opcode::Occupy),
+            (Domain::Flat, 20) => Self::Flat(flat::Opcode::Vacate),
+            (Domain::Flat, 21) => Self::Flat(flat::Opcode::Block),
+            (Domain::Flat, 22) => Self::Flat(flat::Opcode::Allow),
+            (Domain::Flat, 23) => Self::Flat(flat::Opcode::Push),
+            (Domain::Flat, 24) => Self::Flat(flat::Opcode::Pull),
+            (Domain::Flat, 25) => Self::Flat(flat::Opcode::Split),
+            (Domain::Flat, 26) => Self::Flat(flat::Opcode::Merge),
+            (Domain::Nest, 16) => Self::Nest(nest::Opcode::Create),
+            (Domain::Nest, 17) => Self::Nest(nest::Opcode::Delete),
+            (Domain::Nest, 18) => Self::Nest(nest::Opcode::Inspect),
+            (Domain::Nest, 19) => Self::Nest(nest::Opcode::Reserve),
+            (Domain::Nest, 20) => Self::Nest(nest::Opcode::Release),
+            (Domain::Nest, 21) => Self::Nest(nest::Opcode::Insert),
+            (Domain::Nest, 22) => Self::Nest(nest::Opcode::Remove),
+            (Domain::Nest, 23) => Self::Nest(nest::Opcode::Publish),
+            (Domain::Nest, 24) => Self::Nest(nest::Opcode::Retract),
+            (Domain::Nest, 25) => Self::Nest(nest::Opcode::Protect),
+            (Domain::Nest, 26) => Self::Nest(nest::Opcode::FaultRoute),
+            (Domain::Nest, 27) => Self::Nest(nest::Opcode::ReleaseRange),
             _ => return None,
         })
     }

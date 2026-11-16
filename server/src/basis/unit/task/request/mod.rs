@@ -53,7 +53,7 @@ impl Task {
                 Ok(Some(reply)) => Ok(Admission::Replay(reply)),
                 Ok(None) => Err(Failure::Busy),
                 Err(Failure::ResultExpired) => Ok(Admission::Replay(
-                    Reply::new(id, memory::Opcode::Inspect(domain), Outcome::Expired)
+                    Reply::new(id, memory::Opcode::inspect(domain), Outcome::Expired)
                         .expect("expired result"),
                 )),
                 Err(error) => Err(error),

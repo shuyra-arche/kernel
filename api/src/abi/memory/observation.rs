@@ -1,7 +1,10 @@
 //! Explicit object/position observations. Result queries remain in Request and
 //! Reply: an observation has no request identity and cannot be a commit receipt.
 
-use super::{Action, Domain, Maintenance, Opcode, Reader, Request, VERSION, Writer, valid_token};
+use super::{
+    Action, Domain, Maintenance, Opcode, Reader, Request, VERSION, Writer, flat as domain_flat,
+    nest as domain_nest, valid_token,
+};
 use crate::address::VirtAddr;
 use crate::model::{
     cell::CellLevel,
@@ -525,7 +528,11 @@ impl Observation {
             &[
                 VERSION,
                 self.0.domain() as u64,
-                Opcode::Inspect(self.0.domain()).slot(),
+                match self.0.domain() {
+                    Domain::Flat => Opcode::Flat(domain_flat::Opcode::Inspect),
+                    Domain::Nest => Opcode::Nest(domain_nest::Opcode::Inspect),
+                }
+                .slot(),
                 0,
                 self.0.tag(),
                 0,
