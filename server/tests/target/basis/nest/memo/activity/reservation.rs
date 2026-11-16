@@ -10,12 +10,12 @@ use kernel_api::{
     address::VirtAddr,
     model::{
         identity::PendId,
-        nest::{MemoPosition, ReserveRequest},
+        nest::{MemoPosition, CreateSpanRequest},
         pend::Target,
     },
 };
 use kernel_client::{call::room, memory::Response};
-pub fn reserve(token: PendId, reservation: ReserveRequest) -> (MemoPosition, VirtAddr) {
+pub fn reserve(token: PendId, reservation: CreateSpanRequest) -> (MemoPosition, VirtAddr) {
     let Target::Nest(nest) = pend_info(token).target else {
         panic!("Nest")
     };
@@ -24,7 +24,7 @@ pub fn reserve(token: PendId, reservation: ReserveRequest) -> (MemoPosition, Vir
         let Snapshot::Nest(state) = inspect(Query::Nest { token, nest }) else {
             panic!("Nest snapshot")
         };
-        let Response::Reply(reply) = call(Action::Reserve {
+        let Response::Reply(reply) = call(Action::CreateSpan {
             token,
             nest,
             expected: state.version,
@@ -33,7 +33,7 @@ pub fn reserve(token: PendId, reservation: ReserveRequest) -> (MemoPosition, Vir
             panic!("Reserve reply")
         };
         match reply.outcome() {
-            Outcome::Committed(Value::Reservation {
+            Outcome::Committed(Value::Span {
                 token,
                 nest,
                 reservation,

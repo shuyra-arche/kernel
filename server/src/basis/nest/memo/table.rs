@@ -1,5 +1,5 @@
-//! Sparse positions keyed by the reservation identity and page coordinate.
-//! Address reuse cannot recover the former reservation's Memo.
+//! Sparse positions keyed by the span identity and page coordinate.
+//! Address reuse cannot recover the former span's Memo.
 use super::{Memo, publication::Publication};
 use crate::basis::nest::{NestError, Span};
 use alloc::vec::Vec;

@@ -54,7 +54,7 @@ fn aliases() {
             (Evidence::NotObserved, Evidence::NotObserved)
         );
         assert_eq!(hit.page, idle.page);
-        assert_ne!((hit.nest, hit.reservation), (idle.nest, idle.reservation));
+        assert_ne!((hit.nest, hit.span), (idle.nest, idle.span));
     }
     let old = memo_status(memo).generation;
     retract(memo);
@@ -103,7 +103,7 @@ fn authority() {
         expected: slot_status(slot).version,
     });
     let (root, address) = reserve_pages(space(), Placement::lowest(4096).unwrap(), 6, 2);
-    let second = MemoPosition::new(root.token(), root.nest(), root.reservation(), 1).unwrap();
+    let second = MemoPosition::new(root.token(), root.nest(), root.span(), 1).unwrap();
     insert(second, slot);
     publish(second);
     let parent = match task_info(kernel_api::model::unit::UnitQuery::Caller).target {
@@ -114,8 +114,8 @@ fn authority() {
     limits.operations = Operations::Nest(NestRights::INSPECT | NestRights::SAMPLE);
     limits.modifiable = kernel_api::model::modifiable::Modifiable::No;
     limits.distributable = Distributable::No;
-    limits.scope = PendScope::Nest(NestScope::Reservation {
-        id: root.reservation(),
+    limits.scope = PendScope::Nest(NestScope::Span {
+        id: root.span(),
         range: PendRange::Pages {
             offset: 1,
             count: 1,
@@ -130,9 +130,9 @@ fn authority() {
     }
     .to_bytes();
     let selected = pend::accord(VirtAddr::new(request.as_ptr() as usize)).unwrap();
-    let outside = MemoPosition::new(selected, root.nest(), root.reservation(), 0).unwrap();
+    let outside = MemoPosition::new(selected, root.nest(), root.span(), 0).unwrap();
     assert_eq!(observe(outside), Err(ShareFail::Denied));
-    let inside = MemoPosition::new(selected, root.nest(), root.reservation(), 1).unwrap();
+    let inside = MemoPosition::new(selected, root.nest(), root.span(), 1).unwrap();
     let reader = Reader::open(inside);
     assert_eq!(pend_info(reader.data).mark, marker);
     let sample = reader.expect(Evidence::NotObserved, Evidence::NotObserved);
@@ -434,7 +434,7 @@ fn consumer_exit() {
     control.distributable = Distributable::No;
     let hot_token = accord(hot.token(), parent, control);
     let hot_selected =
-        MemoPosition::new(hot_token, hot.nest(), hot.reservation(), hot.page()).unwrap();
+        MemoPosition::new(hot_token, hot.nest(), hot.span(), hot.page()).unwrap();
     for (position, word) in [cold, hot_selected].into_iter().zip(CHILD_VIEWS.iter()) {
         let end = room::clock() + 8_000_000_000;
         let token = loop {
@@ -448,7 +448,7 @@ fn consumer_exit() {
         word.store(token.get(), Release);
     }
     let mut namespace = pend_info(space()).limits;
-    namespace.operations = Operations::Nest(NestRights::INSPECT | NestRights::RESERVE);
+    namespace.operations = Operations::Nest(NestRights::INSPECT | NestRights::CREATE_SPAN);
     namespace.modifiable = kernel_api::model::modifiable::Modifiable::No;
     namespace.distributable = Distributable::No;
     CHILD_SPACE.store(accord(space(), child, namespace).get(), Release);
@@ -497,7 +497,7 @@ fn large_leaf() {
     });
     let (memo, _) = crate::reservation::reserve(
         space(),
-        ReserveRequest {
+        CreateSpanRequest {
             placement: Placement::lowest(2 * 1024 * 1024).unwrap(),
             count: PageCount::new(512).unwrap(),
             level,

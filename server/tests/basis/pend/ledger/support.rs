@@ -200,7 +200,7 @@ impl Nest {
     pub(crate) fn is_external(&self) -> bool {
         self.external.load(Ordering::Acquire)
     }
-    pub(crate) fn reservation(&self, id: SpanId) -> Option<Arc<Span>> {
+    pub(crate) fn span(&self, id: SpanId) -> Option<Arc<Span>> {
         self.spans
             .lock()
             .unwrap()
@@ -208,20 +208,20 @@ impl Nest {
             .find(|(known, _, _)| *known == id)
             .map(|(_, span, _)| span.clone())
     }
-    pub(crate) fn reservation_count(&self, id: SpanId) -> Option<PageCount> {
-        Some(self.reservation(id)?.count)
+    pub(crate) fn span_count(&self, id: SpanId) -> Option<PageCount> {
+        Some(self.span(id)?.count)
     }
-    pub(crate) fn reservation_root(&self, id: SpanId, root: &Arc<Pend>) -> bool {
+    pub(crate) fn span_root(&self, id: SpanId, root: &Arc<Pend>) -> bool {
         self.spans
             .lock()
             .unwrap()
             .iter()
             .any(|(known, _, original)| *known == id && original.ptr_eq(&Arc::downgrade(root)))
     }
-    pub(crate) fn reservation_open(&self, id: SpanId) -> bool {
-        self.is_open() && self.reservation_status(id) == PendStatus::Active
+    pub(crate) fn span_open(&self, id: SpanId) -> bool {
+        self.is_open() && self.span_status(id) == PendStatus::Active
     }
-    pub(crate) fn reservation_status(&self, id: SpanId) -> PendStatus {
+    pub(crate) fn span_status(&self, id: SpanId) -> PendStatus {
         self.reservations
             .lock()
             .unwrap()
@@ -229,7 +229,7 @@ impl Nest {
             .find(|(known, _)| *known == id)
             .map_or(PendStatus::Dead, |(_, status)| *status)
     }
-    pub(crate) fn withdraw_reservation(
+    pub(crate) fn withdraw_span(
         &self,
         id: SpanId,
         window: (PageOffset, PageCount),
@@ -249,8 +249,8 @@ impl Nest {
         self.complete(id, Some(publisher));
         Ok(())
     }
-    pub(crate) fn release_reservation(&self, id: SpanId) -> Result<(), AccessError> {
-        let count = self.reservation_count(id).ok_or(AccessError::Denied)?;
+    pub(crate) fn close_span(&self, id: SpanId) -> Result<(), AccessError> {
+        let count = self.span_count(id).ok_or(AccessError::Denied)?;
         if self.busy.load(Ordering::Acquire) {
             return Err(AccessError::Busy);
         }
@@ -265,10 +265,10 @@ impl Nest {
             .1 = PendStatus::Dead;
         Ok(())
     }
-    pub(crate) fn retire_reservation(&self, raw: usize) {
+    pub(crate) fn retire_span(&self, raw: usize) {
         let removable = self.spans.lock().unwrap().iter().any(|(id, _, root)| {
             id.get() == raw
-                && self.reservation_status(*id) == PendStatus::Dead
+                && self.span_status(*id) == PendStatus::Dead
                 && root
                     .upgrade()
                     .is_none_or(|root| root.status() == PendStatus::Dead)

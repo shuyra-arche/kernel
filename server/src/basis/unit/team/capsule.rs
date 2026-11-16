@@ -16,8 +16,8 @@ use crate::basis::nest::Nest;
 use crate::basis::nest::NestError;
 use crate::basis::nest::Placement;
 use crate::basis::nest::RegionKind;
-use crate::basis::nest::Reservation;
 use crate::basis::nest::SpaceKind;
+use crate::basis::nest::Span;
 use kernel_api::address::PAGE_SIZE;
 use kernel_api::address::PageCount;
 use kernel_api::address::PageIndex;
@@ -63,8 +63,8 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
                         unsafe { BorrowedRegion::new(PhysAddr::from_raw(physical), data_size)? };
                     Flat::from_region(borrowed)?.whole()
                 };
-                let reservation = reserve_at(nest, va, data_size)?;
-                nest.attach(reservation, source, access, access)?;
+                let span = reserve_at(nest, va, data_size, source.level())?;
+                nest.attach(span, source, access, access)?;
             }
             if size > data_size {
                 let bss_start = va + data_size;
@@ -74,8 +74,8 @@ pub(crate) fn assemble(bytes: &'static [u8]) -> Result<Arc<Team>, NestError> {
                     Allocation::new(bss_size / PAGE_SIZE, PAGE_SIZE)?,
                 )?
                 .whole();
-                let reservation = reserve_at(nest, bss_start, bss_size)?;
-                nest.attach(reservation, source, access, access)?;
+                let span = reserve_at(nest, bss_start, bss_size, source.level())?;
+                nest.attach(span, source, access, access)?;
             }
         }
         nest.advance_window(RegionKind::Normal, image_end)?;
@@ -116,12 +116,17 @@ fn image_frames(
 }
 
 /// 在 `Normal` 窗口内登记一笔固定跨度；不动页表。
-fn reserve_at(nest: &Arc<Nest>, start: VirtAddr, size: usize) -> Result<Reservation, NestError> {
+fn reserve_at(
+    nest: &Arc<Nest>,
+    start: VirtAddr,
+    size: usize,
+    level: kernel_api::model::cell::CellLevel,
+) -> Result<Arc<Span>, NestError> {
     if size == 0 || start.offset() != 0 || !size.is_multiple_of(PAGE_SIZE) {
         return Err(NestError::NotAligned);
     }
     if !nest.window_contains(RegionKind::Normal, start, size) {
         return Err(NestError::NoRegion);
     }
-    nest.reserve(Placement::exact(RegionKind::Normal, start, size)?)
+    nest.reserve(Placement::exact(RegionKind::Normal, start, size)?, level)
 }

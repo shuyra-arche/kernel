@@ -158,7 +158,7 @@ fn prepare(
         let _commit = crate::basis::commit();
         pend::access::license(sender, license, CreationRights::SHARE).map_err(failure)?;
     }
-    let route = pend::access::Reservation::acquire(
+    let route = pend::access::SpanRoute::acquire(
         sender,
         request.src,
         NestRights::INSPECT | NestRights::SAMPLE,

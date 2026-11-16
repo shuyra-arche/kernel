@@ -59,7 +59,7 @@ fn child(
 }
 
 #[test]
-fn returned_reservation_roots_reap_scripted_metadata_after_real_authority_settlement() {
+fn returned_span_roots_reap_scripted_metadata_after_real_authority_settlement() {
     let (task, nest, whole) = setup(Yes, Distributable::Yes);
     for raw in 1..=64 {
         let root = {
@@ -72,12 +72,12 @@ fn returned_reservation_roots_reap_scripted_metadata_after_real_authority_settle
             prepared.publish();
             root
         };
-        nest.retire_reservation(raw);
-        assert!(nest.reservation(id(raw)).is_some());
+        nest.retire_span(raw);
+        assert!(nest.span(id(raw)).is_some());
         ledger::return_(&task, root.token()).unwrap();
         assert_eq!(root.authority().status(), PendStatus::Dead);
         assert!(ledger::locate(&task, root.token()).is_none());
-        assert!(nest.reservation(id(raw)).is_none());
+        assert!(nest.span(id(raw)).is_none());
         assert!(nest.reservations.lock().unwrap().is_empty());
         assert!(task.pend.heirs.lock().is_empty());
         assert!(whole.alive());
@@ -151,7 +151,7 @@ fn creating_whole_cannot_narrow_until_its_mapping_heir_is_removed() {
 }
 
 #[test]
-fn narrowed_reservation_root_return_retires_the_original_span_despite_its_sire() {
+fn narrowed_span_root_return_retires_the_original_span_despite_its_sire() {
     let (task, nest, whole) = setup(Yes, Distributable::Yes);
     let root = reserve(&task, &nest, &whole, 8, CellLevel::BASE);
     assert_eq!(root.sire(), Some(whole.token()));

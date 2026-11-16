@@ -169,7 +169,7 @@ impl NestState {
     #[cfg(debug_assertions)]
     pub(super) fn audit(&self, owner: &Nest, geometry: Geometry) {
         self.index.audit();
-        self.index.audit_reservations(
+        self.index.audit_spans(
             owner,
             self.root.cpu().expect("CPU audit"),
             geometry,

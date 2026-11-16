@@ -21,11 +21,11 @@ pub(crate) struct Occupancy {
 }
 
 /// Prepared while the owning Layout lock remains held through commit. This is
-/// unpublished capacity and identity reservation, not a second occupancy ledger.
+/// unpublished capacity and identity span, not a second occupancy ledger.
 pub(crate) struct PreparedRetirement {
     pieces: Vec<(usize, usize, usize)>,
     identities: Option<core::ops::RangeInclusive<usize>>,
-    reservation: usize,
+    span: usize,
 }
 
 impl PreparedRetirement {
@@ -213,9 +213,9 @@ impl Occupancy {
         &mut self,
         start: usize,
         last: usize,
-        reservation: usize,
+        span: usize,
     ) -> Result<PreparedRetirement, AddressError> {
-        let pieces = self.pieces(start, last, reservation)?;
+        let pieces = self.pieces(start, last, span)?;
         let fresh = pieces.iter().filter(|(_, _, ticket)| *ticket == 0).count();
         self.spans
             .try_reserve(fresh.checked_mul(2).ok_or(AddressError::OutOfMemory)?)
@@ -230,7 +230,7 @@ impl Occupancy {
         Ok(PreparedRetirement {
             pieces,
             identities,
-            reservation,
+            span,
         })
     }
 
@@ -247,7 +247,7 @@ impl Occupancy {
                     .as_mut()
                     .and_then(Iterator::next)
                     .expect("prepared retirement identity");
-                self.retire_piece(*start, *last, prepared.reservation, *ticket);
+                self.retire_piece(*start, *last, prepared.span, *ticket);
             }
         }
         prepared.pieces
@@ -306,7 +306,7 @@ impl Occupancy {
         }
     }
 
-    /// Caller proved every hardware obligation of this reservation settled.
+    /// Caller proved every hardware obligation of this span settled.
     pub(crate) fn release_settled(&mut self, id: usize) {
         self.spans.retain(|span| span.id != id);
     }

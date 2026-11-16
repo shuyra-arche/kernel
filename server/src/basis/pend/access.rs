@@ -111,12 +111,12 @@ pub(crate) fn seal_resource(token: PendId, kind: ViewKind) -> Result<usize, Pend
 }
 
 /// Retains an authority route while the caller holds its ledger serial.
-pub(crate) struct Reservation {
+pub(crate) struct SpanRoute {
     entry: alloc::sync::Arc<PendEntry>,
     rights: kernel_api::model::pend::NestRights,
 }
 
-impl Reservation {
+impl SpanRoute {
     pub(crate) fn acquire(
         actor: &alloc::sync::Arc<crate::basis::unit::task::Task>,
         token: PendId,
@@ -135,11 +135,11 @@ impl Reservation {
             return Err(PendFail::Denied);
         }
         let nest = entry.target().nest().ok_or(PendFail::Denied)?;
-        let span = nest.reservation(id).ok_or(PendFail::Dead)?;
+        let span = nest.span(id).ok_or(PendFail::Dead)?;
         let cleanup = rights == NestRights::INSPECT
             || rights == NestRights::RETRACT
             || rights == NestRights::REMOVE;
-        if !cleanup && (!nest.is_open() || !nest.reservation_open(id)) {
+        if !cleanup && (!nest.is_open() || !nest.span_open(id)) {
             return Err(PendFail::Dead);
         }
         let (offset, count) = entry.authority().window().ok_or(PendFail::Denied)?;
@@ -160,7 +160,7 @@ impl Reservation {
 
     pub(crate) fn nest(&self) -> &alloc::sync::Arc<crate::basis::nest::Nest> {
         let pend::Target::Nest { nest, .. } = self.entry.target() else {
-            unreachable!("a Reservation retains its immutable Nest target")
+            unreachable!("a SpanRoute retains its immutable Nest target")
         };
         nest
     }
@@ -171,17 +171,17 @@ impl Reservation {
             ..
         }) = self.entry.scope()
         else {
-            unreachable!("scope attenuation preserves Reservation identity")
+            unreachable!("scope attenuation preserves span identity")
         };
         id
     }
 
     pub(crate) fn span(&self) -> Result<alloc::sync::Arc<crate::basis::nest::Span>, PendFail> {
-        self.nest().reservation(self.id()).ok_or(PendFail::Dead)
+        self.nest().span(self.id()).ok_or(PendFail::Dead)
     }
 
     /// The v10 adapter above normalizes once. The common resolver never adds
-    /// the current Pend window to a fixed Reservation-origin coordinate.
+    /// the current Pend window to a fixed Span-origin coordinate.
     pub(crate) fn position(
         &self,
         position: kernel_api::model::nest::MemoPosition,
@@ -217,7 +217,7 @@ impl Reservation {
     }
 }
 
-impl Drop for Reservation {
+impl Drop for SpanRoute {
     fn drop(&mut self) {
         // No operation keeps this transient route after its ledger guard ends.
         unsafe { self.entry.authority().release_route() };
