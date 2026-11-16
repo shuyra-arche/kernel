@@ -1421,3 +1421,54 @@ pub mod nest {
         }
     }
 }
+
+/// Shared request envelope for a domain action. The wire Request remains the
+/// validation authority; the domain type is preserved for callers and entry
+/// dispatch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DomainRequest<A> {
+    wire: Request,
+    action: A,
+}
+
+impl<A> DomainRequest<A>
+where
+    A: Copy + Into<Action>,
+{
+    pub fn new(id: Option<RequestId>, action: A) -> Option<Self> {
+        let wire = Request::new(id, action.into())?;
+        Some(Self { wire, action })
+    }
+
+    pub const fn id(self) -> Option<RequestId> {
+        self.wire.id()
+    }
+
+    pub const fn action(self) -> A {
+        self.action
+    }
+
+    pub fn to_bytes(self) -> [u8; Request::WIDTH] {
+        self.wire.to_bytes()
+    }
+}
+
+impl<A> DomainRequest<A>
+where
+    A: Copy + TryFrom<Action>,
+{
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let wire = Request::from_bytes(bytes)?;
+        let action = A::try_from(wire.action()).ok()?;
+        Some(Self { wire, action })
+    }
+
+    pub fn from_call(number: u64, bytes: &[u8]) -> Option<Self> {
+        let wire = Request::from_call(number, bytes)?;
+        let action = A::try_from(wire.action()).ok()?;
+        Some(Self { wire, action })
+    }
+}
+
+pub type FlatRequest = DomainRequest<flat::Action>;
+pub type NestRequest = DomainRequest<nest::Action>;
