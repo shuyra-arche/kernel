@@ -1,5 +1,4 @@
 mod state;
-use super::super::address::Layout;
 use super::super::memo::Publisher;
 use super::super::{Nest, NestError, Span};
 use super::{ClosePhase, NestState, Storage};
@@ -17,10 +16,8 @@ impl NestState {
     fn external() -> Self {
         Self {
             root: Storage::External(External::new()),
-            index: super::super::index::Index::new(),
             retirement: super::retirement::Retirement::new(),
             phase: ClosePhase::Open,
-            team: None,
         }
     }
 }
@@ -47,7 +44,9 @@ impl Nest {
             life: Anchor::try_new().map_err(|_| NestError::OutOfMemory)?,
             admission: super::super::admission::Admission::new()?,
             spans: super::super::authority::SpanIndex::new(),
-            layout: LegacyLock::new(Layout::new()),
+            address: LegacyLock::new(super::super::address::AddressState::new(
+                super::super::address::Layout::new(),
+            )),
             pending_cleanup: LegacyLock::new(None),
             state: ManuallyDrop::new(LegacyLock::new(NestState::external())),
         })
@@ -215,8 +214,9 @@ impl Nest {
         }
     }
     pub(crate) fn progress_external_close(&self) -> Result<bool, Error> {
+        let address = self.address.lock();
         let mut state = self.state.lock();
-        if state.index.any(|span| !span.state.lock().memos.idle()) {
+        if address.index.any(|span| !span.state.lock().memos.idle()) {
             return Ok(false);
         }
         match &mut state.root {
@@ -231,8 +231,9 @@ impl Nest {
         if !self.external_settled() {
             return Err(NestError::Busy);
         }
+        let address = self.address.lock();
         let mut state = self.state.lock();
-        if state.index.len() != 0 {
+        if address.index.len() != 0 {
             return Err(NestError::Busy);
         }
         state.phase = ClosePhase::Closed;

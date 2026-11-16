@@ -24,7 +24,7 @@ impl Nest {
 
     /// An observation for resident admission, never a retained mapping owner.
     pub(crate) fn mapping_range(&self, at: VirtAddr) -> Option<(VirtAddr, usize)> {
-        self.state
+        self.address
             .lock()
             .index
             .find(at.as_usize())
@@ -84,7 +84,8 @@ impl Nest {
         if state.phase.is_closed() {
             return Err(NestError::NoRegion);
         }
-        let mapping = state.index.find(at).ok_or(NestError::NoRegion)?;
+        let address_state = self.address.lock();
+        let mapping = address_state.index.find(at).ok_or(NestError::NoRegion)?;
         let inner = mapping.state.lock();
         let range = inner.range_at(at).ok_or(NestError::NoRegion)?;
         let page = address.page_align();
@@ -129,6 +130,7 @@ impl Nest {
         // pin that exact mapping through validation and copying; a peer's fence
         // for another PTE cannot turn a valid user buffer into a denied one.
         // This path may run under COMMIT and must never drive hardware progress.
+        let address = self.address.lock();
         let state = self.state.lock();
         if !state.phase.is_open() || state.retirement.invalidation() == super::Invalidation::Failed
         {
@@ -141,7 +143,7 @@ impl Nest {
         let mut offset = 0;
         while offset < size {
             let at = start.as_usize() + offset;
-            let Some(mapping) = state.index.find(at) else {
+            let Some(mapping) = address.index.find(at) else {
                 return false;
             };
             let inner = mapping.state.lock();
@@ -170,7 +172,7 @@ impl Nest {
         offset = 0;
         while offset < size {
             let at = start.as_usize() + offset;
-            let Some(mapping) = state.index.find(at) else {
+            let Some(mapping) = address.index.find(at) else {
                 unreachable!("Nest held across access validation and copy")
             };
             let _inner = mapping.state.lock();
