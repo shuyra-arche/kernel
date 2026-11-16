@@ -159,7 +159,9 @@ fn cull(task: &Arc<Task>, token: PendId, caller: Option<&Arc<Task>>) -> Result<(
                         nest.close_span(id).map_err(reservation_failure)?;
                     } else {
                         let window = entry.authority().window().ok_or(PendFail::Denied)?;
-                        nest.withdraw_span(id, window, entry.authority())?;
+                        if let Some(span) = nest.span(id) {
+                            span.withdraw(nest, window, entry.authority())?;
+                        }
                     }
                 }
                 PendScope::Nest(NestScope::Whole)

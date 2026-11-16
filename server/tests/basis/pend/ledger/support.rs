@@ -115,11 +115,20 @@ pub(crate) struct Nest {
     pub(crate) released: Mutex<Vec<(SpanId, PageCount)>>,
 }
 pub(crate) struct Span {
+    id: SpanId,
     count: PageCount,
     level: CellLevel,
     pub(crate) open: AtomicBool,
 }
 impl Span {
+    pub(crate) fn withdraw(
+        self: &Arc<Self>,
+        nest: &Arc<Nest>,
+        window: (PageOffset, PageCount),
+        authority: &Arc<Pend>,
+    ) -> Result<(), PendFail> {
+        nest.withdraw_span(self.id, window, authority)
+    }
     pub(crate) fn is_open(&self) -> bool {
         self.open.load(Ordering::Acquire)
     }
@@ -161,6 +170,7 @@ impl Nest {
         self.spans.lock().unwrap().push((
             id,
             Arc::new(Span {
+                id,
                 count,
                 level,
                 open: AtomicBool::new(true),

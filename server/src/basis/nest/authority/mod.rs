@@ -327,8 +327,8 @@ impl Nest {
                 })
             {
                 if let Some(count) = kernel_api::address::PageCount::new(span.grain()) {
-                    let _ = self.withdraw_span(
-                        id,
+                    let _ = span.withdraw(
+                        self,
                         (kernel_api::address::PageOffset::ZERO, count),
                         principal.authority(),
                     );

@@ -586,63 +586,6 @@ impl Nest {
         Ok(())
     }
 
-    pub(crate) fn withdraw_span(
-        self: &Arc<Self>,
-        id: kernel_api::model::nest::SpanId,
-        window: (PageOffset, PageCount),
-        authority: &Arc<crate::basis::pend::Pend>,
-    ) -> Result<(), kernel_api::abi::call::pend::PendFail> {
-        use kernel_api::abi::call::pend::PendFail;
-        use kernel_api::model::pend::{NestScope, PendScope};
-        let Some(mapping) = self.span(id) else {
-            return Ok(());
-        };
-        let _operation = mapping.operation().ok_or(PendFail::Busy)?;
-        mapping
-            .range(window.0, window.1)
-            .map_err(|_| PendFail::NotAligned)?;
-        if !matches!(authority.scope(), PendScope::Nest(NestScope::Span { id: known, .. }) if known == id)
-        {
-            return Err(PendFail::Denied);
-        }
-        if !self.is_external() {
-            self.finish_invalidation().map_err(|_| PendFail::Busy)?;
-        }
-        let end = window
-            .0
-            .get()
-            .checked_add(window.1.get())
-            .ok_or(PendFail::NotAligned)?;
-        let mut cursor = None;
-        let mut busy = false;
-        loop {
-            let Some(index) = mapping.state.lock().memos.next_page(cursor) else {
-                break;
-            };
-            cursor = Some(index);
-            if index < window.0.get() || index >= end {
-                continue;
-            }
-            mapping.finish_memo(index);
-            if !mapping.memo_published_by(index, authority) {
-                continue;
-            }
-            let Some(page) = mapping.memo_page(index).map_err(|_| PendFail::Busy)? else {
-                busy = true;
-                continue;
-            };
-            match crate::basis::cell::change::acquire(&page) {
-                Ok(change) => busy |= mapping.retract_forced(self, index, change).is_err(),
-                Err(_) => busy = true,
-            }
-        }
-        sign::signal(self.span_key(&mapping));
-        if self.is_external() {
-            sign::signal(WakeKey::ExternalSpan { id: id.get() });
-        }
-        if busy { Err(PendFail::Busy) } else { Ok(()) }
-    }
-
     pub(crate) fn withdraw_source(
         self: &Arc<Self>,
         binding: &Arc<authority::RangeBinding>,
