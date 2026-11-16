@@ -1103,3 +1103,66 @@ impl Span {
         if busy { Err(PendFail::Busy) } else { Ok(()) }
     }
 }
+
+impl Span {
+    /// Release a page-aligned subrange of this Span's active access and
+    /// occupancy. A released hole is immediately reusable by a new Span while
+    /// this historical Span retains its original identity and remaining ranges.
+    pub(in crate::basis::nest) fn release_range(
+        self: &Arc<Self>,
+        nest: &Nest,
+        offset: kernel_api::address::PageOffset,
+        count: kernel_api::address::PageCount,
+    ) -> Result<(), NestError> {
+        let start = VirtAddr::new(
+            self.initial_start()
+                .as_usize()
+                .checked_add(
+                    offset
+                        .get()
+                        .checked_mul(kernel_api::address::PAGE_SIZE)
+                        .ok_or(NestError::NotAligned)?,
+                )
+                .ok_or(NestError::NotAligned)?,
+        );
+        let last = start
+            .as_usize()
+            .checked_add(count.checked_bytes().ok_or(NestError::NotAligned)?)
+            .and_then(|end| end.checked_sub(1))
+            .ok_or(NestError::NotAligned)?;
+        let mut address = nest.address.lock();
+        let translation = self.translation.lock();
+        let mut inner = self.state.lock();
+        if inner.phase != super::SpanPhase::Open
+            || inner.source.is_some()
+            || translation.retirement.pending_for(self)
+        {
+            return Err(NestError::Busy);
+        }
+        if inner.memos.published().any(|(page, _)| {
+            let at = self.initial_start().as_usize() + page * kernel_api::address::PAGE_SIZE;
+            (start.as_usize()..=last).contains(&at)
+        }) {
+            return Err(NestError::Busy);
+        }
+        let next = super::ActiveRange::split(&inner.active, start.as_usize(), last, None)?;
+        if next.len() == inner.active.len() {
+            return Err(NestError::NoRegion);
+        }
+        if next.is_empty() {
+            return Err(NestError::Busy);
+        }
+        if !address
+            .occupancy
+            .release_range(start.as_usize(), last, self.identity())
+        {
+            return Err(NestError::Busy);
+        }
+        inner.active = next;
+        self.changed();
+        drop(inner);
+        assert!(address.index.refresh(self), "released Span is indexed");
+        let _ = translation;
+        Ok(())
+    }
+}
