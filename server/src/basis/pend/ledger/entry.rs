@@ -86,9 +86,9 @@ impl PendEntry {
         let status = self.authority.status();
         if let Target::Nest { nest, .. } = &self.meta {
             if let PendScope::Nest(NestScope::Span { id, .. }) = self.scope() {
-                match nest.span_status(id) {
-                    PendStatus::Dead => return PendStatus::Dead,
-                    PendStatus::Retiring if status != PendStatus::Dead => {
+                match nest.span(id).map(|span| span.pend_status(nest.is_open())) {
+                    Some(PendStatus::Dead) | None => return PendStatus::Dead,
+                    Some(PendStatus::Retiring) if status != PendStatus::Dead => {
                         return PendStatus::Retiring;
                     }
                     _ => {}

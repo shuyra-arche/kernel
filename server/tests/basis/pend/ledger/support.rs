@@ -130,6 +130,20 @@ impl Span {
     ) -> Result<(), PendFail> {
         nest.withdraw_span(self.id, window, authority)
     }
+    pub(crate) fn pend_status(&self, nest_open: bool) -> PendStatus {
+        let status = self
+            .reservations
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(known, _)| *known == self.id)
+            .map_or(PendStatus::Dead, |(_, status)| *status);
+        if !nest_open && status == PendStatus::Active {
+            PendStatus::Retiring
+        } else {
+            status
+        }
+    }
     pub(crate) fn count(&self) -> Option<PageCount> {
         Some(self.count)
     }

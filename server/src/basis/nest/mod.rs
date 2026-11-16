@@ -307,16 +307,6 @@ impl Nest {
         self.spans.registered(id.get())?.span
     }
 
-    pub(crate) fn span_status(
-        &self,
-        id: kernel_api::model::nest::SpanId,
-    ) -> kernel_api::model::pend::PendStatus {
-        self.span(id)
-            .map_or(kernel_api::model::pend::PendStatus::Dead, |span| {
-                span.pend_status(self.is_open())
-            })
-    }
-
     pub(crate) fn span_root(
         &self,
         id: kernel_api::model::nest::SpanId,
