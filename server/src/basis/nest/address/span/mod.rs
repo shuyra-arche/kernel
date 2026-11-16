@@ -100,6 +100,8 @@ pub struct Span {
     pub(crate) faults:
         LegacyLock<crate::basis::sync::order::FaultPolicy, super::super::fault::State>,
     pub(crate) identity: SpanIdentity,
+    /// Shared Nest admission; final acceptance still happens under commit.
+    admission: Arc<super::super::admission::Admission>,
     pub(crate) range: SpanRange,
     pub(crate) attrs: Attributes,
     pub(crate) state: LegacyLock<crate::basis::sync::order::Reservation, SpanState>,
@@ -167,6 +169,7 @@ impl Span {
         match Arc::try_new(Self {
             faults: LegacyLock::new(super::super::fault::State::new()),
             identity,
+            admission: nest.admission.clone(),
             range,
             attrs,
             state: LegacyLock::new(SpanState::vacant()),
@@ -346,7 +349,7 @@ impl Span {
     }
 
     pub(in crate::basis::nest) fn is_open(&self) -> bool {
-        self.state.lock().phase == SpanPhase::Open
+        self.admission.is_open() && self.state.lock().phase == SpanPhase::Open
     }
 
     pub(in crate::basis::nest) fn close(&self) {
