@@ -151,7 +151,8 @@ impl Occupancy {
     /// The remaining left/right pieces keep the same generation identity, so a
     /// stale credential cannot release a newer occupant.
     pub(crate) fn release_range(&mut self, start: usize, last: usize, generation: usize) -> bool {
-        if start > last {
+        if start > last || !start.is_multiple_of(PAGE_SIZE) || !(last + 1).is_multiple_of(PAGE_SIZE)
+        {
             return false;
         }
         let Some(at) = self.spans.iter().position(|slot| {

@@ -352,3 +352,28 @@ fn partial_release_waits_for_the_retirement_ticket_to_settle() {
     assert_eq!(reused, start);
     assert_ne!(replacement, generation);
 }
+
+#[test]
+fn partial_release_rejects_unaligned_windows() {
+    let mut layout = Layout::new();
+    let page = 4096;
+    let placement = Placement::fixed(VirtAddr::new(0x60000), page).unwrap();
+    let (start, generation) = layout.reserve(placement).unwrap();
+    assert!(
+        !layout
+            .occupancy
+            .release_range(start + 1, start + page - 1, generation)
+    );
+    assert!(
+        !layout
+            .occupancy
+            .release_range(start, start + page - 2, generation)
+    );
+    assert!(layout.occupancy.has_id(generation));
+    assert!(
+        layout
+            .occupancy
+            .release_range(start, start + page - 1, generation)
+    );
+    assert!(!layout.occupancy.has_id(generation));
+}
