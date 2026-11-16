@@ -1001,3 +1001,41 @@ impl Span {
         Ok(())
     }
 }
+
+impl Span {
+    /// Sample phase and revision under the same owner lock as physical completion.
+    pub(crate) fn snapshot(
+        &self,
+        nest: &Nest,
+        offset: kernel_api::address::PageOffset,
+        count: kernel_api::address::PageCount,
+        writable: bool,
+    ) -> Result<kernel_api::model::nest::SpanStatus, NestError> {
+        use super::SpanPhase as LocalPhase;
+        use kernel_api::model::nest::{SpanId, SpanPhase, SpanStatus};
+        nest.check_owner(self)?;
+        let translation = self.translation.lock();
+        let inner = self.state.lock();
+        let phase = match inner.phase {
+            LocalPhase::Open if translation.is_open() => SpanPhase::Open,
+            LocalPhase::Gone => SpanPhase::Closed,
+            _ => SpanPhase::Closing,
+        };
+        let mut access = inner.initial_access;
+        if !writable {
+            access.remove(Access::WRITE);
+        }
+        Ok(SpanStatus {
+            nest: self.identity.nest_id(),
+            span: SpanId::from_bytes(&(self.identity() as u64).to_le_bytes())
+                .expect("span identity"),
+            version: self.version(),
+            offset: offset.get(),
+            count: count.get(),
+            address: self.initial_start(),
+            level: self.level(),
+            access: access.bits() << 1,
+            phase,
+        })
+    }
+}
