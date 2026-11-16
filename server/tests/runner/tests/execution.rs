@@ -72,6 +72,29 @@ fn successful_leader_cannot_leave_a_background_process() {
     assert!(cleanup["reaped"].as_u64().unwrap() >= 1);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn nonzero_exit_with_a_background_process_is_not_a_clean_business_result() {
+    let root = scratch("background-nonzero");
+    let result = process::run(
+        Command::new("sh").args(["-c", "sleep 30 & echo PASS; exit 2"]),
+        &root,
+        Duration::from_secs(2),
+    );
+    assert!(result.is_err());
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("result.json")).unwrap()).unwrap();
+    let cleanup: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("cleanup.json")).unwrap()).unwrap();
+    assert_eq!(receipt["status"], "exited");
+    assert_eq!(receipt["code"], 2);
+    assert_eq!(receipt["passed"], false);
+    assert_eq!(cleanup["unexpected_descendants"], true);
+    assert_eq!(cleanup["settled"], true);
+    assert!(cleanup["reaped"].as_u64().unwrap() >= 1);
+    fs::remove_dir_all(root).unwrap();
+}
 #[test]
 fn large_output_cannot_deadlock_pipes() {
     let root = scratch("streams");

@@ -137,9 +137,10 @@ pub fn run(command: &mut Command, directory: &Path, timeout: Duration) -> Result
         return Err(error.into());
     }
     require(
-        cleanup.settled || result.status != "exited",
+        result.status != "exited"
+            || (!cleanup.unexpected_descendants && cleanup.settled && cleanup.error.is_none()),
         format!(
-            "child process group did not settle: {}",
+            "child process group cleanup invalidated the exit result: {}",
             directory.display()
         ),
     )?;

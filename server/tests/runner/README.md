@@ -30,6 +30,10 @@ with any leftover child fails as cleanup-failed. Timeouts keep their timeout
 status and also record whether their process group settled. The runner gives
 direct children PR_SET_PDEATHSIG, but a hard kill of the runner cannot guarantee
 cleanup of compiler grandchildren that have already been spawned.
+When a nonzero exit leaves any group members or has an unsettled cleanup, the
+runner returns an error while preserving the leader's original exit status and
+code in result.json. This prevents an exit code from being consumed as a valid
+business-negative result after a cleanup failure.
 
 Other Unix hosts retain process-group termination for timeout handling, but
 the leftover-process settlement check is only verified on Linux.
