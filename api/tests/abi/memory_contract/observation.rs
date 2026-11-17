@@ -85,6 +85,7 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
         (
             Query::Memo(memo(512)),
             Snapshot::Memo(MemoStatus {
+                range: None,
                 nest,
                 span,
                 coordinate: 512,
@@ -312,6 +313,7 @@ fn logical_association_can_exist_without_a_physical_publication() {
         unreachable!()
     };
     let associated = MemoStatus {
+        range: None,
         phase: MemoPhase::Associated,
         page: 0,
         access: 0,
@@ -319,6 +321,7 @@ fn logical_association_can_exist_without_a_physical_publication() {
     };
     assert!(Observation::new(Snapshot::Memo(associated)).is_some());
     let empty = MemoStatus {
+        range: None,
         phase: MemoPhase::Empty,
         source: None,
         ..associated
@@ -326,27 +329,37 @@ fn logical_association_can_exist_without_a_physical_publication() {
     assert!(Observation::new(Snapshot::Memo(empty)).is_some());
     for invalid in [
         MemoStatus {
+            range: None,
             phase: MemoPhase::Empty,
             ..associated
         },
         MemoStatus {
+            range: None,
             phase: MemoPhase::Associated,
             ..status
         },
         MemoStatus {
+            range: None,
             source: None,
             ..status
         },
-        MemoStatus { page: 0, ..status },
         MemoStatus {
+            range: None,
+            page: 0,
+            ..status
+        },
+        MemoStatus {
+            range: None,
             access: 4,
             ..status
         },
         MemoStatus {
+            range: None,
             source: Some((slot(0).flat(), 1025)),
             ..status
         },
         MemoStatus {
+            range: None,
             coordinate: 513,
             ..status
         },
@@ -359,7 +372,12 @@ fn logical_association_can_exist_without_a_physical_publication() {
         MemoPhase::Retiring,
         MemoPhase::Failed,
     ] {
-        let observation = Observation::new(Snapshot::Memo(MemoStatus { phase, ..status })).unwrap();
+        let observation = Observation::new(Snapshot::Memo(MemoStatus {
+            range: None,
+            phase,
+            ..status
+        }))
+        .unwrap();
         assert_eq!(
             Observation::from_bytes(&observation.to_bytes()),
             Some(observation)

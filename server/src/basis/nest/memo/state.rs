@@ -667,6 +667,7 @@ impl Memo {
             }
         };
         MemoStatus {
+            range: self.range(),
             nest,
             span: reservation,
             coordinate,

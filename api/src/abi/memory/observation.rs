@@ -477,6 +477,7 @@ impl Snapshot {
                     page: input.word()?,
                     access: input.word()?,
                     level: CellLevel::new(input.size()?)?,
+                    range: None,
                 })
             }
             (Domain::Nest, 2) => Self::Span(SpanStatus {

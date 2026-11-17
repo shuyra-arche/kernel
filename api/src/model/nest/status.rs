@@ -135,6 +135,7 @@ impl MemoPhase {
 /// remains in Kernel. Equal source coordinates never establish equal authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoStatus {
+    pub range: Option<crate::model::identity::PendId>,
     pub nest: NestId,
     pub span: SpanId,
     pub coordinate: usize,
