@@ -46,8 +46,7 @@ impl Task {
             if actor.get() == 0 || actor.get() > isize::MAX as usize {
                 return Err(Failure::Denied);
             }
-            let mut storage =
-                Box::<Journal>::try_new_uninit().map_err(|_| Failure::OutOfMemory)?;
+            let mut storage = Box::<Journal>::try_new_uninit().map_err(|_| Failure::OutOfMemory)?;
             let target = storage.as_mut().as_mut_ptr();
             // SAFETY: target is the unique aligned Box allocation. Write all
             // fields and each record before publishing the initialized Box.
