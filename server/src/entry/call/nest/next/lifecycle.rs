@@ -104,15 +104,18 @@ pub(super) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation
                 SpanRoute::acquire(actor, range, NestRights::INSPECT).map_err(pend_error)?;
             let span = route.span().map_err(pend_error)?;
             let (offset, count) = route.entry().authority().window().ok_or(Failure::Denied)?;
-            Snapshot::Span(
-                span.snapshot(
+            let mut status = span
+                .snapshot(
                     route.nest(),
                     offset,
                     count,
                     route.entry().modifiable() == Modifiable::Yes,
                 )
-                .map_err(nest_error)?,
-            )
+                .map_err(nest_error)?;
+            // Describe the validated range used by this caller, including
+            // derived and narrowed Pend windows, rather than the Span root.
+            status.range = range;
+            Snapshot::Span(status)
         }
         _ => return Err(Failure::Unsupported),
     };
