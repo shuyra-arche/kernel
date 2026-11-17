@@ -40,8 +40,7 @@ pub(crate) fn capture() -> TrapEvent {
             // An address in the kernel trap-stack guard is not proof that
             // the kernel stack overflowed when the fault came from User mode.
             // User faults must pass through the normal address/authority path.
-            if riscv::register::sstatus::read().spp()
-                == riscv::register::sstatus::SPP::Supervisor
+            if riscv::register::sstatus::read().spp() == riscv::register::sstatus::SPP::Supervisor
                 && let Some(hart) = trap_stack_guard_hart(detail.value)
             {
                 panic!(
