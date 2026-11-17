@@ -77,6 +77,7 @@ fn event() -> FaultEvent {
 
 fn status() -> FaultStatus {
     FaultStatus {
+        range: None,
         nest: nest_id(),
         span: span_id(),
         epoch: FaultEpoch::new(4).unwrap(),
@@ -512,7 +513,6 @@ fn malformed_fault_fields_reject_unknown_flags_and_noncanonical_tails() {
         (10, 0),
         (11, 0),
         (11, MAX_FAULT_NS + 1),
-        (13, 1),
     ] {
         let mut bad = original;
         set_word(&mut bad, i, value);

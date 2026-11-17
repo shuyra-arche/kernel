@@ -254,6 +254,7 @@ impl Snapshot {
                     s.handler.map_or(0, |task| task.get()) as u64,
                     s.timeout_ns,
                     s.last_sequence,
+                    s.range.map_or(0, |range| range.get() as u64),
                 ],
             ),
             Self::FaultEvent(s) => words(
@@ -368,6 +369,10 @@ impl Snapshot {
                 },
                 timeout_ns: input.word()?,
                 last_sequence: input.word()?,
+                range: match input.size()? {
+                    0 => None,
+                    range => Some(crate::model::identity::PendId::mint(range)),
+                },
             }),
             (Domain::Nest, 5) => {
                 let nest = NestId::new(input.size()?)?;
