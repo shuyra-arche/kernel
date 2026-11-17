@@ -128,7 +128,7 @@ pub mod nest {
     pub use super::observation::nest::Query;
     pub use super::observation::snapshot::nest::Snapshot;
     pub use super::reply::nest::Value;
-    pub use super::request::nest::Action;
+    pub use super::request::nest::{Action, Request};
     /// Nest-domain operation slots. Reserve/Release name address occupancy and
     /// range release; the internal Span is not a public operation handle.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1472,6 +1472,195 @@ pub mod nest {
             })
         }
     }
+
+    #[allow(dead_code)]
+    impl Action {
+        pub const fn opcode(self) -> super::domain_nest::Opcode {
+            match self {
+                Self::FaultRoute { .. } => super::domain_nest::Opcode::FaultRoute,
+                Self::Create { .. } => super::domain_nest::Opcode::Create,
+                Self::Delete { .. } => super::domain_nest::Opcode::Delete,
+                Self::Reserve { .. } => super::domain_nest::Opcode::Reserve,
+                Self::Release { .. } => super::domain_nest::Opcode::Release,
+                Self::ReleaseRange { .. } => super::domain_nest::Opcode::ReleaseRange,
+                Self::Inspect(_) | Self::InspectResult { .. } => {
+                    super::domain_nest::Opcode::Inspect
+                }
+                Self::Insert { .. } => super::domain_nest::Opcode::Insert,
+                Self::Remove { .. } => super::domain_nest::Opcode::Remove,
+                Self::Publish { .. } => super::domain_nest::Opcode::Publish,
+                Self::Retract { .. } => super::domain_nest::Opcode::Retract,
+                Self::Protect { .. } => super::domain_nest::Opcode::Protect,
+            }
+        }
+
+        fn is_inspection(self) -> bool {
+            matches!(self, Self::Inspect(_) | Self::InspectResult { .. })
+        }
+
+        fn wire(self) -> Option<super::Action> {
+            Some(match self {
+                Self::FaultRoute {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    epoch,
+                    route,
+                } => super::Action::FaultRoute {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    epoch,
+                    route,
+                },
+                Self::Create { license } => super::Action::CreateNest { license },
+                Self::Reserve {
+                    token,
+                    nest,
+                    expected,
+                    request,
+                } => super::Action::CreateSpan {
+                    token,
+                    nest,
+                    expected,
+                    request,
+                },
+                Self::Release {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                } => super::Action::DeleteSpan {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                },
+                Self::ReleaseRange {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    offset,
+                    count,
+                } => super::Action::ReleaseRange {
+                    token,
+                    nest,
+                    span,
+                    expected,
+                    offset,
+                    count,
+                },
+                Self::Inspect(query) => super::Action::Inspect(query),
+                Self::InspectResult { request } => super::Action::InspectResult {
+                    domain: Domain::Nest,
+                    request,
+                },
+                Self::Insert {
+                    target,
+                    expected,
+                    source,
+                } => super::Action::Insert {
+                    target,
+                    expected,
+                    source,
+                },
+                Self::Remove { memo, expected } => super::Action::Remove { memo, expected },
+                Self::Publish {
+                    memo,
+                    expected,
+                    maintenance,
+                } => super::Action::Publish {
+                    memo,
+                    expected,
+                    maintenance,
+                },
+                Self::Retract { memo, expected } => super::Action::Retract { memo, expected },
+                Self::Protect {
+                    memo,
+                    expected,
+                    access,
+                } => super::Action::Protect {
+                    memo,
+                    expected,
+                    access,
+                },
+                Self::Delete { .. } => return None,
+            })
+        }
+    }
+
+    #[allow(dead_code)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Request {
+        id: Option<RequestId>,
+        action: Action,
+    }
+
+    #[allow(dead_code)]
+    impl Request {
+        pub const WIDTH: usize = super::Request::WIDTH;
+
+        pub fn new(id: Option<RequestId>, action: Action) -> Option<Self> {
+            (id.is_none() == action.is_inspection()).then_some(Self { id, action })
+        }
+
+        pub const fn id(self) -> Option<RequestId> {
+            self.id
+        }
+        pub const fn action(self) -> Action {
+            self.action
+        }
+
+        pub fn to_bytes(self) -> [u8; Self::WIDTH] {
+            if let Action::Delete { token, expected } = self.action {
+                let mut bytes = [0; Self::WIDTH];
+                let mut out = Writer(&mut bytes);
+                out.word(VERSION).unwrap();
+                out.word(Domain::Nest as u64).unwrap();
+                out.word(super::domain_nest::Opcode::Delete.slot()).unwrap();
+                out.word(self.id.map_or(0, RequestId::get)).unwrap();
+                out.word(token.get() as u64).unwrap();
+                out.word(expected.get()).unwrap();
+                return bytes;
+            }
+            super::Request::new(self.id, self.action.wire().expect("non-delete Nest"))
+                .unwrap()
+                .to_bytes()
+        }
+
+        pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+            if bytes.len() != Self::WIDTH {
+                return None;
+            }
+            let mut input = Reader(bytes);
+            if input.word()? != VERSION || input.word()? != Domain::Nest as u64 {
+                return None;
+            }
+            let slot = input.word()?;
+            let id = RequestId::new(input.word()?);
+            if slot == super::domain_nest::Opcode::Delete.slot() {
+                let token = input.token()?;
+                let expected = NestVersion::new(input.word()?)?;
+                input.finish()?;
+                return Self::new(id, Action::Delete { token, expected });
+            }
+            let request = super::Request::from_bytes(bytes)?;
+            let action = Action::try_from(request.action()).ok()?;
+            Self::new(request.id(), action)
+        }
+
+        pub fn from_call(number: u64, bytes: &[u8]) -> Option<Self> {
+            let opcode = Opcode::from_call_number(number)?;
+            let Opcode::Nest(opcode) = opcode else {
+                return None;
+            };
+            let request = Self::from_bytes(bytes)?;
+            (request.action.opcode() == opcode).then_some(request)
+        }
+    }
 }
 
 /// Shared request envelope for a domain action. The wire Request remains the

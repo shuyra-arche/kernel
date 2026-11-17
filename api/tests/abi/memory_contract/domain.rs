@@ -1,6 +1,6 @@
 //! Domain-local request codecs and the shared wire header.
 use kernel_api::{
-    abi::memory::{Domain, RequestId, VERSION, flat},
+    abi::memory::{Domain, RequestId, VERSION, flat, nest},
     address::PageCount,
     model::{
         cell::CellLevel,
@@ -54,4 +54,33 @@ fn flat_inspection_requires_no_request_id() {
     .unwrap();
     assert!(flat::Request::new(RequestId::new(9), action).is_none());
     assert!(flat::Request::new(None, action).is_some());
+}
+
+#[test]
+fn nest_delete_uses_token_and_version_only() {
+    let action = nest::Action::Delete {
+        token: PendId::mint(3),
+        expected: NestVersion::new(2).unwrap(),
+    };
+    let request = nest::Request::new(RequestId::new(11), action).unwrap();
+    let bytes = request.to_bytes();
+    assert_eq!(word(&bytes, 0), VERSION);
+    assert_eq!(word(&bytes, 1), Domain::Nest as u64);
+    assert_eq!(word(&bytes, 2), nest::Opcode::Delete.slot());
+    assert_eq!(word(&bytes, 3), 11);
+    assert_eq!(word(&bytes, 4), 3);
+    assert_eq!(word(&bytes, 5), 2);
+    assert_eq!(nest::Request::from_bytes(&bytes).unwrap(), request);
+}
+
+#[test]
+fn nest_create_roundtrips_license() {
+    let action = nest::Action::Create {
+        license: PendId::mint(3),
+    };
+    let request = nest::Request::new(RequestId::new(12), action).unwrap();
+    assert_eq!(
+        nest::Request::from_bytes(&request.to_bytes()).unwrap(),
+        request
+    );
 }
