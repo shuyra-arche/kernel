@@ -12,8 +12,8 @@ use crate::model::{
     identity::PendId,
     nest::SpanId,
     nest::{
-        FaultEpoch, FaultPhase, MemoGeneration, NestId, NestPhase, NestVersion, SpanPhase,
-        SpanVersion,
+        FaultEpoch, FaultPhase, MemoGeneration, NestId, NestPhase, NestVersion, RangeVersion,
+        SpanPhase, SpanVersion,
     },
 };
 
@@ -22,9 +22,8 @@ use crate::model::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Value {
     FaultRoute {
-        nest: NestId,
-        span: SpanId,
-        version: SpanVersion,
+        range: PendId,
+        version: RangeVersion,
         epoch: FaultEpoch,
         phase: FaultPhase,
     },
@@ -103,16 +102,14 @@ impl Value {
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
         match self {
             Self::FaultRoute {
-                nest,
-                span,
+                range,
                 version,
                 epoch,
                 phase,
             } => {
                 for word in [
                     12,
-                    nest.get() as u64,
-                    span.get() as u64,
+                    range.get() as u64,
                     version.get(),
                     epoch.get(),
                     phase as u64,
@@ -232,9 +229,8 @@ impl Value {
     fn read(input: &mut Reader<'_>) -> Option<Option<Self>> {
         Some(match input.word()? {
             12 => Some(Self::FaultRoute {
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
-                version: SpanVersion::new(input.word()?)?,
+                range: input.token()?,
+                version: RangeVersion::new(input.word()?)?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 phase: FaultPhase::from_tag(input.word()?)?,
             }),
@@ -587,21 +583,20 @@ impl Reply {
                 match (action, self.outcome) {
                     (
                         Action::FaultRoute {
+                            range,
                             expected,
                             epoch,
                             route,
-                            ..
                         },
                         Outcome::Committed(Value::FaultRoute {
-                            nest: actual_nest,
-                            span: actual_span,
+                            range: actual_range,
                             version,
                             epoch: actual_epoch,
                             phase,
                         }),
                     ) => {
-                        let _ = (actual_nest, actual_span);
-                        expected.next().map(|next| next.get()) == Some(version.get())
+                        range == actual_range
+                            && expected.next() == Some(version)
                             && epoch.next() == Some(actual_epoch)
                             && phase
                                 == if route.is_some() {
@@ -858,9 +853,8 @@ pub mod nest {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Value {
         FaultRoute {
-            nest: NestId,
-            span: SpanId,
-            version: SpanVersion,
+            range: PendId,
+            version: RangeVersion,
             epoch: FaultEpoch,
             phase: FaultPhase,
         },
@@ -899,15 +893,14 @@ pub mod nest {
             match (self, opcode) {
                 (
                     Self::FaultRoute {
-                        span,
+                        range,
                         version,
                         epoch,
                         phase,
-                        ..
                     },
                     Opcode::FaultRoute,
                 ) => {
-                    valid_token(span.get())
+                    valid_token(range.get())
                         && version.get() > 1
                         && epoch.get() > 1
                         && matches!(phase, FaultPhase::Active | FaultPhase::Disabled)
@@ -948,14 +941,12 @@ pub mod nest {
         fn from(value: Value) -> Self {
             match value {
                 Value::FaultRoute {
-                    nest,
-                    span,
+                    range,
                     version,
                     epoch,
                     phase,
                 } => Self::FaultRoute {
-                    nest,
-                    span,
+                    range,
                     version,
                     epoch,
                     phase,
@@ -1015,14 +1006,12 @@ pub mod nest {
         fn try_from(value: super::Value) -> Result<Self, Self::Error> {
             Ok(match value {
                 super::Value::FaultRoute {
-                    nest,
-                    span,
+                    range,
                     version,
                     epoch,
                     phase,
                 } => Self::FaultRoute {
-                    nest,
-                    span,
+                    range,
                     version,
                     epoch,
                     phase,

@@ -47,9 +47,8 @@ pub(super) fn results() -> Vec<Reply> {
                     kernel_api::abi::memory::nest::Opcode::FaultRoute,
                 ),
                 Outcome::Committed(Value::FaultRoute {
-                    nest: nest_id(),
-                    span: span_id(),
-                    version: SpanVersion::new(8).unwrap(),
+                    range: PendId::mint(13),
+                    version: kernel_api::model::nest::RangeVersion::new(8).unwrap(),
                     epoch: FaultEpoch::new(4).unwrap(),
                     phase,
                 }),
@@ -132,7 +131,7 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
             Some(request)
         );
         assert!(Request::new(None, action).is_none());
-        let expected = bytes::<128>(&[14, 13, 26, u64::MAX, 2, 0, 12, 17, 19, 8, 4, index as u64]);
+        let expected = bytes::<128>(&[14, 13, 26, u64::MAX, 2, 0, 12, 13, 8, 4, index as u64]);
         assert_eq!(reply.to_bytes(), expected);
         assert_eq!(Reply::from_bytes(&expected), Some(reply));
         assert!(reply.matches(request));
@@ -298,7 +297,7 @@ fn stale_route_events_and_mismatched_registration_receipts_do_not_correlate() {
     }
     for (action, reply) in mutations().into_iter().zip(results()) {
         let request = Request::new(Some(id()), action).unwrap();
-        for (index, value) in [(9, 9), (10, 5)] {
+        for (index, value) in [(8, 7), (9, 9)] {
             let mut bad = reply.to_bytes();
             set_word(&mut bad, index, value);
             assert!(!Reply::from_bytes(&bad).unwrap().matches(request));
@@ -306,7 +305,7 @@ fn stale_route_events_and_mismatched_registration_receipts_do_not_correlate() {
         let mut bad = reply.to_bytes();
         set_word(
             &mut bad,
-            11,
+            10,
             if matches!(action, Action::FaultRoute { route: None, .. }) {
                 1
             } else {

@@ -166,8 +166,6 @@ pub(crate) fn configure(actor: &Arc<Task>, action: NestAction) -> Result<Value, 
         return Err(Failure::Invalid);
     };
     let (route, span) = full_route_range(actor, range, kernel_api::abi::memory::rights::FAULT)?;
-    let nest = route.nest().id();
-    let reservation = route.id();
     let _operation = span.operation().ok_or(Failure::Busy)?;
     if route.nest().is_external() {
         return Err(Failure::Unsupported);
@@ -175,10 +173,7 @@ pub(crate) fn configure(actor: &Arc<Task>, action: NestAction) -> Result<Value, 
     if span.version().get() != expected.get() || span.faults.lock().epoch != epoch {
         return Err(Failure::Stale);
     }
-    let version = kernel_api::model::nest::SpanVersion::new(
-        expected.next().ok_or(Failure::VersionExhausted)?.get(),
-    )
-    .ok_or(Failure::VersionExhausted)?;
+    let version = expected.next().ok_or(Failure::VersionExhausted)?;
     let epoch = epoch.next().ok_or(Failure::VersionExhausted)?;
     let binding = config
         .map(|config| Binding::prepare(actor, route.entry(), route.nest(), &span, config))
@@ -200,8 +195,7 @@ pub(crate) fn configure(actor: &Arc<Task>, action: NestAction) -> Result<Value, 
         sign::signal(old.key());
     }
     Ok(Value::FaultRoute {
-        nest,
-        span: reservation,
+        range,
         version,
         epoch,
         phase: if config.is_some() {
