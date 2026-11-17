@@ -21,6 +21,14 @@ impl RequestKey {
         })
     }
 
+    pub fn new_from_domain(
+        id: Option<RequestId>,
+        opcode: Opcode,
+        bytes: [u8; Request::WIDTH],
+    ) -> Option<Self> {
+        Self::from_parts(id, opcode, bytes)
+    }
+
     pub fn from_parts(
         id: Option<RequestId>,
         opcode: Opcode,

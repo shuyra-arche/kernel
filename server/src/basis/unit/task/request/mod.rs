@@ -32,6 +32,7 @@ impl Task {
     /// Reserve result capacity before returning the sole execution receipt.
     /// Replays never return a permit to run effects again. All admission guards
     /// end here, before Entry prepares a Page or starts a hardware operation.
+    #[allow(dead_code)]
     pub(crate) fn admit_memory(
         self: &Arc<Self>,
         request: Request,
@@ -91,6 +92,14 @@ impl Task {
                 Ok(Admission::Execute(Receipt::new(self, request, accepted)))
             }
         }
+    }
+
+    pub(crate) fn inspect_result(
+        &self,
+        domain: Domain,
+        id: RequestId,
+    ) -> Result<Option<Reply>, Failure> {
+        self.inspect_memory(domain, id)
     }
 
     fn inspect_memory(&self, domain: Domain, id: RequestId) -> Result<Option<Reply>, Failure> {
