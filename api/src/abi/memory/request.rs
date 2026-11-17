@@ -10,10 +10,9 @@ use crate::model::{
     cell::CellLevel,
     flat::{BlockRef, FlatId, FlatVersion, Reshape, SlotPosition, SlotVersion},
     identity::PendId,
-    nest::SpanId,
     nest::{
         CreateSpanRequest, FaultEpoch, FaultRoute, MemoGeneration, MemoPosition, NestId,
-        NestVersion, SpanVersion,
+        NestVersion,
     },
     nest::{RangeSlice, RangeVersion},
     view::ViewId,
@@ -164,10 +163,8 @@ pub enum Action {
         request: CreateSpanRequest,
     },
     DeleteSpan {
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
-        expected: SpanVersion,
+        range: PendId,
+        expected: RangeVersion,
     },
     /// Release a page-aligned subrange of a Span. The Span stays open and its
     /// revision advances; full close remains `DeleteSpan`.
@@ -323,9 +320,7 @@ impl Action {
                         _ => true,
                     }
             }
-            Self::DeleteSpan { token, span, .. } => {
-                valid_token(token.get()) && valid_token(span.get())
-            }
+            Self::DeleteSpan { range, .. } => valid_token(range.get()),
             Self::ReleaseRange { target, .. } => target.range().get() != 0,
             Self::Split {
                 start,
@@ -439,15 +434,8 @@ impl Action {
                 out.word(expected.get())?;
                 out.bytes(&request.to_bytes())
             }
-            Self::DeleteSpan {
-                token,
-                nest,
-                span,
-                expected,
-            } => {
-                out.word(token.get() as u64)?;
-                out.word(nest.get() as u64)?;
-                out.word(span.get() as u64)?;
+            Self::DeleteSpan { range, expected } => {
+                out.word(range.get() as u64)?;
                 out.word(expected.get())
             }
             Self::ReleaseRange { target, expected } => {
@@ -587,10 +575,8 @@ impl Action {
                 request: CreateSpanRequest::from_bytes(input.bytes::<48>()?)?,
             },
             Opcode::Nest(domain_nest::Opcode::Release) => Self::DeleteSpan {
-                token: input.token()?,
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
-                expected: SpanVersion::new(input.word()?)?,
+                range: input.token()?,
+                expected: RangeVersion::new(input.word()?)?,
             },
             Opcode::Nest(domain_nest::Opcode::ReleaseRange) => Self::ReleaseRange {
                 target: RangeSlice::from_bytes(input.bytes::<24>()?)?,
@@ -1284,10 +1270,8 @@ pub mod nest {
             request: CreateSpanRequest,
         },
         Release {
-            token: PendId,
-            nest: NestId,
-            span: SpanId,
-            expected: SpanVersion,
+            range: PendId,
+            expected: RangeVersion,
         },
         ReleaseRange {
             target: RangeSlice,
@@ -1353,17 +1337,7 @@ pub mod nest {
                     expected,
                     request,
                 },
-                super::Action::DeleteSpan {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                } => Self::Release {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                },
+                super::Action::DeleteSpan { range, expected } => Self::Release { range, expected },
                 super::Action::ReleaseRange { target, expected } => {
                     Self::ReleaseRange { target, expected }
                 }
@@ -1456,17 +1430,7 @@ pub mod nest {
                     expected,
                     request,
                 },
-                Self::Release {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                } => super::Action::DeleteSpan {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                },
+                Self::Release { range, expected } => super::Action::DeleteSpan { range, expected },
                 Self::ReleaseRange { target, expected } => {
                     super::Action::ReleaseRange { target, expected }
                 }

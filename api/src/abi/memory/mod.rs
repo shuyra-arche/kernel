@@ -324,11 +324,6 @@ impl<'a> Reader<'a> {
         valid_token(value).then(|| crate::model::identity::PendId::mint(value))
     }
 
-    fn span(&mut self) -> Option<crate::model::nest::SpanId> {
-        let value = self.size()?;
-        valid_token(value).then(|| crate::model::nest::SpanId::new(value))
-    }
-
     fn finish(self) -> Option<()> {
         self.0.iter().all(|byte| *byte == 0).then_some(())
     }

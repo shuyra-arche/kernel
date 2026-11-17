@@ -167,46 +167,43 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        NestAction::Release {
-            token,
-            nest: id,
-            span: reservation,
-            expected,
-        } => {
-            let (nest, span) = {
+        NestAction::Release { range, expected } => {
+            let (nest, span, reservation) = {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
                 if !pend::live(actor) {
                     return Err(Failure::Dead);
                 }
-                let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
+                let entry = pend::locate(actor, range).ok_or(Failure::Denied)?;
                 if !entry
                     .authority()
                     .permits(Operations::Nest(NestRights::DELETE_SPAN))
-                    || !matches!(entry.scope(), PendScope::Nest(NestScope::Span { id, .. }) if id == reservation)
                 {
                     return Err(Failure::Denied);
                 }
+                let reservation = match entry.scope() {
+                    PendScope::Nest(NestScope::Span { id, .. }) => id,
+                    _ => return Err(Failure::Denied),
+                };
                 let nest = entry.target().nest().ok_or(Failure::Denied)?;
-                if nest.id() != id {
-                    return Err(Failure::Denied);
-                }
                 let span = nest.span(reservation).ok_or(Failure::Dead)?;
                 let (offset, count) = entry.authority().window().ok_or(Failure::Denied)?;
                 if offset.get() != 0 || count.checked_bytes() != Some(span.initial_size()) {
                     return Err(Failure::Denied);
                 }
-                if span.version() != expected {
+                if span.version().get() != expected.get() {
                     return Err(Failure::Stale);
                 }
-                expected.next().ok_or(Failure::VersionExhausted)?;
-                nest.begin_release(&span, expected).map_err(nest_error)?;
+                let next = expected.next().ok_or(Failure::VersionExhausted)?;
+                let version = kernel_api::model::nest::SpanVersion::new(next.get())
+                    .ok_or(Failure::VersionExhausted)?;
+                nest.begin_release(&span, version).map_err(nest_error)?;
                 receipt.start(Value::SpanLifecycle {
                     range: span.authority(),
                     version: span.version(),
                     phase: SpanPhase::Closing,
                 });
-                (nest, span)
+                (nest, span, reservation)
             };
             nest.close_span(reservation).map_err(cell_error)?;
             let _commit = basis::commit();

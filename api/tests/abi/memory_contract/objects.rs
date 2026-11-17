@@ -48,10 +48,8 @@ pub(super) fn mutations() -> Vec<Action> {
             request: span(),
         },
         Action::DeleteSpan {
-            token: PendId::mint(7),
-            nest: nest_id(),
-            span: span_id(),
-            expected: SpanVersion::new(u64::MAX).unwrap(),
+            range: PendId::mint(7),
+            expected: kernel_api::model::nest::RangeVersion::new(u64::MAX).unwrap(),
         },
     ]
 }
@@ -197,7 +195,7 @@ fn object_mutations_use_expected_object_versions_and_exact_wire_layouts() {
             1,
             6,
         ],
-        &[14, 13, 20, u64::MAX, 7, 17, 19, u64::MAX],
+        &[14, 13, 20, u64::MAX, 7, u64::MAX],
     ];
     for (action, words) in mutations().into_iter().zip(payloads) {
         let request = Request::new(Some(id()), action).unwrap();
@@ -280,18 +278,16 @@ fn creation_span_and_deletion_reject_bad_geometry_identity_or_version() {
         Request::new(
             Some(id()),
             Action::DeleteSpan {
-                token: PendId::mint(1),
-                nest: nest_id(),
-                span: SpanId::NONE,
-                expected: SpanVersion::INITIAL
-            }
+                range: PendId::NONE,
+                expected: kernel_api::model::nest::RangeVersion::INITIAL,
+            },
         )
         .is_none()
     );
     for index in [1, 3, 5] {
         let action = mutations()[index];
         let mut bad = Request::new(Some(id()), action).unwrap().to_bytes();
-        set_word(&mut bad, if index == 5 { 7 } else { 6 }, 0);
+        set_word(&mut bad, if index == 5 { 4 } else { 6 }, 0);
         assert!(Request::from_bytes(&bad).is_none());
     }
 }
