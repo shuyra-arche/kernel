@@ -16,6 +16,10 @@ fn release_requires_complete_cell_grains_at_fixed_original_coordinates() {
         CellLevel::new(1).unwrap(),
     )
     .unwrap();
+    assert_eq!(span.start(), VirtAddr::new(base));
+    assert_eq!(span.size(), 2 * grain * PAGE_SIZE);
+    assert_eq!(span.level(), CellLevel::new(1).unwrap());
+    assert_eq!(span.last(), base + 2 * grain * PAGE_SIZE - 1);
 
     assert_eq!(
         span.release_slice(PageOffset::new(0), PageCount::new(grain).unwrap()),
