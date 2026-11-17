@@ -28,9 +28,7 @@ use crate::model::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Query {
     FaultRoute {
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
+        range: PendId,
     },
     /// Observe the next retained event without consuming it. Only the actual
     /// registered handler may read events; timeout never resolves a fault.
@@ -80,9 +78,8 @@ impl Query {
         match self {
             Self::Flat { token, .. } | Self::Nest { token, .. } => valid_token(token.get()),
             Self::Block(h) => valid_token(h.token.get()),
-            Self::Span { token, span, .. } | Self::FaultRoute { token, span, .. } => {
-                valid_token(token.get()) && valid_token(span.get())
-            }
+            Self::Span { token, span, .. } => valid_token(token.get()) && valid_token(span.get()),
+            Self::FaultRoute { range } => valid_token(range.get()),
             Self::FaultEvent {
                 token, span, wait, ..
             } => valid_token(token.get()) && valid_token(span.get()) && wait != Wait::Infinite,
@@ -106,11 +103,12 @@ impl Query {
                 out.word(nest.get() as u64)
             }
             Self::Memo(memo) => out.bytes(&memo.to_bytes()),
-            Self::Span { token, nest, span } | Self::FaultRoute { token, nest, span } => {
+            Self::Span { token, nest, span } => {
                 out.word(token.get() as u64)?;
                 out.word(nest.get() as u64)?;
                 out.word(span.get() as u64)
             }
+            Self::FaultRoute { range } => out.word(range.get() as u64),
             Self::FaultEvent {
                 token,
                 nest,
@@ -164,9 +162,7 @@ impl Query {
                 span: input.span()?,
             },
             (Domain::Nest, 4) => Self::FaultRoute {
-                token: input.token()?,
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
             },
             (Domain::Nest, 5) => Self::FaultEvent {
                 token: input.token()?,
@@ -247,14 +243,12 @@ impl Snapshot {
             Self::FaultRoute(s) => words(
                 out,
                 &[
-                    s.nest.get() as u64,
-                    s.span.get() as u64,
+                    s.range.get() as u64,
                     s.epoch.get(),
                     s.phase as u64,
                     s.handler.map_or(0, |task| task.get()) as u64,
                     s.timeout_ns,
                     s.last_sequence,
-                    s.range.map_or(0, |range| range.get() as u64),
                 ],
             ),
             Self::FaultEvent(s) => words(
@@ -359,8 +353,7 @@ impl Snapshot {
     fn read(domain: Domain, tag: u64, input: &mut Reader<'_>) -> Option<Self> {
         Some(match (domain, tag) {
             (Domain::Nest, 4) => Self::FaultRoute(FaultStatus {
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 phase: FaultPhase::from_tag(input.word()?)?,
                 handler: match input.size()? {
@@ -369,10 +362,6 @@ impl Snapshot {
                 },
                 timeout_ns: input.word()?,
                 last_sequence: input.word()?,
-                range: match input.size()? {
-                    0 => None,
-                    range => Some(crate::model::identity::PendId::mint(range)),
-                },
             }),
             (Domain::Nest, 5) => {
                 let nest = NestId::new(input.size()?)?;
@@ -618,9 +607,7 @@ pub mod nest {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Query {
         FaultRoute {
-            token: PendId,
-            nest: NestId,
-            span: SpanId,
+            range: PendId,
         },
         FaultEvent {
             token: PendId,
@@ -645,7 +632,7 @@ pub mod nest {
     impl From<Query> for super::Query {
         fn from(query: Query) -> Self {
             match query {
-                Query::FaultRoute { token, nest, span } => Self::FaultRoute { token, nest, span },
+                Query::FaultRoute { range } => Self::FaultRoute { range },
                 Query::FaultEvent {
                     token,
                     nest,
@@ -673,9 +660,7 @@ pub mod nest {
 
         fn try_from(query: super::Query) -> Result<Self, Self::Error> {
             Ok(match query {
-                super::Query::FaultRoute { token, nest, span } => {
-                    Self::FaultRoute { token, nest, span }
-                }
+                super::Query::FaultRoute { range } => Self::FaultRoute { range },
                 super::Query::FaultEvent {
                     token,
                     nest,
@@ -784,9 +769,7 @@ pub mod snapshot {
             pub(crate) fn matches(self, query: super::super::nest::Query) -> bool {
                 use super::super::nest::Query;
                 match (self, query) {
-                    (Self::FaultRoute(s), Query::FaultRoute { nest, span, .. }) => {
-                        s.nest == nest && s.span == span
-                    }
+                    (Self::FaultRoute(s), Query::FaultRoute { range }) => s.range == range,
                     (
                         Self::FaultEvent(s),
                         Query::FaultEvent {

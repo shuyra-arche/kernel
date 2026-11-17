@@ -77,9 +77,7 @@ fn event() -> FaultEvent {
 
 fn status() -> FaultStatus {
     FaultStatus {
-        range: None,
-        nest: nest_id(),
-        span: span_id(),
+        range: PendId::mint(13),
         epoch: FaultEpoch::new(4).unwrap(),
         phase: FaultPhase::Active,
         handler: Some(TaskId::new(29)),
@@ -91,9 +89,7 @@ fn status() -> FaultStatus {
 fn queries() -> Vec<Query> {
     vec![
         Query::FaultRoute {
-            token: PendId::mint(13),
-            nest: nest_id(),
-            span: span_id(),
+            range: PendId::mint(13),
         },
         Query::FaultEvent {
             token: PendId::mint(13),
@@ -149,7 +145,7 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
 #[test]
 fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
     let expected_queries = [
-        bytes::<256>(&[14, 13, 18, 0, 4, 13, 17, 19]),
+        bytes::<256>(&[14, 13, 18, 0, 4, 13]),
         bytes::<256>(&[14, 13, 18, 0, 5, 13, 17, 19, 4, u64::MAX - 1, 1, 1 << 63]),
     ];
     let snapshots = [
@@ -157,21 +153,7 @@ fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
         Snapshot::FaultEvent(event()),
     ];
     let expected_snapshots = [
-        bytes::<128>(&[
-            14,
-            13,
-            18,
-            0,
-            4,
-            0,
-            17,
-            19,
-            4,
-            1,
-            29,
-            MAX_FAULT_NS,
-            u64::MAX,
-        ]),
+        bytes::<128>(&[14, 13, 18, 0, 4, 0, 13, 4, 1, 29, MAX_FAULT_NS, u64::MAX]),
         bytes::<128>(&[
             14,
             13,
@@ -507,12 +489,12 @@ fn malformed_fault_fields_reject_unknown_flags_and_noncanonical_tails() {
         .unwrap()
         .to_bytes();
     for (i, value) in [
+        (6, 0),
         (7, 0),
-        (8, 0),
-        (9, 3),
+        (8, 3),
+        (9, 0),
         (10, 0),
-        (11, 0),
-        (11, MAX_FAULT_NS + 1),
+        (10, MAX_FAULT_NS + 1),
     ] {
         let mut bad = original;
         set_word(&mut bad, i, value);

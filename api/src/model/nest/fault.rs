@@ -107,9 +107,7 @@ impl FaultPhase {
 /// diagnosis; neither a dead route nor a dead grant can admit recovery actions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaultStatus {
-    pub range: Option<crate::model::identity::PendId>,
-    pub nest: NestId,
-    pub span: SpanId,
+    pub range: crate::model::identity::PendId,
     pub epoch: FaultEpoch,
     pub phase: FaultPhase,
     pub handler: Option<TaskId>,
@@ -118,10 +116,8 @@ pub struct FaultStatus {
 }
 impl FaultStatus {
     pub fn valid(self) -> bool {
-        self.range
-            .is_none_or(|range| range.get() > 0 && range.get() <= isize::MAX as usize)
-            && self.span.get() > 0
-            && self.span.get() <= isize::MAX as usize
+        self.range.get() > 0
+            && self.range.get() <= isize::MAX as usize
             && match self.phase {
                 FaultPhase::Disabled => {
                     self.handler.is_none()

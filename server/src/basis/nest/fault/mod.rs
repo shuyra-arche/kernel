@@ -212,28 +212,15 @@ pub(crate) fn configure(actor: &Arc<Task>, action: NestAction) -> Result<Value, 
     })
 }
 pub(crate) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation, Failure> {
-    let NestQuery::FaultRoute {
-        token,
-        nest,
-        span: reservation,
-    } = query
-    else {
+    let NestQuery::FaultRoute { range } = query else {
         return Err(Failure::Invalid);
     };
     let _commit = crate::basis::commit();
-    let (_, span) = full_route(
-        actor,
-        token,
-        nest,
-        reservation,
-        kernel_api::model::pend::NestRights::INSPECT,
-    )?;
+    let (_, span) = full_route_range(actor, range, kernel_api::model::pend::NestRights::INSPECT)?;
     let active = active(&span);
     let state = span.faults.lock();
     let status = FaultStatus {
-        nest,
-        range: Some(token),
-        span: reservation,
+        range,
         epoch: state.epoch,
         phase: match active {
             Ok(_) if !state.lost() => FaultPhase::Active,
