@@ -88,10 +88,9 @@ pub(super) fn results() -> Vec<Reply> {
             id(),
             kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Reserve),
             Outcome::Committed(Value::Span {
-                token: PendId::mint(5),
+                range: PendId::mint(5),
                 nest,
                 nest_version: n,
-                span,
                 version: m,
                 address: VirtAddr::new(0x8000),
             }),
@@ -150,8 +149,7 @@ pub(super) fn results() -> Vec<Reply> {
     }
     for phase in [SpanPhase::Closing, SpanPhase::Closed, SpanPhase::Failed] {
         let value = Value::SpanLifecycle {
-            nest,
-            span,
+            range: PendId::mint(5),
             version: m,
             phase,
         };
@@ -323,8 +321,7 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
         (
             kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Release),
             Value::SpanLifecycle {
-                nest: nest_id(),
-                span: span_id(),
+                range: PendId::mint(13),
                 version: SpanVersion::INITIAL,
                 phase: SpanPhase::Closing,
             },
@@ -410,7 +407,6 @@ fn span_result_carries_the_new_grant_and_both_structural_versions() {
         5,
         17,
         1 << 63,
-        19,
         1 << 63,
         0x8000,
     ]
@@ -426,10 +422,9 @@ fn span_result_carries_the_new_grant_and_both_structural_versions() {
         (8, 0),
         (9, 0),
         (10, 0),
-        (11, 0),
+        (11, 1),
+        (11, (usize::MAX & !4095) as u64),
         (12, 1),
-        (12, (usize::MAX & !4095) as u64),
-        (13, 1),
     ] {
         let mut bad = expected;
         set_word(&mut bad, word, value);
@@ -500,8 +495,7 @@ fn release_range_encodes_identity_expected_revision_and_page_window() {
     );
 
     let value = Value::SpanLifecycle {
-        nest: NestId::new(13).unwrap(),
-        span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
+        range: PendId::mint(7),
         version: SpanVersion::new(4).unwrap(),
         phase: SpanPhase::Open,
     };
@@ -532,8 +526,7 @@ fn release_range_rejects_empty_or_overflowing_windows_and_non_open_replies() {
 
     let request = Request::new(Some(id()), action(1, 2).unwrap()).unwrap();
     let value = |phase| Value::SpanLifecycle {
-        nest: NestId::new(13).unwrap(),
-        span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
+        range: PendId::mint(7),
         version: SpanVersion::new(4).unwrap(),
         phase,
     };

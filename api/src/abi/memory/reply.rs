@@ -10,7 +10,6 @@ use crate::model::{
     cell::CellLevel,
     flat::{BlockPhase, BlockRef, FlatId, FlatPhase, FlatVersion, Reshape, SlotVersion},
     identity::PendId,
-    nest::SpanId,
     nest::{
         FaultEpoch, FaultPhase, MemoGeneration, NestId, NestPhase, NestVersion, RangeVersion,
         SpanPhase, SpanVersion,
@@ -46,10 +45,9 @@ pub enum Value {
         version: NestVersion,
     },
     Span {
-        token: PendId,
+        range: PendId,
         nest: NestId,
         nest_version: NestVersion,
-        span: SpanId,
         version: SpanVersion,
         address: VirtAddr,
     },
@@ -64,8 +62,7 @@ pub enum Value {
         phase: NestPhase,
     },
     SpanLifecycle {
-        nest: NestId,
-        span: SpanId,
+        range: PendId,
         version: SpanVersion,
         phase: SpanPhase,
     },
@@ -152,18 +149,16 @@ impl Value {
                 out.word(version.get())
             }
             Self::Span {
-                token,
+                range,
                 nest,
                 nest_version,
-                span,
                 version,
                 address,
             } => {
                 out.word(7)?;
-                out.word(token.get() as u64)?;
+                out.word(range.get() as u64)?;
                 out.word(nest.get() as u64)?;
                 out.word(nest_version.get())?;
-                out.word(span.get() as u64)?;
                 out.word(version.get())?;
                 out.word(address.get() as u64)
             }
@@ -188,14 +183,12 @@ impl Value {
                 out.word(phase as u64)
             }
             Self::SpanLifecycle {
-                nest,
-                span,
+                range,
                 version,
                 phase,
             } => {
                 out.word(10)?;
-                out.word(nest.get() as u64)?;
-                out.word(span.get() as u64)?;
+                out.word(range.get() as u64)?;
                 out.word(version.get())?;
                 out.word(phase as u64)
             }
@@ -251,10 +244,9 @@ impl Value {
                 version: NestVersion::new(input.word()?)?,
             }),
             7 => Some(Self::Span {
-                token: input.token()?,
+                range: input.token()?,
                 nest: NestId::new(input.size()?)?,
                 nest_version: NestVersion::new(input.word()?)?,
-                span: input.span()?,
                 version: SpanVersion::new(input.word()?)?,
                 address: VirtAddr::new(input.size()?),
             }),
@@ -276,8 +268,7 @@ impl Value {
                 },
             }),
             10 => Some(Self::SpanLifecycle {
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
                 version: SpanVersion::new(input.word()?)?,
                 phase: SpanPhase::from_tag(input.word()?)?,
             }),
@@ -864,10 +855,9 @@ pub mod nest {
             version: NestVersion,
         },
         Span {
-            token: PendId,
+            range: PendId,
             nest: NestId,
             nest_version: NestVersion,
-            span: SpanId,
             version: SpanVersion,
             address: VirtAddr,
         },
@@ -877,8 +867,7 @@ pub mod nest {
             phase: NestPhase,
         },
         SpanLifecycle {
-            nest: NestId,
-            span: SpanId,
+            range: PendId,
             version: SpanVersion,
             phase: SpanPhase,
         },
@@ -906,23 +895,14 @@ pub mod nest {
                         && matches!(phase, FaultPhase::Active | FaultPhase::Disabled)
                 }
                 (Self::Created { token, .. }, Opcode::Create) => valid_token(token.get()),
-                (
-                    Self::Span {
-                        token,
-                        span,
-                        address,
-                        ..
-                    },
-                    Opcode::Reserve,
-                ) => {
-                    valid_token(token.get())
-                        && valid_token(span.get())
+                (Self::Span { range, address, .. }, Opcode::Reserve) => {
+                    valid_token(range.get())
                         && address.get().is_multiple_of(BASE_PAGE_SIZE)
                         && address.get().checked_add(BASE_PAGE_SIZE).is_some()
                 }
                 (Self::Lifecycle { .. }, Opcode::Delete) => true,
-                (Self::SpanLifecycle { span, .. }, Opcode::Release | Opcode::ReleaseRange) => {
-                    valid_token(span.get())
+                (Self::SpanLifecycle { range, .. }, Opcode::Release | Opcode::ReleaseRange) => {
+                    valid_token(range.get())
                 }
                 (
                     Self::Memo { .. },
@@ -961,17 +941,15 @@ pub mod nest {
                     version,
                 },
                 Value::Span {
-                    token,
+                    range,
                     nest,
                     nest_version,
-                    span,
                     version,
                     address,
                 } => Self::Span {
-                    token,
+                    range,
                     nest,
                     nest_version,
-                    span,
                     version,
                     address,
                 },
@@ -985,13 +963,11 @@ pub mod nest {
                     phase,
                 },
                 Value::SpanLifecycle {
-                    nest,
-                    span,
+                    range,
                     version,
                     phase,
                 } => Self::SpanLifecycle {
-                    nest,
-                    span,
+                    range,
                     version,
                     phase,
                 },
@@ -1026,17 +1002,15 @@ pub mod nest {
                     version,
                 },
                 super::Value::Span {
-                    token,
+                    range,
                     nest,
                     nest_version,
-                    span,
                     version,
                     address,
                 } => Self::Span {
-                    token,
+                    range,
                     nest,
                     nest_version,
-                    span,
                     version,
                     address,
                 },
@@ -1050,13 +1024,11 @@ pub mod nest {
                     phase,
                 },
                 super::Value::SpanLifecycle {
-                    nest,
-                    span,
+                    range,
                     version,
                     phase,
                 } => Self::SpanLifecycle {
-                    nest,
-                    span,
+                    range,
                     version,
                     phase,
                 },

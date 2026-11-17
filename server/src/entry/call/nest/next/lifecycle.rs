@@ -70,10 +70,9 @@ pub(super) fn mutate(actor: &Arc<Task>, action: NestAction) -> Result<Value, Fai
                 .map_err(nest_error)?;
             grant.publish();
             Ok(Value::Span {
-                token,
+                range: token,
                 nest: nest.id(),
                 nest_version: nest.version(),
-                span: id,
                 version: span.version(),
                 address: span.initial_start(),
             })
@@ -203,8 +202,7 @@ pub(super) fn effect(
                 expected.next().ok_or(Failure::VersionExhausted)?;
                 nest.begin_release(&span, expected).map_err(nest_error)?;
                 receipt.start(Value::SpanLifecycle {
-                    nest: id,
-                    span: reservation,
+                    range: span.authority(),
                     version: span.version(),
                     phase: SpanPhase::Closing,
                 });
@@ -213,8 +211,7 @@ pub(super) fn effect(
             nest.close_span(reservation).map_err(cell_error)?;
             let _commit = basis::commit();
             let value = Value::SpanLifecycle {
-                nest: id,
-                span: reservation,
+                range: span.authority(),
                 version: span.version(),
                 phase: SpanPhase::Closed,
             };
@@ -225,7 +222,7 @@ pub(super) fn effect(
             let token = target.range();
             let offset = target.offset();
             let count = target.count();
-            let (id, reservation, span) = {
+            let span = {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
                 if !pend::live(actor) {
@@ -263,11 +260,10 @@ pub(super) fn effect(
                 expected.next().ok_or(Failure::VersionExhausted)?;
                 nest.reclaim_range(reservation, offset, count)
                     .map_err(nest_error)?;
-                (nest.id(), reservation, span)
+                span
             };
             let value = Value::SpanLifecycle {
-                nest: id,
-                span: reservation,
+                range: token,
                 version: span.version(),
                 phase: SpanPhase::Open,
             };
