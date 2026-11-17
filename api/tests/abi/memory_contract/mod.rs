@@ -1,6 +1,7 @@
 //! Native memory value contracts. These do not exercise server authorization,
 //! publication, maintenance or retirement.
 mod call;
+mod domain;
 mod fault;
 mod journal;
 mod objects;

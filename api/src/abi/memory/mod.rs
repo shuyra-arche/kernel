@@ -86,7 +86,7 @@ pub mod flat {
     pub use super::observation::flat::Query;
     pub use super::observation::snapshot::flat::Snapshot;
     pub use super::reply::flat::Value;
-    pub use super::request::flat::Action;
+    pub use super::request::flat::{Action, Request};
     /// Flat-domain operation slots. The wire domain is still carried by the
     /// shared envelope; these are not mixed with Nest operations.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
