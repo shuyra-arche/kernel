@@ -93,7 +93,8 @@ impl Cpu {
                 .ok_or(Failure::VersionExhausted)?;
             let wire = FaultEvent {
                 nest: nest.id(),
-                span: memo.span,
+                span: kernel_api::model::nest::SpanId::from_bytes(&span.identity().to_le_bytes())
+                    .expect("Span identity"),
                 epoch: state.epoch,
                 sequence: FaultSequence::new(1).unwrap(),
                 memo_page: page,

@@ -167,8 +167,7 @@ fn prepare(
     let nest = route.nest();
     let span = route.span().map_err(failure)?;
     let position =
-        kernel_api::model::nest::MemoPosition::new(request.src, nest.id(), route.id(), page)
-            .ok_or(Failure::Denied)?;
+        kernel_api::model::nest::MemoPosition::new(request.src, page).ok_or(Failure::Denied)?;
     route.position(position).map_err(failure)?;
     let source = route.entry().clone();
     let mark = if request.mark == Mark::NONE {

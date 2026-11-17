@@ -186,5 +186,5 @@ fn range_release_carries_target_and_expected_version() {
 #[test]
 fn memo_position_range_matches_its_token() {
     let position = super::memo(0);
-    assert_eq!(position.range(), position.token());
+    assert_eq!(position.range().get(), 13);
 }

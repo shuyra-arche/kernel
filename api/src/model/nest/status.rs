@@ -136,14 +136,11 @@ impl MemoPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoStatus {
     pub range: Option<crate::model::identity::PendId>,
-    pub nest: NestId,
-    pub span: SpanId,
     pub coordinate: usize,
     pub generation: MemoGeneration,
     pub phase: MemoPhase,
     pub source: Option<(FlatId, usize)>,
     pub page: u64,
-    /// Access of the physical publication; zero when there is no publication.
     pub access: u64,
     pub level: CellLevel,
 }
@@ -153,15 +150,16 @@ impl MemoStatus {
     }
 
     pub fn valid(self) -> bool {
-        if self.range.is_some_and(|range| range.get() == 0) {
+        let Some(range) = self.range else {
+            return false;
+        };
+        if range.get() == 0 || range.get() > isize::MAX as usize {
             return false;
         }
         let Some(grain) = self.level.pages() else {
             return false;
         };
-        if self.span.get() == 0
-            || self.span.get() > isize::MAX as usize
-            || !self.level.fits_at(self.coordinate, self.coordinate, grain)
+        if !self.level.fits_at(self.coordinate, self.coordinate, grain)
             || self.page > isize::MAX as u64
             || self
                 .source

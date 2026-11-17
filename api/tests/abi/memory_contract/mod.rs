@@ -27,14 +27,16 @@ fn slot(page: usize) -> SlotPosition {
     SlotPosition::new(PendId::mint(7), FlatId::new(11).unwrap(), page).unwrap()
 }
 
+fn nest_id() -> NestId {
+    NestId::new(17).unwrap()
+}
+
+fn span_id() -> SpanId {
+    SpanId::from_bytes(&19u64.to_le_bytes()).unwrap()
+}
+
 fn memo(page: usize) -> MemoPosition {
-    MemoPosition::new(
-        PendId::mint(13),
-        NestId::new(17).unwrap(),
-        SpanId::from_bytes(&19u64.to_le_bytes()).unwrap(),
-        page,
-    )
-    .unwrap()
+    MemoPosition::new(PendId::mint(13), page).unwrap()
 }
 
 #[test]
@@ -51,21 +53,10 @@ fn positions_encode_identity_separately_from_expected_revision() {
         (7, 11, 512)
     );
     let memo = memo(512);
-    assert_eq!(MemoPosition::WIDTH, 32);
-    assert_eq!(
-        super::fetch_words::<4>(&memo.to_bytes()),
-        Some([13, 17, 19, 512])
-    );
+    assert_eq!(MemoPosition::WIDTH, 16);
+    assert_eq!(super::fetch_words::<2>(&memo.to_bytes()), Some([13, 512]));
     assert_eq!(MemoPosition::from_bytes(&memo.to_bytes()), Some(memo));
-    assert_eq!(
-        (
-            memo.token().get(),
-            memo.nest().get(),
-            memo.span().get(),
-            memo.page()
-        ),
-        (13, 17, 19, 512)
-    );
+    assert_eq!((memo.range().get(), memo.page()), (13, 512));
     // A byte order check independent of the crate's encoder/decoder round trip.
     assert_eq!(&slot.to_bytes()[16..24], &[0, 2, 0, 0, 0, 0, 0, 0]);
 }
@@ -115,16 +106,7 @@ fn position_decoders_reject_sentinels_overflow_and_nonexact_lengths() {
             "word {word}, {value}"
         );
     }
-    for (word, value) in [
-        (0, 0),
-        (0, high),
-        (1, 0),
-        (1, high),
-        (2, 0),
-        (2, high),
-        (3, u64::MAX),
-        (3, usize::MAX as u64 / BASE_PAGE_SIZE as u64),
-    ] {
+    for (word, value) in [(0, 0), (1, usize::MAX as u64)] {
         let mut bytes = memo(0).to_bytes();
         bytes[word * 8..(word + 1) * 8].copy_from_slice(&value.to_le_bytes());
         assert!(
@@ -144,7 +126,7 @@ fn position_decoders_reject_sentinels_overflow_and_nonexact_lengths() {
     assert!(SlotPosition::from_bytes(&[0; SlotPosition::WIDTH + 1]).is_none());
     assert!(MemoPosition::from_bytes(&[0; MemoPosition::WIDTH + 1]).is_none());
     assert!(SlotPosition::new(PendId::NONE, FlatId::new(1).unwrap(), 0).is_none());
-    assert!(MemoPosition::new(PendId::mint(1), NestId::new(1).unwrap(), SpanId::NONE, 0).is_none());
+    assert!(MemoPosition::new(PendId::NONE, 0).is_none());
 }
 
 #[test]

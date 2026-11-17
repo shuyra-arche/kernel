@@ -157,7 +157,7 @@ impl Query {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
             },
-            (Domain::Nest, 1) => Self::Memo(MemoPosition::from_bytes(input.bytes::<32>()?)?),
+            (Domain::Nest, 1) => Self::Memo(MemoPosition::from_bytes(input.bytes::<16>()?)?),
             (Domain::Nest, 2) => Self::Span {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
@@ -327,8 +327,7 @@ impl Snapshot {
                 words(
                     out,
                     &[
-                        s.nest.get() as u64,
-                        s.span.get() as u64,
+                        s.range.map_or(0, |range| range.get() as u64),
                         s.coordinate as u64,
                         s.generation.get(),
                         s.phase as u64,
@@ -455,8 +454,10 @@ impl Snapshot {
                 })
             }
             (Domain::Nest, 1) => {
-                let nest = NestId::new(input.size()?)?;
-                let span = input.span()?;
+                let range = match input.size()? {
+                    0 => None,
+                    range => Some(crate::model::identity::PendId::mint(range)),
+                };
                 let coordinate = input.size()?;
                 let generation = MemoGeneration::new(input.word()?)?;
                 let phase = MemoPhase::from_tag(input.word()?)?;
@@ -468,8 +469,7 @@ impl Snapshot {
                     (id, page) => Some((FlatId::new(id)?, page)),
                 };
                 Self::Memo(MemoStatus {
-                    nest,
-                    span,
+                    range,
                     coordinate,
                     generation,
                     phase,
@@ -477,9 +477,9 @@ impl Snapshot {
                     page: input.word()?,
                     access: input.word()?,
                     level: CellLevel::new(input.size()?)?,
-                    range: None,
                 })
             }
+
             (Domain::Nest, 2) => Self::Span(SpanStatus {
                 nest: NestId::new(input.size()?)?,
                 span: input.span()?,
@@ -799,7 +799,7 @@ pub mod snapshot {
                     }
                     (Self::Nest(s), Query::Nest { nest, .. }) => s.info.id == nest,
                     (Self::Memo(s), Query::Memo(p)) => {
-                        s.nest == p.nest() && s.span == p.span() && s.coordinate == p.page()
+                        s.range() == Some(p.range()) && s.coordinate == p.page()
                     }
                     (Self::Span(s), Query::Span { nest, span, .. }) => {
                         s.nest == nest && s.span == span

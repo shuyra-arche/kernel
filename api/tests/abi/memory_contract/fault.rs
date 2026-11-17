@@ -1,5 +1,5 @@
 use super::request::{id, set_word};
-use super::{memo, slot};
+use super::{memo, nest_id, slot, span_id};
 use kernel_api::{
     abi::memory::{
         Action, Delivery, Failure, Observation, Opcode, Outcome, Query, Reply, Request, Snapshot,
@@ -30,8 +30,8 @@ pub(super) fn mutations() -> Vec<Action> {
         .into_iter()
         .map(|route| Action::FaultRoute {
             token: PendId::mint(13),
-            nest: memo(0).nest(),
-            span: memo(0).span(),
+            nest: nest_id(),
+            span: span_id(),
             expected: SpanVersion::new(7).unwrap(),
             epoch: FaultEpoch::new(3).unwrap(),
             route,
@@ -49,8 +49,8 @@ pub(super) fn results() -> Vec<Reply> {
                     kernel_api::abi::memory::nest::Opcode::FaultRoute,
                 ),
                 Outcome::Committed(Value::FaultRoute {
-                    nest: memo(0).nest(),
-                    span: memo(0).span(),
+                    nest: nest_id(),
+                    span: span_id(),
                     version: SpanVersion::new(8).unwrap(),
                     epoch: FaultEpoch::new(4).unwrap(),
                     phase,
@@ -63,8 +63,8 @@ pub(super) fn results() -> Vec<Reply> {
 
 fn event() -> FaultEvent {
     FaultEvent {
-        nest: memo(0).nest(),
-        span: memo(0).span(),
+        nest: nest_id(),
+        span: span_id(),
         epoch: FaultEpoch::new(4).unwrap(),
         sequence: FaultSequence::new(u64::MAX).unwrap(),
         memo_page: 512,
@@ -79,8 +79,8 @@ fn event() -> FaultEvent {
 
 fn status() -> FaultStatus {
     FaultStatus {
-        nest: memo(0).nest(),
-        span: memo(0).span(),
+        nest: nest_id(),
+        span: span_id(),
         epoch: FaultEpoch::new(4).unwrap(),
         phase: FaultPhase::Active,
         handler: Some(TaskId::new(29)),
@@ -93,13 +93,13 @@ fn queries() -> Vec<Query> {
     vec![
         Query::FaultRoute {
             token: PendId::mint(13),
-            nest: memo(0).nest(),
-            span: memo(0).span(),
+            nest: nest_id(),
+            span: span_id(),
         },
         Query::FaultEvent {
             token: PendId::mint(13),
-            nest: memo(0).nest(),
-            span: memo(0).span(),
+            nest: nest_id(),
+            span: span_id(),
             epoch: FaultEpoch::new(4).unwrap(),
             after: u64::MAX - 1,
             wait: Wait::At(1 << 63),

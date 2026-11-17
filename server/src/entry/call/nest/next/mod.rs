@@ -43,7 +43,7 @@ pub(in crate::entry::call) fn effect(
     let (route, span, index, data, publisher, maintenance) = {
         let _serial = actor.pend.lock();
         let _commit = basis::commit();
-        let route = SpanRoute::acquire(actor, position.token(), rights).map_err(pend_error)?;
+        let route = SpanRoute::acquire(actor, position.range(), rights).map_err(pend_error)?;
         let index = route.position(position).map_err(pend_error)?;
         let span = route.span().map_err(pend_error)?;
         let info = span.inspect(index).map_err(nest_error)?;
@@ -177,7 +177,7 @@ pub(in crate::entry::call) fn effect(
                 change,
                 &mut || {
                     if !pend::live(actor)
-                        || pend::locate(actor, position.token())
+                        || pend::locate(actor, position.range())
                             .is_none_or(|held| !Arc::ptr_eq(&held, route.entry()))
                     {
                         return Err(crate::basis::nest::memo::AccessError::Denied);
@@ -327,7 +327,7 @@ pub(in crate::entry::call) fn inspect(
     let _serial = actor.pend.lock();
     let _commit = basis::commit();
     let mapping =
-        SpanRoute::acquire(actor, position.token(), NestRights::INSPECT).map_err(pend_error)?;
+        SpanRoute::acquire(actor, position.range(), NestRights::INSPECT).map_err(pend_error)?;
     let index = mapping.position(position).map_err(pend_error)?;
     let span = mapping.span().map_err(pend_error)?;
     Observation::new(Snapshot::Memo(span.inspect(index).map_err(nest_error)?))
@@ -349,7 +349,7 @@ pub(in crate::entry::call) fn mutate(
             expected,
             source,
         } => {
-            let mapping = SpanRoute::acquire(actor, target.token(), NestRights::INSERT)
+            let mapping = SpanRoute::acquire(actor, target.range(), NestRights::INSERT)
                 .map_err(pend_error)?;
             let index = mapping.position(target).map_err(pend_error)?;
             let span = mapping.span().map_err(pend_error)?;
@@ -373,14 +373,14 @@ pub(in crate::entry::call) fn mutate(
                 index,
                 expected.get(),
                 selected,
-                target.token(),
+                target.range(),
             )
             .map_err(nest_error)?;
             Ok(Value::Memo { generation })
         }
         NestAction::Remove { memo, expected } => {
             let mapping =
-                SpanRoute::acquire(actor, memo.token(), NestRights::REMOVE).map_err(pend_error)?;
+                SpanRoute::acquire(actor, memo.range(), NestRights::REMOVE).map_err(pend_error)?;
             let index = mapping.position(memo).map_err(pend_error)?;
             let span = mapping.span().map_err(pend_error)?;
             let info = span.inspect(index).map_err(nest_error)?;
@@ -438,7 +438,7 @@ fn select(
             Source::from_pend(actor, token, PageOffset::new(page), count).map_err(cell_error)
         }
         memory::Source::Memo { position, expected } => {
-            let mapping = SpanRoute::acquire(actor, position.token(), NestRights::PUBLISH)
+            let mapping = SpanRoute::acquire(actor, position.range(), NestRights::PUBLISH)
                 .map_err(pend_error)?;
             let index = mapping.position(position).map_err(pend_error)?;
             let span = mapping.span().map_err(pend_error)?;

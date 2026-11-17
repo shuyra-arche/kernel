@@ -381,7 +381,7 @@ fn malformed_headers_payloads_and_reserved_tails_reject() {
         },
     )
     .unwrap();
-    for (word, invalid) in [(9, 3), (10, 0), (11, 0), (12, u64::MAX), (13, 0)] {
+    for (word, invalid) in [(7, 3), (8, 0), (9, 0), (10, u64::MAX), (11, 0)] {
         let mut bytes = insert.to_bytes();
         set_word(&mut bytes, word, invalid);
         assert!(Request::from_bytes(&bytes).is_none());

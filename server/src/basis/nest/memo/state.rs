@@ -642,8 +642,8 @@ impl Memo {
     /// Observe the retained physical Page, never re-resolve the logical source.
     pub(in crate::basis::nest) fn snapshot(
         &self,
-        nest: kernel_api::model::nest::NestId,
-        reservation: kernel_api::model::nest::SpanId,
+        _nest: kernel_api::model::nest::NestId,
+        _reservation: kernel_api::model::nest::SpanId,
         coordinate: usize,
         level: kernel_api::model::cell::CellLevel,
         failed_fence: bool,
@@ -668,8 +668,6 @@ impl Memo {
         };
         MemoStatus {
             range: self.range(),
-            nest,
-            span: reservation,
             coordinate,
             level,
             generation: MemoGeneration::new(self.generation()).expect("Memo generation"),

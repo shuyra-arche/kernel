@@ -1,5 +1,5 @@
 use super::request::{id, set_word};
-use super::{memo, slot};
+use super::{memo, nest_id, slot, span_id};
 use kernel_api::{
     abi::memory::{Action, Domain, Failure, Opcode, Outcome, Reply, Request, Value},
     address::{PageCount, VirtAddr},
@@ -38,19 +38,19 @@ pub(super) fn mutations() -> Vec<Action> {
         },
         Action::DeleteNest {
             token: PendId::mint(7),
-            nest: memo(0).nest(),
+            nest: nest_id(),
             expected: NestVersion::new(u64::MAX).unwrap(),
         },
         Action::CreateSpan {
             token: PendId::mint(7),
-            nest: memo(0).nest(),
+            nest: nest_id(),
             expected: NestVersion::new(u64::MAX).unwrap(),
             request: span(),
         },
         Action::DeleteSpan {
             token: PendId::mint(7),
-            nest: memo(0).nest(),
-            span: memo(0).span(),
+            nest: nest_id(),
+            span: span_id(),
             expected: SpanVersion::new(u64::MAX).unwrap(),
         },
     ]
@@ -61,8 +61,8 @@ pub(super) fn results() -> Vec<Reply> {
     let n = NestVersion::new(1 << 63).unwrap();
     let m = SpanVersion::new(1 << 63).unwrap();
     let flat = slot(0).flat();
-    let nest = memo(0).nest();
-    let span = memo(0).span();
+    let nest = nest_id();
+    let span = span_id();
     let mut results = vec![
         Reply::new(
             id(),
@@ -268,7 +268,7 @@ fn creation_span_and_deletion_reject_bad_geometry_identity_or_version() {
             Some(id()),
             Action::CreateSpan {
                 token: PendId::mint(1),
-                nest: memo(0).nest(),
+                nest: nest_id(),
                 expected: NestVersion::INITIAL,
                 request: bad
             }
@@ -283,7 +283,7 @@ fn creation_span_and_deletion_reject_bad_geometry_identity_or_version() {
             Some(id()),
             Action::DeleteSpan {
                 token: PendId::mint(1),
-                nest: memo(0).nest(),
+                nest: nest_id(),
                 span: SpanId::NONE,
                 expected: SpanVersion::INITIAL
             }
@@ -315,7 +315,7 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
         (
             kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Delete),
             Value::NestLifecycle {
-                nest: memo(0).nest(),
+                nest: nest_id(),
                 version: NestVersion::INITIAL,
                 phase: NestPhase::Closing,
             },
@@ -323,8 +323,8 @@ fn object_results_preserve_pending_retirement_instead_of_claiming_deletion() {
         (
             kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Release),
             Value::SpanLifecycle {
-                nest: memo(0).nest(),
-                span: memo(0).span(),
+                nest: nest_id(),
+                span: span_id(),
                 version: SpanVersion::INITIAL,
                 phase: SpanPhase::Closing,
             },

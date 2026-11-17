@@ -1,5 +1,5 @@
 use super::request::{id, maintenance, set_word};
-use super::{memo, slot};
+use super::{memo, nest_id, slot, span_id};
 use kernel_api::{
     abi::memory::{
         Action, Domain, Failure, Observation, Opcode, Outcome, Query, Reply, Request, Snapshot,
@@ -22,8 +22,8 @@ use kernel_api::{
 
 fn fixtures() -> Vec<(Query, Snapshot)> {
     let flat = slot(0).flat();
-    let nest = memo(0).nest();
-    let span = memo(0).span();
+    let nest = nest_id();
+    let span = span_id();
     vec![
         (
             Query::Flat {
@@ -85,9 +85,7 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
         (
             Query::Memo(memo(512)),
             Snapshot::Memo(MemoStatus {
-                range: None,
-                nest,
-                span,
+                range: Some(PendId::mint(13)),
                 coordinate: 512,
                 generation: MemoGeneration::new(6).unwrap(),
                 phase: MemoPhase::Published,
@@ -125,7 +123,7 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
         &[14, 12, 18, 0, 1, 7, 11, 512],
         &[14, 12, 18, 0, 2, 23, 11, 29, 31],
         &[14, 13, 18, 0, 0, 13, 17],
-        &[14, 13, 18, 0, 1, 13, 17, 19, 512],
+        &[14, 13, 18, 0, 1, 13, 512],
         &[14, 13, 18, 0, 2, 13, 17, 19],
     ];
     for ((query, _), words) in fixtures().into_iter().zip(expected) {
@@ -168,7 +166,7 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
             None,
             Action::Inspect(Query::Span {
                 token: PendId::mint(1),
-                nest: memo(0).nest(),
+                nest: nest_id(),
                 span: SpanId::NONE
             })
         )
@@ -198,7 +196,7 @@ fn observation_vectors_preserve_source_publication_and_full_width_faults() {
             u64::MAX - 1,
             u64::MAX,
         ],
-        &[14, 13, 18, 0, 1, 0, 17, 19, 512, 6, 3, 11, 1024, 53, 6, 1],
+        &[14, 13, 18, 0, 1, 0, 13, 512, 6, 3, 11, 1024, 53, 6, 1],
         &[14, 13, 18, 0, 2, 0, 17, 19, 7, 512, 512, 0x8000, 1, 6, 0],
     ];
     for ((query, snapshot), words) in fixtures().into_iter().zip(expected) {
@@ -313,7 +311,7 @@ fn logical_association_can_exist_without_a_physical_publication() {
         unreachable!()
     };
     let associated = MemoStatus {
-        range: None,
+        range: Some(PendId::mint(13)),
         phase: MemoPhase::Associated,
         page: 0,
         access: 0,
@@ -321,7 +319,7 @@ fn logical_association_can_exist_without_a_physical_publication() {
     };
     assert!(Observation::new(Snapshot::Memo(associated)).is_some());
     let empty = MemoStatus {
-        range: None,
+        range: Some(PendId::mint(13)),
         phase: MemoPhase::Empty,
         source: None,
         ..associated
@@ -329,37 +327,37 @@ fn logical_association_can_exist_without_a_physical_publication() {
     assert!(Observation::new(Snapshot::Memo(empty)).is_some());
     for invalid in [
         MemoStatus {
-            range: None,
+            range: Some(PendId::mint(13)),
             phase: MemoPhase::Empty,
             ..associated
         },
         MemoStatus {
-            range: None,
+            range: Some(PendId::mint(13)),
             phase: MemoPhase::Associated,
             ..status
         },
         MemoStatus {
-            range: None,
+            range: Some(PendId::mint(13)),
             source: None,
             ..status
         },
         MemoStatus {
-            range: None,
+            range: Some(PendId::mint(13)),
             page: 0,
             ..status
         },
         MemoStatus {
-            range: None,
+            range: Some(PendId::mint(13)),
             access: 4,
             ..status
         },
         MemoStatus {
-            range: None,
+            range: Some(PendId::mint(13)),
             source: Some((slot(0).flat(), 1025)),
             ..status
         },
         MemoStatus {
-            range: None,
+            range: Some(PendId::mint(13)),
             coordinate: 513,
             ..status
         },
@@ -373,7 +371,7 @@ fn logical_association_can_exist_without_a_physical_publication() {
         MemoPhase::Failed,
     ] {
         let observation = Observation::new(Snapshot::Memo(MemoStatus {
-            range: None,
+            range: Some(PendId::mint(13)),
             phase,
             ..status
         }))
@@ -465,11 +463,12 @@ fn malformed_observations_reject_headers_geometry_flags_and_reserved_payloads() 
         (3, 8, 2),
         (3, 9, 5),
         (3, 14, 1),
-        (4, 7, 0),
-        (4, 9, 0),
-        (4, 10, 6),
-        (4, 11, 0),
-        (4, 15, 7),
+        (4, 4, 0),
+        (4, 6, 0),
+        (4, 7, 7),
+        (4, 8, 0),
+        (4, 11, 7),
+        (4, 12, 0),
         (5, 7, 0),
         (5, 8, 0),
         (5, 9, 513),

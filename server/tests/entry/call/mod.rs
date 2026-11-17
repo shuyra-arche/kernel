@@ -89,13 +89,7 @@ fn request(id: u64, publish: bool) -> Request {
         Some(RequestId::new(id).unwrap()),
         if publish {
             Action::Publish {
-                memo: MemoPosition::new(
-                    PendId::mint(3),
-                    NestId::new(4).unwrap(),
-                    SpanId::from_bytes(&5u64.to_le_bytes()).unwrap(),
-                    0,
-                )
-                .unwrap(),
+                memo: MemoPosition::new(PendId::mint(3), 0).unwrap(),
                 expected: MemoGeneration::INITIAL,
                 maintenance: None,
             }

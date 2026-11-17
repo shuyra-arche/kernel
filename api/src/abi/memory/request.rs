@@ -853,7 +853,7 @@ fn write_memo(
 
 fn read_memo(input: &mut Reader<'_>) -> Option<(MemoPosition, MemoGeneration)> {
     Some((
-        MemoPosition::from_bytes(input.bytes::<32>()?)?,
+        MemoPosition::from_bytes(input.bytes::<16>()?)?,
         MemoGeneration::new(input.word()?)?,
     ))
 }
