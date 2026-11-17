@@ -219,11 +219,45 @@ fn flat_requests_validate_authorization_and_geometry_before_encoding() {
         start: SlotPosition::new(
             PendId::mint(3),
             FlatId::new(11).unwrap(),
-            usize::MAX,
+            1,
         )
         .unwrap(),
-        count: 2,
+        count: usize::MAX,
         recover: None,
     };
     assert!(flat::Request::new(RequestId::new(32), invalid_block).is_none());
+}
+
+#[test]
+fn nest_actions_use_the_domain_codec_without_a_unified_request() {
+    let action = nest::Action::Release {
+        range: PendId::mint(5),
+        expected: kernel_api::model::nest::RangeVersion::new(2).unwrap(),
+    };
+    let request = nest::Request::new(RequestId::new(33), action).unwrap();
+    let bytes = request.to_bytes();
+    assert_eq!(nest::Request::from_bytes(&bytes), Some(request));
+
+    let mut garbage = bytes;
+    garbage[255] = 1;
+    assert!(nest::Request::from_bytes(&garbage).is_none());
+
+    let flat_number = kernel_api::abi::memory::Opcode::Flat(flat::Opcode::Delete).call_number();
+    assert!(nest::Request::from_call(flat_number, &bytes).is_none());
+}
+
+#[test]
+fn nest_actions_reject_invalid_permissions_and_access() {
+    let invalid_range = nest::Action::Release {
+        range: PendId::NONE,
+        expected: kernel_api::model::nest::RangeVersion::new(2).unwrap(),
+    };
+    assert!(nest::Request::new(RequestId::new(34), invalid_range).is_none());
+
+    let invalid_access = nest::Action::Protect {
+        memo: super::memo(0),
+        expected: kernel_api::model::nest::MemoGeneration::INITIAL,
+        access: 0,
+    };
+    assert!(nest::Request::new(RequestId::new(35), invalid_access).is_none());
 }
