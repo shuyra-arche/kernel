@@ -5,9 +5,9 @@ extern crate alloc;
 mod name;
 
 mod active;
-mod geometry;
 #[path = "../../name/allocation.rs"]
 mod allocation;
+mod geometry;
 
 mod basis {
     pub(crate) use crate::name;

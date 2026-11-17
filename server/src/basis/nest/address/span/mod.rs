@@ -2,7 +2,6 @@
 mod access;
 mod geometry;
 mod operations;
-pub(crate) use geometry::SpanRange;
 use super::super::index::source;
 use super::super::memo::publication::{CellRuns, Publication};
 use super::super::{CleanupNode, Nest, NestId};
@@ -11,6 +10,7 @@ pub use access::{Access, ActiveRange};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+pub(crate) use geometry::SpanRange;
 
 use crate::basis::flat::FlatRange;
 use crate::basis::nest::NestError;

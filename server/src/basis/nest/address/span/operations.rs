@@ -1136,9 +1136,11 @@ impl Span {
         }
         // A released slice cannot retain a source, Page, freeze or hardware
         // obligation in a historical Memo. Require Remove and settlement first.
-        if inner.memos.published().any(|(page, _)| {
-            page >= offset.get() && page < offset.get() + count.get()
-        }) {
+        if inner
+            .memos
+            .published()
+            .any(|(page, _)| page >= offset.get() && page < offset.get() + count.get())
+        {
             return Err(NestError::Busy);
         }
         let mut cursor = None;
