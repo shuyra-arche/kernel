@@ -110,10 +110,7 @@ mod nest {
             .unwrap();
             drop(bytes);
             let reply = actor
-                .inspect_result(
-                    kernel_api::abi::memory::Domain::Nest,
-                    request.id().unwrap(),
-                )
+                .inspect_result(kernel_api::abi::memory::Domain::Nest, request.id().unwrap())
                 .unwrap()
                 .expect("accepted request retains its pending result");
             assert_eq!(
