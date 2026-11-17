@@ -54,12 +54,12 @@ impl Index {
 
     /// 按关系身份摘除节点；摘到才减计数。
     pub(super) fn remove(&mut self, span: &Arc<Span>) -> bool {
-        let (root, removed) = remove_span(self.root.take(), span);
+        let (root, removed) = extract(self.root.take(), span);
         self.root = root;
-        if removed {
+        if removed.is_some() {
             self.len -= 1;
         }
-        removed
+        removed.is_some()
     }
 
     /// 覆盖 `address` 的关系。
@@ -83,9 +83,19 @@ impl Index {
         first_overlap(self.root.as_deref(), lo, hi)
     }
 
-    /// 关系区间变化后重算其节点缓存。
+    /// A Span may lose its original first active interval during partial
+    /// release. Reinsert its existing Box when the search key changes;
+    /// updating only the cached key would break AVL ordering and lookups.
+    /// Reuse the existing node allocation under the Address commit guard.
     pub(super) fn refresh(&mut self, span: &Arc<Span>) -> bool {
-        refresh(&mut self.root, span)
+        let (remaining, extracted) = extract(self.root.take(), span);
+        let Some(mut node) = extracted else {
+            self.root = remaining;
+            return false;
+        };
+        node.update();
+        self.root = Some(insert(remaining, node));
+        true
     }
 
     /// 索引自身的不变量：节点数等于计数，键、高度与缓存都要对。
@@ -113,25 +123,30 @@ fn insert(root: Option<Box<IndexNode>>, node: Box<IndexNode>) -> Box<IndexNode> 
     IndexNode::balance(root)
 }
 
-/// 按关系身份摘除节点，返回 (新根, 是否摘到)。
-fn remove_span(root: Option<Box<IndexNode>>, span: &Arc<Span>) -> (Option<Box<IndexNode>>, bool) {
+/// Extract by actual Arc identity. Both removal and key relocation reuse the
+/// same balanced operation; a found node is detached from both child links.
+fn extract(
+    root: Option<Box<IndexNode>>,
+    span: &Arc<Span>,
+) -> (Option<Box<IndexNode>>, Option<Box<IndexNode>>) {
     let Some(mut node) = root else {
-        return (None, false);
+        return (None, None);
     };
     if Arc::ptr_eq(&node.span, span) {
-        return (IndexNode::detach(node), true);
+        let (remaining, selected) = IndexNode::separate(node);
+        return (remaining, Some(selected));
     }
-    let (left, found) = remove_span(node.left.take(), span);
+    let (left, selected) = extract(node.left.take(), span);
     node.left = left;
-    if found {
-        return (Some(IndexNode::balance(node)), true);
+    if selected.is_some() {
+        return (Some(IndexNode::balance(node)), selected);
     }
-    let (right, found) = remove_span(node.right.take(), span);
+    let (right, selected) = extract(node.right.take(), span);
     node.right = right;
-    if found {
-        (Some(IndexNode::balance(node)), true)
+    if selected.is_some() {
+        (Some(IndexNode::balance(node)), selected)
     } else {
-        (Some(node), false)
+        (Some(node), None)
     }
 }
 
@@ -173,22 +188,6 @@ fn first_overlap(root: Option<&IndexNode>, lo: usize, hi: usize) -> Option<Arc<S
         first_overlap(node.right.as_deref(), lo, hi)
     } else {
         None
-    }
-}
-
-fn refresh(root: &mut Option<Box<IndexNode>>, span: &Arc<Span>) -> bool {
-    let Some(node) = root.as_deref_mut() else {
-        return false;
-    };
-    if Arc::ptr_eq(&node.span, span) {
-        node.update();
-        return true;
-    }
-    if refresh(&mut node.left, span) || refresh(&mut node.right, span) {
-        node.update();
-        true
-    } else {
-        false
     }
 }
 

@@ -1138,10 +1138,10 @@ impl Span {
                 )
                 .ok_or(NestError::NotAligned)?,
         );
+        let bytes = count.checked_bytes().ok_or(NestError::NotAligned)?;
         let last = start
             .as_usize()
-            .checked_add(count.checked_bytes().ok_or(NestError::NotAligned)?)
-            .and_then(|end| end.checked_sub(1))
+            .checked_add(bytes - 1)
             .ok_or(NestError::NotAligned)?;
         let pages = self.initial_size() / kernel_api::address::PAGE_SIZE;
         if offset
@@ -1174,10 +1174,12 @@ impl Span {
                 }
             }
         }
-        let next = super::ActiveRange::split(&inner.active, start.as_usize(), last, None)?;
-        if next.len() == inner.active.len() {
+        // Entry count is not proof of an unchanged range: removing a prefix
+        // from one of two intervals still leaves exactly two entries.
+        if !super::ActiveRange::cover(&inner.active, start.as_usize(), last) {
             return Err(NestError::NoRegion);
         }
+        let next = super::ActiveRange::split(&inner.active, start.as_usize(), last, None)?;
         if next.is_empty() {
             return Err(NestError::Busy);
         }

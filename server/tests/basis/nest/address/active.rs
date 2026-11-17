@@ -76,3 +76,16 @@ fn a_gap_between_two_ranges_is_not_covered_or_accessible() {
         Some(Access::READ | Access::WRITE)
     );
 }
+
+#[test]
+fn removing_one_edge_from_two_segments_preserves_count_but_changes_coverage() {
+    let ranges = [range(0x10000, 2), range(0x20000, 2)];
+    assert!(ActiveRange::cover(&ranges, 0x10000, 0x10fff));
+    let changed = ActiveRange::split(&ranges, 0x10000, 0x10fff, None).unwrap();
+    assert_eq!(changed.len(), ranges.len());
+    assert_eq!(changed[0].start.as_usize(), 0x11000);
+    assert!(!ActiveRange::cover(&changed, 0x10000, 0x10fff));
+    assert!(ActiveRange::cover(&changed, 0x11000, 0x11fff));
+    assert!(ActiveRange::cover(&changed, 0x20000, 0x21fff));
+    assert!(!ActiveRange::cover(&changed, 0x11000, 0x20fff));
+}
