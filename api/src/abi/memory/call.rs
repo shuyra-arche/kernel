@@ -1,6 +1,6 @@
 //! Native ABI 14 Flat/Nest domain calls. The register framing and result
 //! transport are shared; operation and request identities stay domain-local.
-use super::{Domain, Opcode, Request, RequestId, journal::RequestKey};
+use super::{Opcode, Request, RequestId, journal::RequestKey};
 
 macro_rules! domain {
     ($module:ident, $domain:ident) => {

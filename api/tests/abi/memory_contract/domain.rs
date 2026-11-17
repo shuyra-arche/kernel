@@ -292,3 +292,76 @@ fn nest_request_encoding_preserves_all_existing_domain_vectors() {
         assert_eq!(nest::Request::from_bytes(&legacy.to_bytes()), Some(request));
     }
 }
+
+#[test]
+fn domain_reply_correlation_rejects_stale_fault_receipts() {
+    use kernel_api::{
+        abi::memory::{DomainCall, Outcome, Reply, Value},
+        model::nest::{FaultEpoch, FaultPhase, FaultRoute, RangeVersion},
+    };
+
+    let range = PendId::mint(13);
+    let request = nest::Request::new(
+        RequestId::new(37),
+        nest::Action::FaultRoute {
+            range,
+            expected: RangeVersion::new(7).unwrap(),
+            epoch: FaultEpoch::new(3).unwrap(),
+            route: Some(FaultRoute {
+                sign: PendId::mint(23),
+                timeout_ns: 1,
+            }),
+        },
+    )
+    .unwrap();
+    let make = |version: u64, epoch: u64| {
+        Reply::new(
+            RequestId::new(37).unwrap(),
+            kernel_api::abi::memory::Opcode::Nest(nest::Opcode::FaultRoute),
+            Outcome::Committed(Value::FaultRoute {
+                range,
+                version: RangeVersion::new(version).unwrap(),
+                epoch: FaultEpoch::new(epoch).unwrap(),
+                phase: FaultPhase::Active,
+            }),
+        )
+        .unwrap()
+    };
+    assert!(make(8, 4).matches_domain(DomainCall::Nest(request)));
+    assert!(!make(9, 4).matches_domain(DomainCall::Nest(request)));
+    assert!(!make(8, 5).matches_domain(DomainCall::Nest(request)));
+}
+
+#[test]
+fn domain_observation_correlation_preserves_requested_range_identity() {
+    use kernel_api::{
+        abi::memory::{DomainCall, Observation, Snapshot},
+        address::VirtAddr,
+        model::nest::{SpanPhase, SpanStatus, SpanVersion},
+    };
+
+    let range = PendId::mint(17);
+    let request = nest::Request::new(
+        None,
+        nest::Action::Inspect(nest::Query::Span { range }),
+    )
+    .unwrap();
+    let status = SpanStatus {
+        range,
+        version: SpanVersion::INITIAL,
+        offset: 0,
+        count: 1,
+        address: VirtAddr::new(4096),
+        level: CellLevel::BASE,
+        access: 2,
+        phase: SpanPhase::Open,
+    };
+    let good = Observation::new(Snapshot::Span(status)).unwrap();
+    assert!(good.matches_domain(DomainCall::Nest(request)));
+    let wrong = Observation::new(Snapshot::Span(SpanStatus {
+        range: PendId::mint(19),
+        ..status
+    }))
+    .unwrap();
+    assert!(!wrong.matches_domain(DomainCall::Nest(request)));
+}
