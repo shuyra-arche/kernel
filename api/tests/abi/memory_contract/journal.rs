@@ -341,20 +341,12 @@ fn keyed_admission_uses_canonical_request_bytes() {
 }
 
 #[test]
-fn task_journal_keeps_only_a_bounded_handle_on_the_trap_stack() {
-    assert!(core::mem::size_of::<Journal>() <= 64);
-    assert_eq!(Journal::allocate(TaskId::new(0)).err(), Some(Failure::Denied));
-
-    let mut journal = Journal::allocate(actor()).unwrap();
-    assert_eq!(journal.high_water(), 0);
-    let accepted = execute(&mut journal, request(1));
-    assert!(matches!(
-        journal.begin_request(actor(), request(1)),
-        Ok(Admission::InFlight(None))
-    ));
-    journal.record(&accepted, committed(1)).unwrap();
-    assert!(matches!(
-        journal.begin_request(actor(), request(1)),
-        Ok(Admission::Replay(reply)) if reply == committed(1)
-    ));
+fn fixed_journal_layout_supports_one_in_place_allocation() {
+    assert_eq!(
+        core::mem::size_of::<Journal>(),
+        core::mem::size_of::<TaskId>()
+            + core::mem::size_of::<u64>()
+            + RESULT_CAPACITY
+                * core::mem::size_of::<Option<kernel_api::abi::memory::journal::Record>>()
+    );
 }

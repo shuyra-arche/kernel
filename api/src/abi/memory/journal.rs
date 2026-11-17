@@ -2,8 +2,6 @@
 //! journal for its lifetime and serialize admission, resource commit and result
 //! recording. This does not execute syscalls, authorize resources or own cleanup.
 
-extern crate alloc;
-use alloc::vec::Vec;
 use super::{Domain, Failure, Opcode, Outcome, RESULT_CAPACITY, Reply, Request, RequestId};
 use crate::model::identity::TaskId;
 
@@ -56,8 +54,11 @@ impl RequestKey {
     }
 }
 
+/// Opaque stored record. Exposed for exact, single-allocation Kernel
+/// initialization; only the Journal methods maintain protocol transitions.
+#[doc(hidden)]
 #[derive(Clone, Copy)]
-struct Record {
+pub struct Record {
     request: RequestKey,
     reply: Option<Reply>,
 }
@@ -86,31 +87,23 @@ pub enum Admission {
 /// No heap allocation, eviction of pending work, wrapping or reset operation.
 /// Numeric Task identity must come from the kernel, never from a descriptor.
 pub struct Journal {
-    actor: TaskId,
-    high_water: u64,
-    records: Vec<Option<Record>>,
+    /// Internal fixed-storage initialization; not an authority interface.
+    #[doc(hidden)]
+    pub actor: TaskId,
+    /// Internal fixed-storage initialization; not an authority interface.
+    #[doc(hidden)]
+    pub high_water: u64,
+    /// Internal fixed-storage initialization; not an authority interface.
+    #[doc(hidden)]
+    pub records: [Option<Record>; RESULT_CAPACITY],
 }
 impl Journal {
-    /// Allocate one fixed, bounded record window outside the trap stack.
-    /// Once created, the window never grows beyond RESULT_CAPACITY entries.
-    pub fn allocate(actor: TaskId) -> Result<Self, Failure> {
-        if actor.get() == 0 || actor.get() > isize::MAX as usize {
-            return Err(Failure::Denied);
-        }
-        let mut records = Vec::new();
-        records
-            .try_reserve_exact(RESULT_CAPACITY)
-            .map_err(|_| Failure::OutOfMemory)?;
-        records.resize_with(RESULT_CAPACITY, || None);
-        Ok(Self {
+    pub fn new(actor: TaskId) -> Option<Self> {
+        (actor.get() > 0 && actor.get() <= isize::MAX as usize).then_some(Self {
             actor,
             high_water: 0,
-            records,
+            records: [None; RESULT_CAPACITY],
         })
-    }
-
-    pub fn new(actor: TaskId) -> Option<Self> {
-        Self::allocate(actor).ok()
     }
 
     pub const fn high_water(&self) -> u64 {
