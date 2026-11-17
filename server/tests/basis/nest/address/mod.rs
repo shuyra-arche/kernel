@@ -5,6 +5,7 @@ extern crate alloc;
 mod name;
 
 mod active;
+mod geometry;
 #[path = "../../name/allocation.rs"]
 mod allocation;
 
