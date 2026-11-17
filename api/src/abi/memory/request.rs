@@ -831,7 +831,7 @@ pub mod flat {
             token: PendId,
             expected: FlatVersion,
         },
-        Inspect(Query),
+        Inspect(super::domain_flat::Query),
         InspectResult {
             request: RequestId,
         },
@@ -897,7 +897,9 @@ pub mod flat {
                 super::Action::DeleteFlat {
                     token, expected, ..
                 } => Self::Delete { token, expected },
-                super::Action::Inspect(query) => Self::Inspect(query),
+                super::Action::Inspect(query) => {
+                    Self::Inspect(super::domain_flat::Query::try_from(query).map_err(|_| ())?)
+                },
                 super::Action::InspectResult {
                     domain: Domain::Flat,
                     request,
@@ -1014,7 +1016,7 @@ pub mod flat {
                     out.word(token.get() as u64)?;
                     out.word(expected.get())
                 }
-                Self::Inspect(query) => query.write(out),
+                Self::Inspect(query) => super::Query::from(query).write(out),
                 Self::InspectResult { request } => {
                     out.word(3)?;
                     out.word(request.get())
@@ -1098,7 +1100,10 @@ pub mod flat {
                             request: RequestId::new(input.word()?)?,
                         }
                     } else {
-                        Self::Inspect(Query::read(Domain::Flat, tag, input)?)
+                        Self::Inspect(
+                            super::domain_flat::Query::try_from(Query::read(Domain::Flat, tag, input)?)
+                                .ok()?,
+                        )
                     }
                 }
                 super::domain_flat::Opcode::Occupy => {
@@ -1277,7 +1282,7 @@ pub mod nest {
             target: RangeSlice,
             expected: RangeVersion,
         },
-        Inspect(Query),
+        Inspect(super::domain_nest::Query),
         InspectResult {
             request: RequestId,
         },
@@ -1341,7 +1346,9 @@ pub mod nest {
                 super::Action::ReleaseRange { target, expected } => {
                     Self::ReleaseRange { target, expected }
                 }
-                super::Action::Inspect(query) => Self::Inspect(query),
+                super::Action::Inspect(query) => {
+                    Self::Inspect(super::domain_nest::Query::try_from(query).map_err(|_| ())?)
+                },
                 super::Action::InspectResult {
                     domain: Domain::Nest,
                     request,
@@ -1434,7 +1441,7 @@ pub mod nest {
                 Self::ReleaseRange { target, expected } => {
                     super::Action::ReleaseRange { target, expected }
                 }
-                Self::Inspect(query) => super::Action::Inspect(query),
+                Self::Inspect(query) => super::Action::Inspect(query.into()),
                 Self::InspectResult { request } => super::Action::InspectResult {
                     domain: Domain::Nest,
                     request,

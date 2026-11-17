@@ -46,12 +46,9 @@ fn flat_create_roundtrips_page_count() {
 
 #[test]
 fn flat_inspection_requires_no_request_id() {
-    let action = flat::Action::try_from(kernel_api::abi::memory::Action::Inspect(
-        kernel_api::abi::memory::Query::Slot(
-            SlotPosition::new(PendId::mint(3), FlatId::new(11).unwrap(), 4).unwrap(),
-        ),
-    ))
-    .unwrap();
+    let action = flat::Action::Inspect(flat::Query::Slot(
+        SlotPosition::new(PendId::mint(3), FlatId::new(11).unwrap(), 4).unwrap(),
+    ));
     assert!(flat::Request::new(RequestId::new(9), action).is_none());
     assert!(flat::Request::new(None, action).is_some());
 }
@@ -87,13 +84,10 @@ fn nest_create_roundtrips_license() {
 
 #[test]
 fn nest_inspection_requires_no_request_id() {
-    let action = nest::Action::try_from(kernel_api::abi::memory::Action::Inspect(
-        kernel_api::abi::memory::Query::Nest {
-            token: PendId::mint(3),
-            nest: kernel_api::model::nest::NestId::new(11).unwrap(),
-        },
-    ))
-    .unwrap();
+    let action = nest::Action::Inspect(nest::Query::Nest {
+        token: PendId::mint(3),
+        nest: kernel_api::model::nest::NestId::new(11).unwrap(),
+    });
     assert!(nest::Request::new(RequestId::new(13), action).is_none());
     assert!(nest::Request::new(None, action).is_some());
 }
@@ -187,4 +181,29 @@ fn range_release_carries_target_and_expected_version() {
 fn memo_position_range_matches_its_token() {
     let position = super::memo(0);
     assert_eq!(position.range().get(), 13);
+}
+
+#[test]
+fn nest_release_range_wire_carries_only_pend_range_and_version() {
+    let target = kernel_api::model::nest::RangeSlice::new(
+        PendId::mint(5),
+        PageOffset::new(7),
+        PageCount::new(9).unwrap(),
+    )
+    .unwrap();
+    let action = nest::Action::ReleaseRange {
+        target,
+        expected: kernel_api::model::nest::RangeVersion::new(3).unwrap(),
+    };
+    let request = nest::Request::new(RequestId::new(20), action).unwrap();
+    let bytes = request.to_bytes();
+    assert_eq!(word(&bytes, 0), VERSION);
+    assert_eq!(word(&bytes, 1), Domain::Nest as u64);
+    assert_eq!(word(&bytes, 2), nest::Opcode::ReleaseRange.slot());
+    assert_eq!(word(&bytes, 3), 20);
+    assert_eq!(word(&bytes, 4), 5);
+    assert_eq!(word(&bytes, 5), 7);
+    assert_eq!(word(&bytes, 6), 9);
+    assert_eq!(word(&bytes, 7), 3);
+    assert_eq!(nest::Request::from_bytes(&bytes).unwrap(), request);
 }

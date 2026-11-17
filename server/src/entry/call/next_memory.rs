@@ -65,7 +65,7 @@ fn run(
                 let output = super::flat::next::inspect(
                     &mut root,
                     &actor,
-                    memory::flat::Query::try_from(query).map_err(|_| Failure::Unsupported)?,
+                    query,
                 )?
                 .to_bytes();
                 if !ident
@@ -97,8 +97,6 @@ fn run(
         memory::DomainCall::Nest(request) => {
             let action = request.action();
             if let memory::nest::Action::Inspect(query) = action {
-                let query =
-                    memory::nest::Query::try_from(query).map_err(|_| Failure::Unsupported)?;
                 if matches!(query, memory::nest::Query::FaultEvent { .. }) {
                     let wait = basis::nest::fault::read::Read::new(
                         &actor,
