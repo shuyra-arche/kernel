@@ -1,6 +1,9 @@
 use crate::basis::{self, unit::task::Task};
 use alloc::sync::Arc;
-use kernel_api::abi::memory::{self, Failure, Outcome, Reply, Request, journal::Accepted};
+use kernel_api::abi::memory::{
+    self, Failure, Outcome, Reply,
+    journal::{Accepted, RequestKey},
+};
 
 /// Exactly one owner can finish an accepted invocation. The enum excludes a
 /// detached receipt that still carries an execution permit or missing value.
@@ -16,11 +19,11 @@ enum State {
 
 pub(crate) struct Receipt<'a> {
     actor: &'a Arc<Task>,
-    request: Request,
+    request: RequestKey,
     state: State,
 }
 impl<'a> Receipt<'a> {
-    pub(super) fn new(actor: &'a Arc<Task>, request: Request, accepted: Accepted) -> Self {
+    pub(super) fn new(actor: &'a Arc<Task>, request: RequestKey, accepted: Accepted) -> Self {
         Self {
             actor,
             request,
@@ -58,12 +61,8 @@ impl<'a> Receipt<'a> {
     }
     fn record(&self, accepted: &Accepted, outcome: Outcome) -> Reply {
         let _commit = basis::commit();
-        let reply = Reply::new(
-            self.request.id().expect("mutation identity"),
-            self.request.action().opcode(),
-            outcome,
-        )
-        .expect("operation result");
+        let reply = Reply::new(self.request.id(), self.request.opcode(), outcome)
+            .expect("operation result");
         self.actor.record_memory(accepted, reply);
         reply
     }
@@ -73,10 +72,7 @@ impl<'a> Receipt<'a> {
             State::Committed(reply) => reply,
             State::Deferred => self
                 .actor
-                .inspect_memory(
-                    self.request.action().opcode().domain(),
-                    self.request.id().unwrap(),
-                )
+                .inspect_memory(self.request.opcode().domain(), self.request.id())
                 .expect("retained result")
                 .expect("accepted result"),
             State::Ready(accepted) => self.record(

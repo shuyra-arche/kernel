@@ -1,7 +1,7 @@
 //! Native ABI 11 has exactly two memory operation domains. The default Cell
 //! register adapter is not part of this interface. No alternate creation path
 //! or Task-local Slot handle can be encoded here.
-use super::{Action, Domain, Opcode, Request, RequestId};
+use super::{Action, Domain, Opcode, Request, RequestId, journal::RequestKey};
 
 macro_rules! domain {
     ($module:ident, $domain:ident) => {
@@ -91,10 +91,53 @@ impl Frame {
     pub const fn registers(self) -> [usize; 6] {
         [self.input, self.output, 0, 0, 0, 0]
     }
+    pub fn domain_snapshot(self, bytes: &[u8]) -> Option<DomainCall> {
+        DomainCall::from_call(self.number(), bytes)
+    }
+
     pub fn snapshot(self, bytes: &[u8]) -> Option<Call> {
         Some(Call::from_request(Request::from_call(
             self.number(),
             bytes,
         )?))
+    }
+}
+
+/// Entry-facing call with the domain request preserved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DomainCall {
+    Flat(super::flat::Request),
+    Nest(super::nest::Request),
+}
+
+impl DomainCall {
+    pub fn from_call(number: u64, bytes: &[u8]) -> Option<Self> {
+        let opcode = Opcode::from_call_number(number)?;
+        match opcode {
+            Opcode::Flat(_) => super::flat::Request::from_call(number, bytes).map(Self::Flat),
+            Opcode::Nest(_) => super::nest::Request::from_call(number, bytes).map(Self::Nest),
+        }
+    }
+
+    pub const fn number(self) -> u64 {
+        match self {
+            Self::Flat(request) => Opcode::Flat(request.action().opcode()).call_number(),
+            Self::Nest(request) => Opcode::Nest(request.action().opcode()).call_number(),
+        }
+    }
+
+    pub fn key(self) -> Option<RequestKey> {
+        match self {
+            Self::Flat(request) => RequestKey::from_parts(
+                request.id(),
+                Opcode::Flat(request.action().opcode()),
+                request.to_bytes(),
+            ),
+            Self::Nest(request) => RequestKey::from_parts(
+                request.id(),
+                Opcode::Nest(request.action().opcode()),
+                request.to_bytes(),
+            ),
+        }
     }
 }

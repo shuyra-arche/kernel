@@ -4,7 +4,7 @@
 
 mod call;
 pub mod journal;
-pub use call::{Call, Frame};
+pub use call::{Call, DomainCall, Frame};
 mod observation;
 mod reply;
 mod request;

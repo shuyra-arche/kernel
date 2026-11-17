@@ -21,6 +21,22 @@ impl RequestKey {
         })
     }
 
+    pub fn from_parts(
+        id: Option<RequestId>,
+        opcode: Opcode,
+        bytes: [u8; Request::WIDTH],
+    ) -> Option<Self> {
+        Some(Self {
+            id: id?,
+            opcode,
+            bytes,
+        })
+    }
+
+    pub const fn bytes(self) -> [u8; Request::WIDTH] {
+        self.bytes
+    }
+
     pub const fn id(self) -> RequestId {
         self.id
     }
