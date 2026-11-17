@@ -9,7 +9,7 @@ mod transition;
 use alloc::sync::{Arc, Weak};
 use kernel_api::abi::memory::{
     self, Action, Domain, Failure, Outcome, Reply, Request, RequestId, Value,
-    journal::{Accepted, Journal},
+    journal::{Accepted, Journal, RequestKey},
 };
 mod receipt;
 pub(crate) use receipt::Receipt;
@@ -59,7 +59,8 @@ impl Task {
                 Err(error) => Err(error),
             };
         }
-        match journal.begin(self.ident.id, request)? {
+        let key = RequestKey::new(request).ok_or(Failure::Invalid)?;
+        match journal.begin(self.ident.id, key)? {
             memory::journal::Admission::Replay(reply)
             | memory::journal::Admission::InFlight(Some(reply)) => Ok(Admission::Replay(reply)),
             memory::journal::Admission::InFlight(None) => Err(Failure::Busy),

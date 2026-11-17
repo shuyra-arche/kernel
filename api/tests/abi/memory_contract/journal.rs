@@ -21,7 +21,7 @@ fn request(id: u64) -> Request {
     .unwrap()
 }
 fn execute(journal: &mut Journal, request: Request) -> Accepted {
-    let Admission::Execute(accepted) = journal.begin(actor(), request).unwrap() else {
+    let Admission::Execute(accepted) = journal.begin_request(actor(), request).unwrap() else {
         panic!("new admission")
     };
     accepted
@@ -43,7 +43,7 @@ fn lost_delivery_replays_one_commit_without_reentering_execution() {
     let mut journal = Journal::new(actor()).unwrap();
     let accepted = execute(&mut journal, request(1));
     assert!(matches!(
-        journal.begin(actor(), request(1)),
+        journal.begin_request(actor(), request(1)),
         Ok(Admission::InFlight(None))
     ));
     journal.record(&accepted, committed(1)).unwrap();
@@ -51,7 +51,7 @@ fn lost_delivery_replays_one_commit_without_reentering_execution() {
     // of delivery failures. Only the first begin yielded Execute.
     for _ in 0..100 {
         assert!(
-            matches!(journal.begin(actor(), request(1)), Ok(Admission::Replay(r)) if r == committed(1))
+            matches!(journal.begin_request(actor(), request(1)), Ok(Admission::Replay(r)) if r == committed(1))
         );
     }
     assert_eq!(
@@ -92,12 +92,12 @@ fn request_identity_covers_canonical_payload_and_domain_but_never_grants() {
     ] {
         let changed = Request::new(request(1).id(), action).unwrap();
         assert!(matches!(
-            journal.begin(actor(), changed),
+            journal.begin_request(actor(), changed),
             Err(Failure::RequestMismatch)
         ));
     }
     assert!(matches!(
-        journal.begin(TaskId::new(32), request(1)),
+        journal.begin_request(TaskId::new(32), request(1)),
         Err(Failure::Denied)
     ));
     assert_eq!(
@@ -123,7 +123,7 @@ fn all_inflight_slots_pin_capacity_and_busy_does_not_consume_a_sequence() {
         accepted.push(execute(&mut journal, request(id)));
     }
     assert!(matches!(
-        journal.begin(actor(), request(17)),
+        journal.begin_request(actor(), request(17)),
         Err(Failure::Busy)
     ));
     assert_eq!(journal.high_water(), 16);
@@ -135,7 +135,7 @@ fn all_inflight_slots_pin_capacity_and_busy_does_not_consume_a_sequence() {
     let _new = execute(&mut journal, request(17));
     assert_eq!(journal.high_water(), 17);
     assert!(matches!(
-        journal.begin(actor(), request(1)),
+        journal.begin_request(actor(), request(1)),
         Err(Failure::ResultExpired)
     ));
     assert_eq!(
@@ -144,7 +144,7 @@ fn all_inflight_slots_pin_capacity_and_busy_does_not_consume_a_sequence() {
     );
     for id in 2..=16 {
         assert!(matches!(
-            journal.begin(actor(), request(id)),
+            journal.begin_request(actor(), request(id)),
             Ok(Admission::InFlight(None))
         ));
     }
@@ -174,7 +174,7 @@ fn pending_cannot_be_evicted_or_turned_into_no_effect_rejection() {
     .unwrap();
     journal.record(&accepted, pending).unwrap();
     assert!(
-        matches!(journal.begin(actor(), req), Ok(Admission::InFlight(Some(r))) if r == pending)
+        matches!(journal.begin_request(actor(), req), Ok(Admission::InFlight(Some(r))) if r == pending)
     );
     let rejected = Reply::new(
         req.id().unwrap(),
@@ -201,7 +201,7 @@ fn pending_cannot_be_evicted_or_turned_into_no_effect_rejection() {
     )
     .unwrap();
     journal.record(&accepted, failed).unwrap();
-    assert!(matches!(journal.begin(actor(), req), Ok(Admission::Replay(r)) if r == failed));
+    assert!(matches!(journal.begin_request(actor(), req), Ok(Admission::Replay(r)) if r == failed));
     assert_eq!(journal.record(&accepted, pending), Err(Failure::Stale));
 }
 
@@ -212,7 +212,7 @@ fn gaps_eviction_and_exhaustion_never_make_an_old_identity_fresh() {
     journal.record(&accepted, committed(u64::MAX)).unwrap();
     for id in [1, 2, u64::MAX - 1] {
         assert!(matches!(
-            journal.begin(actor(), request(id)),
+            journal.begin_request(actor(), request(id)),
             Err(Failure::ResultExpired)
         ));
         assert_eq!(
@@ -221,7 +221,7 @@ fn gaps_eviction_and_exhaustion_never_make_an_old_identity_fresh() {
         );
     }
     assert!(matches!(
-        journal.begin(actor(), request(u64::MAX)),
+        journal.begin_request(actor(), request(u64::MAX)),
         Ok(Admission::Replay(_))
     ));
     assert_eq!(journal.high_water(), u64::MAX);
@@ -249,7 +249,9 @@ fn rejected_attempt_is_retained_but_inspections_and_expired_results_are_not_muta
     )
     .unwrap();
     journal.record(&accepted, rejected).unwrap();
-    assert!(matches!(journal.begin(actor(), req), Ok(Admission::Replay(r)) if r == rejected));
+    assert!(
+        matches!(journal.begin_request(actor(), req), Ok(Admission::Replay(r)) if r == rejected)
+    );
     let query = Request::new(
         None,
         Action::InspectResult {
@@ -259,7 +261,7 @@ fn rejected_attempt_is_retained_but_inspections_and_expired_results_are_not_muta
     )
     .unwrap();
     assert!(matches!(
-        journal.begin(actor(), query),
+        journal.begin_request(actor(), query),
         Err(Failure::Invalid)
     ));
     assert_eq!(journal.high_water(), 1);
@@ -316,5 +318,7 @@ fn takeover_updates_retained_epoch_before_a_later_failure() {
         journal.inspect(actor(), Domain::Flat, req.id().unwrap()),
         Ok(Some(failed))
     );
-    assert!(matches!(journal.begin(actor(), req), Ok(Admission::Replay(reply)) if reply == failed));
+    assert!(
+        matches!(journal.begin_request(actor(), req), Ok(Admission::Replay(reply)) if reply == failed)
+    );
 }

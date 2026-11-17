@@ -2,12 +2,37 @@
 //! journal for its lifetime and serialize admission, resource commit and result
 //! recording. This does not execute syscalls, authorize resources or own cleanup.
 
-use super::{Domain, Failure, Outcome, RESULT_CAPACITY, Reply, Request, RequestId};
+use super::{Domain, Failure, Opcode, Outcome, RESULT_CAPACITY, Reply, Request, RequestId};
 use crate::model::identity::TaskId;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestKey {
+    id: RequestId,
+    opcode: Opcode,
+    bytes: [u8; Request::WIDTH],
+}
+
+impl RequestKey {
+    pub fn new(request: Request) -> Option<Self> {
+        Some(Self {
+            id: request.id()?,
+            opcode: request.action().opcode(),
+            bytes: request.to_bytes(),
+        })
+    }
+
+    pub const fn id(self) -> RequestId {
+        self.id
+    }
+
+    pub const fn opcode(self) -> Opcode {
+        self.opcode
+    }
+}
 
 #[derive(Clone, Copy)]
 struct Record {
-    request: Request,
+    request: RequestKey,
     reply: Option<Reply>,
 }
 impl Record {
@@ -22,9 +47,8 @@ impl Record {
 #[derive(Debug)]
 pub struct Accepted {
     actor: TaskId,
-    request: Request,
+    request: RequestKey,
 }
-
 #[derive(Debug)]
 pub enum Admission {
     Execute(Accepted),
@@ -63,15 +87,15 @@ impl Journal {
 
     /// Reserve storage before any resource effect. Canonical Request equality
     /// excludes output addresses; changing the opcode/domain is a mismatch too.
-    pub fn begin(&mut self, actor: TaskId, request: Request) -> Result<Admission, Failure> {
+    pub fn begin_request(&mut self, actor: TaskId, request: Request) -> Result<Admission, Failure> {
+        let key = RequestKey::new(request).ok_or(Failure::Invalid)?;
+        self.begin(actor, key)
+    }
+
+    pub fn begin(&mut self, actor: TaskId, request: RequestKey) -> Result<Admission, Failure> {
         self.authorize(actor)?;
-        let id = request.id().ok_or(Failure::Invalid)?;
-        if let Some(record) = self
-            .records
-            .iter()
-            .flatten()
-            .find(|r| r.request.id() == Some(id))
-        {
+        let id = request.id();
+        if let Some(record) = self.records.iter().flatten().find(|r| r.request.id() == id) {
             if record.request != request {
                 return Err(Failure::RequestMismatch);
             }
@@ -95,7 +119,7 @@ impl Journal {
                     .filter_map(|(i, record)| {
                         record
                             .filter(|r| r.terminal())
-                            .map(|r| (i, r.request.id().unwrap().get()))
+                            .map(|r| (i, r.request.id().get()))
                     })
                     .min_by_key(|(_, id)| *id)
                     .map(|(i, _)| i)
@@ -115,7 +139,7 @@ impl Journal {
     /// The resource owner must separately check exact object/publication epochs.
     pub fn record(&mut self, accepted: &Accepted, reply: Reply) -> Result<(), Failure> {
         self.authorize(accepted.actor)?;
-        if !reply.matches(accepted.request) || matches!(reply.outcome(), Outcome::Expired) {
+        if !reply.matches_key(accepted.request) || matches!(reply.outcome(), Outcome::Expired) {
             return Err(Failure::Invalid);
         }
         let record = self
@@ -151,13 +175,8 @@ impl Journal {
         id: RequestId,
     ) -> Result<Option<Reply>, Failure> {
         self.authorize(actor)?;
-        if let Some(record) = self
-            .records
-            .iter()
-            .flatten()
-            .find(|r| r.request.id() == Some(id))
-        {
-            if record.request.action().opcode().domain() != domain {
+        if let Some(record) = self.records.iter().flatten().find(|r| r.request.id() == id) {
+            if record.request.opcode().domain() != domain {
                 return Err(Failure::NoRegion);
             }
             return Ok(record.reply);

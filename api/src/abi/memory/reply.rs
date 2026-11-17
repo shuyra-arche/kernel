@@ -3,7 +3,7 @@
 
 use super::{
     Action, Failure, Opcode, Reader, Request, RequestId, VERSION, Writer, flat as domain_flat,
-    nest as domain_nest, valid_token,
+    journal::RequestKey, nest as domain_nest, valid_token,
 };
 use crate::address::{BASE_PAGE_SIZE, VirtAddr};
 use crate::model::{
@@ -571,6 +571,10 @@ impl Reply {
 
     /// Correlates delivery, not authority or resource freshness. Inspect returns
     /// the retained mutation's opcode; an expired query need only know its domain.
+    pub fn matches_key(self, key: RequestKey) -> bool {
+        self.request == key.id() && self.opcode == key.opcode() && self.outcome.valid(self.opcode)
+    }
+
     pub fn matches(self, request: Request) -> bool {
         match request.action() {
             Action::InspectResult { domain, request } => {
