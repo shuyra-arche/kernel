@@ -426,3 +426,47 @@ fn partial_release_rejects_a_slice_crossing_an_already_released_hole() {
             .release_range(start + 2 * page, start + 3 * page - 1, generation)
     );
 }
+
+#[test]
+fn large_cell_placement_selects_the_effective_cell_alignment() {
+    let cell = kernel_api::model::cell::CellLevel::new(1)
+        .unwrap()
+        .bytes()
+        .unwrap();
+    let mut layout = Layout::new();
+    layout
+        .register_window(RegionKind::Normal, 0x1000, 3 * cell - 1)
+        .unwrap();
+
+    // Lowest/Highest must both choose a whole-Cell boundary, even when
+    // the public placement's alignment hint was only a base page.
+    let lowest = Placement::new(
+        RegionKind::Normal,
+        cell,
+        cell,
+        address::PlacementAt::Lowest,
+    )
+    .unwrap();
+    let (start, generation) = layout.reserve(lowest).unwrap();
+    assert_eq!(start, cell);
+    assert!(layout.occupancy.release(start, start + cell - 1, generation));
+
+    let highest = Placement::new(
+        RegionKind::Normal,
+        cell,
+        cell,
+        address::PlacementAt::Highest,
+    )
+    .unwrap();
+    let (start, generation) = layout.reserve(highest).unwrap();
+    assert_eq!(start, 2 * cell);
+    assert!(layout.occupancy.release(start, start + cell - 1, generation));
+
+    let unaligned = Placement::new(
+        RegionKind::Normal,
+        cell,
+        cell,
+        address::PlacementAt::Exact(VirtAddr::new(cell + 4096)),
+    );
+    assert_eq!(unaligned, Err(address::AddressError::NotAligned));
+}
