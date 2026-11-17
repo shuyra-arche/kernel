@@ -93,6 +93,16 @@ Independent IOMMU backend execution remains available with
 `cargo +nightly test --locked -p kernel-memory-tests --test iommu-target
 --target x86_64-unknown-linux-gnu -- --ignored --nocapture`.
 
+The [IOMMU target QEMU workflow](../../.github/workflows/iommu-target.yml)
+runs this same existing test on a Debian trixie QEMU target when its relevant
+implementation/test sources change, or by explicit manual dispatch. The test
+runs its real MMIO and DMA scenarios, requires normal guest exit and exact
+assertions, and uploads versioned emulator output, commands and serial logs.
+Its first [executed check](https://github.com/shuyra-arche/kernel/actions/runs/44069009085)
+used QEMU 10.0.13 and passed. This isolated M-mode test does not establish
+Vanllia ABI 14 user-space composition, multi-Hart behavior or physical IOMMU
+controller safety.
+
 ## Composition and evidence
 
 [runner/](runner/) contains typed scenario selection and assertions. Its
@@ -115,10 +125,11 @@ Every boot requires complete scenario assertions and a successful process exit;
 a timeout, signal, nonzero exit or failure marker cannot pass. Evidence survives
 failed builds and boots. Raw results belong in CI artifacts, not source control.
 
-Kernel CI checks only this repository: Host contracts and debug/release RV64
-builds run as three parallel jobs. Its host runner depends only on registry
-crates; CI does not check out Vanllia, System or Twine, and does not run a
-cross-repository QEMU composition.
+Kernel's default Check CI runs Host contracts and debug/release RV64 builds
+as three parallel jobs. The separate IOMMU QEMU workflow above verifies its
+own target guest without assembling another provider. Neither workflow checks
+out a live Vanllia/System/Twine product composition; those scenarios are owned
+by the integration repository.
 
 Vanllia owns the explicit integration gate. Its workflow pins the Kernel
 provider, executes 29 QEMU jobs split by scenario/profile/Hart with up to eight
