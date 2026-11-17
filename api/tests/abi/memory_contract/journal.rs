@@ -1,8 +1,7 @@
 use super::{memo, slot};
 use kernel_api::{
     abi::memory::{
-        Action, Domain, Failure, Outcome, RESULT_CAPACITY, Reply, Request, RequestId,
-        Value,
+        Action, Domain, Failure, Outcome, RESULT_CAPACITY, Reply, Request, RequestId, Value,
         journal::{Accepted, Admission, Journal, RequestKey},
     },
     model::{flat::SlotVersion, identity::TaskId, nest::MemoGeneration},

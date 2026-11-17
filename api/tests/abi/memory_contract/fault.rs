@@ -2,8 +2,7 @@ use super::request::{id, set_word};
 use super::slot;
 use kernel_api::{
     abi::memory::{
-        Action, Delivery, Failure, Observation, Outcome, Query, Reply, Request, Snapshot,
-        Value,
+        Action, Delivery, Failure, Observation, Outcome, Query, Reply, Request, Snapshot, Value,
     },
     model::{
         flat::SlotVersion,

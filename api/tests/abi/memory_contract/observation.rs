@@ -1,9 +1,7 @@
 use super::request::{id, maintenance, set_word};
 use super::{memo, nest_id, slot};
 use kernel_api::{
-    abi::memory::{
-        Action, Failure, Observation, Outcome, Query, Reply, Request, Snapshot,
-    },
+    abi::memory::{Action, Failure, Observation, Outcome, Query, Reply, Request, Snapshot},
     address::VirtAddr,
     model::{
         cell::CellLevel,

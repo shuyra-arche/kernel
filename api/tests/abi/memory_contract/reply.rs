@@ -1,9 +1,7 @@
 use super::request::{id, maintenance, set_word};
 use super::{memo, slot};
 use kernel_api::{
-    abi::memory::{
-        Action, Delivery, Domain, Failure, Outcome, Reply, Request, RequestId, Value,
-    },
+    abi::memory::{Action, Delivery, Domain, Failure, Outcome, Reply, Request, RequestId, Value},
     model::{
         flat::{BlockPhase, SlotVersion},
         nest::MemoGeneration,

@@ -2,8 +2,8 @@
 mod next_memory;
 use crate::support::*;
 use kernel_api::abi::memory::{
-    Action, Failure, Observation, Value, flat::Action as FlatAction,
-    flat::Query as FlatQuery, nest::Action as NestAction, nest::Query as NestQuery,
+    Action, Failure, Observation, Value, flat::Action as FlatAction, flat::Query as FlatQuery,
+    nest::Action as NestAction, nest::Query as NestQuery,
 };
 use std::sync::{Arc, atomic::Ordering};
 pub(crate) fn invoke(
