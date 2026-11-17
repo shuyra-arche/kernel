@@ -341,11 +341,8 @@ fn domain_observation_correlation_preserves_requested_range_identity() {
     };
 
     let range = PendId::mint(17);
-    let request = nest::Request::new(
-        None,
-        nest::Action::Inspect(nest::Query::Span { range }),
-    )
-    .unwrap();
+    let request =
+        nest::Request::new(None, nest::Action::Inspect(nest::Query::Span { range })).unwrap();
     let status = SpanStatus {
         range,
         version: SpanVersion::INITIAL,

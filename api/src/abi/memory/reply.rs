@@ -627,7 +627,6 @@ impl Reply {
         }
     }
 
-
     /// Client-side correlation with the domain request, without recreating a
     /// mixed action. Retained-result inspection is scoped by request ID and
     /// domain; a mutation additionally binds its opcode and exact outcome.

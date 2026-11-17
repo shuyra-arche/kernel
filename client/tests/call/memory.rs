@@ -1,7 +1,6 @@
 use kernel_api::{
     abi::memory::{
-        self, Delivery, Domain, Failure, Observation, Outcome, Reply, RequestId,
-        Snapshot, Value,
+        self, Delivery, Domain, Failure, Observation, Outcome, Reply, RequestId, Snapshot, Value,
     },
     address::VirtAddr,
     model::{
@@ -135,7 +134,11 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
 #[test]
 fn observations_require_the_requested_mapping_and_cannot_replace_mutation_results() {
     let range = PendId::mint(17);
-    let request = memory::nest::Call::new(None, memory::nest::Action::Inspect(memory::nest::Query::Span { range })).unwrap();
+    let request = memory::nest::Call::new(
+        None,
+        memory::nest::Action::Inspect(memory::nest::Query::Span { range }),
+    )
+    .unwrap();
     let status = SpanStatus {
         range,
         version: SpanVersion::INITIAL,
