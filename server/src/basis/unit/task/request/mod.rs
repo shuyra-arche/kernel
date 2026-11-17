@@ -4,7 +4,6 @@ use crate::{
     basis,
     basis::sync::{LegacyLock, order},
 };
-use alloc::boxed::Box;
 mod transition;
 use alloc::sync::{Arc, Weak};
 use kernel_api::abi::memory::{
@@ -16,7 +15,7 @@ pub(crate) use receipt::Receipt;
 
 /// One bounded result owner per actual Task. Resource and hardware state stay
 /// with Flat/Nest/Memo; this window only owns admission and response history.
-pub(super) struct Requests(LegacyLock<order::TaskJournal, Option<Box<Journal>>>);
+pub(super) struct Requests(LegacyLock<order::TaskJournal, Option<Journal>>);
 impl Requests {
     pub(super) const fn new() -> Self {
         Self(LegacyLock::new(None))
@@ -40,16 +39,9 @@ impl Task {
         let _commit = basis::commit();
         let mut window = self.requests.0.lock();
         if window.is_none() {
-            // Allocate storage before initializing the fixed result array.
-            // Constructing Journal by value can overflow the guarded trap
-            // stack before Box::try_new has any chance to move it to the heap.
-            let mut storage =
-                Box::<Journal>::try_new_uninit().map_err(|_| Failure::OutOfMemory)?;
-            if !Journal::initialize(&mut storage, self.ident.id) {
-                return Err(Failure::Denied);
-            }
-            // SAFETY: initialize wrote every Journal field before publication.
-            *window = Some(unsafe { storage.assume_init() });
+            // The fixed record storage is allocated once by Journal. Keeping
+            // only the Vec handle here avoids a large trap-stack temporary.
+            *window = Some(Journal::allocate(self.ident.id)?);
         }
         let journal = window.as_mut().expect("prepared Task journal");
         match journal.begin(self.ident.id, request)? {

@@ -341,12 +341,11 @@ fn keyed_admission_uses_canonical_request_bytes() {
 }
 
 #[test]
-fn heap_initialized_journal_preserves_the_same_bounded_request_contract() {
-    let mut slot = Box::<Journal>::try_new_uninit().unwrap();
-    assert!(!Journal::initialize(&mut slot, TaskId::new(0)));
-    assert!(Journal::initialize(&mut slot, actor()));
-    // SAFETY: the constructor initialized every field after validating actor.
-    let mut journal = unsafe { slot.assume_init() };
+fn task_journal_keeps_only_a_bounded_handle_on_the_trap_stack() {
+    assert!(core::mem::size_of::<Journal>() <= 64);
+    assert_eq!(Journal::allocate(TaskId::new(0)).err(), Some(Failure::Denied));
+
+    let mut journal = Journal::allocate(actor()).unwrap();
     assert_eq!(journal.high_water(), 0);
     let accepted = execute(&mut journal, request(1));
     assert!(matches!(
