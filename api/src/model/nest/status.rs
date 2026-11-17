@@ -148,6 +148,10 @@ pub struct MemoStatus {
     pub level: CellLevel,
 }
 impl MemoStatus {
+    pub const fn range(self) -> Option<crate::model::identity::PendId> {
+        self.range
+    }
+
     pub fn valid(self) -> bool {
         if self.range.is_some_and(|range| range.get() == 0) {
             return false;
