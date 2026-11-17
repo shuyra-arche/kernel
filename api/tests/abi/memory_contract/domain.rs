@@ -207,3 +207,23 @@ fn nest_release_range_wire_carries_only_pend_range_and_version() {
     assert_eq!(word(&bytes, 7), 3);
     assert_eq!(nest::Request::from_bytes(&bytes).unwrap(), request);
 }
+
+#[test]
+fn flat_requests_validate_authorization_and_geometry_before_encoding() {
+    let bad_delete = flat::Action::Delete {
+        token: PendId::NONE,
+        expected: FlatVersion::new(2).unwrap(),
+    };
+    assert!(flat::Request::new(RequestId::new(31), bad_delete).is_none());
+    let invalid_block = flat::Action::Block {
+        start: SlotPosition::new(
+            PendId::mint(3),
+            FlatId::new(11).unwrap(),
+            usize::MAX,
+        )
+        .unwrap(),
+        count: 2,
+        recover: None,
+    };
+    assert!(flat::Request::new(RequestId::new(32), invalid_block).is_none());
+}
