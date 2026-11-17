@@ -187,10 +187,7 @@ impl SpanRoute {
         position: kernel_api::model::nest::MemoPosition,
     ) -> Result<usize, PendFail> {
         use kernel_api::model::pend::{NestScope, PendRange, PendScope};
-        if position.token() != self.entry.token()
-            || position.nest() != self.nest().id()
-            || position.span() != self.id()
-        {
+        if position.range() != self.entry.token() {
             return Err(PendFail::Denied);
         }
         let span = self.span()?;
@@ -199,7 +196,7 @@ impl SpanRoute {
         if !self.entry.authority().selects(
             Operations::Nest(self.rights),
             PendScope::Nest(NestScope::Span {
-                id: position.span(),
+                id: self.id(),
                 range: PendRange::Pages {
                     offset: page,
                     count: grain,

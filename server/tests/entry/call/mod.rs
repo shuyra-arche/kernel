@@ -15,7 +15,7 @@ use kernel_api::{
     model::{
         flat::{FlatId, SlotPosition, SlotVersion},
         identity::PendId,
-        nest::{MemoGeneration, MemoPosition, NestId, SpanId},
+        nest::{MemoGeneration, MemoPosition},
     },
 };
 use request::Transition;
@@ -45,7 +45,7 @@ pub(crate) mod basis {
                 impl Read {
                     pub(crate) fn new(
                         _: &std::sync::Arc<crate::support::Task>,
-                        _: kernel_api::abi::memory::Query,
+                        _: kernel_api::abi::memory::nest::Query,
                         _: kernel_api::address::VirtAddr,
                     ) -> Result<Self, kernel_api::abi::memory::Failure> {
                         Err(kernel_api::abi::memory::Failure::Unsupported)
@@ -89,13 +89,7 @@ fn request(id: u64, publish: bool) -> Request {
         Some(RequestId::new(id).unwrap()),
         if publish {
             Action::Publish {
-                memo: MemoPosition::new(
-                    PendId::mint(3),
-                    NestId::new(4).unwrap(),
-                    SpanId::from_bytes(&5u64.to_le_bytes()).unwrap(),
-                    0,
-                )
-                .unwrap(),
+                memo: MemoPosition::new(PendId::mint(3), 0).unwrap(),
                 expected: MemoGeneration::INITIAL,
                 maintenance: None,
             }

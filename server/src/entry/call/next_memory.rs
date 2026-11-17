@@ -12,7 +12,7 @@ use alloc::sync::Arc;
 use basis::unit::task::request::Admission;
 pub(super) use basis::unit::task::request::Receipt;
 use kernel_api::{
-    abi::memory::{self, Action, Delivery, Failure, Frame, Reply, Request},
+    abi::memory::{self, Delivery, Failure, Frame, Reply, Request},
     address::VirtAddr,
 };
 
@@ -53,39 +53,96 @@ fn run(
     {
         return Err(Failure::Invalid);
     }
-    let request = frame.snapshot(&bytes).ok_or(Failure::Invalid)?.request();
+    let call = frame.domain_snapshot(&bytes).ok_or(Failure::Invalid)?;
     let actor = super::memory::caller(&ident).ok_or(Failure::Dead)?;
     if actor.realtime() {
         return Err(Failure::Denied);
     }
-    if let Action::Inspect(query) = request.action()
-        && query.domain() == memory::Domain::Flat
-    {
-        let output = super::flat::next::inspect(&mut root, &actor, query)?.to_bytes();
-        if !ident
-            .team
-            .nest
-            .copy_out(&output, VirtAddr::new(frame.output()))
-        {
-            return Err(Failure::ReplyFault);
+    let output = match call {
+        memory::DomainCall::Flat(request) => {
+            let action = request.action();
+            if let memory::flat::Action::Inspect(query) = action {
+                let output = super::flat::next::inspect(
+                    &mut root,
+                    &actor,
+                    memory::flat::Query::try_from(query).map_err(|_| Failure::Unsupported)?,
+                )?
+                .to_bytes();
+                if !ident
+                    .team
+                    .nest
+                    .copy_out(&output, VirtAddr::new(frame.output()))
+                {
+                    return Err(Failure::ReplyFault);
+                }
+                return Ok(basis::room::Handoff::Resume(false));
+            }
+            if let memory::flat::Action::InspectResult { request: id } = action {
+                let reply = actor.inspect_result(memory::Domain::Flat, id)?;
+                return copy_result(&ident, &frame, reply.ok_or(Failure::Busy)?.to_bytes());
+            }
+            let key = memory::journal::RequestKey::new_from_domain(
+                request.id(),
+                memory::Opcode::Flat(action.opcode()),
+                request.to_bytes(),
+            )
+            .ok_or(Failure::Invalid)?;
+            let mut receipt = match actor.admit_memory_key(key)? {
+                Admission::Replay(reply) => return copy_result(&ident, &frame, reply.to_bytes()),
+                Admission::Execute(receipt) => receipt,
+            };
+            let result = execute_flat(&actor, action, &mut receipt);
+            receipt.finish(result)
         }
-        return Ok(basis::room::Handoff::Resume(false));
-    }
+        memory::DomainCall::Nest(request) => {
+            let action = request.action();
+            if let memory::nest::Action::Inspect(query) = action {
+                let query =
+                    memory::nest::Query::try_from(query).map_err(|_| Failure::Unsupported)?;
+                if matches!(query, memory::nest::Query::FaultEvent { .. }) {
+                    let wait = basis::nest::fault::read::Read::new(
+                        &actor,
+                        query,
+                        VirtAddr::new(frame.output()),
+                    )?;
+                    drop(actor);
+                    drop(ident);
+                    return Ok(match basis::nest::fault::read::park(wait) {
+                        basis::room::Handoff::Resume(()) => basis::room::Handoff::Resume(true),
+                        basis::room::Handoff::Switch(pa) => basis::room::Handoff::Switch(pa),
+                    });
+                }
+                let output = super::nest::next::inspect(&actor, query)?.to_bytes();
+                return copy_result(&ident, &frame, output);
+            }
+            if let memory::nest::Action::InspectResult { request: id } = action {
+                let reply = actor.inspect_result(memory::Domain::Nest, id)?;
+                return copy_result(&ident, &frame, reply.ok_or(Failure::Busy)?.to_bytes());
+            }
+            let key = memory::journal::RequestKey::new_from_domain(
+                request.id(),
+                memory::Opcode::Nest(action.opcode()),
+                request.to_bytes(),
+            )
+            .ok_or(Failure::Invalid)?;
+            let mut receipt = match actor.admit_memory_key(key)? {
+                Admission::Replay(reply) => return copy_result(&ident, &frame, reply.to_bytes()),
+                Admission::Execute(receipt) => receipt,
+            };
+            let result = execute_nest(&actor, action, &mut receipt);
+            receipt.finish(result)
+        }
+    };
     drop(root);
-    if let Action::Inspect(query @ memory::Query::FaultEvent { .. }) = request.action() {
-        let wait =
-            basis::nest::fault::read::Read::new(&actor, query, VirtAddr::new(frame.output()))?;
-        drop(actor);
-        drop(ident);
-        return Ok(match basis::nest::fault::read::park(wait) {
-            basis::room::Handoff::Resume(()) => basis::room::Handoff::Resume(true),
-            basis::room::Handoff::Switch(pa) => basis::room::Handoff::Switch(pa),
-        });
-    }
-    let output = execute(&actor, request)?;
-    // A completed holding change reopens its Page gate. Wake source observers
-    // only after the ledger, journal and COMMIT guards have been released.
     crate::basis::nest::retirement::maintain();
+    copy_result(&ident, &frame, output)
+}
+
+fn copy_result(
+    ident: &Arc<TaskIdent>,
+    frame: &Frame,
+    output: [u8; Reply::WIDTH],
+) -> Result<crate::basis::room::Handoff<bool>, Failure> {
     if !ident
         .team
         .nest
@@ -96,45 +153,42 @@ fn run(
     Ok(basis::room::Handoff::Resume(false))
 }
 
-fn execute(actor: &Arc<Task>, request: Request) -> Result<[u8; Reply::WIDTH], Failure> {
-    if let Action::Inspect(query) = request.action() {
-        return match query.domain() {
-            memory::Domain::Flat => return Err(Failure::Unsupported),
-            memory::Domain::Nest => super::nest::next::inspect(actor, query),
-        }
-        .map(|value| value.to_bytes());
-    }
-    let mut receipt = match actor.admit_memory(request)? {
-        Admission::Replay(reply) => return Ok(reply.to_bytes()),
-        Admission::Execute(receipt) => receipt,
-    };
+fn execute_flat(
+    actor: &Arc<Task>,
+    action: memory::flat::Action,
+    receipt: &mut Receipt<'_>,
+) -> Result<memory::Value, Failure> {
     if matches!(
-        request.action(),
-        Action::Block { .. } | Action::Allow { .. } | Action::DeleteFlat { .. }
+        action,
+        memory::flat::Action::Block { .. }
+            | memory::flat::Action::Allow { .. }
+            | memory::flat::Action::Delete { .. }
     ) {
-        let result = super::flat::next::effect(actor, request.action(), &mut receipt);
-        return Ok(receipt.finish(result));
-    }
-    if matches!(
-        request.action(),
-        Action::CreateNest { .. }
-            | Action::Publish { .. }
-            | Action::Retract { .. }
-            | Action::Protect { .. }
-            | Action::DeleteSpan { .. }
-            | Action::DeleteNest { .. }
-    ) {
-        let result = super::nest::next::effect(actor, request.action(), &mut receipt);
-        return Ok(receipt.finish(result));
+        return super::flat::next::effect(actor, action, receipt);
     }
     let _serial = actor.pend.lock();
-    // Occupy allocates/zeroes before COMMIT, then rechecks both live selection
-    // and expected version. A losing preparation remains private and is freed.
-    let prepared = super::flat::next::prepare(actor, request.action());
+    let prepared = super::flat::next::prepare(actor, action);
     let _commit = basis::commit();
-    let result = prepared.and_then(|prepared| match request.action().opcode().domain() {
-        memory::Domain::Flat => super::flat::next::mutate(actor, request.action(), prepared),
-        memory::Domain::Nest => super::nest::next::mutate(actor, request.action()),
-    });
-    Ok(receipt.finish(result))
+    prepared.and_then(|prepared| super::flat::next::mutate(actor, action, prepared))
+}
+
+fn execute_nest(
+    actor: &Arc<Task>,
+    action: memory::nest::Action,
+    receipt: &mut Receipt<'_>,
+) -> Result<memory::Value, Failure> {
+    if matches!(
+        action,
+        memory::nest::Action::Create { .. }
+            | memory::nest::Action::Delete { .. }
+            | memory::nest::Action::Release { .. }
+            | memory::nest::Action::Publish { .. }
+            | memory::nest::Action::Retract { .. }
+            | memory::nest::Action::Protect { .. }
+    ) {
+        return super::nest::next::effect(actor, action, receipt);
+    }
+    let _serial = actor.pend.lock();
+    let _commit = basis::commit();
+    super::nest::next::mutate(actor, action)
 }

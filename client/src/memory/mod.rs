@@ -1,13 +1,7 @@
 //! Native ABI 11 Flat/Nest calls. ABI 10 does not accept these descriptors.
 //! Each invocation snapshots once and traps once. There is no automatic retry,
 //! request ID allocation, permission cache or fallback to legacy Cell calls.
-use kernel_api::abi::memory::{
-    Action, Call, Delivery, Failure, Frame, Observation, Reply, Request,
-};
-use kernel_api::model::{
-    identity::PendId,
-    nest::{NestId, SpanId, SpanVersion},
-};
+use kernel_api::abi::memory::{Call, Delivery, Failure, Frame, Observation, Reply, Request};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Response {
@@ -32,7 +26,6 @@ pub mod flat {
     }
 }
 pub mod nest {
-    use super::{Action, NestId, PendId, SpanId, SpanVersion};
     pub use kernel_api::abi::memory::nest::Call;
     pub fn invoke(call: Call) -> Result<super::Response, super::Error> {
         super::invoke(call.into())
@@ -41,23 +34,12 @@ pub mod nest {
     /// authority window and request id; this only binds the wire layout.
     pub fn release_range(
         id: Option<kernel_api::abi::memory::RequestId>,
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
-        expected: SpanVersion,
-        offset: usize,
-        count: usize,
+        target: kernel_api::model::nest::RangeSlice,
+        expected: kernel_api::model::nest::RangeVersion,
     ) -> Option<Call> {
         Call::new(
             id,
-            Action::ReleaseRange {
-                token,
-                nest,
-                span,
-                expected,
-                offset,
-                count,
-            },
+            kernel_api::abi::memory::Action::ReleaseRange { target, expected },
         )
     }
 }

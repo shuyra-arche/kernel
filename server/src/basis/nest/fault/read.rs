@@ -20,7 +20,7 @@ pub(crate) struct Read {
     actor: Weak<Task>,
     span: Arc<Span>,
     binding: Arc<Binding>,
-    query: Query,
+    query: NestQuery,
     output: VirtAddr,
     deadline: u64,
 }
@@ -30,14 +30,13 @@ pub(crate) struct Read {
 unsafe impl Send for Read {}
 unsafe impl Sync for Read {}
 impl Read {
-    pub(crate) fn new(actor: &Arc<Task>, query: Query, output: VirtAddr) -> Result<Self, Failure> {
-        let Query::FaultEvent {
-            token,
-            nest,
-            span: reservation,
-            epoch,
-            wait,
-            ..
+    pub(crate) fn new(
+        actor: &Arc<Task>,
+        query: NestQuery,
+        output: VirtAddr,
+    ) -> Result<Self, Failure> {
+        let NestQuery::FaultEvent {
+            range, epoch, wait, ..
         } = query
         else {
             return Err(Failure::Invalid);
@@ -45,11 +44,9 @@ impl Read {
         let _commit = crate::basis::commit();
         let now = clock::uptime().as_nanos() as u64;
         let ns = kernel_api::model::nest::fault_read_deadline(wait, now).ok_or(Failure::Invalid)?;
-        let (_, span) = full_route(
+        let (_, span) = full_route_range(
             actor,
-            token,
-            nest,
-            reservation,
+            range,
             kernel_api::model::pend::NestRights::INSPECT | kernel_api::abi::memory::rights::FAULT,
         )?;
         let binding = {
@@ -57,7 +54,7 @@ impl Read {
                 return Err(Failure::Stale);
             }
             let binding = active(&span)?;
-            if !binding.reads(actor, token) {
+            if !binding.reads(actor, range) {
                 return Err(Failure::Denied);
             }
             binding
@@ -75,8 +72,8 @@ impl Read {
         self.deadline
     }
     fn poll(&self) -> Result<FaultEvent, Failure> {
-        let Query::FaultEvent {
-            token,
+        let NestQuery::FaultEvent {
+            range,
             epoch,
             after,
             wait,
@@ -94,7 +91,7 @@ impl Read {
             return Err(Failure::Stale);
         }
         let binding = active(&self.span)?;
-        if !Arc::ptr_eq(&binding, &self.binding) || !binding.reads(&actor, token) {
+        if !Arc::ptr_eq(&binding, &self.binding) || !binding.reads(&actor, range) {
             return Err(Failure::Denied);
         }
         let state = self.span.faults.lock();
@@ -115,7 +112,7 @@ impl Read {
         matches!(result, Err(Failure::Busy))
             && matches!(
                 self.query,
-                Query::FaultEvent {
+                NestQuery::FaultEvent {
                     wait: Wait::At(_),
                     ..
                 }

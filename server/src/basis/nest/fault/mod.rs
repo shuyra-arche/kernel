@@ -9,8 +9,10 @@ use crate::basis::{pend, sign, unit::task::Task};
 use alloc::sync::{Arc, Weak};
 use binding::Binding;
 use kernel_api::{
-    abi::memory::{Failure, Observation, Query, Snapshot, Value},
-    model::nest::{FaultEpoch, FaultPhase, FaultRoute, FaultStatus, NestId, SpanId},
+    abi::memory::{
+        Failure, Observation, Snapshot, Value, nest::Action as NestAction, nest::Query as NestQuery,
+    },
+    model::nest::{FaultEpoch, FaultPhase, FaultRoute, FaultStatus},
 };
 use queue::Queue;
 
@@ -122,32 +124,22 @@ fn span_key(nest: &Nest, span: &Span) -> sign::WakeKey {
         span: span.identity(),
     }
 }
-fn full_route(
+fn full_route_range(
     actor: &Arc<Task>,
-    token: kernel_api::model::identity::PendId,
-    id: NestId,
-    span_id: SpanId,
+    range: kernel_api::model::identity::PendId,
     rights: kernel_api::model::pend::NestRights,
 ) -> Result<(pend::access::SpanRoute, Arc<Span>), Failure> {
     let route =
-        pend::access::SpanRoute::acquire(actor, token, rights).map_err(|_| Failure::Denied)?;
-    if route.nest().id() != id || route.id() != span_id {
-        return Err(Failure::Denied);
-    }
+        pend::access::SpanRoute::acquire(actor, range, rights).map_err(|_| Failure::Denied)?;
     let span = route.span().map_err(|_| Failure::Dead)?;
     if !binding::full(route.entry(), &span) {
         return Err(Failure::Denied);
     }
     Ok((route, span))
 }
-pub(crate) fn configure(
-    actor: &Arc<Task>,
-    action: kernel_api::abi::memory::Action,
-) -> Result<Value, Failure> {
-    let kernel_api::abi::memory::Action::FaultRoute {
-        token,
-        nest,
-        span: reservation,
+pub(crate) fn configure(actor: &Arc<Task>, action: NestAction) -> Result<Value, Failure> {
+    let NestAction::FaultRoute {
+        range,
         expected,
         epoch,
         route: config,
@@ -155,18 +147,12 @@ pub(crate) fn configure(
     else {
         return Err(Failure::Invalid);
     };
-    let (route, span) = full_route(
-        actor,
-        token,
-        nest,
-        reservation,
-        kernel_api::abi::memory::rights::FAULT,
-    )?;
+    let (route, span) = full_route_range(actor, range, kernel_api::abi::memory::rights::FAULT)?;
     let _operation = span.operation().ok_or(Failure::Busy)?;
     if route.nest().is_external() {
         return Err(Failure::Unsupported);
     }
-    if span.version() != expected || span.faults.lock().epoch != epoch {
+    if span.version().get() != expected.get() || span.faults.lock().epoch != epoch {
         return Err(Failure::Stale);
     }
     let version = expected.next().ok_or(Failure::VersionExhausted)?;
@@ -180,7 +166,7 @@ pub(crate) fn configure(
         if !nest_state.is_open() || span_state.phase != super::address::span::SpanPhase::Open {
             return Err(Failure::Dead);
         }
-        if span.version() != expected {
+        if span.version().get() != expected.get() {
             return Err(Failure::Stale);
         }
         let mut state = span.faults.lock();
@@ -191,8 +177,7 @@ pub(crate) fn configure(
         sign::signal(old.key());
     }
     Ok(Value::FaultRoute {
-        nest,
-        span: reservation,
+        range,
         version,
         epoch,
         phase: if config.is_some() {
@@ -202,28 +187,16 @@ pub(crate) fn configure(
         },
     })
 }
-pub(crate) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Failure> {
-    let Query::FaultRoute {
-        token,
-        nest,
-        span: reservation,
-    } = query
-    else {
+pub(crate) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation, Failure> {
+    let NestQuery::FaultRoute { range } = query else {
         return Err(Failure::Invalid);
     };
     let _commit = crate::basis::commit();
-    let (_, span) = full_route(
-        actor,
-        token,
-        nest,
-        reservation,
-        kernel_api::model::pend::NestRights::INSPECT,
-    )?;
+    let (_, span) = full_route_range(actor, range, kernel_api::model::pend::NestRights::INSPECT)?;
     let active = active(&span);
     let state = span.faults.lock();
     let status = FaultStatus {
-        nest,
-        span: reservation,
+        range: span.authority(),
         epoch: state.epoch,
         phase: match active {
             Ok(_) if !state.lost() => FaultPhase::Active,

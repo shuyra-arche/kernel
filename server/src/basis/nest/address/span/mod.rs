@@ -106,6 +106,7 @@ pub struct Span {
     /// Shared hardware translation; Address organization stays in the Nest.
     pub(in crate::basis::nest) translation: Arc<super::super::translation::Translation>,
     pub(crate) range: SpanRange,
+    range_id: core::sync::atomic::AtomicUsize,
     pub(crate) attrs: Attributes,
     pub(crate) state: LegacyLock<crate::basis::sync::order::Span, SpanState>,
     operation: core::sync::atomic::AtomicBool,
@@ -135,6 +136,17 @@ impl Drop for Span {
 }
 
 impl Span {
+    pub(crate) fn bind_authority(&self, range: kernel_api::model::identity::PendId) {
+        self.range_id
+            .store(range.get(), core::sync::atomic::Ordering::Release);
+    }
+
+    pub(crate) fn authority(&self) -> kernel_api::model::identity::PendId {
+        kernel_api::model::identity::PendId::mint(
+            self.range_id.load(core::sync::atomic::Ordering::Acquire),
+        )
+    }
+
     pub(crate) fn version(&self) -> kernel_api::model::nest::SpanVersion {
         kernel_api::model::nest::SpanVersion::new(
             self.revision.load(core::sync::atomic::Ordering::Acquire),
@@ -172,6 +184,7 @@ impl Span {
         match Arc::try_new(Self {
             faults: LegacyLock::new(super::super::fault::State::new()),
             identity,
+            range_id: core::sync::atomic::AtomicUsize::new(0),
             admission: nest.admission.clone(),
             translation: (*nest.state).clone(),
             range,

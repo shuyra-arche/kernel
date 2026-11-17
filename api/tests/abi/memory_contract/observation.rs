@@ -1,9 +1,7 @@
 use super::request::{id, maintenance, set_word};
-use super::{memo, slot};
+use super::{memo, nest_id, slot};
 use kernel_api::{
-    abi::memory::{
-        Action, Domain, Failure, Observation, Opcode, Outcome, Query, Reply, Request, Snapshot,
-    },
+    abi::memory::{Action, Failure, Observation, Outcome, Query, Reply, Request, Snapshot},
     address::VirtAddr,
     model::{
         cell::CellLevel,
@@ -12,7 +10,6 @@ use kernel_api::{
             SlotVersion,
         },
         identity::{PendId, TaskId},
-        nest::SpanId,
         nest::{
             MemoGeneration, MemoPhase, MemoStatus, NestInfo, NestKind, NestPhase, NestStatus,
             NestVersion, SpanPhase, SpanStatus, SpanVersion,
@@ -22,8 +19,7 @@ use kernel_api::{
 
 fn fixtures() -> Vec<(Query, Snapshot)> {
     let flat = slot(0).flat();
-    let nest = memo(0).nest();
-    let span = memo(0).span();
+    let nest = nest_id();
     vec![
         (
             Query::Flat {
@@ -85,8 +81,7 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
         (
             Query::Memo(memo(512)),
             Snapshot::Memo(MemoStatus {
-                nest,
-                span,
+                range: Some(PendId::mint(13)),
                 coordinate: 512,
                 generation: MemoGeneration::new(6).unwrap(),
                 phase: MemoPhase::Published,
@@ -98,13 +93,10 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
         ),
         (
             Query::Span {
-                token: PendId::mint(13),
-                nest,
-                span,
+                range: PendId::mint(13),
             },
             Snapshot::Span(SpanStatus {
-                nest,
-                span,
+                range: PendId::mint(13),
                 version: SpanVersion::new(7).unwrap(),
                 offset: 512,
                 count: 512,
@@ -124,8 +116,8 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
         &[14, 12, 18, 0, 1, 7, 11, 512],
         &[14, 12, 18, 0, 2, 23, 11, 29, 31],
         &[14, 13, 18, 0, 0, 13, 17],
-        &[14, 13, 18, 0, 1, 13, 17, 19, 512],
-        &[14, 13, 18, 0, 2, 13, 17, 19],
+        &[14, 13, 18, 0, 1, 13, 512],
+        &[14, 13, 18, 0, 2, 13],
     ];
     for ((query, _), words) in fixtures().into_iter().zip(expected) {
         let request = Request::new(None, Action::Inspect(query)).unwrap();
@@ -135,7 +127,10 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
         }
         assert_eq!(request.to_bytes(), bytes);
         assert_eq!(
-            Request::from_call(Opcode::Inspect(query.domain()).call_number(), &bytes),
+            Request::from_call(
+                kernel_api::abi::memory::Opcode::inspect(query.domain()).call_number(),
+                &bytes
+            ),
             Some(request)
         );
         assert!(Request::new(Some(id()), Action::Inspect(query)).is_none());
@@ -163,9 +158,7 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
         Request::new(
             None,
             Action::Inspect(Query::Span {
-                token: PendId::mint(1),
-                nest: memo(0).nest(),
-                span: SpanId::NONE
+                range: PendId::NONE,
             })
         )
         .is_none()
@@ -194,8 +187,8 @@ fn observation_vectors_preserve_source_publication_and_full_width_faults() {
             u64::MAX - 1,
             u64::MAX,
         ],
-        &[14, 13, 18, 0, 1, 0, 17, 19, 512, 6, 3, 11, 1024, 53, 6, 1],
-        &[14, 13, 18, 0, 2, 0, 17, 19, 7, 512, 512, 0x8000, 1, 6, 0],
+        &[14, 13, 18, 0, 1, 0, 13, 512, 6, 3, 11, 1024, 53, 6, 1],
+        &[14, 13, 18, 0, 2, 0, 13, 7, 512, 512, 0x8000, 1, 6, 0],
     ];
     for ((query, snapshot), words) in fixtures().into_iter().zip(expected) {
         let observation = Observation::new(snapshot).unwrap();
@@ -221,7 +214,12 @@ fn observations_cannot_be_used_as_commit_receipts_or_for_another_position() {
     for (query, snapshot) in fixtures() {
         let observation = Observation::new(snapshot).unwrap();
         assert!(Reply::from_bytes(&observation.to_bytes()).is_none());
-        let receipt = Reply::new(id(), Opcode::Occupy, Outcome::Rejected(Failure::Busy)).unwrap();
+        let receipt = Reply::new(
+            id(),
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            Outcome::Rejected(Failure::Busy),
+        )
+        .unwrap();
         assert!(Observation::from_bytes(&receipt.to_bytes()).is_none());
         assert!(!receipt.matches(Request::new(None, Action::Inspect(query)).unwrap()));
         assert!(
@@ -304,6 +302,7 @@ fn logical_association_can_exist_without_a_physical_publication() {
         unreachable!()
     };
     let associated = MemoStatus {
+        range: Some(PendId::mint(13)),
         phase: MemoPhase::Associated,
         page: 0,
         access: 0,
@@ -311,6 +310,7 @@ fn logical_association_can_exist_without_a_physical_publication() {
     };
     assert!(Observation::new(Snapshot::Memo(associated)).is_some());
     let empty = MemoStatus {
+        range: Some(PendId::mint(13)),
         phase: MemoPhase::Empty,
         source: None,
         ..associated
@@ -318,27 +318,37 @@ fn logical_association_can_exist_without_a_physical_publication() {
     assert!(Observation::new(Snapshot::Memo(empty)).is_some());
     for invalid in [
         MemoStatus {
+            range: Some(PendId::mint(13)),
             phase: MemoPhase::Empty,
             ..associated
         },
         MemoStatus {
+            range: Some(PendId::mint(13)),
             phase: MemoPhase::Associated,
             ..status
         },
         MemoStatus {
+            range: Some(PendId::mint(13)),
             source: None,
             ..status
         },
-        MemoStatus { page: 0, ..status },
         MemoStatus {
+            range: Some(PendId::mint(13)),
+            page: 0,
+            ..status
+        },
+        MemoStatus {
+            range: Some(PendId::mint(13)),
             access: 4,
             ..status
         },
         MemoStatus {
+            range: Some(PendId::mint(13)),
             source: Some((slot(0).flat(), 1025)),
             ..status
         },
         MemoStatus {
+            range: Some(PendId::mint(13)),
             coordinate: 513,
             ..status
         },
@@ -351,7 +361,12 @@ fn logical_association_can_exist_without_a_physical_publication() {
         MemoPhase::Retiring,
         MemoPhase::Failed,
     ] {
-        let observation = Observation::new(Snapshot::Memo(MemoStatus { phase, ..status })).unwrap();
+        let observation = Observation::new(Snapshot::Memo(MemoStatus {
+            range: Some(PendId::mint(13)),
+            phase,
+            ..status
+        }))
+        .unwrap();
         assert_eq!(
             Observation::from_bytes(&observation.to_bytes()),
             Some(observation)
@@ -439,20 +454,21 @@ fn malformed_observations_reject_headers_geometry_flags_and_reserved_payloads() 
         (3, 8, 2),
         (3, 9, 5),
         (3, 14, 1),
-        (4, 7, 0),
-        (4, 9, 0),
-        (4, 10, 6),
-        (4, 11, 0),
-        (4, 15, 7),
+        (4, 4, 0),
+        (4, 6, 0),
+        (4, 7, 7),
+        (4, 8, 0),
+        (4, 11, 7),
+        (4, 12, 0),
+        (5, 6, 0),
         (5, 7, 0),
-        (5, 8, 0),
-        (5, 9, 513),
+        (5, 8, 513),
+        (5, 9, 0),
         (5, 10, 1),
-        (5, 11, 1),
-        (5, 12, 7),
+        (5, 11, 7),
+        (5, 12, 4),
         (5, 13, 4),
-        (5, 14, 4),
-        (5, 15, 1),
+        (5, 14, 1),
     ] {
         let mut bad = Observation::new(fixtures()[fixture].1).unwrap().to_bytes();
         set_word(&mut bad, word, value);
@@ -495,5 +511,8 @@ fn accepted_query_and_observation_mutations_reencode_canonically() {
             }
         }
     }
-    assert_eq!(Opcode::Inspect(Domain::Flat).slot(), 18);
+    assert_eq!(
+        kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Flat).slot(),
+        18
+    );
 }

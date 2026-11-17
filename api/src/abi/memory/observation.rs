@@ -1,7 +1,10 @@
 //! Explicit object/position observations. Result queries remain in Request and
 //! Reply: an observation has no request identity and cannot be a commit receipt.
 
-use super::{Action, Domain, Maintenance, Opcode, Reader, Request, VERSION, Writer, valid_token};
+use super::{
+    Action, Domain, Maintenance, Opcode, Reader, Request, VERSION, Writer, flat as domain_flat,
+    nest as domain_nest, valid_token,
+};
 use crate::address::VirtAddr;
 use crate::model::{
     cell::CellLevel,
@@ -10,7 +13,6 @@ use crate::model::{
         SlotPosition, SlotStatus, SlotVersion,
     },
     identity::{PendId, TaskId},
-    nest::SpanId,
     nest::{
         FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase, FaultSequence, FaultStatus,
         MemoGeneration, MemoPhase, MemoPosition, MemoStatus, NestId, NestInfo, NestKind, NestPhase,
@@ -25,16 +27,12 @@ use crate::model::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Query {
     FaultRoute {
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
+        range: PendId,
     },
     /// Observe the next retained event without consuming it. Only the actual
     /// registered handler may read events; timeout never resolves a fault.
     FaultEvent {
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
+        range: PendId,
         epoch: FaultEpoch,
         after: u64,
         wait: Wait,
@@ -51,9 +49,7 @@ pub enum Query {
     },
     Memo(MemoPosition),
     Span {
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
+        range: PendId,
     },
 }
 
@@ -73,16 +69,15 @@ impl Query {
             Self::FaultEvent { .. } => 5,
         }
     }
-    pub(super) fn valid(self) -> bool {
+    pub(crate) fn valid(self) -> bool {
         match self {
             Self::Flat { token, .. } | Self::Nest { token, .. } => valid_token(token.get()),
             Self::Block(h) => valid_token(h.token.get()),
-            Self::Span { token, span, .. } | Self::FaultRoute { token, span, .. } => {
-                valid_token(token.get()) && valid_token(span.get())
+            Self::Span { range } => valid_token(range.get()),
+            Self::FaultRoute { range } => valid_token(range.get()),
+            Self::FaultEvent { range, wait, .. } => {
+                valid_token(range.get()) && wait != Wait::Infinite
             }
-            Self::FaultEvent {
-                token, span, wait, ..
-            } => valid_token(token.get()) && valid_token(span.get()) && wait != Wait::Infinite,
             _ => true,
         }
     }
@@ -103,26 +98,15 @@ impl Query {
                 out.word(nest.get() as u64)
             }
             Self::Memo(memo) => out.bytes(&memo.to_bytes()),
-            Self::Span { token, nest, span } | Self::FaultRoute { token, nest, span } => {
-                out.word(token.get() as u64)?;
-                out.word(nest.get() as u64)?;
-                out.word(span.get() as u64)
-            }
+            Self::Span { range } => out.word(range.get() as u64),
+            Self::FaultRoute { range } => out.word(range.get() as u64),
             Self::FaultEvent {
-                token,
-                nest,
-                span,
+                range,
                 epoch,
                 after,
                 wait,
             } => {
-                for word in [
-                    token.get() as u64,
-                    nest.get() as u64,
-                    span.get() as u64,
-                    epoch.get(),
-                    after,
-                ] {
+                for word in [range.get() as u64, epoch.get(), after] {
                     out.word(word)?;
                 }
                 match wait {
@@ -154,21 +138,15 @@ impl Query {
                 token: input.token()?,
                 nest: NestId::new(input.size()?)?,
             },
-            (Domain::Nest, 1) => Self::Memo(MemoPosition::from_bytes(input.bytes::<32>()?)?),
+            (Domain::Nest, 1) => Self::Memo(MemoPosition::from_bytes(input.bytes::<16>()?)?),
             (Domain::Nest, 2) => Self::Span {
-                token: input.token()?,
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
             },
             (Domain::Nest, 4) => Self::FaultRoute {
-                token: input.token()?,
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
             },
             (Domain::Nest, 5) => Self::FaultEvent {
-                token: input.token()?,
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 after: input.word()?,
                 wait: match (input.word()?, input.word()?) {
@@ -212,40 +190,31 @@ impl Snapshot {
     }
     fn valid(self) -> bool {
         match self {
-            Self::Flat(s) => s.valid(),
-            Self::Slot(s) => s.valid(),
-            Self::Block(s) => s.valid(),
-            Self::Nest(_) => true,
-            Self::Memo(s) => s.valid(),
-            Self::Span(s) => s.valid(),
-            Self::FaultRoute(s) => s.valid(),
-            Self::FaultEvent(s) => s.valid(),
+            Self::Flat(_) => {
+                snapshot::flat::Snapshot::try_from(self).is_ok_and(snapshot::flat::Snapshot::valid)
+            }
+            Self::Slot(_) | Self::Block(_) => {
+                snapshot::flat::Snapshot::try_from(self).is_ok_and(snapshot::flat::Snapshot::valid)
+            }
+            _ => {
+                snapshot::nest::Snapshot::try_from(self).is_ok_and(snapshot::nest::Snapshot::valid)
+            }
         }
     }
     fn matches(self, query: Query) -> bool {
-        match (self, query) {
-            (Self::FaultRoute(s), Query::FaultRoute { nest, span, .. }) => {
-                s.nest == nest && s.span == span
-            }
-            (
-                Self::FaultEvent(s),
-                Query::FaultEvent {
-                    nest,
-                    span,
-                    epoch,
-                    after,
-                    ..
-                },
-            ) => s.nest == nest && s.span == span && s.epoch == epoch && s.sequence.get() > after,
-            (Self::Flat(s), Query::Flat { flat, .. }) => s.id == flat,
-            (Self::Slot(s), Query::Slot(p)) => s.flat == p.flat() && s.coordinate == p.page(),
-            (Self::Block(s), Query::Block(h)) => s.block == h.block,
-            (Self::Nest(s), Query::Nest { nest, .. }) => s.info.id == nest,
-            (Self::Memo(s), Query::Memo(p)) => {
-                s.nest == p.nest() && s.span == p.span() && s.coordinate == p.page()
-            }
-            (Self::Span(s), Query::Span { nest, span, .. }) => s.nest == nest && s.span == span,
-            _ => false,
+        match query.domain() {
+            Domain::Flat => snapshot::flat::Snapshot::try_from(self).is_ok_and(|value| {
+                snapshot::flat::Snapshot::matches(
+                    value,
+                    flat::Query::try_from(query).expect("flat query"),
+                )
+            }),
+            Domain::Nest => snapshot::nest::Snapshot::try_from(self).is_ok_and(|value| {
+                snapshot::nest::Snapshot::matches(
+                    value,
+                    nest::Query::try_from(query).expect("nest query"),
+                )
+            }),
         }
     }
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
@@ -253,8 +222,7 @@ impl Snapshot {
             Self::FaultRoute(s) => words(
                 out,
                 &[
-                    s.nest.get() as u64,
-                    s.span.get() as u64,
+                    s.range.get() as u64,
                     s.epoch.get(),
                     s.phase as u64,
                     s.handler.map_or(0, |task| task.get()) as u64,
@@ -265,8 +233,7 @@ impl Snapshot {
             Self::FaultEvent(s) => words(
                 out,
                 &[
-                    s.nest.get() as u64,
-                    s.span.get() as u64,
+                    s.range as u64,
                     s.epoch.get(),
                     s.sequence.get(),
                     s.memo_page as u64,
@@ -333,8 +300,7 @@ impl Snapshot {
                 words(
                     out,
                     &[
-                        s.nest.get() as u64,
-                        s.span.get() as u64,
+                        s.range.map_or(0, |range| range.get() as u64),
                         s.coordinate as u64,
                         s.generation.get(),
                         s.phase as u64,
@@ -349,8 +315,7 @@ impl Snapshot {
             Self::Span(s) => words(
                 out,
                 &[
-                    s.nest.get() as u64,
-                    s.span.get() as u64,
+                    s.range.get() as u64,
                     s.version.get(),
                     s.offset as u64,
                     s.count as u64,
@@ -365,8 +330,7 @@ impl Snapshot {
     fn read(domain: Domain, tag: u64, input: &mut Reader<'_>) -> Option<Self> {
         Some(match (domain, tag) {
             (Domain::Nest, 4) => Self::FaultRoute(FaultStatus {
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 phase: FaultPhase::from_tag(input.word()?)?,
                 handler: match input.size()? {
@@ -377,8 +341,7 @@ impl Snapshot {
                 last_sequence: input.word()?,
             }),
             (Domain::Nest, 5) => {
-                let nest = NestId::new(input.size()?)?;
-                let span = input.span()?;
+                let range = input.size()?;
                 let epoch = FaultEpoch::new(input.word()?)?;
                 let sequence = FaultSequence::new(input.word()?)?;
                 let memo_page = input.size()?;
@@ -391,8 +354,7 @@ impl Snapshot {
                     return None;
                 }
                 Self::FaultEvent(FaultEvent {
-                    nest,
-                    span,
+                    range,
                     epoch,
                     sequence,
                     memo_page,
@@ -461,8 +423,10 @@ impl Snapshot {
                 })
             }
             (Domain::Nest, 1) => {
-                let nest = NestId::new(input.size()?)?;
-                let span = input.span()?;
+                let range = match input.size()? {
+                    0 => None,
+                    range => Some(crate::model::identity::PendId::mint(range)),
+                };
                 let coordinate = input.size()?;
                 let generation = MemoGeneration::new(input.word()?)?;
                 let phase = MemoPhase::from_tag(input.word()?)?;
@@ -474,8 +438,7 @@ impl Snapshot {
                     (id, page) => Some((FlatId::new(id)?, page)),
                 };
                 Self::Memo(MemoStatus {
-                    nest,
-                    span,
+                    range,
                     coordinate,
                     generation,
                     phase,
@@ -485,9 +448,9 @@ impl Snapshot {
                     level: CellLevel::new(input.size()?)?,
                 })
             }
+
             (Domain::Nest, 2) => Self::Span(SpanStatus {
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
                 version: SpanVersion::new(input.word()?)?,
                 offset: input.size()?,
                 count: input.size()?,
@@ -525,7 +488,11 @@ impl Observation {
             &[
                 VERSION,
                 self.0.domain() as u64,
-                Opcode::Inspect(self.0.domain()).slot(),
+                match self.0.domain() {
+                    Domain::Flat => Opcode::Flat(domain_flat::Opcode::Inspect),
+                    Domain::Nest => Opcode::Nest(domain_nest::Opcode::Inspect),
+                }
+                .slot(),
                 0,
                 self.0.tag(),
                 0,
@@ -568,5 +535,247 @@ fn boolean(input: &mut Reader<'_>) -> Option<bool> {
         0 => Some(false),
         1 => Some(true),
         _ => None,
+    }
+}
+
+/// Flat-domain observations.
+pub mod flat {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Query {
+        Flat { token: PendId, flat: FlatId },
+        Slot(SlotPosition),
+        Block(Maintenance),
+    }
+
+    impl From<Query> for super::Query {
+        fn from(query: Query) -> Self {
+            match query {
+                Query::Flat { token, flat } => Self::Flat { token, flat },
+                Query::Slot(slot) => Self::Slot(slot),
+                Query::Block(block) => Self::Block(block),
+            }
+        }
+    }
+
+    impl TryFrom<super::Query> for Query {
+        type Error = ();
+
+        fn try_from(query: super::Query) -> Result<Self, Self::Error> {
+            Ok(match query {
+                super::Query::Flat { token, flat } => Self::Flat { token, flat },
+                super::Query::Slot(slot) => Self::Slot(slot),
+                super::Query::Block(block) => Self::Block(block),
+                _ => return Err(()),
+            })
+        }
+    }
+}
+
+/// Nest-domain observations. The range is still named by the internal Span in
+/// this transitional type; the Pend-bound range replaces it in the next slice.
+pub mod nest {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Query {
+        FaultRoute {
+            range: PendId,
+        },
+        FaultEvent {
+            range: PendId,
+            epoch: FaultEpoch,
+            after: u64,
+            wait: Wait,
+        },
+        Nest {
+            token: PendId,
+            nest: NestId,
+        },
+        Memo(MemoPosition),
+        Span {
+            range: PendId,
+        },
+    }
+
+    impl From<Query> for super::Query {
+        fn from(query: Query) -> Self {
+            match query {
+                Query::FaultRoute { range } => Self::FaultRoute { range },
+                Query::FaultEvent {
+                    range,
+                    epoch,
+                    after,
+                    wait,
+                } => Self::FaultEvent {
+                    range,
+                    epoch,
+                    after,
+                    wait,
+                },
+                Query::Nest { token, nest } => Self::Nest { token, nest },
+                Query::Memo(memo) => Self::Memo(memo),
+                Query::Span { range } => Self::Span { range },
+            }
+        }
+    }
+
+    impl TryFrom<super::Query> for Query {
+        type Error = ();
+
+        fn try_from(query: super::Query) -> Result<Self, Self::Error> {
+            Ok(match query {
+                super::Query::FaultRoute { range } => Self::FaultRoute { range },
+                super::Query::FaultEvent {
+                    range,
+                    epoch,
+                    after,
+                    wait,
+                } => Self::FaultEvent {
+                    range,
+                    epoch,
+                    after,
+                    wait,
+                },
+                super::Query::Nest { token, nest } => Self::Nest { token, nest },
+                super::Query::Memo(memo) => Self::Memo(memo),
+                super::Query::Span { range } => Self::Span { range },
+                _ => return Err(()),
+            })
+        }
+    }
+}
+
+/// Flat-domain snapshots.
+pub mod snapshot {
+    pub mod flat {
+        use super::super::*;
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Snapshot {
+            Flat(FlatStatus),
+            Slot(SlotStatus),
+            Block(BlockStatus),
+        }
+
+        impl Snapshot {
+            pub(crate) fn valid(self) -> bool {
+                match self {
+                    Self::Flat(s) => s.valid(),
+                    Self::Slot(s) => s.valid(),
+                    Self::Block(s) => s.valid(),
+                }
+            }
+
+            pub(crate) fn matches(self, query: super::super::flat::Query) -> bool {
+                match (self, query) {
+                    (Self::Flat(s), super::super::flat::Query::Flat { flat, .. }) => s.id == flat,
+                    (Self::Slot(s), super::super::flat::Query::Slot(p)) => {
+                        s.flat == p.flat() && s.coordinate == p.page()
+                    }
+                    (Self::Block(s), super::super::flat::Query::Block(h)) => s.block == h.block,
+                    _ => false,
+                }
+            }
+        }
+
+        impl From<Snapshot> for super::super::Snapshot {
+            fn from(value: Snapshot) -> Self {
+                match value {
+                    Snapshot::Flat(status) => Self::Flat(status),
+                    Snapshot::Slot(status) => Self::Slot(status),
+                    Snapshot::Block(status) => Self::Block(status),
+                }
+            }
+        }
+
+        impl TryFrom<super::super::Snapshot> for Snapshot {
+            type Error = ();
+
+            fn try_from(value: super::super::Snapshot) -> Result<Self, Self::Error> {
+                Ok(match value {
+                    super::super::Snapshot::Flat(status) => Self::Flat(status),
+                    super::super::Snapshot::Slot(status) => Self::Slot(status),
+                    super::super::Snapshot::Block(status) => Self::Block(status),
+                    _ => return Err(()),
+                })
+            }
+        }
+    }
+
+    /// Nest-domain snapshots.
+    pub mod nest {
+        use super::super::*;
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Snapshot {
+            FaultRoute(FaultStatus),
+            FaultEvent(FaultEvent),
+            Nest(NestStatus),
+            Memo(MemoStatus),
+            Span(SpanStatus),
+        }
+
+        impl Snapshot {
+            pub(crate) fn valid(self) -> bool {
+                match self {
+                    Self::FaultRoute(s) => s.valid(),
+                    Self::FaultEvent(s) => s.valid(),
+                    Self::Nest(_) => true,
+                    Self::Memo(s) => s.valid(),
+                    Self::Span(s) => s.valid(),
+                }
+            }
+
+            pub(crate) fn matches(self, query: super::super::nest::Query) -> bool {
+                use super::super::nest::Query;
+                match (self, query) {
+                    (Self::FaultRoute(s), Query::FaultRoute { range }) => s.range == range,
+                    (
+                        Self::FaultEvent(s),
+                        Query::FaultEvent {
+                            range,
+                            epoch,
+                            after,
+                            ..
+                        },
+                    ) => s.range() == range && s.epoch == epoch && s.sequence.get() > after,
+                    (Self::Nest(s), Query::Nest { nest, .. }) => s.info.id == nest,
+                    (Self::Memo(s), Query::Memo(p)) => {
+                        s.range() == Some(p.range()) && s.coordinate == p.page()
+                    }
+                    (Self::Span(s), Query::Span { range, .. }) => s.range == range,
+                    _ => false,
+                }
+            }
+        }
+
+        impl From<Snapshot> for super::super::Snapshot {
+            fn from(value: Snapshot) -> Self {
+                match value {
+                    Snapshot::FaultRoute(status) => Self::FaultRoute(status),
+                    Snapshot::FaultEvent(event) => Self::FaultEvent(event),
+                    Snapshot::Nest(status) => Self::Nest(status),
+                    Snapshot::Memo(status) => Self::Memo(status),
+                    Snapshot::Span(status) => Self::Span(status),
+                }
+            }
+        }
+
+        impl TryFrom<super::super::Snapshot> for Snapshot {
+            type Error = ();
+
+            fn try_from(value: super::super::Snapshot) -> Result<Self, Self::Error> {
+                Ok(match value {
+                    super::super::Snapshot::FaultRoute(status) => Self::FaultRoute(status),
+                    super::super::Snapshot::FaultEvent(event) => Self::FaultEvent(event),
+                    super::super::Snapshot::Nest(status) => Self::Nest(status),
+                    super::super::Snapshot::Memo(status) => Self::Memo(status),
+                    super::super::Snapshot::Span(status) => Self::Span(status),
+                    _ => return Err(()),
+                })
+            }
+        }
     }
 }

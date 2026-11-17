@@ -1,9 +1,8 @@
 use super::{memo, slot};
 use kernel_api::{
     abi::memory::{
-        Action, Domain, Failure, Opcode, Outcome, RESULT_CAPACITY, Reply, Request, RequestId,
-        Value,
-        journal::{Accepted, Admission, Journal},
+        Action, Domain, Failure, Outcome, RESULT_CAPACITY, Reply, Request, RequestId, Value,
+        journal::{Accepted, Admission, Journal, RequestKey},
     },
     model::{flat::SlotVersion, identity::TaskId, nest::MemoGeneration},
 };
@@ -21,7 +20,7 @@ fn request(id: u64) -> Request {
     .unwrap()
 }
 fn execute(journal: &mut Journal, request: Request) -> Accepted {
-    let Admission::Execute(accepted) = journal.begin(actor(), request).unwrap() else {
+    let Admission::Execute(accepted) = journal.begin_request(actor(), request).unwrap() else {
         panic!("new admission")
     };
     accepted
@@ -29,7 +28,7 @@ fn execute(journal: &mut Journal, request: Request) -> Accepted {
 fn committed(id: u64) -> Reply {
     Reply::new(
         RequestId::new(id).unwrap(),
-        Opcode::Occupy,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
         Outcome::Committed(Value::Slot {
             version: SlotVersion::new(2).unwrap(),
             page: 17,
@@ -43,7 +42,7 @@ fn lost_delivery_replays_one_commit_without_reentering_execution() {
     let mut journal = Journal::new(actor()).unwrap();
     let accepted = execute(&mut journal, request(1));
     assert!(matches!(
-        journal.begin(actor(), request(1)),
+        journal.begin_request(actor(), request(1)),
         Ok(Admission::InFlight(None))
     ));
     journal.record(&accepted, committed(1)).unwrap();
@@ -51,7 +50,7 @@ fn lost_delivery_replays_one_commit_without_reentering_execution() {
     // of delivery failures. Only the first begin yielded Execute.
     for _ in 0..100 {
         assert!(
-            matches!(journal.begin(actor(), request(1)), Ok(Admission::Replay(r)) if r == committed(1))
+            matches!(journal.begin_request(actor(), request(1)), Ok(Admission::Replay(r)) if r == committed(1))
         );
     }
     assert_eq!(
@@ -61,7 +60,7 @@ fn lost_delivery_replays_one_commit_without_reentering_execution() {
     journal.record(&accepted, committed(1)).unwrap(); // identical completion is idempotent
     let rejected = Reply::new(
         RequestId::new(1).unwrap(),
-        Opcode::Occupy,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
         Outcome::Rejected(Failure::Busy),
     )
     .unwrap();
@@ -92,12 +91,12 @@ fn request_identity_covers_canonical_payload_and_domain_but_never_grants() {
     ] {
         let changed = Request::new(request(1).id(), action).unwrap();
         assert!(matches!(
-            journal.begin(actor(), changed),
+            journal.begin_request(actor(), changed),
             Err(Failure::RequestMismatch)
         ));
     }
     assert!(matches!(
-        journal.begin(TaskId::new(32), request(1)),
+        journal.begin_request(TaskId::new(32), request(1)),
         Err(Failure::Denied)
     ));
     assert_eq!(
@@ -123,7 +122,7 @@ fn all_inflight_slots_pin_capacity_and_busy_does_not_consume_a_sequence() {
         accepted.push(execute(&mut journal, request(id)));
     }
     assert!(matches!(
-        journal.begin(actor(), request(17)),
+        journal.begin_request(actor(), request(17)),
         Err(Failure::Busy)
     ));
     assert_eq!(journal.high_water(), 16);
@@ -135,7 +134,7 @@ fn all_inflight_slots_pin_capacity_and_busy_does_not_consume_a_sequence() {
     let _new = execute(&mut journal, request(17));
     assert_eq!(journal.high_water(), 17);
     assert!(matches!(
-        journal.begin(actor(), request(1)),
+        journal.begin_request(actor(), request(1)),
         Err(Failure::ResultExpired)
     ));
     assert_eq!(
@@ -144,7 +143,7 @@ fn all_inflight_slots_pin_capacity_and_busy_does_not_consume_a_sequence() {
     );
     for id in 2..=16 {
         assert!(matches!(
-            journal.begin(actor(), request(id)),
+            journal.begin_request(actor(), request(id)),
             Ok(Admission::InFlight(None))
         ));
     }
@@ -166,14 +165,19 @@ fn pending_cannot_be_evicted_or_turned_into_no_effect_rejection() {
     let value = Value::Memo {
         generation: MemoGeneration::new(2).unwrap(),
     };
-    let pending = Reply::new(req.id().unwrap(), Opcode::Publish, Outcome::Pending(value)).unwrap();
+    let pending = Reply::new(
+        req.id().unwrap(),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
+        Outcome::Pending(value),
+    )
+    .unwrap();
     journal.record(&accepted, pending).unwrap();
     assert!(
-        matches!(journal.begin(actor(), req), Ok(Admission::InFlight(Some(r))) if r == pending)
+        matches!(journal.begin_request(actor(), req), Ok(Admission::InFlight(Some(r))) if r == pending)
     );
     let rejected = Reply::new(
         req.id().unwrap(),
-        Opcode::Publish,
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
         Outcome::Rejected(Failure::Busy),
     )
     .unwrap();
@@ -188,7 +192,7 @@ fn pending_cannot_be_evicted_or_turned_into_no_effect_rejection() {
     );
     let failed = Reply::new(
         req.id().unwrap(),
-        Opcode::Publish,
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
         Outcome::Failed {
             failure: Failure::Hardware,
             retained: Some(value),
@@ -196,7 +200,7 @@ fn pending_cannot_be_evicted_or_turned_into_no_effect_rejection() {
     )
     .unwrap();
     journal.record(&accepted, failed).unwrap();
-    assert!(matches!(journal.begin(actor(), req), Ok(Admission::Replay(r)) if r == failed));
+    assert!(matches!(journal.begin_request(actor(), req), Ok(Admission::Replay(r)) if r == failed));
     assert_eq!(journal.record(&accepted, pending), Err(Failure::Stale));
 }
 
@@ -207,7 +211,7 @@ fn gaps_eviction_and_exhaustion_never_make_an_old_identity_fresh() {
     journal.record(&accepted, committed(u64::MAX)).unwrap();
     for id in [1, 2, u64::MAX - 1] {
         assert!(matches!(
-            journal.begin(actor(), request(id)),
+            journal.begin_request(actor(), request(id)),
             Err(Failure::ResultExpired)
         ));
         assert_eq!(
@@ -216,7 +220,7 @@ fn gaps_eviction_and_exhaustion_never_make_an_old_identity_fresh() {
         );
     }
     assert!(matches!(
-        journal.begin(actor(), request(u64::MAX)),
+        journal.begin_request(actor(), request(u64::MAX)),
         Ok(Admission::Replay(_))
     ));
     assert_eq!(journal.high_water(), u64::MAX);
@@ -230,16 +234,23 @@ fn rejected_attempt_is_retained_but_inspections_and_expired_results_are_not_muta
     let mut journal = Journal::new(actor()).unwrap();
     let req = request(1);
     let accepted = execute(&mut journal, req);
-    let expired = Reply::new(req.id().unwrap(), Opcode::Occupy, Outcome::Expired).unwrap();
+    let expired = Reply::new(
+        req.id().unwrap(),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+        Outcome::Expired,
+    )
+    .unwrap();
     assert_eq!(journal.record(&accepted, expired), Err(Failure::Invalid));
     let rejected = Reply::new(
         req.id().unwrap(),
-        Opcode::Occupy,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
         Outcome::Rejected(Failure::Denied),
     )
     .unwrap();
     journal.record(&accepted, rejected).unwrap();
-    assert!(matches!(journal.begin(actor(), req), Ok(Admission::Replay(r)) if r == rejected));
+    assert!(
+        matches!(journal.begin_request(actor(), req), Ok(Admission::Replay(r)) if r == rejected)
+    );
     let query = Request::new(
         None,
         Action::InspectResult {
@@ -249,7 +260,7 @@ fn rejected_attempt_is_retained_but_inspections_and_expired_results_are_not_muta
     )
     .unwrap();
     assert!(matches!(
-        journal.begin(actor(), query),
+        journal.begin_request(actor(), query),
         Err(Failure::Invalid)
     ));
     assert_eq!(journal.high_water(), 1);
@@ -277,7 +288,9 @@ fn takeover_updates_retained_epoch_before_a_later_failure() {
                 &accepted,
                 Reply::new(
                     req.id().unwrap(),
-                    Opcode::Block,
+                    kernel_api::abi::memory::Opcode::Flat(
+                        kernel_api::abi::memory::flat::Opcode::Block,
+                    ),
                     Outcome::Pending(Value::Maintenance {
                         block,
                         phase: BlockPhase::Draining,
@@ -289,7 +302,7 @@ fn takeover_updates_retained_epoch_before_a_later_failure() {
     }
     let failed = Reply::new(
         req.id().unwrap(),
-        Opcode::Block,
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
         Outcome::Failed {
             failure: Failure::Busy,
             retained: Some(Value::Maintenance {
@@ -304,5 +317,25 @@ fn takeover_updates_retained_epoch_before_a_later_failure() {
         journal.inspect(actor(), Domain::Flat, req.id().unwrap()),
         Ok(Some(failed))
     );
-    assert!(matches!(journal.begin(actor(), req), Ok(Admission::Replay(reply)) if reply == failed));
+    assert!(
+        matches!(journal.begin_request(actor(), req), Ok(Admission::Replay(reply)) if reply == failed)
+    );
+}
+
+#[test]
+fn keyed_admission_uses_canonical_request_bytes() {
+    let req = request(1);
+    let key = RequestKey::new(req).unwrap();
+    let mut journal = Journal::new(actor()).unwrap();
+    let Admission::Execute(accepted) = journal.begin(actor(), key).unwrap() else {
+        panic!("fresh key")
+    };
+    let reply = Reply::new(
+        req.id().unwrap(),
+        req.action().opcode(),
+        Outcome::Rejected(Failure::Denied),
+    )
+    .unwrap();
+    journal.record(&accepted, reply).unwrap();
+    assert!(matches!(journal.begin(actor(), key), Ok(Admission::Replay(r)) if r == reply));
 }

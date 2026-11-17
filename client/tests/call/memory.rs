@@ -1,13 +1,12 @@
 use kernel_api::{
     abi::memory::{
-        self, Action, Delivery, Domain, Failure, Observation, Opcode, Outcome, Query, Reply,
-        RequestId, Snapshot, Value,
+        self, Action, Delivery, Domain, Failure, Observation, Outcome, Query, Reply, RequestId,
+        Snapshot, Value,
     },
     address::VirtAddr,
     model::{
         cell::CellLevel,
         identity::PendId,
-        nest::SpanId,
         nest::{NestId, NestVersion, SpanPhase, SpanStatus, SpanVersion},
     },
 };
@@ -24,7 +23,7 @@ fn call() -> memory::nest::Call {
 fn committed(id: u64) -> Reply {
     Reply::new(
         RequestId::new(id).unwrap(),
-        Opcode::Create(Domain::Nest),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Create),
         Outcome::Committed(Value::CreatedNest {
             token: PendId::mint(17),
             nest: NestId::new(19).unwrap(),
@@ -41,7 +40,13 @@ fn one_canonical_snapshot_and_one_correlated_result() {
     assert_eq!(
         invoke_with(request, |number, input, output| {
             calls += 1;
-            assert_eq!(number, Opcode::Create(Domain::Nest).call_number());
+            assert_eq!(
+                number,
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::Create
+                )
+                .call_number()
+            );
             assert_eq!(input, &request.request().to_bytes());
             assert_eq!(output, &[0; 128]);
             *output = result.to_bytes();
@@ -88,7 +93,7 @@ fn lost_delivery_and_malformed_success_never_trigger_retry_or_fake_rejection() {
 fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() {
     let failure = Reply::new(
         RequestId::new(7).unwrap(),
-        Opcode::Create(Domain::Nest),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Create),
         Outcome::Rejected(Failure::Unsupported),
     )
     .unwrap();
@@ -116,7 +121,7 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
     );
     let expired = Reply::new(
         RequestId::new(7).unwrap(),
-        Opcode::Inspect(Domain::Nest),
+        kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Nest),
         Outcome::Expired,
     )
     .unwrap();
@@ -130,20 +135,10 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
 }
 #[test]
 fn observations_require_the_requested_mapping_and_cannot_replace_mutation_results() {
-    let nest = NestId::new(19).unwrap();
-    let span = SpanId::from_bytes(&23u64.to_le_bytes()).unwrap();
-    let request = memory::nest::Call::new(
-        None,
-        Action::Inspect(Query::Span {
-            token: PendId::mint(17),
-            nest,
-            span,
-        }),
-    )
-    .unwrap();
+    let range = PendId::mint(17);
+    let request = memory::nest::Call::new(None, Action::Inspect(Query::Span { range })).unwrap();
     let status = SpanStatus {
-        nest,
-        span,
+        range,
         version: SpanVersion::INITIAL,
         offset: 0,
         count: 1,
@@ -168,7 +163,7 @@ fn observations_require_the_requested_mapping_and_cannot_replace_mutation_result
         Err(Error::Protocol)
     );
     let wrong = Observation::new(Snapshot::Span(SpanStatus {
-        nest: NestId::new(20).unwrap(),
+        range: PendId::mint(20),
         ..status
     }))
     .unwrap();

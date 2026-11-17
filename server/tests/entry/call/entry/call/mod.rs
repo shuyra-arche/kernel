@@ -1,7 +1,10 @@
 #[path = "../../../../../src/entry/call/next_memory.rs"]
 mod next_memory;
 use crate::support::*;
-use kernel_api::abi::memory::{Action, Failure, Observation, Query, Value};
+use kernel_api::abi::memory::{
+    Action, Failure, Observation, Value, flat::Action as FlatAction, flat::Query as FlatQuery,
+    nest::Action as NestAction, nest::Query as NestQuery,
+};
 use std::sync::{Arc, atomic::Ordering};
 pub(crate) fn invoke(
     frame: &mut TrapContext,
@@ -27,16 +30,16 @@ mod flat {
         pub(crate) fn inspect(
             _: &mut crate::basis::sync::Root<'_>,
             _: &Arc<Task>,
-            _: Query,
+            _: FlatQuery,
         ) -> Result<Observation, Failure> {
             Err(Failure::Unsupported)
         }
-        pub(crate) fn prepare(_: &Arc<Task>, _: Action) -> Result<Option<()>, Failure> {
+        pub(crate) fn prepare(_: &Arc<Task>, _: FlatAction) -> Result<Option<()>, Failure> {
             Ok(None)
         }
         pub(crate) fn mutate(
             actor: &Arc<Task>,
-            _: Action,
+            _: FlatAction,
             _: Option<()>,
         ) -> Result<Value, Failure> {
             assert_ne!(commit_depth(), 0);
@@ -48,7 +51,7 @@ mod flat {
         }
         pub(crate) fn effect(
             _: &Arc<Task>,
-            _: Action,
+            _: FlatAction,
             _: &mut next_memory::Receipt<'_>,
         ) -> Result<Value, Failure> {
             Err(Failure::Unsupported)
@@ -58,21 +61,21 @@ mod flat {
 mod nest {
     pub(super) mod next {
         use super::super::*;
-        pub(crate) fn inspect(_: &Arc<Task>, _: Query) -> Result<Observation, Failure> {
+        pub(crate) fn inspect(_: &Arc<Task>, _: NestQuery) -> Result<Observation, Failure> {
             Err(Failure::Unsupported)
         }
-        pub(crate) fn mutate(_: &Arc<Task>, _: Action) -> Result<Value, Failure> {
+        pub(crate) fn mutate(_: &Arc<Task>, _: NestAction) -> Result<Value, Failure> {
             Err(Failure::Unsupported)
         }
         pub(crate) fn effect(
             actor: &Arc<Task>,
-            action: Action,
+            action: NestAction,
             receipt: &mut next_memory::Receipt<'_>,
         ) -> Result<Value, Failure> {
             if actor.mode.load(Ordering::SeqCst) == 1 {
                 return Err(Failure::Denied);
             }
-            if matches!(action, Action::CreateNest { .. }) {
+            if matches!(action, NestAction::Create { .. }) {
                 // Private address-space preparation may fence. The dispatcher
                 // must release admission locks before entering this boundary.
                 assert_eq!(commit_depth(), 0);

@@ -117,29 +117,125 @@ pub(super) fn set_word(bytes: &mut [u8], index: usize, value: u64) {
 #[test]
 fn settled_operations_have_distinct_domain_and_slot_contracts() {
     for (opcode, domain, slot) in [
-        (Opcode::Create(Domain::Flat), 12, 16),
-        (Opcode::Delete(Domain::Flat), 12, 17),
-        (Opcode::Create(Domain::Nest), 13, 16),
-        (Opcode::Delete(Domain::Nest), 13, 17),
-        (Opcode::CreateSpan, 13, 19),
-        (Opcode::DeleteSpan, 13, 20),
-        (Opcode::Split, 12, 25),
-        (Opcode::Merge, 12, 26),
-        (Opcode::FaultRoute, 13, 26),
-        (Opcode::Inspect(Domain::Flat), 12, 18),
-        (Opcode::Inspect(Domain::Nest), 13, 18),
-        (Opcode::Occupy, 12, 19),
-        (Opcode::Vacate, 12, 20),
-        (Opcode::Block, 12, 21),
-        (Opcode::Allow, 12, 22),
-        (Opcode::Push, 12, 23),
-        (Opcode::Pull, 12, 24),
-        (Opcode::Insert, 13, 21),
-        (Opcode::Remove, 13, 22),
-        (Opcode::Publish, 13, 23),
-        (Opcode::Retract, 13, 24),
-        (Opcode::Protect, 13, 25),
-        (Opcode::ReleaseRange, 13, 27),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Create),
+            12,
+            16,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Delete),
+            12,
+            17,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Create),
+            13,
+            16,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Delete),
+            13,
+            17,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Reserve),
+            13,
+            19,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Release),
+            13,
+            20,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Split),
+            12,
+            25,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Merge),
+            12,
+            26,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(
+                kernel_api::abi::memory::nest::Opcode::FaultRoute,
+            ),
+            13,
+            26,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Flat),
+            12,
+            18,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Nest),
+            13,
+            18,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Occupy),
+            12,
+            19,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Vacate),
+            12,
+            20,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Block),
+            12,
+            21,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Allow),
+            12,
+            22,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Push),
+            12,
+            23,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Pull),
+            12,
+            24,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Insert),
+            13,
+            21,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Remove),
+            13,
+            22,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Publish),
+            13,
+            23,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Retract),
+            13,
+            24,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Protect),
+            13,
+            25,
+        ),
+        (
+            kernel_api::abi::memory::Opcode::Nest(
+                kernel_api::abi::memory::nest::Opcode::ReleaseRange,
+            ),
+            13,
+            27,
+        ),
     ] {
         assert_eq!((opcode.domain() as u64, opcode.slot()), (domain, slot));
         assert_eq!(Opcode::of(domain, slot), Some(opcode));
@@ -285,7 +381,7 @@ fn malformed_headers_payloads_and_reserved_tails_reject() {
         },
     )
     .unwrap();
-    for (word, invalid) in [(9, 3), (10, 0), (11, 0), (12, u64::MAX), (13, 0)] {
+    for (word, invalid) in [(7, 3), (8, 0), (9, 0), (10, u64::MAX), (11, 0)] {
         let mut bytes = insert.to_bytes();
         set_word(&mut bytes, word, invalid);
         assert!(Request::from_bytes(&bytes).is_none());

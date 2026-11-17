@@ -1,7 +1,7 @@
 use super::request::{id, maintenance, set_word};
 use super::slot;
 use kernel_api::{
-    abi::memory::{Action, Failure, Maintenance, Opcode, Outcome, Reply, Request, Value},
+    abi::memory::{Action, Failure, Maintenance, Outcome, Reply, Request, Value},
     address::BASE_PAGE_SIZE,
     model::{
         cell::CellLevel,
@@ -41,10 +41,13 @@ fn geometry() -> Value {
 }
 
 pub(super) fn results() -> Vec<Reply> {
-    [Opcode::Split, Opcode::Merge]
-        .into_iter()
-        .map(|opcode| Reply::new(id(), opcode, Outcome::Committed(geometry())).unwrap())
-        .collect()
+    [
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Split),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Merge),
+    ]
+    .into_iter()
+    .map(|opcode| Reply::new(id(), opcode, Outcome::Committed(geometry())).unwrap())
+    .collect()
 }
 
 #[test]
@@ -77,7 +80,16 @@ fn reshape_vectors_cover_exact_parent_range_and_aggregate_version() {
             Request::from_call(action.opcode().call_number(), &expected),
             Some(request)
         );
-        assert!(Request::from_call(Opcode::Protect.call_number(), &expected).is_none());
+        assert!(
+            Request::from_call(
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::Protect
+                )
+                .call_number(),
+                &expected
+            )
+            .is_none()
+        );
         assert!(Request::new(None, action).is_none());
         let mut result_bytes = [0; Reply::WIDTH];
         for (index, word) in [
@@ -224,7 +236,10 @@ fn flat_high_water_marks_do_not_reissue_retired_child_versions() {
 
 #[test]
 fn reshape_results_cannot_claim_partial_geometry_or_pending_allocation_changes() {
-    for opcode in [Opcode::Split, Opcode::Merge] {
+    for opcode in [
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Split),
+        kernel_api::abi::memory::Opcode::Flat(kernel_api::abi::memory::flat::Opcode::Merge),
+    ] {
         assert!(Reply::new(id(), opcode, Outcome::Pending(geometry())).is_none());
         assert!(
             Reply::new(

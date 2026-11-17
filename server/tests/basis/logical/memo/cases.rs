@@ -46,6 +46,7 @@ fn retract(memo: &mut Memo, page: &Arc<Page>) {
 #[test]
 fn a_neighboring_cpu_batch_cannot_finish_retract_before_its_pte_withdrawal() {
     let (mut memo, _, _) = logical();
+    memo.bind_range(kernel_api::model::identity::PendId::mint(3));
     let pool = Pool::new(0);
     let data = page(pool);
     publish(&mut memo, &data);
@@ -69,6 +70,7 @@ fn a_neighboring_cpu_batch_cannot_finish_retract_before_its_pte_withdrawal() {
 #[test]
 fn in_place_protect_requires_a_fresh_cpu_completion_without_republishing_retention() {
     let (mut memo, _, _) = logical();
+    memo.bind_range(kernel_api::model::identity::PendId::mint(3));
     let pool = Pool::new(0);
     let data = page(pool);
     publish(&mut memo, &data);
@@ -97,6 +99,7 @@ fn next_observation_keeps_physical_identity_through_failed_fence_and_retirement(
         )
     };
     let (mut memo, _, _) = logical();
+    memo.bind_range(kernel_api::model::identity::PendId::mint(3));
     let associated = observe(&memo, false);
     assert!(associated.valid());
     assert_eq!(associated.phase, MemoPhase::Associated);
@@ -146,6 +149,7 @@ fn next_observation_keeps_physical_identity_through_failed_fence_and_retirement(
 fn whole_namespace_withdrawal_retains_memo_page_until_its_batch_settles() {
     use kernel_api::model::nest::{MemoPhase, NestId, SpanId};
     let (mut memo, registry, binding) = logical();
+    memo.bind_range(kernel_api::model::identity::PendId::mint(3));
     let pool = Pool::new(0);
     let data = page(pool);
     let id = data.id().get() as u64;
@@ -397,6 +401,7 @@ fn unfinished_publication_retains_exact_page_and_prevents_replacement() {
 #[test]
 fn exact_publication_retains_provenance_through_withdrawal_until_settlement() {
     let (mut memo, _, _) = logical();
+    memo.bind_range(kernel_api::model::identity::PendId::mint(3));
     let pool = Pool::new(0);
     let page = page(pool);
     let origin = Arc::new(crate::basis::pend::Provenance);
@@ -436,6 +441,7 @@ fn exact_publication_retains_provenance_through_withdrawal_until_settlement() {
 fn failed_publication_keeps_its_exact_completion_through_retirement() {
     use crate::basis::unit::task::request::{Completion, Transition};
     let (mut memo, _, _) = logical();
+    memo.bind_range(kernel_api::model::identity::PendId::mint(3));
     let pool = Pool::new(0);
     let page = page(pool);
     let change = page.begin().unwrap();

@@ -24,9 +24,9 @@ fn error(error: BindingError) -> Failure {
     }
 }
 
-pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure> {
+pub(super) fn mutate(actor: &Arc<Task>, action: NestAction) -> Result<Value, Failure> {
     match action {
-        Action::CreateSpan {
+        NestAction::Reserve {
             token,
             nest: id,
             expected,
@@ -64,15 +64,15 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
             let grant =
                 pend::prepare_reservation(actor, &parent, id, request.count).map_err(pend_error)?;
             let token = grant.entry().token();
+            span.bind_authority(token);
             let span = prepared
                 .publish(grant.entry().authority())
                 .map_err(nest_error)?;
             grant.publish();
             Ok(Value::Span {
-                token,
+                range: token,
                 nest: nest.id(),
                 nest_version: nest.version(),
-                span: id,
                 version: span.version(),
                 address: span.initial_start(),
             })
@@ -81,11 +81,11 @@ pub(super) fn mutate(actor: &Arc<Task>, action: Action) -> Result<Value, Failure
     }
 }
 
-pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Failure> {
+pub(super) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation, Failure> {
     let _serial = actor.pend.lock();
     let _commit = basis::commit();
     let value = match query {
-        Query::Nest { token, nest: id } => {
+        NestQuery::Nest { token, nest: id } => {
             let entry = binding::authorized(actor, token, NestRights::INSPECT).map_err(error)?;
             let nest = entry.target().nest().ok_or(Failure::Denied)?;
             if nest.id() != id {
@@ -99,16 +99,9 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
                 }
             }
         }
-        Query::Span {
-            token,
-            nest: id,
-            span: reservation,
-        } => {
+        NestQuery::Span { range } => {
             let route =
-                SpanRoute::acquire(actor, token, NestRights::INSPECT).map_err(pend_error)?;
-            if route.id() != reservation || route.nest().id() != id {
-                return Err(Failure::Denied);
-            }
+                SpanRoute::acquire(actor, range, NestRights::INSPECT).map_err(pend_error)?;
             let span = route.span().map_err(pend_error)?;
             let (offset, count) = route.entry().authority().window().ok_or(Failure::Denied)?;
             Snapshot::Span(
@@ -128,11 +121,11 @@ pub(super) fn inspect(actor: &Arc<Task>, query: Query) -> Result<Observation, Fa
 
 pub(super) fn effect(
     actor: &Arc<Task>,
-    action: Action,
+    action: NestAction,
     receipt: &mut crate::entry::call::next_memory::Receipt<'_>,
 ) -> Result<Value, Failure> {
     match action {
-        Action::CreateNest { license } => {
+        NestAction::Create { license } => {
             {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
@@ -174,67 +167,58 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        Action::DeleteSpan {
-            token,
-            nest: id,
-            span: reservation,
-            expected,
-        } => {
-            let (nest, span) = {
+        NestAction::Release { range, expected } => {
+            let (nest, span, reservation) = {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
                 if !pend::live(actor) {
                     return Err(Failure::Dead);
                 }
-                let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
+                let entry = pend::locate(actor, range).ok_or(Failure::Denied)?;
                 if !entry
                     .authority()
                     .permits(Operations::Nest(NestRights::DELETE_SPAN))
-                    || !matches!(entry.scope(), PendScope::Nest(NestScope::Span { id, .. }) if id == reservation)
                 {
                     return Err(Failure::Denied);
                 }
+                let reservation = match entry.scope() {
+                    PendScope::Nest(NestScope::Span { id, .. }) => id,
+                    _ => return Err(Failure::Denied),
+                };
                 let nest = entry.target().nest().ok_or(Failure::Denied)?;
-                if nest.id() != id {
-                    return Err(Failure::Denied);
-                }
                 let span = nest.span(reservation).ok_or(Failure::Dead)?;
                 let (offset, count) = entry.authority().window().ok_or(Failure::Denied)?;
                 if offset.get() != 0 || count.checked_bytes() != Some(span.initial_size()) {
                     return Err(Failure::Denied);
                 }
-                if span.version() != expected {
+                if span.version().get() != expected.get() {
                     return Err(Failure::Stale);
                 }
-                expected.next().ok_or(Failure::VersionExhausted)?;
-                nest.begin_release(&span, expected).map_err(nest_error)?;
+                let next = expected.next().ok_or(Failure::VersionExhausted)?;
+                let version = kernel_api::model::nest::SpanVersion::new(next.get())
+                    .ok_or(Failure::VersionExhausted)?;
+                nest.begin_release(&span, version).map_err(nest_error)?;
                 receipt.start(Value::SpanLifecycle {
-                    nest: id,
-                    span: reservation,
+                    range: span.authority(),
                     version: span.version(),
                     phase: SpanPhase::Closing,
                 });
-                (nest, span)
+                (nest, span, reservation)
             };
             nest.close_span(reservation).map_err(cell_error)?;
             let _commit = basis::commit();
             let value = Value::SpanLifecycle {
-                nest: id,
-                span: reservation,
+                range: span.authority(),
                 version: span.version(),
                 phase: SpanPhase::Closed,
             };
             receipt.committed(value);
             Ok(value)
         }
-        Action::ReleaseRange {
-            token,
-            nest: id,
-            span: reservation,
-            expected,
-            offset,
-            count,
-        } => {
+        NestAction::ReleaseRange { target, expected } => {
+            let token = target.range();
+            let offset = target.offset();
+            let count = target.count();
             let span = {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
@@ -242,42 +226,41 @@ pub(super) fn effect(
                     return Err(Failure::Dead);
                 }
                 let entry = pend::locate(actor, token).ok_or(Failure::Denied)?;
+                let reservation = match entry.scope() {
+                    PendScope::Nest(NestScope::Span { id, .. }) => id,
+                    _ => return Err(Failure::Denied),
+                };
                 if !entry
                     .authority()
                     .permits(Operations::Nest(NestRights::DELETE_SPAN))
-                    || !matches!(entry.scope(), PendScope::Nest(NestScope::Span { id, .. }) if id == reservation)
                 {
                     return Err(Failure::Denied);
                 }
                 let nest = entry.target().nest().ok_or(Failure::Denied)?;
-                if nest.id() != id {
-                    return Err(Failure::Denied);
-                }
                 let span = nest.span(reservation).ok_or(Failure::Dead)?;
                 let (window_offset, window_count) =
                     entry.authority().window().ok_or(Failure::Denied)?;
-                let end = offset.checked_add(count).ok_or(Failure::Denied)?;
+                let end = offset
+                    .get()
+                    .checked_add(count.get())
+                    .ok_or(Failure::Denied)?;
                 let window_end = window_offset
                     .get()
                     .checked_add(window_count.get())
                     .ok_or(Failure::Denied)?;
-                if offset < window_offset.get() || end > window_end {
+                if offset.get() < window_offset.get() || end > window_end {
                     return Err(Failure::Denied);
                 }
-                if span.version() != expected {
+                if span.version().get() != expected.get() {
                     return Err(Failure::Stale);
                 }
                 expected.next().ok_or(Failure::VersionExhausted)?;
-                let offset = kernel_api::address::PageOffset::new(offset);
-                let count =
-                    kernel_api::address::PageCount::new(count).ok_or(Failure::NotAligned)?;
                 nest.reclaim_range(reservation, offset, count)
                     .map_err(nest_error)?;
                 span
             };
             let value = Value::SpanLifecycle {
-                nest: id,
-                span: reservation,
+                range: token,
                 version: span.version(),
                 phase: SpanPhase::Open,
             };
@@ -285,19 +268,13 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        Action::DeleteNest {
-            token,
-            nest: id,
-            expected,
-        } => {
+        NestAction::Delete { token, expected } => {
             let nest = {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
                 let entry = binding::authorized(actor, token, NestRights::DELETE).map_err(error)?;
                 let nest = entry.target().nest().ok_or(Failure::Denied)?;
-                if nest.id() != id {
-                    return Err(Failure::Denied);
-                }
+                let id = nest.id();
                 binding::check_delete_root(&nest, &entry).map_err(error)?;
                 if nest.version() != expected {
                     return Err(Failure::Stale);
@@ -320,7 +297,7 @@ pub(super) fn effect(
             }
             let _commit = basis::commit();
             let value = Value::NestLifecycle {
-                nest: id,
+                nest: nest.id(),
                 version: nest.version(),
                 phase: NestPhase::Closed,
             };

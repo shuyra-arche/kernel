@@ -2,17 +2,17 @@
 //! the caller's output buffer never transforms Committed into Rejected.
 
 use super::{
-    Action, Domain, Failure, Opcode, Reader, Request, RequestId, VERSION, Writer, valid_token,
+    Action, Failure, Opcode, Reader, Request, RequestId, VERSION, Writer, flat as domain_flat,
+    journal::RequestKey, nest as domain_nest, valid_token,
 };
 use crate::address::{BASE_PAGE_SIZE, VirtAddr};
 use crate::model::{
     cell::CellLevel,
     flat::{BlockPhase, BlockRef, FlatId, FlatPhase, FlatVersion, Reshape, SlotVersion},
     identity::PendId,
-    nest::SpanId,
     nest::{
-        FaultEpoch, FaultPhase, MemoGeneration, NestId, NestPhase, NestVersion, SpanPhase,
-        SpanVersion,
+        FaultEpoch, FaultPhase, MemoGeneration, NestId, NestPhase, NestVersion, RangeVersion,
+        SpanPhase, SpanVersion,
     },
 };
 
@@ -21,9 +21,8 @@ use crate::model::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Value {
     FaultRoute {
-        nest: NestId,
-        span: SpanId,
-        version: SpanVersion,
+        range: PendId,
+        version: RangeVersion,
         epoch: FaultEpoch,
         phase: FaultPhase,
     },
@@ -46,10 +45,9 @@ pub enum Value {
         version: NestVersion,
     },
     Span {
-        token: PendId,
+        range: PendId,
         nest: NestId,
         nest_version: NestVersion,
-        span: SpanId,
         version: SpanVersion,
         address: VirtAddr,
     },
@@ -64,8 +62,7 @@ pub enum Value {
         phase: NestPhase,
     },
     SpanLifecycle {
-        nest: NestId,
-        span: SpanId,
+        range: PendId,
         version: SpanVersion,
         phase: SpanPhase,
     },
@@ -89,78 +86,27 @@ pub enum Value {
 
 impl Value {
     fn matches(self, opcode: Opcode) -> bool {
-        match (self, opcode) {
-            (
-                Self::FaultRoute {
-                    span,
-                    version,
-                    epoch,
-                    phase,
-                    ..
-                },
-                Opcode::FaultRoute,
-            ) => {
-                valid_token(span.get())
-                    && version.get() > 1
-                    && epoch.get() > 1
-                    && matches!(phase, FaultPhase::Active | FaultPhase::Disabled)
+        match opcode {
+            Opcode::Flat(opcode) => {
+                flat::Value::try_from(self).is_ok_and(|value| value.matches(opcode))
             }
-            (Self::Geometry { version, slots, .. }, Opcode::Split | Opcode::Merge) => {
-                version.get() > 1 && slots.get() == version.get()
+            Opcode::Nest(opcode) => {
+                nest::Value::try_from(self).is_ok_and(|value| value.matches(opcode))
             }
-            (Self::CreatedFlat { token, .. }, Opcode::Create(Domain::Flat))
-            | (Self::CreatedNest { token, .. }, Opcode::Create(Domain::Nest)) => {
-                valid_token(token.get())
-            }
-            (
-                Self::Span {
-                    token,
-                    span,
-                    address,
-                    ..
-                },
-                Opcode::CreateSpan,
-            ) => {
-                valid_token(token.get())
-                    && valid_token(span.get())
-                    && address.get().is_multiple_of(BASE_PAGE_SIZE)
-                    && address.get().checked_add(BASE_PAGE_SIZE).is_some()
-            }
-            (Self::FlatLifecycle { .. }, Opcode::Delete(Domain::Flat))
-            | (Self::NestLifecycle { .. }, Opcode::Delete(Domain::Nest)) => true,
-            (Self::SpanLifecycle { span, .. }, Opcode::DeleteSpan | Opcode::ReleaseRange) => {
-                valid_token(span.get())
-            }
-            (Self::Slot { page, .. }, Opcode::Occupy | Opcode::Vacate) => page <= isize::MAX as u64,
-            (Self::Transfer { page, .. }, Opcode::Push | Opcode::Pull) => {
-                page > 0 && page <= isize::MAX as u64
-            }
-            (
-                Self::Memo { .. },
-                Opcode::Insert
-                | Opcode::Remove
-                | Opcode::Publish
-                | Opcode::Retract
-                | Opcode::Protect,
-            )
-            | (Self::Maintenance { .. }, Opcode::Block | Opcode::Allow) => true,
-            _ => false,
         }
     }
 
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
         match self {
             Self::FaultRoute {
-                nest,
-                span,
+                range,
                 version,
                 epoch,
                 phase,
             } => {
                 for word in [
                     12,
-                    nest.get() as u64,
-                    span.get() as u64,
+                    range.get() as u64,
                     version.get(),
                     epoch.get(),
                     phase as u64,
@@ -203,18 +149,16 @@ impl Value {
                 out.word(version.get())
             }
             Self::Span {
-                token,
+                range,
                 nest,
                 nest_version,
-                span,
                 version,
                 address,
             } => {
                 out.word(7)?;
-                out.word(token.get() as u64)?;
+                out.word(range.get() as u64)?;
                 out.word(nest.get() as u64)?;
                 out.word(nest_version.get())?;
-                out.word(span.get() as u64)?;
                 out.word(version.get())?;
                 out.word(address.get() as u64)
             }
@@ -239,14 +183,12 @@ impl Value {
                 out.word(phase as u64)
             }
             Self::SpanLifecycle {
-                nest,
-                span,
+                range,
                 version,
                 phase,
             } => {
                 out.word(10)?;
-                out.word(nest.get() as u64)?;
-                out.word(span.get() as u64)?;
+                out.word(range.get() as u64)?;
                 out.word(version.get())?;
                 out.word(phase as u64)
             }
@@ -280,9 +222,8 @@ impl Value {
     fn read(input: &mut Reader<'_>) -> Option<Option<Self>> {
         Some(match input.word()? {
             12 => Some(Self::FaultRoute {
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
-                version: SpanVersion::new(input.word()?)?,
+                range: input.token()?,
+                version: RangeVersion::new(input.word()?)?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 phase: FaultPhase::from_tag(input.word()?)?,
             }),
@@ -303,10 +244,9 @@ impl Value {
                 version: NestVersion::new(input.word()?)?,
             }),
             7 => Some(Self::Span {
-                token: input.token()?,
+                range: input.token()?,
                 nest: NestId::new(input.size()?)?,
                 nest_version: NestVersion::new(input.word()?)?,
-                span: input.span()?,
                 version: SpanVersion::new(input.word()?)?,
                 address: VirtAddr::new(input.size()?),
             }),
@@ -328,8 +268,7 @@ impl Value {
                 },
             }),
             10 => Some(Self::SpanLifecycle {
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
                 version: SpanVersion::new(input.word()?)?,
                 phase: SpanPhase::from_tag(input.word()?)?,
             }),
@@ -378,7 +317,10 @@ impl Outcome {
         if let Self::Expired = self {
             return true;
         }
-        if matches!(opcode, Opcode::Inspect(_)) {
+        if matches!(
+            opcode,
+            Opcode::Flat(domain_flat::Opcode::Inspect) | Opcode::Nest(domain_nest::Opcode::Inspect)
+        ) {
             return false;
         }
         match self {
@@ -394,23 +336,29 @@ impl Outcome {
                         | Failure::RequestMismatch
                         | Failure::FaultExpired
                 ) && match (opcode, retained) {
-                    (Opcode::Create(_) | Opcode::CreateSpan | Opcode::FaultRoute, None) => true,
                     (
-                        Opcode::Delete(Domain::Flat),
+                        Opcode::Flat(domain_flat::Opcode::Create)
+                        | Opcode::Nest(domain_nest::Opcode::Create)
+                        | Opcode::Nest(domain_nest::Opcode::Reserve)
+                        | Opcode::Nest(domain_nest::Opcode::FaultRoute),
+                        None,
+                    ) => true,
+                    (
+                        Opcode::Flat(domain_flat::Opcode::Delete),
                         Some(Value::FlatLifecycle {
                             phase: FlatPhase::Closing | FlatPhase::Failed,
                             ..
                         }),
                     ) => true,
                     (
-                        Opcode::Delete(Domain::Nest),
+                        Opcode::Nest(domain_nest::Opcode::Delete),
                         Some(Value::NestLifecycle {
                             phase: NestPhase::Closing | NestPhase::Failed,
                             ..
                         }),
                     ) => true,
                     (
-                        Opcode::DeleteSpan,
+                        Opcode::Nest(domain_nest::Opcode::Release),
                         Some(
                             value @ Value::SpanLifecycle {
                                 phase: SpanPhase::Closing | SpanPhase::Failed,
@@ -419,31 +367,34 @@ impl Outcome {
                         ),
                     ) => value.matches(opcode),
                     (
-                        Opcode::Occupy
-                        | Opcode::Push
-                        | Opcode::Pull
-                        | Opcode::Split
-                        | Opcode::Merge
-                        | Opcode::Insert
-                        | Opcode::Remove,
+                        Opcode::Flat(domain_flat::Opcode::Occupy)
+                        | Opcode::Flat(domain_flat::Opcode::Push)
+                        | Opcode::Flat(domain_flat::Opcode::Pull)
+                        | Opcode::Flat(domain_flat::Opcode::Split)
+                        | Opcode::Flat(domain_flat::Opcode::Merge)
+                        | Opcode::Nest(domain_nest::Opcode::Insert)
+                        | Opcode::Nest(domain_nest::Opcode::Remove),
                         None,
                     ) => true,
-                    (Opcode::Vacate, Some(value @ Value::Slot { page: 1.., .. })) => {
-                        value.matches(opcode)
-                    }
                     (
-                        Opcode::Publish | Opcode::Retract | Opcode::Protect,
+                        Opcode::Flat(domain_flat::Opcode::Vacate),
+                        Some(value @ Value::Slot { page: 1.., .. }),
+                    ) => value.matches(opcode),
+                    (
+                        Opcode::Nest(domain_nest::Opcode::Publish)
+                        | Opcode::Nest(domain_nest::Opcode::Retract)
+                        | Opcode::Nest(domain_nest::Opcode::Protect),
                         None | Some(Value::Memo { .. }),
                     ) => true,
                     (
-                        Opcode::Block,
+                        Opcode::Flat(domain_flat::Opcode::Block),
                         Some(Value::Maintenance {
                             phase: BlockPhase::Draining | BlockPhase::Orphaned,
                             ..
                         }),
                     ) => true,
                     (
-                        Opcode::Allow,
+                        Opcode::Flat(domain_flat::Opcode::Allow),
                         Some(Value::Maintenance {
                             phase: BlockPhase::Releasing | BlockPhase::Orphaned,
                             ..
@@ -457,64 +408,79 @@ impl Outcome {
                     && matches!(
                         (opcode, value),
                         (
-                            Opcode::Delete(Domain::Flat),
+                            Opcode::Flat(domain_flat::Opcode::Delete),
                             Value::FlatLifecycle {
                                 phase: FlatPhase::Closing,
                                 ..
                             }
                         ) | (
-                            Opcode::Delete(Domain::Nest),
+                            Opcode::Nest(domain_nest::Opcode::Delete),
                             Value::NestLifecycle {
                                 phase: NestPhase::Closing,
                                 ..
                             }
                         ) | (
-                            Opcode::DeleteSpan,
+                            Opcode::Nest(domain_nest::Opcode::Release),
                             Value::SpanLifecycle {
                                 phase: SpanPhase::Closing,
                                 ..
                             }
                         ) | (
-                            Opcode::Block,
+                            Opcode::Flat(domain_flat::Opcode::Block),
                             Value::Maintenance {
                                 phase: BlockPhase::Draining,
                                 ..
                             }
                         ) | (
-                            Opcode::Allow,
+                            Opcode::Flat(domain_flat::Opcode::Allow),
                             Value::Maintenance {
                                 phase: BlockPhase::Releasing,
                                 ..
                             }
                         ) | (
-                            Opcode::Publish | Opcode::Retract | Opcode::Protect,
+                            Opcode::Nest(domain_nest::Opcode::Publish)
+                                | Opcode::Nest(domain_nest::Opcode::Retract)
+                                | Opcode::Nest(domain_nest::Opcode::Protect),
                             Value::Memo { .. }
-                        ) | (Opcode::Vacate, Value::Slot { page: 1.., .. })
+                        ) | (
+                            Opcode::Flat(domain_flat::Opcode::Vacate),
+                            Value::Slot { page: 1.., .. }
+                        )
                     )
             }
             Self::Committed(value) => {
                 value.matches(opcode)
                     && match (opcode, value) {
-                        (Opcode::Delete(Domain::Flat), Value::FlatLifecycle { phase, .. }) => {
-                            phase == FlatPhase::Closed
+                        (
+                            Opcode::Flat(domain_flat::Opcode::Delete),
+                            Value::FlatLifecycle { phase, .. },
+                        ) => phase == FlatPhase::Closed,
+                        (
+                            Opcode::Nest(domain_nest::Opcode::Delete),
+                            Value::NestLifecycle { phase, .. },
+                        ) => phase == NestPhase::Closed,
+                        (
+                            Opcode::Nest(domain_nest::Opcode::Release),
+                            Value::SpanLifecycle { phase, .. },
+                        ) => phase == SpanPhase::Closed,
+                        (
+                            Opcode::Nest(domain_nest::Opcode::ReleaseRange),
+                            Value::SpanLifecycle { phase, .. },
+                        ) => phase == SpanPhase::Open,
+                        (Opcode::Flat(domain_flat::Opcode::Occupy), Value::Slot { page, .. }) => {
+                            page != 0
                         }
-                        (Opcode::Delete(Domain::Nest), Value::NestLifecycle { phase, .. }) => {
-                            phase == NestPhase::Closed
+                        (Opcode::Flat(domain_flat::Opcode::Vacate), Value::Slot { page, .. }) => {
+                            page == 0
                         }
-                        (Opcode::DeleteSpan, Value::SpanLifecycle { phase, .. }) => {
-                            phase == SpanPhase::Closed
-                        }
-                        (Opcode::ReleaseRange, Value::SpanLifecycle { phase, .. }) => {
-                            phase == SpanPhase::Open
-                        }
-                        (Opcode::Occupy, Value::Slot { page, .. }) => page != 0,
-                        (Opcode::Vacate, Value::Slot { page, .. }) => page == 0,
-                        (Opcode::Block, Value::Maintenance { phase, .. }) => {
-                            phase == BlockPhase::Held
-                        }
-                        (Opcode::Allow, Value::Maintenance { phase, .. }) => {
-                            phase == BlockPhase::Closed
-                        }
+                        (
+                            Opcode::Flat(domain_flat::Opcode::Block),
+                            Value::Maintenance { phase, .. },
+                        ) => phase == BlockPhase::Held,
+                        (
+                            Opcode::Flat(domain_flat::Opcode::Allow),
+                            Value::Maintenance { phase, .. },
+                        ) => phase == BlockPhase::Closed,
                         _ => true,
                     }
             }
@@ -592,6 +558,10 @@ impl Reply {
 
     /// Correlates delivery, not authority or resource freshness. Inspect returns
     /// the retained mutation's opcode; an expired query need only know its domain.
+    pub fn matches_key(self, key: RequestKey) -> bool {
+        self.request == key.id() && self.opcode == key.opcode() && self.outcome.valid(self.opcode)
+    }
+
     pub fn matches(self, request: Request) -> bool {
         match request.action() {
             Action::InspectResult { domain, request } => {
@@ -604,23 +574,19 @@ impl Reply {
                 match (action, self.outcome) {
                     (
                         Action::FaultRoute {
-                            nest,
-                            span,
+                            range,
                             expected,
                             epoch,
                             route,
-                            ..
                         },
                         Outcome::Committed(Value::FaultRoute {
-                            nest: actual_nest,
-                            span: actual_span,
+                            range: actual_range,
                             version,
                             epoch: actual_epoch,
                             phase,
                         }),
                     ) => {
-                        nest == actual_nest
-                            && span == actual_span
+                        range == actual_range
                             && expected.next() == Some(version)
                             && epoch.next() == Some(actual_epoch)
                             && phase
@@ -712,5 +678,363 @@ impl Reply {
             _ => return None,
         };
         Self::new(request, opcode, outcome)
+    }
+}
+
+/// Flat-domain results.
+pub mod flat {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Value {
+        Geometry {
+            flat: FlatId,
+            version: FlatVersion,
+            slots: SlotVersion,
+            range: Reshape,
+        },
+        Created {
+            token: PendId,
+            flat: FlatId,
+            version: FlatVersion,
+        },
+        Lifecycle {
+            flat: FlatId,
+            version: FlatVersion,
+            phase: FlatPhase,
+        },
+        Slot {
+            version: SlotVersion,
+            page: u64,
+        },
+        Transfer {
+            local: SlotVersion,
+            remote: SlotVersion,
+            page: u64,
+        },
+        Maintenance {
+            block: BlockRef,
+            phase: BlockPhase,
+        },
+    }
+
+    impl Value {
+        pub(super) fn matches(self, opcode: domain_flat::Opcode) -> bool {
+            use domain_flat::Opcode;
+            match (self, opcode) {
+                (Self::Geometry { version, slots, .. }, Opcode::Split | Opcode::Merge) => {
+                    version.get() > 1 && slots.get() == version.get()
+                }
+                (Self::Created { token, .. }, Opcode::Create) => valid_token(token.get()),
+                (Self::Lifecycle { .. }, Opcode::Delete) => true,
+                (Self::Slot { page, .. }, Opcode::Occupy | Opcode::Vacate) => {
+                    page <= isize::MAX as u64
+                }
+                (Self::Transfer { page, .. }, Opcode::Push | Opcode::Pull) => {
+                    page > 0 && page <= isize::MAX as u64
+                }
+                (Self::Maintenance { .. }, Opcode::Block | Opcode::Allow) => true,
+                _ => false,
+            }
+        }
+    }
+
+    impl From<Value> for super::Value {
+        fn from(value: Value) -> Self {
+            match value {
+                Value::Geometry {
+                    flat,
+                    version,
+                    slots,
+                    range,
+                } => Self::Geometry {
+                    flat,
+                    version,
+                    slots,
+                    range,
+                },
+                Value::Created {
+                    token,
+                    flat,
+                    version,
+                } => Self::CreatedFlat {
+                    token,
+                    flat,
+                    version,
+                },
+                Value::Lifecycle {
+                    flat,
+                    version,
+                    phase,
+                } => Self::FlatLifecycle {
+                    flat,
+                    version,
+                    phase,
+                },
+                Value::Slot { version, page } => Self::Slot { version, page },
+                Value::Transfer {
+                    local,
+                    remote,
+                    page,
+                } => Self::Transfer {
+                    local,
+                    remote,
+                    page,
+                },
+                Value::Maintenance { block, phase } => Self::Maintenance { block, phase },
+            }
+        }
+    }
+
+    impl TryFrom<super::Value> for Value {
+        type Error = ();
+
+        fn try_from(value: super::Value) -> Result<Self, Self::Error> {
+            Ok(match value {
+                super::Value::Geometry {
+                    flat,
+                    version,
+                    slots,
+                    range,
+                } => Self::Geometry {
+                    flat,
+                    version,
+                    slots,
+                    range,
+                },
+                super::Value::CreatedFlat {
+                    token,
+                    flat,
+                    version,
+                } => Self::Created {
+                    token,
+                    flat,
+                    version,
+                },
+                super::Value::FlatLifecycle {
+                    flat,
+                    version,
+                    phase,
+                } => Self::Lifecycle {
+                    flat,
+                    version,
+                    phase,
+                },
+                super::Value::Slot { version, page } => Self::Slot { version, page },
+                super::Value::Transfer {
+                    local,
+                    remote,
+                    page,
+                } => Self::Transfer {
+                    local,
+                    remote,
+                    page,
+                },
+                super::Value::Maintenance { block, phase } => Self::Maintenance { block, phase },
+                _ => return Err(()),
+            })
+        }
+    }
+}
+
+/// Nest-domain results.
+pub mod nest {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Value {
+        FaultRoute {
+            range: PendId,
+            version: RangeVersion,
+            epoch: FaultEpoch,
+            phase: FaultPhase,
+        },
+        Created {
+            token: PendId,
+            nest: NestId,
+            version: NestVersion,
+        },
+        Span {
+            range: PendId,
+            nest: NestId,
+            nest_version: NestVersion,
+            version: SpanVersion,
+            address: VirtAddr,
+        },
+        Lifecycle {
+            nest: NestId,
+            version: NestVersion,
+            phase: NestPhase,
+        },
+        SpanLifecycle {
+            range: PendId,
+            version: SpanVersion,
+            phase: SpanPhase,
+        },
+        Memo {
+            generation: MemoGeneration,
+        },
+    }
+
+    impl Value {
+        pub(super) fn matches(self, opcode: domain_nest::Opcode) -> bool {
+            use domain_nest::Opcode;
+            match (self, opcode) {
+                (
+                    Self::FaultRoute {
+                        range,
+                        version,
+                        epoch,
+                        phase,
+                    },
+                    Opcode::FaultRoute,
+                ) => {
+                    valid_token(range.get())
+                        && version.get() > 1
+                        && epoch.get() > 1
+                        && matches!(phase, FaultPhase::Active | FaultPhase::Disabled)
+                }
+                (Self::Created { token, .. }, Opcode::Create) => valid_token(token.get()),
+                (Self::Span { range, address, .. }, Opcode::Reserve) => {
+                    valid_token(range.get())
+                        && address.get().is_multiple_of(BASE_PAGE_SIZE)
+                        && address.get().checked_add(BASE_PAGE_SIZE).is_some()
+                }
+                (Self::Lifecycle { .. }, Opcode::Delete) => true,
+                (Self::SpanLifecycle { range, .. }, Opcode::Release | Opcode::ReleaseRange) => {
+                    valid_token(range.get())
+                }
+                (
+                    Self::Memo { .. },
+                    Opcode::Insert
+                    | Opcode::Remove
+                    | Opcode::Publish
+                    | Opcode::Retract
+                    | Opcode::Protect,
+                ) => true,
+                _ => false,
+            }
+        }
+    }
+
+    impl From<Value> for super::Value {
+        fn from(value: Value) -> Self {
+            match value {
+                Value::FaultRoute {
+                    range,
+                    version,
+                    epoch,
+                    phase,
+                } => Self::FaultRoute {
+                    range,
+                    version,
+                    epoch,
+                    phase,
+                },
+                Value::Created {
+                    token,
+                    nest,
+                    version,
+                } => Self::CreatedNest {
+                    token,
+                    nest,
+                    version,
+                },
+                Value::Span {
+                    range,
+                    nest,
+                    nest_version,
+                    version,
+                    address,
+                } => Self::Span {
+                    range,
+                    nest,
+                    nest_version,
+                    version,
+                    address,
+                },
+                Value::Lifecycle {
+                    nest,
+                    version,
+                    phase,
+                } => Self::NestLifecycle {
+                    nest,
+                    version,
+                    phase,
+                },
+                Value::SpanLifecycle {
+                    range,
+                    version,
+                    phase,
+                } => Self::SpanLifecycle {
+                    range,
+                    version,
+                    phase,
+                },
+                Value::Memo { generation } => Self::Memo { generation },
+            }
+        }
+    }
+
+    impl TryFrom<super::Value> for Value {
+        type Error = ();
+
+        fn try_from(value: super::Value) -> Result<Self, Self::Error> {
+            Ok(match value {
+                super::Value::FaultRoute {
+                    range,
+                    version,
+                    epoch,
+                    phase,
+                } => Self::FaultRoute {
+                    range,
+                    version,
+                    epoch,
+                    phase,
+                },
+                super::Value::CreatedNest {
+                    token,
+                    nest,
+                    version,
+                } => Self::Created {
+                    token,
+                    nest,
+                    version,
+                },
+                super::Value::Span {
+                    range,
+                    nest,
+                    nest_version,
+                    version,
+                    address,
+                } => Self::Span {
+                    range,
+                    nest,
+                    nest_version,
+                    version,
+                    address,
+                },
+                super::Value::NestLifecycle {
+                    nest,
+                    version,
+                    phase,
+                } => Self::Lifecycle {
+                    nest,
+                    version,
+                    phase,
+                },
+                super::Value::SpanLifecycle {
+                    range,
+                    version,
+                    phase,
+                } => Self::SpanLifecycle {
+                    range,
+                    version,
+                    phase,
+                },
+                super::Value::Memo { generation } => Self::Memo { generation },
+                _ => return Err(()),
+            })
+        }
     }
 }

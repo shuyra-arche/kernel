@@ -1,9 +1,9 @@
 //! Next-memory-ABI space, span and Memo observations. Descriptive
 //! snapshots do not replace a live Whole/Span Pend or retirement evidence.
 
-use super::{MemoGeneration, NestId, NestInfo};
+use super::{MemoGeneration, NestInfo};
 use crate::address::{BASE_PAGE_SIZE, VirtAddr};
-use crate::model::{cell::CellLevel, flat::FlatId, nest::SpanId};
+use crate::model::{cell::CellLevel, flat::FlatId};
 use core::num::NonZeroU64;
 
 /// Address-space topology/lifecycle epoch, not a Memo publication generation.
@@ -73,8 +73,7 @@ impl SpanPhase {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpanStatus {
-    pub nest: NestId,
-    pub span: SpanId,
+    pub range: crate::model::identity::PendId,
     pub version: SpanVersion,
     pub offset: usize,
     pub count: usize,
@@ -91,8 +90,8 @@ impl SpanStatus {
         let Some(grain) = self.level.pages() else {
             return false;
         };
-        self.span.get() > 0
-            && self.span.get() <= isize::MAX as usize
+        self.range.get() > 0
+            && self.range.get() <= isize::MAX as usize
             && crate::model::cell::pages(self.offset, self.count).is_some()
             && self.offset.is_multiple_of(grain)
             && self.count.is_multiple_of(grain)
@@ -135,25 +134,31 @@ impl MemoPhase {
 /// remains in Kernel. Equal source coordinates never establish equal authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoStatus {
-    pub nest: NestId,
-    pub span: SpanId,
+    pub range: Option<crate::model::identity::PendId>,
     pub coordinate: usize,
     pub generation: MemoGeneration,
     pub phase: MemoPhase,
     pub source: Option<(FlatId, usize)>,
     pub page: u64,
-    /// Access of the physical publication; zero when there is no publication.
     pub access: u64,
     pub level: CellLevel,
 }
 impl MemoStatus {
+    pub const fn range(self) -> Option<crate::model::identity::PendId> {
+        self.range
+    }
+
     pub fn valid(self) -> bool {
+        let Some(range) = self.range else {
+            return false;
+        };
+        if range.get() == 0 || range.get() > isize::MAX as usize {
+            return false;
+        }
         let Some(grain) = self.level.pages() else {
             return false;
         };
-        if self.span.get() == 0
-            || self.span.get() > isize::MAX as usize
-            || !self.level.fits_at(self.coordinate, self.coordinate, grain)
+        if !self.level.fits_at(self.coordinate, self.coordinate, grain)
             || self.page > isize::MAX as u64
             || self
                 .source
@@ -181,4 +186,29 @@ impl MemoStatus {
 
 pub(crate) fn valid_access(access: u64) -> bool {
     access & !14 == 0 && access & 10 != 0 && (access & 4 == 0 || access & 2 != 0)
+}
+
+/// Version of the Pend-bound range authority used by Reserve/Release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RangeVersion(NonZeroU64);
+impl RangeVersion {
+    pub const INITIAL: Self = Self(NonZeroU64::MIN);
+    pub const fn new(value: u64) -> Option<Self> {
+        match NonZeroU64::new(value) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+    pub const fn get(self) -> u64 {
+        self.0.get()
+    }
+    pub fn next(self) -> Option<Self> {
+        Self::new(self.get().checked_add(1)?)
+    }
+    pub fn to_bytes(self) -> [u8; 8] {
+        self.get().to_le_bytes()
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        Self::new(u64::from_le_bytes(bytes.try_into().ok()?))
+    }
 }

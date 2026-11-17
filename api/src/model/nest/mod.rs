@@ -2,6 +2,7 @@
 mod create;
 mod fault;
 mod position;
+mod range;
 mod span;
 pub use span::SpanId;
 mod status;
@@ -11,8 +12,10 @@ pub use fault::{
     FaultSequence, FaultStatus, MAX_FAULT_NS, fault_read_deadline,
 };
 pub use position::{MemoGeneration, MemoPosition};
+pub use range::{RangeRelease, RangeSlice};
 pub use status::{
-    MemoPhase, MemoStatus, NestStatus, NestVersion, SpanPhase, SpanStatus, SpanVersion,
+    MemoPhase, MemoStatus, NestStatus, NestVersion, RangeVersion, SpanPhase, SpanStatus,
+    SpanVersion,
 };
 
 use crate::abi::register::{Decode, Wire};

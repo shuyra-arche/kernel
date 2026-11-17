@@ -7,18 +7,13 @@ use kernel_api::{
 
 pub(super) fn delete(
     actor: &Arc<Task>,
-    action: Action,
+    action: FlatAction,
     receipt: &mut crate::entry::call::next_memory::Receipt<'_>,
 ) -> Result<Value, Failure> {
-    let Action::DeleteFlat {
-        token,
-        flat: id,
-        expected,
-    } = action
-    else {
+    let FlatAction::Delete { token, expected } = action else {
         return Err(Failure::Invalid);
     };
-    let (meta, version, _operation) = {
+    let (meta, version, _operation, id) = {
         let _serial = actor.pend.lock();
         let _commit = basis::commit();
         if !pend::live(actor) {
@@ -35,8 +30,8 @@ pub(super) fn delete(
             return Err(Failure::Denied);
         };
         let range = meta.source();
-        if range.source_id() != id
-            || range.index().get() != 0
+        let id = range.source_id();
+        if range.index().get() != 0
             || range.page_count() != range.flat().page_count()
             || entry.authority().window() != Some((PageOffset::ZERO, range.page_count()))
         {
@@ -64,7 +59,7 @@ pub(super) fn delete(
             version,
             phase: FlatPhase::Closing,
         });
-        (meta.clone(), version, operation)
+        (meta.clone(), version, operation, id)
     };
     flat::source::close(&meta).map_err(pend_error)?;
     let _commit = basis::commit();

@@ -13,11 +13,11 @@ enum Progress {
 
 pub(in crate::entry::call) fn effect(
     actor: &Arc<Task>,
-    action: Action,
+    action: FlatAction,
     receipt: &mut crate::entry::call::next_memory::Receipt<'_>,
 ) -> Result<Value, Failure> {
     match action {
-        Action::Block {
+        FlatAction::Block {
             start,
             count,
             recover,
@@ -140,7 +140,7 @@ pub(in crate::entry::call) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        Action::Allow { maintenance } => {
+        FlatAction::Allow { maintenance } => {
             let (entry, source, block, _operation) = {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();

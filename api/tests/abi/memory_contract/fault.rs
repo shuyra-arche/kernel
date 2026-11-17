@@ -1,16 +1,15 @@
 use super::request::{id, set_word};
-use super::{memo, slot};
+use super::slot;
 use kernel_api::{
     abi::memory::{
-        Action, Delivery, Failure, Observation, Opcode, Outcome, Query, Reply, Request, Snapshot,
-        Value,
+        Action, Delivery, Failure, Observation, Outcome, Query, Reply, Request, Snapshot, Value,
     },
     model::{
         flat::SlotVersion,
         identity::{PendId, TaskId},
         nest::{
             FAULT_CAPACITY, FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase,
-            FaultRoute, FaultSequence, FaultStatus, MAX_FAULT_NS, MemoGeneration, SpanVersion,
+            FaultRoute, FaultSequence, FaultStatus, MAX_FAULT_NS, MemoGeneration,
             fault_read_deadline,
         },
         pend::NestRights,
@@ -29,10 +28,8 @@ pub(super) fn mutations() -> Vec<Action> {
     [None, Some(route())]
         .into_iter()
         .map(|route| Action::FaultRoute {
-            token: PendId::mint(13),
-            nest: memo(0).nest(),
-            span: memo(0).span(),
-            expected: SpanVersion::new(7).unwrap(),
+            range: PendId::mint(13),
+            expected: kernel_api::model::nest::RangeVersion::new(7).unwrap(),
             epoch: FaultEpoch::new(3).unwrap(),
             route,
         })
@@ -45,11 +42,12 @@ pub(super) fn results() -> Vec<Reply> {
         .map(|phase| {
             Reply::new(
                 id(),
-                Opcode::FaultRoute,
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::FaultRoute,
+                ),
                 Outcome::Committed(Value::FaultRoute {
-                    nest: memo(0).nest(),
-                    span: memo(0).span(),
-                    version: SpanVersion::new(8).unwrap(),
+                    range: PendId::mint(13),
+                    version: kernel_api::model::nest::RangeVersion::new(8).unwrap(),
                     epoch: FaultEpoch::new(4).unwrap(),
                     phase,
                 }),
@@ -61,8 +59,7 @@ pub(super) fn results() -> Vec<Reply> {
 
 fn event() -> FaultEvent {
     FaultEvent {
-        nest: memo(0).nest(),
-        span: memo(0).span(),
+        range: 13,
         epoch: FaultEpoch::new(4).unwrap(),
         sequence: FaultSequence::new(u64::MAX).unwrap(),
         memo_page: 512,
@@ -77,8 +74,7 @@ fn event() -> FaultEvent {
 
 fn status() -> FaultStatus {
     FaultStatus {
-        nest: memo(0).nest(),
-        span: memo(0).span(),
+        range: PendId::mint(13),
         epoch: FaultEpoch::new(4).unwrap(),
         phase: FaultPhase::Active,
         handler: Some(TaskId::new(29)),
@@ -90,14 +86,10 @@ fn status() -> FaultStatus {
 fn queries() -> Vec<Query> {
     vec![
         Query::FaultRoute {
-            token: PendId::mint(13),
-            nest: memo(0).nest(),
-            span: memo(0).span(),
+            range: PendId::mint(13),
         },
         Query::FaultEvent {
-            token: PendId::mint(13),
-            nest: memo(0).nest(),
-            span: memo(0).span(),
+            range: PendId::mint(13),
             epoch: FaultEpoch::new(4).unwrap(),
             after: u64::MAX - 1,
             wait: Wait::At(1 << 63),
@@ -118,18 +110,24 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
     assert_eq!(NestRights::from_bits(1 << 12), Some(NestRights::FAULT));
     for (index, (action, reply)) in mutations().into_iter().zip(results()).enumerate() {
         let request = Request::new(Some(id()), action).unwrap();
-        let mut expected = bytes::<256>(&[14, 13, 26, u64::MAX, 13, 17, 19, 7, 3, index as u64]);
+        let mut expected = bytes::<256>(&[14, 13, 26, u64::MAX, 13, 7, 3, index as u64]);
         if index == 1 {
-            set_word(&mut expected, 10, 23);
-            set_word(&mut expected, 11, MAX_FAULT_NS);
+            set_word(&mut expected, 8, 23);
+            set_word(&mut expected, 9, MAX_FAULT_NS);
         }
         assert_eq!(request.to_bytes(), expected);
         assert_eq!(
-            Request::from_call(Opcode::FaultRoute.call_number(), &expected),
+            Request::from_call(
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::FaultRoute
+                )
+                .call_number(),
+                &expected
+            ),
             Some(request)
         );
         assert!(Request::new(None, action).is_none());
-        let expected = bytes::<128>(&[14, 13, 26, u64::MAX, 2, 0, 12, 17, 19, 8, 4, index as u64]);
+        let expected = bytes::<128>(&[14, 13, 26, u64::MAX, 2, 0, 12, 13, 8, 4, index as u64]);
         assert_eq!(reply.to_bytes(), expected);
         assert_eq!(Reply::from_bytes(&expected), Some(reply));
         assert!(reply.matches(request));
@@ -142,29 +140,15 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
 #[test]
 fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
     let expected_queries = [
-        bytes::<256>(&[14, 13, 18, 0, 4, 13, 17, 19]),
-        bytes::<256>(&[14, 13, 18, 0, 5, 13, 17, 19, 4, u64::MAX - 1, 1, 1 << 63]),
+        bytes::<256>(&[14, 13, 18, 0, 4, 13]),
+        bytes::<256>(&[14, 13, 18, 0, 5, 13, 4, u64::MAX - 1, 1, 1 << 63]),
     ];
     let snapshots = [
         Snapshot::FaultRoute(status()),
         Snapshot::FaultEvent(event()),
     ];
     let expected_snapshots = [
-        bytes::<128>(&[
-            14,
-            13,
-            18,
-            0,
-            4,
-            0,
-            17,
-            19,
-            4,
-            1,
-            29,
-            MAX_FAULT_NS,
-            u64::MAX,
-        ]),
+        bytes::<128>(&[14, 13, 18, 0, 4, 0, 13, 4, 1, 29, MAX_FAULT_NS, u64::MAX]),
         bytes::<128>(&[
             14,
             13,
@@ -172,8 +156,7 @@ fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
             0,
             5,
             0,
-            17,
-            19,
+            13,
             4,
             u64::MAX,
             512,
@@ -190,7 +173,8 @@ fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
         assert_eq!(request.to_bytes(), expected_queries[index]);
         assert_eq!(
             Request::from_call(
-                Opcode::Inspect(kernel_api::abi::memory::Domain::Nest).call_number(),
+                kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Nest)
+                    .call_number(),
                 &expected_queries[index]
             ),
             Some(request)
@@ -245,9 +229,7 @@ fn recovery_budgets_and_read_deadlines_are_finite_and_overflow_checked() {
     assert!(fault_read_deadline(Wait::At(101 + MAX_FAULT_NS), 100).is_none());
     assert!(fault_read_deadline(Wait::Infinite, 100).is_none());
     let Query::FaultEvent {
-        token,
-        nest,
-        span,
+        range,
         epoch,
         after,
         ..
@@ -259,9 +241,7 @@ fn recovery_budgets_and_read_deadlines_are_finite_and_overflow_checked() {
         Request::new(
             None,
             Action::Inspect(Query::FaultEvent {
-                token,
-                nest,
-                span,
+                range,
                 epoch,
                 after,
                 wait: Wait::Infinite
@@ -272,9 +252,7 @@ fn recovery_budgets_and_read_deadlines_are_finite_and_overflow_checked() {
     let poll = Request::new(
         None,
         Action::Inspect(Query::FaultEvent {
-            token,
-            nest,
-            span,
+            range,
             epoch,
             after,
             wait: Wait::Poll,
@@ -308,7 +286,7 @@ fn stale_route_events_and_mismatched_registration_receipts_do_not_correlate() {
     }
     for (action, reply) in mutations().into_iter().zip(results()) {
         let request = Request::new(Some(id()), action).unwrap();
-        for (index, value) in [(7, 37), (8, 41), (9, 9), (10, 5)] {
+        for (index, value) in [(8, 7), (9, 9)] {
             let mut bad = reply.to_bytes();
             set_word(&mut bad, index, value);
             assert!(!Reply::from_bytes(&bad).unwrap().matches(request));
@@ -316,7 +294,7 @@ fn stale_route_events_and_mismatched_registration_receipts_do_not_correlate() {
         let mut bad = reply.to_bytes();
         set_word(
             &mut bad,
-            11,
+            10,
             if matches!(action, Action::FaultRoute { route: None, .. }) {
                 1
             } else {
@@ -388,11 +366,22 @@ fn route_loss_and_disabled_status_cannot_masquerade_as_active_service() {
         let Outcome::Committed(value) = reply.outcome() else {
             unreachable!()
         };
-        assert!(Reply::new(id(), Opcode::FaultRoute, Outcome::Pending(value)).is_none());
         assert!(
             Reply::new(
                 id(),
-                Opcode::FaultRoute,
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::FaultRoute
+                ),
+                Outcome::Pending(value)
+            )
+            .is_none()
+        );
+        assert!(
+            Reply::new(
+                id(),
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::FaultRoute
+                ),
                 Outcome::Failed {
                     failure: Failure::HandlerGone,
                     retained: Some(value)
@@ -407,7 +396,9 @@ fn route_loss_and_disabled_status_cannot_masquerade_as_active_service() {
     assert!(
         Reply::new(
             id(),
-            Opcode::FaultRoute,
+            kernel_api::abi::memory::Opcode::Nest(
+                kernel_api::abi::memory::nest::Opcode::FaultRoute
+            ),
             Outcome::Rejected(Failure::FaultExpired)
         )
         .is_none()
@@ -425,13 +416,9 @@ fn malformed_fault_fields_reject_unknown_flags_and_noncanonical_tails() {
         (4, 0),
         (5, 0),
         (6, 0),
-        (7, 0),
+        (7, 2),
         (8, 0),
-        (9, 2),
-        (10, 0),
-        (11, 0),
-        (11, MAX_FAULT_NS + 1),
-        (12, 1),
+        (9, MAX_FAULT_NS + 1),
     ] {
         let mut bad = request;
         set_word(&mut bad, i, value);
@@ -440,16 +427,7 @@ fn malformed_fault_fields_reject_unknown_flags_and_noncanonical_tails() {
     let query = Request::new(None, Action::Inspect(queries()[1]))
         .unwrap()
         .to_bytes();
-    for (i, value) in [
-        (3, 1),
-        (4, 6),
-        (5, 0),
-        (6, 0),
-        (7, 0),
-        (8, 0),
-        (10, 2),
-        (12, 1),
-    ] {
+    for (i, value) in [(3, 1), (4, 0), (5, 0)] {
         let mut bad = query;
         set_word(&mut bad, i, value);
         assert!(Request::from_bytes(&bad).is_none(), "query {i}");
@@ -466,18 +444,8 @@ fn malformed_fault_fields_reject_unknown_flags_and_noncanonical_tails() {
         (5, 1),
         (6, 0),
         (7, 0),
-        (8, 0),
-        (8, 1),
-        (9, 0),
-        (10, u64::MAX),
-        (11, 0),
-        (12, 0),
-        (13, u64::MAX),
-        (14, 0),
-        (15, 0),
-        (15, 0x402),
-        (15, 0x601),
-        (15, 0x10401),
+        (14, 0x10401),
+        (15, 1),
     ] {
         let mut bad = original;
         set_word(&mut bad, i, value);
@@ -490,13 +458,12 @@ fn malformed_fault_fields_reject_unknown_flags_and_noncanonical_tails() {
         .unwrap()
         .to_bytes();
     for (i, value) in [
+        (6, 0),
         (7, 0),
-        (8, 0),
-        (9, 3),
+        (8, 3),
+        (9, 0),
         (10, 0),
-        (11, 0),
-        (11, MAX_FAULT_NS + 1),
-        (13, 1),
+        (10, MAX_FAULT_NS + 1),
     ] {
         let mut bad = original;
         set_word(&mut bad, i, value);

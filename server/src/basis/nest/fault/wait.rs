@@ -92,8 +92,7 @@ impl Cpu {
                 .deadline(now)
                 .ok_or(Failure::VersionExhausted)?;
             let wire = FaultEvent {
-                nest: nest.id(),
-                span: memo.span,
+                range: span.authority().get(),
                 epoch: state.epoch,
                 sequence: FaultSequence::new(1).unwrap(),
                 memo_page: page,
