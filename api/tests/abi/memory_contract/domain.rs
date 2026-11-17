@@ -84,3 +84,28 @@ fn nest_create_roundtrips_license() {
         request
     );
 }
+
+#[test]
+fn nest_inspection_requires_no_request_id() {
+    let action = nest::Action::try_from(kernel_api::abi::memory::Action::Inspect(
+        kernel_api::abi::memory::Query::Nest {
+            token: PendId::mint(3),
+            nest: kernel_api::model::nest::NestId::new(11).unwrap(),
+        },
+    ))
+    .unwrap();
+    assert!(nest::Request::new(RequestId::new(13), action).is_none());
+    assert!(nest::Request::new(None, action).is_some());
+}
+
+#[test]
+fn domain_headers_reject_the_other_domain() {
+    let flat = flat::Action::Delete {
+        token: PendId::mint(3),
+        expected: FlatVersion::new(2).unwrap(),
+    };
+    let bytes = flat::Request::new(RequestId::new(14), flat)
+        .unwrap()
+        .to_bytes();
+    assert!(nest::Request::from_bytes(&bytes).is_none());
+}
