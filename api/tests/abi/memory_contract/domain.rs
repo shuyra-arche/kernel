@@ -46,12 +46,9 @@ fn flat_create_roundtrips_page_count() {
 
 #[test]
 fn flat_inspection_requires_no_request_id() {
-    let action = flat::Action::try_from(kernel_api::abi::memory::Action::Inspect(
-        kernel_api::abi::memory::Query::Slot(
-            SlotPosition::new(PendId::mint(3), FlatId::new(11).unwrap(), 4).unwrap(),
-        ),
-    ))
-    .unwrap();
+    let action = flat::Action::Inspect(flat::Query::Slot(
+        SlotPosition::new(PendId::mint(3), FlatId::new(11).unwrap(), 4).unwrap(),
+    ));
     assert!(flat::Request::new(RequestId::new(9), action).is_none());
     assert!(flat::Request::new(None, action).is_some());
 }
@@ -87,13 +84,10 @@ fn nest_create_roundtrips_license() {
 
 #[test]
 fn nest_inspection_requires_no_request_id() {
-    let action = nest::Action::try_from(kernel_api::abi::memory::Action::Inspect(
-        kernel_api::abi::memory::Query::Nest {
-            token: PendId::mint(3),
-            nest: kernel_api::model::nest::NestId::new(11).unwrap(),
-        },
-    ))
-    .unwrap();
+    let action = nest::Action::Inspect(nest::Query::Nest {
+        token: PendId::mint(3),
+        nest: kernel_api::model::nest::NestId::new(11).unwrap(),
+    });
     assert!(nest::Request::new(RequestId::new(13), action).is_none());
     assert!(nest::Request::new(None, action).is_some());
 }
@@ -187,4 +181,114 @@ fn range_release_carries_target_and_expected_version() {
 fn memo_position_range_matches_its_token() {
     let position = super::memo(0);
     assert_eq!(position.range().get(), 13);
+}
+
+#[test]
+fn nest_release_range_wire_carries_only_pend_range_and_version() {
+    let target = kernel_api::model::nest::RangeSlice::new(
+        PendId::mint(5),
+        PageOffset::new(7),
+        PageCount::new(9).unwrap(),
+    )
+    .unwrap();
+    let action = nest::Action::ReleaseRange {
+        target,
+        expected: kernel_api::model::nest::RangeVersion::new(3).unwrap(),
+    };
+    let request = nest::Request::new(RequestId::new(20), action).unwrap();
+    let bytes = request.to_bytes();
+    assert_eq!(word(&bytes, 0), VERSION);
+    assert_eq!(word(&bytes, 1), Domain::Nest as u64);
+    assert_eq!(word(&bytes, 2), nest::Opcode::ReleaseRange.slot());
+    assert_eq!(word(&bytes, 3), 20);
+    assert_eq!(word(&bytes, 4), 5);
+    assert_eq!(word(&bytes, 5), 7);
+    assert_eq!(word(&bytes, 6), 9);
+    assert_eq!(word(&bytes, 7), 3);
+    assert_eq!(nest::Request::from_bytes(&bytes).unwrap(), request);
+}
+
+#[test]
+fn flat_requests_validate_authorization_and_geometry_before_encoding() {
+    let bad_delete = flat::Action::Delete {
+        token: PendId::NONE,
+        expected: FlatVersion::new(2).unwrap(),
+    };
+    assert!(flat::Request::new(RequestId::new(31), bad_delete).is_none());
+    let invalid_block = flat::Action::Block {
+        start: SlotPosition::new(PendId::mint(3), FlatId::new(11).unwrap(), 1).unwrap(),
+        count: usize::MAX,
+        recover: None,
+    };
+    assert!(flat::Request::new(RequestId::new(32), invalid_block).is_none());
+}
+
+#[test]
+fn nest_actions_use_the_domain_codec_without_a_unified_request() {
+    let action = nest::Action::Release {
+        range: PendId::mint(5),
+        expected: kernel_api::model::nest::RangeVersion::new(2).unwrap(),
+    };
+    let request = nest::Request::new(RequestId::new(33), action).unwrap();
+    let bytes = request.to_bytes();
+    assert_eq!(nest::Request::from_bytes(&bytes), Some(request));
+
+    let mut garbage = bytes;
+    garbage[255] = 1;
+    assert!(nest::Request::from_bytes(&garbage).is_none());
+
+    let flat_number = kernel_api::abi::memory::Opcode::Flat(flat::Opcode::Delete).call_number();
+    assert!(nest::Request::from_call(flat_number, &bytes).is_none());
+}
+
+#[test]
+fn nest_actions_reject_invalid_permissions_and_access() {
+    let invalid_range = nest::Action::Release {
+        range: PendId::NONE,
+        expected: kernel_api::model::nest::RangeVersion::new(2).unwrap(),
+    };
+    assert!(nest::Request::new(RequestId::new(34), invalid_range).is_none());
+
+    let invalid_access = nest::Action::Protect {
+        memo: super::memo(0),
+        expected: kernel_api::model::nest::MemoGeneration::INITIAL,
+        access: 0,
+    };
+    assert!(nest::Request::new(RequestId::new(35), invalid_access).is_none());
+}
+
+#[test]
+fn flat_request_encoding_preserves_all_existing_domain_vectors() {
+    for mixed in super::request::mutations() {
+        let Ok(action) = flat::Action::try_from(mixed) else {
+            continue;
+        };
+        if matches!(action, flat::Action::Delete { .. }) {
+            // Delete's duplicated FlatId was intentionally removed from the new wire.
+            continue;
+        }
+        let id = RequestId::new(91);
+        let legacy = kernel_api::abi::memory::Request::new(id, mixed).unwrap();
+        let request = flat::Request::new(id, action).unwrap();
+        assert_eq!(request.to_bytes(), legacy.to_bytes(), "{action:?}");
+        assert_eq!(flat::Request::from_bytes(&legacy.to_bytes()), Some(request));
+    }
+}
+
+#[test]
+fn nest_request_encoding_preserves_all_existing_domain_vectors() {
+    for mixed in super::request::mutations() {
+        let Ok(action) = nest::Action::try_from(mixed) else {
+            continue;
+        };
+        if matches!(action, nest::Action::Delete { .. }) {
+            // Delete's duplicated NestId was intentionally removed from the new wire.
+            continue;
+        }
+        let id = RequestId::new(92);
+        let legacy = kernel_api::abi::memory::Request::new(id, mixed).unwrap();
+        let request = nest::Request::new(id, action).unwrap();
+        assert_eq!(request.to_bytes(), legacy.to_bytes(), "{action:?}");
+        assert_eq!(nest::Request::from_bytes(&legacy.to_bytes()), Some(request));
+    }
 }

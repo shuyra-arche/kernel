@@ -1,6 +1,6 @@
-//! Native ABI 11 Flat/Nest contracts.
-//! No per-call ABI 10 fallback exists. Each token still requires live caller-local
-//! authorization at the Server's commit boundary.
+//! Native Flat/Nest ABI contracts with domain-local actions and opcodes.
+//! Shared request/result envelopes do not grant authority; Server commits
+//! validate caller-local Pend permissions.
 
 mod call;
 pub mod journal;
@@ -11,7 +11,7 @@ mod request;
 
 pub use observation::{Observation, Query, Snapshot};
 pub use reply::{Delivery, Outcome, Reply, Value};
-pub use request::{Action, DomainRequest, FlatRequest, Maintenance, NestRequest, Request, Source};
+pub use request::{Action, Maintenance, Request, Source};
 
 use core::num::NonZeroU64;
 

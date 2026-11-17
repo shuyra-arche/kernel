@@ -1,4 +1,4 @@
-//! Native ABI 11 has exactly two memory operation domains. The default Cell
+//! Native ABI 14 has exactly two memory operation domains. The default Cell
 //! register adapter is not part of this interface. No alternate creation path
 //! or Task-local Slot handle can be encoded here.
 use super::{Action, Domain, Opcode, Request, RequestId, journal::RequestKey};

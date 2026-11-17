@@ -1,67 +1,87 @@
 # ReleaseRange
 
-`Action::ReleaseRange` (Nest domain slot 27) releases a page-aligned subrange
-of one live Span without deleting the Span.
+`nest::Action::ReleaseRange` (Nest domain, slot 27) releases a page-aligned
+subrange of a live Span without deleting the Span. The public request identifies
+the range by its current Pend grant, not by separately supplied NestId/SpanId.
 
 ## Wire
 
-The request has six words after the call number:
+The canonical request remains 256 bytes. Its four-word header is:
 
-| Word | Meaning |
+| Header word | Meaning |
 | --- | --- |
-| 0 | live Pend token (`DELETE_SPAN` authority) |
-| 1 | NestId |
-| 2 | SpanId |
-| 3 | expected SpanVersion |
-| 4 | page offset within the Span |
-| 5 | page count |
+| 0 | ABI version |
+| 1 | Nest domain (13) |
+| 2 | ReleaseRange slot (27) |
+| 3 | RequestId, scoped by the actual caller Task |
 
-The request is still the canonical 256-byte memory descriptor. Existing
-operation slots and layouts are unchanged, so this is additive inside ABI 14.
+Immediately after the header are **four payload words**:
+
+| Payload word | Meaning |
+| --- | --- |
+| 0 | live range Pend token (`DELETE_SPAN` right) |
+| 1 | fixed-origin page offset within the original Span |
+| 2 | nonzero page count |
+| 3 | expected `RangeVersion` |
+
+The first three payload words are `RangeSlice` (24 bytes), followed by
+`RangeVersion` (8 bytes). All remaining bytes must be zero. The descriptor
+is checked against the actual trap number before admission. A request's
+`PendId` is a locator, **not** proof of authority.
+
+These coordinates reflect the current Pend-bound request codec. Do not combine
+older pinned ABI 14 clients that still send NestId/SpanId fields with this
+provider revision: the wire fields changed during pre-release development.
+Rebuild API, Client, Server and the image together.
 
 ## Entry checks
 
-- The caller is live and holds a Pend entry with `DELETE_SPAN`.
-- The Pend scope is exactly this Span.
-- The requested window lies inside the delegated authority window.
-- `Span.version() == expected`.
-- `offset + count` is within the Span's initial page count.
+- The actual caller is live and owns a live range Pend with `DELETE_SPAN`.
+- The Pend scope resolves to one stable Span, including its internal
+  `SpanId` disambiguation; an old grant cannot select a newer occupant.
+- The requested fixed-origin slice lies inside the current delegated window,
+  and `offset + count` is valid within the Span's original page count.
+- `RangeVersion` matches the current Span revision and can advance.
+- The checked request and result journal are admitted consistently.
 
-Violations return `Denied`, `Stale`, `NotAligned` or `Dead`.
+Violations reject as appropriate (`Denied`, `Stale`, `NotAligned`,
+`Dead` or a resource-specific failure).
 
 ## Span checks
 
-Under Address -> Translation -> Span:
+Under the actual `Address -> Translation -> Span` synchronization path:
 
-- the Span is Open and has no implicit source;
-- no Translation retirement batch is pending for it;
-- no published Memo and no in-flight/busy Memo lies in the window;
-- releasing does not remove the last active range (use `DeleteSpan`).
+- The Span remains Open, and no covering Translation retirement batch is pending.
+- No published or in-flight/busy Memo occupies the requested window.
+- The slice overlaps an active range and does not remove the final active
+  range; full close is performed through the distinct `Release` action.
+- Any existing implicit source remains owned by the Span for its remaining
+  active ranges; it does not authorize access through a released hole.
 
-A violation returns `Busy` (or `NoRegion` when no active range overlaps) and
-changes nothing.
+An ineligible or busy request changes no occupancy or access state.
 
 ## Commit
 
-On success:
+On success, the same authoritative commit:
 
-1. the occupancy subrange is released under the same generation;
-2. the released pages leave the Span's active ranges;
-3. the index key/coverage is refreshed from the remaining ranges;
-4. the Span revision advances.
+1. removes the selected occupancy interval under the exact original identity;
+2. excludes the released positions from the Span's active access;
+3. refreshes the Span index against the remaining active ranges;
+4. advances the Span revision.
 
-The Span keeps its original identity and range, but cannot access the hole.
-A new Span may reserve and index the released pages; a stale address credential
-cannot release a newer generation.
+The historical Span retains its original identity and geometry, but cannot
+access or release the hole. The returned Nest-domain value is
+`SpanLifecycle { range, version, phase: Open }`, where `range` names the
+requesting Pend. A new Span may reuse only the genuinely released address
+interval. Old grants and late completions never act on the replacement.
 
-The reply is `SpanLifecycle { phase: Open }` with the new revision. A pending
-or Closed lifecycle is rejected by reply validation.
+## Limits and verification
 
-## Limits
+The operation currently refuses to release the final active range. It also
+refuses published, in-flight and retirement-owned positions; it is not a
+general asynchronous forced-unmap operation. Do not confuse Pend.Return with
+memory range release.
 
-- Source-backed Spans keep their implicit source for the remaining ranges; the
-  released hole is inaccessible and the source is released when the owning Nest/Team closes.
-- The last active range cannot be released partially.
-- Host tests cover occupancy holes, active-range splits and the reply contract.
-  QEMU/target-level behavior and cross-repository pins still need the external
-  integration run.
+Host tests protect wire fields, range identity, occupancy holes, active-range
+splits and result matching. They do not establish RV64 TLB or IOMMU completion;
+those still need target and integration evidence.

@@ -82,16 +82,24 @@ This revision implements ABI 14 unconditionally. Calls, native Flat/Nest
 memory descriptors, Boot Ledger and Capsule ABI use the single version in
 `abi::VERSION`. Capsule format remains 2. Cargo features do not select an ABI.
 
-ABI 14 names the address contract by its real owner, the Span: `SpanId`,
-`SpanVersion`, `SpanStatus`, `SpanPhase`, `CreateSpanRequest`,
-`Action::CreateSpan`/`DeleteSpan`/`ReleaseRange`, `Query::Span`/`Snapshot::Span`,
-`MemoPosition::span`, the `span` field of fault and activity observations,
-`SignSource::SpanRetired`/`SpanPublished`, `NestScope::Span` and
-`NestRights::CREATE_SPAN`/`DELETE_SPAN`. The explicit `Reservation` object and
-its public names are gone. Wire tags, operation slots and field widths are
-unchanged; the version still advances so ABI 13 calls, Ledger entries and
-Capsules are rejected instead of being assumed binary-compatible. Update every
-pin and rebuild the complete image.
+ABI 14 removes the independent Reservation object and introduces Span as the
+Kernel's owner of an occupied address range. The native Memory ABI now
+separates `flat::Action` from `nest::Action` (and their Query, Value,
+Snapshot and Opcode types), sharing the fixed Domain/slot transport,
+RequestId, result journal and outcome protocol. The transitional combined
+representation remains within the codec while migration continues.
+
+Nest range requests use live Pend grants: `nest::Action::Reserve` creates an
+occupied Span, `Release` closes it, and `ReleaseRange` releases a partial
+range. `MemoPosition` carries only the 16-byte (range Pend, fixed-origin page)
+coordinate; FaultRoute, Span observation and lifecycle results are also
+Pend-range addressed. SpanId is still a descriptive identity in
+`NestScope::Span` for same-object validation; it is not a capability.
+
+These Pend-bound wire descriptors changed within the ABI 14 pre-release
+source history. The version rejects ABI 13, but **matching ABI 14 numbers
+alone do not establish revision compatibility**: update every source pin,
+including the boot image, and rebuild together.
 
 Pin API, Client, Server and image producers to one matching revision. Remove
 `features = ["memory-v11"]` from existing dependencies when upgrading; no
