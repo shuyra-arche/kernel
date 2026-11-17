@@ -109,3 +109,17 @@ fn domain_headers_reject_the_other_domain() {
         .to_bytes();
     assert!(nest::Request::from_bytes(&bytes).is_none());
 }
+
+#[test]
+fn flat_from_call_checks_the_trap_slot() {
+    let action = flat::Action::Delete {
+        token: PendId::mint(3),
+        expected: FlatVersion::new(2).unwrap(),
+    };
+    let request = flat::Request::new(RequestId::new(15), action).unwrap();
+    let bytes = request.to_bytes();
+    let number = kernel_api::abi::memory::Opcode::Flat(flat::Opcode::Delete).call_number();
+    assert_eq!(flat::Request::from_call(number, &bytes).unwrap(), request);
+    let create = kernel_api::abi::memory::Opcode::Flat(flat::Opcode::Create).call_number();
+    assert!(flat::Request::from_call(create, &bytes).is_none());
+}
