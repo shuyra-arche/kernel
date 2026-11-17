@@ -151,7 +151,9 @@ impl Occupancy {
     /// The remaining left/right pieces keep the same generation identity, so a
     /// stale credential cannot release a newer occupant.
     pub(crate) fn release_range(&mut self, start: usize, last: usize, generation: usize) -> bool {
-        if start > last || !start.is_multiple_of(PAGE_SIZE) || !(last + 1).is_multiple_of(PAGE_SIZE)
+        if start > last
+            || !start.is_multiple_of(PAGE_SIZE)
+            || last % PAGE_SIZE != PAGE_SIZE - 1
         {
             return false;
         }
@@ -167,7 +169,10 @@ impl Occupancy {
             return true;
         }
         if start == whole_start {
-            self.spans[at].start = last + 1;
+            let Some(next) = last.checked_add(1) else {
+                return false;
+            };
+            self.spans[at].start = next;
             return true;
         }
         if last == whole_last {
@@ -177,8 +182,11 @@ impl Occupancy {
         if self.spans.try_reserve(1).is_err() {
             return false;
         }
+        let Some(next) = last.checked_add(1) else {
+            return false;
+        };
         let right = Span {
-            start: last + 1,
+            start: next,
             last: whole_last,
             ticket: 0,
             id: generation,

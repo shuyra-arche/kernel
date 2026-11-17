@@ -135,11 +135,12 @@ impl IndexNode {
         (Some(Self::balance(node)), min)
     }
 
-    /// 摘除本节点，空位由右子树最小节点顶替。
-    pub(super) fn detach(mut node: Box<Self>) -> Option<Box<Self>> {
+    /// Detach the existing allocation without dropping or copying its Span.
+    /// A key change can then reinsert the same node without any allocation.
+    pub(super) fn separate(mut node: Box<Self>) -> (Option<Box<Self>>, Box<Self>) {
         let left = node.left.take();
         let right = node.right.take();
-        match (left, right) {
+        let remaining = match (left, right) {
             (None, right) => right,
             (left, None) => left,
             (left, Some(right)) => {
@@ -148,6 +149,7 @@ impl IndexNode {
                 next.right = right;
                 Some(Self::balance(next))
             }
-        }
+        };
+        (remaining, node)
     }
 }
