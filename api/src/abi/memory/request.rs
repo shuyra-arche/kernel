@@ -899,7 +899,7 @@ pub mod flat {
                 } => Self::Delete { token, expected },
                 super::Action::Inspect(query) => {
                     Self::Inspect(super::domain_flat::Query::try_from(query).map_err(|_| ())?)
-                },
+                }
                 super::Action::InspectResult {
                     domain: Domain::Flat,
                     request,
@@ -1101,8 +1101,12 @@ pub mod flat {
                         }
                     } else {
                         Self::Inspect(
-                            super::domain_flat::Query::try_from(Query::read(Domain::Flat, tag, input)?)
-                                .ok()?,
+                            super::domain_flat::Query::try_from(Query::read(
+                                Domain::Flat,
+                                tag,
+                                input,
+                            )?)
+                            .ok()?,
                         )
                     }
                 }
@@ -1348,7 +1352,7 @@ pub mod nest {
                 }
                 super::Action::Inspect(query) => {
                     Self::Inspect(super::domain_nest::Query::try_from(query).map_err(|_| ())?)
-                },
+                }
                 super::Action::InspectResult {
                     domain: Domain::Nest,
                     request,

@@ -62,12 +62,7 @@ fn run(
         memory::DomainCall::Flat(request) => {
             let action = request.action();
             if let memory::flat::Action::Inspect(query) = action {
-                let output = super::flat::next::inspect(
-                    &mut root,
-                    &actor,
-                    query,
-                )?
-                .to_bytes();
+                let output = super::flat::next::inspect(&mut root, &actor, query)?.to_bytes();
                 if !ident
                     .team
                     .nest
