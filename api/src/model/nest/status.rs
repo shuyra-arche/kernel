@@ -149,6 +149,9 @@ pub struct MemoStatus {
 }
 impl MemoStatus {
     pub fn valid(self) -> bool {
+        if self.range.is_some_and(|range| range.get() == 0) {
+            return false;
+        }
         let Some(grain) = self.level.pages() else {
             return false;
         };
