@@ -27,8 +27,7 @@ use kernel_api::{
 use queue::{Progress, Queue};
 fn event(page: usize, epoch: u64) -> FaultEvent {
     FaultEvent {
-        nest: NestId::new(1).unwrap(),
-        span: SpanId::from_bytes(&2u64.to_le_bytes()).unwrap(),
+        range: 2,
         epoch: FaultEpoch::new(epoch).unwrap(),
         sequence: FaultSequence::new(1).unwrap(),
         memo_page: page,

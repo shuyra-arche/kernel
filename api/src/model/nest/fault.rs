@@ -1,11 +1,10 @@
 //! Next-memory-ABI fault routing values. A route is a Span-owned record,
 //! never an authorization root. Events describe identities, not data grants.
 
-use super::{MemoGeneration, NestId};
+use super::MemoGeneration;
 use crate::model::{
     flat::{FlatId, SlotVersion},
     identity::{PendId, TaskId},
-    nest::SpanId,
 };
 use core::num::NonZeroU64;
 
@@ -173,8 +172,7 @@ impl FaultAccess {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaultEvent {
-    pub nest: NestId,
-    pub span: SpanId,
+    pub range: usize,
     pub epoch: FaultEpoch,
     pub sequence: FaultSequence,
     pub memo_page: usize,
@@ -186,9 +184,13 @@ pub struct FaultEvent {
     pub access: FaultAccess,
 }
 impl FaultEvent {
+    pub const fn range(self) -> crate::model::identity::PendId {
+        crate::model::identity::PendId::mint(self.range)
+    }
+
     pub fn valid(self) -> bool {
-        self.span.get() > 0
-            && self.span.get() <= isize::MAX as usize
+        self.range > 0
+            && self.range <= isize::MAX as usize
             && self.epoch.get() > 1
             && crate::model::cell::pages(self.memo_page, 1).is_some()
             && crate::model::cell::pages(self.slot_page, 1).is_some()

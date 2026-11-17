@@ -36,12 +36,7 @@ impl Read {
         output: VirtAddr,
     ) -> Result<Self, Failure> {
         let NestQuery::FaultEvent {
-            token,
-            nest,
-            span: reservation,
-            epoch,
-            wait,
-            ..
+            range, epoch, wait, ..
         } = query
         else {
             return Err(Failure::Invalid);
@@ -49,11 +44,9 @@ impl Read {
         let _commit = crate::basis::commit();
         let now = clock::uptime().as_nanos() as u64;
         let ns = kernel_api::model::nest::fault_read_deadline(wait, now).ok_or(Failure::Invalid)?;
-        let (_, span) = full_route(
+        let (_, span) = full_route_range(
             actor,
-            token,
-            nest,
-            reservation,
+            range,
             kernel_api::model::pend::NestRights::INSPECT | kernel_api::abi::memory::rights::FAULT,
         )?;
         let binding = {
@@ -61,7 +54,7 @@ impl Read {
                 return Err(Failure::Stale);
             }
             let binding = active(&span)?;
-            if !binding.reads(actor, token) {
+            if !binding.reads(actor, range) {
                 return Err(Failure::Denied);
             }
             binding
@@ -80,7 +73,7 @@ impl Read {
     }
     fn poll(&self) -> Result<FaultEvent, Failure> {
         let NestQuery::FaultEvent {
-            token,
+            range,
             epoch,
             after,
             wait,
@@ -98,7 +91,7 @@ impl Read {
             return Err(Failure::Stale);
         }
         let binding = active(&self.span)?;
-        if !Arc::ptr_eq(&binding, &self.binding) || !binding.reads(&actor, token) {
+        if !Arc::ptr_eq(&binding, &self.binding) || !binding.reads(&actor, range) {
             return Err(Failure::Denied);
         }
         let state = self.span.faults.lock();

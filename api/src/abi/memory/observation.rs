@@ -33,9 +33,7 @@ pub enum Query {
     /// Observe the next retained event without consuming it. Only the actual
     /// registered handler may read events; timeout never resolves a fault.
     FaultEvent {
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
+        range: PendId,
         epoch: FaultEpoch,
         after: u64,
         wait: Wait,
@@ -80,9 +78,9 @@ impl Query {
             Self::Block(h) => valid_token(h.token.get()),
             Self::Span { token, span, .. } => valid_token(token.get()) && valid_token(span.get()),
             Self::FaultRoute { range } => valid_token(range.get()),
-            Self::FaultEvent {
-                token, span, wait, ..
-            } => valid_token(token.get()) && valid_token(span.get()) && wait != Wait::Infinite,
+            Self::FaultEvent { range, wait, .. } => {
+                valid_token(range.get()) && wait != Wait::Infinite
+            }
             _ => true,
         }
     }
@@ -110,20 +108,12 @@ impl Query {
             }
             Self::FaultRoute { range } => out.word(range.get() as u64),
             Self::FaultEvent {
-                token,
-                nest,
-                span,
+                range,
                 epoch,
                 after,
                 wait,
             } => {
-                for word in [
-                    token.get() as u64,
-                    nest.get() as u64,
-                    span.get() as u64,
-                    epoch.get(),
-                    after,
-                ] {
+                for word in [range.get() as u64, epoch.get(), after] {
                     out.word(word)?;
                 }
                 match wait {
@@ -165,9 +155,7 @@ impl Query {
                 range: input.token()?,
             },
             (Domain::Nest, 5) => Self::FaultEvent {
-                token: input.token()?,
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 after: input.word()?,
                 wait: match (input.word()?, input.word()?) {
@@ -254,8 +242,7 @@ impl Snapshot {
             Self::FaultEvent(s) => words(
                 out,
                 &[
-                    s.nest.get() as u64,
-                    s.span.get() as u64,
+                    s.range as u64,
                     s.epoch.get(),
                     s.sequence.get(),
                     s.memo_page as u64,
@@ -364,8 +351,7 @@ impl Snapshot {
                 last_sequence: input.word()?,
             }),
             (Domain::Nest, 5) => {
-                let nest = NestId::new(input.size()?)?;
-                let span = input.span()?;
+                let range = input.size()?;
                 let epoch = FaultEpoch::new(input.word()?)?;
                 let sequence = FaultSequence::new(input.word()?)?;
                 let memo_page = input.size()?;
@@ -378,8 +364,7 @@ impl Snapshot {
                     return None;
                 }
                 Self::FaultEvent(FaultEvent {
-                    nest,
-                    span,
+                    range,
                     epoch,
                     sequence,
                     memo_page,
@@ -610,9 +595,7 @@ pub mod nest {
             range: PendId,
         },
         FaultEvent {
-            token: PendId,
-            nest: NestId,
-            span: SpanId,
+            range: PendId,
             epoch: FaultEpoch,
             after: u64,
             wait: Wait,
@@ -634,16 +617,12 @@ pub mod nest {
             match query {
                 Query::FaultRoute { range } => Self::FaultRoute { range },
                 Query::FaultEvent {
-                    token,
-                    nest,
-                    span,
+                    range,
                     epoch,
                     after,
                     wait,
                 } => Self::FaultEvent {
-                    token,
-                    nest,
-                    span,
+                    range,
                     epoch,
                     after,
                     wait,
@@ -662,16 +641,12 @@ pub mod nest {
             Ok(match query {
                 super::Query::FaultRoute { range } => Self::FaultRoute { range },
                 super::Query::FaultEvent {
-                    token,
-                    nest,
-                    span,
+                    range,
                     epoch,
                     after,
                     wait,
                 } => Self::FaultEvent {
-                    token,
-                    nest,
-                    span,
+                    range,
                     epoch,
                     after,
                     wait,
@@ -773,18 +748,12 @@ pub mod snapshot {
                     (
                         Self::FaultEvent(s),
                         Query::FaultEvent {
-                            nest,
-                            span,
+                            range,
                             epoch,
                             after,
                             ..
                         },
-                    ) => {
-                        s.nest == nest
-                            && s.span == span
-                            && s.epoch == epoch
-                            && s.sequence.get() > after
-                    }
+                    ) => s.range() == range && s.epoch == epoch && s.sequence.get() > after,
                     (Self::Nest(s), Query::Nest { nest, .. }) => s.info.id == nest,
                     (Self::Memo(s), Query::Memo(p)) => {
                         s.range() == Some(p.range()) && s.coordinate == p.page()

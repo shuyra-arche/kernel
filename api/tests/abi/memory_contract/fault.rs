@@ -60,8 +60,7 @@ pub(super) fn results() -> Vec<Reply> {
 
 fn event() -> FaultEvent {
     FaultEvent {
-        nest: nest_id(),
-        span: span_id(),
+        range: 13,
         epoch: FaultEpoch::new(4).unwrap(),
         sequence: FaultSequence::new(u64::MAX).unwrap(),
         memo_page: 512,
@@ -91,9 +90,7 @@ fn queries() -> Vec<Query> {
             range: PendId::mint(13),
         },
         Query::FaultEvent {
-            token: PendId::mint(13),
-            nest: nest_id(),
-            span: span_id(),
+            range: PendId::mint(13),
             epoch: FaultEpoch::new(4).unwrap(),
             after: u64::MAX - 1,
             wait: Wait::At(1 << 63),
@@ -145,7 +142,7 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
 fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
     let expected_queries = [
         bytes::<256>(&[14, 13, 18, 0, 4, 13]),
-        bytes::<256>(&[14, 13, 18, 0, 5, 13, 17, 19, 4, u64::MAX - 1, 1, 1 << 63]),
+        bytes::<256>(&[14, 13, 18, 0, 5, 13, 4, u64::MAX - 1, 1, 1 << 63]),
     ];
     let snapshots = [
         Snapshot::FaultRoute(status()),
@@ -160,8 +157,7 @@ fn fault_observation_vectors_preserve_source_and_full_width_event_identity() {
             0,
             5,
             0,
-            17,
-            19,
+            13,
             4,
             u64::MAX,
             512,
@@ -234,9 +230,7 @@ fn recovery_budgets_and_read_deadlines_are_finite_and_overflow_checked() {
     assert!(fault_read_deadline(Wait::At(101 + MAX_FAULT_NS), 100).is_none());
     assert!(fault_read_deadline(Wait::Infinite, 100).is_none());
     let Query::FaultEvent {
-        token,
-        nest,
-        span,
+        range,
         epoch,
         after,
         ..
@@ -248,9 +242,7 @@ fn recovery_budgets_and_read_deadlines_are_finite_and_overflow_checked() {
         Request::new(
             None,
             Action::Inspect(Query::FaultEvent {
-                token,
-                nest,
-                span,
+                range,
                 epoch,
                 after,
                 wait: Wait::Infinite
@@ -261,9 +253,7 @@ fn recovery_budgets_and_read_deadlines_are_finite_and_overflow_checked() {
     let poll = Request::new(
         None,
         Action::Inspect(Query::FaultEvent {
-            token,
-            nest,
-            span,
+            range,
             epoch,
             after,
             wait: Wait::Poll,
@@ -438,16 +428,7 @@ fn malformed_fault_fields_reject_unknown_flags_and_noncanonical_tails() {
     let query = Request::new(None, Action::Inspect(queries()[1]))
         .unwrap()
         .to_bytes();
-    for (i, value) in [
-        (3, 1),
-        (4, 6),
-        (5, 0),
-        (6, 0),
-        (7, 0),
-        (8, 0),
-        (10, 2),
-        (12, 1),
-    ] {
+    for (i, value) in [(3, 1), (4, 0), (5, 0)] {
         let mut bad = query;
         set_word(&mut bad, i, value);
         assert!(Request::from_bytes(&bad).is_none(), "query {i}");
@@ -464,18 +445,8 @@ fn malformed_fault_fields_reject_unknown_flags_and_noncanonical_tails() {
         (5, 1),
         (6, 0),
         (7, 0),
-        (8, 0),
-        (8, 1),
-        (9, 0),
-        (10, u64::MAX),
-        (11, 0),
-        (12, 0),
-        (13, u64::MAX),
-        (14, 0),
-        (15, 0),
-        (15, 0x402),
-        (15, 0x601),
-        (15, 0x10401),
+        (14, 0x10401),
+        (15, 1),
     ] {
         let mut bad = original;
         set_word(&mut bad, i, value);

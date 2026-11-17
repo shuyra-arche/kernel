@@ -12,7 +12,7 @@ use kernel_api::{
     abi::memory::{
         Failure, Observation, Snapshot, Value, nest::Action as NestAction, nest::Query as NestQuery,
     },
-    model::nest::{FaultEpoch, FaultPhase, FaultRoute, FaultStatus, NestId, SpanId},
+    model::nest::{FaultEpoch, FaultPhase, FaultRoute, FaultStatus},
 };
 use queue::Queue;
 
@@ -123,24 +123,6 @@ fn span_key(nest: &Nest, span: &Span) -> sign::WakeKey {
         space: nest.id(),
         span: span.identity(),
     }
-}
-fn full_route(
-    actor: &Arc<Task>,
-    token: kernel_api::model::identity::PendId,
-    id: NestId,
-    span_id: SpanId,
-    rights: kernel_api::model::pend::NestRights,
-) -> Result<(pend::access::SpanRoute, Arc<Span>), Failure> {
-    let route =
-        pend::access::SpanRoute::acquire(actor, token, rights).map_err(|_| Failure::Denied)?;
-    if route.nest().id() != id || route.id() != span_id {
-        return Err(Failure::Denied);
-    }
-    let span = route.span().map_err(|_| Failure::Dead)?;
-    if !binding::full(route.entry(), &span) {
-        return Err(Failure::Denied);
-    }
-    Ok((route, span))
 }
 fn full_route_range(
     actor: &Arc<Task>,
