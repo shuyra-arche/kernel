@@ -20,7 +20,7 @@ use kernel_api::{
         flat::{FlatId, SlotVersion},
         nest::{
             FAULT_CAPACITY, FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultSequence,
-            MemoGeneration, NestId, SpanId,
+            MemoGeneration,
         },
     },
 };

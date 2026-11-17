@@ -1,7 +1,7 @@
 use super::request::{id, maintenance, set_word};
 use super::slot;
 use kernel_api::{
-    abi::memory::{Action, Failure, Maintenance, Opcode, Outcome, Reply, Request, Value},
+    abi::memory::{Action, Failure, Maintenance, Outcome, Reply, Request, Value},
     address::BASE_PAGE_SIZE,
     model::{
         cell::CellLevel,

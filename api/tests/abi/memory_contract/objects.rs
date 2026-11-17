@@ -1,14 +1,13 @@
 use super::request::{id, set_word};
-use super::{memo, nest_id, slot, span_id};
+use super::{nest_id, slot};
 use kernel_api::{
-    abi::memory::{Action, Domain, Failure, Opcode, Outcome, Reply, Request, Value},
+    abi::memory::{Action, Failure, Outcome, Reply, Request, Value},
     address::{PageCount, VirtAddr},
     model::{
         cell::{CellLevel, Placement},
         flat::{FlatPhase, FlatVersion},
         identity::PendId,
-        nest::SpanId,
-        nest::{CreateSpanRequest, NestId, NestPhase, NestVersion, SpanPhase, SpanVersion},
+        nest::{CreateSpanRequest, NestPhase, NestVersion, SpanPhase, SpanVersion},
     },
 };
 
@@ -60,7 +59,6 @@ pub(super) fn results() -> Vec<Reply> {
     let m = SpanVersion::new(1 << 63).unwrap();
     let flat = slot(0).flat();
     let nest = nest_id();
-    let span = span_id();
     let mut results = vec![
         Reply::new(
             id(),

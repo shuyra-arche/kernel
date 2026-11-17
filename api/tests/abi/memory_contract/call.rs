@@ -1,7 +1,7 @@
 use kernel_api::{
     abi::{
         call::EnvCall,
-        memory::{self, Action, Call, Domain, Frame, Opcode, RequestId},
+        memory::{self, Action, Call, Domain, Frame, RequestId},
     },
     model::{cell::CellLevel, identity::PendId},
 };

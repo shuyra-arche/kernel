@@ -15,7 +15,7 @@ use kernel_api::{
     model::{
         flat::{FlatId, SlotPosition, SlotVersion},
         identity::PendId,
-        nest::{MemoGeneration, MemoPosition, NestId, SpanId},
+        nest::{MemoGeneration, MemoPosition},
     },
 };
 use request::Transition;

@@ -1,8 +1,8 @@
 use super::request::{id, set_word};
-use super::{memo, nest_id, slot, span_id};
+use super::slot;
 use kernel_api::{
     abi::memory::{
-        Action, Delivery, Failure, Observation, Opcode, Outcome, Query, Reply, Request, Snapshot,
+        Action, Delivery, Failure, Observation, Outcome, Query, Reply, Request, Snapshot,
         Value,
     },
     model::{
@@ -10,7 +10,7 @@ use kernel_api::{
         identity::{PendId, TaskId},
         nest::{
             FAULT_CAPACITY, FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase,
-            FaultRoute, FaultSequence, FaultStatus, MAX_FAULT_NS, MemoGeneration, SpanVersion,
+            FaultRoute, FaultSequence, FaultStatus, MAX_FAULT_NS, MemoGeneration,
             fault_read_deadline,
         },
         pend::NestRights,

@@ -6,7 +6,7 @@ use kernel_api::{
     model::{
         cell::CellLevel,
         identity::PendId,
-        nest::{SpanId, SpanPhase, SpanStatus, SpanVersion},
+        nest::{SpanPhase, SpanStatus, SpanVersion},
         sign::SignSource,
     },
 };

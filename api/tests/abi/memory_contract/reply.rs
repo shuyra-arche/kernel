@@ -2,7 +2,7 @@ use super::request::{id, maintenance, set_word};
 use super::{memo, slot};
 use kernel_api::{
     abi::memory::{
-        Action, Delivery, Domain, Failure, Opcode, Outcome, Reply, Request, RequestId, Value,
+        Action, Delivery, Domain, Failure, Outcome, Reply, Request, RequestId, Value,
     },
     model::{
         flat::{BlockPhase, SlotVersion},

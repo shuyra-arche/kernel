@@ -1,7 +1,7 @@
 use super::{memo, slot};
 use kernel_api::{
     abi::memory::{
-        Action, Domain, Failure, Opcode, Outcome, RESULT_CAPACITY, Reply, Request, RequestId,
+        Action, Domain, Failure, Outcome, RESULT_CAPACITY, Reply, Request, RequestId,
         Value,
         journal::{Accepted, Admission, Journal, RequestKey},
     },

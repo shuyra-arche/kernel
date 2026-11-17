@@ -1,8 +1,8 @@
 use super::request::{id, maintenance, set_word};
-use super::{memo, nest_id, slot, span_id};
+use super::{memo, nest_id, slot};
 use kernel_api::{
     abi::memory::{
-        Action, Domain, Failure, Observation, Opcode, Outcome, Query, Reply, Request, Snapshot,
+        Action, Failure, Observation, Outcome, Query, Reply, Request, Snapshot,
     },
     address::VirtAddr,
     model::{
@@ -12,7 +12,6 @@ use kernel_api::{
             SlotVersion,
         },
         identity::{PendId, TaskId},
-        nest::SpanId,
         nest::{
             MemoGeneration, MemoPhase, MemoStatus, NestInfo, NestKind, NestPhase, NestStatus,
             NestVersion, SpanPhase, SpanStatus, SpanVersion,
@@ -23,7 +22,6 @@ use kernel_api::{
 fn fixtures() -> Vec<(Query, Snapshot)> {
     let flat = slot(0).flat();
     let nest = nest_id();
-    let span = span_id();
     vec![
         (
             Query::Flat {

@@ -1,13 +1,12 @@
 use kernel_api::{
     abi::memory::{
-        self, Action, Delivery, Domain, Failure, Observation, Opcode, Outcome, Query, Reply,
+        self, Action, Delivery, Domain, Failure, Observation, Outcome, Query, Reply,
         RequestId, Snapshot, Value,
     },
     address::VirtAddr,
     model::{
         cell::CellLevel,
         identity::PendId,
-        nest::SpanId,
         nest::{NestId, NestVersion, SpanPhase, SpanStatus, SpanVersion},
     },
 };
@@ -136,7 +135,6 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
 }
 #[test]
 fn observations_require_the_requested_mapping_and_cannot_replace_mutation_results() {
-    let nest = NestId::new(19).unwrap();
     let range = PendId::mint(17);
     let request = memory::nest::Call::new(None, Action::Inspect(Query::Span { range })).unwrap();
     let status = SpanStatus {
