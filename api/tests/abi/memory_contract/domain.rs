@@ -166,3 +166,19 @@ fn range_slice_rejects_zero_binding_and_truncation() {
     );
     assert!(kernel_api::model::nest::RangeSlice::from_bytes(&[0; 23]).is_none());
 }
+
+#[test]
+fn range_release_carries_target_and_expected_version() {
+    let target = kernel_api::model::nest::RangeSlice::new(
+        PendId::mint(5),
+        PageOffset::new(7),
+        PageCount::new(9).unwrap(),
+    )
+    .unwrap();
+    let release = kernel_api::model::nest::RangeRelease {
+        target,
+        expected: kernel_api::model::nest::RangeVersion::new(3).unwrap(),
+    };
+    assert_eq!(release.target, target);
+    assert_eq!(release.expected.get(), 3);
+}
