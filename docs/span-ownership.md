@@ -75,14 +75,14 @@ ready for a future worker/repoll path.
 `Occupancy::release_range` and `Span::release_range` implement the hole
 primitive:
 
-- free a page-aligned subrange of one exact generation;
+- free a CellLevel-aligned subrange (using fixed 4 KiB ABI page coordinates) of one exact generation;
 - keep left/right occupancy slots under the same generation identity;
 - remove the range from active access and refresh the index from remaining
   active ranges;
-- refuse while a publication or translation batch still owns it, and refuse
-  to release the last active range. A source-backed Span keeps its implicit
-  source for the remaining ranges; the released hole is no longer accessible
-  and the source is released when the owning Nest/Team closes.
+- refuse if a Memo in the window still retains a logical association, Page,
+  freeze, publication or pending hardware obligation; also refuse the final
+  active range. A Span-wide implicit source remains responsible for its other
+  active ranges and cannot grant access through the released hole.
 
 `nest::Action::ReleaseRange` (Nest slot 27) is the userspace entry. Its
 `RangeSlice { range: PendId, offset, count }` binds the original page

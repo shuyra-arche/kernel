@@ -89,6 +89,40 @@ impl SpanRange {
     pub(crate) fn last(&self) -> usize {
         self.start.as_usize() + (self.size - 1)
     }
+
+    /// Release complete Cells at coordinates fixed to the original range.
+    /// Physical Cell geometry is distinct from the hardware PTE leaf size.
+    pub(crate) fn release_slice(
+        &self,
+        offset: PageOffset,
+        count: PageCount,
+    ) -> Result<(usize, usize), NestError> {
+        let grain = self.level.pages().ok_or(NestError::NotAligned)?;
+        if !offset.get().is_multiple_of(grain) || !count.get().is_multiple_of(grain) {
+            return Err(NestError::NotAligned);
+        }
+        let end = offset
+            .get()
+            .checked_add(count.get())
+            .ok_or(NestError::NotAligned)?;
+        if end > self.size / PAGE_SIZE {
+            return Err(NestError::NotAligned);
+        }
+        let start = self
+            .start
+            .as_usize()
+            .checked_add(
+                offset
+                    .get()
+                    .checked_mul(PAGE_SIZE)
+                    .ok_or(NestError::NotAligned)?,
+            )
+            .ok_or(NestError::NotAligned)?;
+        let last = start
+            .checked_add(count.checked_bytes().ok_or(NestError::NotAligned)? - 1)
+            .ok_or(NestError::NotAligned)?;
+        Ok((start, last))
+    }
 }
 
 /// An occupied address span: identity, original range, permissions and source
