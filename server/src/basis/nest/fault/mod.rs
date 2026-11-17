@@ -214,7 +214,7 @@ pub(crate) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation
     let active = active(&span);
     let state = span.faults.lock();
     let status = FaultStatus {
-        range,
+        range: span.authority(),
         epoch: state.epoch,
         phase: match active {
             Ok(_) if !state.lost() => FaultPhase::Active,

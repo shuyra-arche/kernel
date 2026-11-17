@@ -64,6 +64,7 @@ pub(super) fn mutate(actor: &Arc<Task>, action: NestAction) -> Result<Value, Fai
             let grant =
                 pend::prepare_reservation(actor, &parent, id, request.count).map_err(pend_error)?;
             let token = grant.entry().token();
+            span.bind_authority(token);
             let span = prepared
                 .publish(grant.entry().authority())
                 .map_err(nest_error)?;
