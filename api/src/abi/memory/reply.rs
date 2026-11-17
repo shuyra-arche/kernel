@@ -635,7 +635,7 @@ impl Reply {
         match call {
             super::DomainCall::Flat(request) => {
                 let action = request.action();
-                if let flat::Action::InspectResult { request: original } = action {
+                if let domain_flat::Action::InspectResult { request: original } = action {
                     return self.request == original && self.opcode.domain() == super::Domain::Flat;
                 }
                 if Some(self.request) != request.id()
@@ -645,13 +645,13 @@ impl Reply {
                 }
                 match (action, self.outcome) {
                     (
-                        flat::Action::Split {
+                        domain_flat::Action::Split {
                             start,
                             expected,
                             parent,
                             ..
                         }
-                        | flat::Action::Merge {
+                        | domain_flat::Action::Merge {
                             start,
                             expected,
                             parent,
@@ -674,7 +674,7 @@ impl Reply {
             }
             super::DomainCall::Nest(request) => {
                 let action = request.action();
-                if let nest::Action::InspectResult { request: original } = action {
+                if let domain_nest::Action::InspectResult { request: original } = action {
                     return self.request == original && self.opcode.domain() == super::Domain::Nest;
                 }
                 if Some(self.request) != request.id()
@@ -684,7 +684,7 @@ impl Reply {
                 }
                 match (action, self.outcome) {
                     (
-                        nest::Action::FaultRoute {
+                        domain_nest::Action::FaultRoute {
                             range,
                             expected,
                             epoch,

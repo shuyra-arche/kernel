@@ -485,11 +485,11 @@ impl Observation {
     pub fn matches_domain(self, call: super::DomainCall) -> bool {
         match call {
             super::DomainCall::Flat(request) => {
-                matches!(request.action(), flat::Action::Inspect(query)
+                matches!(request.action(), domain_flat::Action::Inspect(query)
                     if self.0.matches(query.into()))
             }
             super::DomainCall::Nest(request) => {
-                matches!(request.action(), nest::Action::Inspect(query)
+                matches!(request.action(), domain_nest::Action::Inspect(query)
                     if self.0.matches(query.into()))
             }
         }
