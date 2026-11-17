@@ -40,6 +40,10 @@ impl MemoPosition {
         self.token
     }
 
+    pub const fn range(self) -> PendId {
+        self.token
+    }
+
     pub const fn nest(self) -> NestId {
         self.nest
     }
