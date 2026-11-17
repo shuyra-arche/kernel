@@ -216,12 +216,7 @@ fn flat_requests_validate_authorization_and_geometry_before_encoding() {
     };
     assert!(flat::Request::new(RequestId::new(31), bad_delete).is_none());
     let invalid_block = flat::Action::Block {
-        start: SlotPosition::new(
-            PendId::mint(3),
-            FlatId::new(11).unwrap(),
-            1,
-        )
-        .unwrap(),
+        start: SlotPosition::new(PendId::mint(3), FlatId::new(11).unwrap(), 1).unwrap(),
         count: usize::MAX,
         recover: None,
     };

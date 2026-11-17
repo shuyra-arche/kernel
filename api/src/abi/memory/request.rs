@@ -1260,7 +1260,8 @@ pub mod flat {
         pub const WIDTH: usize = super::Request::WIDTH;
 
         pub fn new(id: Option<RequestId>, action: Action) -> Option<Self> {
-            (id.is_none() == action.is_inspection() && action.valid()).then_some(Self { id, action })
+            (id.is_none() == action.is_inspection() && action.valid())
+                .then_some(Self { id, action })
         }
 
         pub const fn id(self) -> Option<RequestId> {
@@ -1500,9 +1501,7 @@ pub mod nest {
                 Self::Inspect(query) => super::Query::from(query).valid(),
                 Self::InspectResult { .. } | Self::Remove { .. } | Self::Retract { .. } => true,
                 Self::Insert { source, .. } => source.valid(),
-                Self::Publish { maintenance, .. } => {
-                    maintenance.is_none_or(Maintenance::valid)
-                }
+                Self::Publish { maintenance, .. } => maintenance.is_none_or(Maintenance::valid),
                 Self::Protect { access, .. } => {
                     access & !14 == 0 && access & 10 != 0 && (access & 4 == 0 || access & 2 != 0)
                 }
@@ -1677,7 +1676,6 @@ pub mod nest {
                 }
             })
         }
-
     }
 
     #[allow(dead_code)]
@@ -1692,7 +1690,8 @@ pub mod nest {
         pub const WIDTH: usize = super::Request::WIDTH;
 
         pub fn new(id: Option<RequestId>, action: Action) -> Option<Self> {
-            (id.is_none() == action.is_inspection() && action.valid()).then_some(Self { id, action })
+            (id.is_none() == action.is_inspection() && action.valid())
+                .then_some(Self { id, action })
         }
 
         pub const fn id(self) -> Option<RequestId> {
@@ -1741,4 +1740,3 @@ pub mod nest {
         }
     }
 }
-
