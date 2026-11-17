@@ -89,6 +89,31 @@ pub struct Journal {
     records: [Option<Record>; RESULT_CAPACITY],
 }
 impl Journal {
+    /// Initialize a caller-owned allocation directly. The production Task
+    /// journal is too large to construct by value on a bounded trap stack.
+    /// A failed actor check writes nothing; successful completion writes all
+    /// fields before the caller may assume the allocation is initialized.
+    pub fn initialize(slot: &mut core::mem::MaybeUninit<Self>, actor: TaskId) -> bool {
+        if actor.get() == 0 || actor.get() > isize::MAX as usize {
+            return false;
+        }
+        let target = slot.as_mut_ptr();
+        // SAFETY: target is an exclusive, correctly aligned Journal allocation.
+        // addr_of_mut! makes no reference to uninitialized fields. Each record
+        // is initialized individually, without constructing a large stack
+        // temporary. All fields are valid before returning true.
+        unsafe {
+            core::ptr::addr_of_mut!((*target).actor).write(actor);
+            core::ptr::addr_of_mut!((*target).high_water).write(0);
+            let records =
+                core::ptr::addr_of_mut!((*target).records).cast::<Option<Record>>();
+            for index in 0..RESULT_CAPACITY {
+                records.add(index).write(None);
+            }
+        }
+        true
+    }
+
     pub fn new(actor: TaskId) -> Option<Self> {
         (actor.get() > 0 && actor.get() <= isize::MAX as usize).then_some(Self {
             actor,

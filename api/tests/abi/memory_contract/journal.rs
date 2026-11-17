@@ -339,3 +339,23 @@ fn keyed_admission_uses_canonical_request_bytes() {
     journal.record(&accepted, reply).unwrap();
     assert!(matches!(journal.begin(actor(), key), Ok(Admission::Replay(r)) if r == reply));
 }
+
+#[test]
+fn heap_initialized_journal_preserves_the_same_bounded_request_contract() {
+    let mut slot = Box::<Journal>::try_new_uninit().unwrap();
+    assert!(!Journal::initialize(&mut slot, TaskId::new(0)));
+    assert!(Journal::initialize(&mut slot, actor()));
+    // SAFETY: the constructor initialized every field after validating actor.
+    let mut journal = unsafe { slot.assume_init() };
+    assert_eq!(journal.high_water(), 0);
+    let accepted = execute(&mut journal, request(1));
+    assert!(matches!(
+        journal.begin_request(actor(), request(1)),
+        Ok(Admission::InFlight(None))
+    ));
+    journal.record(&accepted, committed(1)).unwrap();
+    assert!(matches!(
+        journal.begin_request(actor(), request(1)),
+        Ok(Admission::Replay(reply)) if reply == committed(1)
+    ));
+}

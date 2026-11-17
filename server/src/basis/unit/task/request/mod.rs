@@ -40,8 +40,16 @@ impl Task {
         let _commit = basis::commit();
         let mut window = self.requests.0.lock();
         if window.is_none() {
-            let journal = Journal::new(self.ident.id).ok_or(Failure::Denied)?;
-            *window = Some(Box::try_new(journal).map_err(|_| Failure::OutOfMemory)?);
+            // Allocate storage before initializing the fixed result array.
+            // Constructing Journal by value can overflow the guarded trap
+            // stack before Box::try_new has any chance to move it to the heap.
+            let mut storage =
+                Box::<Journal>::try_new_uninit().map_err(|_| Failure::OutOfMemory)?;
+            if !Journal::initialize(&mut storage, self.ident.id) {
+                return Err(Failure::Denied);
+            }
+            // SAFETY: initialize wrote every Journal field before publication.
+            *window = Some(unsafe { storage.assume_init() });
         }
         let journal = window.as_mut().expect("prepared Task journal");
         match journal.begin(self.ident.id, request)? {
