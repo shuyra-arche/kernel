@@ -2,7 +2,7 @@
 mod next_memory;
 use crate::support::*;
 use kernel_api::abi::memory::{
-    Action, Failure, Observation, Value, flat::Action as FlatAction, flat::Query as FlatQuery,
+    Failure, Observation, Value, flat::Action as FlatAction, flat::Query as FlatQuery,
     nest::Action as NestAction, nest::Query as NestQuery,
 };
 use std::sync::{Arc, atomic::Ordering};
@@ -104,23 +104,18 @@ mod nest {
             // Read the actual copied descriptor and query through the Task
             // owner while the hardware effect is outside every commit guard.
             let bytes = actor.ident.team.nest.bytes.lock().unwrap();
-            let request = kernel_api::abi::memory::Request::from_bytes(
+            let request = kernel_api::abi::memory::nest::Request::from_bytes(
                 &bytes[..kernel_api::abi::memory::Request::WIDTH],
             )
             .unwrap();
             drop(bytes);
-            let query = kernel_api::abi::memory::Request::new(
-                None,
-                Action::InspectResult {
-                    domain: kernel_api::abi::memory::Domain::Nest,
-                    request: request.id().unwrap(),
-                },
-            )
-            .unwrap();
-            let crate::request::Admission::Replay(reply) = actor.admit_memory(query).unwrap()
-            else {
-                panic!("query cannot admit another execution");
-            };
+            let reply = actor
+                .inspect_result(
+                    kernel_api::abi::memory::Domain::Nest,
+                    request.id().unwrap(),
+                )
+                .unwrap()
+                .expect("accepted request retains its pending result");
             assert_eq!(
                 reply.outcome(),
                 kernel_api::abi::memory::Outcome::Pending(value)

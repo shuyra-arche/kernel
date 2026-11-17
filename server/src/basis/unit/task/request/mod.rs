@@ -8,7 +8,7 @@ use alloc::boxed::Box;
 mod transition;
 use alloc::sync::{Arc, Weak};
 use kernel_api::abi::memory::{
-    self, Action, Domain, Failure, Outcome, Reply, Request, RequestId, Value,
+    self, Domain, Failure, Outcome, Reply, RequestId, Value,
     journal::{Accepted, Journal, RequestKey},
 };
 mod receipt;
@@ -32,46 +32,6 @@ impl Task {
     /// Reserve result capacity before returning the sole execution receipt.
     /// Replays never return a permit to run effects again. All admission guards
     /// end here, before Entry prepares a Page or starts a hardware operation.
-    #[allow(dead_code)]
-    pub(crate) fn admit_memory(
-        self: &Arc<Self>,
-        request: Request,
-    ) -> Result<Admission<'_>, Failure> {
-        let _serial = self.pend.lock();
-        let _commit = basis::commit();
-        let mut window = self.requests.0.lock();
-        if window.is_none() {
-            let journal = Journal::new(self.ident.id).ok_or(Failure::Denied)?;
-            *window = Some(Box::try_new(journal).map_err(|_| Failure::OutOfMemory)?);
-        }
-        let journal = window.as_mut().expect("prepared Task journal");
-        if let Action::InspectResult {
-            domain,
-            request: id,
-        } = request.action()
-        {
-            return match journal.inspect(self.ident.id, domain, id) {
-                Ok(Some(reply)) => Ok(Admission::Replay(reply)),
-                Ok(None) => Err(Failure::Busy),
-                Err(Failure::ResultExpired) => Ok(Admission::Replay(
-                    Reply::new(id, memory::Opcode::inspect(domain), Outcome::Expired)
-                        .expect("expired result"),
-                )),
-                Err(error) => Err(error),
-            };
-        }
-        let key = RequestKey::new(request).ok_or(Failure::Invalid)?;
-        match journal.begin(self.ident.id, key)? {
-            memory::journal::Admission::Replay(reply)
-            | memory::journal::Admission::InFlight(Some(reply)) => Ok(Admission::Replay(reply)),
-            memory::journal::Admission::InFlight(None) => Err(Failure::Busy),
-            memory::journal::Admission::Execute(accepted) => {
-                Ok(Admission::Execute(Receipt::new(self, key, accepted)))
-            }
-        }
-    }
-
-    #[allow(dead_code)]
     pub(crate) fn admit_memory_key(
         self: &Arc<Self>,
         request: RequestKey,
