@@ -256,3 +256,39 @@ fn nest_actions_reject_invalid_permissions_and_access() {
     };
     assert!(nest::Request::new(RequestId::new(35), invalid_access).is_none());
 }
+
+#[test]
+fn flat_request_encoding_preserves_all_existing_domain_vectors() {
+    for mixed in super::request::mutations() {
+        let Ok(action) = flat::Action::try_from(mixed) else {
+            continue;
+        };
+        if matches!(action, flat::Action::Delete { .. }) {
+            // Delete's duplicated FlatId was intentionally removed from the new wire.
+            continue;
+        }
+        let id = RequestId::new(91);
+        let legacy = kernel_api::abi::memory::Request::new(id, mixed).unwrap();
+        let request = flat::Request::new(id, action).unwrap();
+        assert_eq!(request.to_bytes(), legacy.to_bytes(), "{action:?}");
+        assert_eq!(flat::Request::from_bytes(&legacy.to_bytes()), Some(request));
+    }
+}
+
+#[test]
+fn nest_request_encoding_preserves_all_existing_domain_vectors() {
+    for mixed in super::request::mutations() {
+        let Ok(action) = nest::Action::try_from(mixed) else {
+            continue;
+        };
+        if matches!(action, nest::Action::Delete { .. }) {
+            // Delete's duplicated NestId was intentionally removed from the new wire.
+            continue;
+        }
+        let id = RequestId::new(92);
+        let legacy = kernel_api::abi::memory::Request::new(id, mixed).unwrap();
+        let request = nest::Request::new(id, action).unwrap();
+        assert_eq!(request.to_bytes(), legacy.to_bytes(), "{action:?}");
+        assert_eq!(nest::Request::from_bytes(&legacy.to_bytes()), Some(request));
+    }
+}
