@@ -7,6 +7,7 @@ mod name;
 mod active;
 #[path = "../../name/allocation.rs"]
 mod allocation;
+mod geometry;
 
 mod basis {
     pub(crate) use crate::name;

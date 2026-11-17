@@ -52,9 +52,8 @@ Violations reject as appropriate (`Denied`, `Stale`, `NotAligned`,
 Under the actual `Address -> Translation -> Span` synchronization path:
 
 - The Span remains Open, and no covering Translation retirement batch is pending.
-- No published or in-flight/busy Memo occupies the requested window.
-- The slice overlaps an active range and does not remove the final active
-  range; full close is performed through the distinct `Release` action.
+- No logically associated source, retained Page/freeze, publication, attribution or in-flight Memo occupies the requested window. Remove the association and settle exact hardware responsibility before release.
+- The slice covers whole CellLevel units relative to the original range, lies fully in currently active intervals and does not remove the final active interval; full close uses the distinct `Release` action.
 - Any existing implicit source remains owned by the Span for its remaining
   active ranges; it does not authorize access through a released hole.
 
@@ -78,8 +77,8 @@ interval. Old grants and late completions never act on the replacement.
 ## Limits and verification
 
 The operation currently refuses to release the final active range. It also
-refuses published, in-flight and retirement-owned positions; it is not a
-general asynchronous forced-unmap operation. Do not confuse Pend.Return with
+refuses source-associated, published, in-flight and retirement-owned positions;
+it is not a general asynchronous forced-unmap operation. Do not confuse Pend.Return with
 memory range release.
 
 Host tests protect wire fields, range identity, occupancy holes, active-range

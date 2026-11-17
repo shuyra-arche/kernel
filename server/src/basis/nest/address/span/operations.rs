@@ -1127,40 +1127,20 @@ impl Span {
         offset: kernel_api::address::PageOffset,
         count: kernel_api::address::PageCount,
     ) -> Result<(), NestError> {
-        let start = VirtAddr::new(
-            self.initial_start()
-                .as_usize()
-                .checked_add(
-                    offset
-                        .get()
-                        .checked_mul(kernel_api::address::PAGE_SIZE)
-                        .ok_or(NestError::NotAligned)?,
-                )
-                .ok_or(NestError::NotAligned)?,
-        );
-        let bytes = count.checked_bytes().ok_or(NestError::NotAligned)?;
-        let last = start
-            .as_usize()
-            .checked_add(bytes - 1)
-            .ok_or(NestError::NotAligned)?;
-        let pages = self.initial_size() / kernel_api::address::PAGE_SIZE;
-        if offset
-            .get()
-            .checked_add(count.get())
-            .is_none_or(|end| end > pages)
-        {
-            return Err(NestError::NotAligned);
-        }
+        let (start, last) = self.range.release_slice(offset, count)?;
         let mut address = nest.address.lock();
         let translation = self.translation.lock();
         let mut inner = self.state.lock();
         if inner.phase != super::SpanPhase::Open || translation.retirement.pending_for(self) {
             return Err(NestError::Busy);
         }
-        if inner.memos.published().any(|(page, _)| {
-            let at = self.initial_start().as_usize() + page * kernel_api::address::PAGE_SIZE;
-            (start.as_usize()..=last).contains(&at)
-        }) {
+        // A released slice cannot retain a source, Page, freeze or hardware
+        // obligation in a historical Memo. Require Remove and settlement first.
+        if inner
+            .memos
+            .published()
+            .any(|(page, _)| page >= offset.get() && page < offset.get() + count.get())
+        {
             return Err(NestError::Busy);
         }
         let mut cursor = None;
@@ -1168,7 +1148,7 @@ impl Span {
             cursor = Some(page);
             if page >= offset.get() && page < offset.get() + count.get() {
                 if let Some(memo) = inner.memos.get(page)
-                    && (memo.in_flight() || memo.busy())
+                    && memo.has_resources()
                 {
                     return Err(NestError::Busy);
                 }
@@ -1176,16 +1156,16 @@ impl Span {
         }
         // Entry count is not proof of an unchanged range: removing a prefix
         // from one of two intervals still leaves exactly two entries.
-        if !super::ActiveRange::cover(&inner.active, start.as_usize(), last) {
+        if !super::ActiveRange::cover(&inner.active, start, last) {
             return Err(NestError::NoRegion);
         }
-        let next = super::ActiveRange::split(&inner.active, start.as_usize(), last, None)?;
+        let next = super::ActiveRange::split(&inner.active, start, last, None)?;
         if next.is_empty() {
             return Err(NestError::Busy);
         }
         if !address
             .occupancy
-            .release_range(start.as_usize(), last, self.identity())
+            .release_range(start, last, self.identity())
         {
             return Err(NestError::Busy);
         }
