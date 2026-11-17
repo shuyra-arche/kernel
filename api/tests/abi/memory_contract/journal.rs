@@ -3,7 +3,7 @@ use kernel_api::{
     abi::memory::{
         Action, Domain, Failure, Opcode, Outcome, RESULT_CAPACITY, Reply, Request, RequestId,
         Value,
-        journal::{Accepted, Admission, Journal},
+        journal::{Accepted, Admission, Journal, RequestKey},
     },
     model::{flat::SlotVersion, identity::TaskId, nest::MemoGeneration},
 };
@@ -321,4 +321,22 @@ fn takeover_updates_retained_epoch_before_a_later_failure() {
     assert!(
         matches!(journal.begin_request(actor(), req), Ok(Admission::Replay(reply)) if reply == failed)
     );
+}
+
+#[test]
+fn keyed_admission_uses_canonical_request_bytes() {
+    let req = request(1);
+    let key = RequestKey::new(req).unwrap();
+    let mut journal = Journal::new(actor()).unwrap();
+    let Admission::Execute(accepted) = journal.begin(actor(), key).unwrap() else {
+        panic!("fresh key")
+    };
+    let reply = Reply::new(
+        req.id().unwrap(),
+        req.action().opcode(),
+        Outcome::Rejected(Failure::Denied),
+    )
+    .unwrap();
+    journal.record(&accepted, reply).unwrap();
+    assert!(matches!(journal.begin(actor(), key), Ok(Admission::Replay(r)) if r == reply));
 }
