@@ -1,17 +1,18 @@
 use kernel_api::{
     abi::{
         call::EnvCall,
-        memory::{self, Action, Call, Domain, Frame, RequestId},
+        memory::{self, Call, Domain, Frame, RequestId},
     },
+    address::PageCount,
     model::{cell::CellLevel, identity::PendId},
 };
 
 fn flat() -> memory::flat::Call {
     memory::flat::Call::new(
         RequestId::new(7),
-        Action::CreateFlat {
+        memory::flat::Action::Create {
             license: PendId::mint(3),
-            count: 512,
+            count: PageCount::new(512).unwrap(),
             level: CellLevel::BASE,
         },
     )
@@ -32,13 +33,13 @@ fn next_surface_has_only_flat_and_nest_and_no_duplicate_create_domain() {
     let flat = flat();
     let nest = memory::nest::Call::new(
         RequestId::new(9),
-        Action::CreateNest {
+        memory::nest::Action::Create {
             license: PendId::mint(3),
         },
     )
     .unwrap();
-    assert!(memory::nest::Call::from_request(flat.request()).is_none());
-    assert!(memory::flat::Call::from_request(nest.request()).is_none());
+    assert!(memory::nest::Request::from_bytes(&flat.request().to_bytes()).is_none());
+    assert!(memory::flat::Request::from_bytes(&nest.request().to_bytes()).is_none());
     for (call, domain) in [
         (Call::from(flat), Domain::Flat),
         (Call::from(nest), Domain::Nest),

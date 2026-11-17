@@ -480,6 +480,21 @@ impl Observation {
     pub fn matches(self, request: Request) -> bool {
         matches!(request.action(), Action::Inspect(query) if self.0.matches(query))
     }
+    /// A snapshot is correlated only with its domain-local Inspect query.
+    /// Inspection never acts as an accepted mutation receipt.
+    pub fn matches_domain(self, call: super::DomainCall) -> bool {
+        match call {
+            super::DomainCall::Flat(request) => {
+                matches!(request.action(), flat::Action::Inspect(query)
+                    if self.0.matches(query.into()))
+            }
+            super::DomainCall::Nest(request) => {
+                matches!(request.action(), nest::Action::Inspect(query)
+                    if self.0.matches(query.into()))
+            }
+        }
+    }
+
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut bytes = [0; Self::WIDTH];
         let mut out = Writer(&mut bytes);

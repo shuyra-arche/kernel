@@ -627,6 +627,92 @@ impl Reply {
         }
     }
 
+
+    /// Client-side correlation with the domain request, without recreating a
+    /// mixed action. Retained-result inspection is scoped by request ID and
+    /// domain; a mutation additionally binds its opcode and exact outcome.
+    pub fn matches_domain(self, call: super::DomainCall) -> bool {
+        match call {
+            super::DomainCall::Flat(request) => {
+                let action = request.action();
+                if let flat::Action::InspectResult { request: original } = action {
+                    return self.request == original && self.opcode.domain() == super::Domain::Flat;
+                }
+                if Some(self.request) != request.id()
+                    || self.opcode != Opcode::Flat(action.opcode())
+                {
+                    return false;
+                }
+                match (action, self.outcome) {
+                    (
+                        flat::Action::Split {
+                            start,
+                            expected,
+                            parent,
+                            ..
+                        }
+                        | flat::Action::Merge {
+                            start,
+                            expected,
+                            parent,
+                            ..
+                        },
+                        Outcome::Committed(Value::Geometry {
+                            flat,
+                            version,
+                            range,
+                            ..
+                        }),
+                    ) => {
+                        flat == start.flat()
+                            && range.offset() == start.page()
+                            && range.parent() == parent
+                            && expected.next() == Some(version)
+                    }
+                    _ => true,
+                }
+            }
+            super::DomainCall::Nest(request) => {
+                let action = request.action();
+                if let nest::Action::InspectResult { request: original } = action {
+                    return self.request == original && self.opcode.domain() == super::Domain::Nest;
+                }
+                if Some(self.request) != request.id()
+                    || self.opcode != Opcode::Nest(action.opcode())
+                {
+                    return false;
+                }
+                match (action, self.outcome) {
+                    (
+                        nest::Action::FaultRoute {
+                            range,
+                            expected,
+                            epoch,
+                            route,
+                        },
+                        Outcome::Committed(Value::FaultRoute {
+                            range: actual_range,
+                            version,
+                            epoch: actual_epoch,
+                            phase,
+                        }),
+                    ) => {
+                        range == actual_range
+                            && expected.next() == Some(version)
+                            && epoch.next() == Some(actual_epoch)
+                            && phase
+                                == if route.is_some() {
+                                    FaultPhase::Active
+                                } else {
+                                    FaultPhase::Disabled
+                                }
+                    }
+                    _ => true,
+                }
+            }
+        }
+    }
+
     pub fn to_bytes(self) -> [u8; Self::WIDTH] {
         let mut bytes = [0; Self::WIDTH];
         self.write(&mut Writer(&mut bytes))

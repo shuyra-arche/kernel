@@ -1,22 +1,24 @@
-//! Native ABI 14 has exactly two memory operation domains. The default Cell
-//! register adapter is not part of this interface. No alternate creation path
-//! or Task-local Slot handle can be encoded here.
-use super::{Action, Domain, Opcode, Request, RequestId, journal::RequestKey};
+//! Native ABI 14 Flat/Nest domain calls. The register framing and result
+//! transport are shared; operation and request identities stay domain-local.
+use super::{Domain, Opcode, Request, RequestId, journal::RequestKey};
 
 macro_rules! domain {
     ($module:ident, $domain:ident) => {
         pub mod $module {
             use super::*;
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-            pub struct Call(Request);
+            pub struct Call(super::super::$module::Request);
             impl Call {
-                pub fn new(id: Option<RequestId>, action: impl Into<Action>) -> Option<Self> {
-                    Self::from_request(Request::new(id, action.into())?)
+                pub fn new(
+                    id: Option<RequestId>,
+                    action: super::super::$module::Action,
+                ) -> Option<Self> {
+                    super::super::$module::Request::new(id, action).map(Self)
                 }
-                pub fn from_request(request: Request) -> Option<Self> {
-                    (request.action().opcode().domain() == Domain::$domain).then_some(Self(request))
+                pub const fn from_request(request: super::super::$module::Request) -> Self {
+                    Self(request)
                 }
-                pub const fn request(self) -> Request {
+                pub const fn request(self) -> super::super::$module::Request {
                     self.0
                 }
             }
@@ -36,27 +38,51 @@ pub enum Call {
     Flat(flat::Call),
     Nest(nest::Call),
 }
+
 impl Call {
+    /// Bridge for older callers constructing a mixed, checked request.
+    /// Real entry and Client transport use only domain-local requests.
     pub fn from_request(request: Request) -> Self {
-        match request.action().opcode().domain() {
-            Domain::Flat => Self::Flat(flat::Call::from_request(request).unwrap()),
-            Domain::Nest => Self::Nest(nest::Call::from_request(request).unwrap()),
+        let action = request.action();
+        match action.opcode() {
+            Opcode::Flat(_) => Self::Flat(
+                flat::Call::new(
+                    request.id(),
+                    super::flat::Action::try_from(action).expect("checked Flat action"),
+                )
+                .expect("checked Flat request"),
+            ),
+            Opcode::Nest(_) => Self::Nest(
+                nest::Call::new(
+                    request.id(),
+                    super::nest::Action::try_from(action).expect("checked Nest action"),
+                )
+                .expect("checked Nest request"),
+            ),
         }
     }
-    pub const fn request(self) -> Request {
+
+    pub const fn from_domain(request: DomainCall) -> Self {
+        match request {
+            DomainCall::Flat(request) => Self::Flat(flat::Call::from_request(request)),
+            DomainCall::Nest(request) => Self::Nest(nest::Call::from_request(request)),
+        }
+    }
+
+    pub const fn request(self) -> DomainCall {
         match self {
-            Self::Flat(call) => call.request(),
-            Self::Nest(call) => call.request(),
+            Self::Flat(call) => DomainCall::Flat(call.request()),
+            Self::Nest(call) => DomainCall::Nest(call.request()),
         }
     }
+
     pub const fn number(self) -> u64 {
-        self.request().action().opcode().call_number()
+        self.request().number()
     }
 }
 
-/// Checked register envelope. It validates arithmetic, not caller memory or
-/// authority. Entry must snapshot all request bytes before effects/output, then
-/// use snapshot() to bind the descriptor to the actual trap number.
+/// Validates the register envelope and binds the copied descriptor to a trap
+/// number. Caller-local authorization is checked only at the Server commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Frame {
     opcode: Opcode,
@@ -94,38 +120,36 @@ impl Frame {
     pub fn domain_snapshot(self, bytes: &[u8]) -> Option<DomainCall> {
         DomainCall::from_call(self.number(), bytes)
     }
-
     pub fn snapshot(self, bytes: &[u8]) -> Option<Call> {
-        Some(Call::from_request(Request::from_call(
-            self.number(),
-            bytes,
-        )?))
+        self.domain_snapshot(bytes).map(Call::from_domain)
     }
 }
 
-/// Entry-facing call with the domain request preserved.
+/// Validated domain request, retaining its action without a mixed Action copy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DomainCall {
     Flat(super::flat::Request),
     Nest(super::nest::Request),
 }
-
 impl DomainCall {
     pub fn from_call(number: u64, bytes: &[u8]) -> Option<Self> {
-        let opcode = Opcode::from_call_number(number)?;
-        match opcode {
+        match Opcode::from_call_number(number)? {
             Opcode::Flat(_) => super::flat::Request::from_call(number, bytes).map(Self::Flat),
             Opcode::Nest(_) => super::nest::Request::from_call(number, bytes).map(Self::Nest),
         }
     }
-
     pub const fn number(self) -> u64 {
         match self {
             Self::Flat(request) => Opcode::Flat(request.action().opcode()).call_number(),
             Self::Nest(request) => Opcode::Nest(request.action().opcode()).call_number(),
         }
     }
-
+    pub fn to_bytes(self) -> [u8; Request::WIDTH] {
+        match self {
+            Self::Flat(request) => request.to_bytes(),
+            Self::Nest(request) => request.to_bytes(),
+        }
+    }
     pub fn key(self) -> Option<RequestKey> {
         match self {
             Self::Flat(request) => RequestKey::from_parts(

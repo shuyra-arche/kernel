@@ -1,6 +1,6 @@
 use kernel_api::{
     abi::memory::{
-        self, Action, Delivery, Domain, Failure, Observation, Outcome, Query, Reply, RequestId,
+        self, Delivery, Domain, Failure, Observation, Outcome, Reply, RequestId,
         Snapshot, Value,
     },
     address::VirtAddr,
@@ -14,7 +14,7 @@ use kernel_client::memory::{Error, Response, invoke_with};
 fn call() -> memory::nest::Call {
     memory::nest::Call::new(
         RequestId::new(7),
-        Action::CreateNest {
+        memory::nest::Action::Create {
             license: PendId::mint(3),
         },
     )
@@ -106,8 +106,7 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
     );
     let inspect = memory::nest::Call::new(
         None,
-        Action::InspectResult {
-            domain: Domain::Nest,
+        memory::nest::Action::InspectResult {
             request: RequestId::new(7).unwrap(),
         },
     )
@@ -136,7 +135,7 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
 #[test]
 fn observations_require_the_requested_mapping_and_cannot_replace_mutation_results() {
     let range = PendId::mint(17);
-    let request = memory::nest::Call::new(None, Action::Inspect(Query::Span { range })).unwrap();
+    let request = memory::nest::Call::new(None, memory::nest::Action::Inspect(memory::nest::Query::Span { range })).unwrap();
     let status = SpanStatus {
         range,
         version: SpanVersion::INITIAL,
