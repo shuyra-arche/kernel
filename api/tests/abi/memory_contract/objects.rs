@@ -472,23 +472,22 @@ fn structural_versions_are_nonzero_full_width_and_never_wrap() {
 
 #[test]
 fn release_range_encodes_identity_expected_revision_and_page_window() {
+    let target = kernel_api::model::nest::RangeSlice::new(
+        PendId::mint(7),
+        kernel_api::address::PageOffset::new(1),
+        kernel_api::address::PageCount::new(2).unwrap(),
+    )
+    .unwrap();
     let request = Request::new(
         Some(id()),
         Action::ReleaseRange {
-            token: PendId::mint(7),
-            nest: NestId::new(13).unwrap(),
-            span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
-            expected: SpanVersion::new(3).unwrap(),
-            offset: 1,
-            count: 2,
+            target,
+            expected: kernel_api::model::nest::RangeVersion::new(3).unwrap(),
         },
     )
     .unwrap();
     let bytes = request.to_bytes();
-    for (index, word) in [14, 13, 27, u64::MAX, 7, 13, 17, 3, 1, 2]
-        .into_iter()
-        .enumerate()
-    {
+    for (index, word) in [14, 13, 27, u64::MAX, 7, 1, 2, 3].into_iter().enumerate() {
         assert_eq!(
             u64::from_le_bytes(bytes[index * 8..(index + 1) * 8].try_into().unwrap()),
             word
@@ -517,18 +516,21 @@ fn release_range_encodes_identity_expected_revision_and_page_window() {
 
 #[test]
 fn release_range_rejects_empty_or_overflowing_windows_and_non_open_replies() {
-    let action = |offset, count| Action::ReleaseRange {
-        token: PendId::mint(7),
-        nest: NestId::new(13).unwrap(),
-        span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),
-        expected: SpanVersion::new(3).unwrap(),
-        offset,
-        count,
+    let action = |offset, count| {
+        let target = kernel_api::model::nest::RangeSlice::new(
+            PendId::mint(7),
+            kernel_api::address::PageOffset::new(offset),
+            kernel_api::address::PageCount::new(count)?,
+        )?;
+        Some(Action::ReleaseRange {
+            target,
+            expected: kernel_api::model::nest::RangeVersion::new(3)?,
+        })
     };
-    assert!(Request::new(Some(id()), action(0, 0)).is_none());
-    assert!(Request::new(Some(id()), action(usize::MAX, 2)).is_none());
+    assert!(action(0, 0).is_none());
+    assert!(action(usize::MAX, 2).is_none());
 
-    let request = Request::new(Some(id()), action(1, 2)).unwrap();
+    let request = Request::new(Some(id()), action(1, 2).unwrap()).unwrap();
     let value = |phase| Value::SpanLifecycle {
         nest: NestId::new(13).unwrap(),
         span: SpanId::from_bytes(&17u64.to_le_bytes()).unwrap(),

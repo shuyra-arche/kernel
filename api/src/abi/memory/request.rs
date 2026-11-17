@@ -15,6 +15,7 @@ use crate::model::{
         CreateSpanRequest, FaultEpoch, FaultRoute, MemoGeneration, MemoPosition, NestId,
         NestVersion, SpanVersion,
     },
+    nest::{RangeSlice, RangeVersion},
     view::ViewId,
 };
 
@@ -173,12 +174,8 @@ pub enum Action {
     /// Release a page-aligned subrange of a Span. The Span stays open and its
     /// revision advances; full close remains `DeleteSpan`.
     ReleaseRange {
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
-        expected: SpanVersion,
-        offset: usize,
-        count: usize,
+        target: RangeSlice,
+        expected: RangeVersion,
     },
     /// One parent to its 512 immediate children. The expected Flat revision
     /// covers every affected coordinate, not merely the first Slot's stamp.
@@ -335,17 +332,7 @@ impl Action {
             Self::DeleteSpan { token, span, .. } => {
                 valid_token(token.get()) && valid_token(span.get())
             }
-            Self::ReleaseRange {
-                token,
-                span,
-                offset,
-                count,
-                ..
-            } => {
-                valid_token(token.get())
-                    && valid_token(span.get())
-                    && crate::model::cell::pages(offset, count).is_some()
-            }
+            Self::ReleaseRange { target, .. } => target.range().get() != 0,
             Self::Split {
                 start,
                 parent,
@@ -473,25 +460,9 @@ impl Action {
                 out.word(span.get() as u64)?;
                 out.word(expected.get())
             }
-            Self::ReleaseRange {
-                token,
-                nest,
-                span,
-                expected,
-                offset,
-                count,
-            } => {
-                for word in [
-                    token.get() as u64,
-                    nest.get() as u64,
-                    span.get() as u64,
-                    expected.get(),
-                    offset as u64,
-                    count as u64,
-                ] {
-                    out.word(word)?;
-                }
-                Some(())
+            Self::ReleaseRange { target, expected } => {
+                out.bytes(&target.to_bytes())?;
+                out.word(expected.get())
             }
             Self::Split {
                 start,
@@ -634,12 +605,8 @@ impl Action {
                 expected: SpanVersion::new(input.word()?)?,
             },
             Opcode::Nest(domain_nest::Opcode::ReleaseRange) => Self::ReleaseRange {
-                token: input.token()?,
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
-                expected: SpanVersion::new(input.word()?)?,
-                offset: input.size()?,
-                count: input.size()?,
+                target: RangeSlice::from_bytes(input.bytes::<24>()?)?,
+                expected: RangeVersion::new(input.word()?)?,
             },
             Opcode::Flat(domain_flat::Opcode::Split) | Opcode::Flat(domain_flat::Opcode::Merge) => {
                 let start = SlotPosition::from_bytes(input.bytes::<24>()?)?;
@@ -1337,12 +1304,8 @@ pub mod nest {
             expected: SpanVersion,
         },
         ReleaseRange {
-            token: PendId,
-            nest: NestId,
-            span: SpanId,
-            expected: SpanVersion,
-            offset: usize,
-            count: usize,
+            target: RangeSlice,
+            expected: RangeVersion,
         },
         Inspect(Query),
         InspectResult {
@@ -1419,21 +1382,9 @@ pub mod nest {
                     span,
                     expected,
                 },
-                super::Action::ReleaseRange {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                    offset,
-                    count,
-                } => Self::ReleaseRange {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                    offset,
-                    count,
-                },
+                super::Action::ReleaseRange { target, expected } => {
+                    Self::ReleaseRange { target, expected }
+                }
                 super::Action::Inspect(query) => Self::Inspect(query),
                 super::Action::InspectResult {
                     domain: Domain::Nest,
@@ -1538,21 +1489,9 @@ pub mod nest {
                     span,
                     expected,
                 },
-                Self::ReleaseRange {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                    offset,
-                    count,
-                } => super::Action::ReleaseRange {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                    offset,
-                    count,
-                },
+                Self::ReleaseRange { target, expected } => {
+                    super::Action::ReleaseRange { target, expected }
+                }
                 Self::Inspect(query) => super::Action::Inspect(query),
                 Self::InspectResult { request } => super::Action::InspectResult {
                     domain: Domain::Nest,

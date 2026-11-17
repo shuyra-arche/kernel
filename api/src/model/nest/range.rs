@@ -16,7 +16,7 @@ impl RangeSlice {
     pub const WIDTH: usize = 24;
 
     pub fn new(range: PendId, offset: PageOffset, count: PageCount) -> Option<Self> {
-        (range.get() != 0).then_some(Self {
+        (range.get() != 0 && offset.get().checked_add(count.get()).is_some()).then_some(Self {
             range,
             offset,
             count,
