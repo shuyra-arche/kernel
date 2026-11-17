@@ -56,3 +56,16 @@ fn final_address_page_has_a_representable_inclusive_release_end() {
             .is_err()
     );
 }
+
+#[test]
+fn original_range_requires_cell_aligned_start_as_well_as_size() {
+    let level = CellLevel::new(1).unwrap();
+    let cell = level.bytes().unwrap();
+    let aligned = VirtAddr::new(2 * cell);
+    assert!(SpanRange::new(aligned, cell, level).is_ok());
+
+    // Page alignment alone does not admit a large physical Cell.
+    assert!(SpanRange::new(VirtAddr::new(2 * cell + PAGE_SIZE), cell, level).is_err());
+    assert!(SpanRange::new(aligned, cell - PAGE_SIZE, level).is_err());
+    assert!(SpanRange::new(aligned, cell + PAGE_SIZE, level).is_err());
+}

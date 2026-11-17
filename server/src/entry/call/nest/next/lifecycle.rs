@@ -331,8 +331,16 @@ fn placement(nest: &Nest, request: CreateSpanRequest) -> Result<Placement, Bindi
             PlacementAt::Exact(address)
         }
     };
-    Placement::new(RegionKind::Normal, size, request.placement.align(), at)
-        .map_err(|error| placement_error(error.into()))
+    // Physical Cells require at least CellLevel alignment. The caller may
+    // request stronger alignment, but a smaller hint cannot misalign a Cell.
+    let cell = request.level.bytes().ok_or(BindingError::NotAligned)?;
+    Placement::new(
+        RegionKind::Normal,
+        size,
+        request.placement.align().max(cell),
+        at,
+    )
+    .map_err(|error| placement_error(error.into()))
 }
 
 fn placement_error(error: crate::basis::nest::NestError) -> BindingError {

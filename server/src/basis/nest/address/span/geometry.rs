@@ -15,7 +15,7 @@ impl SpanRange {
     pub(crate) fn new(start: VirtAddr, size: usize, level: CellLevel) -> Result<Self, NestError> {
         let cell = level.bytes().ok_or(NestError::NotAligned)?;
         if size == 0
-            || start.offset() != 0
+            || !start.as_usize().is_multiple_of(cell)
             || !size.is_multiple_of(cell)
             || start.as_usize().checked_add(size - 1).is_none()
         {
