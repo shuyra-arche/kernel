@@ -24,7 +24,7 @@ fn call() -> memory::nest::Call {
 fn committed(id: u64) -> Reply {
     Reply::new(
         RequestId::new(id).unwrap(),
-        Opcode::Create(Domain::Nest),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Create),
         Outcome::Committed(Value::CreatedNest {
             token: PendId::mint(17),
             nest: NestId::new(19).unwrap(),
@@ -41,7 +41,13 @@ fn one_canonical_snapshot_and_one_correlated_result() {
     assert_eq!(
         invoke_with(request, |number, input, output| {
             calls += 1;
-            assert_eq!(number, Opcode::Create(Domain::Nest).call_number());
+            assert_eq!(
+                number,
+                kernel_api::abi::memory::Opcode::Nest(
+                    kernel_api::abi::memory::nest::Opcode::Create
+                )
+                .call_number()
+            );
             assert_eq!(input, &request.request().to_bytes());
             assert_eq!(output, &[0; 128]);
             *output = result.to_bytes();
@@ -88,7 +94,7 @@ fn lost_delivery_and_malformed_success_never_trigger_retry_or_fake_rejection() {
 fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() {
     let failure = Reply::new(
         RequestId::new(7).unwrap(),
-        Opcode::Create(Domain::Nest),
+        kernel_api::abi::memory::Opcode::Nest(kernel_api::abi::memory::nest::Opcode::Create),
         Outcome::Rejected(Failure::Unsupported),
     )
     .unwrap();
@@ -116,7 +122,7 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
     );
     let expired = Reply::new(
         RequestId::new(7).unwrap(),
-        Opcode::Inspect(Domain::Nest),
+        kernel_api::abi::memory::Opcode::inspect(kernel_api::abi::memory::Domain::Nest),
         Outcome::Expired,
     )
     .unwrap();
