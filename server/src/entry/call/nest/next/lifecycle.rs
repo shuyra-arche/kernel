@@ -194,8 +194,11 @@ pub(super) fn effect(
                 if span.version().get() != expected.get() {
                     return Err(Failure::Stale);
                 }
-                let next = expected.next().ok_or(Failure::VersionExhausted)?;
-                let version = kernel_api::model::nest::SpanVersion::new(next.get())
+                expected.next().ok_or(Failure::VersionExhausted)?;
+                // Begin release compares the live Span version with the
+                // caller's *current* expected version. The next version is
+                // reserved for the transition, not for this precondition.
+                let version = kernel_api::model::nest::SpanVersion::new(expected.get())
                     .ok_or(Failure::VersionExhausted)?;
                 nest.begin_release(&span, version).map_err(nest_error)?;
                 receipt.start(Value::SpanLifecycle {
