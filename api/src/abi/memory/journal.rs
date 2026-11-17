@@ -1,8 +1,8 @@
-extern crate alloc;
 //! Fixed-capacity request/result protocol. The live Task must own exactly one
 //! journal for its lifetime and serialize admission, resource commit and result
 //! recording. This does not execute syscalls, authorize resources or own cleanup.
 
+extern crate alloc;
 use alloc::vec::Vec;
 use super::{Domain, Failure, Opcode, Outcome, RESULT_CAPACITY, Reply, Request, RequestId};
 use crate::model::identity::TaskId;
