@@ -173,6 +173,7 @@ pub(crate) struct Memo {
     publication_access: u64,
     hardware: Hardware,
     attribution: Option<Attribution>,
+    range: Option<usize>,
 }
 impl Memo {
     pub(crate) const fn vacant() -> Self {
@@ -184,6 +185,7 @@ impl Memo {
             publication_access: 0,
             hardware: Hardware::Empty,
             attribution: None,
+            range: None,
         }
     }
     pub(in crate::basis::nest) fn retain_completion(
@@ -202,6 +204,19 @@ impl Memo {
     ) -> Option<crate::basis::unit::task::request::Completion> {
         self.activity.completion().and_then(Option::take)
     }
+    #[allow(dead_code)]
+    pub(in crate::basis::nest) fn bind_range(
+        &mut self,
+        range: kernel_api::model::identity::PendId,
+    ) {
+        self.range = Some(range.get());
+    }
+
+    #[allow(dead_code)]
+    pub(in crate::basis::nest) fn range(&self) -> Option<kernel_api::model::identity::PendId> {
+        self.range.map(kernel_api::model::identity::PendId::mint)
+    }
+
     pub(in crate::basis::nest) fn maintenance(
         &self,
     ) -> Option<&Arc<crate::basis::pend::MaintenanceUse>> {

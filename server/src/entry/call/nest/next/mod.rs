@@ -368,8 +368,14 @@ pub(in crate::entry::call) fn mutate(
             }
             let count = PageCount::new(span.grain()).ok_or(Failure::NotAligned)?;
             let selected = select(actor, source, count)?;
-            span.insert(mapping.nest(), index, expected.get(), selected)
-                .map_err(nest_error)?;
+            span.insert(
+                mapping.nest(),
+                index,
+                expected.get(),
+                selected,
+                target.token(),
+            )
+            .map_err(nest_error)?;
             Ok(Value::Memo { generation })
         }
         NestAction::Remove { memo, expected } => {

@@ -24,6 +24,7 @@ impl Span {
         index: usize,
         expected: u64,
         source: Source,
+        range_authority: kernel_api::model::identity::PendId,
     ) -> Result<(), NestError> {
         if self.source().is_some() {
             return Err(NestError::Pinned);
@@ -80,11 +81,17 @@ impl Span {
                 return Err(NestError::NoRegion);
             }
             let mut inner = self.state.lock();
-            inner
+            let replaced = inner
                 .memos
                 .existing_mut(index)
                 .expect("prepared Memo")
-                .associate(expected, None, source, binding.clone())
+                .associate(expected, None, source, binding.clone());
+            inner
+                .memos
+                .existing_mut(index)
+                .expect("associated Memo")
+                .bind_range(range_authority);
+            replaced
         };
         self.changed();
         authorization.register_binding(binding);
