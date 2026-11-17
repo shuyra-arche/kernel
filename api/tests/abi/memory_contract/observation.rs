@@ -97,13 +97,10 @@ fn fixtures() -> Vec<(Query, Snapshot)> {
         ),
         (
             Query::Span {
-                token: PendId::mint(13),
-                nest,
-                span,
+                range: PendId::mint(13),
             },
             Snapshot::Span(SpanStatus {
-                nest,
-                span,
+                range: PendId::mint(13),
                 version: SpanVersion::new(7).unwrap(),
                 offset: 512,
                 count: 512,
@@ -124,7 +121,7 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
         &[14, 12, 18, 0, 2, 23, 11, 29, 31],
         &[14, 13, 18, 0, 0, 13, 17],
         &[14, 13, 18, 0, 1, 13, 512],
-        &[14, 13, 18, 0, 2, 13, 17, 19],
+        &[14, 13, 18, 0, 2, 13],
     ];
     for ((query, _), words) in fixtures().into_iter().zip(expected) {
         let request = Request::new(None, Action::Inspect(query)).unwrap();
@@ -165,9 +162,7 @@ fn inspect_queries_need_identity_and_scope_but_no_expected_version_or_request_id
         Request::new(
             None,
             Action::Inspect(Query::Span {
-                token: PendId::mint(1),
-                nest: nest_id(),
-                span: SpanId::NONE
+                range: PendId::NONE,
             })
         )
         .is_none()
@@ -197,7 +192,7 @@ fn observation_vectors_preserve_source_publication_and_full_width_faults() {
             u64::MAX,
         ],
         &[14, 13, 18, 0, 1, 0, 13, 512, 6, 3, 11, 1024, 53, 6, 1],
-        &[14, 13, 18, 0, 2, 0, 17, 19, 7, 512, 512, 0x8000, 1, 6, 0],
+        &[14, 13, 18, 0, 2, 0, 13, 7, 512, 512, 0x8000, 1, 6, 0],
     ];
     for ((query, snapshot), words) in fixtures().into_iter().zip(expected) {
         let observation = Observation::new(snapshot).unwrap();
@@ -469,15 +464,15 @@ fn malformed_observations_reject_headers_geometry_flags_and_reserved_payloads() 
         (4, 8, 0),
         (4, 11, 7),
         (4, 12, 0),
+        (5, 6, 0),
         (5, 7, 0),
-        (5, 8, 0),
-        (5, 9, 513),
+        (5, 8, 513),
+        (5, 9, 0),
         (5, 10, 1),
-        (5, 11, 1),
-        (5, 12, 7),
+        (5, 11, 7),
+        (5, 12, 4),
         (5, 13, 4),
-        (5, 14, 4),
-        (5, 15, 1),
+        (5, 14, 1),
     ] {
         let mut bad = Observation::new(fixtures()[fixture].1).unwrap().to_bytes();
         set_word(&mut bad, word, value);

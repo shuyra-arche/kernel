@@ -137,19 +137,10 @@ fn accepted_failure_and_recovered_original_opcode_stay_distinct_from_delivery() 
 #[test]
 fn observations_require_the_requested_mapping_and_cannot_replace_mutation_results() {
     let nest = NestId::new(19).unwrap();
-    let span = SpanId::from_bytes(&23u64.to_le_bytes()).unwrap();
-    let request = memory::nest::Call::new(
-        None,
-        Action::Inspect(Query::Span {
-            token: PendId::mint(17),
-            nest,
-            span,
-        }),
-    )
-    .unwrap();
+    let range = PendId::mint(17);
+    let request = memory::nest::Call::new(None, Action::Inspect(Query::Span { range })).unwrap();
     let status = SpanStatus {
-        nest,
-        span,
+        range,
         version: SpanVersion::INITIAL,
         offset: 0,
         count: 1,
@@ -174,7 +165,7 @@ fn observations_require_the_requested_mapping_and_cannot_replace_mutation_result
         Err(Error::Protocol)
     );
     let wrong = Observation::new(Snapshot::Span(SpanStatus {
-        nest: NestId::new(20).unwrap(),
+        range: PendId::mint(20),
         ..status
     }))
     .unwrap();

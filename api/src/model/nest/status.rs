@@ -1,9 +1,9 @@
 //! Next-memory-ABI space, span and Memo observations. Descriptive
 //! snapshots do not replace a live Whole/Span Pend or retirement evidence.
 
-use super::{MemoGeneration, NestId, NestInfo};
+use super::{MemoGeneration, NestInfo};
 use crate::address::{BASE_PAGE_SIZE, VirtAddr};
-use crate::model::{cell::CellLevel, flat::FlatId, nest::SpanId};
+use crate::model::{cell::CellLevel, flat::FlatId};
 use core::num::NonZeroU64;
 
 /// Address-space topology/lifecycle epoch, not a Memo publication generation.
@@ -73,8 +73,7 @@ impl SpanPhase {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpanStatus {
-    pub nest: NestId,
-    pub span: SpanId,
+    pub range: crate::model::identity::PendId,
     pub version: SpanVersion,
     pub offset: usize,
     pub count: usize,
@@ -91,8 +90,8 @@ impl SpanStatus {
         let Some(grain) = self.level.pages() else {
             return false;
         };
-        self.span.get() > 0
-            && self.span.get() <= isize::MAX as usize
+        self.range.get() > 0
+            && self.range.get() <= isize::MAX as usize
             && crate::model::cell::pages(self.offset, self.count).is_some()
             && self.offset.is_multiple_of(grain)
             && self.count.is_multiple_of(grain)

@@ -100,16 +100,9 @@ pub(super) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation
                 }
             }
         }
-        NestQuery::Span {
-            token,
-            nest: id,
-            span: reservation,
-        } => {
+        NestQuery::Span { range } => {
             let route =
-                SpanRoute::acquire(actor, token, NestRights::INSPECT).map_err(pend_error)?;
-            if route.id() != reservation || route.nest().id() != id {
-                return Err(Failure::Denied);
-            }
+                SpanRoute::acquire(actor, range, NestRights::INSPECT).map_err(pend_error)?;
             let span = route.span().map_err(pend_error)?;
             let (offset, count) = route.entry().authority().window().ok_or(Failure::Denied)?;
             Snapshot::Span(

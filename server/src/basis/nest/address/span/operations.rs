@@ -1027,7 +1027,7 @@ impl Span {
         writable: bool,
     ) -> Result<kernel_api::model::nest::SpanStatus, NestError> {
         use super::SpanPhase as LocalPhase;
-        use kernel_api::model::nest::{SpanId, SpanPhase, SpanStatus};
+        use kernel_api::model::nest::{SpanPhase, SpanStatus};
         nest.check_owner(self)?;
         let translation = self.translation.lock();
         let inner = self.state.lock();
@@ -1041,9 +1041,7 @@ impl Span {
             access.remove(Access::WRITE);
         }
         Ok(SpanStatus {
-            nest: self.identity.nest_id(),
-            span: SpanId::from_bytes(&(self.identity() as u64).to_le_bytes())
-                .expect("span identity"),
+            range: self.authority(),
             version: self.version(),
             offset: offset.get(),
             count: count.get(),

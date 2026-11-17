@@ -13,7 +13,6 @@ use crate::model::{
         SlotPosition, SlotStatus, SlotVersion,
     },
     identity::{PendId, TaskId},
-    nest::SpanId,
     nest::{
         FaultAccess, FaultCause, FaultEpoch, FaultEvent, FaultPhase, FaultSequence, FaultStatus,
         MemoGeneration, MemoPhase, MemoPosition, MemoStatus, NestId, NestInfo, NestKind, NestPhase,
@@ -50,9 +49,7 @@ pub enum Query {
     },
     Memo(MemoPosition),
     Span {
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
+        range: PendId,
     },
 }
 
@@ -76,7 +73,7 @@ impl Query {
         match self {
             Self::Flat { token, .. } | Self::Nest { token, .. } => valid_token(token.get()),
             Self::Block(h) => valid_token(h.token.get()),
-            Self::Span { token, span, .. } => valid_token(token.get()) && valid_token(span.get()),
+            Self::Span { range } => valid_token(range.get()),
             Self::FaultRoute { range } => valid_token(range.get()),
             Self::FaultEvent { range, wait, .. } => {
                 valid_token(range.get()) && wait != Wait::Infinite
@@ -101,11 +98,7 @@ impl Query {
                 out.word(nest.get() as u64)
             }
             Self::Memo(memo) => out.bytes(&memo.to_bytes()),
-            Self::Span { token, nest, span } => {
-                out.word(token.get() as u64)?;
-                out.word(nest.get() as u64)?;
-                out.word(span.get() as u64)
-            }
+            Self::Span { range } => out.word(range.get() as u64),
             Self::FaultRoute { range } => out.word(range.get() as u64),
             Self::FaultEvent {
                 range,
@@ -147,9 +140,7 @@ impl Query {
             },
             (Domain::Nest, 1) => Self::Memo(MemoPosition::from_bytes(input.bytes::<16>()?)?),
             (Domain::Nest, 2) => Self::Span {
-                token: input.token()?,
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
             },
             (Domain::Nest, 4) => Self::FaultRoute {
                 range: input.token()?,
@@ -324,8 +315,7 @@ impl Snapshot {
             Self::Span(s) => words(
                 out,
                 &[
-                    s.nest.get() as u64,
-                    s.span.get() as u64,
+                    s.range.get() as u64,
                     s.version.get(),
                     s.offset as u64,
                     s.count as u64,
@@ -460,8 +450,7 @@ impl Snapshot {
             }
 
             (Domain::Nest, 2) => Self::Span(SpanStatus {
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
+                range: input.token()?,
                 version: SpanVersion::new(input.word()?)?,
                 offset: input.size()?,
                 count: input.size()?,
@@ -606,9 +595,7 @@ pub mod nest {
         },
         Memo(MemoPosition),
         Span {
-            token: PendId,
-            nest: NestId,
-            span: SpanId,
+            range: PendId,
         },
     }
 
@@ -629,7 +616,7 @@ pub mod nest {
                 },
                 Query::Nest { token, nest } => Self::Nest { token, nest },
                 Query::Memo(memo) => Self::Memo(memo),
-                Query::Span { token, nest, span } => Self::Span { token, nest, span },
+                Query::Span { range } => Self::Span { range },
             }
         }
     }
@@ -653,7 +640,7 @@ pub mod nest {
                 },
                 super::Query::Nest { token, nest } => Self::Nest { token, nest },
                 super::Query::Memo(memo) => Self::Memo(memo),
-                super::Query::Span { token, nest, span } => Self::Span { token, nest, span },
+                super::Query::Span { range } => Self::Span { range },
                 _ => return Err(()),
             })
         }
@@ -758,9 +745,7 @@ pub mod snapshot {
                     (Self::Memo(s), Query::Memo(p)) => {
                         s.range() == Some(p.range()) && s.coordinate == p.page()
                     }
-                    (Self::Span(s), Query::Span { nest, span, .. }) => {
-                        s.nest == nest && s.span == span
-                    }
+                    (Self::Span(s), Query::Span { range, .. }) => s.range == range,
                     _ => false,
                 }
             }

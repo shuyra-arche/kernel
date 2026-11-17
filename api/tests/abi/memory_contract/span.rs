@@ -1,34 +1,23 @@
 //! Span identity is independent of address, revision and permission.
-use super::{memo, nest_id, request::set_word, span_id};
+use super::{memo, request::set_word, span_id};
 use kernel_api::{
     abi::memory::{Action, Observation, Query, Request, Snapshot},
     address::VirtAddr,
     model::{
         cell::CellLevel,
-        nest::{MemoPosition, SpanId, SpanPhase, SpanStatus, SpanVersion},
+        identity::PendId,
+        nest::{SpanId, SpanPhase, SpanStatus, SpanVersion},
         sign::SignSource,
     },
 };
 
 #[test]
-fn reusing_an_address_and_revision_cannot_match_an_old_span_observation() {
+fn reusing_a_range_cannot_match_an_old_span_observation() {
     let old = memo(0);
-    let new_id = SpanId::from_bytes(&23u64.to_le_bytes()).unwrap();
-    let current = MemoPosition::new(old.range(), 0).unwrap();
-    let query = |span: SpanId| {
-        Request::new(
-            None,
-            Action::Inspect(Query::Span {
-                token: old.range(),
-                nest: nest_id(),
-                span,
-            }),
-        )
-        .unwrap()
-    };
+    let new_range = PendId::mint(23);
+    let query = |range| Request::new(None, Action::Inspect(Query::Span { range })).unwrap();
     let status = SpanStatus {
-        nest: nest_id(),
-        span: span_id(),
+        range: old.range(),
         version: SpanVersion::INITIAL,
         offset: 0,
         count: 1,
@@ -39,27 +28,23 @@ fn reusing_an_address_and_revision_cannot_match_an_old_span_observation() {
     };
     let previous = Observation::new(Snapshot::Span(status)).unwrap();
     let replacement = Observation::new(Snapshot::Span(SpanStatus {
-        span: new_id,
+        range: new_range,
         ..status
     }))
     .unwrap();
-    assert!(previous.matches(query(span_id())));
-    assert!(!previous.matches(query(new_id)));
-    assert!(replacement.matches(query(new_id)));
-    assert!(!replacement.matches(query(span_id())));
-    // The rename does not change the versioned descriptor's numeric layout.
-    let bytes = query(span_id()).to_bytes();
-    assert_eq!(
-        &bytes[32..64],
-        &[2u64, 13, 17, 19].map(u64::to_le_bytes).concat()
-    );
+    assert!(previous.matches(query(old.range())));
+    assert!(!previous.matches(query(new_range)));
+    assert!(replacement.matches(query(new_range)));
+    assert!(!replacement.matches(query(old.range())));
+    let bytes = query(old.range()).to_bytes();
+    assert_eq!(&bytes[32..48], &[2u64, 13].map(u64::to_le_bytes).concat());
     for version in [10, 11, 13, 15] {
         let mut mixed = bytes;
         set_word(&mut mixed, 0, version);
         assert!(Request::from_bytes(&mixed).is_none());
     }
     let mut absent = bytes;
-    set_word(&mut absent, 7, 0);
+    set_word(&mut absent, 5, 0);
     assert!(Request::from_bytes(&absent).is_none());
 }
 
