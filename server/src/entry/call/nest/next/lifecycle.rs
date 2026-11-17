@@ -285,19 +285,13 @@ pub(super) fn effect(
             receipt.committed(value);
             Ok(value)
         }
-        NestAction::Delete {
-            token,
-            nest: id,
-            expected,
-        } => {
+        NestAction::Delete { token, expected } => {
             let nest = {
                 let _serial = actor.pend.lock();
                 let _commit = basis::commit();
                 let entry = binding::authorized(actor, token, NestRights::DELETE).map_err(error)?;
                 let nest = entry.target().nest().ok_or(Failure::Denied)?;
-                if nest.id() != id {
-                    return Err(Failure::Denied);
-                }
+                let id = nest.id();
                 binding::check_delete_root(&nest, &entry).map_err(error)?;
                 if nest.version() != expected {
                     return Err(Failure::Stale);
@@ -320,7 +314,7 @@ pub(super) fn effect(
             }
             let _commit = basis::commit();
             let value = Value::NestLifecycle {
-                nest: id,
+                nest: nest.id(),
                 version: nest.version(),
                 phase: NestPhase::Closed,
             };

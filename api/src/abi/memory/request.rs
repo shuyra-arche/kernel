@@ -888,7 +888,6 @@ pub mod flat {
         },
         Delete {
             token: PendId,
-            flat: FlatId,
             expected: FlatVersion,
         },
         Inspect(Query),
@@ -955,14 +954,8 @@ pub mod flat {
                     level,
                 },
                 super::Action::DeleteFlat {
-                    token,
-                    flat,
-                    expected,
-                } => Self::Delete {
-                    token,
-                    flat,
-                    expected,
-                },
+                    token, expected, ..
+                } => Self::Delete { token, expected },
                 super::Action::Inspect(query) => Self::Inspect(query),
                 super::Action::InspectResult {
                     domain: Domain::Flat,
@@ -1040,104 +1033,6 @@ pub mod flat {
             })
         }
     }
-
-    impl From<Action> for super::Action {
-        fn from(action: Action) -> Self {
-            match action {
-                Action::Create {
-                    license,
-                    count,
-                    level,
-                } => Self::CreateFlat {
-                    license,
-                    count: count.get(),
-                    level,
-                },
-                Action::Delete {
-                    token,
-                    flat,
-                    expected,
-                } => Self::DeleteFlat {
-                    token,
-                    flat,
-                    expected,
-                },
-                Action::Inspect(query) => Self::Inspect(query),
-                Action::InspectResult { request } => Self::InspectResult {
-                    domain: Domain::Flat,
-                    request,
-                },
-                Action::Occupy { slot, expected } => Self::Occupy { slot, expected },
-                Action::Vacate {
-                    slot,
-                    expected,
-                    maintenance,
-                } => Self::Vacate {
-                    slot,
-                    expected,
-                    maintenance,
-                },
-                Action::Block {
-                    start,
-                    count,
-                    recover,
-                } => Self::Block {
-                    start,
-                    count,
-                    recover,
-                },
-                Action::Allow { maintenance } => Self::Allow { maintenance },
-                Action::Push {
-                    local,
-                    local_version,
-                    remote,
-                    remote_version,
-                    maintenance,
-                } => Self::Push {
-                    local,
-                    local_version,
-                    remote,
-                    remote_version,
-                    maintenance,
-                },
-                Action::Pull {
-                    local,
-                    local_version,
-                    remote,
-                    remote_version,
-                    maintenance,
-                } => Self::Pull {
-                    local,
-                    local_version,
-                    remote,
-                    remote_version,
-                    maintenance,
-                },
-                Action::Split {
-                    start,
-                    expected,
-                    parent,
-                    maintenance,
-                } => Self::Split {
-                    start,
-                    expected,
-                    parent,
-                    maintenance,
-                },
-                Action::Merge {
-                    start,
-                    expected,
-                    parent,
-                    maintenance,
-                } => Self::Merge {
-                    start,
-                    expected,
-                    parent,
-                    maintenance,
-                },
-            }
-        }
-    }
 }
 
 /// Nest-domain operations. Reserve/Release name address occupancy; the
@@ -1160,7 +1055,6 @@ pub mod nest {
         },
         Delete {
             token: PendId,
-            nest: NestId,
             expected: NestVersion,
         },
         Reserve {
@@ -1234,14 +1128,8 @@ pub mod nest {
                 },
                 super::Action::CreateNest { license } => Self::Create { license },
                 super::Action::DeleteNest {
-                    token,
-                    nest,
-                    expected,
-                } => Self::Delete {
-                    token,
-                    nest,
-                    expected,
-                },
+                    token, expected, ..
+                } => Self::Delete { token, expected },
                 super::Action::CreateSpan {
                     token,
                     nest,
@@ -1315,109 +1203,6 @@ pub mod nest {
                 },
                 _ => return Err(()),
             })
-        }
-    }
-
-    impl From<Action> for super::Action {
-        fn from(action: Action) -> Self {
-            match action {
-                Action::FaultRoute {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                    epoch,
-                    route,
-                } => Self::FaultRoute {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                    epoch,
-                    route,
-                },
-                Action::Create { license } => Self::CreateNest { license },
-                Action::Delete {
-                    token,
-                    nest,
-                    expected,
-                } => Self::DeleteNest {
-                    token,
-                    nest,
-                    expected,
-                },
-                Action::Reserve {
-                    token,
-                    nest,
-                    expected,
-                    request,
-                } => Self::CreateSpan {
-                    token,
-                    nest,
-                    expected,
-                    request,
-                },
-                Action::Release {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                } => Self::DeleteSpan {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                },
-                Action::ReleaseRange {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                    offset,
-                    count,
-                } => Self::ReleaseRange {
-                    token,
-                    nest,
-                    span,
-                    expected,
-                    offset,
-                    count,
-                },
-                Action::Inspect(query) => Self::Inspect(query),
-                Action::InspectResult { request } => Self::InspectResult {
-                    domain: Domain::Nest,
-                    request,
-                },
-                Action::Insert {
-                    target,
-                    expected,
-                    source,
-                } => Self::Insert {
-                    target,
-                    expected,
-                    source,
-                },
-                Action::Remove { memo, expected } => Self::Remove { memo, expected },
-                Action::Publish {
-                    memo,
-                    expected,
-                    maintenance,
-                } => Self::Publish {
-                    memo,
-                    expected,
-                    maintenance,
-                },
-                Action::Retract { memo, expected } => Self::Retract { memo, expected },
-                Action::Protect {
-                    memo,
-                    expected,
-                    access,
-                } => Self::Protect {
-                    memo,
-                    expected,
-                    access,
-                },
-            }
         }
     }
 }

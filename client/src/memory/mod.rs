@@ -48,7 +48,7 @@ pub mod nest {
     ) -> Option<Call> {
         Call::new(
             id,
-            kernel_api::abi::memory::nest::Action::ReleaseRange {
+            kernel_api::abi::memory::Action::ReleaseRange {
                 token,
                 nest,
                 span,
