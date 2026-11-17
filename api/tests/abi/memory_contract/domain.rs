@@ -153,3 +153,16 @@ fn range_version_rejects_zero() {
         4
     );
 }
+
+#[test]
+fn range_slice_rejects_zero_binding_and_truncation() {
+    assert!(
+        kernel_api::model::nest::RangeSlice::new(
+            PendId::NONE,
+            PageOffset::new(0),
+            PageCount::new(1).unwrap(),
+        )
+        .is_none()
+    );
+    assert!(kernel_api::model::nest::RangeSlice::from_bytes(&[0; 23]).is_none());
+}
