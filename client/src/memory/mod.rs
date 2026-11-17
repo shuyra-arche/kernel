@@ -1,4 +1,4 @@
-//! Native ABI 11 Flat/Nest calls. ABI 10 does not accept these descriptors.
+//! Native ABI 14 Flat/Nest calls; each domain constructs its own request.
 //! Each invocation snapshots once and traps once. There is no automatic retry,
 //! request ID allocation, permission cache or fallback to legacy Cell calls.
 use kernel_api::abi::memory::{Call, Delivery, Failure, Frame, Observation, Reply, Request};
@@ -39,7 +39,7 @@ pub mod nest {
     ) -> Option<Call> {
         Call::new(
             id,
-            kernel_api::abi::memory::Action::ReleaseRange { target, expected },
+            kernel_api::abi::memory::nest::Action::ReleaseRange { target, expected },
         )
     }
 }
@@ -59,11 +59,11 @@ pub fn invoke_with(
         Delivery::Failed(error) => return Err(Error::Delivery(error)),
         Delivery::Written => {}
     }
-    if let Some(reply) = Reply::from_bytes(&output).filter(|reply| reply.matches(request)) {
+    if let Some(reply) = Reply::from_bytes(&output).filter(|reply| reply.matches_domain(request)) {
         return Ok(Response::Reply(reply));
     }
     if let Some(observation) =
-        Observation::from_bytes(&output).filter(|value| value.matches(request))
+        Observation::from_bytes(&output).filter(|value| value.matches_domain(request))
     {
         return Ok(Response::Observation(observation));
     }
