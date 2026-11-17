@@ -883,7 +883,7 @@ pub mod flat {
     pub enum Action {
         Create {
             license: PendId,
-            count: usize,
+            count: crate::address::PageCount,
             level: CellLevel,
         },
         Delete {
@@ -951,7 +951,7 @@ pub mod flat {
                     level,
                 } => Self::Create {
                     license,
-                    count,
+                    count: crate::address::PageCount::new(count).ok_or(())?,
                     level,
                 },
                 super::Action::DeleteFlat {
@@ -1050,7 +1050,7 @@ pub mod flat {
                     level,
                 } => Self::CreateFlat {
                     license,
-                    count,
+                    count: count.get(),
                     level,
                 },
                 Action::Delete {

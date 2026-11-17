@@ -299,7 +299,7 @@ pub(in crate::entry::call) fn mutate(
             level,
         } => {
             let (token, flat, version) =
-                flat::authority::create_explicit(actor, license, count, level)
+                flat::authority::create_explicit(actor, license, count.get(), level)
                     .map_err(pend_error)?;
             Ok(Value::CreatedFlat {
                 token,
