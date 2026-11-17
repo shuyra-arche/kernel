@@ -44,7 +44,7 @@ fn sources() -> [Source; 3] {
     ]
 }
 
-fn mutations() -> Vec<Action> {
+pub(super) fn mutations() -> Vec<Action> {
     let slot = slot(512);
     let memo = memo(512);
     let sv = SlotVersion::new(43).unwrap();

@@ -11,7 +11,7 @@ mod request;
 
 pub use observation::{Observation, Query, Snapshot};
 pub use reply::{Delivery, Outcome, Reply, Value};
-pub use request::{Action, DomainRequest, FlatRequest, Maintenance, NestRequest, Request, Source};
+pub use request::{Action, Maintenance, Request, Source};
 
 use core::num::NonZeroU64;
 

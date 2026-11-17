@@ -1001,6 +1001,66 @@ pub mod flat {
             matches!(self, Self::Inspect(_) | Self::InspectResult { .. })
         }
 
+        fn valid(self) -> bool {
+            match self {
+                Self::Create {
+                    license,
+                    count,
+                    level,
+                } => {
+                    valid_token(license.get())
+                        && level
+                            .pages()
+                            .is_some_and(|grain| count.get().is_multiple_of(grain))
+                }
+                Self::Delete { token, .. } => valid_token(token.get()),
+                Self::Inspect(query) => super::Query::from(query).valid(),
+                Self::InspectResult { .. } | Self::Occupy { .. } => true,
+                Self::Vacate { maintenance, .. } | Self::Allow { maintenance } => {
+                    maintenance.valid()
+                }
+                Self::Block {
+                    start,
+                    count,
+                    recover,
+                } => {
+                    crate::model::cell::pages(start.page(), count).is_some()
+                        && recover.is_none_or(|block| block.flat() == start.flat())
+                }
+                Self::Push {
+                    local,
+                    remote,
+                    maintenance,
+                    ..
+                }
+                | Self::Pull {
+                    local,
+                    remote,
+                    maintenance,
+                    ..
+                } => {
+                    (local.flat() != remote.flat() || local.page() != remote.page())
+                        && maintenance.is_none_or(Maintenance::valid)
+                }
+                Self::Split {
+                    start,
+                    parent,
+                    maintenance,
+                    ..
+                }
+                | Self::Merge {
+                    start,
+                    parent,
+                    maintenance,
+                    ..
+                } => {
+                    Reshape::new(start.page(), parent).is_some()
+                        && maintenance.valid()
+                        && maintenance.block.flat() == start.flat()
+                }
+            }
+        }
+
         fn write(self, out: &mut Writer<'_>) -> Option<()> {
             match self {
                 Self::Create {
@@ -1200,7 +1260,8 @@ pub mod flat {
         pub const WIDTH: usize = super::Request::WIDTH;
 
         pub fn new(id: Option<RequestId>, action: Action) -> Option<Self> {
-            (id.is_none() == action.is_inspection()).then_some(Self { id, action })
+            (id.is_none() == action.is_inspection() && action.valid())
+                .then_some(Self { id, action })
         }
 
         pub const fn id(self) -> Option<RequestId> {
@@ -1416,70 +1477,203 @@ pub mod nest {
             matches!(self, Self::Inspect(_) | Self::InspectResult { .. })
         }
 
-        fn wire(self) -> Option<super::Action> {
-            Some(match self {
+        fn valid(self) -> bool {
+            match self {
+                Self::FaultRoute { range, route, .. } => {
+                    valid_token(range.get()) && route.is_none_or(FaultRoute::valid)
+                }
+                Self::Create { license } => valid_token(license.get()),
+                Self::Delete { token, .. } => valid_token(token.get()),
+                Self::Reserve { token, request, .. } => {
+                    valid_token(token.get())
+                        && request.valid()
+                        && match request.placement.at() {
+                            crate::model::cell::PlacementAt::Exact(address) => request
+                                .count
+                                .checked_bytes()
+                                .and_then(|bytes| address.get().checked_add(bytes))
+                                .is_some(),
+                            _ => true,
+                        }
+                }
+                Self::Release { range, .. } => valid_token(range.get()),
+                Self::ReleaseRange { target, .. } => valid_token(target.range().get()),
+                Self::Inspect(query) => super::Query::from(query).valid(),
+                Self::InspectResult { .. } | Self::Remove { .. } | Self::Retract { .. } => true,
+                Self::Insert { source, .. } => source.valid(),
+                Self::Publish { maintenance, .. } => maintenance.is_none_or(Maintenance::valid),
+                Self::Protect { access, .. } => {
+                    access & !14 == 0 && access & 10 != 0 && (access & 4 == 0 || access & 2 != 0)
+                }
+            }
+        }
+
+        fn write(self, out: &mut Writer<'_>) -> Option<()> {
+            match self {
                 Self::FaultRoute {
                     range,
                     expected,
                     epoch,
                     route,
-                } => super::Action::FaultRoute {
-                    range,
-                    expected,
-                    epoch,
-                    route,
-                },
-                Self::Create { license } => super::Action::CreateNest { license },
+                } => {
+                    for word in [
+                        range.get() as u64,
+                        expected.get(),
+                        epoch.get(),
+                        u64::from(route.is_some()),
+                    ] {
+                        out.word(word)?;
+                    }
+                    if let Some(route) = route {
+                        out.word(route.sign.get() as u64)?;
+                        out.word(route.timeout_ns)?;
+                    }
+                    Some(())
+                }
+                Self::Create { license } => out.word(license.get() as u64),
+                Self::Delete { token, expected } => {
+                    out.word(token.get() as u64)?;
+                    out.word(expected.get())
+                }
                 Self::Reserve {
                     token,
                     nest,
                     expected,
                     request,
-                } => super::Action::CreateSpan {
-                    token,
-                    nest,
-                    expected,
-                    request,
-                },
-                Self::Release { range, expected } => super::Action::DeleteSpan { range, expected },
-                Self::ReleaseRange { target, expected } => {
-                    super::Action::ReleaseRange { target, expected }
+                } => {
+                    out.word(token.get() as u64)?;
+                    out.word(nest.get() as u64)?;
+                    out.word(expected.get())?;
+                    out.bytes(&request.to_bytes())
                 }
-                Self::Inspect(query) => super::Action::Inspect(query.into()),
-                Self::InspectResult { request } => super::Action::InspectResult {
-                    domain: Domain::Nest,
-                    request,
-                },
+                Self::Release { range, expected } => {
+                    out.word(range.get() as u64)?;
+                    out.word(expected.get())
+                }
+                Self::ReleaseRange { target, expected } => {
+                    out.bytes(&target.to_bytes())?;
+                    out.word(expected.get())
+                }
+                Self::Inspect(query) => super::Query::from(query).write(out),
+                Self::InspectResult { request } => {
+                    out.word(3)?;
+                    out.word(request.get())
+                }
                 Self::Insert {
                     target,
                     expected,
                     source,
-                } => super::Action::Insert {
-                    target,
-                    expected,
-                    source,
-                },
-                Self::Remove { memo, expected } => super::Action::Remove { memo, expected },
+                } => {
+                    super::write_memo(out, target, expected)?;
+                    source.write(out)
+                }
+                Self::Remove { memo, expected } | Self::Retract { memo, expected } => {
+                    super::write_memo(out, memo, expected)
+                }
                 Self::Publish {
                     memo,
                     expected,
                     maintenance,
-                } => super::Action::Publish {
-                    memo,
-                    expected,
-                    maintenance,
-                },
-                Self::Retract { memo, expected } => super::Action::Retract { memo, expected },
+                } => {
+                    super::write_memo(out, memo, expected)?;
+                    super::write_maintenance(out, maintenance)
+                }
                 Self::Protect {
                     memo,
                     expected,
                     access,
-                } => super::Action::Protect {
-                    memo,
-                    expected,
-                    access,
+                } => {
+                    super::write_memo(out, memo, expected)?;
+                    out.word(access)
+                }
+            }
+        }
+
+        fn read(opcode: super::domain_nest::Opcode, input: &mut Reader<'_>) -> Option<Self> {
+            Some(match opcode {
+                super::domain_nest::Opcode::FaultRoute => Self::FaultRoute {
+                    range: input.token()?,
+                    expected: RangeVersion::new(input.word()?)?,
+                    epoch: FaultEpoch::new(input.word()?)?,
+                    route: match input.word()? {
+                        0 => None,
+                        1 => Some(FaultRoute {
+                            sign: input.token()?,
+                            timeout_ns: input.word()?,
+                        }),
+                        _ => return None,
+                    },
                 },
-                Self::Delete { .. } => return None,
+                super::domain_nest::Opcode::Create => Self::Create {
+                    license: input.token()?,
+                },
+                super::domain_nest::Opcode::Delete => Self::Delete {
+                    token: input.token()?,
+                    expected: NestVersion::new(input.word()?)?,
+                },
+                super::domain_nest::Opcode::Reserve => Self::Reserve {
+                    token: input.token()?,
+                    nest: NestId::new(input.size()?)?,
+                    expected: NestVersion::new(input.word()?)?,
+                    request: CreateSpanRequest::from_bytes(input.bytes::<48>()?)?,
+                },
+                super::domain_nest::Opcode::Release => Self::Release {
+                    range: input.token()?,
+                    expected: RangeVersion::new(input.word()?)?,
+                },
+                super::domain_nest::Opcode::ReleaseRange => Self::ReleaseRange {
+                    target: RangeSlice::from_bytes(input.bytes::<24>()?)?,
+                    expected: RangeVersion::new(input.word()?)?,
+                },
+                super::domain_nest::Opcode::Inspect => {
+                    let tag = input.word()?;
+                    if tag == 3 {
+                        Self::InspectResult {
+                            request: RequestId::new(input.word()?)?,
+                        }
+                    } else {
+                        Self::Inspect(
+                            super::domain_nest::Query::try_from(Query::read(
+                                Domain::Nest,
+                                tag,
+                                input,
+                            )?)
+                            .ok()?,
+                        )
+                    }
+                }
+                super::domain_nest::Opcode::Insert => {
+                    let (target, expected) = super::read_memo(input)?;
+                    Self::Insert {
+                        target,
+                        expected,
+                        source: Source::read(input)?,
+                    }
+                }
+                super::domain_nest::Opcode::Remove => {
+                    let (memo, expected) = super::read_memo(input)?;
+                    Self::Remove { memo, expected }
+                }
+                super::domain_nest::Opcode::Publish => {
+                    let (memo, expected) = super::read_memo(input)?;
+                    Self::Publish {
+                        memo,
+                        expected,
+                        maintenance: super::read_maintenance(input)?,
+                    }
+                }
+                super::domain_nest::Opcode::Retract => {
+                    let (memo, expected) = super::read_memo(input)?;
+                    Self::Retract { memo, expected }
+                }
+                super::domain_nest::Opcode::Protect => {
+                    let (memo, expected) = super::read_memo(input)?;
+                    Self::Protect {
+                        memo,
+                        expected,
+                        access: input.word()?,
+                    }
+                }
             })
         }
     }
@@ -1496,7 +1690,8 @@ pub mod nest {
         pub const WIDTH: usize = super::Request::WIDTH;
 
         pub fn new(id: Option<RequestId>, action: Action) -> Option<Self> {
-            (id.is_none() == action.is_inspection()).then_some(Self { id, action })
+            (id.is_none() == action.is_inspection() && action.valid())
+                .then_some(Self { id, action })
         }
 
         pub const fn id(self) -> Option<RequestId> {
@@ -1507,20 +1702,14 @@ pub mod nest {
         }
 
         pub fn to_bytes(self) -> [u8; Self::WIDTH] {
-            if let Action::Delete { token, expected } = self.action {
-                let mut bytes = [0; Self::WIDTH];
-                let mut out = Writer(&mut bytes);
-                out.word(VERSION).unwrap();
-                out.word(Domain::Nest as u64).unwrap();
-                out.word(super::domain_nest::Opcode::Delete.slot()).unwrap();
-                out.word(self.id.map_or(0, RequestId::get)).unwrap();
-                out.word(token.get() as u64).unwrap();
-                out.word(expected.get()).unwrap();
-                return bytes;
-            }
-            super::Request::new(self.id, self.action.wire().expect("non-delete Nest"))
-                .unwrap()
-                .to_bytes()
+            let mut bytes = [0; Self::WIDTH];
+            let mut out = Writer(&mut bytes);
+            out.word(VERSION).unwrap();
+            out.word(Domain::Nest as u64).unwrap();
+            out.word(self.action.opcode().slot()).unwrap();
+            out.word(self.id.map_or(0, RequestId::get)).unwrap();
+            self.action.write(&mut out).expect("bounded Nest request");
+            bytes
         }
 
         pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -1531,17 +1720,14 @@ pub mod nest {
             if input.word()? != VERSION || input.word()? != Domain::Nest as u64 {
                 return None;
             }
-            let slot = input.word()?;
+            let opcode = Opcode::of(Domain::Nest as u64, input.word()?)?;
+            let Opcode::Nest(opcode) = opcode else {
+                return None;
+            };
             let id = RequestId::new(input.word()?);
-            if slot == super::domain_nest::Opcode::Delete.slot() {
-                let token = input.token()?;
-                let expected = NestVersion::new(input.word()?)?;
-                input.finish()?;
-                return Self::new(id, Action::Delete { token, expected });
-            }
-            let request = super::Request::from_bytes(bytes)?;
-            let action = Action::try_from(request.action()).ok()?;
-            Self::new(request.id(), action)
+            let action = Action::read(opcode, &mut input)?;
+            input.finish()?;
+            Self::new(id, action)
         }
 
         pub fn from_call(number: u64, bytes: &[u8]) -> Option<Self> {
@@ -1554,54 +1740,3 @@ pub mod nest {
         }
     }
 }
-
-/// Shared request envelope for a domain action. The wire Request remains the
-/// validation authority; the domain type is preserved for callers and entry
-/// dispatch.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DomainRequest<A> {
-    wire: Request,
-    action: A,
-}
-
-impl<A> DomainRequest<A>
-where
-    A: Copy + Into<Action>,
-{
-    pub fn new(id: Option<RequestId>, action: A) -> Option<Self> {
-        let wire = Request::new(id, action.into())?;
-        Some(Self { wire, action })
-    }
-
-    pub const fn id(self) -> Option<RequestId> {
-        self.wire.id()
-    }
-
-    pub const fn action(self) -> A {
-        self.action
-    }
-
-    pub fn to_bytes(self) -> [u8; Request::WIDTH] {
-        self.wire.to_bytes()
-    }
-}
-
-impl<A> DomainRequest<A>
-where
-    A: Copy + TryFrom<Action>,
-{
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let wire = Request::from_bytes(bytes)?;
-        let action = A::try_from(wire.action()).ok()?;
-        Some(Self { wire, action })
-    }
-
-    pub fn from_call(number: u64, bytes: &[u8]) -> Option<Self> {
-        let wire = Request::from_call(number, bytes)?;
-        let action = A::try_from(wire.action()).ok()?;
-        Some(Self { wire, action })
-    }
-}
-
-pub type FlatRequest = DomainRequest<flat::Action>;
-pub type NestRequest = DomainRequest<nest::Action>;
