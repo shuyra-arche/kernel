@@ -1,6 +1,6 @@
 use kernel_api::{
     abi::memory::{
-        self, Delivery, Domain, Failure, Observation, Outcome, Reply, RequestId, Snapshot, Value,
+        self, Delivery, Failure, Observation, Outcome, Reply, RequestId, Snapshot, Value,
     },
     address::VirtAddr,
     model::{
