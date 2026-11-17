@@ -440,16 +440,15 @@ fn large_cell_placement_selects_the_effective_cell_alignment() {
 
     // Lowest/Highest must both choose a whole-Cell boundary, even when
     // the public placement's alignment hint was only a base page.
-    let lowest = Placement::new(
-        RegionKind::Normal,
-        cell,
-        cell,
-        address::PlacementAt::Lowest,
-    )
-    .unwrap();
+    let lowest =
+        Placement::new(RegionKind::Normal, cell, cell, address::PlacementAt::Lowest).unwrap();
     let (start, generation) = layout.reserve(lowest).unwrap();
     assert_eq!(start, cell);
-    assert!(layout.occupancy.release(start, start + cell - 1, generation));
+    assert!(
+        layout
+            .occupancy
+            .release(start, start + cell - 1, generation)
+    );
 
     let highest = Placement::new(
         RegionKind::Normal,
@@ -460,7 +459,11 @@ fn large_cell_placement_selects_the_effective_cell_alignment() {
     .unwrap();
     let (start, generation) = layout.reserve(highest).unwrap();
     assert_eq!(start, 2 * cell);
-    assert!(layout.occupancy.release(start, start + cell - 1, generation));
+    assert!(
+        layout
+            .occupancy
+            .release(start, start + cell - 1, generation)
+    );
 
     let unaligned = Placement::new(
         RegionKind::Normal,
