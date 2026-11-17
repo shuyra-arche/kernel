@@ -29,10 +29,8 @@ pub(super) fn mutations() -> Vec<Action> {
     [None, Some(route())]
         .into_iter()
         .map(|route| Action::FaultRoute {
-            token: PendId::mint(13),
-            nest: nest_id(),
-            span: span_id(),
-            expected: SpanVersion::new(7).unwrap(),
+            range: PendId::mint(13),
+            expected: kernel_api::model::nest::RangeVersion::new(7).unwrap(),
             epoch: FaultEpoch::new(3).unwrap(),
             route,
         })
@@ -120,10 +118,10 @@ fn route_vectors_have_no_caller_selected_handler_or_authority_root() {
     assert_eq!(NestRights::from_bits(1 << 12), Some(NestRights::FAULT));
     for (index, (action, reply)) in mutations().into_iter().zip(results()).enumerate() {
         let request = Request::new(Some(id()), action).unwrap();
-        let mut expected = bytes::<256>(&[14, 13, 26, u64::MAX, 13, 17, 19, 7, 3, index as u64]);
+        let mut expected = bytes::<256>(&[14, 13, 26, u64::MAX, 13, 7, 3, index as u64]);
         if index == 1 {
-            set_word(&mut expected, 10, 23);
-            set_word(&mut expected, 11, MAX_FAULT_NS);
+            set_word(&mut expected, 8, 23);
+            set_word(&mut expected, 9, MAX_FAULT_NS);
         }
         assert_eq!(request.to_bytes(), expected);
         assert_eq!(
@@ -317,7 +315,7 @@ fn stale_route_events_and_mismatched_registration_receipts_do_not_correlate() {
     }
     for (action, reply) in mutations().into_iter().zip(results()) {
         let request = Request::new(Some(id()), action).unwrap();
-        for (index, value) in [(7, 37), (8, 41), (9, 9), (10, 5)] {
+        for (index, value) in [(9, 9), (10, 5)] {
             let mut bad = reply.to_bytes();
             set_word(&mut bad, index, value);
             assert!(!Reply::from_bytes(&bad).unwrap().matches(request));
@@ -447,13 +445,9 @@ fn malformed_fault_fields_reject_unknown_flags_and_noncanonical_tails() {
         (4, 0),
         (5, 0),
         (6, 0),
-        (7, 0),
+        (7, 2),
         (8, 0),
-        (9, 2),
-        (10, 0),
-        (11, 0),
-        (11, MAX_FAULT_NS + 1),
-        (12, 1),
+        (9, MAX_FAULT_NS + 1),
     ] {
         let mut bad = request;
         set_word(&mut bad, i, value);

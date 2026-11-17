@@ -134,10 +134,8 @@ pub enum Action {
     /// Atomically install/replace or disable a Span-owned fault route. The
     /// provider binds the actual caller, never a caller-supplied handler Task.
     FaultRoute {
-        token: PendId,
-        nest: NestId,
-        span: SpanId,
-        expected: SpanVersion,
+        range: PendId,
+        expected: RangeVersion,
         epoch: FaultEpoch,
         route: Option<FaultRoute>,
     },
@@ -295,12 +293,8 @@ impl Action {
 
     fn valid(self) -> bool {
         match self {
-            Self::FaultRoute {
-                token, span, route, ..
-            } => {
-                valid_token(token.get())
-                    && valid_token(span.get())
-                    && route.is_none_or(FaultRoute::valid)
+            Self::FaultRoute { range, route, .. } => {
+                valid_token(range.get()) && route.is_none_or(FaultRoute::valid)
             }
             Self::CreateFlat {
                 license,
@@ -387,17 +381,13 @@ impl Action {
     fn write(self, out: &mut Writer<'_>) -> Option<()> {
         match self {
             Self::FaultRoute {
-                token,
-                nest,
-                span,
+                range,
                 expected,
                 epoch,
                 route,
             } => {
                 for word in [
-                    token.get() as u64,
-                    nest.get() as u64,
-                    span.get() as u64,
+                    range.get() as u64,
                     expected.get(),
                     epoch.get(),
                     u64::from(route.is_some()),
@@ -560,10 +550,8 @@ impl Action {
     fn read(opcode: Opcode, input: &mut Reader<'_>) -> Option<Self> {
         Some(match opcode {
             Opcode::Nest(domain_nest::Opcode::FaultRoute) => Self::FaultRoute {
-                token: input.token()?,
-                nest: NestId::new(input.size()?)?,
-                span: input.span()?,
-                expected: SpanVersion::new(input.word()?)?,
+                range: input.token()?,
+                expected: RangeVersion::new(input.word()?)?,
                 epoch: FaultEpoch::new(input.word()?)?,
                 route: match input.word()? {
                     0 => None,
@@ -1277,10 +1265,8 @@ pub mod nest {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Action {
         FaultRoute {
-            token: PendId,
-            nest: NestId,
-            span: SpanId,
-            expected: SpanVersion,
+            range: PendId,
+            expected: RangeVersion,
             epoch: FaultEpoch,
             route: Option<FaultRoute>,
         },
@@ -1342,16 +1328,12 @@ pub mod nest {
         fn try_from(action: super::Action) -> Result<Self, Self::Error> {
             Ok(match action {
                 super::Action::FaultRoute {
-                    token,
-                    nest,
-                    span,
+                    range,
                     expected,
                     epoch,
                     route,
                 } => Self::FaultRoute {
-                    token,
-                    nest,
-                    span,
+                    range,
                     expected,
                     epoch,
                     route,
@@ -1452,16 +1434,12 @@ pub mod nest {
         fn wire(self) -> Option<super::Action> {
             Some(match self {
                 Self::FaultRoute {
-                    token,
-                    nest,
-                    span,
+                    range,
                     expected,
                     epoch,
                     route,
                 } => super::Action::FaultRoute {
-                    token,
-                    nest,
-                    span,
+                    range,
                     expected,
                     epoch,
                     route,

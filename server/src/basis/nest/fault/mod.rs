@@ -142,11 +142,22 @@ fn full_route(
     }
     Ok((route, span))
 }
+fn full_route_range(
+    actor: &Arc<Task>,
+    range: kernel_api::model::identity::PendId,
+    rights: kernel_api::model::pend::NestRights,
+) -> Result<(pend::access::SpanRoute, Arc<Span>), Failure> {
+    let route =
+        pend::access::SpanRoute::acquire(actor, range, rights).map_err(|_| Failure::Denied)?;
+    let span = route.span().map_err(|_| Failure::Dead)?;
+    if !binding::full(route.entry(), &span) {
+        return Err(Failure::Denied);
+    }
+    Ok((route, span))
+}
 pub(crate) fn configure(actor: &Arc<Task>, action: NestAction) -> Result<Value, Failure> {
     let NestAction::FaultRoute {
-        token,
-        nest,
-        span: reservation,
+        range,
         expected,
         epoch,
         route: config,
@@ -154,21 +165,20 @@ pub(crate) fn configure(actor: &Arc<Task>, action: NestAction) -> Result<Value, 
     else {
         return Err(Failure::Invalid);
     };
-    let (route, span) = full_route(
-        actor,
-        token,
-        nest,
-        reservation,
-        kernel_api::abi::memory::rights::FAULT,
-    )?;
+    let (route, span) = full_route_range(actor, range, kernel_api::abi::memory::rights::FAULT)?;
+    let nest = route.nest().id();
+    let reservation = route.id();
     let _operation = span.operation().ok_or(Failure::Busy)?;
     if route.nest().is_external() {
         return Err(Failure::Unsupported);
     }
-    if span.version() != expected || span.faults.lock().epoch != epoch {
+    if span.version().get() != expected.get() || span.faults.lock().epoch != epoch {
         return Err(Failure::Stale);
     }
-    let version = expected.next().ok_or(Failure::VersionExhausted)?;
+    let version = kernel_api::model::nest::SpanVersion::new(
+        expected.next().ok_or(Failure::VersionExhausted)?.get(),
+    )
+    .ok_or(Failure::VersionExhausted)?;
     let epoch = epoch.next().ok_or(Failure::VersionExhausted)?;
     let binding = config
         .map(|config| Binding::prepare(actor, route.entry(), route.nest(), &span, config))
@@ -179,7 +189,7 @@ pub(crate) fn configure(actor: &Arc<Task>, action: NestAction) -> Result<Value, 
         if !nest_state.is_open() || span_state.phase != super::address::span::SpanPhase::Open {
             return Err(Failure::Dead);
         }
-        if span.version() != expected {
+        if span.version().get() != expected.get() {
             return Err(Failure::Stale);
         }
         let mut state = span.faults.lock();

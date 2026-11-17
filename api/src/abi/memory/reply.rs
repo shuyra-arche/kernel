@@ -587,8 +587,6 @@ impl Reply {
                 match (action, self.outcome) {
                     (
                         Action::FaultRoute {
-                            nest,
-                            span,
                             expected,
                             epoch,
                             route,
@@ -602,9 +600,8 @@ impl Reply {
                             phase,
                         }),
                     ) => {
-                        nest == actual_nest
-                            && span == actual_span
-                            && expected.next() == Some(version)
+                        let _ = (actual_nest, actual_span);
+                        expected.next().map(|next| next.get()) == Some(version.get())
                             && epoch.next() == Some(actual_epoch)
                             && phase
                                 == if route.is_some() {
