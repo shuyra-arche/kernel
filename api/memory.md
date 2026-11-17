@@ -31,11 +31,17 @@ CPU/IOMMU hardware leaf sizes are separate from physical holding identity.
 The current revision has one ABI. Native Flat/Nest operations use fixed-origin
 SlotPosition / MemoPosition with independent versions. Flat owns Occupy/Vacate,
 Push/Pull, Split/Merge and Block/Allow. Nest owns association, publication and
-Span FaultRoute. `SpanId`, `SpanVersion` and `SpanStatus` name the occupied
-address span; `CreateSpanRequest` and `Action::CreateSpan`/`DeleteSpan` create
-and delete it. `Action::ReleaseRange` releases a page-aligned subrange while
-keeping the Span open; see [ReleaseRange](../docs/release-range.md). ABI 13 and older calls, Ledger entries and Capsules reject. Versioned RequestIds and a bounded journal report
-Rejected/Pending/Committed/Failed outcomes and checked observations.
+Span FaultRoute. The entry now uses domain-local `flat::Action` and
+`nest::Action`, plus corresponding Query/Value/Snapshot/Opcode types; a
+transitional combined representation still exists inside the codec.
+`nest::Action::Reserve` creates an occupied Span and a live range Pend;
+`nest::Action::Release` closes the whole Span, while
+`nest::Action::ReleaseRange` releases a page-aligned subrange without closing
+it. `MemoPosition` is the 16-byte (range Pend, fixed-origin page) coordinate.
+A descriptive SpanId still exists in the Pend scope for disambiguation; it
+never grants authority by itself. See [ReleaseRange](../docs/release-range.md).
+ABI 13 and older calls, Ledger entries and Capsules reject. Versioned RequestIds
+and a bounded journal report Rejected/Pending/Committed/Failed outcomes.
 
 No Cargo feature selects the ABI. Calls, memory descriptors, Ledger and Capsule
 ABI derive from `abi::VERSION`; Capsule format remains 2. Remove the former
