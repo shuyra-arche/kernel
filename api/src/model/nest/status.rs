@@ -182,3 +182,28 @@ impl MemoStatus {
 pub(crate) fn valid_access(access: u64) -> bool {
     access & !14 == 0 && access & 10 != 0 && (access & 4 == 0 || access & 2 != 0)
 }
+
+/// Version of the Pend-bound range authority used by Reserve/Release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RangeVersion(NonZeroU64);
+impl RangeVersion {
+    pub const INITIAL: Self = Self(NonZeroU64::MIN);
+    pub const fn new(value: u64) -> Option<Self> {
+        match NonZeroU64::new(value) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+    pub const fn get(self) -> u64 {
+        self.0.get()
+    }
+    pub fn next(self) -> Option<Self> {
+        Self::new(self.get().checked_add(1)?)
+    }
+    pub fn to_bytes(self) -> [u8; 8] {
+        self.get().to_le_bytes()
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        Self::new(u64::from_le_bytes(bytes.try_into().ok()?))
+    }
+}

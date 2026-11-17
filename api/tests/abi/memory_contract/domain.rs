@@ -1,7 +1,7 @@
 //! Domain-local request codecs and the shared wire header.
 use kernel_api::{
     abi::memory::{Domain, RequestId, VERSION, flat, nest},
-    address::PageCount,
+    address::{PageCount, PageOffset},
     model::{
         cell::CellLevel,
         flat::{FlatId, FlatVersion, SlotPosition},
@@ -122,4 +122,34 @@ fn flat_from_call_checks_the_trap_slot() {
     assert_eq!(flat::Request::from_call(number, &bytes).unwrap(), request);
     let create = kernel_api::abi::memory::Opcode::Flat(flat::Opcode::Create).call_number();
     assert!(flat::Request::from_call(create, &bytes).is_none());
+}
+
+#[test]
+fn range_slice_roundtrips_pend_coordinates() {
+    let range = kernel_api::model::nest::RangeSlice::new(
+        PendId::mint(5),
+        PageOffset::new(7),
+        PageCount::new(9).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        kernel_api::model::nest::RangeSlice::from_bytes(&range.to_bytes()),
+        Some(range)
+    );
+    assert_eq!(range.range(), PendId::mint(5));
+    assert_eq!(range.offset(), PageOffset::new(7));
+    assert_eq!(range.count(), PageCount::new(9).unwrap());
+}
+
+#[test]
+fn range_version_rejects_zero() {
+    assert!(kernel_api::model::nest::RangeVersion::new(0).is_none());
+    assert_eq!(
+        kernel_api::model::nest::RangeVersion::new(3)
+            .unwrap()
+            .next()
+            .unwrap()
+            .get(),
+        4
+    );
 }
