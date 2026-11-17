@@ -1033,6 +1033,273 @@ pub mod flat {
             })
         }
     }
+
+    #[allow(dead_code)]
+    impl Action {
+        pub const fn opcode(self) -> super::domain_flat::Opcode {
+            match self {
+                Self::Create { .. } => super::domain_flat::Opcode::Create,
+                Self::Delete { .. } => super::domain_flat::Opcode::Delete,
+                Self::Inspect(_) | Self::InspectResult { .. } => {
+                    super::domain_flat::Opcode::Inspect
+                }
+                Self::Occupy { .. } => super::domain_flat::Opcode::Occupy,
+                Self::Vacate { .. } => super::domain_flat::Opcode::Vacate,
+                Self::Block { .. } => super::domain_flat::Opcode::Block,
+                Self::Allow { .. } => super::domain_flat::Opcode::Allow,
+                Self::Push { .. } => super::domain_flat::Opcode::Push,
+                Self::Pull { .. } => super::domain_flat::Opcode::Pull,
+                Self::Split { .. } => super::domain_flat::Opcode::Split,
+                Self::Merge { .. } => super::domain_flat::Opcode::Merge,
+            }
+        }
+
+        fn is_inspection(self) -> bool {
+            matches!(self, Self::Inspect(_) | Self::InspectResult { .. })
+        }
+
+        fn write(self, out: &mut Writer<'_>) -> Option<()> {
+            match self {
+                Self::Create {
+                    license,
+                    count,
+                    level,
+                } => {
+                    out.word(license.get() as u64)?;
+                    out.word(count.get() as u64)?;
+                    out.word(level.get() as u64)
+                }
+                Self::Delete { token, expected } => {
+                    out.word(token.get() as u64)?;
+                    out.word(expected.get())
+                }
+                Self::Inspect(query) => query.write(out),
+                Self::InspectResult { request } => {
+                    out.word(3)?;
+                    out.word(request.get())
+                }
+                Self::Occupy { slot, expected } => super::write_slot(out, slot, expected),
+                Self::Vacate {
+                    slot,
+                    expected,
+                    maintenance,
+                } => {
+                    super::write_slot(out, slot, expected)?;
+                    maintenance.write(out)
+                }
+                Self::Block {
+                    start,
+                    count,
+                    recover,
+                } => {
+                    out.bytes(&start.to_bytes())?;
+                    out.word(count as u64)?;
+                    out.word(u64::from(recover.is_some()))?;
+                    if let Some(block) = recover {
+                        out.bytes(&block.to_bytes())?;
+                    }
+                    Some(())
+                }
+                Self::Allow { maintenance } => maintenance.write(out),
+                Self::Push {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                }
+                | Self::Pull {
+                    local,
+                    local_version,
+                    remote,
+                    remote_version,
+                    maintenance,
+                } => {
+                    super::write_slot(out, local, local_version)?;
+                    super::write_slot(out, remote, remote_version)?;
+                    super::write_maintenance(out, maintenance)
+                }
+                Self::Split {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                }
+                | Self::Merge {
+                    start,
+                    expected,
+                    parent,
+                    maintenance,
+                } => {
+                    out.bytes(&start.to_bytes())?;
+                    out.word(expected.get())?;
+                    out.word(parent.get() as u64)?;
+                    maintenance.write(out)
+                }
+            }
+        }
+
+        fn read(opcode: super::domain_flat::Opcode, input: &mut Reader<'_>) -> Option<Self> {
+            Some(match opcode {
+                super::domain_flat::Opcode::Create => Self::Create {
+                    license: input.token()?,
+                    count: crate::address::PageCount::new(input.size()?)?,
+                    level: CellLevel::new(input.size()?)?,
+                },
+                super::domain_flat::Opcode::Delete => Self::Delete {
+                    token: input.token()?,
+                    expected: FlatVersion::new(input.word()?)?,
+                },
+                super::domain_flat::Opcode::Inspect => {
+                    let tag = input.word()?;
+                    if tag == 3 {
+                        Self::InspectResult {
+                            request: RequestId::new(input.word()?)?,
+                        }
+                    } else {
+                        Self::Inspect(Query::read(Domain::Flat, tag, input)?)
+                    }
+                }
+                super::domain_flat::Opcode::Occupy => {
+                    let (slot, expected) = super::read_slot(input)?;
+                    Self::Occupy { slot, expected }
+                }
+                super::domain_flat::Opcode::Vacate => {
+                    let (slot, expected) = super::read_slot(input)?;
+                    Self::Vacate {
+                        slot,
+                        expected,
+                        maintenance: Maintenance::read(input)?,
+                    }
+                }
+                super::domain_flat::Opcode::Block => {
+                    let start = SlotPosition::from_bytes(input.bytes::<24>()?)?;
+                    let count = input.size()?;
+                    let recover = match input.word()? {
+                        0 => None,
+                        1 => Some(BlockRef::from_bytes(input.bytes::<24>()?)?),
+                        _ => return None,
+                    };
+                    Self::Block {
+                        start,
+                        count,
+                        recover,
+                    }
+                }
+                super::domain_flat::Opcode::Allow => Self::Allow {
+                    maintenance: Maintenance::read(input)?,
+                },
+                super::domain_flat::Opcode::Push | super::domain_flat::Opcode::Pull => {
+                    let (local, local_version) = super::read_slot(input)?;
+                    let (remote, remote_version) = super::read_slot(input)?;
+                    let maintenance = super::read_maintenance(input)?;
+                    if opcode == super::domain_flat::Opcode::Push {
+                        Self::Push {
+                            local,
+                            local_version,
+                            remote,
+                            remote_version,
+                            maintenance,
+                        }
+                    } else {
+                        Self::Pull {
+                            local,
+                            local_version,
+                            remote,
+                            remote_version,
+                            maintenance,
+                        }
+                    }
+                }
+                super::domain_flat::Opcode::Split | super::domain_flat::Opcode::Merge => {
+                    let start = SlotPosition::from_bytes(input.bytes::<24>()?)?;
+                    let expected = FlatVersion::new(input.word()?)?;
+                    let parent = CellLevel::new(input.size()?)?;
+                    let maintenance = Maintenance::read(input)?;
+                    if opcode == super::domain_flat::Opcode::Split {
+                        Self::Split {
+                            start,
+                            expected,
+                            parent,
+                            maintenance,
+                        }
+                    } else {
+                        Self::Merge {
+                            start,
+                            expected,
+                            parent,
+                            maintenance,
+                        }
+                    }
+                }
+            })
+        }
+    }
+
+    /// Flat-domain request envelope. Only the header words and the payload
+    /// belong to the domain request; no unified action is reconstructed.
+    #[allow(dead_code)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Request {
+        id: Option<RequestId>,
+        action: Action,
+    }
+
+    #[allow(dead_code)]
+    impl Request {
+        pub const WIDTH: usize = super::Request::WIDTH;
+
+        pub fn new(id: Option<RequestId>, action: Action) -> Option<Self> {
+            (id.is_none() == action.is_inspection()).then_some(Self { id, action })
+        }
+
+        pub const fn id(self) -> Option<RequestId> {
+            self.id
+        }
+
+        pub const fn action(self) -> Action {
+            self.action
+        }
+
+        pub fn to_bytes(self) -> [u8; Self::WIDTH] {
+            let mut bytes = [0; Self::WIDTH];
+            let opcode = self.action.opcode();
+            let mut out = Writer(&mut bytes);
+            out.word(VERSION).unwrap();
+            out.word(Domain::Flat as u64).unwrap();
+            out.word(opcode.slot()).unwrap();
+            out.word(self.id.map_or(0, RequestId::get)).unwrap();
+            self.action.write(&mut out).unwrap();
+            bytes
+        }
+
+        pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+            if bytes.len() != Self::WIDTH {
+                return None;
+            }
+            let mut input = Reader(bytes);
+            if input.word()? != VERSION || input.word()? != Domain::Flat as u64 {
+                return None;
+            }
+            let opcode = Opcode::of(Domain::Flat as u64, input.word()?)?;
+            let Opcode::Flat(opcode) = opcode else {
+                return None;
+            };
+            let id = RequestId::new(input.word()?);
+            let action = Action::read(opcode, &mut input)?;
+            input.finish()?;
+            Self::new(id, action)
+        }
+
+        pub fn from_call(number: u64, bytes: &[u8]) -> Option<Self> {
+            let opcode = Opcode::from_call_number(number)?;
+            let Opcode::Flat(opcode) = opcode else {
+                return None;
+            };
+            let request = Self::from_bytes(bytes)?;
+            (request.action.opcode() == opcode).then_some(request)
+        }
+    }
 }
 
 /// Nest-domain operations. Reserve/Release name address occupancy; the
