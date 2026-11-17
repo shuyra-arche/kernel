@@ -384,7 +384,11 @@ fn topmost_page_can_be_released_by_range_without_overflow() {
     let top = usize::MAX - 4095;
     let placement = Placement::fixed(VirtAddr::new(top), 4096).unwrap();
     let (_, generation) = layout.reserve(placement).unwrap();
-    assert!(!layout.occupancy.release_range(top, usize::MAX - 1, generation));
+    assert!(
+        !layout
+            .occupancy
+            .release_range(top, usize::MAX - 1, generation)
+    );
     assert!(layout.occupancy.has_id(generation));
     assert!(layout.occupancy.release_range(top, usize::MAX, generation));
     let (_, replacement) = layout.reserve(placement).unwrap();
@@ -399,9 +403,25 @@ fn partial_release_rejects_a_slice_crossing_an_already_released_hole() {
     let page = 4096;
     let placement = Placement::fixed(VirtAddr::new(0x90000), 4 * page).unwrap();
     let (start, generation) = layout.reserve(placement).unwrap();
-    assert!(layout.occupancy.release_range(start + page, start + 2 * page - 1, generation));
-    assert!(!layout.occupancy.release_range(start, start + 3 * page - 1, generation));
+    assert!(
+        layout
+            .occupancy
+            .release_range(start + page, start + 2 * page - 1, generation)
+    );
+    assert!(
+        !layout
+            .occupancy
+            .release_range(start, start + 3 * page - 1, generation)
+    );
     assert!(layout.occupancy.has_id(generation));
-    assert!(layout.occupancy.release_range(start, start + page - 1, generation));
-    assert!(layout.occupancy.release_range(start + 2 * page, start + 3 * page - 1, generation));
+    assert!(
+        layout
+            .occupancy
+            .release_range(start, start + page - 1, generation)
+    );
+    assert!(
+        layout
+            .occupancy
+            .release_range(start + 2 * page, start + 3 * page - 1, generation)
+    );
 }
