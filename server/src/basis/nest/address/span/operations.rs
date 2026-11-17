@@ -91,6 +91,10 @@ impl Span {
                 .existing_mut(index)
                 .expect("associated Memo")
                 .bind_range(range_authority);
+            debug_assert_eq!(
+                inner.memos.existing_mut(index).expect("bound Memo").range(),
+                Some(range_authority)
+            );
             replaced
         };
         self.changed();
