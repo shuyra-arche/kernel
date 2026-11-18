@@ -1009,7 +1009,7 @@ impl Nest {
         for (_, retained) in &mut published {
             retained.publish();
         }
-        state.retirement.mappings.push(Arc::downgrade(mapping));
+        state.retirement.mappings.push(mapping.clone());
         for run in mapping.state.lock().runs(start, &published) {
             let run = run?;
             state.root.cpu_mut()?.map_range_prepared_geometry(
@@ -1238,7 +1238,7 @@ impl Nest {
         // 开票之后没有可失败准备：票、PTE 与关系在同一提交内转入退休责任。
         let tickets = layout.occupancy.retire(prepared);
         state.withdraw_prepared(start, len, self.geometry());
-        state.retirement.mappings.push(Arc::downgrade(mapping));
+        state.retirement.mappings.push(mapping.clone());
         if inner
             .memos
             .withdraw(first_page, last_page, &mut state.retirement.cells)
