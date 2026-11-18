@@ -136,14 +136,19 @@ own target guest without assembling another provider. Neither workflow checks
 out a live Vanllia/System/Twine product composition; those scenarios are owned
 by the integration repository.
 
-Vanllia's current integration workflow pins a Kernel test provider and
-executes 13 single-Hart QEMU contract/ABI scenarios, up to eight in parallel,
-with separate evidence per job. Kernel's own Flat target CI also uses one Hart.
-The historical multi-Hart SMP, RT and additional mechanism probes are no
-longer ordinary CI gates; their owner-side test code and explicit runner
-commands remain available. A green single-Hart CI run does not establish SMP
-safety or an assembled product. Opt-in performance comparisons may run with
-four Harts.
+Vanllia's current integration CI verifies five direct Native/ABI/std
+composition cases. It calls Kernel's
+[pinned target workflow](../../.github/workflows/pinned-target.yml) for six
+separate Activity/Unsupported/Stopped/IRQ single-Hart cases, passing only the
+exact product Kernel gitlink SHA. Kernel owns this test matrix, its reviewed
+fixture pin and its QEMU evidence. The reusable workflow is also manually
+runnable with an immutable Kernel SHA; it verifies the **selected source
+revision**, not the unrelated Kernel main ABI candidate. Kernel's separate
+Flat and IOMMU target workflows remain owner-side checks.
+The historical multi-Hart SMP/Realtime probes are not routine CI gates;
+their explicit runner commands remain available. A green single-Hart CI
+does not establish SMP safety or an assembled product. Opt-in performance
+comparisons may run with four Harts.
 Long paired comparisons remain opt-in in the composition owner's PR with
 `Room comparison: requested` and exactly one
 `Room baseline: <40 lowercase hex characters>` line.
