@@ -36,6 +36,7 @@ impl Task {
 
     /// Observe only the next real child while the husk is stalled, after
     /// dropping the retirement guard. Never materialize a child snapshot.
+    #[cfg(not(test))]
     pub(crate) fn retirement_heir(&self) -> Option<Arc<crate::basis::unit::team::Team>> {
         let after = match &*self.retirement.try_lock()? {
             Retirement::Heirs { after } => *after,
