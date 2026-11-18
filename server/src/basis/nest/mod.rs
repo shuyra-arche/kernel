@@ -1499,6 +1499,7 @@ impl Nest {
                 Err(NestError::Busy)
             }
             Err(error) => {
+                state.retirement.remember_failure(error);
                 state.retirement.fail();
                 Err(error)
             }
@@ -1524,6 +1525,7 @@ impl Nest {
                     fenced
                 }
                 Err(_) => {
+                    state.retirement.remember_failure(NestError::Shootdown);
                     state.retirement.fail();
                     return Err(NestError::Shootdown);
                 }
@@ -1695,14 +1697,19 @@ impl Nest {
         translation::Invalidation,
         usize,
         bool,
+        Option<NestError>,
     ) {
-        let (phase, invalidation) = {
+        let (phase, invalidation, failure) = {
             let state = self.state.lock();
-            (state.phase, state.retirement.invalidation())
+            (
+                state.phase,
+                state.retirement.invalidation(),
+                state.retirement.last_failure(),
+            )
         };
         let indexed = self.address.lock().index.len();
         let pending = self.pending_cleanup.lock().is_some();
-        (phase, invalidation, indexed, pending)
+        (phase, invalidation, indexed, pending, failure)
     }
 
     /// 翻译里只取物理地址的那一面：权限位不外露。

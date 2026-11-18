@@ -14,6 +14,7 @@ use crate::basis::nest::memo::publication::Publication;
 /// Address tickets become claimable in the same transition as the covering fence.
 pub(in crate::basis::nest) struct Retirement {
     invalidation: Invalidation,
+    failure: Option<super::super::NestError>,
     scope: Scope,
     sequence: crate::basis::name::Generation,
     pending: Option<Request<Asid>>,
@@ -28,6 +29,7 @@ impl Retirement {
     pub(in crate::basis::nest) fn new() -> Self {
         Self {
             invalidation: Invalidation::Clean,
+            failure: None,
             scope: Scope::AddressSpace,
             sequence: crate::basis::name::Generation::first(),
             pending: None,
@@ -62,6 +64,14 @@ impl Retirement {
 
     pub(in crate::basis::nest) fn invalidation(&self) -> Invalidation {
         self.invalidation
+    }
+
+    pub(in crate::basis::nest) fn last_failure(&self) -> Option<super::super::NestError> {
+        self.failure
+    }
+
+    pub(in crate::basis::nest) fn remember_failure(&mut self, reason: super::super::NestError) {
+        self.failure = Some(reason);
     }
 
     /// Only this batch's retained mappings still depend on its completion.
@@ -131,6 +141,7 @@ impl Retirement {
                 .pending
                 .is_none_or(|expected| !proof.confirms(expected))
         {
+            self.remember_failure(super::super::NestError::Shootdown);
             self.fail();
             return Err(super::super::NestError::Shootdown);
         }
@@ -138,11 +149,13 @@ impl Retirement {
         // batch retained and retryable, even though the hardware fence ran.
         let mut held = Vec::new();
         if held.try_reserve(self.mappings.len()).is_err() {
+            self.remember_failure(super::super::NestError::OutOfMemory);
             self.fail();
             return Err(super::super::NestError::OutOfMemory);
         }
         for mapping in &self.mappings {
             let Some(mapping) = mapping.upgrade() else {
+                self.remember_failure(super::super::NestError::NoRegion);
                 self.fail();
                 return Err(super::super::NestError::NoRegion);
             };
@@ -154,11 +167,13 @@ impl Retirement {
             .map(|mapping| mapping.state.lock().memos.awaiting_cpu())
             .sum();
         if settled.try_reserve(count).is_err() {
+            self.remember_failure(super::super::NestError::OutOfMemory);
             self.fail();
             return Err(super::super::NestError::OutOfMemory);
         }
         self.pending = None;
         self.deferred = None;
+        self.failure = None;
         for mapping in &held {
             {
                 let mut state = mapping.state.lock();

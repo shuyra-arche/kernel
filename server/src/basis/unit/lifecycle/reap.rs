@@ -233,9 +233,10 @@ pub(crate) fn stalled() {
                 child.nest.id().get(),
                 child.nest.is_closed()
             );
-            let (phase, invalidation, indexed, cleanup) = child.nest.retirement_observation();
+            let (phase, invalidation, indexed, cleanup, failure) =
+                child.nest.retirement_observation();
             crate::putln!(
-                "[stop] nest phase={phase:?} invalidation={invalidation:?} indexed={indexed} cleanup={cleanup}"
+                "[stop] nest phase={phase:?} invalidation={invalidation:?} indexed={indexed} cleanup={cleanup} failure={failure:?}"
             );
         }
     }
