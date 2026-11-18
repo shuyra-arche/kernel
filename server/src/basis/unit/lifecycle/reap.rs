@@ -191,15 +191,17 @@ pub(crate) enum Progress {
 /// owners; never hold the husk-chain lock during phase observations.
 pub(crate) fn stalled() {
     let mut tasks: [Option<Arc<Task>>; 4] = [const { None }; 4];
-    let (pending, retained) = {
-        let queue = PENDING.lock();
+    // These are independent owners. A diagnostic must not create a
+    // ReapQueue -> Husks lock edge that normal cleanup never needs.
+    let pending = PENDING.lock().len();
+    let retained = {
         let husks = HUSKS.lock();
         let mut count = 0;
         husks.chain.visit(tasks.len(), |task| {
             tasks[count] = Some(task.clone());
             count += 1;
         });
-        (queue.len(), husks.chain.len())
+        husks.chain.len()
     };
     crate::putln!("[stop] retirement pending={pending} husks={retained}");
     for task in tasks.into_iter().flatten() {
