@@ -59,8 +59,9 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
 with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`.
-For Kernel-owned private probes, check out Vanllia at the immutable
-[reviewed platform fixture revision](runner/fixture). The standalone Kernel
+For Kernel-owned private Guest compositions (other than Flat), check out Vanllia at the immutable
+[reviewed platform fixture revision](runner/fixture). Flat uses its own Guest
+and Cargo-pinned Platform source, with no separate Vanllia checkout. The Kernel
 `runner` package owns target selection, execution and evidence. Vanllia's
 selected product owns its independent Native/ABI13 composition under
 [`product/tests/`](https://github.com/shuyra-arche/vanllia/tree/main/product/tests),
@@ -72,11 +73,14 @@ cargo +nightly build --locked --manifest-path server/tests/runner/Cargo.toml --t
 verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 "$verify" smp --kernel "$PWD" --fixture /path/to/vanllia --output /new/smp --profile release
 "$verify" activity --kernel "$PWD" --fixture /path/to/vanllia --output /new/activity --profile release
-"$verify" flat --kernel "$PWD" --fixture /path/to/vanllia --output /new/flat
+"$verify" flat --kernel "$PWD" --output /new/flat
 "$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/irq --mode irq --events 16
 ```
 
-These commands are explicit integration commands, outside Kernel CI. Run both debug and release. SMP defaults to 4 Harts when explicitly invoked; ordinary CI does not schedule an SMP campaign. A/D and Flat default
+The Flat target also runs in Kernel's own single-Hart QEMU CI, without a
+Vanllia fixture checkout. Other commands here are explicit integration
+commands, outside ordinary Kernel CI. Run both debug and release. SMP defaults
+to 4 Harts when explicitly invoked; ordinary CI does not schedule an SMP campaign. A/D and Flat default
 to 1/4. Activity also has separate `--unsupported` and `--stopped` scenarios.
 Room correctness uses `--mode irq --events 16` on 1/4 and `--mode realtime
 --harts 4`. Scheduling comparisons stay opt-in, using `--mode room --baseline
