@@ -1,7 +1,7 @@
 name: Kernel Flat target QEMU
 
-# A Kernel-private target suite. Vanllia supplies a pinned platform fixture,
-# not the test assertions or their CI matrix.
+# A Kernel-private target suite. Flat owns its guest and assertions; its
+# standalone Cargo dependency selects an immutable Vanllia Platform revision.
 # Ordinary CI uses one Hart; multi-Hart execution is opt-in outside CI,
 # except for explicitly selected performance benchmarks.
 on:
@@ -68,25 +68,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Select reviewed platform fixture
-        id: fixture
-        run: |
-          pin=$(cat server/tests/runner/fixture)
-          [[ "$pin" =~ ^[0-9a-f]{40}$ ]]
-          echo "sha=$pin" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: shuyra-arche/vanllia
-          ref: ${{ steps.fixture.outputs.sha }}
-          path: .integration/fixture
-          persist-credentials: false
       - name: Execute Kernel-owned Flat contracts
         env:
           PROFILE: ${{ matrix.profile }}
         run: |
           cargo build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
           runner="$GITHUB_WORKSPACE/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify"
-          "$runner" flat --kernel "$GITHUB_WORKSPACE" --fixture "$GITHUB_WORKSPACE/.integration/fixture" \
+          "$runner" flat --kernel "$GITHUB_WORKSPACE" \
             --output "$GITHUB_WORKSPACE/.integration/evidence" --profile "$PROFILE" --harts 1
       - name: Preserve source and guest execution evidence
         if: always()
