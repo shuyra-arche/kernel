@@ -1,0 +1,119 @@
+name: Kernel optional Room/IRQ comparison
+
+# Kernel owns private experiment selection, baseline admission, guest contracts,
+# interleaving and evidence. This never runs in ordinary CI; callers gate it.
+on:
+  workflow_call:
+    inputs:
+      kernel_sha:
+        description: Immutable selected Kernel candidate revision
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RUSTUP_TOOLCHAIN: nightly
+
+jobs:
+  comparison:
+    name: Opt-in ${{ matrix.mode }} / ${{ matrix.latency }}
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - { mode: room, latency: enabled }
+          - { mode: room, latency: disabled }
+          - { mode: irq, latency: enabled }
+          - { mode: irq, latency: disabled }
+          - { mode: warmup, latency: enabled }
+    env:
+      QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
+    steps:
+      - name: Install native image tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+          sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN" --target riscv64gc-unknown-none-elf
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Admit exact selected Kernel revision
+        env:
+          KERNEL_SHA: ${{ inputs.kernel_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$KERNEL_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: shuyra-arche/kernel
+          ref: ${{ inputs.kernel_sha }}
+          path: .integration/kernel
+          persist-credentials: false
+      - name: Select comparison control
+        id: control
+        if: matrix.mode != 'warmup'
+        run: |
+          cargo build --locked --manifest-path .integration/kernel/server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+          .integration/kernel/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify baseline --event "$GITHUB_EVENT_PATH" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: matrix.mode != 'warmup'
+        with:
+          repository: shuyra-arche/kernel
+          ref: ${{ steps.control.outputs.sha }}
+          path: .integration/control
+          persist-credentials: false
+      - name: Select Kernel-owned reviewed platform fixture
+        id: fixture
+        run: |
+          set -euo pipefail
+          pin=$(cat .integration/kernel/server/tests/runner/fixture)
+          [[ "$pin" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$pin" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: shuyra-arche/vanllia
+          ref: ${{ steps.fixture.outputs.sha }}
+          path: .integration/fixture
+          persist-credentials: false
+      - name: Compare paired boots
+        env:
+          MODE: ${{ matrix.mode }}
+          LATENCY: ${{ matrix.latency }}
+        run: |
+          cargo build --locked --manifest-path .integration/kernel/server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+          args=()
+          if [[ "$LATENCY" == disabled ]]; then args+=(--no-latency); fi
+          if [[ "$MODE" == warmup ]]; then
+            args+=(--compare-room-warmup)
+            MODE=room
+          else
+            args+=(--baseline .integration/control)
+          fi
+          .integration/kernel/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify room --kernel .integration/kernel --fixture .integration/fixture --output .integration/comparison --mode "$MODE" --profile release --harts 4 --rounds 5 "${args[@]}"
+      - name: Preserve paired evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: comparison-${{ matrix.mode }}-${{ matrix.latency }}
+          include-hidden-files: true
+          path: |
+            .integration/comparison/order.json
+            .integration/comparison/*/inputs.json
+            .integration/comparison/*/*.elf
+            .integration/comparison/*/*.bin
+            .integration/comparison/*/*.lock
+            .integration/comparison/*/patches/*
+            .integration/comparison/*/resolve/*
+            .integration/comparison/*/locked/*
+            .integration/comparison/*/harts-*/*.log
+            .integration/comparison/*/harts-*/result.json
+          if-no-files-found: warn
