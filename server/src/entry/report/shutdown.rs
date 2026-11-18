@@ -68,6 +68,7 @@ pub(crate) fn report() {
 }
 
 pub(crate) fn stalled(observation: shutdown::Observation) {
+    crate::basis::unit::lifecycle::stalled();
     let shutdown::Observation {
         hart,
         pushed,

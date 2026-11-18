@@ -71,7 +71,7 @@ pub(crate) use doom::exit_team;
 pub(crate) use doom::slay;
 pub(crate) use doom::take_doomed;
 pub(crate) use doom::{Termination, branch_stats};
-pub(crate) use reap::{Progress, advance};
+pub(crate) use reap::{Progress, advance, stalled};
 pub(crate) static WORK: crate::basis::sign::Resident = crate::basis::sign::Resident::new();
 static LAST: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 pub(super) fn progressed() {

@@ -186,6 +186,31 @@ pub(crate) enum Progress {
     Ready,
     Blocked,
 }
+/// A single, allocation-free sample when normal shutdown has been stalled
+/// for two seconds. Copy at most four Arc handles before inspecting other
+/// owners; never hold the husk-chain lock during phase observations.
+pub(super) fn stalled() {
+    let mut tasks: [Option<Arc<Task>>; 4] = [const { None }; 4];
+    let (pending, retained) = {
+        let queue = PENDING.lock();
+        let husks = HUSKS.lock();
+        let mut count = 0;
+        husks.chain.visit(tasks.len(), |task| {
+            tasks[count] = Some(task.clone());
+            count += 1;
+        });
+        (queue.len(), husks.chain.len())
+    };
+    crate::putln!("[stop] retirement pending={pending} husks={retained}");
+    for task in tasks.into_iter().flatten() {
+        crate::putln!(
+            "[stop] husk task={} stage={}",
+            task.ident.id.get(),
+            task.retirement_stage()
+        );
+    }
+}
+
 pub(super) fn pending() -> bool {
     let terminal = !PENDING.lock().is_empty();
     let husks = !HUSKS.lock().chain.is_empty();

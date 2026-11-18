@@ -18,6 +18,22 @@ impl Retirement {
     }
 }
 impl Task {
+    /// A bounded, read-only diagnostic for a shutdown that has stopped
+    /// making retirement progress. It does not grant new cleanup authority.
+    pub(crate) fn retirement_stage(&self) -> &'static str {
+        let Some(phase) = self.retirement.try_lock() else {
+            return "in-flight";
+        };
+        match &*phase {
+            Retirement::Active => "in-flight",
+            Retirement::Heirs { .. } => "heirs",
+            Retirement::Pends => "pends",
+            Retirement::Memory => "memory",
+            Retirement::Receipts(_) => "receipts",
+            Retirement::Settled => "settled",
+        }
+    }
+
     /// One owner-controlled step. Ok(false) is an immediately runnable next
     /// stage; Err retains an obligation requiring a later attempt.
     pub(crate) fn advance_retirement(self: &Arc<Self>) -> Result<bool, NestError> {
