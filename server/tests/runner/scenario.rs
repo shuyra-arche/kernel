@@ -486,7 +486,7 @@ pub fn run(command: Commands) -> Result<()> {
     };
     if args.harts.is_empty() {
         args.harts = if matches!(kind, Kind::Smp) {
-            vec![1, 2, 4]
+            vec![4]
         } else {
             vec![1, 4]
         };
