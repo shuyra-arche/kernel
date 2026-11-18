@@ -58,11 +58,13 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 ## Native execution
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
-with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`. Clone Vanllia at the exact
-revision in [runner/fixture](runner/fixture); this is a published fixture input for explicit integration runs. The shared
-host execution library lives in Kernel’s standalone `runner` package. Vanllia
-consumes that library and owns native memory and System/Twine compositions.
-Kernel owns its private completion, A/D, Flat and Room probes.
+with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`. For Kernel-owned private probes, check out Vanllia at the immutable
+[reviewed platform fixture revision](runner/fixture). The standalone Kernel
+`runner` package owns target selection, execution and evidence. Vanllia's
+selected product owns its independent Native/ABI13 composition under
+[`product/tests/`](https://github.com/shuyra-arche/vanllia/tree/main/product/tests),
+while System maintains its own Runtime/Supply/RPC contracts. Kernel owns its
+private completion, A/D, Flat and Room probes.
 
 ```sh
 cargo +nightly build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
@@ -81,14 +83,16 @@ Room correctness uses `--mode irq --events 16` on 1/4 and `--mode realtime
 Invalid counts, duplicate Harts and malformed baseline SHAs fail admission.
 
 ```sh
-cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-debug
-cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-release --profile release
-cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/reject --capsule-version 10
+cargo +nightly run --locked --manifest-path /path/to/vanllia/product/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-debug
+cargo +nightly run --locked --manifest-path /path/to/vanllia/product/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-release --profile release
+cargo +nightly run --locked --manifest-path /path/to/vanllia/product/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/reject --capsule-version 10
 ```
 
 The last command is a negative test of the current boot contract, not an ABI 10
-guest. System consumer verification uses Vanllia's `verify system` with the
-pinned System and Twine checkouts in [Vanllia’s integration workflow](https://github.com/shuyra-arche/vanllia/blob/main/.github/workflows/memory.yml).
+guest. System's Runtime, Supply, RPC and handoff contracts execute through
+[System's native workflow](https://github.com/shuyra-arche/system/blob/main/.github/workflows/native.yml).
+Vanllia's distinct `std` composition check uses immutable System/Toolchain
+inputs and the production Loader; it does not duplicate System's private test.
 Independent IOMMU backend execution remains available with
 `cargo +nightly test --locked -p kernel-memory-tests --test iommu-target
 --target x86_64-unknown-linux-gnu -- --ignored --nocapture`.
