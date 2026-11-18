@@ -136,11 +136,14 @@ own target guest without assembling another provider. Neither workflow checks
 out a live Vanllia/System/Twine product composition; those scenarios are owned
 by the integration repository.
 
-Vanllia owns the explicit integration gate. Its workflow pins the Kernel
-provider, executes 29 QEMU jobs split by scenario/profile/Hart with up to eight
-workers, and uploads a distinct artifact for every job. Native/System cases use
-Vanllia's own runner; private Kernel probes use this repository's runner and the
-published Vanllia fixture. A failing shard does not cancel the other evidence.
+Vanllia's current integration workflow pins a Kernel test provider and
+executes 13 single-Hart QEMU contract/ABI scenarios, up to eight in parallel,
+with separate evidence per job. Kernel's own Flat target CI also uses one Hart.
+The historical multi-Hart SMP, RT and additional mechanism probes are no
+longer ordinary CI gates; their owner-side test code and explicit runner
+commands remain available. A green single-Hart CI run does not establish SMP
+safety or an assembled product. Opt-in performance comparisons may run with
+four Harts.
 Long paired comparisons remain opt-in in the composition owner's PR with
 `Room comparison: requested` and exactly one
 `Room baseline: <40 lowercase hex characters>` line.
