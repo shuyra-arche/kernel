@@ -147,11 +147,15 @@ revision**, not the unrelated Kernel main ABI candidate. Kernel's separate
 Flat and IOMMU target workflows remain owner-side checks.
 The historical multi-Hart SMP/Realtime probes are not routine CI gates;
 their explicit runner commands remain available. A green single-Hart CI
-does not establish SMP safety or an assembled product. Opt-in performance
-comparisons may run with four Harts.
-Long paired comparisons remain opt-in in the composition owner's PR with
+does not establish SMP safety or an assembled product. Opt-in performance comparisons use four Harts. The
+[Kernel-owned comparison workflow](../../.github/workflows/room-comparison.yml)
+defines the five Room/IRQ/warmup experiment cases, baseline admission, five
+alternating paired rounds and raw evidence. It is available only by an
+explicit `workflow_call`, not a normal Kernel PR/push job. A composition
+caller chooses the exact candidate Kernel SHA and opts in on its PR with
 `Room comparison: requested` and exactly one
-`Room baseline: <40 lowercase hex characters>` line.
+`Room baseline: <40 lowercase hex characters>` line. An identical-SHA
+control verifies execution mechanics, not performance improvements.
 
 ## Retired historical checks
 
