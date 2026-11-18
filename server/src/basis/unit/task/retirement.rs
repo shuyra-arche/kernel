@@ -20,6 +20,7 @@ impl Retirement {
 impl Task {
     /// A bounded, read-only diagnostic for a shutdown that has stopped
     /// making retirement progress. It does not grant new cleanup authority.
+    #[cfg(not(test))]
     pub(crate) fn retirement_stage(&self) -> &'static str {
         let Some(phase) = self.retirement.try_lock() else {
             return "in-flight";
