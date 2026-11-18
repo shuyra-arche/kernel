@@ -15,7 +15,7 @@ pub struct Inputs {
     #[arg(long)]
     kernel: PathBuf,
     #[arg(long)]
-    fixture: PathBuf,
+    fixture: Option<PathBuf>,
     #[arg(long)]
     output: PathBuf,
     #[arg(long,default_value="debug",value_parser=["debug","release"])]
@@ -101,14 +101,23 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     let provider = root.join("provider");
     let fixture = root.join("fixture");
     let source = revision(kernel)?;
-    let pin = revision(&args.fixture)?;
-    // The published Vanllia runner commit is also the reviewed composition pin.
-    require(
-        pin == include_str!("fixture").trim(),
-        "unreviewed Vanllia fixture revision",
-    )?;
+    // A private guest composition uses the reviewed historical Vanllia source.
+    // Flat owns its Guest and uses only the immutable platform Cargo dependency.
+    let pin = match args.fixture.as_deref() {
+        Some(checkout) => {
+            let pin = revision(checkout)?;
+            require(
+                pin == include_str!("fixture").trim(),
+                "unreviewed Vanllia fixture revision",
+            )?;
+            Some(pin)
+        }
+        None => None,
+    };
     archive(kernel, &source, &provider)?;
-    archive(&args.fixture, &pin, &fixture)?;
+    if let (Some(checkout), Some(pin)) = (args.fixture.as_deref(), pin.as_deref()) {
+        archive(checkout, pin, &fixture)?;
+    }
     let patches = root.join("patches");
     fs::create_dir(&patches)?;
     if !matches!(kind, Kind::Flat { .. }) {
@@ -218,10 +227,8 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
                     "kernel/flat-probe-contracts"
                 },
             ]);
-            command.arg("--config").arg(format!(
-                "patch.\"https://github.com/shuyra-arche/vanllia.git\".platform-riscv.path={}",
-                serde_json::to_string(&fixture.join("platform/riscv"))?
-            ));
+            // Cargo selects the reviewed Platform source from Flat's own
+            // immutable Git dependency. No Vanllia test checkout is needed.
             command.env("FLAT_PROBE_PROVIDER", "1");
         }
         Kind::Room {
@@ -425,6 +432,17 @@ fn boot(
     );
     Ok(result.passed)
 }
+pub(crate) fn admit_fixture(kind: &Kind, fixture: Option<&Path>) -> Result<()> {
+    if matches!(kind, Kind::Flat { .. }) {
+        require(
+            fixture.is_none(),
+            "Flat uses its pinned Platform dependency; --fixture is not accepted",
+        )
+    } else {
+        require(fixture.is_some(), "this target scenario requires --fixture")
+    }
+}
+
 pub fn run(command: Commands) -> Result<()> {
     let (mut args, kind, baseline, warmup) = match command {
         Commands::Smp { inputs } => (inputs, Kind::Smp, None, false),
@@ -484,6 +502,7 @@ pub fn run(command: Commands) -> Result<()> {
             )
         }
     };
+    admit_fixture(&kind, args.fixture.as_deref())?;
     if args.harts.is_empty() {
         args.harts = if matches!(kind, Kind::Smp) {
             vec![4]
