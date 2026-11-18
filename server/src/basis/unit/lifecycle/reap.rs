@@ -189,7 +189,7 @@ pub(crate) enum Progress {
 /// A single, allocation-free sample when normal shutdown has been stalled
 /// for two seconds. Copy at most four Arc handles before inspecting other
 /// owners; never hold the husk-chain lock during phase observations.
-pub(super) fn stalled() {
+pub(crate) fn stalled() {
     let mut tasks: [Option<Arc<Task>>; 4] = [const { None }; 4];
     let (pending, retained) = {
         let queue = PENDING.lock();
