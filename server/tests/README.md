@@ -58,7 +58,8 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 ## Native execution
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
-with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`. For Kernel-owned private probes, check out Vanllia at the immutable
+with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`.
+For Kernel-owned private probes, check out Vanllia at the immutable
 [reviewed platform fixture revision](runner/fixture). The standalone Kernel
 `runner` package owns target selection, execution and evidence. Vanllia's
 selected product owns its independent Native/ABI13 composition under
@@ -88,8 +89,11 @@ cargo +nightly run --locked --manifest-path /path/to/vanllia/product/tests/runne
 cargo +nightly run --locked --manifest-path /path/to/vanllia/product/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/reject --capsule-version 10
 ```
 
-The last command is a negative test of the current boot contract, not an ABI 10
-guest. System's Runtime, Supply, RPC and handoff contracts execute through
+These Native/ABI13 product examples require the Kernel revision selected by
+the Vanllia product's matching manifests and locks. Running them against an
+unrelated Kernel main/ABI14 candidate is not valid product verification.
+The last command rejects an ABI 10 Capsule; it is not an ABI 10 guest.
+System's Runtime, Supply, RPC and handoff contracts execute through
 [System's native workflow](https://github.com/shuyra-arche/system/blob/main/.github/workflows/native.yml).
 Vanllia's distinct `std` composition check uses immutable System/Toolchain
 inputs and the production Loader; it does not duplicate System's private test.
