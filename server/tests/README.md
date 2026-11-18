@@ -73,7 +73,7 @@ verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 "$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/irq --mode irq --events 16
 ```
 
-These commands are explicit integration commands, outside Kernel CI. Run both debug and release. SMP defaults to 1/2/4 Harts; A/D and Flat default
+These commands are explicit integration commands, outside Kernel CI. Run both debug and release. SMP defaults to 4 Harts when explicitly invoked; ordinary CI does not schedule an SMP campaign. A/D and Flat default
 to 1/4. Activity also has separate `--unsupported` and `--stopped` scenarios.
 Room correctness uses `--mode irq --events 16` on 1/4 and `--mode realtime
 --harts 4`. Scheduling comparisons stay opt-in, using `--mode room --baseline
@@ -92,6 +92,11 @@ pinned System and Twine checkouts in [Vanllia’s integration workflow](https://
 Independent IOMMU backend execution remains available with
 `cargo +nightly test --locked -p kernel-memory-tests --test iommu-target
 --target x86_64-unknown-linux-gnu -- --ignored --nocapture`.
+
+The ordinary Kernel CI exercises Flat target contracts on one Hart. SMP
+correctness and multi-Hart fault campaigns remain manually invocable, with
+four Harts as the SMP default; opt-in benchmarks may use four Harts to
+measure multi-Hart performance.
 
 The [IOMMU target QEMU workflow](../../.github/workflows/iommu-target.yml)
 runs this same existing test on a Debian trixie QEMU target when its relevant
