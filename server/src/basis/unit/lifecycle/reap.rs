@@ -213,13 +213,14 @@ pub(crate) fn stalled() {
                 let records = child.node.tasks.lock();
                 (
                     records.len(),
-                    records.iter().filter(|member| member.exit().is_some()).count(),
+                    records
+                        .iter()
+                        .filter(|member| member.exit().is_some())
+                        .count(),
                     records
                         .iter()
                         .filter(|member| {
-                            member
-                                .reclaimed
-                                .load(core::sync::atomic::Ordering::Acquire)
+                            member.reclaimed.load(core::sync::atomic::Ordering::Acquire)
                         })
                         .count(),
                 )
@@ -229,6 +230,11 @@ pub(crate) fn stalled() {
                 child.id.get(),
                 child.nest.id().get(),
                 child.nest.is_closed()
+            );
+            let (phase, invalidation, indexed, cleanup) =
+                child.nest.retirement_observation();
+            crate::putln!(
+                "[stop] nest phase={phase:?} invalidation={invalidation:?} indexed={indexed} cleanup={cleanup}"
             );
         }
     }

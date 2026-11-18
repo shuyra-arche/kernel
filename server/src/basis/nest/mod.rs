@@ -1686,6 +1686,20 @@ impl Nest {
         self.state.lock().phase.is_closed()
     }
 
+    /// Read-only, bounded shutdown diagnosis. Sample the state and index
+    /// independently: diagnostics must not introduce a new lock order.
+    pub(crate) fn retirement_observation(
+        &self,
+    ) -> (translation::phase::ClosePhase, translation::Invalidation, usize, bool) {
+        let (phase, invalidation) = {
+            let state = self.state.lock();
+            (state.phase, state.retirement.invalidation())
+        };
+        let indexed = self.address.lock().index.len();
+        let pending = self.pending_cleanup.lock().is_some();
+        (phase, invalidation, indexed, pending)
+    }
+
     /// 翻译里只取物理地址的那一面：权限位不外露。
     pub(crate) fn physical_at(&self, address: VirtAddr) -> Option<PhysAddr> {
         self.translate(address).map(|(physical, _)| physical)
