@@ -1,12 +1,12 @@
 #![allow(dead_code)]
 #[path = "../composition/mod.rs"]
 mod composition;
+#[path = "../scenario.rs"]
+mod scenario;
 #[path = "../utilities.rs"]
 mod utilities;
 #[path = "../verify.rs"]
 mod verify;
-#[path = "../scenario.rs"]
-mod scenario;
 #[test]
 fn flat_does_not_require_a_historical_fixture_but_other_probes_do() {
     use std::path::Path;
