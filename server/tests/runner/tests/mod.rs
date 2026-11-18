@@ -1,10 +1,39 @@
 #![allow(dead_code)]
 #[path = "../composition/mod.rs"]
 mod composition;
+#[path = "../scenario.rs"]
+mod scenario;
 #[path = "../utilities.rs"]
 mod utilities;
 #[path = "../verify.rs"]
 mod verify;
+#[test]
+fn flat_does_not_require_a_historical_fixture_but_other_probes_do() {
+    use std::path::Path;
+
+    let old_fixture = Path::new("/example/vanllia");
+    for timing in [false, true] {
+        let flat = verify::Kind::Flat { timing };
+        assert!(scenario::admit_fixture(&flat, None).is_ok());
+        assert!(scenario::admit_fixture(&flat, Some(old_fixture)).is_err());
+    }
+    for private in [
+        verify::Kind::Smp,
+        verify::Kind::Activity {
+            unsupported: false,
+            stopped: false,
+        },
+        verify::Kind::Room {
+            mode: "irq".into(),
+            events: 16,
+            latency: true,
+            cold: false,
+        },
+    ] {
+        assert!(scenario::admit_fixture(&private, None).is_err());
+        assert!(scenario::admit_fixture(&private, Some(old_fixture)).is_ok());
+    }
+}
 #[cfg(unix)]
 #[test]
 fn symbolizer_keeps_literal_compressed_call_pcs_and_rejects_tool_failure() {
