@@ -1690,7 +1690,12 @@ impl Nest {
     /// independently: diagnostics must not introduce a new lock order.
     pub(crate) fn retirement_observation(
         &self,
-    ) -> (translation::phase::ClosePhase, translation::Invalidation, usize, bool) {
+    ) -> (
+        translation::phase::ClosePhase,
+        translation::Invalidation,
+        usize,
+        bool,
+    ) {
         let (phase, invalidation) = {
             let state = self.state.lock();
             (state.phase, state.retirement.invalidation())
