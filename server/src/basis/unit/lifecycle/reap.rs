@@ -208,6 +208,29 @@ pub(crate) fn stalled() {
             task.ident.id.get(),
             task.retirement_stage()
         );
+        if let Some(child) = task.retirement_heir() {
+            let (members, exited, reclaimed) = {
+                let records = child.node.tasks.lock();
+                (
+                    records.len(),
+                    records.iter().filter(|member| member.exit().is_some()).count(),
+                    records
+                        .iter()
+                        .filter(|member| {
+                            member
+                                .reclaimed
+                                .load(core::sync::atomic::Ordering::Acquire)
+                        })
+                        .count(),
+                )
+            };
+            crate::putln!(
+                "[stop] child team={} nest={} members={members} exited={exited} reclaimed={reclaimed} nest-closed={}",
+                child.id.get(),
+                child.nest.id().get(),
+                child.nest.is_closed()
+            );
+        }
     }
 }
 

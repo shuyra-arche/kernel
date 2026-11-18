@@ -34,6 +34,23 @@ impl Task {
         }
     }
 
+    /// Observe only the next real child while the husk is stalled, after
+    /// dropping the retirement guard. Never materialize a child snapshot.
+    pub(crate) fn retirement_heir(
+        &self,
+    ) -> Option<Arc<crate::basis::unit::team::Team>> {
+        let after = match &*self.retirement.try_lock()? {
+            Retirement::Heirs { after } => *after,
+            _ => return None,
+        };
+        self.heir
+            .try_lock()?
+            .iter()
+            .filter(|team| team.id.get() > after)
+            .min_by_key(|team| team.id.get())
+            .cloned()
+    }
+
     /// One owner-controlled step. Ok(false) is an immediately runnable next
     /// stage; Err retains an obligation requiring a later attempt.
     pub(crate) fn advance_retirement(self: &Arc<Self>) -> Result<bool, NestError> {
