@@ -17,12 +17,16 @@ fn flat_does_not_require_a_historical_fixture_but_other_probes_do() {
         assert!(scenario::admit_fixture(&flat, None).is_ok());
         assert!(scenario::admit_fixture(&flat, Some(old_fixture)).is_err());
     }
+    for unsupported in [false, true] {
+        let activity = verify::Kind::Activity {
+            unsupported,
+            stopped: false,
+        };
+        assert!(scenario::admit_fixture(&activity, None).is_ok());
+        assert!(scenario::admit_fixture(&activity, Some(old_fixture)).is_err());
+    }
     for private in [
         verify::Kind::Smp,
-        verify::Kind::Activity {
-            unsupported: false,
-            stopped: false,
-        },
         verify::Kind::Room {
             mode: "irq".into(),
             events: 16,

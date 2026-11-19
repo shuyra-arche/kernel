@@ -59,9 +59,11 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
 with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`.
-For Kernel-owned private Guest compositions (other than Flat), check out Vanllia at the immutable
-[reviewed platform fixture revision](runner/fixture). Flat uses its own Guest
-and Cargo-pinned Platform source, with no separate Vanllia checkout. The Kernel
+For Kernel-owned private Guest compositions other than Flat and the published
+ABI13 Activity target, check out Vanllia at the immutable
+[reviewed fixture revision](runner/fixture). Flat and published Activity use
+Kernel-owned Guests and Cargo-pinned Platform inputs, without a separate
+Vanllia test checkout. The Kernel
 `runner` package owns target selection, execution and evidence. Vanllia's
 selected product owns its independent Native/ABI13 composition under
 [`product/tests/`](https://github.com/shuyra-arche/vanllia/tree/main/product/tests),
@@ -72,13 +74,14 @@ private completion, A/D, Flat and Room probes.
 cargo +nightly build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
 verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 "$verify" smp --kernel "$PWD" --fixture /path/to/vanllia --output /new/smp --profile release
-"$verify" activity --kernel "$PWD" --fixture /path/to/vanllia --output /new/activity --profile release
+"$verify" activity --kernel /path/to/abi13-kernel --output /new/activity --profile release
 "$verify" flat --kernel "$PWD" --output /new/flat
 "$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/irq --mode irq --events 16
 ```
 
-The Flat target also runs in Kernel's own single-Hart QEMU CI, without a
-Vanllia fixture checkout. Other commands here are explicit integration
+The Flat and pinned ABI13 Activity targets run in Kernel's own single-Hart
+QEMU workflows without a Vanllia fixture checkout. Activity selects the
+published matching Kernel revision, not current main/ABI14. Other commands here are explicit integration
 commands, outside ordinary Kernel CI. Run both debug and release. SMP defaults
 to 4 Harts when explicitly invoked; ordinary CI does not schedule an SMP campaign. A/D and Flat default
 to 1/4. Activity also has separate `--unsupported` and `--stopped` scenarios.
@@ -155,8 +158,8 @@ separate Activity/Unsupported/Stopped/IRQ single-Hart cases, passing only the
 exact product Kernel gitlink SHA. Kernel owns this test matrix, its reviewed
 fixture pin and its QEMU evidence. The reusable workflow is also manually
 runnable with an immutable Kernel SHA; it verifies the **selected source
-revision**, not the unrelated Kernel main ABI candidate. Kernel's separate
-Flat and IOMMU target workflows remain owner-side checks.
+revision**, not the unrelated Kernel main ABI candidate. Kernel's separate Flat, pinned ABI13 Activity and IOMMU target workflows
+remain owner-side checks.
 The historical multi-Hart SMP/Realtime probes are not routine CI gates;
 their explicit runner commands remain available. A green single-Hart CI
 does not establish SMP safety or an assembled product. Opt-in performance comparisons use four Harts. The
