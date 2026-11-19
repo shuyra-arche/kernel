@@ -1,7 +1,8 @@
 name: Kernel published Realtime admission QEMU
 
-# One-Hart negative admission contract. Four-Hart priority, budget and
-# migration qualification is explicit manual work, never ordinary CI.
+# Ordinary PR/push CI tests the one-Hart negative-admission contract.
+# Workflow dispatch defaults to four Harts and tests real priority, budget,
+# replenishment, fixed-Hart and recovery behavior; it is never a CI SMP gate.
 on:
   pull_request:
     paths:
@@ -19,6 +20,13 @@ on:
       - "server/tests/target/basis/room/schedule/**"
       - "server/tests/target/basis/room/pinned/**"
   workflow_dispatch:
+    inputs:
+      harts:
+        description: Explicit Realtime Hart count (four-Hart positive qualification)
+        type: choice
+        required: true
+        default: "4"
+        options: ["1", "4"]
 
 permissions:
   contents: read
@@ -33,7 +41,7 @@ defaults:
 
 jobs:
   qemu:
-    name: ABI13 Realtime admission / ${{ matrix.profile }} / h1
+    name: ABI13 Realtime / ${{ matrix.profile }} / h${{ github.event_name == 'workflow_dispatch' && inputs.harts || '1' }}
     runs-on: ubuntu-latest
     container: debian:trixie
     timeout-minutes: 25
@@ -45,6 +53,7 @@ jobs:
       RUSTUP_TOOLCHAIN: nightly
       QEMU_RISCV64: qemu-system-riscv64
       QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
+      HARTS: ${{ github.event_name == 'workflow_dispatch' && inputs.harts || '1' }}
     steps:
       - name: Install target and execution tools
         run: |
@@ -64,27 +73,28 @@ jobs:
           ref: 789ffd19b5359f3de172fb9aad8a61f6a7113a64
           path: .integration/provider
           persist-credentials: false
-      - name: Execute one-Hart Realtime rejection contract
+      - name: Execute ABI13 Realtime admission or positive four-Hart contract
         env:
           PROFILE: ${{ matrix.profile }}
         run: |
           set -euo pipefail
           cargo build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
           runner="$GITHUB_WORKSPACE/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify"
+          [[ "$HARTS" == 1 || "$HARTS" == 4 ]]
           "$runner" room --mode realtime --kernel "$GITHUB_WORKSPACE/.integration/provider" \
             --output "$GITHUB_WORKSPACE/.integration/evidence" \
-            --profile "$PROFILE" --harts 1 --rounds 1
+            --profile "$PROFILE" --harts "$HARTS" --rounds 1
       - name: Show failed build or QEMU evidence
         if: failure()
         run: |
-          for file in .integration/evidence/candidate/resolve/stderr.log .integration/evidence/candidate/locked/stderr.log .integration/evidence/candidate/harts-1-round-0/serial.log; do
+          for file in .integration/evidence/candidate/resolve/stderr.log .integration/evidence/candidate/locked/stderr.log ".integration/evidence/candidate/harts-$HARTS-round-0/serial.log"; do
             if [[ -f "$file" ]]; then echo "---- $file ----"; tail -n 110 "$file"; fi
           done
       - name: Preserve complete target evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: kernel-abi13-realtime-${{ matrix.profile }}-h1
+          name: kernel-abi13-realtime-${{ matrix.profile }}-h${{ github.event_name == 'workflow_dispatch' && inputs.harts || '1' }}
           include-hidden-files: true
           path: .integration/evidence/
           if-no-files-found: warn
