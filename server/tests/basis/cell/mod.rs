@@ -5,7 +5,8 @@
 extern crate alloc;
 
 // Host exercises the production Cell without loading Flat or Nest state.
-#[allow(dead_code)]
+// The production Page exports additional public-to-Kernel members not needed by this suite.
+#[allow(dead_code, unused_imports)]
 #[path = "../../../src/basis/cell/page/mod.rs"]
 pub(crate) mod cell;
 #[allow(dead_code, unused_imports)]
