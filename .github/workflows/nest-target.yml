@@ -23,6 +23,12 @@ on:
       - "server/src/metal/riscv/mmu/**"
       - "api/**"
       - "client/**"
+  workflow_call:
+    inputs:
+      kernel_sha:
+        description: Exact Kernel provider revision selected by the calling owner
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       kernel_sha:
