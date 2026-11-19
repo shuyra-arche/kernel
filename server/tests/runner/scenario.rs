@@ -248,10 +248,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
                         "platform/window.rs",
                     ] {
                         let shared = format!("target/basis/room/pinned/{name}");
-                        compose::copy(
-                            &shared,
-                            &provider.join("server/tests").join(&shared),
-                        )?;
+                        compose::copy(&shared, &provider.join("server/tests").join(&shared))?;
                     }
                 }
                 let package = if mode == "irq" {
