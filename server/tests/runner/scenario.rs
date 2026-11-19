@@ -15,8 +15,6 @@ pub struct Inputs {
     #[arg(long)]
     kernel: PathBuf,
     #[arg(long)]
-    fixture: Option<PathBuf>,
-    #[arg(long)]
     output: PathBuf,
     #[arg(long,default_value="debug",value_parser=["debug","release"])]
     profile: String,
@@ -88,45 +86,13 @@ struct Variant {
     image: Option<PathBuf>,
     kind: Kind,
 }
-fn copy_guest(file: &str, fixture: &Path) -> Result<()> {
-    compose::copy(
-        file,
-        &fixture
-            .join("tests/memory/guest")
-            .join(Path::new(file).file_name().unwrap()),
-    )
-}
 fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Variant> {
     fresh(root)?;
     let provider = root.join("provider");
-    let fixture = root.join("fixture");
     let source = revision(kernel)?;
-    // A private guest composition uses the reviewed historical Vanllia source.
-    // Flat owns its Guest and uses only the immutable platform Cargo dependency.
-    let pin = match args.fixture.as_deref() {
-        Some(checkout) => {
-            let pin = revision(checkout)?;
-            require(
-                pin == include_str!("fixture").trim(),
-                "unreviewed Vanllia fixture revision",
-            )?;
-            Some(pin)
-        }
-        None => None,
-    };
     archive(kernel, &source, &provider)?;
-    if let (Some(checkout), Some(pin)) = (args.fixture.as_deref(), pin.as_deref()) {
-        archive(checkout, pin, &fixture)?;
-    }
     let patches = root.join("patches");
     fs::create_dir(&patches)?;
-    let legacy_guest = matches!(
-        kind,
-        Kind::Smp | Kind::Shutdown { .. } | Kind::Lifecycle { .. } | Kind::Retirement { .. }
-    );
-    if legacy_guest {
-        compose::apply("user-fixture", &fixture, &patches)?;
-    }
     let manifest;
     let mut command = Command::new("cargo");
     command.arg("build");
@@ -142,14 +108,10 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     ] {
         command.env_remove(name);
     }
-    if legacy_guest {
-        compose::copy(
-            "target/basis/unit/stack.rs",
-            &fixture.join("tests/memory/guest/stack.rs"),
-        )?;
-    }
     match &kind {
         Kind::Smp | Kind::Lifecycle { .. } | Kind::Retirement { .. } | Kind::Shutdown { .. } => {
+            // The published ABI13 completion, lifecycle and shutdown Guest is
+            // owned here. Preserve the exact provider-source patch contracts.
             compose::apply("smp-provider", &provider, &patches)?;
             if let Kind::Retirement { cancel } = &kind {
                 compose::apply("retirement-provider", &provider, &patches)?;
@@ -172,14 +134,18 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
                     compose::apply("shutdown-quiet", &provider, &patches)?;
                 }
             }
-            compose::apply("smp-fixture", &fixture, &patches)?;
-            copy_guest("target/metal/riscv/mmu/completion/cases.rs", &fixture)?;
-            fs::rename(
-                fixture.join("tests/memory/guest/cases.rs"),
-                fixture.join("tests/memory/guest/smp.rs"),
+            let package = "target/smp";
+            let target = provider.join("server/tests").join(package);
+            for file in compose::hashes(&compose::suite().join(package))?.keys() {
+                compose::copy(&format!("{package}/{file}"), &target.join(file))?;
+            }
+            // Import the already Kernel-owned ABI13 stack fixture directly:
+            // no second source copy and no Vanllia product test checkout.
+            compose::copy(
+                "target/basis/room/pinned/stack.rs",
+                &provider.join("server/tests/target/basis/room/pinned/stack.rs"),
             )?;
-            copy_guest("target/metal/riscv/mmu/completion/recovery.rs", &fixture)?;
-            manifest = fixture.join("tests/memory/Cargo.toml");
+            manifest = target.join("Cargo.toml");
             patch_provider(&mut command, &provider)?;
         }
         Kind::Activity {
@@ -300,7 +266,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     }
     let qemu = std::env::var("QEMU_RISCV64").unwrap_or("qemu-system-riscv64".into());
     let firmware = Path::new(&std::env::var("QEMU_OPENSBI")?).canonicalize()?;
-    let mut inputs = serde_json::json!({"source":source,"fixture":pin,"profile":args.profile,"scenario":format!("{kind:?}"),"tools":tools(&qemu,&firmware)?,
+    let mut inputs = serde_json::json!({"source":source,"profile":args.profile,"scenario":format!("{kind:?}"),"tools":tools(&qemu,&firmware)?,
         "suite_sha256":compose::hashes(&compose::suite())?,"composition_sha256":compose::hashes(&patches)?,"builds":[]});
     let lock = manifest.with_file_name("Cargo.lock");
     if lock.exists() {
@@ -443,20 +409,6 @@ fn boot(
     );
     Ok(result.passed)
 }
-pub(crate) fn admit_fixture(kind: &Kind, fixture: Option<&Path>) -> Result<()> {
-    if matches!(
-        kind,
-        Kind::Flat { .. } | Kind::Activity { .. } | Kind::Room { .. }
-    ) {
-        require(
-            fixture.is_none(),
-            "this Kernel target has a pinned Platform dependency; --fixture is not accepted",
-        )
-    } else {
-        require(fixture.is_some(), "this target scenario requires --fixture")
-    }
-}
-
 pub fn run(command: Commands) -> Result<()> {
     let (mut args, kind, baseline, warmup) = match command {
         Commands::Smp { inputs } => (inputs, Kind::Smp, None, false),
@@ -516,7 +468,6 @@ pub fn run(command: Commands) -> Result<()> {
             )
         }
     };
-    admit_fixture(&kind, args.fixture.as_deref())?;
     if args.harts.is_empty() {
         args.harts = if matches!(kind, Kind::Smp) {
             vec![4]
