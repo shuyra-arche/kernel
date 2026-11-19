@@ -15,8 +15,6 @@ pub struct Inputs {
     #[arg(long)]
     kernel: PathBuf,
     #[arg(long)]
-    fixture: PathBuf,
-    #[arg(long)]
     output: PathBuf,
     #[arg(long,default_value="debug",value_parser=["debug","release"])]
     profile: String,
@@ -88,35 +86,13 @@ struct Variant {
     image: Option<PathBuf>,
     kind: Kind,
 }
-fn copy_guest(file: &str, fixture: &Path) -> Result<()> {
-    compose::copy(
-        file,
-        &fixture
-            .join("tests/memory/guest")
-            .join(Path::new(file).file_name().unwrap()),
-    )
-}
 fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Variant> {
     fresh(root)?;
     let provider = root.join("provider");
-    let fixture = root.join("fixture");
     let source = revision(kernel)?;
-    let pin = revision(&args.fixture)?;
-    // The published Vanllia runner commit is also the reviewed composition pin.
-    require(
-        pin == include_str!("fixture").trim(),
-        "unreviewed Vanllia fixture revision",
-    )?;
     archive(kernel, &source, &provider)?;
-    archive(&args.fixture, &pin, &fixture)?;
     let patches = root.join("patches");
     fs::create_dir(&patches)?;
-    if !matches!(kind, Kind::Flat { .. }) {
-        compose::apply("user-fixture", &fixture, &patches)?;
-    }
-    if matches!(kind, Kind::Room { .. }) {
-        compose::apply("transport-fixture", &fixture, &patches)?;
-    }
     let manifest;
     let mut command = Command::new("cargo");
     command.arg("build");
@@ -132,14 +108,10 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     ] {
         command.env_remove(name);
     }
-    if !matches!(kind, Kind::Flat { .. }) {
-        compose::copy(
-            "target/basis/unit/stack.rs",
-            &fixture.join("tests/memory/guest/stack.rs"),
-        )?;
-    }
     match &kind {
         Kind::Smp | Kind::Lifecycle { .. } | Kind::Retirement { .. } | Kind::Shutdown { .. } => {
+            // The published ABI13 completion, lifecycle and shutdown Guest is
+            // owned here. Preserve the exact provider-source patch contracts.
             compose::apply("smp-provider", &provider, &patches)?;
             if let Kind::Retirement { cancel } = &kind {
                 compose::apply("retirement-provider", &provider, &patches)?;
@@ -162,21 +134,28 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
                     compose::apply("shutdown-quiet", &provider, &patches)?;
                 }
             }
-            compose::apply("smp-fixture", &fixture, &patches)?;
-            copy_guest("target/metal/riscv/mmu/completion/cases.rs", &fixture)?;
-            fs::rename(
-                fixture.join("tests/memory/guest/cases.rs"),
-                fixture.join("tests/memory/guest/smp.rs"),
+            let package = "target/smp";
+            let target = provider.join("server/tests").join(package);
+            for file in compose::hashes(&compose::suite().join(package))?.keys() {
+                compose::copy(&format!("{package}/{file}"), &target.join(file))?;
+            }
+            // Import the already Kernel-owned ABI13 stack fixture directly:
+            // no second source copy and no Vanllia product test checkout.
+            compose::copy(
+                "target/basis/room/pinned/stack.rs",
+                &provider.join("server/tests/target/basis/room/pinned/stack.rs"),
             )?;
-            copy_guest("target/metal/riscv/mmu/completion/recovery.rs", &fixture)?;
-            manifest = fixture.join("tests/memory/Cargo.toml");
+            manifest = target.join("Cargo.toml");
             patch_provider(&mut command, &provider)?;
         }
         Kind::Activity {
             unsupported,
             stopped,
         } => {
-            compose::apply("activity-provider", &provider, &patches)?;
+            // This is the selected published ABI13 Guest and Platform pair,
+            // owned by Kernel rather than the Vanllia product test directory.
+            // Keep the historical source preimage checks for Kernel patches.
+            compose::apply("activity-pinned-provider", &provider, &patches)?;
             if *stopped {
                 compose::apply("activity-stopped", &provider, &patches)?;
                 command.env("ACTIVITY_STOPPED", "1");
@@ -184,20 +163,12 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
             if *unsupported {
                 command.env("ACTIVITY_UNSUPPORTED", "1");
             }
-            compose::apply("activity-support", &fixture, &patches)?;
-            compose::apply(
-                if *unsupported {
-                    "activity-unsupported-platform"
-                } else {
-                    "activity-platform"
-                },
-                &fixture,
-                &patches,
-            )?;
-            for file in ["main.rs", "cases.rs", "reservation.rs"] {
-                copy_guest(&format!("target/basis/nest/memo/activity/{file}"), &fixture)?;
+            let package = "target/basis/nest/memo/activity/pinned";
+            let target = provider.join("server/tests").join(package);
+            for file in compose::hashes(&compose::suite().join(package))?.keys() {
+                compose::copy(&format!("{package}/{file}"), &target.join(file))?;
             }
-            manifest = fixture.join("tests/memory/Cargo.toml");
+            manifest = target.join("Cargo.toml");
             patch_provider(&mut command, &provider)?;
         }
         Kind::Flat { timing } => {
@@ -218,10 +189,8 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
                     "kernel/flat-probe-contracts"
                 },
             ]);
-            command.arg("--config").arg(format!(
-                "patch.\"https://github.com/shuyra-arche/vanllia.git\".platform-riscv.path={}",
-                serde_json::to_string(&fixture.join("platform/riscv"))?
-            ));
+            // Cargo selects the reviewed Platform source from Flat's own
+            // immutable Git dependency. No Vanllia test checkout is needed.
             command.env("FLAT_PROBE_PROVIDER", "1");
         }
         Kind::Room {
@@ -230,33 +199,48 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
             latency,
             cold,
         } => {
-            compose::apply(
-                if mode == "irq" {
-                    "irq-fixture"
-                } else {
-                    "room-fixture"
-                },
-                &fixture,
-                &patches,
-            )?;
+            // Room, IRQ and Realtime are independent published ABI13 Kernel
+            // target Guests, sharing the same reviewed firmware/stack helpers.
             if *latency {
-                compose::apply("room-window", &provider, &patches)?;
+                compose::apply("room-pinned-window", &provider, &patches)?;
                 command.args(["--features", "kernel/latency"]);
             }
-            let guest = match mode.as_str() {
-                "irq" => "interrupt.rs",
-                "realtime" => "realtime.rs",
-                _ => "guest.rs",
+            let package = match mode.as_str() {
+                "room" => "target/basis/room/pinned",
+                "irq" => "target/basis/room/irq",
+                "realtime" => "target/basis/room/schedule",
+                _ => unreachable!("mode checked at CLI admission"),
             };
-            compose::copy(
-                &format!("target/basis/room/{guest}"),
-                &fixture.join("tests/memory/guest/main.rs"),
-            )?;
+            if mode == "irq" {
+                for name in [
+                    "stack.rs",
+                    "support.rs",
+                    "platform/device.rs",
+                    "platform/window.rs",
+                ] {
+                    let shared = format!("target/basis/room/pinned/{name}");
+                    compose::copy(&shared, &provider.join("server/tests").join(&shared))?;
+                }
+            } else if mode == "realtime" {
+                let shared = "target/basis/room/pinned";
+                let target = provider.join("server/tests").join(shared);
+                for file in compose::hashes(&compose::suite().join(shared))?.keys() {
+                    compose::copy(&format!("{shared}/{file}"), &target.join(file))?;
+                }
+                compose::copy(
+                    "target/basis/room/realtime.rs",
+                    &provider.join("server/tests/target/basis/room/realtime.rs"),
+                )?;
+            }
+            let target = provider.join("server/tests").join(package);
+            for file in compose::hashes(&compose::suite().join(package))?.keys() {
+                compose::copy(&format!("{package}/{file}"), &target.join(file))?;
+            }
+            manifest = target.join("Cargo.toml");
             command.env("IRQ_EVENTS", events.to_string());
             if *cold {
                 command.env("ROOM_COLD", "1");
             }
-            manifest = fixture.join("tests/memory/Cargo.toml");
             patch_provider(&mut command, &provider)?;
         }
     }
@@ -282,7 +266,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     }
     let qemu = std::env::var("QEMU_RISCV64").unwrap_or("qemu-system-riscv64".into());
     let firmware = Path::new(&std::env::var("QEMU_OPENSBI")?).canonicalize()?;
-    let mut inputs = serde_json::json!({"source":source,"fixture":pin,"profile":args.profile,"scenario":format!("{kind:?}"),"tools":tools(&qemu,&firmware)?,
+    let mut inputs = serde_json::json!({"source":source,"profile":args.profile,"scenario":format!("{kind:?}"),"tools":tools(&qemu,&firmware)?,
         "suite_sha256":compose::hashes(&compose::suite())?,"composition_sha256":compose::hashes(&patches)?,"builds":[]});
     let lock = manifest.with_file_name("Cargo.lock");
     if lock.exists() {
@@ -486,7 +470,7 @@ pub fn run(command: Commands) -> Result<()> {
     };
     if args.harts.is_empty() {
         args.harts = if matches!(kind, Kind::Smp) {
-            vec![1, 2, 4]
+            vec![4]
         } else {
             vec![1, 4]
         };

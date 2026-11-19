@@ -11,9 +11,11 @@ fn word(elf: &[u8], at: usize, width: usize) -> Result<usize> {
 pub fn initrd(elf: &[u8], version: u8) -> Result<Vec<u8>> {
     encode(elf, version, false)
 }
-/// The pinned System client fixture materializes all BSS pages in its image.
-pub fn system_initrd(elf: &[u8]) -> Result<Vec<u8>> {
-    encode(elf, 14, true)
+/// Materialize the entire BSS of a System guest within its boot capsule.
+/// The caller must select the paired boot ABI; this is a packaging policy,
+/// not an implicit upgrade of a previously verified consumer.
+pub fn system_initrd(elf: &[u8], version: u8) -> Result<Vec<u8>> {
+    encode(elf, version, true)
 }
 fn encode(elf: &[u8], version: u8, dense: bool) -> Result<Vec<u8>> {
     require(matches!(version, 10..=14), "unsupported capsule version")?;

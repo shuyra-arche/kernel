@@ -1,10 +1,43 @@
 #![allow(dead_code)]
 #[path = "../composition/mod.rs"]
 mod composition;
+#[path = "../scenario.rs"]
+mod scenario;
 #[path = "../utilities.rs"]
 mod utilities;
 #[path = "../verify.rs"]
 mod verify;
+#[test]
+fn private_scenario_parsing_rejects_retired_product_fixture() {
+    use clap::Parser;
+    #[derive(Parser)]
+    struct Cli {
+        #[command(subcommand)]
+        command: scenario::Commands,
+    }
+    for name in [
+        "smp",
+        "shutdown",
+        "lifecycle",
+        "retirement",
+        "activity",
+        "flat",
+        "room",
+    ] {
+        let args = vec![
+            "verify",
+            name,
+            "--kernel",
+            "/example/kernel",
+            "--output",
+            "/example/evidence",
+        ];
+        assert!(Cli::try_parse_from(args.clone()).is_ok(), "{name}");
+        let mut obsolete = args;
+        obsolete.extend(["--fixture", "/example/vanllia"]);
+        assert!(Cli::try_parse_from(obsolete).is_err(), "{name}");
+    }
+}
 #[cfg(unix)]
 #[test]
 fn symbolizer_keeps_literal_compressed_call_pcs_and_rejects_tool_failure() {

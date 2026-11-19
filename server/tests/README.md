@@ -58,22 +58,37 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 ## Native execution
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
-with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`. Clone Vanllia at the exact
-revision in [runner/fixture](runner/fixture); this is a published fixture input for explicit integration runs. The shared
-host execution library lives in Kernel’s standalone `runner` package. Vanllia
-consumes that library and owns native memory and System/Twine compositions.
-Kernel owns its private completion, A/D, Flat and Room probes.
+with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`.
+All Kernel-owned target suites now use their own Guest and Cargo-pinned
+Platform build inputs, including [SMP/Lifecycle/Retirement/Shutdown](target/smp/README.md).
+No Kernel `verify` mode accepts a Vanllia product test `--fixture`.
+Source instrumentation still requires exact reviewed SHA-256 preimages.
+The Kernel `runner` package owns target selection, execution and evidence. Vanllia's
+selected product owns its independent Native/ABI13 composition under
+[`product/tests/`](https://github.com/shuyra-arche/vanllia/tree/main/product/tests),
+while System maintains its own Runtime/Supply/RPC contracts. Kernel owns its
+private completion, A/D, Flat and Room probes.
 
 ```sh
 cargo +nightly build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
 verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
-"$verify" smp --kernel "$PWD" --fixture /path/to/vanllia --output /new/smp --profile release
-"$verify" activity --kernel "$PWD" --fixture /path/to/vanllia --output /new/activity --profile release
-"$verify" flat --kernel "$PWD" --fixture /path/to/vanllia --output /new/flat
-"$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/irq --mode irq --events 16
+"$verify" smp --kernel /path/to/kernel-at-b1062f60 --output /new/smp --profile release
+"$verify" activity --kernel /path/to/abi13-kernel --output /new/activity --profile release
+"$verify" flat --kernel "$PWD" --output /new/flat
+"$verify" room --kernel /path/to/abi13-kernel --output /new/irq --mode irq --events 16 --harts 1
+"$verify" room --kernel /path/to/abi13-kernel --output /new/room --mode room --harts 1
 ```
 
-These commands are explicit integration commands, outside Kernel CI. Run both debug and release. SMP defaults to 1/2/4 Harts; A/D and Flat default
+Flat and pinned ABI13 Activity, Room, IRQ and Realtime admission targets run
+in Kernel-owned single-Hart QEMU workflows. The SMP/Lifecycle/Retirement/
+Shutdown suite is available only through explicit invocation and the
+[manual qualification workflow](../../.github/workflows/smp-owner.yml); no SMP
+scenario is selected by ordinary PR/push CI. An opt-in one-Hart migration check
+passed for all nine modes, but only a separately invoked four-Hart run can
+qualify migration, cross-Hart completion and finalization. All frozen ABI13
+suites require a matching published Kernel revision, not current main/ABI14.
+Realtime's one-Hart rejection does not qualify four-Hart budget/preemption.
+SMP defaults to four Harts when explicitly invoked. A/D and Flat default
 to 1/4. Activity also has separate `--unsupported` and `--stopped` scenarios.
 Room correctness uses `--mode irq --events 16` on 1/4 and `--mode realtime
 --harts 4`. Scheduling comparisons stay opt-in, using `--mode room --baseline
@@ -81,17 +96,43 @@ Room correctness uses `--mode irq --events 16` on 1/4 and `--mode realtime
 Invalid counts, duplicate Harts and malformed baseline SHAs fail admission.
 
 ```sh
-cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-debug
-cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-release --profile release
-cargo +nightly run --locked --manifest-path /path/to/vanllia/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/reject --capsule-version 10
+cargo +nightly run --locked --manifest-path /path/to/vanllia/product/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-debug
+cargo +nightly run --locked --manifest-path /path/to/vanllia/product/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/native-release --profile release
+cargo +nightly run --locked --manifest-path /path/to/vanllia/product/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu -- native --kernel "$PWD" --fixture /path/to/vanllia --output /new/reject --capsule-version 10
 ```
 
-The last command is a negative test of the current boot contract, not an ABI 10
-guest. System consumer verification uses Vanllia's `verify system` with the
-pinned System and Twine checkouts in [Vanllia’s integration workflow](https://github.com/shuyra-arche/vanllia/blob/main/.github/workflows/memory.yml).
+These Native/ABI13 product examples require the Kernel revision selected by
+the Vanllia product's matching manifests and locks. Running them against an
+unrelated Kernel main/ABI14 candidate is not valid product verification.
+The last command rejects an ABI 10 Capsule; it is not an ABI 10 guest.
+System's Runtime, Supply, RPC and handoff contracts execute through
+[System's native workflow](https://github.com/shuyra-arche/system/blob/main/.github/workflows/native.yml).
+Vanllia's distinct `std` composition check uses immutable System/Toolchain
+inputs and the production Loader; it does not duplicate System's private test.
 Independent IOMMU backend execution remains available with
 `cargo +nightly test --locked -p kernel-memory-tests --test iommu-target
 --target x86_64-unknown-linux-gnu -- --ignored --nocapture`.
+
+The ordinary Kernel CI exercises only one-Hart target contracts.
+SMP/Lifecycle/Retirement/Shutdown and four-Hart Realtime qualification remain
+separate from ordinary PR/push CI. The existing
+[CPU completion manual workflow](../../.github/workflows/smp-owner.yml)
+runs nine owner-defined scenarios, defaults to four Harts and accepts an explicit
+debug/release choice; the
+[Realtime workflow](../../.github/workflows/realtime-target.yml) runs one Hart
+for PR/push, but allows a manually selected four-Hart positive contract.
+
+After the workflows are merged, an authorized GitHub Actions user can run:
+
+```sh
+gh workflow run smp-owner.yml --repo shuyra-arche/kernel --ref main -f harts=4 -f profile=release
+gh workflow run realtime-target.yml --repo shuyra-arche/kernel --ref main -f harts=4
+```
+
+Both jobs preserve raw QEMU, build, cleanup and source-identity evidence.
+Neither has a recorded four-Hart success solely from being dispatchable;
+the actual job's native result and artifacts determine qualification. No
+opt-in SMP campaign is part of normal CI.
 
 The [IOMMU target QEMU workflow](../../.github/workflows/iommu-target.yml)
 runs this same existing test on a Debian trixie QEMU target when its relevant
@@ -131,14 +172,31 @@ own target guest without assembling another provider. Neither workflow checks
 out a live Vanllia/System/Twine product composition; those scenarios are owned
 by the integration repository.
 
-Vanllia owns the explicit integration gate. Its workflow pins the Kernel
-provider, executes 29 QEMU jobs split by scenario/profile/Hart with up to eight
-workers, and uploads a distinct artifact for every job. Native/System cases use
-Vanllia's own runner; private Kernel probes use this repository's runner and the
-published Vanllia fixture. A failing shard does not cancel the other evidence.
-Long paired comparisons remain opt-in in the composition owner's PR with
+Vanllia's current integration CI verifies five direct Native/ABI/std
+composition cases. It calls Kernel's
+[pinned target workflow](../../.github/workflows/pinned-target.yml) for six
+separate Activity/Unsupported/Stopped/IRQ single-Hart cases, passing only
+the exact product Kernel gitlink SHA. The Activity cases select Kernel's
+reviewed published ABI13 owner-runner and frozen Guest, without a Vanllia
+product test fixture. The reusable IRQ caller and opt-in Room/IRQ comparison
+now select a reviewed immutable owner-runner revision and retain the same
+candidate Kernel identity and test assertions. A green owner-side target is
+not by itself proof of a newly assembled product or physical hardware.
+The reusable workflow is also manually runnable with an immutable Kernel SHA;
+it verifies the **selected source revision**, not the unrelated Kernel main
+ABI candidate. Kernel's separate Flat, pinned ABI13 Activity and IOMMU target workflows
+remain owner-side checks.
+Full multi-Hart SMP/Realtime qualification remains outside ordinary CI;
+their explicit runner commands remain available. A green single-Hart CI
+does not establish SMP safety or an assembled product. Opt-in performance comparisons use four Harts. The
+[Kernel-owned comparison workflow](../../.github/workflows/room-comparison.yml)
+defines the five Room/IRQ/warmup experiment cases, baseline admission, five
+alternating paired rounds and raw evidence. It is available only by an
+explicit `workflow_call`, not a normal Kernel PR/push job. A composition
+caller chooses the exact candidate Kernel SHA and opts in on its PR with
 `Room comparison: requested` and exactly one
-`Room baseline: <40 lowercase hex characters>` line.
+`Room baseline: <40 lowercase hex characters>` line. An identical-SHA
+control verifies execution mechanics, not performance improvements.
 
 ## Retired historical checks
 
@@ -191,8 +249,8 @@ memory, exit, CPU retirement and actual multi-Hart migration checks. This is
 focused allocation-failure injection, not exhaustion of all system memory.
 
 ```sh
-"$verify" lifecycle --kernel "$PWD" --fixture /path/to/vanllia --output /new/lifecycle-pressure --pressure --harts 1 4 --rounds 3
-"$verify" lifecycle --kernel "$PWD" --fixture /path/to/vanllia --output /new/lifecycle-cancel-pressure --pressure --cancel --harts 1 4 --rounds 3 --profile release
+"$verify" lifecycle --kernel /path/to/kernel-at-b1062f60 --output /new/lifecycle-pressure --pressure --harts 1 4 --rounds 3
+"$verify" lifecycle --kernel /path/to/kernel-at-b1062f60 --output /new/lifecycle-cancel-pressure --pressure --cancel --harts 1 4 --rounds 3 --profile release
 ```
 
 ## Explicit finalization
