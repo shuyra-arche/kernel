@@ -27,6 +27,10 @@ name = "flat"
 path = "basis/flat/mod.rs"
 
 [[test]]
+name = "fabric"
+path = "metal/generic/memory/mod.rs"
+
+[[test]]
 name = "translation"
 path = "metal/riscv/mmu/mod.rs"
 
