@@ -22,8 +22,6 @@ use state::slot;
 
 #[path = "../../src/metal/generic/mmu/internal/fence.rs"]
 mod scope;
-#[path = "nest/translation.rs"]
-mod translation;
 
 #[path = "../metal/generic/memory/evidence.rs"]
 mod evidence;
