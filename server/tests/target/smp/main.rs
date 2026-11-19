@@ -7,9 +7,7 @@ mod support;
 #[path = "../basis/room/pinned/stack.rs"]
 mod stack;
 mod swap;
-#[path = "../metal/riscv/mmu/completion/cases.rs"]
 mod smp;
-#[path = "../metal/riscv/mmu/completion/recovery.rs"]
 mod recovery;
 use core::fmt::Write;
 use kernel_api::{

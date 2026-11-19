@@ -24,7 +24,10 @@ replay and migration checks remain the Kernel-owned
 [`recovery.rs`](../metal/riscv/mmu/completion/recovery.rs),
 [`probe.rs`](../metal/riscv/mmu/completion/probe.rs) and
 [`instructions.rs`](../metal/riscv/mmu/completion/instructions.rs).
-The Guest directly imports those existing files rather than duplicating them.
+The ABI13-specific `smp.rs` and `recovery.rs` are frozen from the last
+ABI13 Kernel revision `b1062f60bfe96e625ed140952d9662319c70087e`.
+The unchanged probe and instructions helpers are shared with their existing
+Kernel owner; they are not copied into the Guest.
 It also imports Kernel's existing
 [`Stack`](../basis/room/pinned/stack.rs) support, preserving real memory
 ownership and Task exit semantics.
