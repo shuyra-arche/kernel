@@ -15,10 +15,10 @@ both the changed source and test assumptions before refreshing a contract.
 Patch content is retained with each run. Baseline comparisons reject unreviewed
 preimages instead of silently patching a different implementation.
 
-The fixture pin identifies the published Vanllia source still required by SMP,
-IRQ, Realtime, lifecycle, retirement and shutdown Guest compositions. Flat,
-published ABI13 Activity, and `verify room --mode room` instead use Kernel-owned
-Guests and standalone Cargo-pinned Platform packages; these reject `--fixture`. The ABI13 Activity
+The historical Vanllia fixture pin remains required by SMP, Realtime,
+lifecycle, retirement and shutdown Guest compositions. Flat, published ABI13
+Activity, Room and IRQ use Kernel-owned Guests with standalone Cargo-pinned
+Platform packages; these reject `--fixture`. The ABI13 Activity
 composition retains its own exact Kernel preimage contract. Other private
 scenarios continue to reject unreviewed Vanllia fixture inputs.
 Ordinary Kernel Host/RV64 checks do not execute that target composition;

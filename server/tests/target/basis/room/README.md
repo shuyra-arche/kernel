@@ -11,8 +11,9 @@ The published ABI13 Room scheduling workload now uses a
 [Kernel-owned Guest and boot package](pinned/README.md), rather than a Vanllia
 product test checkout. The exact `platform-riscv` build dependency remains
 pinned at `f2dfa14f5b1f7bd47ee84841ba5c7112e8475950`.
-IRQ/Sign and Realtime still use the reviewed historical Vanllia fixture
-until they receive their own independent owner test packages. This suite
+The published ABI13 IRQ/Sign target also has a
+[Kernel-owned UART/Guest package](irq/README.md); Realtime still needs the
+historical reviewed Vanllia fixture. This suite
 protects the original Scheduler, retained IRQ/Sign delivery and Realtime
 contracts behind #120. Repeated performance comparison remains opt-in and
 does not qualify Kernel current main/ABI14.
@@ -75,9 +76,10 @@ observed maximum is a WCET or deployment response guarantee.
 
 These are isolated test compositions. For `--mode room`, the runner archives
 the exact Kernel provider and selects Kernel-owned Guest/Platform tests; it does
-not fetch a Vanllia product fixture. IRQ and Realtime still require the
-reviewed historical Vanllia fixture. Every provider patch retains its exact
-preimage check and original/resolved lockfiles. No native
+not fetch a Vanllia product fixture. IRQ now also uses a Kernel-owned Guest
+and test-only UART bootstrap with the same strict source contracts.
+Realtime still requires the reviewed historical Vanllia fixture. Every
+provider patch retains its exact preimage check and original/resolved lockfiles. No native
 RAM Publish or DMA is needed; SMP memory qualification stays unavailable.
 
 The IRQ image explicitly gives the initial Team a trusted static UART mapping
@@ -95,13 +97,15 @@ restoration before rebind.
 Use the root README toolchain, QEMU 10.0.x and `QEMU_OPENSBI`. Run from Kernel:
 
 ```sh
-"$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/evidence --mode irq --events 16 --rounds 1 --profile debug
+"$verify" room --kernel /path/to/abi13-kernel --output /new/evidence --mode irq --events 16 --harts 1 --rounds 1 --profile debug
 "$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/rt-evidence --mode realtime --harts 4 --rounds 1
 "$verify" room --kernel /path/to/abi13-kernel --baseline /path/to/control --output /new/comparison --mode room --harts 1 4 --rounds 5
 ```
 
-Repeat the comparison with `--mode irq` and its required
-`--fixture /path/to/vanllia`; both modes also support `--no-latency`.
+Repeat the comparison with `--mode irq` and without a product test fixture.
+Both modes also support `--no-latency`. The separately pinned reusable
+benchmark workflow retains its existing IRQ path until independently verified
+against this owned target.
 Both providers build before measured boots; A/B order reverses each round.
 Keep the toolchain, firmware, lockfile, quota and affinity fixed, and avoid
 concurrent builds or tests. Run all failures/outliers through the same reporting
