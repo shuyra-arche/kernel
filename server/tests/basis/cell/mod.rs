@@ -9,11 +9,11 @@ extern crate alloc;
 #[path = "../../../src/basis/cell/page/mod.rs"]
 pub(crate) mod cell;
 #[allow(dead_code, unused_imports)]
-#[path = "../../../src/basis/name/mod.rs"]
-mod name;
-#[allow(dead_code, unused_imports)]
 #[path = "../../support/lock.rs"]
 mod host_lock;
+#[allow(dead_code, unused_imports)]
+#[path = "../../../src/basis/name/mod.rs"]
+mod name;
 #[allow(dead_code)]
 #[path = "../../../src/metal/generic/memory/mod.rs"]
 pub mod proof;
@@ -29,6 +29,6 @@ mod metal {
     }
 }
 
-mod support;
-mod ownership;
 mod access;
+mod ownership;
+mod support;
