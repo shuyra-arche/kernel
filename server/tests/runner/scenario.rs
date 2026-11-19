@@ -25,6 +25,10 @@ pub struct Inputs {
 }
 #[derive(Subcommand)]
 pub enum Commands {
+    Nest {
+        #[command(flatten)]
+        inputs: Inputs,
+    },
     Smp {
         #[command(flatten)]
         inputs: Inputs,
@@ -109,6 +113,18 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         command.env_remove(name);
     }
     match &kind {
+        Kind::Nest => {
+            // Kernel-owned ABI14 CPU completion: no published ABI13 Guest
+            // or Vanllia product test is loaded as the owner fixture.
+            compose::apply("nest-provider", &provider, &patches)?;
+            let package = "target/basis/nest/completion";
+            let target = provider.join("server/tests").join(package);
+            for file in compose::hashes(&compose::suite().join(package))?.keys() {
+                compose::copy(&format!("{package}/{file}"), &target.join(file))?;
+            }
+            manifest = target.join("Cargo.toml");
+            patch_provider(&mut command, &provider)?;
+        }
         Kind::Smp | Kind::Lifecycle { .. } | Kind::Retirement { .. } | Kind::Shutdown { .. } => {
             // The published ABI13 completion, lifecycle and shutdown Guest is
             // owned here. Preserve the exact provider-source patch contracts.
@@ -307,7 +323,10 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         let path = root.join("initrd.bin");
         fs::write(
             &path,
-            capsule::initrd(&fs::read(root.join("guest.elf"))?, 13)?,
+            capsule::initrd(
+                &fs::read(root.join("guest.elf"))?,
+                if matches!(kind, Kind::Nest) { 14 } else { 13 },
+            )?,
         )?;
         Some(path)
     };
@@ -411,6 +430,7 @@ fn boot(
 }
 pub fn run(command: Commands) -> Result<()> {
     let (mut args, kind, baseline, warmup) = match command {
+        Commands::Nest { inputs } => (inputs, Kind::Nest, None, false),
         Commands::Smp { inputs } => (inputs, Kind::Smp, None, false),
         Commands::Shutdown { inputs, quiet } => (inputs, Kind::Shutdown { quiet }, None, false),
         Commands::Lifecycle {
@@ -471,6 +491,8 @@ pub fn run(command: Commands) -> Result<()> {
     if args.harts.is_empty() {
         args.harts = if matches!(kind, Kind::Smp) {
             vec![4]
+        } else if matches!(kind, Kind::Nest) {
+            vec![1]
         } else {
             vec![1, 4]
         };
