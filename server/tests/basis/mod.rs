@@ -43,7 +43,7 @@ pub mod proof;
 mod name;
 
 #[allow(dead_code)]
-#[path = "logical/model.rs"]
+#[path = "nest/fixture/model.rs"]
 mod basis;
 
 #[path = "flat/admission.rs"]

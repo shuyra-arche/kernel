@@ -8,7 +8,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-#[path = "../../../../src/basis/nest/memo/observation.rs"]
+#[path = "../../../../../src/basis/nest/memo/observation.rs"]
 mod observation;
 pub(crate) use observation::{MemoInfo, MemoState};
 pub(crate) mod source {
@@ -53,12 +53,12 @@ pub(crate) mod publisher {
     }
 }
 use publisher::Publisher;
-#[path = "../../../../src/basis/nest/memo/table.rs"]
+#[path = "../../../../../src/basis/nest/memo/table.rs"]
 mod table;
 pub(super) use state::Memo;
 pub(super) use table::Memos;
 mod cases;
-#[path = "../../../../src/basis/nest/memo/state.rs"]
+#[path = "../../../../../src/basis/nest/memo/state.rs"]
 mod state;
 pub(super) use state::Settled;
 

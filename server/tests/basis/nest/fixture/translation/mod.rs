@@ -1,11 +1,11 @@
 //! Production CPU retirement with inert index/Span/table owners. Scripted
 //! completions establish bookkeeping only; actual shootdown needs QEMU/RV64.
-#[path = "../../../../src/basis/nest/translation/invalidation.rs"]
+#[path = "../../../../../src/basis/nest/translation/invalidation.rs"]
 mod invalidation;
 use invalidation::Invalidation;
-#[path = "../../../../src/basis/nest/translation/retirement.rs"]
+#[path = "../../../../../src/basis/nest/translation/retirement.rs"]
 mod retirement;
-#[path = "../../../../src/basis/nest/translation/tickets.rs"]
+#[path = "../../../../../src/basis/nest/translation/tickets.rs"]
 mod tickets;
 
 use super::NestError;
