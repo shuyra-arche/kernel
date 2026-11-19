@@ -26,10 +26,6 @@ mod holding;
 #[path = "../../src/metal/generic/mmu/internal/fence.rs"]
 mod scope;
 
-#[path = "../metal/generic/memory/evidence.rs"]
-mod evidence;
-#[path = "../metal/generic/memory/fabric.rs"]
-mod fabric;
 #[path = "../../src/metal/generic/memory/mod.rs"]
 pub mod proof;
 
