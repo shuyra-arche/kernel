@@ -9,23 +9,7 @@ use crate::{
 use kernel_api::model::flat::{FlatVersion, SlotVersion};
 use std::sync::{Arc, Barrier, Mutex};
 
-pub(crate) fn fresh() -> FlatState {
-    let mut state = FlatState::new(FlatSource::Managed(Vec::new()), true);
-    state.explicit = true;
-    state
-}
-pub(crate) fn page(pool: &'static Pool) -> Page {
-    Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap()
-}
-pub(crate) fn resident(state: &FlatState) -> Arc<Page> {
-    let FlatSource::Managed(slots) = &state.source else {
-        unreachable!()
-    };
-    let crate::slot::Slot::Resident(page) = &slots[0].1 else {
-        unreachable!()
-    };
-    page.clone()
-}
+pub(crate) use crate::holding::{fresh, page, resident};
 
 fn maintenance(state: &FlatState) -> Vec<crate::cell::Block> {
     let page = resident(state);

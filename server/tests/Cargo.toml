@@ -23,6 +23,10 @@ name = "cell"
 path = "basis/cell/mod.rs"
 
 [[test]]
+name = "flat"
+path = "basis/flat/mod.rs"
+
+[[test]]
 name = "translation"
 path = "metal/riscv/mmu/mod.rs"
 
