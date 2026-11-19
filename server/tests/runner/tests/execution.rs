@@ -137,12 +137,19 @@ fn malformed_elf_never_panics_or_builds_an_image() {
     let rejected = capsule::initrd(&elf, 10).unwrap();
     assert_eq!(rejected[4107], 10);
     elf[68..72].copy_from_slice(&6u32.to_le_bytes());
-    let dense = capsule::system_initrd(&elf).unwrap();
+    let dense13 = capsule::system_initrd(&elf, 13).unwrap();
     assert_eq!(
-        u64::from_le_bytes(dense[4096 + 48..4096 + 56].try_into().unwrap()),
+        u64::from_le_bytes(dense13[4096 + 48..4096 + 56].try_into().unwrap()),
         1
     );
-    assert_eq!(dense.len(), 12288);
+    assert_eq!(dense13[4107], 13);
+    assert_eq!(dense13.len(), 12288);
+    let dense14 = capsule::system_initrd(&elf, 14).unwrap();
+    assert_eq!(dense14[4107], 14);
+    assert_eq!(dense14.len(), dense13.len());
+    assert_eq!(&dense14[..4107], &dense13[..4107]);
+    assert_eq!(&dense14[4108..], &dense13[4108..]);
+    assert!(capsule::system_initrd(&elf, 15).is_err());
     elf[96..104].copy_from_slice(&4097u64.to_le_bytes());
     assert!(capsule::initrd(&elf, 13).is_err());
     elf[32..40].copy_from_slice(&u64::MAX.to_le_bytes());

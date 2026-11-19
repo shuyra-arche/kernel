@@ -12,23 +12,25 @@ reservation, Page and transfer implementation. ABI 11 user Calls create explicit
 Flats, so the native user guest cannot enter this allocation path. The probe
 runs trusted Kernel Tasks without adding a public ABI or production test hooks.
 
-the Rust `flat` runner archives the provider's exact HEAD and the pinned Vanllia platform into
-a new output directory. In that disposable copy it selects `provider.rs` as the
-crate root, attaches the test cases as a child of Flat, starts a Kernel Task at
-boot, and inserts guard entry/exit callbacks into the real SpinLock guard. It
-records the complete provider composition diff and suite hashes. Production
-source and visibility in the checkout remain unchanged. The platform pin and
-removal of its historical `memory-v11` feature match the native CI composition.
+The Rust `flat` runner archives the Kernel provider's exact HEAD into a new
+output directory. The Flat Guest and tests live in Kernel; its standalone Cargo
+manifest pins the `platform-riscv` source to an immutable Vanllia Git commit.
+Cargo resolves that dependency and the runner preserves the resulting lock and
+build evidence. It does not archive, patch, or require a historical Vanllia test
+checkout. The disposable Kernel copy selects `provider.rs` as the crate root,
+attaches the test cases as a child of Flat, starts a Kernel Task at boot, and
+inserts guard entry/exit callbacks into the real SpinLock guard. Production
+source and visibility in the checkout remain unchanged.
 
-Use Python 3.12+, the root README's Rust target, QEMU 10.0.x and OpenSBI with SBI
-DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI` as in the native guest. From the Kernel
-root, with the fixture checkout at the pin in the Rust `flat` runner:
+Use the root README's Rust target, QEMU 10.0.x and OpenSBI with SBI DBCN.
+Set `QEMU_RISCV64` and `QEMU_OPENSBI`. Run from the Kernel root; no
+`--fixture` argument or separate Vanllia checkout is accepted:
 
 ```sh
 "$verify" flat --kernel "$PWD" \
-  --fixture /absolute/path/to/vanllia --output /tmp/flat-debug
+  --output /tmp/flat-debug
 "$verify" flat --kernel "$PWD" \
-  --fixture /absolute/path/to/vanllia --output /tmp/flat-release \
+  --output /tmp/flat-release \
   --profile release --rounds 3
 ```
 
@@ -79,10 +81,10 @@ baseline and candidate sequentially, without another test or build running:
 
 ```sh
 "$verify" flat --kernel /absolute/path/to/baseline \
-  --fixture /absolute/path/to/vanllia --output /tmp/flat-before \
+  --output /tmp/flat-before \
   --mode timing --profile release --rounds 3
 "$verify" flat --kernel "$PWD" \
-  --fixture /absolute/path/to/vanllia --output /tmp/flat-after \
+  --output /tmp/flat-after \
   --mode timing --profile release --rounds 3
 ```
 
@@ -104,7 +106,7 @@ contention separately. This is neither a steady mixed-workload benchmark nor a
 WCET argument. Report all rounds and outliers, including whole-call cost.
 
 Each output retains inputs, tool versions, CPU quota/affinity, exact commands,
-source/fixture identities, suite/firmware/lock/ELF hashes, composition diff,
+source and Cargo-locked Platform identities, suite/firmware/lock/ELF hashes, composition diff,
 build output and per-boot serial/stderr/status. Keep raw evidence as CI
 artifacts or attached review assets rather than committing logs to source.
 

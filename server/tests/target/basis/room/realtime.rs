@@ -3,8 +3,10 @@
 #![no_std]
 #![no_main]
 #[allow(dead_code)]
+#[path = "pinned/stack.rs"]
 mod stack;
 #[allow(dead_code)]
+#[path = "pinned/support.rs"]
 mod support;
 use core::{
     fmt::Write,

@@ -1,0 +1,100 @@
+name: Kernel published Realtime admission QEMU
+
+# Ordinary PR/push CI tests the one-Hart negative-admission contract.
+# Workflow dispatch defaults to four Harts and tests real priority, budget,
+# replenishment, fixed-Hart and recovery behavior; it is never a CI SMP gate.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/realtime-target.yml"
+      - "server/tests/runner/**"
+      - "server/tests/target/basis/room/realtime.rs"
+      - "server/tests/target/basis/room/schedule/**"
+      - "server/tests/target/basis/room/pinned/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/realtime-target.yml"
+      - "server/tests/runner/**"
+      - "server/tests/target/basis/room/realtime.rs"
+      - "server/tests/target/basis/room/schedule/**"
+      - "server/tests/target/basis/room/pinned/**"
+  workflow_dispatch:
+    inputs:
+      harts:
+        description: Explicit Realtime Hart count (four-Hart positive qualification)
+        type: choice
+        required: true
+        default: "4"
+        options: ["1", "4"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-realtime-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  qemu:
+    name: ABI13 Realtime / ${{ matrix.profile }} / h${{ github.event_name == 'workflow_dispatch' && inputs.harts || '1' }}
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [debug, release]
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+      QEMU_RISCV64: qemu-system-riscv64
+      QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
+      HARTS: ${{ github.event_name == 'workflow_dispatch' && inputs.harts || '1' }}
+    steps:
+      - name: Install target and execution tools
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+          sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN" --target riscv64gc-unknown-none-elf
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select immutable ABI13 Kernel provider
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: shuyra-arche/kernel
+          ref: 789ffd19b5359f3de172fb9aad8a61f6a7113a64
+          path: .integration/provider
+          persist-credentials: false
+      - name: Execute ABI13 Realtime admission or positive four-Hart contract
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+          runner="$GITHUB_WORKSPACE/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify"
+          [[ "$HARTS" == 1 || "$HARTS" == 4 ]]
+          "$runner" room --mode realtime --kernel "$GITHUB_WORKSPACE/.integration/provider" \
+            --output "$GITHUB_WORKSPACE/.integration/evidence" \
+            --profile "$PROFILE" --harts "$HARTS" --rounds 1
+      - name: Show failed build or QEMU evidence
+        if: failure()
+        run: |
+          for file in .integration/evidence/candidate/resolve/stderr.log .integration/evidence/candidate/locked/stderr.log ".integration/evidence/candidate/harts-$HARTS-round-0/serial.log"; do
+            if [[ -f "$file" ]]; then echo "---- $file ----"; tail -n 110 "$file"; fi
+          done
+      - name: Preserve complete target evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kernel-abi13-realtime-${{ matrix.profile }}-h${{ github.event_name == 'workflow_dispatch' && inputs.harts || '1' }}
+          include-hidden-files: true
+          path: .integration/evidence/
+          if-no-files-found: warn
