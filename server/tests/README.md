@@ -59,11 +59,11 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
 with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`.
-For Kernel-owned private Guest compositions other than Flat and the published
-ABI13 Activity target, check out Vanllia at the immutable
-[reviewed fixture revision](runner/fixture). Flat and published Activity use
-Kernel-owned Guests and Cargo-pinned Platform inputs, without a separate
-Vanllia test checkout. The Kernel
+For private Guest compositions other than Flat, published ABI13 Activity and
+published ABI13 `Room` mode, check out Vanllia at the immutable
+[reviewed fixture revision](runner/fixture). Flat, published Activity and
+Room-mode scheduling checks use Kernel-owned Guests and Cargo-pinned Platform
+inputs, without a separate Vanllia test checkout. The Kernel
 `runner` package owns target selection, execution and evidence. Vanllia's
 selected product owns its independent Native/ABI13 composition under
 [`product/tests/`](https://github.com/shuyra-arche/vanllia/tree/main/product/tests),
@@ -77,6 +77,7 @@ verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 "$verify" activity --kernel /path/to/abi13-kernel --output /new/activity --profile release
 "$verify" flat --kernel "$PWD" --output /new/flat
 "$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/irq --mode irq --events 16
+"$verify" room --kernel /path/to/abi13-kernel --output /new/room --mode room --harts 1
 ```
 
 The Flat and pinned ABI13 Activity targets run in Kernel's own single-Hart
