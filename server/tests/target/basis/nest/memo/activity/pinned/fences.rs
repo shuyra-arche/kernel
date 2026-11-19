@@ -2,7 +2,7 @@
 //! provider. The exact production history and Pending round run on real Harts.
 use super::*;
 use core::sync::atomic::{AtomicUsize, Ordering::*};
-#[path = "../../../../../../src/basis/nest/memo/activity/epoch.rs"]
+#[path = "../../../../../../../src/basis/nest/memo/activity/epoch.rs"]
 mod epoch;
 static ARRIVED: AtomicUsize = AtomicUsize::new(0);
 static PHASE: AtomicUsize = AtomicUsize::new(0);
