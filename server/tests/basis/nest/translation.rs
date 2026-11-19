@@ -1,4 +1,4 @@
-#[path = "../../src/basis/nest/translation/tickets.rs"]
+#[path = "../../../src/basis/nest/translation/tickets.rs"]
 mod tickets;
 
 use crate::scope::{Shootdown, invalidate};

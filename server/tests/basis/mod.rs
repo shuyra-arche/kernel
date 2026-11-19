@@ -22,12 +22,16 @@ use state::slot;
 
 #[path = "../../src/metal/generic/mmu/internal/completion.rs"]
 mod completion;
+#[path = "../metal/generic/mmu/internal/rendezvous.rs"]
 mod rendezvous;
 #[path = "../../src/metal/generic/mmu/internal/fence.rs"]
 mod scope;
+#[path = "nest/translation.rs"]
 mod translation;
 
+#[path = "../metal/generic/memory/evidence.rs"]
 mod evidence;
+#[path = "../metal/generic/memory/fabric.rs"]
 mod fabric;
 #[path = "../../src/metal/generic/memory/mod.rs"]
 pub mod proof;
@@ -39,19 +43,27 @@ pub mod proof;
 mod name;
 
 #[allow(dead_code)]
-#[path = "model.rs"]
+#[path = "logical/model.rs"]
 mod basis;
 
+#[path = "flat/admission.rs"]
 mod admission;
 #[path = "name/allocation.rs"]
 mod allocation;
+#[path = "cell/levels.rs"]
 mod levels;
+#[path = "cell/maintenance.rs"]
 mod maintenance;
+#[path = "flat/materialize.rs"]
 mod materialize;
+#[path = "cell/ownership.rs"]
 mod ownership;
+#[path = "cell/retention.rs"]
 mod retention;
+#[path = "cell/support.rs"]
 mod support;
 
+#[path = "cell/change.rs"]
 mod change;
 #[allow(dead_code)]
 #[path = "../../src/basis/cell/change.rs"]
@@ -64,7 +76,9 @@ mod memo;
 #[path = "../../src/basis/flat/storage/mod.rs"]
 mod state;
 
+#[path = "flat/reshape.rs"]
 mod reshape;
+#[path = "flat/residency.rs"]
 mod residency;
 
 #[allow(dead_code)]

@@ -29,7 +29,7 @@ pub(crate) mod cell {
 pub(crate) mod flat {
     pub(crate) use crate::error::FlatError;
 }
-#[path = "logical/mod.rs"]
+#[path = "mod.rs"]
 pub(crate) mod nest;
 pub(crate) mod pend {
     use kernel_api::model::identity::{PendId, TaskId};
