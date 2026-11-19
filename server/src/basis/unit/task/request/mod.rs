@@ -40,8 +40,27 @@ impl Task {
         let _commit = basis::commit();
         let mut window = self.requests.0.lock();
         if window.is_none() {
-            let journal = Journal::new(self.ident.id).ok_or(Failure::Denied)?;
-            *window = Some(Box::try_new(journal).map_err(|_| Failure::OutOfMemory)?);
+            // Initialize Journal directly in fallible heap storage. Creating
+            // Journal::new() by value uses too much guarded trap-stack space.
+            let actor = self.ident.id;
+            if actor.get() == 0 || actor.get() > isize::MAX as usize {
+                return Err(Failure::Denied);
+            }
+            let mut storage = Box::<Journal>::try_new_uninit().map_err(|_| Failure::OutOfMemory)?;
+            let target = storage.as_mut().as_mut_ptr();
+            // SAFETY: target is the unique aligned Box allocation. Write all
+            // fields and each record before publishing the initialized Box.
+            // No uninitialized reference to Journal is ever formed.
+            unsafe {
+                core::ptr::addr_of_mut!((*target).actor).write(actor);
+                core::ptr::addr_of_mut!((*target).high_water).write(0);
+                let records = core::ptr::addr_of_mut!((*target).records)
+                    .cast::<Option<kernel_api::abi::memory::journal::Record>>();
+                for slot in 0..kernel_api::abi::memory::RESULT_CAPACITY {
+                    records.add(slot).write(None);
+                }
+                *window = Some(storage.assume_init());
+            }
         }
         let journal = window.as_mut().expect("prepared Task journal");
         match journal.begin(self.ident.id, request)? {

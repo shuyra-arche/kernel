@@ -3,6 +3,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 #[derive(Clone, Debug)]
 pub enum Kind {
+    Nest,
     Smp,
     Shutdown {
         quiet: bool,
@@ -43,6 +44,16 @@ pub fn check(log: &str, kind: &Kind, harts: u8) -> Result<Value> {
     let mut extra = true;
     let mut evidence = json!({});
     match kind {
+        Kind::Nest => {
+            markers.extend([
+                "PASS nest-completion abi=14 alias=retained withdrawal=2 replay=2 task-fault=2 reuse=2".to_owned(),
+                format!("PASS smp-completion harts={harts} bounded=1 retained=1 retry=1"),
+                format!("PASS smp-instructions harts={harts} bounded=1 retained=1 retry=1"),
+            ]);
+            let writers = captures(log, r"PASS nest-writer task=(\d+)")?;
+            extra &= writers.len() == 2 && writers[0] != writers[1];
+            evidence = json!({"writers":writers,"target_harts":harts});
+        }
         Kind::Retirement { cancel } => {
             let mut result = check(log, &Kind::Smp, harts)?;
             let rows: Vec<_> = Regex::new(r"PASS retirement turns=(\d+) task-records=(\d+) fallback-records=(\d+) cancel=(\d+) pending=0 retained-source=0")?

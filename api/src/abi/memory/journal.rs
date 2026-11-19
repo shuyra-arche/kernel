@@ -54,8 +54,11 @@ impl RequestKey {
     }
 }
 
+/// Opaque stored record. Exposed for exact, single-allocation Kernel
+/// initialization; only the Journal methods maintain protocol transitions.
+#[doc(hidden)]
 #[derive(Clone, Copy)]
-struct Record {
+pub struct Record {
     request: RequestKey,
     reply: Option<Reply>,
 }
@@ -84,9 +87,15 @@ pub enum Admission {
 /// No heap allocation, eviction of pending work, wrapping or reset operation.
 /// Numeric Task identity must come from the kernel, never from a descriptor.
 pub struct Journal {
-    actor: TaskId,
-    high_water: u64,
-    records: [Option<Record>; RESULT_CAPACITY],
+    /// Internal fixed-storage initialization; not an authority interface.
+    #[doc(hidden)]
+    pub actor: TaskId,
+    /// Internal fixed-storage initialization; not an authority interface.
+    #[doc(hidden)]
+    pub high_water: u64,
+    /// Internal fixed-storage initialization; not an authority interface.
+    #[doc(hidden)]
+    pub records: [Option<Record>; RESULT_CAPACITY],
 }
 impl Journal {
     pub fn new(actor: TaskId) -> Option<Self> {

@@ -1,8 +1,8 @@
 {
   "server/src/basis/nest/activity.rs": "6f46edf353c667bc9c8d2f1eb75e011c4892ce26683eb65d132824114dbd0707",
-  "server/src/basis/nest/translation/retirement.rs": "3c1b0531566aa379b43e2290cba4c535c3489d579f568c7ec7f38d21cd4eaf48",
+  "server/src/basis/nest/translation/retirement.rs": "ee5a8749443446f3432f9dbab88dbbb2e972bd69c746390c44879651f657987d",
   "server/src/entry/boot/mod.rs": "c13d40184982e7d6ac4083d177e61906a4e6acb8e51d54c956900e403e371d8a",
-  "server/src/entry/report/shutdown.rs": "a93707a500099e6991f5eaddc6ed30bc14fbb6e63e510941bf03508f185a903b",
+  "server/src/entry/report/shutdown.rs": "6e7b3899751611073ddbccc2164c61108ae61c9dbd62d1dca45d854c6cfea598",
   "server/src/entry/trap/mod.rs": "b1b398d6d32b8c298890def38f258f67a9828e01692c588ab8d06c34608376b8",
   "server/src/metal/riscv/mmu/internal/completion.rs": "4dfb9106a6d99a08e589e76e92ca16de7e61b637a6b5bbb49d2845e04a52e610",
   "server/src/metal/riscv/mmu/internal/table/mod.rs": "6c6d240d794ac54d86de50670ee5d567792f97702d133141297750cd29ac4a86"

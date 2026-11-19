@@ -339,3 +339,14 @@ fn keyed_admission_uses_canonical_request_bytes() {
     journal.record(&accepted, reply).unwrap();
     assert!(matches!(journal.begin(actor(), key), Ok(Admission::Replay(r)) if r == reply));
 }
+
+#[test]
+fn fixed_journal_layout_supports_one_in_place_allocation() {
+    assert_eq!(
+        core::mem::size_of::<Journal>(),
+        core::mem::size_of::<TaskId>()
+            + core::mem::size_of::<u64>()
+            + RESULT_CAPACITY
+                * core::mem::size_of::<Option<kernel_api::abi::memory::journal::Record>>()
+    );
+}

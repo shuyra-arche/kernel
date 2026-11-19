@@ -1,0 +1,35 @@
+[package]
+name = "nest-completion-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+resolver = "2"
+members = ["platform"]
+default-members = [".", "platform"]
+
+[workspace.dependencies]
+kernel-api = { path = "../../../../../../api" }
+kernel-client = { path = "../../../../../../client" }
+kernel = { path = "../../../../../../server" }
+
+[patch."https://github.com/shuyra-arche/kernel.git"]
+kernel-api = { path = "../../../../../../api" }
+kernel-client = { path = "../../../../../../client" }
+kernel = { path = "../../../../../../server" }
+
+[dependencies]
+kernel-api.workspace = true
+kernel-client.workspace = true
+
+[[bin]]
+name = "memory-guest"
+path = "main.rs"
+test = false
+bench = false
+
+[profile.dev]
+panic = "abort"
+[profile.release]
+panic = "abort"

@@ -1,0 +1,103 @@
+name: Kernel ABI14 Nest completion QEMU
+
+# #220 owner-only CPU completion qualification. Normal PR CI is single-Hart.
+# An explicit dispatch may select four Harts; this does not alter normal CI
+# or historical published ABI13 qualification.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/nest-target.yml"
+      - "server/tests/target/basis/nest/completion/**"
+      - "server/tests/runner/**"
+  workflow_dispatch:
+    inputs:
+      kernel_sha:
+        description: Exact Kernel ABI14 revision to verify
+        type: string
+        required: true
+        default: "657f2a36aa4043ae2a5b419774577b6498bfc9e7"
+      harts:
+        description: Explicit Hart count (four-Hart is manual)
+        type: choice
+        required: true
+        default: "4"
+        options: ["1", "4"]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: nest-abi14-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  completion:
+    name: ABI14 Nest / ${{ matrix.profile }} / target CPU
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [debug, release]
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+      QEMU_RISCV64: qemu-system-riscv64
+      QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
+      KERNEL_SHA: ${{ inputs.kernel_sha || '657f2a36aa4043ae2a5b419774577b6498bfc9e7' }}
+      HARTS: ${{ github.event_name == 'workflow_dispatch' && inputs.harts || '1' }}
+    steps:
+      - name: Install target and execution tools
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+          sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN" --target riscv64gc-unknown-none-elf
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate immutable ABI14 provider selection
+        run: |
+          set -euo pipefail
+          [[ "$KERNEL_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$HARTS" == 1 || "$HARTS" == 4 ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: shuyra-arche/kernel
+          ref: ${{ env.KERNEL_SHA }}
+          path: .integration/provider
+          persist-credentials: false
+      - name: Execute exact Kernel-owned Nest completion contract
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          test "$(git -C .integration/provider rev-parse HEAD)" = "$KERNEL_SHA"
+          cargo build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+          runner="$GITHUB_WORKSPACE/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify"
+          "$runner" nest --kernel "$GITHUB_WORKSPACE/.integration/provider" \
+            --output "$GITHUB_WORKSPACE/.integration/evidence" \
+            --profile "$PROFILE" --harts "$HARTS"
+      - name: Expose failed source/compile/guest evidence
+        if: failure()
+        run: |
+          for file in .integration/evidence/candidate/resolve/stderr.log .integration/evidence/candidate/locked/stderr.log .integration/evidence/candidate/harts-"$HARTS"-round-0/serial.log; do
+            if test -f "$file"; then
+              echo "---- $file ----"
+              tail -n 140 "$file"
+            fi
+          done
+      - name: Preserve exact source and QEMU evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kernel-nest-abi14-${{ matrix.profile }}-h${{ env.HARTS }}
+          include-hidden-files: true
+          path: .integration/evidence/
+          if-no-files-found: warn
