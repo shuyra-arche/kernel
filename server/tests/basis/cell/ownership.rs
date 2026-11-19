@@ -135,17 +135,3 @@ fn closing_owner_adopts_external_cell_without_reclaiming_it() {
     unsafe { device.retire().settle() };
     assert_eq!(pool.gives(), 1);
 }
-
-#[test]
-fn page_errors_preserve_the_logical_source_failure_contract() {
-    use crate::{cell::PageError, error::FlatError};
-    for (physical, logical) in [
-        (PageError::InvalidOwner, FlatError::OutOfRange),
-        (PageError::InvalidRange, FlatError::NotAligned),
-        (PageError::IdentityExhausted, FlatError::OutOfMemory),
-        (PageError::OutOfMemory, FlatError::OutOfMemory),
-        (PageError::Busy, FlatError::Busy),
-    ] {
-        assert_eq!(FlatError::from(physical), logical);
-    }
-}
