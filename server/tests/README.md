@@ -59,11 +59,11 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
 with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`.
-For private Guest compositions other than Flat, published ABI13 Activity and
-published ABI13 `Room` mode, check out Vanllia at the immutable
-[reviewed fixture revision](runner/fixture). Flat, published Activity and
-Room-mode scheduling checks use Kernel-owned Guests and Cargo-pinned Platform
-inputs, without a separate Vanllia test checkout. The Kernel
+For private Guest compositions other than Flat, published ABI13 Activity,
+Room scheduling and IRQ, check out Vanllia at the immutable
+[reviewed fixture revision](runner/fixture). Flat, Activity, Room and IRQ
+owner-side checks use Kernel-owned Guests and Cargo-pinned Platform inputs
+without a Vanllia product test checkout. The Kernel
 `runner` package owns target selection, execution and evidence. Vanllia's
 selected product owns its independent Native/ABI13 composition under
 [`product/tests/`](https://github.com/shuyra-arche/vanllia/tree/main/product/tests),
@@ -76,13 +76,14 @@ verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 "$verify" smp --kernel "$PWD" --fixture /path/to/vanllia --output /new/smp --profile release
 "$verify" activity --kernel /path/to/abi13-kernel --output /new/activity --profile release
 "$verify" flat --kernel "$PWD" --output /new/flat
-"$verify" room --kernel "$PWD" --fixture /path/to/vanllia --output /new/irq --mode irq --events 16
+"$verify" room --kernel /path/to/abi13-kernel --output /new/irq --mode irq --events 16 --harts 1
 "$verify" room --kernel /path/to/abi13-kernel --output /new/room --mode room --harts 1
 ```
 
-The Flat and pinned ABI13 Activity targets run in Kernel's own single-Hart
-QEMU workflows without a Vanllia fixture checkout. Activity selects the
-published matching Kernel revision, not current main/ABI14. Other commands here are explicit integration
+Flat and pinned ABI13 Activity, Room and IRQ targets run in Kernel's own
+single-Hart QEMU workflows without a Vanllia product fixture checkout.
+The pinned tests select their matching published Kernel revision, not
+current main/ABI14. Other commands here are explicit integration
 commands, outside ordinary Kernel CI. Run both debug and release. SMP defaults
 to 4 Harts when explicitly invoked; ordinary CI does not schedule an SMP campaign. A/D and Flat default
 to 1/4. Activity also has separate `--unsupported` and `--stopped` scenarios.
@@ -158,8 +159,9 @@ composition cases. It calls Kernel's
 separate Activity/Unsupported/Stopped/IRQ single-Hart cases, passing only
 the exact product Kernel gitlink SHA. The Activity cases select Kernel's
 reviewed published ABI13 owner-runner and frozen Guest, without a Vanllia
-product test fixture. IRQ retains the immutable historical Kernel runner and
-its strictly checked Vanllia platform fixture until independently migrated.
+product test fixture. The IRQ consumer workflow still retains the legacy
+fixture pin until that caller is separately switched to the new owner-runner;
+a passing new IRQ target does not authorize an untested caller revision.
 The reusable workflow is also manually runnable with an immutable Kernel SHA;
 it verifies the **selected source revision**, not the unrelated Kernel main
 ABI candidate. Kernel's separate Flat, pinned ABI13 Activity and IOMMU target workflows
