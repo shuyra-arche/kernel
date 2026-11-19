@@ -1,7 +1,6 @@
 //! Execute the production Flat state transitions and Page allocator receipts.
 //! Authority, Task dispatch and hardware completion itself are separate gates.
 use crate::{
-    cell::{Owner, Page},
     index::PageIndex,
     state::{FlatSource, FlatState, residency::Error},
     support::Pool,

@@ -52,13 +52,6 @@ mod basis {
     }
 }
 mod metal {
-    pub(crate) use crate::host_lock as sync;
-    pub(crate) mod memory {
-        pub(crate) fn topology() -> Option<&'static crate::proof::topology::Topology> {
-            None
-        }
-        pub(crate) fn data_visible() {}
-    }
     pub(crate) mod generic {
         pub(crate) use crate::proof as memory;
     }
