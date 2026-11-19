@@ -1,25 +1,24 @@
 use clap::{Parser, Subcommand};
 use kernel_verification::Result;
 use std::path::PathBuf;
+
 mod composition;
 mod inventory;
 mod scenario;
 mod utilities;
 mod verify;
+
 #[derive(Parser)]
-#[command(about = "Kernel host verification; guests remain separate RV64 packages")]
+#[command(about = "Kernel-owned target verification")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
+
 #[derive(Subcommand)]
 enum Commands {
     #[command(flatten)]
     Scenario(scenario::Commands),
-    Baseline {
-        #[arg(long)]
-        event: PathBuf,
-    },
     Symbolize {
         elf: PathBuf,
         serial: PathBuf,
@@ -31,15 +30,13 @@ enum Commands {
         kernel: PathBuf,
     },
 }
+
 fn main() {
     let result: Result<()> = match Cli::parse().command {
         Commands::Scenario(command) => scenario::run(command),
-        Commands::Baseline { event } => utilities::baseline(&event),
-        Commands::Symbolize {
-            elf,
-            serial,
-            addr2line,
-        } => utilities::symbolize(&elf, &serial, &addr2line),
+        Commands::Symbolize { elf, serial, addr2line } => {
+            utilities::symbolize(&elf, &serial, &addr2line)
+        }
         Commands::Inventory { kernel } => inventory::run(&kernel),
     };
     if let Err(error) = result {

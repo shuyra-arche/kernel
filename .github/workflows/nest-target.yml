@@ -2,7 +2,7 @@ name: Kernel ABI14 Nest completion QEMU
 
 # #220 owner-only CPU completion qualification. Normal PR CI is single-Hart.
 # An explicit dispatch may select four Harts; this does not alter normal CI
-# or historical published ABI13 qualification.
+# or another target campaign.
 on:
   pull_request:
     paths:

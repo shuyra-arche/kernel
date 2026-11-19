@@ -9,12 +9,11 @@
  test = false
  bench = false
  doctest = false
-@@ -30,4 +30,6 @@
+@@ -30,4 +30,5 @@
  kernel-api = { workspace = true }
  
  [features]
 +flat-probe-contracts = []
-+flat-probe-timing = []
  latency = []
 --- a/server/src/basis/flat/mod.rs
 +++ b/server/src/basis/flat/mod.rs
@@ -36,29 +35,3 @@
      crate::basis::unit::lifecycle::tally::rooted();
  
      boot_harts()?;
---- a/server/src/metal/generic/sync/spin/guard.rs
-+++ b/server/src/metal/generic/sync/spin/guard.rs
-@@ -9,6 +9,7 @@
-     pub(super) lock: &'a SpinLock<T, E, D>,
-     _not_send: PhantomData<*const ()>,
-     _trap: E::Guard,
-+    probe_start: u64,
-     #[cfg(feature = "latency")]
-     start: u64,
- }
-@@ -19,6 +20,7 @@
-             lock,
-             _not_send: PhantomData,
-             _trap: trap,
-+            probe_start: crate::basis::flat::probe::lock_enter(lock as *const _ as *const () as usize),
-             #[cfg(feature = "latency")]
-             start: crate::metal::measure::stamp(),
-         }
-@@ -41,6 +43,7 @@
- 
- impl<T: ?Sized, E: Environment, D: Diagnostics> Drop for SpinLockGuard<'_, T, E, D> {
-     fn drop(&mut self) {
-+        crate::basis::flat::probe::lock_leave(self.probe_start);
-         #[cfg(debug_assertions)]
-         D::released(self.lock as *const _ as *const () as usize);
-         #[cfg(feature = "latency")]
