@@ -1,39 +1,46 @@
 # Kernel tests
 
-Test code follows the responsibility it verifies. Host suites mirror the real
-production owner under `basis/`, `entry/`, and `metal/`; shared support belongs
-under `support/` only when it has multiple actual consumers.
+Test source belongs to the responsibility it verifies. Host tests follow the
+production owners under `basis/`, `entry/` and `metal/`; common fixtures only
+exist where there are actual shared consumers.
 
-Host tests exercise real state machines, failure handling, permission and
-resource invariants without pretending that mocks prove actual RV64 behavior.
+Host tests:
 
 ```sh
 cargo +nightly test --locked --workspace --target x86_64-unknown-linux-gnu
 cargo +nightly test --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
 ```
 
-Target suites exercise current Kernel code:
+Each target project owns its `suite.json` alongside its Cargo manifest,
+Guest and any source probe patch. The common `Target` workflow discovers these
+files, selects owners whose source inputs changed, and runs an independent job
+per project/profile. No project name is declared in the workflow or runner.
 
-- `target/basis/nest/completion/`: CPU mapping retirement, retained references,
-  request replay, CPU fences and optional multi-Hart completion.
-- `target/basis/flat/`: physical page ownership, allocation failure, transfer
-  and cancellation.
-- `target/metal/riscv/iommu/`: real MMIO/DMA mechanisms, separately selected.
+To discover available jobs locally:
 
-Build the standalone Host runner and select a Kernel revision:
+```sh
+bash tools/tests/discover.sh "$PWD" "" 1
+```
+
+To run one project:
 
 ```sh
 cargo +nightly build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
-verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
-"$verify" nest --kernel "$PWD" --output /tmp/nest --harts 1
-"$verify" flat --kernel "$PWD" --output /tmp/flat --harts 1
+server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify run \
+  --suite server/tests/target/basis/nest/completion \
+  --kernel "$PWD" --output /tmp/nest --harts 1
 ```
 
-Set `QEMU_RISCV64` and `QEMU_OPENSBI`; QEMU 10.0.x and OpenSBI DBCN are
-required. Ordinary PR CI runs one Hart. Explicit multi-Hart Nest/Flat runs
-are available via `--harts 4`; no four-Hart test is part of normal CI.
+Set `QEMU_RISCV64` and `QEMU_OPENSBI` for CPU suites (QEMU 10.0.x and
+OpenSBI DBCN). Normal CI uses one Hart. Multi-Hart runs are manually selected
+and only admitted by projects that declare support for them. An IOMMU target
+project may instead own a Cargo test invoking QEMU directly.
 
-The runner retains source identities, reviewed patches, compiler/build logs,
-QEMU output and cleanup receipts. Host compilation, target execution and
-physical hardware qualification are distinct claims. No old-ABI fixture,
-migration harness or general-purpose compatibility runner is maintained.
+To add a project, create its directory and `suite.json` with an ID,
+profile/Hart support, owned source patterns and one execution declaration.
+A project can be deleted by deleting its directory. Neither action requires
+editing CI, a central case enum or another project's tests. No historical
+ABI fixtures or compatibility runners are kept.
+
+Results report actual build/exit/Guest evidence. A green Host test cannot
+prove target CPU, IOMMU or physical hardware effects.

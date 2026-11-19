@@ -1,0 +1,119 @@
+name: Target
+
+on:
+  pull_request:
+    paths:
+      - "server/src/**"
+      - "server/tests/**"
+      - "api/**"
+      - "client/**"
+      - "tools/tests/discover.sh"
+      - "Cargo.lock"
+      - ".github/workflows/target.yml"
+  push:
+    branches: [main]
+    paths:
+      - "server/src/**"
+      - "server/tests/**"
+      - "api/**"
+      - "client/**"
+      - "tools/tests/discover.sh"
+      - "Cargo.lock"
+      - ".github/workflows/target.yml"
+  workflow_dispatch:
+    inputs:
+      harts:
+        description: Explicit emulated Hart count
+        type: choice
+        required: true
+        default: "4"
+        options: ["1", "4"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-target-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  discover:
+    name: Discover test projects
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.projects.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: projects
+        name: Select affected owners
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          HARTS: ${{ inputs.harts || '1' }}
+        run: |
+          set -euo pipefail
+          matrix="$(bash tools/tests/discover.sh "$GITHUB_WORKSPACE" "$BASE_SHA" "$HARTS")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix" | jq .
+
+  target:
+    name: ${{ matrix.id }} / ${{ matrix.profile }} / h${{ inputs.harts || '1' }}
+    needs: discover
+    if: needs.discover.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+      QEMU_RISCV64: qemu-system-riscv64
+      QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
+      HARTS: ${{ inputs.harts || '1' }}
+      PROFILE: ${{ matrix.profile }}
+      SUITE: ${{ matrix.suite }}
+    steps:
+      - name: Install target tools
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential qemu-system-riscv opensbi
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+          sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN" --target riscv64gc-unknown-none-elf
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Run project-owned verification
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+          runner="$GITHUB_WORKSPACE/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify"
+          "$runner" run --suite "$SUITE" --kernel "$GITHUB_WORKSPACE" \
+            --output "$GITHUB_WORKSPACE/.integration/evidence" --profile "$PROFILE" --harts "$HARTS"
+      - name: Expose failed build or execution evidence
+        if: failure()
+        run: |
+          for file in .integration/evidence/candidate/resolve/stderr.log .integration/evidence/candidate/locked/stderr.log .integration/evidence/candidate/harts-"$HARTS"-round-0/serial.log .integration/evidence/cargo/stderr.log; do
+            if test -f "$file"; then
+              echo "---- $file ----"
+              tail -n 100 "$file"
+            fi
+          done
+      - name: Preserve project evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: target-${{ matrix.id }}-${{ matrix.profile }}-h${{ inputs.harts || '1' }}
+          include-hidden-files: true
+          path: |
+            .integration/evidence/
+            ${{ matrix.suite }}/target/evidence/
+          if-no-files-found: warn

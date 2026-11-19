@@ -1,0 +1,27 @@
+{
+  "id": "iommu",
+  "profiles": [
+    "release"
+  ],
+  "harts": [
+    1
+  ],
+  "sources": [
+    "server/tests/metal/riscv/iommu/execution/**",
+    "server/tests/support/iommu/**",
+    "server/src/basis/nest/translation/external/**",
+    "server/src/basis/nest/memo/publication/receipt.rs",
+    "server/src/metal/riscv/mmu/external/**",
+    "api/**",
+    "Cargo.lock",
+    "server/src/metal/generic/mmu/external/**",
+    "server/src/basis/cell/**",
+    "server/src/metal/generic/sync/**"
+  ],
+  "run": {
+    "kind": "cargo-test",
+    "package": "kernel-tests",
+    "test": "iommu-target",
+    "ignored": true
+  }
+}

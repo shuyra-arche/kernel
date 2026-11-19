@@ -1,0 +1,43 @@
+{
+  "id": "flat",
+  "profiles": [
+    "debug",
+    "release"
+  ],
+  "harts": [
+    1,
+    4
+  ],
+  "sources": [
+    "server/src/basis/flat/**",
+    "server/src/basis/nest/**",
+    "server/src/basis/cell/**",
+    "server/src/basis/pend/**",
+    "server/src/basis/unit/**",
+    "server/src/entry/boot/**",
+    "server/src/metal/generic/sync/**",
+    "server/src/metal/riscv/mmu/**",
+    "api/**",
+    "client/**",
+    "Cargo.lock",
+    "server/src/basis/name/**"
+  ],
+  "run": {
+    "kind": "qemu",
+    "kernel": "flat-guest",
+    "features": [
+      "kernel/flat-probe-contracts"
+    ],
+    "environment": {
+      "FLAT_PROBE_PROVIDER": "1"
+    },
+    "expects": [
+      "task: all tasks exited",
+      "PASS flat-contracts",
+      "PASS flat-oom",
+      "PASS flat-reservation",
+      "PASS flat-cancel",
+      "PASS flat-race"
+    ]
+  }
+}

@@ -1,51 +1,35 @@
+use crate::suite::Distinct;
 use kernel_verification::Result;
 use regex::Regex;
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 
-#[derive(Clone, Copy, Debug)]
-pub enum Kind {
-    Nest,
-    Flat,
-}
-
-pub fn check(log: &str, kind: &Kind, harts: u8) -> Result<Value> {
-    let mut markers = vec!["task: all tasks exited".to_owned()];
-    let mut evidence = json!({});
-    let valid = match kind {
-        Kind::Nest => {
-            markers.extend([
-                "PASS nest-completion abi=14 alias=retained withdrawal=2 replay=2 task-fault=2 reuse=2".to_owned(),
-                format!("PASS smp-completion harts={harts} bounded=1 retained=1 retry=1"),
-                format!("PASS smp-instructions harts={harts} bounded=1 retained=1 retry=1"),
-            ]);
-            let writers: Vec<_> = Regex::new(r"PASS nest-writer task=(\d+)")?
-                .captures_iter(log)
-                .map(|row| row[1].to_owned())
-                .collect();
-            let valid = writers.len() == 2 && writers[0] != writers[1];
-            evidence = json!({"writers": writers, "target_harts": harts});
-            valid
-        }
-        Kind::Flat => {
-            markers.extend(
-                [
-                    "PASS flat-contracts",
-                    "PASS flat-oom",
-                    "PASS flat-reservation",
-                    "PASS flat-cancel",
-                    "PASS flat-race",
-                ]
-                .map(String::from),
-            );
-            true
-        }
-    };
-    let missing: Vec<_> = markers
+pub fn check(
+    log: &str,
+    expects: &[String],
+    distinct: Option<&Distinct>,
+    harts: u8,
+) -> Result<Value> {
+    let missing: Vec<_> = expects
         .iter()
-        .filter(|marker| !log.contains(marker.as_str()))
+        .map(|marker| marker.replace("{harts}", &harts.to_string()))
+        .filter(|marker| !log.contains(marker))
         .collect();
+    let mut evidence = json!({});
+    let mut valid = true;
+    if let Some(rule) = distinct {
+        let pattern = Regex::new(&rule.pattern)?;
+        let values: Vec<_> = pattern
+            .captures_iter(log)
+            .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
+            .collect();
+        let unique: BTreeSet<_> = values.iter().collect();
+        valid &= values.len() == rule.count && unique.len() == rule.count;
+        evidence = json!({"distinct": values});
+    }
     Ok(json!({
-        "passed": valid && missing.is_empty()
+        "passed": valid
+            && missing.is_empty()
             && !log.contains("FAIL")
             && !log.contains("[kernel] fatal"),
         "missing": missing,

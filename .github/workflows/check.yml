@@ -46,6 +46,7 @@ jobs:
           bash tools/tests/release.sh
           bash tools/check-layout.sh
           bash tools/check-tooling.sh
+          bash -n tools/tests/discover.sh
       - name: Install host toolchain
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt,clippy
       - name: Identify compiler

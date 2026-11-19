@@ -5,11 +5,12 @@ use std::path::PathBuf;
 mod composition;
 mod inventory;
 mod scenario;
+mod suite;
 mod utilities;
 mod verify;
 
 #[derive(Parser)]
-#[command(about = "Kernel-owned target verification")]
+#[command(about = "Kernel target verification")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -17,8 +18,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(flatten)]
-    Scenario(scenario::Commands),
+    Run(scenario::Inputs),
     Symbolize {
         elf: PathBuf,
         serial: PathBuf,
@@ -33,7 +33,7 @@ enum Commands {
 
 fn main() {
     let result: Result<()> = match Cli::parse().command {
-        Commands::Scenario(command) => scenario::run(command),
+        Commands::Run(inputs) => scenario::run(inputs),
         Commands::Symbolize {
             elf,
             serial,
