@@ -45,7 +45,7 @@ safety is claimed. Production Platform remains the immutable Git-pinned
 
 Use Kernel's `verify` Host runner with the compatible ABI13 source above,
 or select the explicit
-[manual qualification workflow](../../../.github/workflows/smp-owner.yml)
+[manual qualification workflow](../../../../.github/workflows/smp-owner.yml)
 after merging, and provide a new output directory. `--fixture` is no
 longer accepted.
 The runner must still pass its complete SMP, Lifecycle, Retirement and
