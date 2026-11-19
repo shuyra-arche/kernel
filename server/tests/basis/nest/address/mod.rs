@@ -5,13 +5,13 @@ extern crate alloc;
 mod name;
 
 mod active;
+#[path = "../../name/allocation.rs"]
+mod allocation;
+mod geometry;
 #[path = "../../../../src/metal/generic/mmu/internal/fence.rs"]
 mod scope;
 #[path = "../translation.rs"]
 mod translation;
-#[path = "../../name/allocation.rs"]
-mod allocation;
-mod geometry;
 
 mod basis {
     pub(crate) use crate::name;
