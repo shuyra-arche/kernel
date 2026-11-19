@@ -120,7 +120,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     }
     let patches = root.join("patches");
     fs::create_dir(&patches)?;
-    let own_room = matches!(&kind, Kind::Room { mode, .. } if mode == "room");
+    let own_room = matches!(&kind, Kind::Room { mode, .. } if mode == "room" || mode == "irq");
     if !matches!(kind, Kind::Flat { .. } | Kind::Activity { .. }) && !own_room {
         compose::apply("user-fixture", &fixture, &patches)?;
     }
@@ -233,40 +233,46 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
             latency,
             cold,
         } => {
-            if mode == "room" {
-                // This published ABI13 Room Guest is maintained by Kernel, not
-                // reconstructed by patching Vanllia's product test sources.
+            if mode == "room" || mode == "irq" {
+                // Kernel owns the published ABI13 Room and IRQ Guest contracts.
+                // IRQ reuses only the already-pinned Room support/stack/PCI
+                // helpers; neither executable fetches Vanllia's product tests.
                 if *latency {
                     compose::apply("room-pinned-window", &provider, &patches)?;
                 }
-                let package = "target/basis/room/pinned";
+                if mode == "irq" {
+                    for name in [
+                        "stack.rs",
+                        "support.rs",
+                        "platform/device.rs",
+                        "platform/window.rs",
+                    ] {
+                        let shared = format!("target/basis/room/pinned/{name}");
+                        compose::copy(
+                            &shared,
+                            &provider.join("server/tests").join(&shared),
+                        )?;
+                    }
+                }
+                let package = if mode == "irq" {
+                    "target/basis/room/irq"
+                } else {
+                    "target/basis/room/pinned"
+                };
                 let target = provider.join("server/tests").join(package);
                 for file in compose::hashes(&compose::suite().join(package))?.keys() {
                     compose::copy(&format!("{package}/{file}"), &target.join(file))?;
                 }
                 manifest = target.join("Cargo.toml");
             } else {
-                // IRQ and Realtime still retain the reviewed historical
-                // fixture and original preimage/Hardware admission policy.
-                compose::apply(
-                    if mode == "irq" {
-                        "irq-fixture"
-                    } else {
-                        "room-fixture"
-                    },
-                    &fixture,
-                    &patches,
-                )?;
+                // Realtime remains a strict historical fixture until separately
+                // qualified on its own real scheduling admission contract.
+                compose::apply("room-fixture", &fixture, &patches)?;
                 if *latency {
                     compose::apply("room-window", &provider, &patches)?;
                 }
-                let guest = match mode.as_str() {
-                    "irq" => "interrupt.rs",
-                    "realtime" => "realtime.rs",
-                    _ => unreachable!("mode checked at CLI admission"),
-                };
                 compose::copy(
-                    &format!("target/basis/room/{guest}"),
+                    "target/basis/room/realtime.rs",
                     &fixture.join("tests/memory/guest/main.rs"),
                 )?;
                 manifest = fixture.join("tests/memory/Cargo.toml");
@@ -448,7 +454,7 @@ fn boot(
 }
 pub(crate) fn admit_fixture(kind: &Kind, fixture: Option<&Path>) -> Result<()> {
     if matches!(kind, Kind::Flat { .. } | Kind::Activity { .. })
-        || matches!(kind, Kind::Room { mode, .. } if mode == "room")
+        || matches!(kind, Kind::Room { mode, .. } if mode == "room" || mode == "irq")
     {
         require(
             fixture.is_none(),
