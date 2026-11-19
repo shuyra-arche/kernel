@@ -41,7 +41,7 @@ incomplete cleanup fail closed. Full raw build/boot evidence is preserved in
 the new output directory, including exact source and Platform identities,
 linker, Cargo lock, tool/firmware hashes, output and statuses.
 
-The [manual qualification workflow](../../../../../.github/workflows/smp-owner.yml)
+The [manual qualification workflow](../../../../../../../.github/workflows/smp-owner.yml)
 is **workflow_dispatch only**. Ordinary PR/push CI does not schedule SMP or
 multi-Hart target campaigns; the one-time nine-scenario one-Hart migration
 verification establishes runnable ownership, **not** four-Hart migration,
