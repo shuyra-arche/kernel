@@ -9,6 +9,7 @@ extern crate alloc;
 #[allow(dead_code, unused_imports)]
 #[path = "../../../src/basis/cell/page/mod.rs"]
 pub(crate) mod cell;
+use cell as page;
 #[allow(dead_code, unused_imports)]
 #[path = "../../support/lock.rs"]
 mod host_lock;
@@ -31,5 +32,29 @@ mod metal {
 }
 
 mod access;
+#[path = "../name/allocation.rs"]
+mod allocation;
+mod change;
+#[allow(dead_code, unused_imports)]
+#[path = "../../../src/basis/cell/change.rs"]
+pub(crate) mod changes;
+mod geometry;
+mod levels;
 mod ownership;
 mod support;
+
+fn reshape(
+    pages: &mut Vec<std::sync::Arc<cell::Page>>,
+    level: kernel_api::model::cell::CellLevel,
+) -> Result<Vec<std::sync::Arc<cell::Page>>, cell::PageError> {
+    cell::Page::reshape_with(pages, level, |pages| {
+        if pages.iter().any(|page| {
+            std::sync::Arc::strong_count(page) != 1
+                || std::sync::Arc::weak_count(page) != 0
+                || !page.allows_return()
+        }) {
+            return Err(cell::PageError::Busy);
+        }
+        Ok(())
+    })
+}

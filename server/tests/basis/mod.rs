@@ -44,8 +44,8 @@ mod basis;
 mod admission;
 #[path = "name/allocation.rs"]
 mod allocation;
-#[path = "cell/levels.rs"]
-mod levels;
+#[path = "cell/geometry.rs"]
+mod geometry;
 #[path = "cell/maintenance.rs"]
 mod maintenance;
 #[path = "flat/materialize.rs"]
@@ -55,7 +55,7 @@ mod retention;
 #[path = "cell/support.rs"]
 mod support;
 
-#[path = "cell/change.rs"]
+#[path = "nest/fixture/change.rs"]
 mod change;
 #[allow(dead_code)]
 #[path = "../../src/basis/cell/change.rs"]
@@ -121,18 +121,3 @@ mod metal {
     }
 }
 
-fn reshape(
-    pages: &mut Vec<std::sync::Arc<cell::Page>>,
-    level: kernel_api::model::cell::CellLevel,
-) -> Result<Vec<std::sync::Arc<cell::Page>>, cell::PageError> {
-    cell::Page::reshape_with(pages, level, |pages| {
-        if pages.iter().any(|page| {
-            std::sync::Arc::strong_count(page) != 1
-                || std::sync::Arc::weak_count(page) != 0
-                || !page.allows_return()
-        }) {
-            return Err(cell::PageError::Busy);
-        }
-        Ok(())
-    })
-}

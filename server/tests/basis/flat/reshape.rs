@@ -1,6 +1,6 @@
 use crate::{
     cell::Block,
-    levels::Pool,
+    geometry::Pool,
     residency::fresh,
     state::{FlatSource, FlatState, residency::Error},
 };
