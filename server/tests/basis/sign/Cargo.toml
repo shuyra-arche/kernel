@@ -1,0 +1,17 @@
+[package]
+name = "kernel-host-sign"
+version.workspace = true
+edition.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+bitflags.workspace = true
+erra.workspace = true
+fack.workspace = true
+hashbrown.workspace = true
+kernel-api.workspace = true
+
+[[test]]
+name = "sign"
+path = "mod.rs"

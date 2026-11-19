@@ -152,6 +152,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernel-host-sign"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
 name = "kernel-tests"
 version = "0.0.1"
 dependencies = [

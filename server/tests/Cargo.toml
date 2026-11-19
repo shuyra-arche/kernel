@@ -47,10 +47,6 @@ name = "iommu-target"
 path = "metal/riscv/iommu/execution/mod.rs"
 
 [[test]]
-name = "sign"
-path = "basis/sign/mod.rs"
-
-[[test]]
 name = "pend"
 path = "basis/pend/mod.rs"
 
