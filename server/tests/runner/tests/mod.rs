@@ -8,7 +8,7 @@ mod utilities;
 #[path = "../verify.rs"]
 mod verify;
 #[test]
-fn flat_does_not_require_a_historical_fixture_but_other_probes_do() {
+fn published_guest_inputs_are_local_and_legacy_probes_require_fixture() {
     use std::path::Path;
 
     let old_fixture = Path::new("/example/vanllia");
@@ -24,6 +24,16 @@ fn flat_does_not_require_a_historical_fixture_but_other_probes_do() {
         };
         assert!(scenario::admit_fixture(&activity, None).is_ok());
         assert!(scenario::admit_fixture(&activity, Some(old_fixture)).is_err());
+    }
+    for latency in [false, true] {
+        let room = verify::Kind::Room {
+            mode: "room".into(),
+            events: 256,
+            latency,
+            cold: false,
+        };
+        assert!(scenario::admit_fixture(&room, None).is_ok());
+        assert!(scenario::admit_fixture(&room, Some(old_fixture)).is_err());
     }
     for private in [
         verify::Kind::Smp,
