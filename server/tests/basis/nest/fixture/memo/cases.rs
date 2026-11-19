@@ -291,7 +291,7 @@ fn legacy_capture_and_retraction_freeze_remain_compatible() {
 
 #[test]
 fn holding_move_and_restore_preserve_logical_binding_and_page_identity() {
-    use crate::{index::PageIndex, residency, state::residency::Error};
+    use crate::{holding as residency, index::PageIndex, state::residency::Error};
     use kernel_api::model::flat::SlotVersion;
 
     let (mut memo, registry, binding) = logical();

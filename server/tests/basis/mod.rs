@@ -20,6 +20,8 @@ pub(crate) mod index {
 }
 use error::FlatError;
 use state::slot;
+#[path = "flat/holding.rs"]
+mod holding;
 
 #[path = "../../src/metal/generic/mmu/internal/fence.rs"]
 mod scope;
@@ -41,16 +43,8 @@ mod name;
 #[path = "nest/fixture/model.rs"]
 mod basis;
 
-#[path = "flat/admission.rs"]
-mod admission;
 #[path = "name/allocation.rs"]
 mod allocation;
-#[path = "cell/geometry.rs"]
-mod geometry;
-#[path = "flat/maintenance.rs"]
-mod maintenance;
-#[path = "flat/materialize.rs"]
-mod materialize;
 #[path = "cell/retention.rs"]
 mod retention;
 #[path = "cell/support.rs"]
@@ -68,11 +62,6 @@ mod memo;
 #[allow(dead_code)]
 #[path = "../../src/basis/flat/storage/mod.rs"]
 mod state;
-
-#[path = "flat/reshape.rs"]
-mod reshape;
-#[path = "flat/residency.rs"]
-mod residency;
 
 #[allow(dead_code)]
 #[path = "../../src/metal/generic/mmu/external/mod.rs"]
