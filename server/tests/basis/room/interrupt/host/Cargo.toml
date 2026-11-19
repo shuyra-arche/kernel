@@ -1,0 +1,20 @@
+[package]
+name = "kernel-host-interrupt"
+version.workspace = true
+edition.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+bitflags.workspace = true
+erra.workspace = true
+fack.workspace = true
+hashbrown.workspace = true
+kernel-api.workspace = true
+
+[[test]]
+name = "interrupt"
+path = "../mod.rs"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("latency"))'] }

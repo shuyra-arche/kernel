@@ -4,6 +4,16 @@ Test source belongs to the responsibility it verifies. Host tests follow the
 production owners under `basis/`, `entry/` and `metal/`; common fixtures only
 exist where there are actual shared consumers.
 
+Host test project ownership is local: each Host suite keeps a `host/Cargo.toml`
+in its own `basis/`, `entry/`, or `metal/` directory, pointing at the
+adjacent Rust test root. Cargo discovers these packages through the recursive
+`**/host` workspace globs; there is no central `[[test]]` registry. Adding
+another Host suite requires only its own `host/Cargo.toml`, without modifying
+the workspace member list, other suites or CI. `cargo test --workspace`
+executes them all. The Name benchmark is declared beside the Name suite and
+remains opt-in. Each suite can also run with `cargo test --manifest-path
+server/tests/basis/cell/host/Cargo.toml --target x86_64-unknown-linux-gnu`.
+
 Host tests:
 
 ```sh

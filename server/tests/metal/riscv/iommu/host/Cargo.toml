@@ -1,0 +1,24 @@
+[package]
+name = "kernel-host-iommu"
+version.workspace = true
+edition.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+bitflags.workspace = true
+erra.workspace = true
+fack.workspace = true
+hashbrown.workspace = true
+kernel-api.workspace = true
+
+[[test]]
+name = "iommu"
+path = "../mod.rs"
+
+[[test]]
+name = "iommu-target"
+path = "../execution/mod.rs"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("latency"))'] }

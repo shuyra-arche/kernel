@@ -20,7 +20,7 @@
   ],
   "run": {
     "kind": "cargo-test",
-    "package": "kernel-tests",
+    "package": "kernel-host-iommu",
     "test": "iommu-target",
     "ignored": true
   }

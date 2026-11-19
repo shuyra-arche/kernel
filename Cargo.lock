@@ -152,6 +152,237 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernel-host-activity"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-address"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-allocator"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-cell"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-console"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-context"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-diagnostics"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-fabric"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-fault"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-flat"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-interrupt"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-invocation"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-iommu"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-latency"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-layout"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-name"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-nest"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-pend"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-registration"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-retirement"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-room"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
 name = "kernel-host-sign"
 version = "0.0.1"
 dependencies = [
@@ -163,7 +394,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "kernel-tests"
+name = "kernel-host-sync"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-translation"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "erra",
+ "fack",
+ "hashbrown",
+ "kernel-api",
+]
+
+[[package]]
+name = "kernel-host-unit"
 version = "0.0.1"
 dependencies = [
  "bitflags",

@@ -1,0 +1,25 @@
+[package]
+name = "kernel-host-name"
+version.workspace = true
+edition.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+bitflags.workspace = true
+erra.workspace = true
+fack.workspace = true
+hashbrown.workspace = true
+kernel-api.workspace = true
+
+[[test]]
+name = "name"
+path = "../mod.rs"
+
+[[bench]]
+name = "ticket-storage"
+path = "../cost.rs"
+harness = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("latency"))'] }

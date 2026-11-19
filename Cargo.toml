@@ -5,8 +5,9 @@ members = [
   "api/abi-macros",
   "client",
   "server",
-  "server/tests",
   "server/tests/basis/**/host",
+  "server/tests/entry/**/host",
+  "server/tests/metal/**/host",
 ]
 
 [workspace.package]
