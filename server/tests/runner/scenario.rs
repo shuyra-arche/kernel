@@ -53,8 +53,15 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     fs::create_dir(&patches)?;
 
     let mut build = Command::new("cargo");
-    build.arg("build").env("RUSTFLAGS", FLAGS).current_dir(&provider);
-    for name in ["CARGO_TARGET_DIR", "CARGO_ENCODED_RUSTFLAGS", "FLAT_PROBE_PROVIDER"] {
+    build
+        .arg("build")
+        .env("RUSTFLAGS", FLAGS)
+        .current_dir(&provider);
+    for name in [
+        "CARGO_TARGET_DIR",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "FLAT_PROBE_PROVIDER",
+    ] {
         build.env_remove(name);
     }
 
@@ -88,7 +95,10 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     }
 
     let manifest = target.join("Cargo.toml");
-    build.arg("--manifest-path").arg(&manifest).args(["--target", TARGET]);
+    build
+        .arg("--manifest-path")
+        .arg(&manifest)
+        .args(["--target", TARGET]);
     if args.profile == "release" {
         build.arg("--release");
     }
@@ -112,13 +122,21 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
         if phase == "locked" {
             build.arg("--locked");
         }
-        inputs["builds"].as_array_mut().unwrap().push(format!("{build:?}").into());
+        inputs["builds"]
+            .as_array_mut()
+            .unwrap()
+            .push(format!("{build:?}").into());
         json(&root.join("inputs.json"), &inputs)?;
         process::build(&mut build, &root.join(phase))?;
     }
     fs::copy(&lock, root.join("Cargo.lock"))?;
 
-    let binaries = manifest.parent().unwrap().join("target").join(TARGET).join(&args.profile);
+    let binaries = manifest
+        .parent()
+        .unwrap()
+        .join("target")
+        .join(TARGET)
+        .join(&args.profile);
     let elf = root.join("platform.elf");
     let image = match kind {
         Kind::Flat => {
@@ -143,7 +161,12 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     }
     inputs["sha256"] = hashes;
     json(&root.join("inputs.json"), &inputs)?;
-    Ok(Variant { root: root.to_owned(), elf, image, kind })
+    Ok(Variant {
+        root: root.to_owned(),
+        elf,
+        image,
+        kind,
+    })
 }
 
 fn boot(args: &Inputs, variant: &Variant, harts: u8, round: u8) -> Result<bool> {
@@ -153,9 +176,26 @@ fn boot(args: &Inputs, variant: &Variant, harts: u8, round: u8) -> Result<bool> 
     let qemu = std::env::var("QEMU_RISCV64").unwrap_or("qemu-system-riscv64".into());
     let mut command = Command::new(qemu);
     command
-        .args(["-accel", "tcg,thread=multi", "-machine", "virt", "-cpu", "rv64", "-smp"])
+        .args([
+            "-accel",
+            "tcg,thread=multi",
+            "-machine",
+            "virt",
+            "-cpu",
+            "rv64",
+            "-smp",
+        ])
         .arg(harts.to_string())
-        .args(["-m", "128M", "-nographic", "-monitor", "none", "-nic", "none", "-bios"])
+        .args([
+            "-m",
+            "128M",
+            "-nographic",
+            "-monitor",
+            "none",
+            "-nic",
+            "none",
+            "-bios",
+        ])
         .arg(firmware)
         .arg("-kernel")
         .arg(&variant.elf);
@@ -207,5 +247,8 @@ pub fn run(command: Commands) -> Result<()> {
             passed &= boot(&args, &variant, *hart, round)?;
         }
     }
-    require(passed, format!("scenario failed; evidence: {}", args.output.display()))
+    require(
+        passed,
+        format!("scenario failed; evidence: {}", args.output.display()),
+    )
 }

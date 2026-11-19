@@ -34,9 +34,11 @@ enum Commands {
 fn main() {
     let result: Result<()> = match Cli::parse().command {
         Commands::Scenario(command) => scenario::run(command),
-        Commands::Symbolize { elf, serial, addr2line } => {
-            utilities::symbolize(&elf, &serial, &addr2line)
-        }
+        Commands::Symbolize {
+            elf,
+            serial,
+            addr2line,
+        } => utilities::symbolize(&elf, &serial, &addr2line),
         Commands::Inventory { kernel } => inventory::run(&kernel),
     };
     if let Err(error) = result {

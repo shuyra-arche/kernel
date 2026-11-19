@@ -18,14 +18,31 @@ fn only_current_scenarios_are_admitted() {
         command: scenario::Commands,
     }
     for name in ["nest", "flat"] {
-        let args = vec!["verify", name, "--kernel", "/example/kernel", "--output", "/example/evidence"];
+        let args = vec![
+            "verify",
+            name,
+            "--kernel",
+            "/example/kernel",
+            "--output",
+            "/example/evidence",
+        ];
         assert!(Cli::try_parse_from(args.clone()).is_ok(), "{name}");
         let mut old = args;
         old.extend(["--fixture", "/example/vanllia"]);
         assert!(Cli::try_parse_from(old).is_err());
     }
-    for obsolete in ["smp", "lifecycle", "retirement", "shutdown", "activity", "room"] {
-        assert!(Cli::try_parse_from(["verify", obsolete]).is_err(), "{obsolete}");
+    for obsolete in [
+        "smp",
+        "lifecycle",
+        "retirement",
+        "shutdown",
+        "activity",
+        "room",
+    ] {
+        assert!(
+            Cli::try_parse_from(["verify", obsolete]).is_err(),
+            "{obsolete}"
+        );
     }
 }
 
@@ -59,17 +76,40 @@ fn composition_rejects_unreviewed_source_before_editing() {
 #[test]
 fn nest_requires_completion_and_distinct_writers() {
     let log = "task: all tasks exited\nPASS nest-completion abi=14 alias=retained withdrawal=2 replay=2 task-fault=2 reuse=2\nPASS smp-completion harts=1 bounded=1 retained=1 retry=1\nPASS smp-instructions harts=1 bounded=1 retained=1 retry=1\nPASS nest-writer task=1 delete=false\nPASS nest-writer task=2 delete=true\n";
-    assert_eq!(verify::check(log, &verify::Kind::Nest, 1).unwrap()["passed"], true);
-    assert_eq!(verify::check(&log.replace("task=2", "task=1"), &verify::Kind::Nest, 1).unwrap()["passed"], false);
-    assert_eq!(verify::check(&log.replace("PASS smp-instructions", "SKIP smp-instructions"), &verify::Kind::Nest, 1).unwrap()["passed"], false);
+    assert_eq!(
+        verify::check(log, &verify::Kind::Nest, 1).unwrap()["passed"],
+        true
+    );
+    assert_eq!(
+        verify::check(&log.replace("task=2", "task=1"), &verify::Kind::Nest, 1).unwrap()["passed"],
+        false
+    );
+    assert_eq!(
+        verify::check(
+            &log.replace("PASS smp-instructions", "SKIP smp-instructions"),
+            &verify::Kind::Nest,
+            1
+        )
+        .unwrap()["passed"],
+        false
+    );
 }
 
 #[test]
 fn flat_requires_all_contracts_and_rejects_guest_failure() {
     let log = "PASS flat-contracts\nPASS flat-oom\nPASS flat-reservation\nPASS flat-cancel\nPASS flat-race\ntask: all tasks exited";
-    assert_eq!(verify::check(log, &verify::Kind::Flat, 1).unwrap()["passed"], true);
-    assert_eq!(verify::check(&format!("{log}\nFAIL"), &verify::Kind::Flat, 1).unwrap()["passed"], false);
-    assert_eq!(verify::check(&log.replace("PASS flat-race", ""), &verify::Kind::Flat, 1).unwrap()["passed"], false);
+    assert_eq!(
+        verify::check(log, &verify::Kind::Flat, 1).unwrap()["passed"],
+        true
+    );
+    assert_eq!(
+        verify::check(&format!("{log}\nFAIL"), &verify::Kind::Flat, 1).unwrap()["passed"],
+        false
+    );
+    assert_eq!(
+        verify::check(&log.replace("PASS flat-race", ""), &verify::Kind::Flat, 1).unwrap()["passed"],
+        false
+    );
 }
 
 #[cfg(unix)]
