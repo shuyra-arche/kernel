@@ -4,8 +4,8 @@ This standalone Cargo workspace selects Kernel-owned target probes. Its Host
 library supplies bounded process handling, evidence and Capsule assembly for
 those probes. Vanllia's selected Shuyra product uses an independent Native/ABI13
 runner under `product/tests/runner/`, without depending on this package as a
-Cargo library. System maintains its own native contracts. Kernel reuses a
-reviewed Vanllia platform fixture, not Vanllia's test policy.
+Cargo library. System maintains its own native contracts. Kernel uses a fixed `platform-riscv` build dependency, not
+a Vanllia product-test checkout or centrally owned test policy.
 See the [verification guide](../README.md) for all entry points and ownership.
 
 `composition/*.patch` and sibling JSON maps form explicit source input contracts.
@@ -15,18 +15,19 @@ both the changed source and test assumptions before refreshing a contract.
 Patch content is retained with each run. Baseline comparisons reject unreviewed
 preimages instead of silently patching a different implementation.
 
-The historical Vanllia fixture pin remains required by SMP, lifecycle,
-retirement and shutdown Guest compositions. Flat, published ABI13 Activity,
-Room, IRQ and Realtime use Kernel-owned Guests with Cargo-pinned Platform
-packages; these reject `--fixture`. Realtime shares its existing source,
-Stack and Platform with Kernel's Room target rather than duplicating them. The ABI13 Activity
-composition retains its own exact Kernel preimage contract. Other private
-scenarios continue to reject unreviewed Vanllia fixture inputs.
-Ordinary Kernel Host/RV64 checks do not execute that target composition;
-Kernel's separate Flat and pinned-target QEMU workflows can select it.
+Every Kernel `verify` subcommand uses Kernel-owned Guest and CPU/Platform
+test sources. `--fixture` is no longer a recognized argument. The frozen
+SMP/Lifecycle/Retirement/Shutdown Guest resides at
+[`target/smp/`](../target/smp/README.md); the original ABI13 executable
+assertions and request-journal recovery remain intact. Private provider
+instrumentation is applied only after exact SHA-256 preimage validation.
+The standalone `platform-riscv` Git package is an immutable build dependency.
+Ordinary Kernel CI selects Flat, Activity, Room, IRQ and one-Hart Realtime
+checks; explicit SMP/multi-Hart verification remains separate.
 Vanllia calls the pinned Kernel-owned workflow with the exact Kernel SHA from
 its product gitlink, rather than adding this Host runner as a Cargo dependency.
-The workflow revision and platform fixture are reviewed immutable inputs.
+The workflow revisions, selected provider and Cargo-resolved Platform source
+are reviewed immutable inputs.
 
 CLI examples and full build/boot commands are recorded in inputs and results.
 Results from host runner contracts cover orchestration failure modes; they do

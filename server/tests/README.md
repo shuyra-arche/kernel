@@ -59,12 +59,11 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
 with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`.
-Only the explicit SMP, lifecycle, retirement and shutdown Guest compositions
-still require Vanllia at the immutable
-[reviewed fixture revision](runner/fixture). Flat, Activity, Room scheduling,
-IRQ and Realtime own their target Guests and Cargo-pinned Platform inputs
-without a Vanllia product test checkout. The Kernel
-`runner` package owns target selection, execution and evidence. Vanllia's
+All Kernel-owned target suites now use their own Guest and Cargo-pinned
+Platform build inputs, including [SMP/Lifecycle/Retirement/Shutdown](target/smp/README.md).
+No Kernel `verify` mode accepts a Vanllia product test `--fixture`.
+Source instrumentation still requires exact reviewed SHA-256 preimages.
+The Kernel `runner` package owns target selection, execution and evidence. Vanllia's
 selected product owns its independent Native/ABI13 composition under
 [`product/tests/`](https://github.com/shuyra-arche/vanllia/tree/main/product/tests),
 while System maintains its own Runtime/Supply/RPC contracts. Kernel owns its
@@ -73,7 +72,7 @@ private completion, A/D, Flat and Room probes.
 ```sh
 cargo +nightly build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
 verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
-"$verify" smp --kernel "$PWD" --fixture /path/to/vanllia --output /new/smp --profile release
+"$verify" smp --kernel /path/to/kernel-at-b1062f60 --output /new/smp --profile release
 "$verify" activity --kernel /path/to/abi13-kernel --output /new/activity --profile release
 "$verify" flat --kernel "$PWD" --output /new/flat
 "$verify" room --kernel /path/to/abi13-kernel --output /new/irq --mode irq --events 16 --harts 1
@@ -81,12 +80,15 @@ verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 ```
 
 Flat and pinned ABI13 Activity, Room, IRQ and Realtime admission targets run
-in Kernel-owned single-Hart QEMU workflows without a Vanllia product fixture
-checkout. The pinned tests select their matching published Kernel revision,
-not current main/ABI14. Realtime's one-Hart rejection does not qualify its
-four-Hart budget/preemption guarantees. Other commands here are explicit integration
-commands, outside ordinary Kernel CI. Run both debug and release. SMP defaults
-to 4 Harts when explicitly invoked; ordinary CI does not schedule an SMP campaign. A/D and Flat default
+in Kernel-owned single-Hart QEMU workflows. The SMP/Lifecycle/Retirement/
+Shutdown suite is available only through explicit invocation and the
+[manual qualification workflow](../../.github/workflows/smp-owner.yml); no SMP
+scenario is selected by ordinary PR/push CI. An opt-in one-Hart migration check
+passed for all nine modes, but only a separately invoked four-Hart run can
+qualify migration, cross-Hart completion and finalization. All frozen ABI13
+suites require a matching published Kernel revision, not current main/ABI14.
+Realtime's one-Hart rejection does not qualify four-Hart budget/preemption.
+SMP defaults to four Harts when explicitly invoked. A/D and Flat default
 to 1/4. Activity also has separate `--unsupported` and `--stopped` scenarios.
 Room correctness uses `--mode irq --events 16` on 1/4 and `--mode realtime
 --harts 4`. Scheduling comparisons stay opt-in, using `--mode room --baseline
@@ -231,8 +233,8 @@ memory, exit, CPU retirement and actual multi-Hart migration checks. This is
 focused allocation-failure injection, not exhaustion of all system memory.
 
 ```sh
-"$verify" lifecycle --kernel "$PWD" --fixture /path/to/vanllia --output /new/lifecycle-pressure --pressure --harts 1 4 --rounds 3
-"$verify" lifecycle --kernel "$PWD" --fixture /path/to/vanllia --output /new/lifecycle-cancel-pressure --pressure --cancel --harts 1 4 --rounds 3 --profile release
+"$verify" lifecycle --kernel /path/to/kernel-at-b1062f60 --output /new/lifecycle-pressure --pressure --harts 1 4 --rounds 3
+"$verify" lifecycle --kernel /path/to/kernel-at-b1062f60 --output /new/lifecycle-cancel-pressure --pressure --cancel --harts 1 4 --rounds 3 --profile release
 ```
 
 ## Explicit finalization

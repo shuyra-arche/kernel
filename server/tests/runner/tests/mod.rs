@@ -8,46 +8,34 @@ mod utilities;
 #[path = "../verify.rs"]
 mod verify;
 #[test]
-fn published_guest_inputs_are_local_and_legacy_probes_require_fixture() {
-    use std::path::Path;
-
-    let old_fixture = Path::new("/example/vanllia");
-    for timing in [false, true] {
-        let flat = verify::Kind::Flat { timing };
-        assert!(scenario::admit_fixture(&flat, None).is_ok());
-        assert!(scenario::admit_fixture(&flat, Some(old_fixture)).is_err());
+fn private_scenario_parsing_rejects_retired_product_fixture() {
+    use clap::Parser;
+    #[derive(Parser)]
+    struct Cli {
+        #[command(subcommand)]
+        command: scenario::Commands,
     }
-    for unsupported in [false, true] {
-        let activity = verify::Kind::Activity {
-            unsupported,
-            stopped: false,
-        };
-        assert!(scenario::admit_fixture(&activity, None).is_ok());
-        assert!(scenario::admit_fixture(&activity, Some(old_fixture)).is_err());
-    }
-    for mode in ["room", "irq", "realtime"] {
-        for latency in [false, true] {
-            let room = verify::Kind::Room {
-                mode: mode.into(),
-                events: if mode == "irq" { 16 } else { 256 },
-                latency,
-                cold: false,
-            };
-            assert!(scenario::admit_fixture(&room, None).is_ok());
-            assert!(scenario::admit_fixture(&room, Some(old_fixture)).is_err());
-        }
-    }
-    for private in [
-        verify::Kind::Smp,
-        verify::Kind::Shutdown { quiet: false },
-        verify::Kind::Lifecycle {
-            cancel: false,
-            pressure: false,
-        },
-        verify::Kind::Retirement { cancel: false },
+    for name in [
+        "smp",
+        "shutdown",
+        "lifecycle",
+        "retirement",
+        "activity",
+        "flat",
+        "room",
     ] {
-        assert!(scenario::admit_fixture(&private, None).is_err());
-        assert!(scenario::admit_fixture(&private, Some(old_fixture)).is_ok());
+        let args = vec![
+            "verify",
+            name,
+            "--kernel",
+            "/example/kernel",
+            "--output",
+            "/example/evidence",
+        ];
+        assert!(Cli::try_parse_from(args.clone()).is_ok(), "{name}");
+        let mut obsolete = args;
+        obsolete.extend(["--fixture", "/example/vanllia"]);
+        assert!(Cli::try_parse_from(obsolete).is_err(), "{name}");
     }
 }
 #[cfg(unix)]
