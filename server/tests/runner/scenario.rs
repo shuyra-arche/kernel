@@ -444,7 +444,10 @@ fn boot(
     Ok(result.passed)
 }
 pub(crate) fn admit_fixture(kind: &Kind, fixture: Option<&Path>) -> Result<()> {
-    if matches!(kind, Kind::Flat { .. } | Kind::Activity { .. } | Kind::Room { .. }) {
+    if matches!(
+        kind,
+        Kind::Flat { .. } | Kind::Activity { .. } | Kind::Room { .. }
+    ) {
         require(
             fixture.is_none(),
             "this Kernel target has a pinned Platform dependency; --fixture is not accepted",
