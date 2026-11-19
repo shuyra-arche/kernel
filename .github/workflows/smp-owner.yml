@@ -28,7 +28,9 @@ defaults:
 
 jobs:
   qualification:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.body, 'Owner SMP migration: verify')
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.body, 'Owner SMP migration: verify')
     name: ABI13 ${{ matrix.case }} / h1
     runs-on: ubuntu-latest
     container: debian:trixie
