@@ -14,4 +14,4 @@ kernel-api.workspace = true
 
 [[test]]
 name = "sign"
-path = "mod.rs"
+path = "../mod.rs"

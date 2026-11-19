@@ -6,7 +6,7 @@ members = [
   "client",
   "server",
   "server/tests",
-  "server/tests/basis/*",
+  "server/tests/basis/**/host",
 ]
 
 [workspace.package]
