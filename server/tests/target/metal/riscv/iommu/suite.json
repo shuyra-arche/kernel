@@ -7,6 +7,7 @@
     1
   ],
   "sources": [
+    "server/tests/metal/riscv/iommu/host/**",
     "server/tests/metal/riscv/iommu/execution/**",
     "server/tests/support/iommu/**",
     "server/src/basis/nest/translation/external/**",
