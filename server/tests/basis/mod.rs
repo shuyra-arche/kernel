@@ -26,6 +26,7 @@ mod holding;
 #[path = "../../src/metal/generic/mmu/internal/fence.rs"]
 mod scope;
 
+#[allow(dead_code)]
 #[path = "../../src/metal/generic/memory/mod.rs"]
 pub mod proof;
 
@@ -39,8 +40,6 @@ mod name;
 #[path = "nest/fixture/model.rs"]
 mod basis;
 
-#[path = "name/allocation.rs"]
-mod allocation;
 #[path = "cell/retention.rs"]
 mod retention;
 #[path = "cell/support.rs"]
