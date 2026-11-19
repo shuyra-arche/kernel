@@ -234,9 +234,12 @@ fn cargo_test(
         command.args(["-p", package]);
     }
     if let Some(manifest) = manifest {
-        command
-            .arg("--manifest-path")
-            .arg(args.kernel.join("server/tests").join(relative).join(manifest));
+        command.arg("--manifest-path").arg(
+            args.kernel
+                .join("server/tests")
+                .join(relative)
+                .join(manifest),
+        );
     }
     command
         .args(["--test", test, "--target", "x86_64-unknown-linux-gnu"])
