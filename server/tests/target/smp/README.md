@@ -3,8 +3,10 @@
 This standalone test Package owns the exact **executed** CPU-only ABI13 source
 contracts previously composed from the historical Vanllia memory Guest.
 It is not a product test or a new Kernel ABI. The selected Kernel provider
-remains the immutable published revision
-`789ffd19b5359f3de172fb9aad8a61f6a7113a64`.
+is the last compatible ABI13 revision with all four target mechanisms:
+`b1062f60bfe96e625ed140952d9662319c70087e`.
+The older `789ffd19...` source predates the retirement/finalization owners
+and is not the baseline for the complete four-mode suite.
 
 ## Source and scope
 
@@ -18,14 +20,14 @@ copied because the original SMP composition did not execute them.
 The unchanged active acceptance modules still exercise real Task permission,
 Nest/Flat ownership and lineage, fault continuations, maintenance, memory
 release/reuse and passive Save/Restore. No old PASS string replaces a native
-assertion. Actual SMP completion/retirement, instruction fences, failure
-replay and migration checks remain the Kernel-owned
-[`cases.rs`](../metal/riscv/mmu/completion/cases.rs),
-[`recovery.rs`](../metal/riscv/mmu/completion/recovery.rs),
+assertion. Actual CPU completion, instruction fences, real mapping retirement, failure
+replay and migration checks use the Kernel-owned frozen
+[`smp.rs`](smp.rs) and [`recovery.rs`](recovery.rs), taken from the last
+ABI13 Kernel revision. The real-Hart
 [`probe.rs`](../metal/riscv/mmu/completion/probe.rs) and
-[`instructions.rs`](../metal/riscv/mmu/completion/instructions.rs).
-The ABI13-specific `smp.rs` and `recovery.rs` are frozen from the last
-ABI13 Kernel revision `b1062f60bfe96e625ed140952d9662319c70087e`.
+[`instructions.rs`](../metal/riscv/mmu/completion/instructions.rs) retain
+their existing Kernel ownership and exact byte identity across the ABI13
+source revision.
 The unchanged probe and instructions helpers are shared with their existing
 Kernel owner; they are not copied into the Guest.
 It also imports Kernel's existing
@@ -33,15 +35,19 @@ It also imports Kernel's existing
 ownership and Task exit semantics.
 
 The QEMU Platform is **CPU-only**, with no device, IOMMU or external route.
-Only paired QEMU virt with exactly 128 MiB coherent RAM and 1/2/4 admitted
-Harts is qualified; no executable Publish, hotplug or physical hardware
-safety is inferred. Production Platform remains the immutable Git-pinned
+The Platform admits only paired QEMU virt with exactly 128 MiB coherent
+RAM and 1/2/4 emulated Harts. Verified here: all nine scenario variants
+on **one** Hart. No completed multi-Hart qualification or physical hardware
+safety is claimed. Production Platform remains the immutable Git-pinned
 `platform-riscv` dependency rather than a test checkout of Vanllia.
 
 ## Verification and limits
 
-Use Kernel's `verify` Host runner with the exact published ABI13 Kernel
-checkout and a new output directory. `--fixture` is no longer accepted.
+Use Kernel's `verify` Host runner with the compatible ABI13 source above,
+or select the explicit
+[manual qualification workflow](../../../.github/workflows/smp-owner.yml)
+after merging, and provide a new output directory. `--fixture` is no
+longer accepted.
 The runner must still pass its complete SMP, Lifecycle, Retirement and
 Shutdown marker/receipt checks, normal/native task exit, exact request replay
 and failure-path cleanup. Existing source-instrumentation patches retain their
