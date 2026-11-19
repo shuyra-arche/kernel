@@ -120,7 +120,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     }
     let patches = root.join("patches");
     fs::create_dir(&patches)?;
-    if !matches!(kind, Kind::Flat { .. }) {
+    if !matches!(kind, Kind::Flat { .. } | Kind::Activity { .. }) {
         compose::apply("user-fixture", &fixture, &patches)?;
     }
     if matches!(kind, Kind::Room { .. }) {
@@ -141,7 +141,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     ] {
         command.env_remove(name);
     }
-    if !matches!(kind, Kind::Flat { .. }) {
+    if !matches!(kind, Kind::Flat { .. } | Kind::Activity { .. }) {
         compose::copy(
             "target/basis/unit/stack.rs",
             &fixture.join("tests/memory/guest/stack.rs"),
@@ -185,6 +185,9 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
             unsupported,
             stopped,
         } => {
+            // This is the selected published ABI13 Guest and Platform pair,
+            // owned by Kernel rather than the Vanllia product test directory.
+            // Keep the historical source preimage checks for Kernel patches.
             compose::apply("activity-provider", &provider, &patches)?;
             if *stopped {
                 compose::apply("activity-stopped", &provider, &patches)?;
@@ -193,20 +196,12 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
             if *unsupported {
                 command.env("ACTIVITY_UNSUPPORTED", "1");
             }
-            compose::apply("activity-support", &fixture, &patches)?;
-            compose::apply(
-                if *unsupported {
-                    "activity-unsupported-platform"
-                } else {
-                    "activity-platform"
-                },
-                &fixture,
-                &patches,
-            )?;
-            for file in ["main.rs", "cases.rs", "reservation.rs"] {
-                copy_guest(&format!("target/basis/nest/memo/activity/{file}"), &fixture)?;
+            let package = "target/basis/nest/memo/activity/pinned";
+            let target = provider.join("server/tests").join(package);
+            for file in compose::hashes(&compose::suite().join(package))?.keys() {
+                compose::copy(&format!("{package}/{file}"), &target.join(file))?;
             }
-            manifest = fixture.join("tests/memory/Cargo.toml");
+            manifest = target.join("Cargo.toml");
             patch_provider(&mut command, &provider)?;
         }
         Kind::Flat { timing } => {
@@ -433,10 +428,10 @@ fn boot(
     Ok(result.passed)
 }
 pub(crate) fn admit_fixture(kind: &Kind, fixture: Option<&Path>) -> Result<()> {
-    if matches!(kind, Kind::Flat { .. }) {
+    if matches!(kind, Kind::Flat { .. } | Kind::Activity { .. }) {
         require(
             fixture.is_none(),
-            "Flat uses its pinned Platform dependency; --fixture is not accepted",
+            "this Kernel target has a pinned Platform dependency; --fixture is not accepted",
         )
     } else {
         require(fixture.is_some(), "this target scenario requires --fixture")
