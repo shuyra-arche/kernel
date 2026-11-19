@@ -7,13 +7,15 @@ extern crate alloc;
 
 // Host contracts for real Nest Memo and retirement state with explicitly inert
 // Task, Pend and hardware completion fixtures. One handoff test consumes real Flat.
-#[allow(dead_code)]
+#[allow(dead_code, unused_imports)]
 #[path = "../../../../src/basis/cell/page/mod.rs"]
 pub(crate) mod cell;
+use cell as page;
 
 #[allow(dead_code)]
 #[path = "../../../../src/basis/flat/error.rs"]
 mod error;
+use error::FlatError;
 pub(crate) mod index {
     pub(crate) use kernel_api::address::PageIndex;
 }
@@ -52,6 +54,7 @@ mod memo;
 #[allow(dead_code)]
 #[path = "../../../../src/basis/flat/storage/mod.rs"]
 mod state;
+use state::slot;
 
 #[allow(dead_code)]
 #[path = "../../../../src/metal/generic/mmu/external/mod.rs"]
