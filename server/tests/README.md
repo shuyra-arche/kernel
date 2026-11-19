@@ -159,9 +159,10 @@ composition cases. It calls Kernel's
 separate Activity/Unsupported/Stopped/IRQ single-Hart cases, passing only
 the exact product Kernel gitlink SHA. The Activity cases select Kernel's
 reviewed published ABI13 owner-runner and frozen Guest, without a Vanllia
-product test fixture. The IRQ consumer workflow still retains the legacy
-fixture pin until that caller is separately switched to the new owner-runner;
-a passing new IRQ target does not authorize an untested caller revision.
+product test fixture. The reusable IRQ caller and opt-in Room/IRQ comparison
+now select a reviewed immutable owner-runner revision and retain the same
+candidate Kernel identity and test assertions. A green owner-side target is
+not by itself proof of a newly assembled product or physical hardware.
 The reusable workflow is also manually runnable with an immutable Kernel SHA;
 it verifies the **selected source revision**, not the unrelated Kernel main
 ABI candidate. Kernel's separate Flat, pinned ABI13 Activity and IOMMU target workflows

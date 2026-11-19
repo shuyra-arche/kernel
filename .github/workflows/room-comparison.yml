@@ -1,9 +1,9 @@
 name: Kernel optional Room/IRQ comparison
 
 # Kernel owns private experiment selection, baseline admission, guest contracts,
-# interleaving and evidence. The published ABI13 Room Guest is Kernel-owned;
-# IRQ retains the historical reviewed fixture. This workflow_call is opt-in
-# and never enters ordinary CI without the caller's explicit request.
+# interleaving and evidence. Published ABI13 Room and IRQ Guests are both
+# Kernel-owned, without the historical Vanllia product fixture. This workflow
+# remains opt-in and never enters ordinary CI on its own.
 on:
   workflow_call:
     inputs:
@@ -73,28 +73,12 @@ jobs:
           ref: ${{ steps.control.outputs.sha }}
           path: .integration/control
           persist-credentials: false
-      - name: Select Kernel-owned published Room runner
-        if: matrix.mode != 'irq'
+      - name: Select Kernel-owned published Room/IRQ runner
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shuyra-arche/kernel
-          ref: b62cf6af238d9e75df938195fe0d1fc004d01916
+          ref: 9db7e5a066a387a766ba15528d8f154e0a7b8a5e
           path: .integration/owner
-          persist-credentials: false
-      - name: Select IRQ reviewed platform fixture
-        if: matrix.mode == 'irq'
-        id: fixture
-        run: |
-          set -euo pipefail
-          pin=$(cat .integration/kernel/server/tests/runner/fixture)
-          [[ "$pin" =~ ^[0-9a-f]{40}$ ]]
-          echo "sha=$pin" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: matrix.mode == 'irq'
-        with:
-          repository: shuyra-arche/vanllia
-          ref: ${{ steps.fixture.outputs.sha }}
-          path: .integration/fixture
           persist-credentials: false
       - name: Compare paired boots
         env:
@@ -110,14 +94,8 @@ jobs:
           else
             args+=(--baseline .integration/control)
           fi
-          if [[ "$MODE" == irq ]]; then
-            cargo build --locked --manifest-path .integration/kernel/server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
-            runner=.integration/kernel/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
-            args+=(--fixture .integration/fixture)
-          else
-            cargo build --locked --manifest-path .integration/owner/server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
-            runner=.integration/owner/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
-          fi
+          cargo build --locked --manifest-path .integration/owner/server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
+          runner=.integration/owner/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
           "$runner" room --kernel .integration/kernel --output .integration/comparison \
             --mode "$MODE" --profile release --harts 4 --rounds 5 "${args[@]}"
       - name: Preserve paired evidence
