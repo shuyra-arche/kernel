@@ -1,4 +1,7 @@
-use crate::{cell::PageError, geometry::{Pool, SIZE}};
+use crate::{
+    cell::PageError,
+    geometry::{Pool, SIZE},
+};
 use kernel_api::model::cell::CellLevel;
 
 #[test]
