@@ -1,6 +1,6 @@
 name: IOMMU target QEMU
 
-# Target-only evidence. This does not replace Vanllia's ABI/product QEMU suite.
+# Target-owned MMIO/DMA evidence. Separate from CPU-only Nest checks.
 on:
   pull_request:
     paths:
@@ -54,7 +54,7 @@ jobs:
       - name: Run target-owned IOMMU scenarios
         run: |
           set -euo pipefail
-          cargo +nightly test --locked -p kernel-memory-tests --test iommu-target \
+          cargo +nightly test --locked -p kernel-tests --test iommu-target \
             --target x86_64-unknown-linux-gnu -- --ignored --nocapture
       - name: Preserve QEMU execution evidence
         if: always()

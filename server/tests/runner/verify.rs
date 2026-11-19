@@ -2,7 +2,7 @@ use kernel_verification::Result;
 use regex::Regex;
 use serde_json::{Value, json};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Kind {
     Nest,
     Flat,
