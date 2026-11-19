@@ -29,6 +29,10 @@ on:
         description: Exact Kernel provider revision selected by the calling owner
         type: string
         required: true
+      owner_sha:
+        description: Immutable Kernel revision containing the owner-side runner
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       kernel_sha:
@@ -80,6 +84,8 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: shuyra-arche/kernel
+          ref: ${{ inputs.owner_sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Validate immutable ABI14 provider selection
         run: |
