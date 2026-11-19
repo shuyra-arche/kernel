@@ -37,10 +37,15 @@ pub(crate) fn capture() -> TrapEvent {
                 Exception::IllegalInstruction => return TrapEvent::IllegalInstruction(detail),
                 _ => return TrapEvent::Exception(detail),
             };
-            if let Some(hart) = trap_stack_guard_hart(detail.value) {
+            // An address in the kernel trap-stack guard is not proof that
+            // the kernel stack overflowed when the fault came from User mode.
+            // User faults must pass through the normal address/authority path.
+            if riscv::register::sstatus::read().spp() == riscv::register::sstatus::SPP::Supervisor
+                && let Some(hart) = trap_stack_guard_hart(detail.value)
+            {
                 panic!(
-                    "trap stack overflow on hart {hart} (stval={:#x})",
-                    detail.value
+                    "trap stack overflow on hart {hart} (stval={:#x} sepc={:#x})",
+                    detail.value, detail.pc
                 );
             }
             TrapEvent::PageFault(PageFault {
