@@ -120,10 +120,11 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     }
     let patches = root.join("patches");
     fs::create_dir(&patches)?;
-    if !matches!(kind, Kind::Flat { .. } | Kind::Activity { .. }) {
+    let own_room = matches!(&kind, Kind::Room { mode, .. } if mode == "room");
+    if !matches!(kind, Kind::Flat { .. } | Kind::Activity { .. }) && !own_room {
         compose::apply("user-fixture", &fixture, &patches)?;
     }
-    if matches!(kind, Kind::Room { .. }) {
+    if matches!(kind, Kind::Room { .. }) && !own_room {
         compose::apply("transport-fixture", &fixture, &patches)?;
     }
     let manifest;
@@ -141,7 +142,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
     ] {
         command.env_remove(name);
     }
-    if !matches!(kind, Kind::Flat { .. } | Kind::Activity { .. }) {
+    if !matches!(kind, Kind::Flat { .. } | Kind::Activity { .. }) && !own_room {
         compose::copy(
             "target/basis/unit/stack.rs",
             &fixture.join("tests/memory/guest/stack.rs"),
@@ -232,33 +233,51 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
             latency,
             cold,
         } => {
-            compose::apply(
-                if mode == "irq" {
-                    "irq-fixture"
-                } else {
-                    "room-fixture"
-                },
-                &fixture,
-                &patches,
-            )?;
+            if mode == "room" {
+                // This published ABI13 Room Guest is maintained by Kernel, not
+                // reconstructed by patching Vanllia's product test sources.
+                if *latency {
+                    compose::apply("room-pinned-window", &provider, &patches)?;
+                }
+                let package = "target/basis/room/pinned";
+                let target = provider.join("server/tests").join(package);
+                for file in compose::hashes(&compose::suite().join(package))?.keys() {
+                    compose::copy(&format!("{package}/{file}"), &target.join(file))?;
+                }
+                manifest = target.join("Cargo.toml");
+            } else {
+                // IRQ and Realtime still retain the reviewed historical
+                // fixture and original preimage/Hardware admission policy.
+                compose::apply(
+                    if mode == "irq" {
+                        "irq-fixture"
+                    } else {
+                        "room-fixture"
+                    },
+                    &fixture,
+                    &patches,
+                )?;
+                if *latency {
+                    compose::apply("room-window", &provider, &patches)?;
+                }
+                let guest = match mode.as_str() {
+                    "irq" => "interrupt.rs",
+                    "realtime" => "realtime.rs",
+                    _ => unreachable!("mode checked at CLI admission"),
+                };
+                compose::copy(
+                    &format!("target/basis/room/{guest}"),
+                    &fixture.join("tests/memory/guest/main.rs"),
+                )?;
+                manifest = fixture.join("tests/memory/Cargo.toml");
+            }
             if *latency {
-                compose::apply("room-window", &provider, &patches)?;
                 command.args(["--features", "kernel/latency"]);
             }
-            let guest = match mode.as_str() {
-                "irq" => "interrupt.rs",
-                "realtime" => "realtime.rs",
-                _ => "guest.rs",
-            };
-            compose::copy(
-                &format!("target/basis/room/{guest}"),
-                &fixture.join("tests/memory/guest/main.rs"),
-            )?;
             command.env("IRQ_EVENTS", events.to_string());
             if *cold {
                 command.env("ROOM_COLD", "1");
             }
-            manifest = fixture.join("tests/memory/Cargo.toml");
             patch_provider(&mut command, &provider)?;
         }
     }
@@ -428,7 +447,9 @@ fn boot(
     Ok(result.passed)
 }
 pub(crate) fn admit_fixture(kind: &Kind, fixture: Option<&Path>) -> Result<()> {
-    if matches!(kind, Kind::Flat { .. } | Kind::Activity { .. }) {
+    if matches!(kind, Kind::Flat { .. } | Kind::Activity { .. })
+        || matches!(kind, Kind::Room { mode, .. } if mode == "room")
+    {
         require(
             fixture.is_none(),
             "this Kernel target has a pinned Platform dependency; --fixture is not accepted",
