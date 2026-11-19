@@ -91,3 +91,14 @@ fn data_completion_cannot_cover_a_pending_instruction_round() {
     assert!(instructions.covers(code));
     assert!(!instructions.covers(later_data));
 }
+
+#[test]
+fn non_global_updates_cannot_shrink_a_pending_global_scope() {
+    use super::cpu::fence::Scope;
+    let mut scope = Scope::AddressSpace;
+    for global in [false, true, false, false] {
+        scope = scope.include(global);
+    }
+    assert_eq!(scope, Scope::Global);
+    assert_eq!(Scope::AddressSpace.include(false), Scope::AddressSpace);
+}

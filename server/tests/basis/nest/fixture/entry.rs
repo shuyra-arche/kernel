@@ -5,71 +5,66 @@
 
 extern crate alloc;
 
-// Compile the production Page itself, without RV64 instructions, fake Page
-// implementations, or changes to the production library's no_std configuration.
+// Host contracts for real Nest Memo and retirement state with explicitly inert
+// Task, Pend and hardware completion fixtures. One handoff test consumes real Flat.
 #[allow(dead_code)]
-#[path = "../../src/basis/cell/page/mod.rs"]
+#[path = "../../../../src/basis/cell/page/mod.rs"]
 pub(crate) mod cell;
-use cell as page;
 
 #[allow(dead_code)]
-#[path = "../../src/basis/flat/error.rs"]
+#[path = "../../../../src/basis/flat/error.rs"]
 mod error;
 pub(crate) mod index {
     pub(crate) use kernel_api::address::PageIndex;
 }
-use error::FlatError;
-use state::slot;
-#[path = "flat/holding.rs"]
+#[path = "../../flat/holding.rs"]
 mod holding;
 
-#[path = "../../src/metal/generic/mmu/internal/fence.rs"]
+#[path = "../../../../src/metal/generic/mmu/internal/fence.rs"]
 mod scope;
 
 #[allow(dead_code)]
-#[path = "../../src/metal/generic/memory/mod.rs"]
+#[path = "../../../../src/metal/generic/memory/mod.rs"]
 pub mod proof;
 
 // Resolve production module paths using the real types, without loading the
 // RV64-specific address-space machinery into the host harness.
 #[allow(dead_code, unused_imports)]
-#[path = "../../src/basis/name/mod.rs"]
+#[path = "../../../../src/basis/name/mod.rs"]
 mod name;
 
 #[allow(dead_code)]
-#[path = "nest/fixture/model.rs"]
+#[path = "model.rs"]
 mod basis;
 
-#[path = "cell/retention.rs"]
-mod retention;
-#[path = "cell/support.rs"]
+#[path = "../../cell/support.rs"]
 mod support;
 
-#[path = "nest/fixture/change.rs"]
+#[path = "change.rs"]
 mod change;
 #[allow(dead_code)]
-#[path = "../../src/basis/cell/change.rs"]
+#[path = "../../../../src/basis/cell/change.rs"]
 pub(crate) mod changes;
 #[allow(dead_code)]
-#[path = "../../src/basis/nest/memo/publication/receipt.rs"]
+#[path = "../../../../src/basis/nest/memo/publication/receipt.rs"]
 mod memo;
 
 #[allow(dead_code)]
-#[path = "../../src/basis/flat/storage/mod.rs"]
+#[path = "../../../../src/basis/flat/storage/mod.rs"]
 mod state;
 
 #[allow(dead_code)]
-#[path = "../../src/metal/generic/mmu/external/mod.rs"]
+#[path = "../../../../src/metal/generic/mmu/external/mod.rs"]
 mod contract;
 #[allow(dead_code)]
-#[path = "../../src/basis/nest/memo/publication/error.rs"]
+#[path = "../../../../src/basis/nest/memo/publication/error.rs"]
 mod external_error;
 #[allow(dead_code)]
-#[path = "../../src/basis/nest/memo/publication/identity.rs"]
+#[path = "../../../../src/basis/nest/memo/publication/identity.rs"]
 mod external_identity;
 use external_error::Error;
 #[allow(dead_code, unused_imports)]
-#[path = "../support/lock.rs"]
+#[path = "../../../support/lock.rs"]
 mod host_lock;
 mod metal {
     pub(crate) use crate::host_lock as sync;

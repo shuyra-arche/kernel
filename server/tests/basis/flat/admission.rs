@@ -67,3 +67,36 @@ fn page_errors_preserve_the_logical_source_failure_contract() {
         assert_eq!(FlatError::from(physical), logical);
     }
 }
+
+#[test]
+fn retirement_outlives_the_source_slot_until_explicit_settlement() {
+    let pool = Pool::new(0);
+    let slots = slot::admit(
+        1,
+        vec![(
+            PageIndex::ZERO,
+            Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap(),
+        )],
+    )
+    .unwrap();
+    let Slot::Resident(cell) = &slots[0].1 else {
+        panic!("resident input")
+    };
+    let mut retained = cell.prepare_hardware(false).unwrap();
+    let identity = cell.id();
+    retained.publish();
+    let retired = retained.retire();
+    let telemetry = crate::cell::statistics::snapshot();
+    assert!(telemetry.cpu >= 4096 && telemetry.retiring >= 4096);
+    drop(slots);
+    assert_eq!(retired.id(), identity);
+    assert_eq!(pool.gives(), 0);
+    assert!(pool.page().is_err());
+
+    // SAFETY: this host test published no actual hardware access. It exercises
+    // the real bookkeeping; it does not establish hardware fence correctness.
+    unsafe { retired.settle() };
+    assert_eq!(pool.gives(), 1);
+    let next = Page::from_internal(Owner::Kernel, pool.page().unwrap()).unwrap();
+    assert_ne!(next.id(), identity);
+}
