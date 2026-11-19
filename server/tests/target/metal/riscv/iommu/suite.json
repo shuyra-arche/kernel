@@ -13,7 +13,10 @@
     "server/src/basis/nest/memo/publication/receipt.rs",
     "server/src/metal/riscv/mmu/external/**",
     "api/**",
-    "Cargo.lock"
+    "Cargo.lock",
+    "server/src/metal/generic/mmu/external/**",
+    "server/src/basis/cell/**",
+    "server/src/metal/generic/sync/**"
   ],
   "run": {
     "kind": "cargo-test",

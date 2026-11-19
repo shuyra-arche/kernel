@@ -19,7 +19,8 @@
     "server/src/metal/riscv/mmu/**",
     "api/**",
     "client/**",
-    "Cargo.lock"
+    "Cargo.lock",
+    "server/src/basis/name/**"
   ],
   "run": {
     "kind": "qemu",

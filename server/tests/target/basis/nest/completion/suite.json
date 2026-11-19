@@ -18,7 +18,10 @@
     "server/src/metal/generic/sync/**",
     "api/**",
     "client/**",
-    "Cargo.lock"
+    "Cargo.lock",
+    "server/tests/target/metal/riscv/mmu/completion/**",
+    "server/src/metal/generic/mmu/internal/**",
+    "server/src/basis/pend/**"
   ],
   "run": {
     "kind": "qemu",
