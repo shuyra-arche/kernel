@@ -59,10 +59,10 @@ the explicit convention requested in #199/#201; shared policy PR #14 is pending.
 
 Use nightly Rust, QEMU 10.0.x, GNU build tools and an identified OpenSBI image
 with DBCN. Set `QEMU_RISCV64` and `QEMU_OPENSBI`.
-For private Guest compositions other than Flat, published ABI13 Activity,
-Room scheduling and IRQ, check out Vanllia at the immutable
-[reviewed fixture revision](runner/fixture). Flat, Activity, Room and IRQ
-owner-side checks use Kernel-owned Guests and Cargo-pinned Platform inputs
+Only the explicit SMP, lifecycle, retirement and shutdown Guest compositions
+still require Vanllia at the immutable
+[reviewed fixture revision](runner/fixture). Flat, Activity, Room scheduling,
+IRQ and Realtime own their target Guests and Cargo-pinned Platform inputs
 without a Vanllia product test checkout. The Kernel
 `runner` package owns target selection, execution and evidence. Vanllia's
 selected product owns its independent Native/ABI13 composition under
@@ -80,10 +80,11 @@ verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 "$verify" room --kernel /path/to/abi13-kernel --output /new/room --mode room --harts 1
 ```
 
-Flat and pinned ABI13 Activity, Room and IRQ targets run in Kernel's own
-single-Hart QEMU workflows without a Vanllia product fixture checkout.
-The pinned tests select their matching published Kernel revision, not
-current main/ABI14. Other commands here are explicit integration
+Flat and pinned ABI13 Activity, Room, IRQ and Realtime admission targets run
+in Kernel-owned single-Hart QEMU workflows without a Vanllia product fixture
+checkout. The pinned tests select their matching published Kernel revision,
+not current main/ABI14. Realtime's one-Hart rejection does not qualify its
+four-Hart budget/preemption guarantees. Other commands here are explicit integration
 commands, outside ordinary Kernel CI. Run both debug and release. SMP defaults
 to 4 Harts when explicitly invoked; ordinary CI does not schedule an SMP campaign. A/D and Flat default
 to 1/4. Activity also has separate `--unsupported` and `--stopped` scenarios.
@@ -167,7 +168,7 @@ The reusable workflow is also manually runnable with an immutable Kernel SHA;
 it verifies the **selected source revision**, not the unrelated Kernel main
 ABI candidate. Kernel's separate Flat, pinned ABI13 Activity and IOMMU target workflows
 remain owner-side checks.
-The historical multi-Hart SMP/Realtime probes are not routine CI gates;
+Full multi-Hart SMP/Realtime qualification remains outside ordinary CI;
 their explicit runner commands remain available. A green single-Hart CI
 does not establish SMP safety or an assembled product. Opt-in performance comparisons use four Harts. The
 [Kernel-owned comparison workflow](../../.github/workflows/room-comparison.yml)

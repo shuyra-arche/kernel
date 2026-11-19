@@ -25,7 +25,7 @@ fn published_guest_inputs_are_local_and_legacy_probes_require_fixture() {
         assert!(scenario::admit_fixture(&activity, None).is_ok());
         assert!(scenario::admit_fixture(&activity, Some(old_fixture)).is_err());
     }
-    for mode in ["room", "irq"] {
+    for mode in ["room", "irq", "realtime"] {
         for latency in [false, true] {
             let room = verify::Kind::Room {
                 mode: mode.into(),
@@ -39,12 +39,12 @@ fn published_guest_inputs_are_local_and_legacy_probes_require_fixture() {
     }
     for private in [
         verify::Kind::Smp,
-        verify::Kind::Room {
-            mode: "realtime".into(),
-            events: 256,
-            latency: true,
-            cold: false,
+        verify::Kind::Shutdown { quiet: false },
+        verify::Kind::Lifecycle {
+            cancel: false,
+            pressure: false,
         },
+        verify::Kind::Retirement { cancel: false },
     ] {
         assert!(scenario::admit_fixture(&private, None).is_err());
         assert!(scenario::admit_fixture(&private, Some(old_fixture)).is_ok());
