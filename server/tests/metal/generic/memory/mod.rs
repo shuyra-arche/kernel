@@ -34,5 +34,6 @@ mod metal {
 mod allocation;
 mod evidence;
 mod fabric;
+#[allow(dead_code)]
 #[path = "../../../basis/cell/support.rs"]
 mod support;
