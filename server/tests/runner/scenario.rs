@@ -54,7 +54,16 @@ fn prepare(args: &Inputs, suite: &Suite, relative: &Path, root: &Path) -> Result
     let patches = root.join("patches");
     fs::create_dir(&patches)?;
     let owner = composition::suite();
-    composition::apply(&owner.join(relative), &provider, &patches)?;
+    let project = owner.join(relative);
+    let contract = project.join("provider.json");
+    let patch = project.join("provider.patch");
+    require(
+        contract.exists() == patch.exists(),
+        "a provider patch needs its matching source contract",
+    )?;
+    if patch.exists() {
+        composition::apply(&project, &provider, &patches)?;
+    }
 
     for path in std::iter::once(relative.to_path_buf()).chain(imports.iter().map(PathBuf::from)) {
         let destination = provider.join("server/tests").join(&path);
@@ -211,11 +220,25 @@ fn boot(args: &Inputs, suite: &Suite, variant: &Variant, hart: u8, round: u8) ->
     Ok(result.passed)
 }
 
-fn cargo_test(args: &Inputs, package: &str, test: &str, ignored: bool) -> Result<()> {
+fn cargo_test(
+    args: &Inputs,
+    relative: &Path,
+    package: Option<&str>,
+    manifest: Option<&str>,
+    test: &str,
+    ignored: bool,
+) -> Result<()> {
     let mut command = Command::new("cargo");
+    command.args(["+nightly", "test", "--locked"]);
+    if let Some(package) = package {
+        command.args(["-p", package]);
+    }
+    if let Some(manifest) = manifest {
+        command
+            .arg("--manifest-path")
+            .arg(args.kernel.join("server/tests").join(relative).join(manifest));
+    }
     command
-        .args(["+nightly", "test", "--locked", "-p"])
-        .arg(package)
         .args(["--test", test, "--target", "x86_64-unknown-linux-gnu"])
         .current_dir(&args.kernel);
     if ignored {
@@ -247,9 +270,17 @@ pub fn run(args: Inputs) -> Result<()> {
     match &suite.run {
         Run::CargoTest {
             package,
+            manifest,
             test,
             ignored,
-        } => cargo_test(&args, package, test, *ignored),
+        } => cargo_test(
+            &args,
+            &relative,
+            package.as_deref(),
+            manifest.as_deref(),
+            test,
+            *ignored,
+        ),
         Run::Qemu { .. } => {
             let variant = prepare(&args, &suite, &relative, &args.output.join("candidate"))?;
             let mut passed = true;

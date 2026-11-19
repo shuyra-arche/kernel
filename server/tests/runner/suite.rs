@@ -33,7 +33,8 @@ pub enum Run {
         distinct: Option<Distinct>,
     },
     CargoTest {
-        package: String,
+        package: Option<String>,
+        manifest: Option<String>,
         test: String,
         ignored: bool,
     },
@@ -99,6 +100,23 @@ pub fn read(path: &Path) -> Result<(Suite, PathBuf)> {
                 path.components()
                     .all(|part| matches!(part, Component::Normal(_))),
                 "test imports must stay within the test tree",
+            )?;
+        }
+    }
+    if let Run::CargoTest {
+        package, manifest, ..
+    } = &suite.run
+    {
+        require(
+            package.is_some() || manifest.is_some(),
+            "Cargo test requires a package or local manifest",
+        )?;
+        if let Some(manifest) = manifest {
+            require(
+                Path::new(manifest)
+                    .components()
+                    .all(|part| matches!(part, Component::Normal(_))),
+                "Cargo manifest must be local to the project",
             )?;
         }
     }

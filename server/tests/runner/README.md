@@ -8,7 +8,8 @@ process cleanup and evidence.
 
 A QEMU suite can declare an additional Guest/Capsule, imported test helpers,
 Cargo features and environment, required result markers and optional distinct
-capture evidence. A Cargo test suite names its owning package and test target.
+capture evidence. Source instrumentation is optional; patches remain project-local when needed.
+A Cargo test suite names its package or own manifest and test target.
 Adding a new project does not change Runner code.
 
 `composition/` contains only the shared patch application mechanism. Source
