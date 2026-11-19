@@ -46,7 +46,7 @@ mod admission;
 mod allocation;
 #[path = "cell/geometry.rs"]
 mod geometry;
-#[path = "cell/maintenance.rs"]
+#[path = "flat/maintenance.rs"]
 mod maintenance;
 #[path = "flat/materialize.rs"]
 mod materialize;
