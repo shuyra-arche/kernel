@@ -1,7 +1,7 @@
 //! rustc checks production API admission and lifetimes in Debug and Release.
 #[test]
 fn production_typestate_compile_contracts() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("metal/riscv/sync/ui");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui");
     let scratch = std::env::temp_dir().join(format!("kernel-sync-ui-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).unwrap();
     let mut paths = std::fs::read_dir(&root)

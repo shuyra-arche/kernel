@@ -5,7 +5,9 @@ members = [
   "api/abi-macros",
   "client",
   "server",
-  "server/tests",
+  "server/tests/basis/**/host",
+  "server/tests/entry/**/host",
+  "server/tests/metal/**/host",
 ]
 
 [workspace.package]
@@ -17,6 +19,7 @@ kernel-api = { path = "api" }
 bitflags = "2.13.1"
 erra = { version = "0.2.0", default-features = false }
 fack = { version = "0.2.0", default-features = false }
+hashbrown = { version = "0.17.1", default-features = false, features = ["alloc", "default-hasher"] }
 
 [profile.dev]
 debug = true

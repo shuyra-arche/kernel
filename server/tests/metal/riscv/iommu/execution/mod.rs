@@ -9,7 +9,7 @@ use std::time::Instant;
 #[test]
 #[ignore = "requires QEMU RISC-V with virt,iommu-sys support (validated on 10.0.13)"]
 fn iommu_on_real_qemu_registers() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/metal/riscv/iommu");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../target/metal/riscv/iommu");
     let output = Command::new("cargo")
         .args([
             "+nightly",
