@@ -330,8 +330,12 @@ pub(in crate::entry::call) fn inspect(
         SpanRoute::acquire(actor, position.range(), NestRights::INSPECT).map_err(pend_error)?;
     let index = mapping.position(position).map_err(pend_error)?;
     let span = mapping.span().map_err(pend_error)?;
-    Observation::new(Snapshot::Memo(span.inspect(index).map_err(nest_error)?))
-        .ok_or(Failure::Invalid)
+    let mut status = span.inspect(index).map_err(nest_error)?;
+    // The observed range belongs to this query's live Pend, not to the
+    // authority that last associated the Memo. An empty Memo has no such
+    // association, and an attenuated branch has a different Pend identity.
+    status.range = Some(position.range());
+    Observation::new(Snapshot::Memo(status)).ok_or(Failure::Invalid)
 }
 
 pub(in crate::entry::call) fn mutate(

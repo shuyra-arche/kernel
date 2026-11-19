@@ -104,15 +104,18 @@ pub(super) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation
                 SpanRoute::acquire(actor, range, NestRights::INSPECT).map_err(pend_error)?;
             let span = route.span().map_err(pend_error)?;
             let (offset, count) = route.entry().authority().window().ok_or(Failure::Denied)?;
-            Snapshot::Span(
-                span.snapshot(
+            let mut status = span
+                .snapshot(
                     route.nest(),
                     offset,
                     count,
                     route.entry().modifiable() == Modifiable::Yes,
                 )
-                .map_err(nest_error)?,
-            )
+                .map_err(nest_error)?;
+            // Describe the validated range used by this caller, including
+            // derived and narrowed Pend windows, rather than the Span root.
+            status.range = range;
+            Snapshot::Span(status)
         }
         _ => return Err(Failure::Unsupported),
     };
@@ -194,8 +197,11 @@ pub(super) fn effect(
                 if span.version().get() != expected.get() {
                     return Err(Failure::Stale);
                 }
-                let next = expected.next().ok_or(Failure::VersionExhausted)?;
-                let version = kernel_api::model::nest::SpanVersion::new(next.get())
+                expected.next().ok_or(Failure::VersionExhausted)?;
+                // Begin release compares the live Span version with the
+                // caller's *current* expected version. The next version is
+                // reserved for the transition, not for this precondition.
+                let version = kernel_api::model::nest::SpanVersion::new(expected.get())
                     .ok_or(Failure::VersionExhausted)?;
                 nest.begin_release(&span, version).map_err(nest_error)?;
                 receipt.start(Value::SpanLifecycle {

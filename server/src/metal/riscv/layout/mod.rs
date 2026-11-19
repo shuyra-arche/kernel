@@ -18,7 +18,7 @@ pub(crate) const HART_FRAME_BASE: VirtAddr = VirtAddr::wrap(plan::HART_FRAME_BAS
 pub(crate) const TEAM_FRAME_WINDOW_SIZE: usize = plan::TEAM_FRAME_WINDOW_SIZE;
 pub(crate) const TEAM_FRAME_BASE: VirtAddr = VirtAddr::wrap(plan::TEAM_FRAME_BASE);
 pub(crate) const TRAP_STACK_SLOT_SIZE: usize = plan::TRAP_STACK_SLOT_SIZE;
-pub(crate) const TRAP_STACK_SLOT_SHIFT: usize = 16;
+pub(crate) const TRAP_STACK_SLOT_SHIFT: usize = TRAP_STACK_SLOT_SIZE.trailing_zeros() as usize;
 pub(crate) const TRAP_STACK_GUARD: usize = PAGE_SIZE;
 pub(crate) const TRAP_STACK_BASE: VirtAddr = VirtAddr::wrap(plan::TRAP_STACK_BASE);
 pub(crate) fn trampoline_pa() -> PhysAddr {

@@ -208,7 +208,7 @@ impl TranslationState {
         let global = mappings.iter().any(|mapping| mapping.is_global());
         for mapping in mappings.iter() {
             index.remove(mapping);
-            self.retirement.mappings.push(Arc::downgrade(mapping));
+            self.retirement.mappings.push(mapping.clone());
             let mut inner = mapping.state.lock();
             if inner
                 .memos
@@ -387,7 +387,7 @@ impl TranslationState {
             geometry,
         );
         inner.memos.publish(index, memo);
-        self.retirement.mappings.push(Arc::downgrade(mapping));
+        self.retirement.mappings.push(mapping.clone());
         self.retirement.mark_dirty(mapping.is_global());
         Ok(())
     }
@@ -432,7 +432,7 @@ impl TranslationState {
 
         // 过了这里只剩下已经定好的状态转移：PTE、发布记录与承载一起转入退休责任。
         self.withdraw_prepared(address, expected.size(), geometry);
-        self.retirement.mappings.push(Arc::downgrade(mapping));
+        self.retirement.mappings.push(mapping.clone());
         if inner.memos.withdraw(page, page, &mut self.retirement.cells) {
             mapping.changed();
         }
@@ -494,7 +494,7 @@ impl TranslationState {
         }
         // 从此处开始提交不再分配：即使 shootdown 失败，保留映射与 Dirty/Failed 状态。
         accepted();
-        self.retirement.mappings.push(Arc::downgrade(mapping));
+        self.retirement.mappings.push(mapping.clone());
         if let Some((page, mut publication)) = replacement {
             let old = inner
                 .memos

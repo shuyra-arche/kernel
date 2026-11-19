@@ -1319,7 +1319,7 @@ impl Span {
         for (_, retained) in &mut fresh {
             retained.publish();
         }
-        state.retirement.mappings.push(Arc::downgrade(self));
+        state.retirement.mappings.push(self.clone());
         for run in inner.runs(self.initial_start(), &fresh) {
             let run = run?;
             state.root.cpu_mut()?.map_range_prepared_geometry(

@@ -1009,7 +1009,7 @@ impl Nest {
         for (_, retained) in &mut published {
             retained.publish();
         }
-        state.retirement.mappings.push(Arc::downgrade(mapping));
+        state.retirement.mappings.push(mapping.clone());
         for run in mapping.state.lock().runs(start, &published) {
             let run = run?;
             state.root.cpu_mut()?.map_range_prepared_geometry(
@@ -1238,7 +1238,7 @@ impl Nest {
         // 开票之后没有可失败准备：票、PTE 与关系在同一提交内转入退休责任。
         let tickets = layout.occupancy.retire(prepared);
         state.withdraw_prepared(start, len, self.geometry());
-        state.retirement.mappings.push(Arc::downgrade(mapping));
+        state.retirement.mappings.push(mapping.clone());
         if inner
             .memos
             .withdraw(first_page, last_page, &mut state.retirement.cells)
@@ -1499,6 +1499,7 @@ impl Nest {
                 Err(NestError::Busy)
             }
             Err(error) => {
+                state.retirement.remember_failure(error);
                 state.retirement.fail();
                 Err(error)
             }
@@ -1524,6 +1525,7 @@ impl Nest {
                     fenced
                 }
                 Err(_) => {
+                    state.retirement.remember_failure(NestError::Shootdown);
                     state.retirement.fail();
                     return Err(NestError::Shootdown);
                 }
@@ -1684,6 +1686,30 @@ impl Nest {
 
     pub(crate) fn is_closed(&self) -> bool {
         self.state.lock().phase.is_closed()
+    }
+
+    /// Read-only, bounded shutdown diagnosis. Sample the state and index
+    /// independently: diagnostics must not introduce a new lock order.
+    pub(crate) fn retirement_observation(
+        &self,
+    ) -> (
+        translation::phase::ClosePhase,
+        translation::Invalidation,
+        usize,
+        bool,
+        Option<NestError>,
+    ) {
+        let (phase, invalidation, failure) = {
+            let state = self.state.lock();
+            (
+                state.phase,
+                state.retirement.invalidation(),
+                state.retirement.last_failure(),
+            )
+        };
+        let indexed = self.address.lock().index.len();
+        let pending = self.pending_cleanup.lock().is_some();
+        (phase, invalidation, indexed, pending, failure)
     }
 
     /// 翻译里只取物理地址的那一面：权限位不外露。

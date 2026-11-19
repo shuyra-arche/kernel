@@ -29,6 +29,27 @@ unsafe impl Shootdown for Cpu {
 }
 
 #[test]
+fn a_pending_fence_owns_its_span_after_discovery_releases_the_last_reference() {
+    let span = Arc::new(super::Span::new(99));
+    let weak = Arc::downgrade(&span);
+    let mut pending = Retirement::new();
+    pending.mappings.push(span.clone());
+    pending.mark_dirty(false);
+    let request = pending.begin(7, 3).unwrap();
+
+    // Retirement must not depend on an independently live source or index.
+    drop(span);
+    assert!(weak.upgrade().is_some());
+    let fenced = pending
+        .complete(scope::invalidate(&Cpu, request).unwrap())
+        .unwrap();
+    assert!(weak.upgrade().is_some());
+    assert!(!pending.pending_for(&weak.upgrade().unwrap()));
+    fenced.release();
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
 fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() {
     use super::memo::source::{Registry, Source};
     use std::sync::atomic::AtomicUsize;
@@ -80,7 +101,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
         assert_eq!(state.memos.awaiting_cpu(), 1);
     }
     let mut pending = Retirement::new();
-    pending.mappings.push(Arc::downgrade(&span));
+    pending.mappings.push(span.clone());
     assert!(pending.pending_for(&span));
     pending.mark_dirty(false);
     let request = pending.begin(7, 3).unwrap();
@@ -104,7 +125,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
             .unwrap();
         pending.cells.push(memo.withdraw().unwrap());
     }
-    pending.mappings.push(Arc::downgrade(&span));
+    pending.mappings.push(span.clone());
     pending.mark_dirty(false);
     let request = pending.begin(7, 3).unwrap();
     let fenced = pending
@@ -114,7 +135,7 @@ fn memo_finishes_with_its_batch_before_a_new_batch_can_delay_resource_release() 
     // A different PTE batch starts before callbacks and Page drops of the old
     // batch. Its unfinished fence cannot strand the old Memo's activity.
     let unrelated = Arc::new(super::Span::new(10));
-    pending.mappings.push(Arc::downgrade(&unrelated));
+    pending.mappings.push(unrelated.clone());
     pending.mark_dirty(false);
     pending.begin(7, 3).unwrap();
     assert!(pending.pending_for(&unrelated));
@@ -158,8 +179,8 @@ fn one_retirement_batch_settles_memos_from_multiple_spans() {
     install(&right, &right_page);
 
     let mut pending = Retirement::new();
-    pending.mappings.push(Arc::downgrade(&left));
-    pending.mappings.push(Arc::downgrade(&right));
+    pending.mappings.push(left.clone());
+    pending.mappings.push(right.clone());
     assert!(pending.pending_for(&left));
     assert!(pending.pending_for(&right));
     pending.mark_dirty(false);
@@ -209,7 +230,7 @@ fn retirement_settles_only_memos_owned_by_its_own_span() {
     assert_eq!(right.state.lock().memos.awaiting_cpu(), 1);
 
     let mut pending = Retirement::new();
-    pending.mappings.push(Arc::downgrade(&left));
+    pending.mappings.push(left.clone());
     pending.mark_dirty(false);
     let request = pending.begin(7, 3).unwrap();
     let fenced = pending

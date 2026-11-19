@@ -196,7 +196,9 @@ pub(crate) fn inspect(actor: &Arc<Task>, query: NestQuery) -> Result<Observation
     let active = active(&span);
     let state = span.faults.lock();
     let status = FaultStatus {
-        range: span.authority(),
+        // Correlate the observation with the live queried Pend, not the
+        // original Span authority that owns the fault state.
+        range,
         epoch: state.epoch,
         phase: match active {
             Ok(_) if !state.lost() => FaultPhase::Active,

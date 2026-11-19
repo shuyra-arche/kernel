@@ -154,6 +154,19 @@ pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), Error> {
     if !super::external::discard(&nest) {
         return Err(Error::Busy);
     }
+    {
+        let records = ORGANIZATIONS.lock();
+        let at = records
+            .iter()
+            .position(|record| Arc::ptr_eq(&record.nest, &nest))
+            .ok_or(Error::Denied)?;
+        if records[at].binding.is_some() {
+            return Err(Error::Busy);
+        }
+    }
+    // COMMIT still serializes organization changes, but Address belongs to
+    // Nest. Do not acquire Address beneath the Organizations lock.
+    nest.delete_organization().map_err(|_| Error::Busy)?;
     let mut records = ORGANIZATIONS.lock();
     let at = records
         .iter()
@@ -162,7 +175,6 @@ pub(crate) fn delete(actor: &Task, token: PendId) -> Result<(), Error> {
     if records[at].binding.is_some() {
         return Err(Error::Busy);
     }
-    nest.delete_organization().map_err(|_| Error::Busy)?;
     let removed = records.remove(at);
     drop(records);
     drop(removed);

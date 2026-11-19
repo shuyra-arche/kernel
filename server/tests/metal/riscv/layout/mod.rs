@@ -21,7 +21,7 @@ fn every_supported_geometry_has_one_ordered_layout_at_all_admitted_counts() {
                 high.windows(2)
                     .all(|pair| pair[0].last.checked_add(1) == Some(pair[1].base))
             );
-            assert_eq!(p.trap.last - p.trap.base + 1, 256 * 65536);
+            assert_eq!(p.trap.last - p.trap.base + 1, 256 * TRAP_STACK_SLOT_SIZE);
             assert_eq!(p.trampoline.last, usize::MAX);
             assert_eq!(p.trampoline.base, TRAMPOLINE);
         }

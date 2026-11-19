@@ -9,7 +9,14 @@ pub(crate) const HART_FRAME_WINDOW_SIZE: usize = 2 * 1024 * 1024;
 pub(crate) const HART_FRAME_BASE: usize = KERNEL_TOP - HART_FRAME_WINDOW_SIZE;
 pub(crate) const TEAM_FRAME_WINDOW_SIZE: usize = 64 * 1024 * 1024;
 pub(crate) const TEAM_FRAME_BASE: usize = HART_FRAME_BASE - TEAM_FRAME_WINDOW_SIZE;
-pub(crate) const TRAP_STACK_SLOT_SIZE: usize = 64 * 1024;
+// Debug checks, lock diagnostics and ABI journaling have deeper call stacks.
+// Keep the normal image at 64 KiB; a Debug image reserves 128 KiB per
+// admitted Hart (including its 4 KiB unmapped guard), never per Task.
+pub(crate) const TRAP_STACK_SLOT_SIZE: usize = if cfg!(debug_assertions) {
+    128 * 1024
+} else {
+    64 * 1024
+};
 pub(crate) const TRAP_STACK_BASE: usize = TEAM_FRAME_BASE - MAX_HART_SLOTS * TRAP_STACK_SLOT_SIZE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

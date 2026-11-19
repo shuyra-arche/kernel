@@ -18,6 +18,39 @@ impl Retirement {
     }
 }
 impl Task {
+    /// A bounded, read-only diagnostic for a shutdown that has stopped
+    /// making retirement progress. It does not grant new cleanup authority.
+    #[cfg(not(test))]
+    pub(crate) fn retirement_stage(&self) -> &'static str {
+        let Some(phase) = self.retirement.try_lock() else {
+            return "in-flight";
+        };
+        match &*phase {
+            Retirement::Active => "in-flight",
+            Retirement::Heirs { .. } => "heirs",
+            Retirement::Pends => "pends",
+            Retirement::Memory => "memory",
+            Retirement::Receipts(_) => "receipts",
+            Retirement::Settled => "settled",
+        }
+    }
+
+    /// Observe only the next real child while the husk is stalled, after
+    /// dropping the retirement guard. Never materialize a child snapshot.
+    #[cfg(not(test))]
+    pub(crate) fn retirement_heir(&self) -> Option<Arc<crate::basis::unit::team::Team>> {
+        let after = match &*self.retirement.try_lock()? {
+            Retirement::Heirs { after } => *after,
+            _ => return None,
+        };
+        self.heir
+            .try_lock()?
+            .iter()
+            .filter(|team| team.id.get() > after)
+            .min_by_key(|team| team.id.get())
+            .cloned()
+    }
+
     /// One owner-controlled step. Ok(false) is an immediately runnable next
     /// stage; Err retains an obligation requiring a later attempt.
     pub(crate) fn advance_retirement(self: &Arc<Self>) -> Result<bool, NestError> {

@@ -1,6 +1,6 @@
 //! Resources held across CPU translation invalidation.
 
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use super::{Invalidation, tickets::Tickets};
@@ -14,6 +14,7 @@ use crate::basis::nest::memo::publication::Publication;
 /// Address tickets become claimable in the same transition as the covering fence.
 pub(in crate::basis::nest) struct Retirement {
     invalidation: Invalidation,
+    failure: Option<super::super::NestError>,
     scope: Scope,
     sequence: crate::basis::name::Generation,
     pending: Option<Request<Asid>>,
@@ -21,13 +22,14 @@ pub(in crate::basis::nest) struct Retirement {
     pub(in crate::basis::nest) tickets: Tickets,
     pub(in crate::basis::nest) tables: Vec<Table>,
     pub(in crate::basis::nest) cells: Vec<Publication>,
-    pub(in crate::basis::nest) mappings: Vec<Weak<Span>>,
+    pub(in crate::basis::nest) mappings: Vec<Arc<Span>>,
 }
 
 impl Retirement {
     pub(in crate::basis::nest) fn new() -> Self {
         Self {
             invalidation: Invalidation::Clean,
+            failure: None,
             scope: Scope::AddressSpace,
             sequence: crate::basis::name::Generation::first(),
             pending: None,
@@ -64,11 +66,17 @@ impl Retirement {
         self.invalidation
     }
 
+    pub(in crate::basis::nest) fn last_failure(&self) -> Option<super::super::NestError> {
+        self.failure
+    }
+
+    pub(in crate::basis::nest) fn remember_failure(&mut self, reason: super::super::NestError) {
+        self.failure = Some(reason);
+    }
+
     /// Only this batch's retained mappings still depend on its completion.
     pub(in crate::basis::nest) fn pending_for(&self, mapping: &Arc<Span>) -> bool {
-        self.mappings
-            .iter()
-            .any(|held| held.as_ptr() == Arc::as_ptr(mapping))
+        self.mappings.iter().any(|held| Arc::ptr_eq(held, mapping))
     }
 
     pub(in crate::basis::nest) fn mark_dirty(&mut self, global: bool) {
@@ -113,9 +121,7 @@ impl Retirement {
         self.deferred = None;
         if self.invalidation != Invalidation::Failed {
             for mapping in &self.mappings {
-                if let Some(mapping) = mapping.upgrade() {
-                    mapping.changed();
-                }
+                mapping.changed();
             }
         }
         self.invalidation = self.invalidation.fail();
@@ -131,35 +137,29 @@ impl Retirement {
                 .pending
                 .is_none_or(|expected| !proof.confirms(expected))
         {
+            self.remember_failure(super::super::NestError::Shootdown);
             self.fail();
             return Err(super::super::NestError::Shootdown);
         }
-        // Allocate before consuming any obligation. Failure leaves the entire
-        // batch retained and retryable, even though the hardware fence ran.
-        let mut held = Vec::new();
-        if held.try_reserve(self.mappings.len()).is_err() {
-            self.fail();
-            return Err(super::super::NestError::OutOfMemory);
-        }
-        for mapping in &self.mappings {
-            let Some(mapping) = mapping.upgrade() else {
-                self.fail();
-                return Err(super::super::NestError::NoRegion);
-            };
-            held.push(mapping);
-        }
+        // The retirement batch itself retains each exact Span until the
+        // covering proof arrives. A weak discovery route cannot guarantee
+        // this lifetime after the address index withdraws the last mapping.
+        // Prepare completion storage before consuming any obligation.
         let mut settled = Vec::new();
-        let count = held
+        let count = self
+            .mappings
             .iter()
             .map(|mapping| mapping.state.lock().memos.awaiting_cpu())
             .sum();
         if settled.try_reserve(count).is_err() {
+            self.remember_failure(super::super::NestError::OutOfMemory);
             self.fail();
             return Err(super::super::NestError::OutOfMemory);
         }
         self.pending = None;
         self.deferred = None;
-        for mapping in &held {
+        self.failure = None;
+        for mapping in &self.mappings {
             {
                 let mut state = mapping.state.lock();
                 state.memos.complete(&mut settled);
@@ -169,12 +169,12 @@ impl Retirement {
         self.tickets.settle();
         self.invalidation = self.invalidation.complete();
         self.scope = Scope::AddressSpace;
-        self.mappings.clear();
+        let mappings = core::mem::take(&mut self.mappings);
         Ok(Fenced {
             settled,
             tables: core::mem::take(&mut self.tables),
             cells: core::mem::take(&mut self.cells),
-            mappings: held,
+            mappings,
         })
     }
 }

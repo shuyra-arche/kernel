@@ -186,6 +186,62 @@ pub(crate) enum Progress {
     Ready,
     Blocked,
 }
+/// A single, allocation-free sample when normal shutdown has been stalled
+/// for two seconds. Copy at most four Arc handles before inspecting other
+/// owners; never hold the husk-chain lock during phase observations.
+pub(crate) fn stalled() {
+    let mut tasks: [Option<Arc<Task>>; 4] = [const { None }; 4];
+    // These are independent owners. A diagnostic must not create a
+    // ReapQueue -> Husks lock edge that normal cleanup never needs.
+    let pending = PENDING.lock().len();
+    let retained = {
+        let husks = HUSKS.lock();
+        let mut count = 0;
+        husks.chain.visit(tasks.len(), |task| {
+            tasks[count] = Some(task.clone());
+            count += 1;
+        });
+        husks.chain.len()
+    };
+    crate::putln!("[stop] retirement pending={pending} husks={retained}");
+    for task in tasks.into_iter().flatten() {
+        crate::putln!(
+            "[stop] husk task={} stage={}",
+            task.ident.id.get(),
+            task.retirement_stage()
+        );
+        if let Some(child) = task.retirement_heir() {
+            let (members, exited, reclaimed) = {
+                let records = child.node.tasks.lock();
+                (
+                    records.len(),
+                    records
+                        .iter()
+                        .filter(|member| member.exit().is_some())
+                        .count(),
+                    records
+                        .iter()
+                        .filter(|member| {
+                            member.reclaimed.load(core::sync::atomic::Ordering::Acquire)
+                        })
+                        .count(),
+                )
+            };
+            crate::putln!(
+                "[stop] child team={} nest={} members={members} exited={exited} reclaimed={reclaimed} nest-closed={}",
+                child.id.get(),
+                child.nest.id().get(),
+                child.nest.is_closed()
+            );
+            let (phase, invalidation, indexed, cleanup, failure) =
+                child.nest.retirement_observation();
+            crate::putln!(
+                "[stop] nest phase={phase:?} invalidation={invalidation:?} indexed={indexed} cleanup={cleanup} failure={failure:?}"
+            );
+        }
+    }
+}
+
 pub(super) fn pending() -> bool {
     let terminal = !PENDING.lock().is_empty();
     let husks = !HUSKS.lock().chain.is_empty();
