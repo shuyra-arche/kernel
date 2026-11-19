@@ -1,7 +1,7 @@
 use crate::basis::unit::{task::Task, team::kernel};
 use crate::entry::boot::BootError;
 use crate::metal::{clock, hart};
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use kernel_api::address::VirtAddr;
 
 mod contracts;
