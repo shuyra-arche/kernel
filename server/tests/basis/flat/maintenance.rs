@@ -6,9 +6,6 @@ use crate::{
 };
 use std::sync::Arc;
 
-fn page() -> Arc<Page> {
-    Arc::new(Page::from_internal(Owner::Kernel, Pool::new(0).page().unwrap()).unwrap())
-}
 #[test]
 fn holding_move_preserves_gate_and_staging_metadata_until_return() {
     use crate::{residency::fresh, state::residency::Error};

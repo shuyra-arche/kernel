@@ -7,6 +7,7 @@ extern crate alloc;
 
 // Compile the production Page itself, without RV64 instructions, fake Page
 // implementations, or changes to the production library's no_std configuration.
+#[allow(dead_code)]
 #[path = "../../src/basis/cell/page/mod.rs"]
 pub(crate) mod cell;
 use cell as page;
