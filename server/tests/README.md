@@ -113,10 +113,26 @@ Independent IOMMU backend execution remains available with
 `cargo +nightly test --locked -p kernel-memory-tests --test iommu-target
 --target x86_64-unknown-linux-gnu -- --ignored --nocapture`.
 
-The ordinary Kernel CI exercises Flat target contracts on one Hart. SMP
-correctness and multi-Hart fault campaigns remain manually invocable, with
-four Harts as the SMP default; opt-in benchmarks may use four Harts to
-measure multi-Hart performance.
+The ordinary Kernel CI exercises only one-Hart target contracts.
+SMP/Lifecycle/Retirement/Shutdown and four-Hart Realtime qualification remain
+separate from ordinary PR/push CI. The existing
+[CPU completion manual workflow](../../.github/workflows/smp-owner.yml)
+runs nine owner-defined scenarios, defaults to four Harts and accepts an explicit
+debug/release choice; the
+[Realtime workflow](../../.github/workflows/realtime-target.yml) runs one Hart
+for PR/push, but allows a manually selected four-Hart positive contract.
+
+After the workflows are merged, an authorized GitHub Actions user can run:
+
+```sh
+gh workflow run smp-owner.yml --repo shuyra-arche/kernel --ref main -f harts=4 -f profile=release
+gh workflow run realtime-target.yml --repo shuyra-arche/kernel --ref main -f harts=4
+```
+
+Both jobs preserve raw QEMU, build, cleanup and source-identity evidence.
+Neither has a recorded four-Hart success solely from being dispatchable;
+the actual job's native result and artifacts determine qualification. No
+opt-in SMP campaign is part of normal CI.
 
 The [IOMMU target QEMU workflow](../../.github/workflows/iommu-target.yml)
 runs this same existing test on a Debian trixie QEMU target when its relevant

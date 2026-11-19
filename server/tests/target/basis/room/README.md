@@ -79,10 +79,15 @@ These are isolated test compositions. For `--mode room`, the runner archives
 the exact Kernel provider and selects Kernel-owned Guest/Platform tests; it does
 not fetch a Vanllia product fixture. IRQ now also uses a Kernel-owned Guest
 and test-only UART bootstrap with the same strict source contracts.
-Realtime now also runs from an owner-side build entry, without a product test
+Realtime runs from an owner-side build entry without a product test
 fixture. Every provider patch retains its exact preimage check and
-original/resolved lockfiles. Four-Hart Realtime behavior stays manual-only. No native
-RAM Publish or DMA is needed; SMP memory qualification stays unavailable.
+original/resolved lockfiles. The Realtime QEMU workflow keeps one-Hart
+negative-admission checks for PR/push and lets an authorized user explicitly
+run four-Hart debug/release **positive** contracts through
+[manual dispatch](https://github.com/shuyra-arche/kernel/actions/workflows/realtime-target.yml)
+(`harts=4`). A successful one-Hart job never qualifies fixed-Hart budgets,
+replenishment, Freeze or preemption. No native RAM Publish or DMA is needed;
+the separate SMP memory qualification remains manual and unclaimed.
 
 The IRQ image explicitly gives the initial Team a trusted static UART mapping
 using the existing external/MMIO boot path. PLIC controls stay private. View

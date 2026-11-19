@@ -11,6 +11,12 @@ on:
         required: true
         default: "4"
         options: ["1", "4"]
+      profile:
+        description: QEMU profile for the explicit CPU completion campaign
+        type: choice
+        required: true
+        default: release
+        options: [debug, release]
 
 permissions:
   contents: read
@@ -25,7 +31,7 @@ defaults:
 
 jobs:
   qualification:
-    name: ABI13 ${{ matrix.case }} / h${{ inputs.harts }}
+    name: ABI13 ${{ matrix.case }} / ${{ inputs.profile }} / h${{ inputs.harts }}
     runs-on: ubuntu-latest
     container: debian:trixie
     timeout-minutes: 25
@@ -48,6 +54,7 @@ jobs:
       QEMU_RISCV64: qemu-system-riscv64
       QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
       HARTS: ${{ inputs.harts }}
+      PROFILE: ${{ inputs.profile }}
     steps:
       - name: Install exact target and execution prerequisites
         run: |
@@ -84,13 +91,15 @@ jobs:
             quiet) args+=(--quiet) ;;
             *) echo "invalid verification variation" >&2; exit 1 ;;
           esac
+          [[ "$HARTS" == 1 || "$HARTS" == 4 ]]
+          [[ "$PROFILE" == debug || "$PROFILE" == release ]]
           "$runner" "$KIND" --kernel "$GITHUB_WORKSPACE/.integration/provider" \
             --output "$GITHUB_WORKSPACE/.integration/evidence" \
-            --profile release --harts "$HARTS" "${args[@]}"
+            --profile "$PROFILE" --harts "$HARTS" "${args[@]}"
       - name: Expose failed source/build/target evidence
         if: failure()
         run: |
-          for file in .integration/evidence/candidate/resolve/stderr.log .integration/evidence/candidate/locked/stderr.log .integration/evidence/candidate/harts-1-round-0/serial.log; do
+          for file in .integration/evidence/candidate/resolve/stderr.log .integration/evidence/candidate/locked/stderr.log ".integration/evidence/candidate/harts-$HARTS-round-0/serial.log"; do
             if [[ -f "$file" ]]; then
               echo "---- $file ----"
               tail -n 120 "$file"
@@ -100,7 +109,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: abi13-owner-${{ matrix.case }}-h${{ inputs.harts }}
+          name: abi13-owner-${{ matrix.case }}-${{ inputs.profile }}-h${{ inputs.harts }}
           include-hidden-files: true
           path: .integration/evidence/
           if-no-files-found: warn
