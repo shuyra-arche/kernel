@@ -347,6 +347,62 @@ fn narrowing_releases_serial_for_withdrawal_and_revalidates_a_new_heir_before_co
 }
 
 #[test]
+fn revoke_before_publication_cannot_retain_a_new_route_or_close_a_sibling() {
+    // Real Pend branch closure with a scripted Nest: this verifies admission,
+    // not whether a real CPU translation has been retired.
+    let (task, nest, whole) = setup(Yes, Distributable::Yes);
+    let root = reserve(&task, &nest, &whole, 8, CellLevel::BASE);
+    let withdrawn = child(&task, &task, &root, PendRange::pages(0, 2).unwrap());
+    let sibling = child(&task, &task, &root, PendRange::pages(4, 2).unwrap());
+
+    ledger::return_(&task, withdrawn.token()).unwrap();
+    assert!(!withdrawn.alive());
+    assert_eq!(withdrawn.authority().retain_route(), Err(PendFail::Dead));
+    assert!(!withdrawn.authority().external_pending());
+
+    assert!(root.alive() && sibling.alive());
+    nest.publish(id(1), sibling.authority());
+    assert!(sibling.authority().external_pending());
+    ledger::return_(&task, sibling.token()).unwrap();
+    assert!(!sibling.authority().external_pending());
+}
+
+#[test]
+fn revoke_after_publication_keeps_the_exact_route_until_withdrawal_completes() {
+    // A scripted busy hardware boundary leaves an accepted route discoverable.
+    // The sibling must not inherit this revocation or this completion.
+    let (task, nest, whole) = setup(Yes, Distributable::Yes);
+    let root = reserve(&task, &nest, &whole, 8, CellLevel::BASE);
+    let withdrawn = child(&task, &task, &root, PendRange::pages(0, 2).unwrap());
+    let sibling = child(&task, &task, &root, PendRange::pages(4, 2).unwrap());
+    nest.publish(id(1), withdrawn.authority());
+    nest.publish(id(1), sibling.authority());
+
+    nest.busy.store(true, Ordering::Release);
+    assert_eq!(
+        ledger::return_(&task, withdrawn.token()),
+        Err(PendFail::Busy)
+    );
+    assert!(!withdrawn.alive());
+    assert!(withdrawn.authority().external_pending());
+    assert_eq!(withdrawn.authority().retain_route(), Err(PendFail::Dead));
+    assert!(root.alive() && sibling.alive());
+    assert!(sibling.authority().external_pending());
+
+    nest.busy.store(false, Ordering::Release);
+    ledger::return_(&task, withdrawn.token()).unwrap();
+    assert!(!withdrawn.authority().external_pending());
+    assert!(sibling.authority().external_pending());
+    {
+        let received = nest.withdrawn.lock().unwrap();
+        assert_eq!(received.len(), 1);
+        assert!(received[0].2.ptr_eq(&Arc::downgrade(withdrawn.authority())));
+    }
+    ledger::return_(&task, sibling.token()).unwrap();
+    assert!(!sibling.authority().external_pending());
+}
+
+#[test]
 fn task_pair_uses_actual_owners_same_task_once_and_rejects_duplicate_identity() {
     let a = Task::new(101);
     let b = Task::new(102);
