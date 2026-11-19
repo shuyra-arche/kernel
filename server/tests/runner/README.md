@@ -15,11 +15,12 @@ both the changed source and test assumptions before refreshing a contract.
 Patch content is retained with each run. Baseline comparisons reject unreviewed
 preimages instead of silently patching a different implementation.
 
-The fixture pin identifies the published Vanllia source used by the SMP,
-Activity, Room, lifecycle, retirement and shutdown Guest compositions. Flat
-instead uses Kernel-owned Guest sources and a standalone Cargo-pinned Platform
-package; `verify flat` rejects `--fixture`. Reviewed preimages still reject
-incompatible inputs for the other private scenarios.
+The fixture pin identifies the published Vanllia source still required by SMP,
+Room, lifecycle, retirement and shutdown Guest compositions. Flat and
+published ABI13 Activity instead use Kernel-owned Guests and standalone
+Cargo-pinned Platform packages; both reject `--fixture`. The ABI13 Activity
+composition retains its own exact Kernel preimage contract. Other private
+scenarios continue to reject unreviewed Vanllia fixture inputs.
 Ordinary Kernel Host/RV64 checks do not execute that target composition;
 Kernel's separate Flat and pinned-target QEMU workflows can select it.
 Vanllia calls the pinned Kernel-owned workflow with the exact Kernel SHA from

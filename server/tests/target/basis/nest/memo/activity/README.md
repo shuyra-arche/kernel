@@ -7,26 +7,26 @@ cargo +nightly build --locked --manifest-path server/tests/runner/Cargo.toml --t
 verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
 ```
 
-the Rust `activity` runner archives the exact Kernel HEAD and pinned Vanllia fixture
-`f2dfa14f5b1f7bd47ee84841ba5c7112e8475950`. It builds matching API/Client/Server,
-Capsule 11 and Ledger 11 with the production target flags and the checked-in
-`tests/latency/Cargo.lock`. It removes only the fixture's historical ABI
-feature and device workload, retaining the CPU memory qualification. No device
-or External A/D capability is inferred.
+The Rust `activity` runner composes the exact selected published ABI13 Kernel
+with its Kernel-owned [ABI13 test Guest and Platform](pinned/README.md).
+`platform-riscv` remains an immutable Git build dependency, not a checkout
+of Vanllia's product test workspace. Capsule and Ledger versions remain the
+selected Kernel's ABI13 contract. No device or External A/D capability is
+inferred. A different Kernel ABI is not admitted by the frozen source contract.
 
-Use Python 3.12+, the root README toolchain, QEMU 10.0.x and OpenSBI with DBCN.
-Set `QEMU_RISCV64` and `QEMU_OPENSBI` as in the native guest guide. Run from the
-Kernel root with the fixture checked out at that pin:
+Use the root README toolchain, QEMU 10.0.x and OpenSBI with DBCN.
+Set `QEMU_RISCV64` and `QEMU_OPENSBI`. Run the matching published ABI13
+Kernel from its checkout. No `--fixture` parameter is accepted:
 
 ```sh
 "$verify" activity --kernel "$PWD" \
-  --fixture /absolute/vanllia --output /tmp/activity-debug --profile debug
+  --output /tmp/activity-debug --profile debug
 "$verify" activity --kernel "$PWD" \
-  --fixture /absolute/vanllia --output /tmp/activity-release --rounds 5
+  --output /tmp/activity-release --rounds 5
 "$verify" activity --kernel "$PWD" \
-  --fixture /absolute/vanllia --output /tmp/activity-unsupported --unsupported
+  --output /tmp/activity-unsupported --unsupported
 "$verify" activity --kernel "$PWD" \
-  --fixture /absolute/vanllia --output /tmp/activity-stopped --stopped
+  --output /tmp/activity-stopped --stopped
 ```
 
 Each command covers 1 and 4 Harts with 128 MiB RAM and multi-thread TCG. A boot
@@ -63,8 +63,9 @@ this directory, attached only inside the archived provider. The complete
 composition diff is recorded. Production visibility, features and entry points
 are unchanged. The early-boot fence probe supplies captured test bits to the
 production history; it proves retry bookkeeping with actual hardware fences,
-not hardware A/D generation. The native guest and host CAS race separately
-exercise those boundaries.
+not hardware A/D generation. The native Guest and Host CAS race separately exercise those boundaries. The
+test-only published ABI13 sources are retained under `pinned/`, rather than
+patched into a Vanllia product Guest.
 
 Each output contains inputs/tool versions/cgroup and affinity, build log,
 composition diff, lockfile/ELF/firmware/Capsule hashes, serial/stderr and parsed
