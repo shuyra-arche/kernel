@@ -1,7 +1,9 @@
 name: Kernel pinned target contracts
 
 # A reusable owner-side regression for the immutable ABI13 Kernel selected by
-# consumers. It does not qualify the current Kernel main ABI or an unrelated PR.
+# consumers. Activity uses Kernel's reviewed owner-side ABI13 Guest; IRQ still
+# uses the published legacy runner and strictly checked Platform fixture.
+# This does not qualify current Kernel main ABI or an unrelated PR.
 on:
   workflow_call:
     inputs:
@@ -76,7 +78,16 @@ jobs:
           ref: ${{ inputs.kernel_sha || '789ffd19b5359f3de172fb9aad8a61f6a7113a64' }}
           path: .integration/kernel
           persist-credentials: false
-      - name: Read the Kernel-owned published fixture pin
+      - name: Select Kernel-owned published Activity runner
+        if: matrix.scenario != 'irq'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: shuyra-arche/kernel
+          ref: 06b2282e8ba04661b720350b4802f23bc20e21fc
+          path: .integration/owner
+          persist-credentials: false
+      - name: Read the IRQ published fixture pin
+        if: matrix.scenario == 'irq'
         id: fixture
         run: |
           set -euo pipefail
@@ -84,6 +95,7 @@ jobs:
           [[ "$pin" =~ ^[0-9a-f]{40}$ ]]
           echo "sha=$pin" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: matrix.scenario == 'irq'
         with:
           repository: shuyra-arche/vanllia
           ref: ${{ steps.fixture.outputs.sha }}
@@ -96,18 +108,26 @@ jobs:
         run: |
           set -euo pipefail
           kernel="$GITHUB_WORKSPACE/.integration/kernel"
-          fixture="$GITHUB_WORKSPACE/.integration/fixture"
           evidence="$GITHUB_WORKSPACE/.integration/evidence"
-          cargo build --locked --manifest-path "$kernel/server/tests/runner/Cargo.toml" --target x86_64-unknown-linux-gnu
-          runner="$kernel/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify"
           case "$SCENARIO" in
-            activity) args=(activity) ;;
-            unsupported) args=(activity --unsupported) ;;
-            stopped) args=(activity --stopped) ;;
-            irq) args=(room --mode irq --events 16) ;;
-            *) exit 1 ;;
+            activity|unsupported|stopped)
+              owner="$GITHUB_WORKSPACE/.integration/owner"
+              cargo build --locked --manifest-path "$owner/server/tests/runner/Cargo.toml" --target x86_64-unknown-linux-gnu
+              runner="$owner/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify"
+              args=(activity)
+              if [[ "$SCENARIO" == unsupported ]]; then args+=(--unsupported); fi
+              if [[ "$SCENARIO" == stopped ]]; then args+=(--stopped); fi
+              "$runner" "${args[@]}" --profile "$PROFILE" --harts 1 --kernel "$kernel" --output "$evidence"
+              ;;
+            irq)
+              fixture="$GITHUB_WORKSPACE/.integration/fixture"
+              cargo build --locked --manifest-path "$kernel/server/tests/runner/Cargo.toml" --target x86_64-unknown-linux-gnu
+              runner="$kernel/server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify"
+              "$runner" room --mode irq --events 16 --profile "$PROFILE" --harts 1 \
+                --kernel "$kernel" --fixture "$fixture" --output "$evidence"
+              ;;
+            *) echo "Unknown Kernel scenario: $SCENARIO" >&2; exit 1 ;;
           esac
-          "$runner" "${args[@]}" --profile "$PROFILE" --harts 1 --kernel "$kernel" --fixture "$fixture" --output "$evidence"
       - name: Preserve exact source and QEMU evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
