@@ -49,9 +49,7 @@ fn runner_accepts_project_paths_without_named_commands() {
         "/example/evidence",
     ];
     assert!(Cli::try_parse_from(args).is_ok());
-    assert!(
-        Cli::try_parse_from(["verify", "--kernel", "/example/kernel"]).is_err()
-    );
+    assert!(Cli::try_parse_from(["verify", "--kernel", "/example/kernel"]).is_err());
 }
 
 #[test]

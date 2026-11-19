@@ -4,7 +4,12 @@ use regex::Regex;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
-pub fn check(log: &str, expects: &[String], distinct: Option<&Distinct>, harts: u8) -> Result<Value> {
+pub fn check(
+    log: &str,
+    expects: &[String],
+    distinct: Option<&Distinct>,
+    harts: u8,
+) -> Result<Value> {
     let missing: Vec<_> = expects
         .iter()
         .map(|marker| marker.replace("{harts}", &harts.to_string()))

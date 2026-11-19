@@ -40,7 +40,10 @@ pub fn apply(project: &Path, root: &Path, evidence: &Path) -> Result<()> {
         let output = command.arg(&patch).output()?;
         require(
             output.status.success(),
-            format!("provider patch: {}", String::from_utf8_lossy(&output.stderr)),
+            format!(
+                "provider patch: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ),
         )?;
     }
     fs::copy(&patch, evidence.join("provider.patch"))?;

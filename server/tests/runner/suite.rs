@@ -81,11 +81,13 @@ pub fn read(path: &Path) -> Result<(Suite, PathBuf)> {
         "invalid test profiles",
     )?;
     require(
-        !suite.harts.is_empty()
-            && suite.harts.iter().all(|hart| matches!(hart, 1 | 4)),
+        !suite.harts.is_empty() && suite.harts.iter().all(|hart| matches!(hart, 1 | 4)),
         "invalid test Hart selection",
     )?;
-    require(!suite.sources.is_empty(), "test project has no source owners")?;
+    require(
+        !suite.sources.is_empty(),
+        "test project has no source owners",
+    )?;
     if let Run::Qemu {
         imports, expects, ..
     } = &suite.run
@@ -94,7 +96,8 @@ pub fn read(path: &Path) -> Result<(Suite, PathBuf)> {
         for import in imports {
             let path = Path::new(import);
             require(
-                path.components().all(|part| matches!(part, Component::Normal(_))),
+                path.components()
+                    .all(|part| matches!(part, Component::Normal(_))),
                 "test imports must stay within the test tree",
             )?;
         }

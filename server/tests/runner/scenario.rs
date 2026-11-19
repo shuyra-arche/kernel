@@ -64,7 +64,10 @@ fn prepare(args: &Inputs, suite: &Suite, relative: &Path, root: &Path) -> Result
         }
     }
 
-    let manifest = provider.join("server/tests").join(relative).join("Cargo.toml");
+    let manifest = provider
+        .join("server/tests")
+        .join(relative)
+        .join("Cargo.toml");
     let mut command = Command::new("cargo");
     command
         .arg("build")
@@ -248,12 +251,7 @@ pub fn run(args: Inputs) -> Result<()> {
             ignored,
         } => cargo_test(&args, package, test, *ignored),
         Run::Qemu { .. } => {
-            let variant = prepare(
-                &args,
-                &suite,
-                &relative,
-                &args.output.join("candidate"),
-            )?;
+            let variant = prepare(&args, &suite, &relative, &args.output.join("candidate"))?;
             let mut passed = true;
             for round in 0..args.rounds {
                 passed &= boot(&args, &suite, &variant, args.harts, round)?;
