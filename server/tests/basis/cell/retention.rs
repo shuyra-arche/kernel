@@ -1,3 +1,6 @@
+#[path = "../../../src/metal/generic/mmu/internal/completion.rs"]
+mod completion;
+
 use crate::cell::Owner;
 use std::sync::Arc;
 use std::sync::Barrier;
@@ -249,5 +252,36 @@ fn publication_cannot_complete_or_retire_an_unpublished_preparation() {
     published.complete();
     // No hardware mapping exists in this host bookkeeping test.
     unsafe { published.retire().settle() };
+    assert!(page.allows_return());
+}
+
+#[test]
+fn partial_completion_and_retry_keep_the_page_retained() {
+    use completion::{Mailbox, Sequence};
+    let page = Arc::new(Page::from_internal(Owner::Kernel, Pool::new(0).page().unwrap()).unwrap());
+    let mut retention = page.prepare_hardware(false).unwrap();
+    retention.publish();
+    let retention = retention.retire();
+    let sequence = Sequence::new();
+    let harts = [Mailbox::new(), Mailbox::new(), Mailbox::new()];
+    let first = sequence.next().unwrap();
+    for hart in &harts {
+        hart.request(first);
+    }
+    unsafe { harts[0].complete(harts[0].pending().unwrap()) };
+    assert!(!harts.iter().all(|hart| hart.covers(first)));
+    assert!(!page.allows_return());
+    let retry = sequence.next().unwrap();
+    for hart in &harts {
+        hart.request(retry);
+    }
+    unsafe { harts[1].complete(first) };
+    assert!(!harts[1].covers(retry));
+    assert!(!page.allows_return());
+    for hart in &harts {
+        unsafe { hart.complete(hart.pending().unwrap()) };
+    }
+    assert!(harts.iter().all(|hart| hart.covers(retry)));
+    unsafe { retention.settle() };
     assert!(page.allows_return());
 }

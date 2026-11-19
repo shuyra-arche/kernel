@@ -17,3 +17,6 @@ mod entry;
 mod flags;
 
 mod activity;
+
+#[path = "../../generic/mmu/internal/rendezvous.rs"]
+mod rendezvous;

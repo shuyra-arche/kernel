@@ -1,5 +1,5 @@
 //! Software receipts only; real fences and access retirement need the RV64 suite.
-use super::completion::{Mailbox, Sequence};
+use super::cpu::completion::{Mailbox, Sequence};
 
 #[test]
 fn delayed_duplicate_and_old_acknowledgements_cannot_complete_a_new_round() {
@@ -36,41 +36,6 @@ fn a_newer_global_round_covers_older_edits_but_never_the_reverse() {
     assert!(hart.covers(first) && hart.covers(second));
     let third = sequence.next().unwrap();
     assert!(!hart.covers(third));
-}
-
-#[test]
-fn partial_completion_and_retry_keep_the_page_retained() {
-    use super::{
-        cell::{Owner, Page},
-        support::Pool,
-    };
-    use std::sync::Arc;
-    let page = Arc::new(Page::from_internal(Owner::Kernel, Pool::new(0).page().unwrap()).unwrap());
-    let mut retention = page.prepare_hardware(false).unwrap();
-    retention.publish();
-    let retention = retention.retire();
-    let sequence = Sequence::new();
-    let harts = [Mailbox::new(), Mailbox::new(), Mailbox::new()];
-    let first = sequence.next().unwrap();
-    for hart in &harts {
-        hart.request(first);
-    }
-    unsafe { harts[0].complete(harts[0].pending().unwrap()) };
-    assert!(!harts.iter().all(|hart| hart.covers(first)));
-    assert!(!page.allows_return());
-    let retry = sequence.next().unwrap();
-    for hart in &harts {
-        hart.request(retry);
-    }
-    unsafe { harts[1].complete(first) };
-    assert!(!harts[1].covers(retry));
-    assert!(!page.allows_return());
-    for hart in &harts {
-        unsafe { hart.complete(hart.pending().unwrap()) };
-    }
-    assert!(harts.iter().all(|hart| hart.covers(retry)));
-    unsafe { retention.settle() };
-    assert!(page.allows_return());
 }
 
 #[test]

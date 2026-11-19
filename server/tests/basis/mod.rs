@@ -20,10 +20,6 @@ pub(crate) mod index {
 use error::FlatError;
 use state::slot;
 
-#[path = "../../src/metal/generic/mmu/internal/completion.rs"]
-mod completion;
-#[path = "../metal/generic/mmu/internal/rendezvous.rs"]
-mod rendezvous;
 #[path = "../../src/metal/generic/mmu/internal/fence.rs"]
 mod scope;
 #[path = "nest/translation.rs"]
