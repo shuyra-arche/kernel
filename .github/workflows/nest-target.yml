@@ -9,13 +9,32 @@ on:
       - ".github/workflows/nest-target.yml"
       - "server/tests/target/basis/nest/completion/**"
       - "server/tests/runner/**"
+      - "server/src/basis/nest/**"
+      - "server/src/metal/riscv/mmu/**"
+      - "api/**"
+      - "client/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/nest-target.yml"
+      - "server/tests/target/basis/nest/completion/**"
+      - "server/tests/runner/**"
+      - "server/src/basis/nest/**"
+      - "server/src/metal/riscv/mmu/**"
+      - "api/**"
+      - "client/**"
+  workflow_call:
+    inputs:
+      kernel_sha:
+        description: Exact Kernel provider revision selected by the calling owner
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       kernel_sha:
-        description: Exact Kernel ABI14 revision to verify
+        description: Optional exact revision; defaults to current PR or main HEAD
         type: string
-        required: true
-        default: "657f2a36aa4043ae2a5b419774577b6498bfc9e7"
+        required: false
       harts:
         description: Explicit Hart count (four-Hart is manual)
         type: choice
@@ -48,7 +67,7 @@ jobs:
       RUSTUP_TOOLCHAIN: nightly
       QEMU_RISCV64: qemu-system-riscv64
       QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
-      KERNEL_SHA: ${{ inputs.kernel_sha || '657f2a36aa4043ae2a5b419774577b6498bfc9e7' }}
+      KERNEL_SHA: ${{ inputs.kernel_sha || github.event.pull_request.head.sha || github.sha }}
       HARTS: ${{ github.event_name == 'workflow_dispatch' && inputs.harts || '1' }}
     steps:
       - name: Install target and execution tools
