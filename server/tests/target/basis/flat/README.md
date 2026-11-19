@@ -1,116 +1,17 @@
-# Implicit Flat target probe
+# Flat target test
 
-Build the host utility first, then run from the Kernel root:
+The Kernel-owned Flat probe exercises real implicit allocation and materialization,
+OutOfMemory recovery, reservation contention, owner cancellation,
+Page transfer and version checks on QEMU.
 
-```sh
-cargo +nightly build --locked --manifest-path server/tests/runner/Cargo.toml --target x86_64-unknown-linux-gnu
-verify=server/tests/runner/target/x86_64-unknown-linux-gnu/debug/verify
-```
-
-This standalone RV64 composition checks the real implicit Flat allocator,
-reservation, Page and transfer implementation. ABI 11 user Calls create explicit
-Flats, so the native user guest cannot enter this allocation path. The probe
-runs trusted Kernel Tasks without adding a public ABI or production test hooks.
-
-The Rust `flat` runner archives the Kernel provider's exact HEAD into a new
-output directory. The Flat Guest and tests live in Kernel; its standalone Cargo
-manifest pins the `platform-riscv` source to an immutable Vanllia Git commit.
-Cargo resolves that dependency and the runner preserves the resulting lock and
-build evidence. It does not archive, patch, or require a historical Vanllia test
-checkout. The disposable Kernel copy selects `provider.rs` as the crate root,
-attaches the test cases as a child of Flat, starts a Kernel Task at boot, and
-inserts guard entry/exit callbacks into the real SpinLock guard. Production
-source and visibility in the checkout remain unchanged.
-
-Use the root README's Rust target, QEMU 10.0.x and OpenSBI with SBI DBCN.
-Set `QEMU_RISCV64` and `QEMU_OPENSBI`. Run from the Kernel root; no
-`--fixture` argument or separate Vanllia checkout is accepted:
+The runner composes the selected source revision with a local Kernel Task probe
+in a disposable archive. The test-owned patch is guarded by reviewed source
+hashes; no production ABI or permanent test hook is added.
 
 ```sh
-"$verify" flat --kernel "$PWD" \
-  --output /tmp/flat-debug
-"$verify" flat --kernel "$PWD" \
-  --output /tmp/flat-release \
-  --profile release --rounds 3
+verify flat --kernel "$PWD" --output /tmp/flat --harts 1
+verify flat --kernel "$PWD" --output /tmp/flat-multi --harts 4
 ```
 
-Both commands select 1 and 4 Harts, 128 MiB RAM and multi-thread TCG. A boot
-passes only with all case markers, normal Task shutdown and no fatal report.
-Each boot has a 120-second timeout; internal waits have a 30-second deadline.
-The checked-in standalone lockfile and production target flags are preserved.
-
-## Contract cases
-
-- Exhaust the real 2 MiB allocator, release one block and materialize two Cells.
-  Check one Resident prefix survives repeated OutOfMemory, with unchanged Page
-  identity, physical address and data; after releasing memory, retry completes
-  with a distinct, zeroed second Page and no abandoned reservation.
-- Hold a real allocation reservation while a peer attempts materialization,
-  residency and transfer. Check consistent Busy. Four-Hart runs force that peer
-  onto a different Hart; one-Hart runs interleave ordinary Tasks. Close the
-  shared Owner epoch before publication and check Kernel adoption.
-- Cancel after actual physical allocation, return the unpublished Page exactly
-  once, observe the worker's Task exit, and check a later retry allocates fresh
-  identity. The counted allocator forwards real frame receipts and asserts that
-  its allocation and return execute with local interrupts enabled.
-- Race four materializers for eight rounds. Check one published Page identity,
-  versioned transfer with stale-destination rejection, preserved identity/data,
-  and sticky Missing after transfer and a rejected stale reverse move.
-
-The Owner closure case uses the production shared epoch, not a complete user
-Team destruction scenario. Cancellation drops the in-flight operation before
-Task exit; it does not inject asynchronous stack destruction. Stale identity
-and geometry fault injection remain in the host memory suite. No test certifies
-physical hardware timing or public SMP memory support.
-
-Workers use no-argument entries, matching the existing observation Task. During
-fixture development, concurrent creation with stack arguments hit
-`stack page materialized before args write`, and repeated creation overlapped
-retirement and hit `kernel frame not mapped` or Shootdown failure. All worker
-stacks/frames are therefore prepared at boot before secondary Harts start;
-workers are released and exit normally during the cases. This probe does not
-validate concurrent Kernel-Nest Task creation or qualify SMP memory draining.
-Kernel Task logs use the existing byte backend because buffered
-console output intentionally rejects their low-half supervisor stack pointers.
-All reporting occurs outside measured intervals.
-
-## Optional timing comparison
-
-Timing is exploratory and is not part of the required correctness check. Run
-baseline and candidate sequentially, without another test or build running:
-
-```sh
-"$verify" flat --kernel /absolute/path/to/baseline \
-  --output /tmp/flat-before \
-  --mode timing --profile release --rounds 3
-"$verify" flat --kernel "$PWD" \
-  --output /tmp/flat-after \
-  --mode timing --profile release --rounds 3
-```
-
-The same suite builds against the pre-reservation provider in timing mode.
-Each boot materializes 64 fresh 2 MiB Cells, dropping each before the next.
-Only guards whose lock address is that Flat's state contribute to `flat-hold`;
-`flat-call` measures the complete materialization call. Records are fixed-size
-per-Hart atomics, with no allocation, logging or new lock in the callback.
-Count, sum, maximum and 32 base-2 histogram bins use firmware clock ticks. Bin
-zero contains zero ticks; bin `i` contains `[2^(i-1), 2^i-1]` ticks for `1..30`;
-bin 31 includes all larger values. Convert with the reported ticks/second.
-
-The measured guard interval starts after acquisition and ends before unlock.
-It excludes lock acquisition wait and callback recording cost. Both providers
-receive identical callbacks. Reception windows and host/firmware pauses can
-occur inside a hold: elapsed lock ownership is not uninterrupted IRQ masking.
-The single active caller isolates zeroing cost; the contract mode covers
-contention separately. This is neither a steady mixed-workload benchmark nor a
-WCET argument. Report all rounds and outliers, including whole-call cost.
-
-Each output retains inputs, tool versions, CPU quota/affinity, exact commands,
-source and Cargo-locked Platform identities, suite/firmware/lock/ELF hashes, composition diff,
-build output and per-boot serial/stderr/status. Keep raw evidence as CI
-artifacts or attached review assets rather than committing logs to source.
-
-Reviewed source inputs must match the SHA-256 contracts under
-`server/tests/runner/composition/`. An incompatible historical baseline fails
-explicitly and requires a separately reviewed composition contract. See the
-[verification guide](../../../README.md) for evidence and CI ownership.
+Normal CI runs one Hart. Four-Hart behavior is opt-in and must not be inferred
+from one-Hart evidence.

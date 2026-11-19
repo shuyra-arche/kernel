@@ -152,7 +152,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kernel-memory-tests"
+name = "kernel-tests"
 version = "0.0.1"
 dependencies = [
  "bitflags",

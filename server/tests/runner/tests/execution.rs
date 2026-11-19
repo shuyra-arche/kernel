@@ -1,7 +1,7 @@
 use kernel_verification::{capsule, process};
 use std::{fs, process::Command, thread, time::Duration};
 fn scratch(name: &str) -> std::path::PathBuf {
-    let root = std::env::temp_dir().join(format!("vanllia-{name}-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("kernel-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir(&root).unwrap();
     root

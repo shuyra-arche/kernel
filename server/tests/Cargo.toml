@@ -1,5 +1,5 @@
 [package]
-name = "kernel-memory-tests"
+name = "kernel-tests"
 version.workspace = true
 edition.workspace = true
 publish = false
