@@ -346,7 +346,6 @@ fn narrowing_releases_serial_for_withdrawal_and_revalidates_a_new_heir_before_co
     assert_eq!(root.scope(), map(1, 0, 4));
 }
 
-
 #[test]
 fn revoke_before_publication_cannot_retain_a_new_route_or_close_a_sibling() {
     // Real Pend branch closure with a scripted Nest: this verifies admission,
@@ -402,7 +401,6 @@ fn revoke_after_publication_keeps_the_exact_route_until_withdrawal_completes() {
     ledger::return_(&task, sibling.token()).unwrap();
     assert!(!sibling.authority().external_pending());
 }
-
 
 #[test]
 fn task_pair_uses_actual_owners_same_task_once_and_rejects_duplicate_identity() {
