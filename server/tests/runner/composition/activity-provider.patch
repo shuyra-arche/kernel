@@ -29,7 +29,7 @@
          .any(|s| matches!(s, Slot::Live(_)))
  }
 +
-+#[path = "../../../tests/target/basis/nest/memo/activity/pinned/probe.rs"]
++#[path = "../../../tests/target/basis/nest/memo/activity/probe.rs"]
 +pub(crate) mod probe;
 --- a/server/src/basis/nest/translation/retirement.rs
 +++ b/server/src/basis/nest/translation/retirement.rs
@@ -112,7 +112,7 @@
      }
  }
 +
-+#[path = "../../../../../tests/target/basis/nest/memo/activity/pinned/fences.rs"]
++#[path = "../../../../../tests/target/basis/nest/memo/activity/fences.rs"]
 +pub(crate) mod activity_fences;
 --- a/server/src/metal/riscv/mmu/internal/table/mod.rs
 +++ b/server/src/metal/riscv/mmu/internal/table/mod.rs

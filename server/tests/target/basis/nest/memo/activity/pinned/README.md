@@ -9,7 +9,9 @@ The Activity Guest, stack, probes and source contracts originate from the
 exact Kernel revision above. The test-only support, linker and firmware
 bootstrap originally came from Vanllia `f2dfa14f5b1f7bd47ee84841ba5c7112e8475950`,
 with the already-reviewed `activity-support` and `activity-platform`
-transformations incorporated here. Kernel's private Guest no longer requires
+transformations incorporated here.
+The `activity-pinned-provider` patch retains the ABI13 provider's original
+SHA-256 preimage contract, separate from main's newer ABI source hashes. Kernel's private Guest no longer requires
 a checkout of Vanllia's product test workspace.
 
 `platform-riscv` remains an ordinary exact-commit Git build dependency.

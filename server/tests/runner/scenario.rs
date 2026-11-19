@@ -188,7 +188,7 @@ fn prepare(args: &Inputs, kernel: &Path, root: &Path, kind: Kind) -> Result<Vari
             // This is the selected published ABI13 Guest and Platform pair,
             // owned by Kernel rather than the Vanllia product test directory.
             // Keep the historical source preimage checks for Kernel patches.
-            compose::apply("activity-provider", &provider, &patches)?;
+            compose::apply("activity-pinned-provider", &provider, &patches)?;
             if *stopped {
                 compose::apply("activity-stopped", &provider, &patches)?;
                 command.env("ACTIVITY_STOPPED", "1");

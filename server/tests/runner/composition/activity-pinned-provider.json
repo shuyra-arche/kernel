@@ -1,0 +1,9 @@
+{
+  "server/src/basis/nest/activity.rs": "f657e060b30270c354bd21a60e39107472924a36389eadf60284c21f6e8ccc3b",
+  "server/src/basis/nest/translation/retirement.rs": "f0c537364b0a7c8de92233864066f477071c742c32fae134814db541e07ff777",
+  "server/src/entry/boot/mod.rs": "86be32774f846bd9e98781c236c77b71f3376c1ac988647b59c9f63afd91b0f8",
+  "server/src/entry/report/shutdown.rs": "6e7b3899751611073ddbccc2164c61108ae61c9dbd62d1dca45d854c6cfea598",
+  "server/src/entry/trap/mod.rs": "b1b398d6d32b8c298890def38f258f67a9828e01692c588ab8d06c34608376b8",
+  "server/src/metal/riscv/mmu/internal/completion.rs": "4dfb9106a6d99a08e589e76e92ca16de7e61b637a6b5bbb49d2845e04a52e610",
+  "server/src/metal/riscv/mmu/internal/table/mod.rs": "6c6d240d794ac54d86de50670ee5d567792f97702d133141297750cd29ac4a86"
+}
