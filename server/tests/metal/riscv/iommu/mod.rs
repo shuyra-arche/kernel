@@ -49,7 +49,7 @@ mod hardware;
 mod host_lock;
 mod lifecycle;
 mod retirement;
-#[path = "../../../basis/support.rs"]
+#[path = "../../../basis/cell/support.rs"]
 mod support;
 mod metal {
     pub(crate) use crate::host_lock as sync;
