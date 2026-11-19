@@ -154,11 +154,14 @@ by the integration repository.
 Vanllia's current integration CI verifies five direct Native/ABI/std
 composition cases. It calls Kernel's
 [pinned target workflow](../../.github/workflows/pinned-target.yml) for six
-separate Activity/Unsupported/Stopped/IRQ single-Hart cases, passing only the
-exact product Kernel gitlink SHA. Kernel owns this test matrix, its reviewed
-fixture pin and its QEMU evidence. The reusable workflow is also manually
-runnable with an immutable Kernel SHA; it verifies the **selected source
-revision**, not the unrelated Kernel main ABI candidate. Kernel's separate Flat, pinned ABI13 Activity and IOMMU target workflows
+separate Activity/Unsupported/Stopped/IRQ single-Hart cases, passing only
+the exact product Kernel gitlink SHA. The Activity cases select Kernel's
+reviewed published ABI13 owner-runner and frozen Guest, without a Vanllia
+product test fixture. IRQ retains the immutable historical Kernel runner and
+its strictly checked Vanllia platform fixture until independently migrated.
+The reusable workflow is also manually runnable with an immutable Kernel SHA;
+it verifies the **selected source revision**, not the unrelated Kernel main
+ABI candidate. Kernel's separate Flat, pinned ABI13 Activity and IOMMU target workflows
 remain owner-side checks.
 The historical multi-Hart SMP/Realtime probes are not routine CI gates;
 their explicit runner commands remain available. A green single-Hart CI
