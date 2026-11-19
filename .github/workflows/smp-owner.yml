@@ -1,26 +1,23 @@
 name: Kernel explicit ABI13 completion qualification
 
-# This workflow is never selected by ordinary CI. It is enabled for this
-# one-time owner migration review or by explicit manual dispatch. Only 1 Hart
-# is used in the automated equivalence check; SMP >=2 Hart is manual-only.
+# Explicit owner qualification only. Never scheduled by ordinary PR or push CI.
+# Four-Hart completion, migration and shutdown checks must be separately invoked.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/smp-owner.yml"
-      - "server/tests/runner/**"
-      - "server/tests/target/smp/**"
-      - "server/tests/target/metal/riscv/mmu/completion/**"
-      - "server/tests/target/basis/unit/lifecycle/**"
-      - "server/tests/target/basis/nest/retirement/**"
-      - "server/tests/target/basis/room/shutdown/**"
   workflow_dispatch:
+    inputs:
+      harts:
+        description: Explicit emulated Hart count (one-Hart does not qualify SMP)
+        type: choice
+        required: true
+        default: "4"
+        options: ["1", "4"]
 
 permissions:
   contents: read
 
 concurrency:
-  group: kernel-owner-smp-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: kernel-owner-smp-${{ github.run_id }}
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -28,10 +25,7 @@ defaults:
 
 jobs:
   qualification:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.pull_request.body, 'Owner SMP migration: verify')
-    name: ABI13 ${{ matrix.case }} / h1
+    name: ABI13 ${{ matrix.case }} / h${{ inputs.harts }}
     runs-on: ubuntu-latest
     container: debian:trixie
     timeout-minutes: 25
@@ -53,6 +47,7 @@ jobs:
       RUSTUP_TOOLCHAIN: nightly
       QEMU_RISCV64: qemu-system-riscv64
       QEMU_OPENSBI: /usr/lib/riscv64-linux-gnu/opensbi/generic/fw_dynamic.bin
+      HARTS: ${{ inputs.harts }}
     steps:
       - name: Install exact target and execution prerequisites
         run: |
@@ -91,7 +86,7 @@ jobs:
           esac
           "$runner" "$KIND" --kernel "$GITHUB_WORKSPACE/.integration/provider" \
             --output "$GITHUB_WORKSPACE/.integration/evidence" \
-            --profile release --harts 1 "${args[@]}"
+            --profile release --harts "$HARTS" "${args[@]}"
       - name: Expose failed source/build/target evidence
         if: failure()
         run: |
@@ -105,7 +100,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: abi13-owner-${{ matrix.case }}-h1
+          name: abi13-owner-${{ matrix.case }}-h${{ inputs.harts }}
           include-hidden-files: true
           path: .integration/evidence/
           if-no-files-found: warn
