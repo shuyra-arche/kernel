@@ -19,6 +19,10 @@ name = "memory"
 path = "basis/mod.rs"
 
 [[test]]
+name = "cell"
+path = "basis/cell/mod.rs"
+
+[[test]]
 name = "translation"
 path = "metal/riscv/mmu/mod.rs"
 

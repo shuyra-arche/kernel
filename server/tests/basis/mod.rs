@@ -50,8 +50,6 @@ mod levels;
 mod maintenance;
 #[path = "flat/materialize.rs"]
 mod materialize;
-#[path = "cell/ownership.rs"]
-mod ownership;
 #[path = "cell/retention.rs"]
 mod retention;
 #[path = "cell/support.rs"]

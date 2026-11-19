@@ -53,3 +53,17 @@ fn invalid_indices_reject_the_entire_import_and_return_all_cells() {
         assert_eq!((pools[0].gives(), pools[1].gives()), (1, 1));
     }
 }
+
+#[test]
+fn page_errors_preserve_the_logical_source_failure_contract() {
+    use crate::{cell::PageError, error::FlatError};
+    for (physical, logical) in [
+        (PageError::InvalidOwner, FlatError::OutOfRange),
+        (PageError::InvalidRange, FlatError::NotAligned),
+        (PageError::IdentityExhausted, FlatError::OutOfMemory),
+        (PageError::OutOfMemory, FlatError::OutOfMemory),
+        (PageError::Busy, FlatError::Busy),
+    ] {
+        assert_eq!(FlatError::from(physical), logical);
+    }
+}
