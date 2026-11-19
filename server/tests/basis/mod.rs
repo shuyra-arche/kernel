@@ -63,7 +63,6 @@ mod memo;
 #[path = "../../src/basis/flat/storage/mod.rs"]
 mod state;
 
-
 #[allow(dead_code)]
 #[path = "../../src/metal/generic/mmu/external/mod.rs"]
 mod contract;

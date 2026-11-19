@@ -20,17 +20,17 @@ pub(crate) mod index {
 use state::slot;
 
 #[allow(dead_code, unused_imports)]
-#[path = "../../../src/basis/name/mod.rs"]
-mod name;
+#[path = "../../../src/basis/cell/change.rs"]
+pub(crate) mod changes;
 #[allow(dead_code, unused_imports)]
 #[path = "../../support/lock.rs"]
 mod host_lock;
+#[allow(dead_code, unused_imports)]
+#[path = "../../../src/basis/name/mod.rs"]
+mod name;
 #[allow(dead_code)]
 #[path = "../../../src/metal/generic/memory/mod.rs"]
 pub mod proof;
-#[allow(dead_code, unused_imports)]
-#[path = "../../../src/basis/cell/change.rs"]
-pub(crate) mod changes;
 #[allow(dead_code, unused_imports)]
 #[path = "../../../src/basis/flat/storage/mod.rs"]
 mod state;
@@ -72,7 +72,7 @@ mod geometry;
 mod holding;
 mod maintenance;
 mod materialize;
-mod residency;
 mod reshape;
+mod residency;
 #[path = "../cell/support.rs"]
 mod support;
