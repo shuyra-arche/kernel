@@ -1,15 +1,20 @@
-# Kernel target runner
+# Target runner
 
-`verify` runs Kernel-owned Flat and Nest target checks against an explicitly
-selected Kernel source tree. It assembles a disposable provider, starts QEMU,
-checks the Guest's own completion markers, and records source/ELF/lockfile,
-build, execution, timeout and process-cleanup evidence.
+`verify run --suite <project-directory> --kernel <repository> --output <fresh-directory>`
+executes a project discovered from `suite.json`. Target projects own their
+source patch contracts, Guest inputs and observable assertions; Runner owns
+source capture, build invocation, QEMU or Cargo test execution, timeouts,
+process cleanup and evidence.
 
-`composition/` contains only source patches required by the active Flat and
-Nest probes. SHA-256 preimages must match before applying them. Test-specific
-assertions belong to the corresponding Guest, not to the generic runner.
+A QEMU suite can declare an additional Guest/Capsule, imported test helpers,
+Cargo features and environment, required result markers and optional distinct
+capture evidence. A Cargo test suite names its owning package and test target.
+Adding a new project does not change Runner code.
 
-On Linux each child executes in its own process group. Unexpected survivors
-are killed and invalidated, including when the original command exits zero.
+`composition/` contains only the shared patch application mechanism. Source
+patches are stored inside the test projects and protected by exact preimage
+SHA-256 contracts. The disposable provider is never the working source tree.
 
-See `../README.md` for commands and supported execution modes.
+On Linux, child processes run in isolated process groups. Leftover descendants
+invalidate success; process output, build failures and cleanup receipts are
+retained for diagnosis. See `../README.md` for invocation.

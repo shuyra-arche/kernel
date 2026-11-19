@@ -1,0 +1,45 @@
+{
+  "id": "nest-completion",
+  "profiles": [
+    "debug",
+    "release"
+  ],
+  "harts": [
+    1,
+    4
+  ],
+  "sources": [
+    "server/src/basis/nest/**",
+    "server/src/basis/flat/**",
+    "server/src/basis/cell/**",
+    "server/src/basis/unit/**",
+    "server/src/entry/**",
+    "server/src/metal/riscv/mmu/**",
+    "server/src/metal/generic/sync/**",
+    "api/**",
+    "client/**",
+    "Cargo.lock"
+  ],
+  "run": {
+    "kind": "qemu",
+    "kernel": "memory-platform",
+    "guest": {
+      "binary": "memory-guest",
+      "capsule": 14
+    },
+    "imports": [
+      "target/metal/riscv/mmu/completion"
+    ],
+    "patch_provider": true,
+    "expects": [
+      "task: all tasks exited",
+      "PASS nest-completion abi=14 alias=retained withdrawal=2 replay=2 task-fault=2 reuse=2",
+      "PASS smp-completion harts={harts} bounded=1 retained=1 retry=1",
+      "PASS smp-instructions harts={harts} bounded=1 retained=1 retry=1"
+    ],
+    "distinct": {
+      "pattern": "PASS nest-writer task=(\\d+)",
+      "count": 2
+    }
+  }
+}

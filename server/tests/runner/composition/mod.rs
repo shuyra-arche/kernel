@@ -1,5 +1,4 @@
-//! Reviewed source composition is a fail-closed input, never runtime text rewriting.
-//! Every touched preimage must match its SHA-256 before git apply checks context.
+//! Reviewed source patches for a test's disposable Kernel provider.
 use kernel_verification::*;
 use std::{
     collections::BTreeMap,
@@ -7,36 +6,32 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+
 pub fn suite() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .to_owned()
 }
-pub fn apply(name: &str, root: &Path, evidence: &Path) -> Result<()> {
-    let base = suite().join("runner/composition");
-    let contract = base.join(format!("{name}.json"));
-    let patch = base.join(format!("{name}.patch"));
+
+pub fn apply(project: &Path, root: &Path, evidence: &Path) -> Result<()> {
+    let contract = project.join("provider.json");
+    let patch = project.join("provider.patch");
     let inputs: BTreeMap<String, String> = serde_json::from_slice(&fs::read(&contract)?)?;
-    require(
-        !inputs.is_empty(),
-        format!("empty composition contract {name}"),
-    )?;
+    require(!inputs.is_empty(), "empty provider patch contract")?;
     for (path, expected) in &inputs {
         require(
             digest(&root.join(path))? == *expected,
-            format!("composition {name} preimage changed: {path}; review and regenerate the patch"),
+            format!("provider preimage changed: {path}; review the test patch"),
         )?;
     }
-    // --directory is absolute so an enclosing checkout cannot change path scope.
     for check in [true, false] {
         let mut command = Command::new("git");
         command
             .current_dir(root)
             .env("GIT_CEILING_DIRECTORIES", root)
             .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE");
-        command
+            .env_remove("GIT_WORK_TREE")
             .args(["apply", "--unsafe-paths"])
             .arg(format!("--directory={}", root.display()));
         if check {
@@ -45,16 +40,14 @@ pub fn apply(name: &str, root: &Path, evidence: &Path) -> Result<()> {
         let output = command.arg(&patch).output()?;
         require(
             output.status.success(),
-            format!(
-                "composition {name}: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ),
+            format!("provider patch: {}", String::from_utf8_lossy(&output.stderr)),
         )?;
     }
-    fs::copy(&patch, evidence.join(format!("{name}.patch")))?;
-    fs::copy(&contract, evidence.join(format!("{name}.json")))?;
+    fs::copy(&patch, evidence.join("provider.patch"))?;
+    fs::copy(&contract, evidence.join("provider.json"))?;
     Ok(())
 }
+
 pub fn copy(relative: &str, destination: &Path) -> Result<()> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
@@ -62,6 +55,7 @@ pub fn copy(relative: &str, destination: &Path) -> Result<()> {
     fs::copy(suite().join(relative), destination)?;
     Ok(())
 }
+
 pub fn hashes(root: &Path) -> Result<BTreeMap<String, String>> {
     let mut result = BTreeMap::new();
     fn visit(root: &Path, path: &Path, result: &mut BTreeMap<String, String>) -> Result<()> {
