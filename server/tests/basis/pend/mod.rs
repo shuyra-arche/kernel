@@ -13,10 +13,10 @@ mod authority;
 mod carried;
 mod creation;
 mod exports;
-mod storage;
 #[path = "../../../src/basis/pend/source/members.rs"]
 mod members;
 mod membership;
+mod storage;
 mod metal {
     pub(crate) mod sync {
         pub(crate) use crate::host_lock::{LegacyGuard, LegacyLock, order};
