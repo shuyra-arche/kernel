@@ -38,6 +38,8 @@ pub(crate) use provenance::Provenance;
 mod external;
 mod geometry;
 mod hold;
+mod members;
+use members::Members;
 pub(crate) mod maintenance;
 mod tracking;
 pub(crate) use tracking::Tracking;
@@ -84,7 +86,7 @@ pub(crate) struct SourceAuthorization {
     /// 成员与 Registry 项是同一个 `Arc<RangeBinding>`，所以“还欠着谁”只有这一份
     /// 事实：只有显式结清（`Nest::retire_span` / `reap_spans`）才撒下成员，
     /// 不靠 `Weak` 升不上或 Drop 替它做主。撤销方也按它把名下关系收回去关。
-    bindings: LegacyLock<crate::basis::sync::order::SourceBindings, Vec<Arc<RangeBinding>>>,
+    bindings: LegacyLock<crate::basis::sync::order::SourceBindings, Members<RangeBinding>>,
     blocks: LegacyLock<crate::basis::sync::order::SourceBlocks, Vec<Arc<RangeBlock>>>,
     origins: LegacyLock<crate::basis::sync::order::SourceOrigins, Vec<Weak<Provenance>>>,
     phase: LegacyLock<crate::basis::sync::order::SourcePhase, Phase>,
@@ -115,7 +117,7 @@ impl SourceAuthorization {
             holds: AtomicUsize::new(0),
             inflight: LegacyLock::new(Vec::new()),
             revoked: LegacyLock::new(false),
-            bindings: LegacyLock::new(Vec::new()),
+            bindings: LegacyLock::new(Members::new()),
             blocks: LegacyLock::new(Vec::new()),
             origins: LegacyLock::new(Vec::new()),
             phase: LegacyLock::new(Phase::Private(range)),
@@ -278,25 +280,20 @@ impl SourceAuthorization {
         self.inflight.lock().retain(|(held, _)| *held != id);
     }
 
-    /// 备下一条成员的位置（可失败的准备；调用方在同一提交段里紧接着写入）。
-    pub(crate) fn reserve_binding(&self) -> Result<(), PendFail> {
-        let mut members = self.bindings.lock();
-        members.try_reserve(1).map_err(|_| PendFail::OutOfMemory)
+    /// Reserve both capacity and the obligation to publish or cancel one member.
+    /// Dropping the reservation cannot leak a slot after a failed Insert.
+    pub(crate) fn reserve_binding(&self) -> Result<PreparedBinding<'_>, PendFail> {
+        self.bindings.lock().prepare()?;
+        Ok(PreparedBinding {
+            source: self,
+            pending: true,
+        })
     }
 
-    /// 写入一条成员：容量已在同一提交段备好，这一步只推入。
-    pub(crate) fn register_binding(&self, binding: Arc<RangeBinding>) {
-        self.bindings.lock().push(binding);
-    }
-
-    /// 撒下一条成员：这份绑定已结清（`Nest::retire_span` / `reap_spans` 的唯一收尾）。
-    ///
-    /// 最后一条成员撤下就是显式的“结清”事件：来源不再占着任何东西时顺带向上收尾，
-    /// 不在 `Drop` 里猜。
+    /// Exact Nest retirement removes the original member, never a newly reused
+    /// Span position. Discovery alone is not proof of completion.
     pub(crate) fn release_binding(self: &Arc<Self>, binding: &Arc<RangeBinding>) {
-        self.bindings
-            .lock()
-            .retain(|held| !Arc::ptr_eq(held, binding));
+        self.bindings.lock().remove(binding);
     }
 
     /// External access blocks private CPU publication until trusted settlement.
@@ -342,31 +339,30 @@ impl SourceAuthorization {
     }
 
     pub(crate) fn first_binding(&self) -> Option<Arc<RangeBinding>> {
-        self.bindings.lock().first().cloned()
+        self.bindings.lock().first()
     }
 
-    /// Query outside source/Nest locks; upgrading a last Nest may run retirement.
+    /// Query without holding source locks while upgrading Nest or retiring work.
     pub(crate) fn pending_cpu(&self) -> bool {
-        let Ok(bindings) = self.bindings() else {
-            return true;
-        };
-        bindings.iter().any(|binding| {
+        self.bindings().any(|binding| {
             binding
                 .nest()
                 .upgrade()
-                .is_none_or(|nest| !nest.is_external() && nest.binding_pending(binding))
+                .is_none_or(|nest| !nest.is_external() && nest.binding_pending(&binding))
         })
     }
 
-    /// 未结 CPU 身份的快照；不复制关系或物理持有。
-    pub(crate) fn bindings(&self) -> Result<Vec<Arc<RangeBinding>>, PendFail> {
-        let held = self.bindings.lock();
-        let mut members = Vec::new();
-        members
-            .try_reserve(held.len())
-            .map_err(|_| PendFail::OutOfMemory)?;
-        members.extend(held.iter().cloned());
-        Ok(members)
+    /// A bounded-space traversal of the members visible at its starting boundary.
+    /// Each item is cloned individually; new publication cannot extend the scan.
+    /// Removed members may disappear, but neither an old identity nor a reused
+    /// position is mistaken for a different member.
+    pub(crate) fn bindings(&self) -> BindingScan<'_> {
+        let end = self.bindings.lock().upper();
+        BindingScan {
+            source: self,
+            after: 0,
+            end,
+        }
     }
 
     /// 已失活来源仍须保留补关入口的义务。
@@ -419,6 +415,46 @@ impl SourceAuthorization {
     /// The returned claim owns rollback until Share adoption commits it.
     pub(crate) fn claim(&self) -> Result<creation::Claim<'_>, PendFail> {
         self.qualification.claim()
+    }
+}
+
+/// The source keeps this admission until a Nest relation is published or the
+/// operation is abandoned. Only the exact successful Insert publishes a member.
+#[must_use = "prepared membership must be published or canceled"]
+pub(crate) struct PreparedBinding<'a> {
+    source: &'a SourceAuthorization,
+    pending: bool,
+}
+
+impl PreparedBinding<'_> {
+    pub(crate) fn publish(mut self, binding: Arc<RangeBinding>) {
+        self.source.bindings.lock().publish(binding);
+        self.pending = false;
+    }
+}
+
+impl Drop for PreparedBinding<'_> {
+    fn drop(&mut self) {
+        if self.pending {
+            self.source.bindings.lock().cancel();
+        }
+    }
+}
+
+/// Discovery cursor is a source-local, non-reused publication sequence.
+pub(crate) struct BindingScan<'a> {
+    source: &'a SourceAuthorization,
+    after: usize,
+    end: usize,
+}
+
+impl Iterator for BindingScan<'_> {
+    type Item = Arc<RangeBinding>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (sequence, binding) = self.source.bindings.lock().after(self.after, self.end)?;
+        self.after = sequence;
+        Some(binding)
     }
 }
 

@@ -293,7 +293,7 @@ impl SourceAuthorization {
     ) -> Result<kernel_api::model::flat::BlockStatus, PendFail> {
         let mut status = block.inspect();
         status.failed |= self.failed_origins(block)?;
-        for binding in self.bindings()? {
+        for binding in self.bindings() {
             let Some(nest) = binding.nest().upgrade() else {
                 continue;
             };
