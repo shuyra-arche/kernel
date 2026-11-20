@@ -17,7 +17,7 @@ pub(crate) fn withdraw(
             return Ok(());
         };
         cursor = Arc::as_ptr(&source) as usize;
-        for binding in source.bindings()? {
+        for binding in source.bindings() {
             let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
             let matches = {
                 let _commit = crate::basis::commit();

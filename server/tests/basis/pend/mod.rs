@@ -13,6 +13,9 @@ mod authority;
 mod carried;
 mod creation;
 mod exports;
+#[path = "../../../src/basis/pend/source/members.rs"]
+mod members;
+mod membership;
 mod storage;
 mod metal {
     pub(crate) mod sync {

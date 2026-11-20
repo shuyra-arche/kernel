@@ -17,7 +17,7 @@ pub(crate) fn withdraw_source_branch(
     if let Some(branch) = meta.authority(token) {
         source.retire_origins(Some(&branch), None)?;
     }
-    for binding in source.bindings()? {
+    for binding in source.bindings() {
         if binding.page().is_none() {
             continue;
         }
@@ -37,7 +37,7 @@ pub(crate) fn withdraw_source_window(
         .get()
         .checked_add(count.get())
         .ok_or(PendFail::NotAligned)?;
-    for binding in source.bindings()? {
+    for binding in source.bindings() {
         let Some(page) = binding.page() else {
             continue;
         };

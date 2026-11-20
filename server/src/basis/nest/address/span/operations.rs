@@ -54,8 +54,8 @@ impl Span {
             .map_err(memo::namespace_error)?;
         let binding = authority::RangeBinding::new_position(self.identity(), nest, index)
             .map_err(memo::namespace_error)?;
-        source
-            .source()
+        let authorization = source.source().clone();
+        let registration = authorization
             .reserve_binding()
             .map_err(memo::namespace_error)?;
 
@@ -75,7 +75,6 @@ impl Span {
         if !nest.is_external() {
             crate::basis::nest::index::source::register(&range, self, Some(&binding))?;
         }
-        let authorization = source.source().clone();
         let replaced = {
             if !translation.is_open() || !self.is_open() {
                 return Err(NestError::NoRegion);
@@ -98,7 +97,7 @@ impl Span {
             replaced
         };
         self.changed();
-        authorization.register_binding(binding);
+        registration.publish(binding);
         replaced.release();
         self.faults
             .lock()

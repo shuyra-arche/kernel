@@ -170,7 +170,7 @@ impl HoldTable {
             let Some(source) = source else {
                 break;
             };
-            for binding in source.bindings().map_err(|_| PendFail::Busy)? {
+            for binding in source.bindings() {
                 let nest = binding.nest().upgrade().ok_or(PendFail::Busy)?;
                 if nest
                     .binding_source(&binding)

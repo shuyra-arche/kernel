@@ -224,7 +224,7 @@ pub(crate) fn settle_block(
     for (_, page) in selected.materialized_cells().map_err(|_| PendFail::Busy)? {
         block.retain(page)?;
     }
-    for binding in source.bindings()? {
+    for binding in source.bindings() {
         if binding.page().is_some() {
             continue;
         }
