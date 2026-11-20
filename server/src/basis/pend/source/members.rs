@@ -51,7 +51,9 @@ impl<T> Members<T> {
     }
 
     pub(crate) fn after(&self, cursor: usize, end: usize) -> Option<(usize, Arc<T>)> {
-        let at = self.entries.partition_point(|(sequence, _)| *sequence <= cursor);
+        let at = self
+            .entries
+            .partition_point(|(sequence, _)| *sequence <= cursor);
         self.entries
             .get(at)
             .filter(|(sequence, _)| *sequence <= end)
