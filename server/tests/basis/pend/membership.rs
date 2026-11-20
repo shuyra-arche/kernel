@@ -10,6 +10,7 @@ fn membership_scan_has_a_fixed_boundary_and_does_not_reuse_identity() {
     let second = Arc::new(8u8);
     index.prepare().unwrap();
     index.publish(first.clone());
+    assert!(Arc::ptr_eq(&index.first().unwrap(), &first));
     index.prepare().unwrap();
     index.publish(second.clone());
 
