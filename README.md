@@ -42,7 +42,7 @@ the bootable system image through the
 
 Pin API and Client to the same [release tag](https://github.com/shuyra-arche/kernel/releases)
 or exact Git revision. Review the
-[API contracts and version selection](api/README.md#version-selection)
+[API contracts and version selection](api/README.md#abi-version)
 before updating a pin. GitHub releases identify source revisions. The
 [Shuyra release standard](https://github.com/shuyra-arche/.github/blob/main/docs/engineering/release.md)
 defines the date-based tags. See [Contributing](CONTRIBUTING.md) for review

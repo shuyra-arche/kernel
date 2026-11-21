@@ -7,7 +7,7 @@ runtime, service implementation, TLS registry or ownership manager.
 ## Image and transport
 
 API, Client and Server implement ABI/Ledger 14 with Capsule format 2.
-No ABI feature is needed. Use [`memory::{flat,nest}`](src/memory.rs) for memory
+No ABI feature is needed. Use [`memory::{flat,nest}`](src/memory/mod.rs) for memory
 operations and the accepted non-memory [`call::*`](src/call/) interfaces.
 Old Cell and Share Open/Shut operations are rejected by the provider.
 
@@ -23,7 +23,7 @@ operation number, `a0..a5` as inputs and `a0..a2` as outputs.
 S-mode `ecall` belongs to SBI, not this dispatcher. A terminal
 `Unit.Exit` does not return normally.
 
-For native memory, [`memory::invoke_with`](src/memory.rs) uses checked
+For native memory, [`memory::invoke_with`](src/memory/mod.rs) uses checked
 fixed-size request/reply buffers and validates response correlation;
 `memory::flat::invoke` and `memory::nest::invoke` execute selected
 calls. A reply delivery error or a missing output **does not prove
