@@ -39,7 +39,8 @@ transitional combined representation still exists inside the codec.
 `nest::Action::ReleaseRange` releases a page-aligned subrange without closing
 it. `MemoPosition` is the 16-byte (range Pend, fixed-origin page) coordinate.
 A descriptive SpanId still exists in the Pend scope for disambiguation; it
-never grants authority by itself. See [ReleaseRange](../docs/release-range.md).
+never grants authority by itself. See the
+[native request definitions](src/abi/memory/request.rs).
 ABI 13 and older calls, Ledger entries and Capsules reject. Versioned RequestIds
 and a bounded journal report Rejected/Pending/Committed/Failed outcomes.
 
@@ -120,10 +121,7 @@ noncoherent sustained sharing, ATS/PRI or bypass must fail closed,
 not assume a platform proof from user-supplied labels. QEMU validation
 does not qualify physical hardware.
 
-See [Nest retirement](../docs/nest-retirement.md),
-[IOMMU ownership](../docs/iommu-failure.md) and
-[Pend delegation](../docs/pend-delegation.md) for the current
-failure and authorization boundaries. [Verification](../server/tests/README.md)
+[Verification](../server/tests/README.md)
 separates Host, RV64, QEMU and real hardware evidence.
 
 ## Authorized CPU activity
@@ -137,8 +135,6 @@ find the correlated Sign, or `Client::memory::activity::pair`.
 
 Only explicitly qualified 4 KiB CPU leaves are supported. Larger geometry,
 External and unqualified configurations return ShareFail::Unsupported before
-publishing grants or clearing bits. The
-[protocol and migration](../docs/memory-activity.md) explain sparse View
-coordinates, fresh epochs, unread facts, cancellation and uncertainty.
-No call number or descriptor width is added. A/D never authorizes physical
-reuse; the global statistics page remains unchanged.
+publishing grants or clearing bits. No call number or descriptor width is
+added. A/D never authorizes physical reuse; the global statistics page
+remains unchanged.

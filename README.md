@@ -6,12 +6,9 @@ across protection boundaries.
 
 ## Documentation
 
-- Read the [design guide](docs/README.md) for the Typst design and its worked
-  example of a request crossing two isolation domains.
+- Read the [design guide](docs/README.md) for the execution and memory models.
 - Read the [Kernel API](api/README.md) for public contracts and the
   [Client guide](client/README.md) for invoking them.
-- Use the [source map](docs/source-map.md) to find the implementation of a
-  mechanism.
 
 ## Packages
 
@@ -48,8 +45,7 @@ or exact Git revision. Review the
 [API contracts and version selection](api/README.md#version-selection)
 before updating a pin. GitHub releases identify source revisions. The
 [Shuyra release standard](https://github.com/shuyra-arche/.github/blob/main/docs/engineering/release.md)
-defines the date-based tags. The [Preview Alpha record](docs/releases/README.md)
-records the published source preview and its verification. See [Contributing](CONTRIBUTING.md) for review
+defines the date-based tags. See [Contributing](CONTRIBUTING.md) for review
 and verification requirements.
 
 Kernel and API derive from [anreonyr/sqware](https://github.com/anreonyr/sqware)

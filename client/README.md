@@ -45,8 +45,8 @@ Exit may target the Task, or a Team explicitly permitting member exit.
 grant an unrelated active or Dormant Task. This gives neither
 management authority nor extra resource access; the child retains
 scope/data ceilings, ancestor revocation and fixed recipient
-budgets. See [Pend](../api/src/abi/call/pend.rs) and its
-[registration rules](../docs/pend-delegation.md).
+budgets. See the [Pend calls](../api/src/abi/call/pend.rs) and the
+[API authorization and lifecycle guide](../api/README.md#authorization-and-lifecycle).
 
 Named Ledger entries identify initial capabilities; the actual Pend
 authorizes them. `Entry::dispatch()` returns a distinct `(View, Sign)`
@@ -57,7 +57,7 @@ cleanliness. Use existing `call::share_view::derive` with a sampling-authorized 
 source and readonly Share limits. `memory::activity::pair(view)` resolves the
 receiver-local `(Sign Pend, Share View Pend)` using existing Pend calls.
 A Busy lookup retains the same View; retry the lookup, not Derive. Follow the
-[activity contract](../docs/memory-activity.md), consume only after a coherent
+[activity contract](../api/memory.md#authorized-cpu-activity), consume only after a coherent
 page read, and Return either grant to cancel. Pin and rebuild a matching
 API/Client/Server image; old strict rights decoders reject SAMPLE.
 

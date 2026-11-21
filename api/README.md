@@ -157,7 +157,7 @@ capability to an unrelated live Task, including Dormant Tasks, without
 granting control over their execution. Recipient registration is bounded
 to 1,024 entries total, at most 256 incoming, 32 per sending Task and
 128 per sending Team per recipient. Prepared/unsettled entries count;
-exhaustion returns `OutOfMemory`. See the [delegation contract](../docs/pend-delegation.md).
+exhaustion returns `OutOfMemory`.
 
 **Memory.** Flat owns logical sources and physical holding positions;
 Nest owns address spans, Memo association and publication; Page
@@ -170,7 +170,7 @@ authorized access; the selected ABI determines its operations.
 An explicit `(View, Sign)` boot dispatch pair does not authorize physical
 device reassignment or declare DMA quiescence. The Kernel observer publishes
 read-only versioned global memory statistics via Share and Sign. The global A/D fields remain `UNKNOWN`. A separate
-[authorized CPU activity stream](../docs/memory-activity.md) requires INSPECT
+[authorized CPU activity stream](memory.md#authorized-cpu-activity) requires INSPECT
 and SAMPLE in a current Span window and explicit boot qualification.
 NotObserved never proves global cleanliness. Upgrade the complete matching
 source-pinned image: older strict rights decoders reject the new SAMPLE bit.
@@ -183,8 +183,9 @@ types and contracts; RV64 builds verify compilation; QEMU executes real
 guest traps and selected hardware paths. Neither replaces physical evidence.
 
 Retired Cell/Flat/Nest register calls and Share Create/Open/Shut declarations
-were removed from the source API. Use native bounded memory requests; see the
-[source migration](../docs/memory-migration.md). Retired numbers remain rejected.
+were removed from the source API. Use
+[bounded native memory requests](src/abi/memory/request.rs).
+Retired numbers remain rejected.
 
 ABI 12 rejects ABI 11 calls, Ledger entries and Capsules. Its only public
 transport is U-mode ECALL (cause 8), advancing the PC by four bytes after
