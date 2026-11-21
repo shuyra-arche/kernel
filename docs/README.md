@@ -8,6 +8,7 @@ in the implementation.
 | Reader's question | Source |
 | --- | --- |
 | Why does the Kernel have this model? | [Design (Typst)](design/main.typ) |
+| How do Cell, Flat and Nest compose and retire access? | [Target memory architecture](design/memory.typ) |
 | Where does the source implement each concern? | [Source map](source-map.md) |
 | What API or ABI exists today? | [Kernel API](../api/README.md) and [API source](../api/src/) |
 | What does the selected Flat/Nest memory ABI provide? | [Current memory contract](../api/memory.md) |
@@ -22,8 +23,10 @@ in the implementation.
 The text starts with isolation, then follows a cross-domain request through
 copying or borrowing, delegation, and notification. After introducing the
 conditions for safe retirement, the [memory chapter](design/memory.typ)
-explains Cell, Flat, Nest, and their state models. A worked example follows
-one Page through association, publication, and retirement. The source map
+derives the target Cell, Flat and Nest contracts from ownership, logical
+position and address access. It describes the CPU and I/O translation
+backends, safe table-page retirement, and a worked DMA example. The
+[current memory contract](../api/memory.md) describes ABI 14. The source map
 groups implementation paths under `basis`, `entry`, and `metal`.
 
 The design explains enduring constraints and identifies current mechanisms

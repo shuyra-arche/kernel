@@ -1,163 +1,228 @@
-#import "memory/diagram.typ": amber, at, drawing, edge, green, label, node, note, pending, rule, wire
+#import "memory/diagram.typ": amber, drawing, green, label, node, wire
+#import "style.typ": design-table
 
 #set par(justify: false)
 
-= Memory from allocation to reuse
-<memory>
+= Memory from allocation to reuse <memory>
 
-A Page can outlive the Slot that first held it, a mapping can outlive the
-association it once recorded, and a hardware publication can outlive the
-Task that requested it. Treating all three as a single mapping lifetime
-would permit premature reuse after a handoff, fault, or device exit.
+A physical allocation can outlive its original holder, an address can
+remain reserved without backing, and a device can still hold work after
+the Task that submitted it exits. To decide when memory is safe to reuse,
+the Kernel needs three independent facts: the physical resource and its
+return obligation, its logical holding, and the translation that grants
+access through an address.
 
-The model below derives the separation of holding, address, and access
-responsibility from these failures. The subsequent example follows those
-three lifetimes during External DMA retirement.
+Cell, Flat and Nest give each of these facts its own authority. The
+#link("https://github.com/shuyra-arche/kernel/blob/main/api/memory.md")[current memory contract]
+documents ABI 14's Page, Slot, Memo and Publication. The target changes
+their organization and behavior, including the admission rules for
+mapping and Transfer. The API, Client and consumers migrate together
+when those contracts are implemented.
 
 #include "memory/model.typ"
-#pagebreak()
 
-A worker maps one Page for device access, then exits with a write still
-queued. Follow the holding, the mapping, and the work left for the Kernel.
+== Composing Cell, Flat and Nest <memory-composition>
 
-== Who holds the Page?
+=== Shared memory
 
-#drawing(160mm)[
-  #label(0mm, 1mm, [One Page, two relationships])
-  #node(0mm, 14mm, 45mm, 29mm, [Slot in a Flat], [
-    A materialized position in the logical backing.
+A Flat holds X once. The source and destination permits can authorize
+two Nests to map the same Cell interval at different addresses and
+permissions. Each mapping owns its own CellAccess and translation
+obligation. Withdrawing one settles only that mapping. Compatible alias
+attributes, memory ordering and data synchronization still apply to the
+whole participating group. Ordinary RAM sharing needs no extra Share
+object. Specialized Share views, such as provider register windows, and
+Activity sampling sessions keep their separate contracts.
+
+#drawing(70mm)[
+  #label(0mm, 0mm, [One disposition, independently retained accesses])
+  #node(0mm, 9mm, 48mm, 25mm, [Flat], [Holding owns X.], fill: green)
+  #node(56mm, 9mm, 48mm, 25mm, [Nest A], [VA A reads X.])
+  #node(112mm, 9mm, 48mm, 25mm, [Nest B], [VA B reads or writes X.])
+  #wire(((24mm, 34mm), (24mm, 42mm), (68mm, 42mm), (68mm, 48mm)))
+  #wire(((80mm, 34mm), (80mm, 48mm)))
+  #wire(((136mm, 34mm), (136mm, 42mm), (92mm, 42mm), (92mm, 48mm)))
+  #node(56mm, 48mm, 48mm, 21mm, [Cell X], [One physical instance.], fill: green)
+]
+
+=== Copy and Task
+
+Copy reads an admitted source slice into an independent Internal Cell
+Y. The message owns the payload holding until delivery according to
+the Copy protocol. A receiver gets a read-only Flat permit and can map
+the payload through an authorized Nest. Source X and payload Y have
+different physical identities and return responsibilities. Copy owns
+queue and delivery state, including rollback of an already claimed
+queue entry when delivery preparation fails and the queue stays open.
+
+A loader maps code and stacks into an Internal Nest, waits for readiness
+and then creates and starts the Task as permitted by the execution
+contract. Tasks can share an Internal Nest and use separate stacks.
+Unit owns Task creation and lifecycle results. Room owns scheduling
+and execution placement. A Task binding must serialize with Nest
+closure and grants no Nest management authority. Task exit can start
+cleanup under the relevant lifetime contract. Previously admitted work
+still has its original owner.
+
+=== DMA and driver responsibility
+
+A driver arranges an authorized requester binding and maps a suitable
+buffer in an External Nest. Once binding and mapping are ready, it puts
+the I/O address in a device descriptor. The device initiates the
+access. A CPU mapping can coexist when the platform qualifies the
+attributes and synchronization for all participants. The driver owns
+device submission, the available device-side stop or drain procedure,
+and the device's data-visibility protocol. The External backend owns
+translation and binding retirement and verifies the required evidence
+before ending the CellAccess. IRQ or Sign delivery can report
+progress. A completed DMA request alone does not settle the mapping.
+
+=== Swap and fault recovery
+
+The user-space Swap Unit owns logical page identity, backing location,
+replacement policy and aliases it is authorized to manage. For swap-out,
+it closes ordinary new admissions and removes its managed old mappings,
+including device aliases and in-flight writes. It keeps a separately
+accounted access for the backing write, waits for successful storage I/O
+and settles that access before returning X. A failed write leaves the
+data and return responsibility available for recovery. If an alias
+cannot be stopped or drained, the Unit cannot yet evict the page.
+Transferring X into a private Flat moves disposition while existing
+accesses remain live.
+
+For swap-in, an authorized fault handler joins concurrent requests for
+the same logical page where applicable, fills a new Cell Y and rechecks
+the live reservation, route generation and rights before installing it.
+Managed aliases of the same page can again bind the same Cell while
+keeping their own permissions. The logical page, backing location and
+valid route can persist while the resident Cell changes. The Task
+resumes after installation is ready. No route follows from a Flat hole.
+Recoverable faults in an External Nest require qualified hardware and
+requester support.
+
+== Concurrency, failures and recovery <memory-races>
+
+Synchronization protects the facts that must agree at the operation's
+commit. Flat coordinates a movement of holdings. Map coordinates the
+live Flat and Nest facts with the relevant Pend admission gates. The
+backends coordinate their own hardware effects. No cross-object lock
+layout follows solely from these responsibilities.
+
+#design-table(
+  table.header([*Race or failure*], [*Result and owner*]),
+  [Map and Transfer], [If Transfer commits first, a request using the old
+    HeldAt fails final admission and releases any candidate access. If
+    Map is admitted first, Nest keeps access to X while installation
+    proceeds. Later placement of Y has no effect on that Mapping.],
+  [Unmap and Release], [Unmap retains its address and CellAccess until
+    hardware settlement. Nest Release cannot hand that address to a
+    successor meanwhile. Flat Release may return disposition earlier,
+    but Cell still waits for the old mapping and every other access.],
+  [Admission and revocation], [Recheck all live gates at final admission.
+    Close first rejects the use. Admission first records any contractual
+    continuing dependency and makes the use discoverable for retirement.
+    If both gates close, the original use retires once. Dropping a
+    handle or transferring a holding does not revoke a branch.],
+  [Stale evidence], [Nest and the backend match the context, exact
+    mapping or binding, operation generation, hardware sequence and
+    covered scope. A batch settles only its covered members. Reject
+    stale evidence and make duplicates harmless. Fault and maintenance
+    work likewise compares its own epochs before modifying live state.],
+  [Caller exit], [Pre-effect candidates can be canceled. Admitted work
+    with possible effects remains owned by its Mapping, binding,
+    retirement, provider-return or other actual operation record. A
+    Kernel worker may advance the record after the caller leaves.],
+  [OOM or full queues], [Before admission reserve bounded space for
+    effects, bookkeeping and recovery. Pre-commit failure preserves
+    input ownership. A failure after possible effects leaves an exact
+    recoverable record. Delivery failure does not undo a commit, and
+    replay follows the original RequestId and its operation contract.],
+  [Provider uncertainty], [The Cell return owner retains the original
+    receipt while acceptance is uncertain. Retry only as allowed by the
+    provider's protocol. If evidence remains unavailable, keep the
+    obligation visible and storage unavailable for reuse.],
+)
+
+Persistent capacity is charged to the resource that owns the record.
+A single operation must bound its temporary work and any reserved
+recovery space. Waiting for a hart, controller, device or provider
+occurs outside the address and tree commit scopes. A wakeup schedules
+a check and the recoverable record remains the source of truth.
+
+== DMA retirement after worker exit <memory-exit>
+
+The worker has mapped X through an External Nest and has a queued
+write. Its execution ends before the device access is settled. The
+manager retains authority over the Nest and retires the mapping
+under the applicable authorization and device contracts.
+
+#drawing(93mm)[
+  #node(0mm, 0mm, 76mm, 22mm, [Task exits], [
+    The Task can publish its result.
   ])
-  #node(57mm, 14mm, 45mm, 29mm, [Nest position], [
-    An address position in the External mapping.
-  ])
-  #wire(((22mm, 43mm), (22mm, 76mm)))
-  #wire(((79mm, 43mm), (79mm, 76mm)))
-  #label(26mm, 57mm, [holds])
-  #label(83mm, 57mm, [records])
-  #node(11mm, 76mm, 88mm, 26mm, [Page], [
-    A physical allocation with a distinct identity.
+  #node(85mm, 0mm, 75mm, 22mm, [A request is still in flight], [
+    It can still try to reach X.
+  ], fill: amber)
+  #wire(((37mm, 22mm), (37mm, 27mm), (74mm, 27mm), (74mm, 32mm)))
+  #wire(((122mm, 22mm), (122mm, 27mm), (86mm, 27mm), (86mm, 32mm)))
+  #node(37mm, 32mm, 86mm, 26mm, [The mapping is Removing], [
+    Nest retains the address and CellAccess while the backend checks
+    invalidation, ordering and device drain.
+  ], fill: amber)
+  #wire(((80mm, 58mm), (80mm, 63mm), (37mm, 63mm), (37mm, 69mm)))
+  #wire(((80mm, 63mm), (122mm, 63mm), (122mm, 69mm)))
+  #node(0mm, 69mm, 76mm, 23mm, [Address handover], [
+    After settlement and Release, a new reservation can use the address.
   ], fill: green)
-
-  #wire(((102mm, 31mm), (112mm, 31mm)), dash: "dashed")
-  #note(115mm, 24mm, 45mm, [The association persists], [
-    If the Slot later changes, the position keeps its recorded Page until
-    an explicit association transition.
-  ])
-
-  #at(0mm, 112mm, line(length: 160mm, stroke: 0.65pt + rule))
-  #label(0mm, 117mm, [A reservation can come first])
-  #node(0mm, 129mm, 54mm, 26mm, [Vacant], [
-    Nest Reserve creates an address without backing.
-  ])
-  #wire(((54mm, 142mm), (105mm, 142mm)))
-  #label(64mm, 133mm, [Insert association])
-  #node(105mm, 129mm, 55mm, 26mm, [Ready], [
-    The address now has backing. Publication can follow.
+  #node(85mm, 69mm, 75mm, 23mm, [Physical reuse], [
+    X also needs returned disposition and settlement of every other use.
   ], fill: green)
 ]
 
-#pagebreak()
+Until the backend accepts exact retirement evidence, the address
+cannot be released to a successor. Even after that mapping settles,
+the Flat can still hold X or a CPU alias can still have access to it.
+The #link(<memory-cell>)[Cell contract] governs final return, using the
+evidence described under #link(<memory-mmu>)[MMU completion].
 
-== When does the address become usable?
+== Architecture and remaining work <memory-status>
 
-#drawing(173mm)[
-  #wire(((157mm, 109mm), (157mm, 150mm), (1mm, 150mm), (1mm, 22mm), (7mm, 22mm)),
-    color: pending, dash: "dashed")
-  #node(7mm, 9mm, 51mm, 26mm, [Ready], [
-    The position names its backing Page.
-  ])
-  #wire(((58mm, 22mm), (69mm, 22mm)), dash: "dashed")
-  #note(73mm, 9mm, 79mm, [Who can ask for publication?], [
-    The worker holds Mapping PUBLISH and live authority over the
-    original source.
-  ])
-  #wire(((32mm, 35mm), (32mm, 54mm)))
-  #label(37mm, 42mm, [Publish])
-  #node(7mm, 54mm, 51mm, 26mm, [Publishing], [
-    The call can return while installation is in flight.
-  ], fill: amber)
+*Established design.* Cell owns physical identity and the path to
+return. Flat owns stable logical coordinates and unique holdings.
+Nest owns address occupancy and mappings to exact admitted accesses.
+Transfer preserves existing aliases. CPU and I/O backend evidence is
+specific to the hardware effects. Table pages follow Cell reclamation.
 
-  #wire(((58mm, 70mm), (87mm, 70mm), (87mm, 85mm), (96mm, 85mm)), color: pending)
-  #label(64mm, 62mm, [if it fails], color: pending)
-  #node(96mm, 63mm, 64mm, 46mm, [Inspect again], [
-    A failed publication can advance the position generation. Read the
-    current state to see whether retry is allowed.
-  ], fill: amber)
+*Implementation contracts.* Establish the exact CellAccess
+representation and admission bookkeeping, including where platform
+exclusivity is enforced. Implement bounded sparse-index preparation and
+joint admission with live authorization. Define public operation,
+replay and progress results, including partial retirement, fault refill,
+and a recovery owner for each admitted effect. Resolve details of
+Nest-to-Task and requester lifetime, authority and shutdown with the
+relevant owners. Validate the affected migration paths before removing
+ABI 14 mechanisms.
 
-  #wire(((32mm, 80mm), (32mm, 110mm)))
-  #label(37mm, 95mm, [Installation completes])
-  #node(7mm, 110mm, 51mm, 28mm, [Published], [
-    The access path to the same Page is installed.
-  ], fill: green)
-  #wire(((58mm, 124mm), (69mm, 124mm)), dash: "dashed")
-  #note(73mm, 116mm, 79mm, [When the worker submits device work], [
-    Inspect reports Published for the requested publication. The mapping
-    and authority stay live throughout use.
-  ])
+*Platform qualification.* Verify CPU activation, multi-hart
+synchronization, label reuse and old table walks. Qualify supported
+IOMMU controller and requester topologies, applicable device-cache
+invalidation, upstream drain and coherency. Qualify external provider
+lifetime, return and Split/Merge support separately. Host checks can
+verify authorization, races, fault injection and record ownership.
+Target execution checks the actual translation backends under its test
+configuration. Physical device proofs require the relevant hardware
+and platform contract.
 
-  #label(24mm, 156mm, [Retry from Ready only with the current generation], color: pending)
-]
-
-#pagebreak()
-
-== What survives the worker's exit?
-
-#drawing(188mm)[
-  #label(0mm, 0mm, [Task and authority])
-  #label(87mm, 0mm, [Hardware and storage])
-  #at(0mm, 8mm, line(length: 67mm, stroke: 0.65pt + rule))
-  #at(87mm, 8mm, line(length: 73mm, stroke: 0.65pt + rule))
-
-  #at(4mm, 17mm, circle(radius: 1.5mm, fill: edge, stroke: none))
-  #note(13mm, 14mm, 54mm, [Task exits], [
-    The manager can observe its result while retirement runs.
-  ])
-  #node(87mm, 14mm, 73mm, 28mm, [A write is still queued], [
-    An earlier write can still attempt to use the mapping.
-  ], fill: amber)
-
-  #wire(((5.5mm, 20mm), (5.5mm, 55mm)))
-  #wire(((123mm, 42mm), (123mm, 53mm)))
-  #at(4mm, 55mm, circle(radius: 1.5mm, fill: edge, stroke: none))
-  #note(13mm, 53mm, 54mm, [The Pend branch closes], [
-    The departed holder loses its authority. The External Nest can remain
-    bound.
-  ])
-  #wire(((67mm, 68mm), (87mm, 68mm)))
-  #label(71mm, 60mm, [starts])
-  #node(87mm, 53mm, 73mm, 31mm, [Withdraw the translation], [
-    The Kernel starts hardware retirement and retains the records needed to
-    finish it.
-  ], fill: amber)
-
-  #wire(((123mm, 84mm), (123mm, 95mm)))
-  #wire(((123mm, 89mm), (77mm, 89mm), (77mm, 105mm), (68mm, 105mm)),
-    color: pending, dash: "dashed")
-  #note(1mm, 98mm, 65mm, [While evidence is missing], [
-    The allocation stays retained. Task results and device notifications
-    report progress. Settlement requires the hardware evidence.
-  ], color: pending)
-  #node(87mm, 95mm, 73mm, 34mm, [The old mapping settles], [
-    The Kernel accepts matching IOMMU invalidation and fence completion
-    together with trusted platform evidence.
-  ], fill: green)
-
-  #wire(((123mm, 129mm), (123mm, 139mm), (37mm, 139mm), (37mm, 151mm)))
-  #wire(((123mm, 139mm), (123mm, 151mm)))
-  #node(0mm, 151mm, 74mm, 33mm, [Address handover], [
-    After the old positions are removed, a successor can reserve in the
-    same External Nest with a fresh MappingId.
-  ], fill: green)
-  #node(86mm, 151mm, 74mm, 33mm, [Physical reuse], [
-    Every CPU and device obligation must settle and every Page holder must
-    release its claim.
-  ], fill: green)
-]
-
-#text(size: 9pt)[
-  The
-  #link("https://github.com/shuyra-arche/kernel/blob/8cec35ff16c0de0aac6a94a9cb0d03ffab4452a3/server/tests/guest/cell/external/exit.rs")[#underline[Historical ABI 10 exit regression]]
-  checks late-access denial and same-Nest handover. The
-  #link("https://github.com/shuyra-arche/kernel/blob/main/api/README.md#cell-contracts")[#underline[Cell contract]]
-  specifies the operations and their failure results.
-]
+Implementation and acceptance are tracked in
+#link("https://github.com/shuyra-arche/kernel/issues/326")[the migration index]
+and the related
+#link("https://github.com/shuyra-arche/kernel/issues/330")[Cell],
+#link("https://github.com/shuyra-arche/kernel/issues/331")[Flat] and
+#link("https://github.com/shuyra-arche/kernel/issues/332")[Nest] issues.
+Their boundaries with
+#link("https://github.com/shuyra-arche/kernel/issues/327")[Sync],
+#link("https://github.com/shuyra-arche/kernel/issues/328")[Execution],
+#link("https://github.com/shuyra-arche/kernel/issues/329")[Pend],
+#link("https://github.com/shuyra-arche/kernel/issues/333")[Copy] and
+#link("https://github.com/shuyra-arche/kernel/issues/334")[Share and Activity]
+remain part of that migration.
