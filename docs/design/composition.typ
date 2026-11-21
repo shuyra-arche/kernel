@@ -8,6 +8,9 @@ may read, what authority permits that access, and what event the worker
 can observe. The producer and worker decide what the request means and
 what counts as a successful response.
 
+This walkthrough uses the earlier Clone and Share call names.
+@memory defines the target Cell, Flat and Nest contracts.
+
 == Choose the relationship to the data
 
 A copy gives the worker independent content. Once the copy has been
@@ -16,7 +19,7 @@ bytes. Borrowing instead gives the worker bounded access to existing
 storage. The bounds, access mode, and lifetime of that grant matter
 because the underlying data remains shared.
 
-The public model expresses these choices as `View.Clone` and `View.Share`.
+The walkthrough expresses these choices as `View.Clone` and `View.Share`.
 A Clone delivery may itself be mapped using a read-only Share: the worker
 then borrows the Kernel's copy, while remaining independent of the
 producer's original storage. The two names describe relationships to data
@@ -109,4 +112,4 @@ completion condition. @assurance explains the evidence required before
 the Kernel can release the underlying resources.
 
 For current call permissions and failure results, see the
-#link("https://github.com/shuyra-arche/kernel/blob/main/api/README.md#authority-and-control-contracts")[Kernel API].
+#link("https://github.com/shuyra-arche/kernel/blob/main/api/README.md#authorization-and-lifecycle")[Kernel API].

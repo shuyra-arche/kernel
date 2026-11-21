@@ -7,7 +7,7 @@ runtime, service implementation, TLS registry or ownership manager.
 ## Image and transport
 
 API, Client and Server implement ABI/Ledger 14 with Capsule format 2.
-No ABI feature is needed. Use [`memory::{flat,nest}`](src/memory.rs) for memory
+No ABI feature is needed. Use [`memory::{flat,nest}`](src/memory/mod.rs) for memory
 operations and the accepted non-memory [`call::*`](src/call/) interfaces.
 Old Cell and Share Open/Shut operations are rejected by the provider.
 
@@ -23,7 +23,7 @@ operation number, `a0..a5` as inputs and `a0..a2` as outputs.
 S-mode `ecall` belongs to SBI, not this dispatcher. A terminal
 `Unit.Exit` does not return normally.
 
-For native memory, [`memory::invoke_with`](src/memory.rs) uses checked
+For native memory, [`memory::invoke_with`](src/memory/mod.rs) uses checked
 fixed-size request/reply buffers and validates response correlation;
 `memory::flat::invoke` and `memory::nest::invoke` execute selected
 calls. A reply delivery error or a missing output **does not prove
@@ -45,8 +45,8 @@ Exit may target the Task, or a Team explicitly permitting member exit.
 grant an unrelated active or Dormant Task. This gives neither
 management authority nor extra resource access; the child retains
 scope/data ceilings, ancestor revocation and fixed recipient
-budgets. See [Pend](../api/src/abi/call/pend.rs) and its
-[registration rules](../docs/pend-delegation.md).
+budgets. See the [Pend calls](../api/src/abi/call/pend.rs) and the
+[API authorization and lifecycle guide](../api/README.md#authorization-and-lifecycle).
 
 Named Ledger entries identify initial capabilities; the actual Pend
 authorizes them. `Entry::dispatch()` returns a distinct `(View, Sign)`
@@ -57,7 +57,7 @@ cleanliness. Use existing `call::share_view::derive` with a sampling-authorized 
 source and readonly Share limits. `memory::activity::pair(view)` resolves the
 receiver-local `(Sign Pend, Share View Pend)` using existing Pend calls.
 A Busy lookup retains the same View; retry the lookup, not Derive. Follow the
-[activity contract](../docs/memory-activity.md), consume only after a coherent
+[activity contract](../api/memory.md#authorized-cpu-activity), consume only after a coherent
 page read, and Return either grant to cancel. Pin and rebuild a matching
 API/Client/Server image; old strict rights decoders reject SAMPLE.
 

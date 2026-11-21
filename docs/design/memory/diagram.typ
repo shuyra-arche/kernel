@@ -1,7 +1,7 @@
 #import "../style.typ": amber, edge, green, ink, muted, pending, rule
 
 #let at(x, y, body) = place(top + left, dx: x, dy: y, body)
-#let drawing(height, body) = block(width: 100%, height: height, body)
+#let drawing(height, body) = block(width: 100%, height: height, breakable: false, body)
 
 #let label(x, y, body, color: muted) = at(x, y, text(
   size: 9pt, weight: "semibold", tracking: 0.2pt, fill: color, body,
